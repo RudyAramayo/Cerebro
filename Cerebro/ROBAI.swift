@@ -7,7 +7,7 @@
 //
 
 import Foundation
-import FoundationModels
+//import FoundationModels
 
 @available(macOS 10.15, *)
 @objcMembers public class ROBAI: NSObject {
@@ -27,11 +27,12 @@ import FoundationModels
     }
     
     func processAIQuery(text: String) async throws -> String? {
-        guard SystemLanguageModel.default.isAvailable else { return nil }
-        let session = LanguageModelSession(model: SystemLanguageModel.default)
-        //let answer = try await session.respond(to: "briefly in 2 sentences tell me, \(text)")
-        //let answer = try await session.respond(to: "Your name is ROB and you are a droid, briefly in 2 sentences tell me, \(text)", generating: String.self, includeSchemaInPrompt: true, options: .init(temperature: 1.0))
-        let answer = try await session.respond(to: "\(text)", generating: String.self, includeSchemaInPrompt: false/*, options: .init(temperature: 0.5)*/)
-        return answer.content.trimmingCharacters(in: .punctuationCharacters)
+        return "Foundation mdoels is not available"
+//        guard SystemLanguageModel.default.isAvailable else { return nil }
+//        let session = LanguageModelSession(model: SystemLanguageModel.default)
+//        //let answer = try await session.respond(to: "briefly in 2 sentences tell me, \(text)")
+//        //let answer = try await session.respond(to: "Your name is ROB and you are a droid, briefly in 2 sentences tell me, \(text)", generating: String.self, includeSchemaInPrompt: true, options: .init(temperature: 1.0))
+//        let answer = try await session.respond(to: "\(text)", generating: String.self, includeSchemaInPrompt: false/*, options: .init(temperature: 0.5)*/)
+//        return answer.content.trimmingCharacters(in: .punctuationCharacters)
     }
 }

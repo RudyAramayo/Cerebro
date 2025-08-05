@@ -786,10 +786,6 @@
         NSError *error = nil;
         [self.autoNetServer sendMessage:[NSKeyedArchiver archivedDataWithRootObject:messageDict requiringSecureCoding:false error:&error]]; //ACK acknowledge receipt to controller
     }
-    else
-    {
-        NSLog(@"COMMAND PARSER ERROR!!!" );
-    }
 }
 
 #pragma mark -
