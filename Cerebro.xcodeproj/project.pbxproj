@@ -1,0 +1,688 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 48;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		D4066C5822828DA5002ACAD1 /* AudioInputTaskController.m in Sources */ = {isa = PBXBuildFile; fileRef = D4066C5722828DA5002ACAD1 /* AudioInputTaskController.m */; };
+		D4066C5A22828E5F002ACAD1 /* AudioInputTaskController.command in Resources */ = {isa = PBXBuildFile; fileRef = D4066C5922828E5F002ACAD1 /* AudioInputTaskController.command */; };
+		D4066C5C22863009002ACAD1 /* ROBBaseControllerModel.m in Sources */ = {isa = PBXBuildFile; fileRef = D4066C5B22863009002ACAD1 /* ROBBaseControllerModel.m */; };
+		D4066C6022867F44002ACAD1 /* ROBTorsoControlsViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = D4066C5F22867F44002ACAD1 /* ROBTorsoControlsViewController.m */; };
+		D408B1212E15E7E300F6FEB3 /* ROBAI.swift in Sources */ = {isa = PBXBuildFile; fileRef = D408B1202E15E7E300F6FEB3 /* ROBAI.swift */; };
+		D40D36F920B4BA270006EF82 /* SimpleUserTracker.command in Resources */ = {isa = PBXBuildFile; fileRef = D40D36F820B4BA270006EF82 /* SimpleUserTracker.command */; };
+		D40D36FC20B4BE5F0006EF82 /* SimpleUserTrackerTaskController.m in Sources */ = {isa = PBXBuildFile; fileRef = D40D36FB20B4BE5F0006EF82 /* SimpleUserTrackerTaskController.m */; };
+		D45E1CE22801460C002189C0 /* ROBRPLidar.m in Sources */ = {isa = PBXBuildFile; fileRef = D45E1CE12801460C002189C0 /* ROBRPLidar.m */; };
+		D49D755827FFD1AF00142E26 /* AutoNetServerConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = D49D755627FFD1AE00142E26 /* AutoNetServerConnection.swift */; };
+		D49D755927FFD1AF00142E26 /* AutoNetServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D49D755727FFD1AE00142E26 /* AutoNetServer.swift */; };
+		D49D755B27FFD1BF00142E26 /* AutoNetDataTransferProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = D49D755A27FFD1BF00142E26 /* AutoNetDataTransferProtocol.swift */; };
+		D4A38F411FFB2AED00092A46 /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = D4A38F401FFB2AED00092A46 /* AppDelegate.m */; };
+		D4A38F441FFB2AED00092A46 /* ROBMainViewController.mm in Sources */ = {isa = PBXBuildFile; fileRef = D4A38F431FFB2AED00092A46 /* ROBMainViewController.mm */; };
+		D4A38F461FFB2AED00092A46 /* art.scnassets in Resources */ = {isa = PBXBuildFile; fileRef = D4A38F451FFB2AED00092A46 /* art.scnassets */; };
+		D4A38F481FFB2AED00092A46 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D4A38F471FFB2AED00092A46 /* Assets.xcassets */; };
+		D4A38F4B1FFB2AED00092A46 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = D4A38F491FFB2AED00092A46 /* Main.storyboard */; };
+		D4A38F4E1FFB2AEE00092A46 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = D4A38F4D1FFB2AEE00092A46 /* main.m */; };
+		D4A38F571FFBFD9900092A46 /* ROBSpeechBox.m in Sources */ = {isa = PBXBuildFile; fileRef = D4A38F561FFBFD9900092A46 /* ROBSpeechBox.m */; };
+		D4A38F5A1FFC007E00092A46 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D4A38F591FFC007E00092A46 /* AVFoundation.framework */; };
+		D4A38F5C1FFC008B00092A46 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D4A38F5B1FFC008B00092A46 /* AudioToolbox.framework */; };
+		D4A38F5E1FFC009300092A46 /* AudioUnit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D4A38F5D1FFC009300092A46 /* AudioUnit.framework */; };
+		D4A38F601FFC06CF00092A46 /* dictation_start.scpt in Resources */ = {isa = PBXBuildFile; fileRef = D4A38F5F1FFC06CF00092A46 /* dictation_start.scpt */; };
+		D4A38F631FFC0C7600092A46 /* ROBSerialBox.m in Sources */ = {isa = PBXBuildFile; fileRef = D4A38F621FFC0C7600092A46 /* ROBSerialBox.m */; };
+		D4A38F651FFC0C9000092A46 /* MultipeerConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D4A38F641FFC0C9000092A46 /* MultipeerConnectivity.framework */; };
+		D4A38F671FFC0C9800092A46 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D4A38F661FFC0C9800092A46 /* IOKit.framework */; };
+		D4A38F691FFC0C9F00092A46 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D4A38F681FFC0C9F00092A46 /* Cocoa.framework */; };
+		D4A38F6B1FFC0CA600092A46 /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D4A38F6A1FFC0CA600092A46 /* AppKit.framework */; };
+		D4A38F6D1FFC0CB400092A46 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D4A38F6C1FFC0CB400092A46 /* Foundation.framework */; };
+		D4A38F731FFC77CB00092A46 /* ROBKeyboardControlsViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = D4A38F721FFC77CB00092A46 /* ROBKeyboardControlsViewController.m */; };
+		D4A38F761FFC8BD300092A46 /* ROBSCNViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = D4A38F751FFC8BD300092A46 /* ROBSCNViewController.m */; };
+		D4AA3D7A2AC9F4AB007DC656 /* StartTextInput.scpt in Resources */ = {isa = PBXBuildFile; fileRef = D4AA3D792AC9F4AB007DC656 /* StartTextInput.scpt */; };
+		D4AB3DA42E1CF38D00EA2571 /* CameraViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4AB3DA32E1CF38D00EA2571 /* CameraViewController.swift */; };
+		D4AB3DA52E1CF38D00EA2571 /* CameraManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4AB3DA22E1CF38D00EA2571 /* CameraManager.swift */; };
+		D4C5252420A65FDD00290BF5 /* ROBConsciousness.m in Sources */ = {isa = PBXBuildFile; fileRef = D4C5252320A65FDD00290BF5 /* ROBConsciousness.m */; };
+		D4CFB7CF2287C79100F2403A /* JoinWifiTaskController.command in Resources */ = {isa = PBXBuildFile; fileRef = D4CFB7CE2287C79000F2403A /* JoinWifiTaskController.command */; };
+		D4CFB7D22287C81300F2403A /* JoinWifiTaskController.m in Sources */ = {isa = PBXBuildFile; fileRef = D4CFB7D02287C81200F2403A /* JoinWifiTaskController.m */; };
+		D4CFB7D42287F01100F2403A /* CoreML.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D4CFB7D32287F01100F2403A /* CoreML.framework */; };
+		D4F136732325E39A0084A302 /* RTSPClientConnection.mm in Sources */ = {isa = PBXBuildFile; fileRef = D4F136632325E3990084A302 /* RTSPClientConnection.mm */; };
+		D4F136742325E39A0084A302 /* NALUnit.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D4F136642325E3990084A302 /* NALUnit.cpp */; };
+		D4F136752325E39A0084A302 /* VideoEncoder.m in Sources */ = {isa = PBXBuildFile; fileRef = D4F136662325E3990084A302 /* VideoEncoder.m */; };
+		D4F136762325E39A0084A302 /* MP4Atom.m in Sources */ = {isa = PBXBuildFile; fileRef = D4F136682325E3990084A302 /* MP4Atom.m */; };
+		D4F136772325E39A0084A302 /* RTSPServer.m in Sources */ = {isa = PBXBuildFile; fileRef = D4F1366A2325E3990084A302 /* RTSPServer.m */; };
+		D4F136782325E39A0084A302 /* ROBRTSPController.m in Sources */ = {isa = PBXBuildFile; fileRef = D4F1366D2325E39A0084A302 /* ROBRTSPController.m */; };
+		D4F136792325E39A0084A302 /* RTSPMessage.m in Sources */ = {isa = PBXBuildFile; fileRef = D4F1366E2325E39A0084A302 /* RTSPMessage.m */; };
+		D4F1367A2325E39A0084A302 /* AVEncoder.mm in Sources */ = {isa = PBXBuildFile; fileRef = D4F136722325E39A0084A302 /* AVEncoder.mm */; };
+		D4F1367D2325E4440084A302 /* flextGL.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D4F1367B2325E4440084A302 /* flextGL.cpp */; };
+		D4F4802D22F2903E006ADB7A /* RealSenseTaskController.m in Sources */ = {isa = PBXBuildFile; fileRef = D4F4802A22F2903D006ADB7A /* RealSenseTaskController.m */; };
+		D4F4802E22F2903E006ADB7A /* RealSenseTaskController.command in Resources */ = {isa = PBXBuildFile; fileRef = D4F4802C22F2903E006ADB7A /* RealSenseTaskController.command */; };
+		D4F642E22325E17F00DF71AE /* FreenectPCL.mm in Sources */ = {isa = PBXBuildFile; fileRef = D4F642D92325E17700DF71AE /* FreenectPCL.mm */; };
+		D4F642E32325E17F00DF71AE /* TrackedPolyRect.m in Sources */ = {isa = PBXBuildFile; fileRef = D4F642DB2325E17900DF71AE /* TrackedPolyRect.m */; };
+		D4F642E52325E17F00DF71AE /* VisionTrackerProcessor.m in Sources */ = {isa = PBXBuildFile; fileRef = D4F642DD2325E17E00DF71AE /* VisionTrackerProcessor.m */; };
+		D4F642E62325E17F00DF71AE /* ROBNiTEManager.mm in Sources */ = {isa = PBXBuildFile; fileRef = D4F642DF2325E17F00DF71AE /* ROBNiTEManager.mm */; };
+		D4F673B222EFFC4600A9B6E4 /* ReSpeakerTaskController.m in Sources */ = {isa = PBXBuildFile; fileRef = D4F673AF22EFFC4500A9B6E4 /* ReSpeakerTaskController.m */; };
+		D4F673B322EFFC4600A9B6E4 /* ReSpeakerTaskController.command in Resources */ = {isa = PBXBuildFile; fileRef = D4F673B022EFFC4600A9B6E4 /* ReSpeakerTaskController.command */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		D45E1CE528014CEC002189C0 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		D4066C5622828DA4002ACAD1 /* AudioInputTaskController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = AudioInputTaskController.h; sourceTree = "<group>"; };
+		D4066C5722828DA5002ACAD1 /* AudioInputTaskController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = AudioInputTaskController.m; sourceTree = "<group>"; };
+		D4066C5922828E5F002ACAD1 /* AudioInputTaskController.command */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.sh; path = AudioInputTaskController.command; sourceTree = "<group>"; };
+		D4066C5B22863009002ACAD1 /* ROBBaseControllerModel.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ROBBaseControllerModel.m; sourceTree = "<group>"; };
+		D4066C5D22863031002ACAD1 /* ROBBaseControllerModel.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = ROBBaseControllerModel.h; sourceTree = "<group>"; };
+		D4066C5E22867F44002ACAD1 /* ROBTorsoControlsViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBTorsoControlsViewController.h; sourceTree = "<group>"; };
+		D4066C5F22867F44002ACAD1 /* ROBTorsoControlsViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ROBTorsoControlsViewController.m; sourceTree = "<group>"; };
+		D408B1202E15E7E300F6FEB3 /* ROBAI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAI.swift; sourceTree = "<group>"; };
+		D40D36F520B4BA060006EF82 /* Cerebro-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Cerebro-Bridging-Header.h"; sourceTree = "<group>"; };
+		D40D36F820B4BA270006EF82 /* SimpleUserTracker.command */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.sh; path = SimpleUserTracker.command; sourceTree = "<group>"; };
+		D40D36FA20B4BE5F0006EF82 /* SimpleUserTrackerTaskController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SimpleUserTrackerTaskController.h; sourceTree = "<group>"; };
+		D40D36FB20B4BE5F0006EF82 /* SimpleUserTrackerTaskController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = SimpleUserTrackerTaskController.m; sourceTree = "<group>"; };
+		D45E1CE02801460C002189C0 /* ROBRPLidar.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBRPLidar.h; sourceTree = "<group>"; };
+		D45E1CE12801460C002189C0 /* ROBRPLidar.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ROBRPLidar.m; sourceTree = "<group>"; };
+		D49D755627FFD1AE00142E26 /* AutoNetServerConnection.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; name = AutoNetServerConnection.swift; path = AutoNet/AutoNetServer/AutoNetServerConnection.swift; sourceTree = "<group>"; };
+		D49D755727FFD1AE00142E26 /* AutoNetServer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; name = AutoNetServer.swift; path = AutoNet/AutoNetServer/AutoNetServer.swift; sourceTree = "<group>"; };
+		D49D755A27FFD1BF00142E26 /* AutoNetDataTransferProtocol.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; name = AutoNetDataTransferProtocol.swift; path = AutoNet/AutoNetShared/AutoNetDataTransferProtocol.swift; sourceTree = "<group>"; };
+		D4A38F3C1FFB2AED00092A46 /* Cerebro.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cerebro.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D4A38F3F1FFB2AED00092A46 /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
+		D4A38F401FFB2AED00092A46 /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
+		D4A38F421FFB2AED00092A46 /* ROBMainViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBMainViewController.h; sourceTree = "<group>"; };
+		D4A38F431FFB2AED00092A46 /* ROBMainViewController.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = ROBMainViewController.mm; sourceTree = "<group>"; };
+		D4A38F451FFB2AED00092A46 /* art.scnassets */ = {isa = PBXFileReference; lastKnownFileType = wrapper.scnassets; path = art.scnassets; sourceTree = "<group>"; };
+		D4A38F471FFB2AED00092A46 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		D4A38F4A1FFB2AED00092A46 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
+		D4A38F4C1FFB2AED00092A46 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		D4A38F4D1FFB2AEE00092A46 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
+		D4A38F4F1FFB2AEE00092A46 /* Cerebro.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Cerebro.entitlements; sourceTree = "<group>"; };
+		D4A38F551FFBFD9900092A46 /* ROBSpeechBox.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBSpeechBox.h; sourceTree = "<group>"; };
+		D4A38F561FFBFD9900092A46 /* ROBSpeechBox.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ROBSpeechBox.m; sourceTree = "<group>"; };
+		D4A38F591FFC007E00092A46 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
+		D4A38F5B1FFC008B00092A46 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
+		D4A38F5D1FFC009300092A46 /* AudioUnit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioUnit.framework; path = System/Library/Frameworks/AudioUnit.framework; sourceTree = SDKROOT; };
+		D4A38F5F1FFC06CF00092A46 /* dictation_start.scpt */ = {isa = PBXFileReference; lastKnownFileType = file; path = dictation_start.scpt; sourceTree = "<group>"; };
+		D4A38F611FFC0C7600092A46 /* ROBSerialBox.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBSerialBox.h; sourceTree = "<group>"; };
+		D4A38F621FFC0C7600092A46 /* ROBSerialBox.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ROBSerialBox.m; sourceTree = "<group>"; };
+		D4A38F641FFC0C9000092A46 /* MultipeerConnectivity.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MultipeerConnectivity.framework; path = System/Library/Frameworks/MultipeerConnectivity.framework; sourceTree = SDKROOT; };
+		D4A38F661FFC0C9800092A46 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
+		D4A38F681FFC0C9F00092A46 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = System/Library/Frameworks/Cocoa.framework; sourceTree = SDKROOT; };
+		D4A38F6A1FFC0CA600092A46 /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = System/Library/Frameworks/AppKit.framework; sourceTree = SDKROOT; };
+		D4A38F6C1FFC0CB400092A46 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
+		D4A38F711FFC77CB00092A46 /* ROBKeyboardControlsViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBKeyboardControlsViewController.h; sourceTree = "<group>"; };
+		D4A38F721FFC77CB00092A46 /* ROBKeyboardControlsViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ROBKeyboardControlsViewController.m; sourceTree = "<group>"; };
+		D4A38F741FFC8BD300092A46 /* ROBSCNViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBSCNViewController.h; sourceTree = "<group>"; };
+		D4A38F751FFC8BD300092A46 /* ROBSCNViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ROBSCNViewController.m; sourceTree = "<group>"; };
+		D4AA3D792AC9F4AB007DC656 /* StartTextInput.scpt */ = {isa = PBXFileReference; lastKnownFileType = file; path = StartTextInput.scpt; sourceTree = "<group>"; };
+		D4AB3DA22E1CF38D00EA2571 /* CameraManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManager.swift; sourceTree = "<group>"; };
+		D4AB3DA32E1CF38D00EA2571 /* CameraViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraViewController.swift; sourceTree = "<group>"; };
+		D4C5252220A65FDD00290BF5 /* ROBConsciousness.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBConsciousness.h; sourceTree = "<group>"; };
+		D4C5252320A65FDD00290BF5 /* ROBConsciousness.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ROBConsciousness.m; sourceTree = "<group>"; };
+		D4CFB7CE2287C79000F2403A /* JoinWifiTaskController.command */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.sh; path = JoinWifiTaskController.command; sourceTree = "<group>"; };
+		D4CFB7D02287C81200F2403A /* JoinWifiTaskController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = JoinWifiTaskController.m; sourceTree = "<group>"; };
+		D4CFB7D12287C81200F2403A /* JoinWifiTaskController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = JoinWifiTaskController.h; sourceTree = "<group>"; };
+		D4CFB7D32287F01100F2403A /* CoreML.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreML.framework; path = System/Library/Frameworks/CoreML.framework; sourceTree = SDKROOT; };
+		D4F136632325E3990084A302 /* RTSPClientConnection.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = RTSPClientConnection.mm; sourceTree = "<group>"; };
+		D4F136642325E3990084A302 /* NALUnit.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = NALUnit.cpp; sourceTree = "<group>"; };
+		D4F136652325E3990084A302 /* RTSPServer.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = RTSPServer.h; sourceTree = "<group>"; };
+		D4F136662325E3990084A302 /* VideoEncoder.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = VideoEncoder.m; sourceTree = "<group>"; };
+		D4F136672325E3990084A302 /* AVEncoder.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = AVEncoder.h; sourceTree = "<group>"; };
+		D4F136682325E3990084A302 /* MP4Atom.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = MP4Atom.m; sourceTree = "<group>"; };
+		D4F136692325E3990084A302 /* VideoEncoder.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = VideoEncoder.h; sourceTree = "<group>"; };
+		D4F1366A2325E3990084A302 /* RTSPServer.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = RTSPServer.m; sourceTree = "<group>"; };
+		D4F1366B2325E3990084A302 /* RTSPClientConnection.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = RTSPClientConnection.h; sourceTree = "<group>"; };
+		D4F1366C2325E39A0084A302 /* MP4Atom.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = MP4Atom.h; sourceTree = "<group>"; };
+		D4F1366D2325E39A0084A302 /* ROBRTSPController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = ROBRTSPController.m; sourceTree = "<group>"; };
+		D4F1366E2325E39A0084A302 /* RTSPMessage.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = RTSPMessage.m; sourceTree = "<group>"; };
+		D4F1366F2325E39A0084A302 /* RTSPMessage.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = RTSPMessage.h; sourceTree = "<group>"; };
+		D4F136702325E39A0084A302 /* NALUnit.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = NALUnit.h; sourceTree = "<group>"; };
+		D4F136712325E39A0084A302 /* ROBRTSPController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = ROBRTSPController.h; sourceTree = "<group>"; };
+		D4F136722325E39A0084A302 /* AVEncoder.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = AVEncoder.mm; sourceTree = "<group>"; };
+		D4F1367B2325E4440084A302 /* flextGL.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = flextGL.cpp; sourceTree = "<group>"; };
+		D4F1367C2325E4440084A302 /* flextGL.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = flextGL.h; sourceTree = "<group>"; };
+		D4F4802A22F2903D006ADB7A /* RealSenseTaskController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = RealSenseTaskController.m; sourceTree = "<group>"; };
+		D4F4802B22F2903E006ADB7A /* RealSenseTaskController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = RealSenseTaskController.h; sourceTree = "<group>"; };
+		D4F4802C22F2903E006ADB7A /* RealSenseTaskController.command */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.sh; path = RealSenseTaskController.command; sourceTree = "<group>"; };
+		D4F642D22325E16A00DF71AE /* FreenectPCL.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FreenectPCL.h; sourceTree = "<group>"; };
+		D4F642D42325E16B00DF71AE /* TrackedPolyRect.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = TrackedPolyRect.h; sourceTree = "<group>"; };
+		D4F642D52325E16B00DF71AE /* VisionTrackerProcessor.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = VisionTrackerProcessor.h; sourceTree = "<group>"; };
+		D4F642D62325E16C00DF71AE /* serialization.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = serialization.h; sourceTree = "<group>"; };
+		D4F642D72325E16C00DF71AE /* k2g.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = k2g.h; sourceTree = "<group>"; };
+		D4F642D92325E17700DF71AE /* FreenectPCL.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = FreenectPCL.mm; sourceTree = "<group>"; };
+		D4F642DA2325E17800DF71AE /* ROBNiTEManager.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = ROBNiTEManager.h; sourceTree = "<group>"; };
+		D4F642DB2325E17900DF71AE /* TrackedPolyRect.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = TrackedPolyRect.m; sourceTree = "<group>"; };
+		D4F642DD2325E17E00DF71AE /* VisionTrackerProcessor.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = VisionTrackerProcessor.m; sourceTree = "<group>"; };
+		D4F642DE2325E17E00DF71AE /* viewer.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = viewer.h; sourceTree = "<group>"; };
+		D4F642DF2325E17F00DF71AE /* ROBNiTEManager.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = ROBNiTEManager.mm; sourceTree = "<group>"; };
+		D4F673AF22EFFC4500A9B6E4 /* ReSpeakerTaskController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = ReSpeakerTaskController.m; sourceTree = "<group>"; };
+		D4F673B022EFFC4600A9B6E4 /* ReSpeakerTaskController.command */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.sh; path = ReSpeakerTaskController.command; sourceTree = "<group>"; };
+		D4F673B122EFFC4600A9B6E4 /* ReSpeakerTaskController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = ReSpeakerTaskController.h; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		D4A38F391FFB2AED00092A46 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D4CFB7D42287F01100F2403A /* CoreML.framework in Frameworks */,
+				D4A38F6D1FFC0CB400092A46 /* Foundation.framework in Frameworks */,
+				D4A38F6B1FFC0CA600092A46 /* AppKit.framework in Frameworks */,
+				D4A38F691FFC0C9F00092A46 /* Cocoa.framework in Frameworks */,
+				D4A38F671FFC0C9800092A46 /* IOKit.framework in Frameworks */,
+				D4A38F651FFC0C9000092A46 /* MultipeerConnectivity.framework in Frameworks */,
+				D4A38F5E1FFC009300092A46 /* AudioUnit.framework in Frameworks */,
+				D4A38F5C1FFC008B00092A46 /* AudioToolbox.framework in Frameworks */,
+				D4A38F5A1FFC007E00092A46 /* AVFoundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		D443281B20093E91003FA553 /* TaskControllers */ = {
+			isa = PBXGroup;
+			children = (
+				D4AA3D792AC9F4AB007DC656 /* StartTextInput.scpt */,
+				D4066C5922828E5F002ACAD1 /* AudioInputTaskController.command */,
+				D4066C5622828DA4002ACAD1 /* AudioInputTaskController.h */,
+				D4066C5722828DA5002ACAD1 /* AudioInputTaskController.m */,
+				D4CFB7CE2287C79000F2403A /* JoinWifiTaskController.command */,
+				D4CFB7D12287C81200F2403A /* JoinWifiTaskController.h */,
+				D4CFB7D02287C81200F2403A /* JoinWifiTaskController.m */,
+				D4F673B022EFFC4600A9B6E4 /* ReSpeakerTaskController.command */,
+				D4F673B122EFFC4600A9B6E4 /* ReSpeakerTaskController.h */,
+				D4F673AF22EFFC4500A9B6E4 /* ReSpeakerTaskController.m */,
+				D4F4802C22F2903E006ADB7A /* RealSenseTaskController.command */,
+				D4F4802B22F2903E006ADB7A /* RealSenseTaskController.h */,
+				D4F4802A22F2903D006ADB7A /* RealSenseTaskController.m */,
+				D40D36F820B4BA270006EF82 /* SimpleUserTracker.command */,
+				D40D36FA20B4BE5F0006EF82 /* SimpleUserTrackerTaskController.h */,
+				D40D36FB20B4BE5F0006EF82 /* SimpleUserTrackerTaskController.m */,
+			);
+			path = TaskControllers;
+			sourceTree = "<group>";
+		};
+		D4A38F331FFB2AED00092A46 = {
+			isa = PBXGroup;
+			children = (
+				D4A38F3E1FFB2AED00092A46 /* Cerebro */,
+				D4A38F3D1FFB2AED00092A46 /* Products */,
+				D4A38F581FFC007E00092A46 /* Frameworks */,
+			);
+			sourceTree = "<group>";
+		};
+		D4A38F3D1FFB2AED00092A46 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				D4A38F3C1FFB2AED00092A46 /* Cerebro.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		D4A38F3E1FFB2AED00092A46 /* Cerebro */ = {
+			isa = PBXGroup;
+			children = (
+				D4A38F3F1FFB2AED00092A46 /* AppDelegate.h */,
+				D4A38F401FFB2AED00092A46 /* AppDelegate.m */,
+				D4A38F421FFB2AED00092A46 /* ROBMainViewController.h */,
+				D4A38F431FFB2AED00092A46 /* ROBMainViewController.mm */,
+				D4AB3DA22E1CF38D00EA2571 /* CameraManager.swift */,
+				D4AB3DA32E1CF38D00EA2571 /* CameraViewController.swift */,
+				D4A38F5F1FFC06CF00092A46 /* dictation_start.scpt */,
+				D49D755727FFD1AE00142E26 /* AutoNetServer.swift */,
+				D49D755A27FFD1BF00142E26 /* AutoNetDataTransferProtocol.swift */,
+				D49D755627FFD1AE00142E26 /* AutoNetServerConnection.swift */,
+				D4A38F741FFC8BD300092A46 /* ROBSCNViewController.h */,
+				D408B1202E15E7E300F6FEB3 /* ROBAI.swift */,
+				D4A38F751FFC8BD300092A46 /* ROBSCNViewController.m */,
+				D4C5252220A65FDD00290BF5 /* ROBConsciousness.h */,
+				D4C5252320A65FDD00290BF5 /* ROBConsciousness.m */,
+				D45E1CE02801460C002189C0 /* ROBRPLidar.h */,
+				D45E1CE12801460C002189C0 /* ROBRPLidar.m */,
+				D4F136622325E3680084A302 /* ROBRTSPController */,
+				D4F642E72325E1C600DF71AE /* ROBNiTEManager */,
+				D443281B20093E91003FA553 /* TaskControllers */,
+				D4A38F711FFC77CB00092A46 /* ROBKeyboardControlsViewController.h */,
+				D4A38F721FFC77CB00092A46 /* ROBKeyboardControlsViewController.m */,
+				D4066C5E22867F44002ACAD1 /* ROBTorsoControlsViewController.h */,
+				D4066C5F22867F44002ACAD1 /* ROBTorsoControlsViewController.m */,
+				D4A38F611FFC0C7600092A46 /* ROBSerialBox.h */,
+				D4A38F621FFC0C7600092A46 /* ROBSerialBox.m */,
+				D4066C5D22863031002ACAD1 /* ROBBaseControllerModel.h */,
+				D4066C5B22863009002ACAD1 /* ROBBaseControllerModel.m */,
+				D4A38F551FFBFD9900092A46 /* ROBSpeechBox.h */,
+				D4A38F561FFBFD9900092A46 /* ROBSpeechBox.m */,
+				D4A38F451FFB2AED00092A46 /* art.scnassets */,
+				D4A38F471FFB2AED00092A46 /* Assets.xcassets */,
+				D4A38F491FFB2AED00092A46 /* Main.storyboard */,
+				D4A38F4C1FFB2AED00092A46 /* Info.plist */,
+				D4A38F4D1FFB2AEE00092A46 /* main.m */,
+				D4A38F4F1FFB2AEE00092A46 /* Cerebro.entitlements */,
+				D40D36F520B4BA060006EF82 /* Cerebro-Bridging-Header.h */,
+			);
+			path = Cerebro;
+			sourceTree = "<group>";
+		};
+		D4A38F581FFC007E00092A46 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				D4CFB7D32287F01100F2403A /* CoreML.framework */,
+				D4A38F6C1FFC0CB400092A46 /* Foundation.framework */,
+				D4A38F6A1FFC0CA600092A46 /* AppKit.framework */,
+				D4A38F681FFC0C9F00092A46 /* Cocoa.framework */,
+				D4A38F661FFC0C9800092A46 /* IOKit.framework */,
+				D4A38F641FFC0C9000092A46 /* MultipeerConnectivity.framework */,
+				D4A38F5D1FFC009300092A46 /* AudioUnit.framework */,
+				D4A38F5B1FFC008B00092A46 /* AudioToolbox.framework */,
+				D4A38F591FFC007E00092A46 /* AVFoundation.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		D4F136622325E3680084A302 /* ROBRTSPController */ = {
+			isa = PBXGroup;
+			children = (
+				D4F136672325E3990084A302 /* AVEncoder.h */,
+				D4F136722325E39A0084A302 /* AVEncoder.mm */,
+				D4F1366C2325E39A0084A302 /* MP4Atom.h */,
+				D4F136682325E3990084A302 /* MP4Atom.m */,
+				D4F136642325E3990084A302 /* NALUnit.cpp */,
+				D4F136702325E39A0084A302 /* NALUnit.h */,
+				D4F136712325E39A0084A302 /* ROBRTSPController.h */,
+				D4F1366D2325E39A0084A302 /* ROBRTSPController.m */,
+				D4F1366B2325E3990084A302 /* RTSPClientConnection.h */,
+				D4F136632325E3990084A302 /* RTSPClientConnection.mm */,
+				D4F1366F2325E39A0084A302 /* RTSPMessage.h */,
+				D4F1366E2325E39A0084A302 /* RTSPMessage.m */,
+				D4F136652325E3990084A302 /* RTSPServer.h */,
+				D4F1366A2325E3990084A302 /* RTSPServer.m */,
+				D4F136692325E3990084A302 /* VideoEncoder.h */,
+				D4F136662325E3990084A302 /* VideoEncoder.m */,
+			);
+			path = ROBRTSPController;
+			sourceTree = "<group>";
+		};
+		D4F642E72325E1C600DF71AE /* ROBNiTEManager */ = {
+			isa = PBXGroup;
+			children = (
+				D4F642DA2325E17800DF71AE /* ROBNiTEManager.h */,
+				D4F642DF2325E17F00DF71AE /* ROBNiTEManager.mm */,
+				D4F642D52325E16B00DF71AE /* VisionTrackerProcessor.h */,
+				D4F642DD2325E17E00DF71AE /* VisionTrackerProcessor.m */,
+				D4F642D22325E16A00DF71AE /* FreenectPCL.h */,
+				D4F642D92325E17700DF71AE /* FreenectPCL.mm */,
+				D4F642D42325E16B00DF71AE /* TrackedPolyRect.h */,
+				D4F642DB2325E17900DF71AE /* TrackedPolyRect.m */,
+				D4F1367C2325E4440084A302 /* flextGL.h */,
+				D4F1367B2325E4440084A302 /* flextGL.cpp */,
+				D4F642D72325E16C00DF71AE /* k2g.h */,
+				D4F642D62325E16C00DF71AE /* serialization.h */,
+				D4F642DE2325E17E00DF71AE /* viewer.h */,
+			);
+			path = ROBNiTEManager;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		D4A38F3B1FFB2AED00092A46 /* Cerebro */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D4A38F521FFB2AEE00092A46 /* Build configuration list for PBXNativeTarget "Cerebro" */;
+			buildPhases = (
+				D4A38F381FFB2AED00092A46 /* Sources */,
+				D4A38F391FFB2AED00092A46 /* Frameworks */,
+				D4A38F3A1FFB2AED00092A46 /* Resources */,
+				D45E1CE528014CEC002189C0 /* Embed Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Cerebro;
+			productName = Cerebro;
+			productReference = D4A38F3C1FFB2AED00092A46 /* Cerebro.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		D4A38F341FFB2AED00092A46 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastUpgradeCheck = 1100;
+				ORGANIZATIONNAME = "Rob Makina";
+				TargetAttributes = {
+					D4A38F3B1FFB2AED00092A46 = {
+						CreatedOnToolsVersion = 9.0;
+						LastSwiftMigration = 0930;
+						ProvisioningStyle = Automatic;
+						SystemCapabilities = {
+							com.apple.NetworkExtensions = {
+								enabled = 0;
+							};
+							com.apple.Sandbox = {
+								enabled = 0;
+							};
+						};
+					};
+				};
+			};
+			buildConfigurationList = D4A38F371FFB2AED00092A46 /* Build configuration list for PBXProject "Cerebro" */;
+			compatibilityVersion = "Xcode 8.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = D4A38F331FFB2AED00092A46;
+			productRefGroup = D4A38F3D1FFB2AED00092A46 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				D4A38F3B1FFB2AED00092A46 /* Cerebro */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		D4A38F3A1FFB2AED00092A46 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D4AA3D7A2AC9F4AB007DC656 /* StartTextInput.scpt in Resources */,
+				D4A38F601FFC06CF00092A46 /* dictation_start.scpt in Resources */,
+				D4A38F4B1FFB2AED00092A46 /* Main.storyboard in Resources */,
+				D4F673B322EFFC4600A9B6E4 /* ReSpeakerTaskController.command in Resources */,
+				D40D36F920B4BA270006EF82 /* SimpleUserTracker.command in Resources */,
+				D4CFB7CF2287C79100F2403A /* JoinWifiTaskController.command in Resources */,
+				D4A38F481FFB2AED00092A46 /* Assets.xcassets in Resources */,
+				D4066C5A22828E5F002ACAD1 /* AudioInputTaskController.command in Resources */,
+				D4A38F461FFB2AED00092A46 /* art.scnassets in Resources */,
+				D4F4802E22F2903E006ADB7A /* RealSenseTaskController.command in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		D4A38F381FFB2AED00092A46 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D45E1CE22801460C002189C0 /* ROBRPLidar.m in Sources */,
+				D4F673B222EFFC4600A9B6E4 /* ReSpeakerTaskController.m in Sources */,
+				D4A38F441FFB2AED00092A46 /* ROBMainViewController.mm in Sources */,
+				D4F4802D22F2903E006ADB7A /* RealSenseTaskController.m in Sources */,
+				D4C5252420A65FDD00290BF5 /* ROBConsciousness.m in Sources */,
+				D4F136732325E39A0084A302 /* RTSPClientConnection.mm in Sources */,
+				D4066C6022867F44002ACAD1 /* ROBTorsoControlsViewController.m in Sources */,
+				D4A38F4E1FFB2AEE00092A46 /* main.m in Sources */,
+				D4A38F631FFC0C7600092A46 /* ROBSerialBox.m in Sources */,
+				D4AB3DA42E1CF38D00EA2571 /* CameraViewController.swift in Sources */,
+				D4AB3DA52E1CF38D00EA2571 /* CameraManager.swift in Sources */,
+				D4F642E62325E17F00DF71AE /* ROBNiTEManager.mm in Sources */,
+				D4A38F411FFB2AED00092A46 /* AppDelegate.m in Sources */,
+				D49D755B27FFD1BF00142E26 /* AutoNetDataTransferProtocol.swift in Sources */,
+				D408B1212E15E7E300F6FEB3 /* ROBAI.swift in Sources */,
+				D4066C5822828DA5002ACAD1 /* AudioInputTaskController.m in Sources */,
+				D4F136752325E39A0084A302 /* VideoEncoder.m in Sources */,
+				D49D755927FFD1AF00142E26 /* AutoNetServer.swift in Sources */,
+				D4A38F571FFBFD9900092A46 /* ROBSpeechBox.m in Sources */,
+				D4CFB7D22287C81300F2403A /* JoinWifiTaskController.m in Sources */,
+				D4F136772325E39A0084A302 /* RTSPServer.m in Sources */,
+				D4A38F731FFC77CB00092A46 /* ROBKeyboardControlsViewController.m in Sources */,
+				D4F642E22325E17F00DF71AE /* FreenectPCL.mm in Sources */,
+				D4F642E32325E17F00DF71AE /* TrackedPolyRect.m in Sources */,
+				D4F642E52325E17F00DF71AE /* VisionTrackerProcessor.m in Sources */,
+				D4F1367A2325E39A0084A302 /* AVEncoder.mm in Sources */,
+				D4F136742325E39A0084A302 /* NALUnit.cpp in Sources */,
+				D4F136792325E39A0084A302 /* RTSPMessage.m in Sources */,
+				D4F1367D2325E4440084A302 /* flextGL.cpp in Sources */,
+				D4A38F761FFC8BD300092A46 /* ROBSCNViewController.m in Sources */,
+				D4066C5C22863009002ACAD1 /* ROBBaseControllerModel.m in Sources */,
+				D4F136762325E39A0084A302 /* MP4Atom.m in Sources */,
+				D4F136782325E39A0084A302 /* ROBRTSPController.m in Sources */,
+				D40D36FC20B4BE5F0006EF82 /* SimpleUserTrackerTaskController.m in Sources */,
+				D49D755827FFD1AF00142E26 /* AutoNetServerConnection.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXVariantGroup section */
+		D4A38F491FFB2AED00092A46 /* Main.storyboard */ = {
+			isa = PBXVariantGroup;
+			children = (
+				D4A38F4A1FFB2AED00092A46 /* Base */,
+			);
+			name = Main.storyboard;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
+/* Begin XCBuildConfiguration section */
+		D4A38F501FFB2AEE00092A46 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "Mac Developer";
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 10.15;
+				MTL_ENABLE_DEBUG_INFO = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		D4A38F511FFB2AEE00092A46 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "Mac Developer";
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 10.15;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		D4A38F531FFB2AEE00092A46 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = Cerebro/Cerebro.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = 975CAGD5EW;
+				ENABLE_HARDENED_RUNTIME = NO;
+				FRAMEWORK_SEARCH_PATHS = "$(PROJECT_DIR)/Cerebro";
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				HEADER_SEARCH_PATHS = "";
+				INFOPLIST_FILE = Cerebro/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+				LIBRARY_SEARCH_PATHS = "$(inherited)";
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				OTHER_CPLUSPLUSFLAGS = (
+					"-fPIC",
+					"-pedantic",
+					"-Wno-missing-field-initializers",
+					"-Wno-switch",
+					"-Wno-multichar",
+					"-Wsequence-point",
+					"-Wformat",
+					"-Wformat-security",
+					"-pthread",
+					"'-std=gnu++11'",
+				);
+				OTHER_LDFLAGS = "";
+				PRODUCT_BUNDLE_IDENTIFIER = com.orbitusrobotics.Cerebro;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_OBJC_BRIDGING_HEADER = "Cerebro/Cerebro-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		D4A38F541FFB2AEE00092A46 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = Cerebro/Cerebro.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = 975CAGD5EW;
+				ENABLE_HARDENED_RUNTIME = NO;
+				FRAMEWORK_SEARCH_PATHS = "$(PROJECT_DIR)/Cerebro";
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				HEADER_SEARCH_PATHS = "";
+				INFOPLIST_FILE = Cerebro/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+				LIBRARY_SEARCH_PATHS = "$(inherited)";
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				OTHER_CPLUSPLUSFLAGS = (
+					"-fPIC",
+					"-pedantic",
+					"-Wno-missing-field-initializers",
+					"-Wno-switch",
+					"-Wno-multichar",
+					"-Wsequence-point",
+					"-Wformat",
+					"-Wformat-security",
+					"-pthread",
+					"'-std=gnu++11'",
+				);
+				OTHER_LDFLAGS = "";
+				PRODUCT_BUNDLE_IDENTIFIER = com.orbitusrobotics.Cerebro;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_OBJC_BRIDGING_HEADER = "Cerebro/Cerebro-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		D4A38F371FFB2AED00092A46 /* Build configuration list for PBXProject "Cerebro" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D4A38F501FFB2AEE00092A46 /* Debug */,
+				D4A38F511FFB2AEE00092A46 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D4A38F521FFB2AEE00092A46 /* Build configuration list for PBXNativeTarget "Cerebro" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D4A38F531FFB2AEE00092A46 /* Debug */,
+				D4A38F541FFB2AEE00092A46 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = D4A38F341FFB2AED00092A46 /* Project object */;
+}
