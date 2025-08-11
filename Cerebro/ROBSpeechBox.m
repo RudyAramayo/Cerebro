@@ -589,6 +589,18 @@
             NSLog(@"string is of zero-length");
             return;
         }
+        
+        //To Allow for pauses in the google gemini responses
+        // Use the below algorithm and try to break up the speech and queue up each element instead, once didFinishSpeaking is reached try to continue with the next element
+//        NSArray *speechComponentCategories = [stringToSpeak componentsSeparatedByString:@"\n**"];
+//        for (NSString *speechComponentCategory in speechComponentCategories) {
+//            NSArray *speechComponentSubCategories = [speechComponentCategory componentsSeparatedByString:@"*   **"];
+//            for (NSString *speechComponentSubCategory in speechComponentSubCategories) {
+//                [NSThread sleepForTimeInterval:0.5];
+//                [self.speechSynth startSpeakingString:speechComponentSubCategory];
+//                [NSThread sleepForTimeInterval:0.5];
+//            }
+//        }
         [self.speechSynth startSpeakingString:stringToSpeak];
         NSLog(@"Have started to say: %@", stringToSpeak);
     });
@@ -821,12 +833,12 @@
 
 - (void)speechSynthesizer:(NSSpeechSynthesizer *)sender willSpeakWord:(NSRange)characterRange ofString:(NSString *)string
 {
-    int speechDidFailToProcessTimeout = 3;
+    int speechDidFailToProcessTimeout = 1.5;
     self.isSpeaking = true;
     //self.isProcessingSpeech = true;
     [self.delegate willStartProcessingSpeech];
     NSString *word = [string substringWithRange:characterRange];
-    //NSLog(@"willSpeakWord = %@", word);
+    NSLog(@"willSpeakWord = %@", word);
     
     if (self.speechDidStopProcessingTimer) {
         [self.speechDidStopProcessingTimer invalidate];

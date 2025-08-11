@@ -18,6 +18,7 @@
 		D49D755827FFD1AF00142E26 /* AutoNetServerConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = D49D755627FFD1AE00142E26 /* AutoNetServerConnection.swift */; };
 		D49D755927FFD1AF00142E26 /* AutoNetServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D49D755727FFD1AE00142E26 /* AutoNetServer.swift */; };
 		D49D755B27FFD1BF00142E26 /* AutoNetDataTransferProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = D49D755A27FFD1BF00142E26 /* AutoNetDataTransferProtocol.swift */; };
+		D49F14342E456EE3001C1824 /* Webcam_color.py in Resources */ = {isa = PBXBuildFile; fileRef = D49F14332E456EE3001C1824 /* Webcam_color.py */; };
 		D4A38F411FFB2AED00092A46 /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = D4A38F401FFB2AED00092A46 /* AppDelegate.m */; };
 		D4A38F441FFB2AED00092A46 /* ROBMainViewController.mm in Sources */ = {isa = PBXBuildFile; fileRef = D4A38F431FFB2AED00092A46 /* ROBMainViewController.mm */; };
 		D4A38F461FFB2AED00092A46 /* art.scnassets in Resources */ = {isa = PBXBuildFile; fileRef = D4A38F451FFB2AED00092A46 /* art.scnassets */; };
@@ -94,6 +95,7 @@
 		D49D755627FFD1AE00142E26 /* AutoNetServerConnection.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; name = AutoNetServerConnection.swift; path = AutoNet/AutoNetServer/AutoNetServerConnection.swift; sourceTree = "<group>"; };
 		D49D755727FFD1AE00142E26 /* AutoNetServer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; name = AutoNetServer.swift; path = AutoNet/AutoNetServer/AutoNetServer.swift; sourceTree = "<group>"; };
 		D49D755A27FFD1BF00142E26 /* AutoNetDataTransferProtocol.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; name = AutoNetDataTransferProtocol.swift; path = AutoNet/AutoNetShared/AutoNetDataTransferProtocol.swift; sourceTree = "<group>"; };
+		D49F14332E456EE3001C1824 /* Webcam_color.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = Webcam_color.py; sourceTree = "<group>"; };
 		D4A38F3C1FFB2AED00092A46 /* Cerebro.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cerebro.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D4A38F3F1FFB2AED00092A46 /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
 		D4A38F401FFB2AED00092A46 /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
@@ -261,6 +263,7 @@
 				D4066C5B22863009002ACAD1 /* ROBBaseControllerModel.m */,
 				D4A38F551FFBFD9900092A46 /* ROBSpeechBox.h */,
 				D4A38F561FFBFD9900092A46 /* ROBSpeechBox.m */,
+				D49F14332E456EE3001C1824 /* Webcam_color.py */,
 				D4A38F451FFB2AED00092A46 /* art.scnassets */,
 				D4A38F471FFB2AED00092A46 /* Assets.xcassets */,
 				D4A38F491FFB2AED00092A46 /* Main.storyboard */,
@@ -399,6 +402,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D49F14342E456EE3001C1824 /* Webcam_color.py in Resources */,
 				D4AA3D7A2AC9F4AB007DC656 /* StartTextInput.scpt in Resources */,
 				D4A38F601FFC06CF00092A46 /* dictation_start.scpt in Resources */,
 				D4A38F4B1FFB2AED00092A46 /* Main.storyboard in Resources */,
