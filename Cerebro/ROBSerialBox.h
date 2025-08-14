@@ -122,6 +122,7 @@
 
 - (void) torso_controllerPassthrough_head_pan:(NSString *)head_pan
                                     head_tilt:(NSString *)head_tilt
+                           head_upperNeckTilt:(NSString *)head_upperNeckTilt
                            arm_R_shoulder_pan:(NSString *)arm_R_shoulder_pan
                           arm_R_shoulder_tilt:(NSString *)arm_R_shoulder_tilt
                               arm_R_elbow_pan:(NSString *)arm_R_elbow_pan

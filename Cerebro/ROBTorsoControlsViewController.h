@@ -22,6 +22,8 @@
 @property (readwrite, retain) IBOutlet NSButton *headPan_enabled;
 @property (readwrite, retain) IBOutlet NSSlider *headTilt;
 @property (readwrite, retain) IBOutlet NSButton *headTilt_enabled;
+@property (readwrite, retain) IBOutlet NSSlider *headUpperNeckTilt;
+@property (readwrite, retain) IBOutlet NSButton *headUpperNeckTilt_enabled;
 
 @property (readwrite, retain) IBOutlet NSSlider *arm_R_Shoulder_Pan;
 @property (readwrite, retain) IBOutlet NSButton *arm_R_Shoulder_Pan_enabled;

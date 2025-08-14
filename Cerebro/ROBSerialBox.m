@@ -1177,6 +1177,7 @@ NSString *textInput = [command_components[12] componentsSeparatedByString:@"TEXT
 
 - (void) torso_controllerPassthrough_head_pan:(NSString *)head_pan
                                     head_tilt:(NSString *)head_tilt
+                           head_upperNeckTilt:(NSString *)head_upperNeckTilt
                            arm_R_shoulder_pan:(NSString *)arm_R_shoulder_pan
                           arm_R_shoulder_tilt:(NSString *)arm_R_shoulder_tilt
                               arm_R_elbow_pan:(NSString *)arm_R_elbow_pan
@@ -1198,6 +1199,7 @@ NSString *textInput = [command_components[12] componentsSeparatedByString:@"TEXT
     
     maestroSetTarget(serialFileDescriptor_maestro, 0, [head_pan intValue]);
     maestroSetTarget(serialFileDescriptor_maestro, 1, [head_tilt intValue]);
+    maestroSetTarget(serialFileDescriptor_maestro, 2, [head_upperNeckTilt intValue]);
     
     maestroSetTarget(serialFileDescriptor_maestro, 4, [arm_L_elbow_pan intValue]);
     maestroSetTarget(serialFileDescriptor_maestro, 5, [arm_R_elbow_pan intValue]);

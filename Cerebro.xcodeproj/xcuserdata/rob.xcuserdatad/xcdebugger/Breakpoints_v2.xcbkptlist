@@ -654,9 +654,9 @@
             filePath = "Cerebro/CameraManager.swift"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "74"
-            endingLineNumber = "74"
-            landmarkName = "prepareCamera()"
+            startingLineNumber = "175"
+            endingLineNumber = "175"
+            landmarkName = "prepareCamera(for:)"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>
@@ -670,25 +670,9 @@
             filePath = "Cerebro/CameraManager.swift"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "58"
-            endingLineNumber = "58"
+            startingLineNumber = "61"
+            endingLineNumber = "61"
             landmarkName = "init(containerView:)"
-            landmarkType = "7">
-         </BreakpointContent>
-      </BreakpointProxy>
-      <BreakpointProxy
-         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
-         <BreakpointContent
-            uuid = "A22E8BF1-59AE-4E9A-AFDC-088DF587531B"
-            shouldBeEnabled = "No"
-            ignoreCount = "0"
-            continueAfterRunningActions = "No"
-            filePath = "Cerebro/CameraManager.swift"
-            startingColumnNumber = "9223372036854775807"
-            endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "78"
-            endingLineNumber = "78"
-            landmarkName = "prepareCamera()"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>
@@ -785,6 +769,22 @@
             startingLineNumber = "192"
             endingLineNumber = "192"
             landmarkName = "-checkIfUTCWebCamIsOnline_SUDO"
+            landmarkType = "7">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "06E0B52F-D662-4FFD-9492-7DDF9C05C366"
+            shouldBeEnabled = "No"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "Cerebro/CameraManager.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "148"
+            endingLineNumber = "148"
+            landmarkName = "deviceConnected(_:)"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>

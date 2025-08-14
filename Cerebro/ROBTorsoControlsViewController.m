@@ -62,6 +62,7 @@
     [self.robMainViewController.serialBox
      torso_controllerPassthrough_head_pan:[NSString stringWithFormat:@"%.f", self.headPan_enabled.state == NSOnState? self.headPan.floatValue : offValue]
      head_tilt:[NSString stringWithFormat:@"%.f", self.headTilt_enabled.state == NSOnState? self.headTilt.floatValue : offValue]
+     head_upperNeckTilt:[NSString stringWithFormat:@"%.f", self.headUpperNeckTilt_enabled.state == NSOnState? self.headUpperNeckTilt.floatValue : offValue]
      arm_R_shoulder_pan:[NSString stringWithFormat:@"%.f", self.arm_R_Shoulder_Pan_enabled.state == NSOnState? self.arm_R_Shoulder_Pan.floatValue: offValue]
      arm_R_shoulder_tilt:[NSString stringWithFormat:@"%.f", self.arm_R_Shoulder_Tilt_enabled.state == NSOnState? self.arm_R_Shoulder_Tilt.floatValue: offValue]
      arm_R_elbow_pan:[NSString stringWithFormat:@"%.f", self.arm_R_Elbow_Pan_enabled.state == NSOnState? self.arm_R_Elbow_Pan.floatValue : offValue]

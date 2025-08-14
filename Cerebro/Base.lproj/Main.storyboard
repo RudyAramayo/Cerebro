@@ -449,7 +449,7 @@ Brake
                         <autoresizingMask key="autoresizingMask"/>
                         <subviews>
                             <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Ar6-N9-3vH">
-                                <rect key="frame" x="185" y="109" width="96" height="19"/>
+                                <rect key="frame" x="185" y="29" width="96" height="19"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
                                 <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="5798.9583333333339" tickMarkPosition="above" sliderType="linear" id="tM2-Dq-N4d"/>
                                 <connections>
@@ -529,7 +529,7 @@ Brake
                                 </connections>
                             </slider>
                             <slider horizontalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="J1f-FG-Z84">
-                                <rect key="frame" x="224" y="131" width="19" height="96"/>
+                                <rect key="frame" x="224" y="61" width="19" height="76"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
                                 <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="4884.6146369485286" tickMarkPosition="right" sliderType="linear" id="Bud-rf-B0V"/>
                                 <connections>
@@ -628,7 +628,7 @@ Brake
                                 </buttonCell>
                             </button>
                             <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="CSn-jc-2oR">
-                                <rect key="frame" x="285" y="110" width="22" height="18"/>
+                                <rect key="frame" x="285" y="30" width="22" height="18"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                                 <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="lFF-8N-ODL">
                                     <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
@@ -636,7 +636,7 @@ Brake
                                 </buttonCell>
                             </button>
                             <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="AMM-Oa-PLc">
-                                <rect key="frame" x="247" y="171" width="22" height="18"/>
+                                <rect key="frame" x="247" y="116" width="22" height="18"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                                 <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="R9F-Wr-A2V">
                                     <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
@@ -676,7 +676,7 @@ Brake
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                             </box>
                             <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="kbv-5W-jo1">
-                                <rect key="frame" x="194" y="13" width="93" height="21"/>
+                                <rect key="frame" x="19" y="13" width="93" height="21"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                                 <buttonCell key="cell" type="push" title="Reconnect" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="NiB-Gz-A7x">
                                     <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
@@ -750,6 +750,22 @@ Brake
                                     <font key="font" metaFont="system"/>
                                 </buttonCell>
                             </button>
+                            <slider horizontalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="CyK-bn-gZP">
+                                <rect key="frame" x="224" y="151" width="19" height="76"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4000" maxValue="8000" doubleValue="6000" tickMarkPosition="right" sliderType="linear" id="UIa-yF-izD"/>
+                                <connections>
+                                    <action selector="applyServoCommand:" target="cHj-5R-xNm" id="1jw-j1-xfp"/>
+                                </connections>
+                            </slider>
+                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="wbx-6Z-lzo">
+                                <rect key="frame" x="247" y="191" width="22" height="18"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="fwZ-xd-8WN">
+                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                    <font key="font" metaFont="system"/>
+                                </buttonCell>
+                            </button>
                         </subviews>
                     </view>
                     <connections>
@@ -785,6 +801,8 @@ Brake
                         <outlet property="headPan_enabled" destination="CSn-jc-2oR" id="v6l-Ip-UFm"/>
                         <outlet property="headTilt" destination="J1f-FG-Z84" id="ol7-Bl-ffR"/>
                         <outlet property="headTilt_enabled" destination="AMM-Oa-PLc" id="XTJ-23-l5E"/>
+                        <outlet property="headUpperNeckTilt" destination="CyK-bn-gZP" id="Ig1-Z9-N7b"/>
+                        <outlet property="headUpperNeckTilt_enabled" destination="wbx-6Z-lzo" id="wmq-Q3-VyY"/>
                     </connections>
                 </viewController>
                 <customObject id="c6P-5Z-L1h" userLabel="First Responder" customClass="NSResponder" sceneMemberID="firstResponder"/>
