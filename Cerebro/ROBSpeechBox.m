@@ -833,7 +833,7 @@
 
 - (void)speechSynthesizer:(NSSpeechSynthesizer *)sender willSpeakWord:(NSRange)characterRange ofString:(NSString *)string
 {
-    int speechDidFailToProcessTimeout = 1.5;
+    int speechDidFailToProcessTimeout = 2;
     self.isSpeaking = true;
     //self.isProcessingSpeech = true;
     [self.delegate willStartProcessingSpeech];
@@ -857,12 +857,14 @@
 
 - (void)speechSynthesizer:(NSSpeechSynthesizer *)sender didEncounterErrorAtIndex:(NSUInteger)characterIndex ofString:(NSString *)string message:(NSString *)message
 {
-    self.isSpeaking = false;
+    NSLog(@"isSpeaking is false");
+    //self.isSpeaking = false;
 }
 
 - (void)speechSynthesizer:(NSSpeechSynthesizer *)sender didEncounterSyncMessage:(NSString *)message NS_SWIFT_UI_ACTOR API_AVAILABLE(macos(10.5)) {
-    NSLog(@"speech sync message");
-    self.isSpeaking = false;
+    //NSLog(@"speech sync message");
+    NSLog(@"isSpeaking is false");
+    //self.isSpeaking = false;
 }
 
 

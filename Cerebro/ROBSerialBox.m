@@ -1196,6 +1196,11 @@ NSString *textInput = [command_components[12] componentsSeparatedByString:@"TEXT
 {
     //int position = maestroGetPosition(serialFileDescriptor_maestro, 0);
     //printf("Current position is %d.\n", position);
+    //---
+    //NSLog(@"headPan = %d, headTilt = %d, headUpperNeckTilt = %d", [head_pan intValue], [head_tilt intValue], [head_upperNeckTilt intValue]);
+    //---
+    //7790 max for upperNeckTilt, 4300 min for uppperNeckTilt
+    //7675 max for headTilt, 4375 max for the headTilt
     
     maestroSetTarget(serialFileDescriptor_maestro, 0, [head_pan intValue]);
     maestroSetTarget(serialFileDescriptor_maestro, 1, [head_tilt intValue]);
