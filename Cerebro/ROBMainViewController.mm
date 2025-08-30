@@ -118,6 +118,28 @@
     [self.speechBox sayIt:responseText];
 }
 
+#pragma mark - ROBSpeechDelegate
+
+- (void) willStartProcessingSpeech
+{
+    //[self.audioInputTaskController beginToIgnore];
+}
+
+- (void) didFinishProcessingSpeech
+{
+    //[self.audioInputTaskController startTask:self];
+    //[self.audioInputTaskController startListeningAgain];
+    
+    //self.speechTextView.editable = YES;
+    //[[[self tastsWindowController] window] makeFirstResponder:self.speechTextView];
+    //[self.speechTextView becomeFirstResponder];
+
+}
+
+- (void) willSpeakWord:(NSRange)characterRange ofString:(NSString *)string {
+    [self resetSpeechResponseAttentionTimer];
+}
+
 - (void) inputText:(NSString *)textInput
 {
     textInput = [textInput lowercaseString];
@@ -164,10 +186,6 @@
     }
     
     self.audioInputTaskController.textView.string = [self.audioInputTaskController.textView.string stringByAppendingString:[NSString stringWithFormat:@"\n%@\n",textInput]];
-}
-
-- (void) willSpeakWord:(NSRange)characterRange ofString:(NSString *)string {
-    [self resetSpeechResponseAttentionTimer];
 }
 
 - (void) resetSpeechResponseAttentionTimer {
@@ -876,28 +894,10 @@
     [self.serialBox serialPortSelected_maestro];
 }
 
-
 - (void) shutdownAudioInput
 {
     //[self.audioInputTaskController beginToIgnore];
 }
-
-- (void) willStartProcessingSpeech
-{
-    //[self.audioInputTaskController beginToIgnore];
-}
-
-- (void) didFinishProcessingSpeech
-{
-    //[self.audioInputTaskController startTask:self];
-    //[self.audioInputTaskController startListeningAgain];
-    
-    //self.speechTextView.editable = YES;
-    //[[[self tastsWindowController] window] makeFirstResponder:self.speechTextView];
-    //[self.speechTextView becomeFirstResponder];
-
-}
-
 
 - (void) didOutputSerialResponse_Head:(NSString *)response
 {
@@ -910,12 +910,10 @@
     }
 }
 
-
 - (void) didOutputSerialResponse_Torso:(NSString *)response
 {
     //NSLog(@"TORSO: %@", response);
 }
-
 
 - (void) didOutputSerialResponse_Base:(NSString *)response
 {

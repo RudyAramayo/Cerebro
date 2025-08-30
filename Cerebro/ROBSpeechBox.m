@@ -22,15 +22,15 @@
 @interface ROBSpeechBox() <AVSpeechSynthesizerDelegate, SFSpeechRecognizerDelegate, SFSpeechRecognitionTaskDelegate, NSSpeechSynthesizerDelegate>
 
 @property (readwrite, retain) NSSpeechSynthesizer *speechSynth;
+@property (nonatomic, strong) AVSpeechSynthesizer *avSpeechSynthesizer;
 
-@property (readwrite, assign) ROBMainViewController *speechDelegate;
 //new properties
 @property (nonatomic, strong) AVCaptureSession *capture;
 @property (nonatomic, strong) SFSpeechRecognizer *speechRecognizer;
 @property (nonatomic, strong) SFSpeechAudioBufferRecognitionRequest *speechRequest;
 @property (nonatomic, strong) SFSpeechRecognitionTask *task;
 @property (nonatomic, strong) AVAudioEngine *audioEngine;
-@property (nonatomic, strong) AVSpeechSynthesizer *speechSynthesizer;
+
 @property (nonatomic, assign) BOOL isSpeaking;
 @property (readwrite, retain) NSMutableArray *localeArray;
 @property (readwrite, assign) int selectedLocaleIndex;
@@ -52,9 +52,9 @@
         NSLog(@"SpeechBox Init");
         self.emotion = anger;
         self.commands = [@[@"robbie", @"robot", @"hey robbie", @"hey robot", @"rob",  @"robbie one"] mutableCopy];
-        self.speechSynth = [[NSSpeechSynthesizer alloc] initWithVoice:[NSSpeechSynthesizer defaultVoice]];
         
-        self.speechSynth.delegate = self;
+        [self setupSpeechSynthesizer];
+        
         self.localeArray = @[
         //English
         @{@"locale_id":@"en-US",@"locale_string":@"English (United States)"},
@@ -186,9 +186,14 @@
     [self startRecognizer];
     
     self.audioEngine = [[AVAudioEngine alloc] init];
-    self.speechSynthesizer  = [[AVSpeechSynthesizer alloc] init];
-    [self.speechSynthesizer setDelegate:self];
+    self.avSpeechSynthesizer  = [[AVSpeechSynthesizer alloc] init];
+    [self.avSpeechSynthesizer setDelegate:self];
 
+}
+
+- (void) setupSpeechSynthesizer {
+    self.avSpeechSynthesizer  = [[AVSpeechSynthesizer alloc] init];
+    [self.avSpeechSynthesizer setDelegate:self];
 }
 
 
@@ -220,6 +225,7 @@
 {
     NSLog(@"didFinishSpeechUtterance");
     self.isSpeaking = false;
+    [self.delegate didFinishProcessingSpeech];
 }
 
 
@@ -243,8 +249,22 @@
 
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer willSpeakRangeOfSpeechString:(NSRange)characterRange utterance:(AVSpeechUtterance *)utterance
 {
-    NSLog(@"willSpeakRangeOfSpeechString");
-    NSLog(@"Speaking!");
+    int speechDidFailToProcessTimeout = 2;
+    self.isSpeaking = true;
+    //self.isProcessingSpeech = true;
+    [self.delegate willStartProcessingSpeech];
+    NSString *word = [utterance.speechString substringWithRange:characterRange];
+    NSLog(@"willSpeakWord = %@", word);
+    
+    if (self.speechDidStopProcessingTimer) {
+        [self.speechDidStopProcessingTimer invalidate];
+    }
+    self.speechDidStopProcessingTimer = [NSTimer scheduledTimerWithTimeInterval:speechDidFailToProcessTimeout repeats:NO block:^(NSTimer * _Nonnull timer) {
+        NSLog(@"isSpeaking is false");
+        self.isSpeaking = false;
+    }];
+    
+    [self.delegate willSpeakWord:characterRange ofString:utterance.speechString];
 }
 
 #pragma mark -
@@ -848,9 +868,8 @@
         self.isSpeaking = false;
     }];
     
-    [self.speechDelegate willSpeakWord:characterRange ofString:string];
+    [self.delegate willSpeakWord:characterRange ofString:string];
 }
-
 
 - (void)speechSynthesizer:(NSSpeechSynthesizer *)sender willSpeakPhoneme:(short)phonemeOpcode
 {

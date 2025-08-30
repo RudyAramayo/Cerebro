@@ -13,6 +13,9 @@
 
 @protocol ROBSpeechDelegate <NSObject>
 
+- (void) willStartProcessingSpeech;
+- (void) didFinishProcessingSpeech;
+- (void) inputText:(NSString *)textInput;
 - (void) willSpeakWord:(NSRange)characterRange ofString:(NSString *)string;
 
 @end

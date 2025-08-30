@@ -190,8 +190,8 @@
             filePath = "Cerebro/ROBMainViewController.mm"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "787"
-            endingLineNumber = "787"
+            startingLineNumber = "805"
+            endingLineNumber = "805"
             landmarkName = "-didReceiveData:"
             landmarkType = "7">
          </BreakpointContent>
@@ -247,22 +247,6 @@
       <BreakpointProxy
          BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
          <BreakpointContent
-            uuid = "A4B7F008-0426-4368-AE71-4F77E23D7E14"
-            shouldBeEnabled = "No"
-            ignoreCount = "0"
-            continueAfterRunningActions = "No"
-            filePath = "Cerebro/ROBMainViewController.mm"
-            startingColumnNumber = "9223372036854775807"
-            endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "894"
-            endingLineNumber = "894"
-            landmarkName = "-didFinishProcessingSpeech"
-            landmarkType = "7">
-         </BreakpointContent>
-      </BreakpointProxy>
-      <BreakpointProxy
-         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
-         <BreakpointContent
             uuid = "128D73CF-2794-4AC7-AFCE-9108D099EE2A"
             shouldBeEnabled = "Yes"
             ignoreCount = "0"
@@ -302,8 +286,8 @@
             filePath = "Cerebro/ROBSpeechBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "604"
-            endingLineNumber = "604"
+            startingLineNumber = "624"
+            endingLineNumber = "624"
             landmarkName = "-sayIt:"
             landmarkType = "7">
          </BreakpointContent>
@@ -318,10 +302,40 @@
             filePath = "Cerebro/ROBSpeechBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "430"
-            endingLineNumber = "430"
+            startingLineNumber = "450"
+            endingLineNumber = "450"
             landmarkName = "-speechRecognitionTask:didFinishRecognition:"
             landmarkType = "7">
+            <Locations>
+               <Location
+                  uuid = "E838F2C1-42AB-499D-8796-742BC1CD44D2 - 91274f405967a8fe"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "-[ROBSpeechBox speechRecognitionTask:didHypothesizeTranscription:]"
+                  moduleName = "Cerebro.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/rob/Library/Mobile%20Documents/com~apple~CloudDocs/Documents/Dev/R.O.B./Cerebro%20v5/Cerebro/ROBSpeechBox.m"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "450"
+                  endingLineNumber = "450">
+               </Location>
+               <Location
+                  uuid = "E838F2C1-42AB-499D-8796-742BC1CD44D2 - ed4a79c7a06f94c1"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "-[ROBSpeechBox speechRecognitionTask:didFinishRecognition:]"
+                  moduleName = "Cerebro.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/rob/Library/Mobile%20Documents/com~apple~CloudDocs/Documents/Dev/R.O.B./Cerebro%20v5/Cerebro/ROBSpeechBox.m"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "450"
+                  endingLineNumber = "450">
+               </Location>
+            </Locations>
          </BreakpointContent>
       </BreakpointProxy>
       <BreakpointProxy
@@ -366,8 +380,8 @@
             filePath = "Cerebro/ROBSpeechBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "818"
-            endingLineNumber = "818"
+            startingLineNumber = "838"
+            endingLineNumber = "838"
             landmarkName = "-speechSynthesizer:didFinishSpeaking:"
             landmarkType = "7">
          </BreakpointContent>
@@ -382,8 +396,8 @@
             filePath = "Cerebro/ROBSpeechBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "836"
-            endingLineNumber = "836"
+            startingLineNumber = "856"
+            endingLineNumber = "856"
             landmarkName = "-speechSynthesizer:willSpeakWord:ofString:"
             landmarkType = "7">
          </BreakpointContent>
@@ -398,10 +412,40 @@
             filePath = "Cerebro/ROBSpeechBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "464"
-            endingLineNumber = "464"
+            startingLineNumber = "484"
+            endingLineNumber = "484"
             landmarkName = "-speechRecognizer:didRecognizeCommand:"
             landmarkType = "7">
+            <Locations>
+               <Location
+                  uuid = "71379C48-ACF4-450A-AD05-9737459D957F - 2b60bd77dd00973d"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "-[ROBSpeechBox didSeeNewPerson:]"
+                  moduleName = "Cerebro.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/rob/Library/Mobile%20Documents/com~apple~CloudDocs/Documents/Dev/R.O.B./Cerebro%20v5/Cerebro/ROBSpeechBox.m"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "573"
+                  endingLineNumber = "573">
+               </Location>
+               <Location
+                  uuid = "71379C48-ACF4-450A-AD05-9737459D957F - 967e922d43cb8ae8"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "-[ROBSpeechBox speechRecognizer:didRecognizeCommand:]"
+                  moduleName = "Cerebro.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/rob/Library/Mobile%20Documents/com~apple~CloudDocs/Documents/Dev/R.O.B./Cerebro%20v5/Cerebro/ROBSpeechBox.m"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "484"
+                  endingLineNumber = "484">
+               </Location>
+            </Locations>
          </BreakpointContent>
       </BreakpointProxy>
       <BreakpointProxy
@@ -414,10 +458,40 @@
             filePath = "Cerebro/ROBSpeechBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "420"
-            endingLineNumber = "420"
+            startingLineNumber = "440"
+            endingLineNumber = "440"
             landmarkName = "-speechRecognitionDidDetectSpeech:"
             landmarkType = "7">
+            <Locations>
+               <Location
+                  uuid = "74283EC1-72D3-402F-BB28-E22D262EFAFC - ed4a79c7a06f960b"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "-[ROBSpeechBox speechRecognitionTask:didFinishRecognition:]"
+                  moduleName = "Cerebro.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/rob/Library/Mobile%20Documents/com~apple~CloudDocs/Documents/Dev/R.O.B./Cerebro%20v5/Cerebro/ROBSpeechBox.m"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "440"
+                  endingLineNumber = "440">
+               </Location>
+               <Location
+                  uuid = "74283EC1-72D3-402F-BB28-E22D262EFAFC - fd84403dc5f0ca33"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "-[ROBSpeechBox speechRecognitionDidDetectSpeech:]"
+                  moduleName = "Cerebro.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/rob/Library/Mobile%20Documents/com~apple~CloudDocs/Documents/Dev/R.O.B./Cerebro%20v5/Cerebro/ROBSpeechBox.m"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "440"
+                  endingLineNumber = "440">
+               </Location>
+            </Locations>
          </BreakpointContent>
       </BreakpointProxy>
       <BreakpointProxy
@@ -430,10 +504,54 @@
             filePath = "Cerebro/ROBSpeechBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "411"
-            endingLineNumber = "411"
+            startingLineNumber = "431"
+            endingLineNumber = "431"
             landmarkName = "-captureOutput:didOutputSampleBuffer:fromConnection:"
             landmarkType = "7">
+            <Locations>
+               <Location
+                  uuid = "7528EC57-4B31-431C-8F45-051499A4E89D - ed4a79c7a06f8913"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "-[ROBSpeechBox speechRecognitionTask:didFinishRecognition:]"
+                  moduleName = "Cerebro.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/rob/Library/Mobile%20Documents/com~apple~CloudDocs/Documents/Dev/R.O.B./Cerebro%20v5/Cerebro/ROBSpeechBox.m"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "432"
+                  endingLineNumber = "432">
+               </Location>
+               <Location
+                  uuid = "7528EC57-4B31-431C-8F45-051499A4E89D - ee635df863cad42f"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "__59-[ROBSpeechBox speechRecognitionTask:didFinishRecognition:]_block_invoke"
+                  moduleName = "Cerebro.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/rob/Library/Mobile%20Documents/com~apple~CloudDocs/Documents/Dev/R.O.B./Cerebro%20v5/Cerebro/ROBSpeechBox.m"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "434"
+                  endingLineNumber = "434">
+               </Location>
+               <Location
+                  uuid = "7528EC57-4B31-431C-8F45-051499A4E89D - 9fa3ba03675210a2"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "-[ROBSpeechBox captureOutput:didOutputSampleBuffer:fromConnection:]"
+                  moduleName = "Cerebro.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/rob/Library/Mobile%20Documents/com~apple~CloudDocs/Documents/Dev/R.O.B./Cerebro%20v5/Cerebro/ROBSpeechBox.m"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "431"
+                  endingLineNumber = "431">
+               </Location>
+            </Locations>
          </BreakpointContent>
       </BreakpointProxy>
       <BreakpointProxy
@@ -446,10 +564,40 @@
             filePath = "Cerebro/ROBSpeechBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "404"
-            endingLineNumber = "404"
+            startingLineNumber = "424"
+            endingLineNumber = "424"
             landmarkName = "-endCapture"
             landmarkType = "7">
+            <Locations>
+               <Location
+                  uuid = "C84E576F-99D5-4D7C-9D3D-C5963225E1B8 - ed4a79c7a06f89b8"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "-[ROBSpeechBox speechRecognitionTask:didFinishRecognition:]"
+                  moduleName = "Cerebro.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/rob/Library/Mobile%20Documents/com~apple~CloudDocs/Documents/Dev/R.O.B./Cerebro%20v5/Cerebro/ROBSpeechBox.m"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "427"
+                  endingLineNumber = "427">
+               </Location>
+               <Location
+                  uuid = "C84E576F-99D5-4D7C-9D3D-C5963225E1B8 - 18e31cc87f267122"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "-[ROBSpeechBox endCapture]"
+                  moduleName = "Cerebro.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/rob/Library/Mobile%20Documents/com~apple~CloudDocs/Documents/Dev/R.O.B./Cerebro%20v5/Cerebro/ROBSpeechBox.m"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "424"
+                  endingLineNumber = "424">
+               </Location>
+            </Locations>
          </BreakpointContent>
       </BreakpointProxy>
       <BreakpointProxy
@@ -462,10 +610,40 @@
             filePath = "Cerebro/ROBSpeechBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "391"
-            endingLineNumber = "391"
+            startingLineNumber = "411"
+            endingLineNumber = "411"
             landmarkName = "-startCapture"
             landmarkType = "7">
+            <Locations>
+               <Location
+                  uuid = "65036B6B-6C4D-4074-9FAA-8F6E484C8940 - 9fa3ba0367521256"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "-[ROBSpeechBox captureOutput:didOutputSampleBuffer:fromConnection:]"
+                  moduleName = "Cerebro.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/rob/Library/Mobile%20Documents/com~apple~CloudDocs/Documents/Dev/R.O.B./Cerebro%20v5/Cerebro/ROBSpeechBox.m"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "411"
+                  endingLineNumber = "411">
+               </Location>
+               <Location
+                  uuid = "65036B6B-6C4D-4074-9FAA-8F6E484C8940 - abfe2d17d53d11f8"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "-[ROBSpeechBox startCapture]"
+                  moduleName = "Cerebro.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/rob/Library/Mobile%20Documents/com~apple~CloudDocs/Documents/Dev/R.O.B./Cerebro%20v5/Cerebro/ROBSpeechBox.m"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "411"
+                  endingLineNumber = "411">
+               </Location>
+            </Locations>
          </BreakpointContent>
       </BreakpointProxy>
       <BreakpointProxy
@@ -478,10 +656,40 @@
             filePath = "Cerebro/ROBSpeechBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "370"
-            endingLineNumber = "370"
+            startingLineNumber = "390"
+            endingLineNumber = "390"
             landmarkName = "-startCapture"
             landmarkType = "7">
+            <Locations>
+               <Location
+                  uuid = "995BA410-1FD9-4AFB-94CD-A88D2CF094A8 - abfe2d17d53d1654"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "-[ROBSpeechBox startCapture]"
+                  moduleName = "Cerebro.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/rob/Library/Mobile%20Documents/com~apple~CloudDocs/Documents/Dev/R.O.B./Cerebro%20v5/Cerebro/ROBSpeechBox.m"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "391"
+                  endingLineNumber = "391">
+               </Location>
+               <Location
+                  uuid = "995BA410-1FD9-4AFB-94CD-A88D2CF094A8 - abfe2d17d53d16b5"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "-[ROBSpeechBox startCapture]"
+                  moduleName = "Cerebro.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/rob/Library/Mobile%20Documents/com~apple~CloudDocs/Documents/Dev/R.O.B./Cerebro%20v5/Cerebro/ROBSpeechBox.m"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "390"
+                  endingLineNumber = "390">
+               </Location>
+            </Locations>
          </BreakpointContent>
       </BreakpointProxy>
       <BreakpointProxy
@@ -519,102 +727,6 @@
       <BreakpointProxy
          BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
          <BreakpointContent
-            uuid = "2FB951FB-0C95-406D-BDEC-C66A34A80B58"
-            shouldBeEnabled = "Yes"
-            ignoreCount = "0"
-            continueAfterRunningActions = "No"
-            filePath = "Cerebro/ROBSpeechBox.m"
-            startingColumnNumber = "9223372036854775807"
-            endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "215"
-            endingLineNumber = "215"
-            landmarkName = "-speechSynthesizer:didStartSpeechUtterance:"
-            landmarkType = "7">
-         </BreakpointContent>
-      </BreakpointProxy>
-      <BreakpointProxy
-         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
-         <BreakpointContent
-            uuid = "B6810D84-4F8A-4561-BCBE-B676137D3B95"
-            shouldBeEnabled = "Yes"
-            ignoreCount = "0"
-            continueAfterRunningActions = "No"
-            filePath = "Cerebro/ROBSpeechBox.m"
-            startingColumnNumber = "9223372036854775807"
-            endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "221"
-            endingLineNumber = "221"
-            landmarkName = "-speechSynthesizer:didFinishSpeechUtterance:"
-            landmarkType = "7">
-         </BreakpointContent>
-      </BreakpointProxy>
-      <BreakpointProxy
-         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
-         <BreakpointContent
-            uuid = "2EE7C0B8-6039-4530-9E85-81C2379C37D3"
-            shouldBeEnabled = "Yes"
-            ignoreCount = "0"
-            continueAfterRunningActions = "No"
-            filePath = "Cerebro/ROBSpeechBox.m"
-            startingColumnNumber = "9223372036854775807"
-            endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "228"
-            endingLineNumber = "228"
-            landmarkName = "-speechSynthesizer:didPauseSpeechUtterance:"
-            landmarkType = "7">
-         </BreakpointContent>
-      </BreakpointProxy>
-      <BreakpointProxy
-         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
-         <BreakpointContent
-            uuid = "9089DDA7-C84E-4FE5-9E07-F0A4D2995D23"
-            shouldBeEnabled = "Yes"
-            ignoreCount = "0"
-            continueAfterRunningActions = "No"
-            filePath = "Cerebro/ROBSpeechBox.m"
-            startingColumnNumber = "9223372036854775807"
-            endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "234"
-            endingLineNumber = "234"
-            landmarkName = "-speechSynthesizer:didContinueSpeechUtterance:"
-            landmarkType = "7">
-         </BreakpointContent>
-      </BreakpointProxy>
-      <BreakpointProxy
-         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
-         <BreakpointContent
-            uuid = "75FF703E-5119-4AD5-A766-BCC8BAFF9F85"
-            shouldBeEnabled = "Yes"
-            ignoreCount = "0"
-            continueAfterRunningActions = "No"
-            filePath = "Cerebro/ROBSpeechBox.m"
-            startingColumnNumber = "9223372036854775807"
-            endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "240"
-            endingLineNumber = "240"
-            landmarkName = "-speechSynthesizer:didCancelSpeechUtterance:"
-            landmarkType = "7">
-         </BreakpointContent>
-      </BreakpointProxy>
-      <BreakpointProxy
-         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
-         <BreakpointContent
-            uuid = "134B504E-3AED-49C2-8E2B-2E8FC359632C"
-            shouldBeEnabled = "Yes"
-            ignoreCount = "0"
-            continueAfterRunningActions = "No"
-            filePath = "Cerebro/ROBSpeechBox.m"
-            startingColumnNumber = "9223372036854775807"
-            endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "246"
-            endingLineNumber = "246"
-            landmarkName = "-speechSynthesizer:willSpeakRangeOfSpeechString:utterance:"
-            landmarkType = "7">
-         </BreakpointContent>
-      </BreakpointProxy>
-      <BreakpointProxy
-         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
-         <BreakpointContent
             uuid = "C382B199-5CB0-4575-8FD1-4D2BE07D8DBA"
             shouldBeEnabled = "No"
             ignoreCount = "0"
@@ -622,8 +734,8 @@
             filePath = "Cerebro/ROBSpeechBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "254"
-            endingLineNumber = "254"
+            startingLineNumber = "274"
+            endingLineNumber = "274"
             landmarkName = "-startRecognizer"
             landmarkType = "7">
          </BreakpointContent>
@@ -670,8 +782,8 @@
             filePath = "Cerebro/ROBMainViewController.mm"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "708"
-            endingLineNumber = "708"
+            startingLineNumber = "726"
+            endingLineNumber = "726"
             landmarkName = "-didReceiveData:"
             landmarkType = "7">
          </BreakpointContent>
@@ -702,8 +814,8 @@
             filePath = "Cerebro/ROBSpeechBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "595"
-            endingLineNumber = "595"
+            startingLineNumber = "615"
+            endingLineNumber = "615"
             landmarkName = "-sayIt:"
             landmarkType = "7">
          </BreakpointContent>
@@ -786,6 +898,70 @@
             endingLineNumber = "119"
             landmarkName = "CameraManager"
             landmarkType = "3">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "AA204C49-155D-4C7B-866B-16B03FB3E95B"
+            shouldBeEnabled = "No"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "Cerebro/ROBSpeechBox.m"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "431"
+            endingLineNumber = "431"
+            landmarkName = "-captureOutput:didOutputSampleBuffer:fromConnection:"
+            landmarkType = "7">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "C4716ACD-2035-45E2-BCC1-20155F7C2FBC"
+            shouldBeEnabled = "No"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "Cerebro/ROBSpeechBox.m"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "390"
+            endingLineNumber = "390"
+            landmarkName = "-startCapture"
+            landmarkType = "7">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "64BC7DDC-093B-40B3-B316-9C5C23AAAED1"
+            shouldBeEnabled = "No"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "Cerebro/ROBSpeechBox.m"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "413"
+            endingLineNumber = "413"
+            landmarkName = "-startCapture"
+            landmarkType = "7">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "F2963957-8E58-41B9-8201-EFC1E811C29E"
+            shouldBeEnabled = "No"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "Cerebro/ROBSpeechBox.m"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "268"
+            endingLineNumber = "268"
+            landmarkName = "-speechSynthesizer:willSpeakRangeOfSpeechString:utterance:"
+            landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>
    </Breakpoints>
