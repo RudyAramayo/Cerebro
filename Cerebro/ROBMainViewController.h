@@ -11,7 +11,13 @@
 @class ROBSerialBox;
 @class ROBSpeechBox;
 
-@interface ROBMainViewController : NSViewController
+@protocol ROBSpeechDelegate <NSObject>
+
+- (void) willSpeakWord:(NSRange)characterRange ofString:(NSString *)string;
+
+@end
+
+@interface ROBMainViewController : NSViewController <ROBSpeechDelegate>
 {
     
 }

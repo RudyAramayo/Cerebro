@@ -78,7 +78,7 @@
             
             NSTask *launchRPLidar = [NSTask new];
             launchRPLidar.launchPath = @"/usr/bin/open";
-            launchRPLidar.arguments = @[@"/Users/rob/Library/Developer/Xcode/DerivedData/RPLidar-fziuydzdocbagjfcyicbboaqukse/Build/Products/Debug-iphoneos/.XCInstall/RPLidar.app"];
+            launchRPLidar.arguments = @[@"/Users/rob/Library/Developer/Xcode/DerivedData/RPLidar-enennkoiyqapwdaqnrwmbdbpatdu/Build/Products/Debug-iphoneos/.XCInstall/RPLidar.app"];
             [launchRPLidar launch];
         } else {
             //NSLog(@"RPLidar check passsed...");
@@ -128,6 +128,8 @@
         self.utcWebCamIsOnline = YES;
         [self.utcWebCamCheckTimer invalidate];
         self.utcWebCamCheckTimer = nil;
+        
+        //[[NSNotificationCenter defaultCenter] postNotificationName:@"UTCWebcamIsOnline" object:nil];
     } else {
         NSLog(@"Error: UTC Webcam is not running");
         self.utcWebCamIsOnline = NO;

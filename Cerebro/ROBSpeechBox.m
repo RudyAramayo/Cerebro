@@ -19,11 +19,11 @@
 @import Speech;
 @import AVFoundation;
 
-
 @interface ROBSpeechBox() <AVSpeechSynthesizerDelegate, SFSpeechRecognizerDelegate, SFSpeechRecognitionTaskDelegate, NSSpeechSynthesizerDelegate>
 
 @property (readwrite, retain) NSSpeechSynthesizer *speechSynth;
 
+@property (readwrite, assign) ROBMainViewController *speechDelegate;
 //new properties
 @property (nonatomic, strong) AVCaptureSession *capture;
 @property (nonatomic, strong) SFSpeechRecognizer *speechRecognizer;
@@ -847,6 +847,8 @@
         NSLog(@"isSpeaking is false");
         self.isSpeaking = false;
     }];
+    
+    [self.speechDelegate willSpeakWord:characterRange ofString:string];
 }
 
 

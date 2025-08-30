@@ -121,29 +121,20 @@
 - (void) inputText:(NSString *)textInput
 {
     textInput = [textInput lowercaseString];
-    //@[@"robbie", @"robot", @"hey robbie", @"hey robot", @"rob",  @"robbie one"]
     if ([textInput containsString:@"robbie"] || [textInput containsString:@"hey rob"] || [textInput containsString:@"rob"] || [textInput containsString:@"robot"])
     {
-        //The following code does not work.. perhaps another idea would be ideal
-        //operhaps heyrob will activate his attention and that allows us to not ignore text for a few minutes
-//        [[NSWorkspace sharedWorkspace] openApplicationAtURL:[NSURL URLWithString:@"/System/Applications/Siri.app"] configuration:[[NSWorkspaceOpenConfiguration alloc] init] completionHandler:^(NSRunningApplication * _Nullable app, NSError * _Nullable error) {
-//            NSLog(@"didOpenSiri");
-//        }];
         self.ignoreText = false;
         NSLog(@"Listening for spoken input");
-        if (self.speechResponseAttentionTimer) {
-            [self.speechResponseAttentionTimer invalidate];
-        }
-        self.speechResponseAttentionTimer = [NSTimer scheduledTimerWithTimeInterval:60 repeats:NO block:^(NSTimer * _Nonnull timer) {
-            NSLog(@"Ignoring spoken input");
-            self.ignoreText = true;
-        }];
+        [self resetSpeechResponseAttentionTimer];
         
         NSArray *acknowledgements = @[@"yes", @"go ahead", @"i'm listening", @"can I help you?"];
-        NSString *acknowledgement = [acknowledgements objectAtIndex:arc4random_uniform(acknowledgements.count)];
+        NSString *acknowledgement = [acknowledgements objectAtIndex:arc4random_uniform((uint32_t)acknowledgements.count)];
         
         [self.speechBox sayIt:acknowledgement];
-        return;
+        if ([textInput isEqualToString:@"robbie"] || [textInput isEqualToString:@"hey rob"] || [textInput isEqualToString:@"rob"] || [textInput isEqualToString:@"robot"])
+        {
+            return;
+        }
     }
     if ([textInput containsString:@"stop"] || [textInput containsString:@"wait"] || [textInput containsString:@"don't move"] || [textInput containsString:@"do not move"])
     {
@@ -168,9 +159,25 @@
             //NSLog(@"response = %@", response);
             [self.speechBox sayIt:response];
         }];
+    } else {
+        NSLog(@"!!!!!!!!!!!!  IGNORING TEXT !!!!!!!!!!!!!!!");
     }
     
     self.audioInputTaskController.textView.string = [self.audioInputTaskController.textView.string stringByAppendingString:[NSString stringWithFormat:@"\n%@\n",textInput]];
+}
+
+- (void) willSpeakWord:(NSRange)characterRange ofString:(NSString *)string {
+    [self resetSpeechResponseAttentionTimer];
+}
+
+- (void) resetSpeechResponseAttentionTimer {
+    if (self.speechResponseAttentionTimer) {
+        [self.speechResponseAttentionTimer invalidate];
+    }
+    self.speechResponseAttentionTimer = [NSTimer scheduledTimerWithTimeInterval:60 repeats:NO block:^(NSTimer * _Nonnull timer) {
+        NSLog(@"Ignoring spoken input");
+        self.ignoreText = true;
+    }];
 }
 
 - (void) makeTextViewFirstResponder:(NSTextView *)textView {

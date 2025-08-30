@@ -65,7 +65,9 @@ final class CameraManager: NSObject, CameraManagerProtocol {
         
         initializeCameraDiscoverySession()
         
-        //initialize existing Luxonis UVC camera...
+        //initialize existing Luxonis UTC camera...
+        //let utcNotification = NSNotification.Name.init("UTCWebcamIsOnline")
+        //NotificationCenter.default.addObserver(self, selector: #selector(utcCameraIsOnline), name:utcNotification, object: nil)
         if let camera = deviceDiscoverySession?.devices.first ?? AVCaptureDevice.default(for: .video) {
             try prepareCamera(for: camera)
         }
@@ -112,6 +114,16 @@ final class CameraManager: NSObject, CameraManagerProtocol {
         )
 
     }
+    
+//    @objc func utcCameraIsOnline() {
+//        if let camera = deviceDiscoverySession?.devices.first ?? AVCaptureDevice.default(for: .video) {
+//            do {
+//                try prepareCamera(for: camera)
+//            } catch {
+//                print("failed to prepare utc camera \(error)")
+//            }
+//        }
+//    }
     
     // KVO callback
     override func observeValue(
