@@ -137,7 +137,7 @@
 }
 
 - (void) willSpeakWord:(NSRange)characterRange ofString:(NSString *)string {
-    [self resetSpeechResponseAttentionTimer];
+    //[self resetSpeechResponseAttentionTimer];
 }
 
 - (void) inputText:(NSString *)textInput

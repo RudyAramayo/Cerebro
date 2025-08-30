@@ -55,6 +55,6 @@
 - (void) didOutputSerialResponse_Torso:(NSString *)response;
 - (void) didOutputSerialResponse_Base:(NSString *)response;
 - (void) didOutputSerialResponse_Maestro:(NSString *)response;
-
+- (void) resetSpeechResponseAttentionTimer;
 
 @end

@@ -1048,6 +1048,7 @@ NSString *textInput = [command_components[12] componentsSeparatedByString:@"TEXT
                 if (deltaText != nil && ![deltaText isEqualToString:@""] && ![deltaText isEqualToString:@"(null)"])
                 {
                     NSLog(@"heSaid: %@", deltaText);
+                    [self.delegate resetSpeechResponseAttentionTimer];
                     [self.delegate inputText:deltaText];
                     [self.delegate clearInputTextMessage];
                     self.currentIncommingVerbalMessage = textInput;
