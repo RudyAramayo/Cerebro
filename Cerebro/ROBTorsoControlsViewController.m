@@ -113,7 +113,8 @@
     self.arm_R11_pitch_label.stringValue = [NSString stringWithFormat:@"%f", pitch];
     self.arm_R11_yaw_label.stringValue = [NSString stringWithFormat:@"%f", yaw];
     
-    [self update_arm_R11_SendCommand:sender];
+    //SENDING COMMANDS TOO FAST CAUSES UNEXPECTED BEHAVIOR!!!
+    //[self update_arm_R11_SendCommand:sender];
 }
 
 - (IBAction)update_arm_R11_SendCommand:(id)sender {
