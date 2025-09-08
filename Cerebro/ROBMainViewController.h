@@ -29,6 +29,7 @@
 @property (readwrite, assign) IBOutlet NSTextView *speechTranscriptTextView;
 @property (readwrite, retain) ROBSerialBox *serialBox;
 @property (readwrite, retain) ROBSpeechBox *speechBox;
+
 - (IBAction)showControls:(id)sender;
 - (IBAction)showSerialDebug:(id)sender;
 - (IBAction)showMainNavigation:(id)sender;

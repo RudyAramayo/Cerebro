@@ -41,6 +41,7 @@
 		D4AA3D7A2AC9F4AB007DC656 /* StartTextInput.scpt in Resources */ = {isa = PBXBuildFile; fileRef = D4AA3D792AC9F4AB007DC656 /* StartTextInput.scpt */; };
 		D4AB3DA42E1CF38D00EA2571 /* CameraViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4AB3DA32E1CF38D00EA2571 /* CameraViewController.swift */; };
 		D4AB3DA52E1CF38D00EA2571 /* CameraManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4AB3DA22E1CF38D00EA2571 /* CameraManager.swift */; };
+		D4BDA6732E6E725D0088A5B4 /* cmd_cartesian_input.py in Resources */ = {isa = PBXBuildFile; fileRef = D4BDA6722E6E725D0088A5B4 /* cmd_cartesian_input.py */; };
 		D4C5252420A65FDD00290BF5 /* ROBConsciousness.m in Sources */ = {isa = PBXBuildFile; fileRef = D4C5252320A65FDD00290BF5 /* ROBConsciousness.m */; };
 		D4CFB7CF2287C79100F2403A /* JoinWifiTaskController.command in Resources */ = {isa = PBXBuildFile; fileRef = D4CFB7CE2287C79000F2403A /* JoinWifiTaskController.command */; };
 		D4CFB7D22287C81300F2403A /* JoinWifiTaskController.m in Sources */ = {isa = PBXBuildFile; fileRef = D4CFB7D02287C81200F2403A /* JoinWifiTaskController.m */; };
@@ -127,6 +128,7 @@
 		D4AA3D792AC9F4AB007DC656 /* StartTextInput.scpt */ = {isa = PBXFileReference; lastKnownFileType = file; path = StartTextInput.scpt; sourceTree = "<group>"; };
 		D4AB3DA22E1CF38D00EA2571 /* CameraManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManager.swift; sourceTree = "<group>"; };
 		D4AB3DA32E1CF38D00EA2571 /* CameraViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraViewController.swift; sourceTree = "<group>"; };
+		D4BDA6722E6E725D0088A5B4 /* cmd_cartesian_input.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = cmd_cartesian_input.py; sourceTree = "<group>"; };
 		D4C5252220A65FDD00290BF5 /* ROBConsciousness.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBConsciousness.h; sourceTree = "<group>"; };
 		D4C5252320A65FDD00290BF5 /* ROBConsciousness.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ROBConsciousness.m; sourceTree = "<group>"; };
 		D4CFB7CE2287C79000F2403A /* JoinWifiTaskController.command */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.sh; path = JoinWifiTaskController.command; sourceTree = "<group>"; };
@@ -193,6 +195,7 @@
 		D443281B20093E91003FA553 /* TaskControllers */ = {
 			isa = PBXGroup;
 			children = (
+				D4BDA6722E6E725D0088A5B4 /* cmd_cartesian_input.py */,
 				D4AA3D792AC9F4AB007DC656 /* StartTextInput.scpt */,
 				D4066C5922828E5F002ACAD1 /* AudioInputTaskController.command */,
 				D4066C5622828DA4002ACAD1 /* AudioInputTaskController.h */,
@@ -407,6 +410,7 @@
 				D4A38F601FFC06CF00092A46 /* dictation_start.scpt in Resources */,
 				D4A38F4B1FFB2AED00092A46 /* Main.storyboard in Resources */,
 				D4F673B322EFFC4600A9B6E4 /* ReSpeakerTaskController.command in Resources */,
+				D4BDA6732E6E725D0088A5B4 /* cmd_cartesian_input.py in Resources */,
 				D40D36F920B4BA270006EF82 /* SimpleUserTracker.command in Resources */,
 				D4CFB7CF2287C79100F2403A /* JoinWifiTaskController.command in Resources */,
 				D4A38F481FFB2AED00092A46 /* Assets.xcassets in Resources */,

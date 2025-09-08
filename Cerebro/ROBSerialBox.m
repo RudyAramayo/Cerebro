@@ -1453,6 +1453,87 @@ NSString *textInput = [command_components[12] componentsSeparatedByString:@"TEXT
     }
 }
 
+- (IBAction)update_arm_R11_Action:(id)sender {
+    
+    double cmdTime = [self.arm_R11_cmdTime doubleValue]/10.0;
+    double cmdSleep = [self.arm_R11_cmdSleep doubleValue]/10.0;
+    double posX = [self.arm_R11_positionX doubleValue]/100.0;
+    double posY = [self.arm_R11_positionY doubleValue]/100.0;
+    double posZ = [self.arm_R11_positionZ doubleValue]/100.0;
+    double roll = [self.arm_R11_roll doubleValue]/100.0;
+    double pitch = [self.arm_R11_pitch doubleValue]/100.0;
+    double yaw = [self.arm_R11_yaw doubleValue]/100.0;
+        
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+
+        NSLog(@"arm_R11_cmdTime = %f", cmdTime);
+        NSLog(@"arm_R11_cmdSleep = %f", cmdSleep);
+        NSLog(@"arm_R11_positionX = %f", posX);
+        NSLog(@"arm_R11_positionY = %f", posY);
+        NSLog(@"arm_R11_positionZ = %f", posZ);
+        NSLog(@"arm_R11_roll = %f", roll);
+        NSLog(@"arm_R11_pitch = %f", pitch);
+        NSLog(@"arm_R11_yaw = %f", yaw);
+        
+        
+        NSMutableArray *arguments = @[].mutableCopy;
+
+        NSString *cmd_cartesian_input = [[NSBundle mainBundle] pathForResource:@"cmd_cartesian_input" ofType:@"py"];
+        //cmd_cartesian_input.py --ip 10.0.0.5 --port 26002 --cmd_time 2 --cmd_sleep 2 --pos_x 0.1 --pos_y -0.33 --pos_z 0.2 --roll 0.0 --pitch -1.5 --yaw 0.5
+        //NSLog(@"cmd_cartesian_input = %@", cmd_cartesian_input);
+        
+        [arguments addObject:cmd_cartesian_input];
+        
+        
+        [arguments addObject:@"--ip"];
+        [arguments addObject:@"10.0.0.5"];
+        
+        [arguments addObject:@"--port"];
+        [arguments addObject:@"26002"];
+        
+        [arguments addObject:@"--cmd_time"];
+        [arguments addObject:[NSString stringWithFormat:@"%f", cmdTime]];
+        
+        [arguments addObject:@"--cmd_sleep"];
+        [arguments addObject:[NSString stringWithFormat:@"%f", cmdSleep]];
+        
+        [arguments addObject:@"--pos_x"];
+        [arguments addObject:[NSString stringWithFormat:@"%f", posX]];
+        
+        [arguments addObject:@"--pos_y"];
+        [arguments addObject:[NSString stringWithFormat:@"%f", posY]];
+        
+        [arguments addObject:@"--pos_z"];
+        [arguments addObject:[NSString stringWithFormat:@"%f", posZ]];
+        
+        [arguments addObject:@"--roll"];
+        [arguments addObject:[NSString stringWithFormat:@"%f", roll]];
+        
+        [arguments addObject:@"--pitch"];
+        [arguments addObject:[NSString stringWithFormat:@"%f", pitch]];
+        
+        [arguments addObject:@"--yaw"];
+        [arguments addObject:[NSString stringWithFormat:@"%f", yaw]];
+        
+        //NSLog(@"args = %@", arguments);
+        
+        NSTask *move_arm_task = [NSTask new];
+        
+        move_arm_task.launchPath = @"/Users/rob/rob_python/bin/python3";
+        move_arm_task.arguments = arguments;
+        
+        NSPipe *pipe = [NSPipe pipe];
+        move_arm_task.standardOutput = pipe;
+        move_arm_task.standardError = pipe;
+        
+        [move_arm_task launch];
+        
+        //NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+        //NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        //NSLog(@"output = %@", output);
+    });
+}
+
 - (void) sendHeadCommand:(NSString *)command
 {
     [self writeString:command serialFileDescriptor:serialFileDescriptor_head];

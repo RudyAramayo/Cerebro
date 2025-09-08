@@ -254,7 +254,7 @@
 
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer willSpeakRangeOfSpeechString:(NSRange)characterRange utterance:(AVSpeechUtterance *)utterance
 {
-    int speechDidFailToProcessTimeout = 2;
+    int speechDidFailToProcessTimeout = 3;
     self.isSpeaking = true;
     //self.isProcessingSpeech = true;
     [self.delegate willStartProcessingSpeech];
@@ -907,66 +907,6 @@
 {
     self.emotion = fear;
 }
-
-//#pragma mark -
-//
-//
-//- (void)speechSynthesizer:(NSSpeechSynthesizer *)sender didFinishSpeaking:(BOOL)finishedSpeaking
-//{
-//    NSLog(@"didFinishSpeaking");
-////    if (self.speechDidStopProcessingTimer) {
-////        [self.speechDidStopProcessingTimer invalidate];
-////    }
-//    
-////    float finalizeSpeechProcessingTime = 10;
-////    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(finalizeSpeechProcessingTime * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-////        self.isSpeaking = false;
-////        NSLog(@"isSpeaking is false");
-////    });
-//    
-//    //self.isProcessingSpeech = false;
-//    [self.delegate didFinishProcessingSpeech];
-//    
-//}
-//
-//- (void)speechSynthesizer:(NSSpeechSynthesizer *)sender willSpeakWord:(NSRange)characterRange ofString:(NSString *)string
-//{
-//    int speechDidFailToProcessTimeout = 2;
-//    self.isSpeaking = true;
-//    //self.isProcessingSpeech = true;
-//    [self.delegate willStartProcessingSpeech];
-//    NSString *word = [string substringWithRange:characterRange];
-//    NSLog(@"willSpeakWord = %@", word);
-//    
-//    if (self.speechDidStopProcessingTimer) {
-//        [self.speechDidStopProcessingTimer invalidate];
-//    }
-//    self.speechDidStopProcessingTimer = [NSTimer scheduledTimerWithTimeInterval:speechDidFailToProcessTimeout repeats:NO block:^(NSTimer * _Nonnull timer) {
-//        NSLog(@"isSpeaking is false");
-//        self.isSpeaking = false;
-//    }];
-//    
-//    [self.delegate willSpeakWord:characterRange ofString:string];
-//}
-//
-//- (void)speechSynthesizer:(NSSpeechSynthesizer *)sender willSpeakPhoneme:(short)phonemeOpcode
-//{
-//    NSLog(@"willSpeakPhoneme");
-//}
-//
-//- (void)speechSynthesizer:(NSSpeechSynthesizer *)sender didEncounterErrorAtIndex:(NSUInteger)characterIndex ofString:(NSString *)string message:(NSString *)message
-//{
-//    NSLog(@"isSpeaking is false");
-//    //self.isSpeaking = false;
-//}
-//
-//- (void)speechSynthesizer:(NSSpeechSynthesizer *)sender didEncounterSyncMessage:(NSString *)message NS_SWIFT_UI_ACTOR API_AVAILABLE(macos(10.5)) {
-//    //NSLog(@"speech sync message");
-//    NSLog(@"isSpeaking is false");
-//    //self.isSpeaking = false;
-//}
-
-
 
 @end
 /*

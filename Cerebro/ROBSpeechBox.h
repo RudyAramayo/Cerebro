@@ -31,6 +31,7 @@
 - (void) didSeeNewPerson:(NSString *)userID;
 - (void) lostSightOfPerson:(NSString*)userID;
 - (void) sayIt:(NSString *)stringToSpeak;
+- (void) stopIt:(id)sender;
 - (void) setOutputLanguage:(NSString *)language;
 
 - (void) switchMood_anger;

@@ -58,6 +58,16 @@
 @property (readwrite, assign) NSButton *exitSafeStartWaistRotationButton;
 @property (readwrite, assign) NSButton *energizeWaistRotationButton;
 
+@property (readwrite, retain) NSSlider *arm_R11_cmdTime;
+@property (readwrite, retain) NSSlider *arm_R11_cmdSleep;
+@property (readwrite, retain) NSSlider *arm_R11_positionX;
+@property (readwrite, retain) NSSlider *arm_R11_positionY;
+@property (readwrite, retain) NSSlider *arm_R11_positionZ;
+@property (readwrite, retain) NSSlider *arm_R11_roll;
+@property (readwrite, retain) NSSlider *arm_R11_pitch;
+@property (readwrite, retain) NSSlider *arm_R11_yaw;
+
+
 - (void) serialPortSelected_head;
 - (void) serialPortSelected_torso;
 - (void) serialPortSelected_base;
@@ -137,4 +147,7 @@
                               arm_L_wrist_pan:(NSString *)arm_L_wrist_pan
                              arm_L_wrist_tilt:(NSString *)arm_L_wrist_tilt
                                 arm_L_gripper:(NSString *)arm_L_gripper;
+
+
+- (IBAction)update_arm_R11_Action:(id)sender;
 @end

@@ -55,4 +55,24 @@
 @property (readwrite, retain) IBOutlet NSSlider *arm_L_Gripper;
 @property (readwrite, retain) IBOutlet NSButton *arm_L_Gripper_enabled;
 
+@property (readwrite, retain) IBOutlet NSSlider *arm_R11_cmdTime;
+@property (readwrite, retain) IBOutlet NSSlider *arm_R11_cmdSleep;
+@property (readwrite, retain) IBOutlet NSSlider *arm_R11_positionX;
+@property (readwrite, retain) IBOutlet NSSlider *arm_R11_positionY;
+@property (readwrite, retain) IBOutlet NSSlider *arm_R11_positionZ;
+@property (readwrite, retain) IBOutlet NSSlider *arm_R11_roll;
+@property (readwrite, retain) IBOutlet NSSlider *arm_R11_pitch;
+@property (readwrite, retain) IBOutlet NSSlider *arm_R11_yaw;
+
+@property (readwrite, retain) IBOutlet NSTextField *arm_R11_cmdTime_label;
+@property (readwrite, retain) IBOutlet NSTextField *arm_R11_cmdSleep_label;
+@property (readwrite, retain) IBOutlet NSTextField *arm_R11_positionX_label;
+@property (readwrite, retain) IBOutlet NSTextField *arm_R11_positionY_label;
+@property (readwrite, retain) IBOutlet NSTextField *arm_R11_positionZ_label;
+@property (readwrite, retain) IBOutlet NSTextField *arm_R11_roll_label;
+@property (readwrite, retain) IBOutlet NSTextField *arm_R11_pitch_label;
+@property (readwrite, retain) IBOutlet NSTextField *arm_R11_yaw_label;
+
+- (void) bindArm_R11_controls;
+
 @end

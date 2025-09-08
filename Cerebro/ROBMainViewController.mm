@@ -174,7 +174,7 @@
     }
     if (!self.ignoreText) {
         //Send to the new foundation models
-        //[self.audioInputTaskController queryTextInput: textInput]; //SENDS TEXT TO GOOGLE GEMINI THROUGH PYTHON
+        //[self.audioInputTaskController queryTextInpu: ttextInput]; //SENDS TEXT TO GOOGLE GEMINI THROUGH PYTHON
         //[self.speechBox inputText:textInput]; //CakeChat input was here
         NSLog(@"textInput = %@", textInput);
         [self.robAI handleInput:textInput completion:^(NSString * _Nonnull response) {
@@ -183,6 +183,7 @@
         }];
     } else {
         NSLog(@"!!!!!!!!!!!!  IGNORING TEXT !!!!!!!!!!!!!!!");
+        NSLog(@"textInput = %@", textInput);
     }
     
     self.audioInputTaskController.textView.string = [self.audioInputTaskController.textView.string stringByAppendingString:[NSString stringWithFormat:@"\n%@\n",textInput]];
@@ -659,6 +660,11 @@
         [self setROBOutputLanguage:language];
         return;
     }
+    if ([msg hasPrefix:@"ShutUp"])
+    {
+        [self.speechBox stopIt:nil];
+        return;
+    }
     if ([msg hasPrefix:@"SetVolume:"])
     {
         NSString *volume = [msg stringByReplacingOccurrencesOfString:@"SetVolume:" withString:@""];
@@ -836,6 +842,7 @@
     [self.torsoControlsWindowController showWindow:self]; // show the window}
     self.torsoControlsViewController = (ROBTorsoControlsViewController *)self.torsoControlsWindowController.contentViewController;
     [self.torsoControlsViewController setRobMainViewController:self];
+    [self.torsoControlsViewController bindArm_R11_controls];
 }
 
 

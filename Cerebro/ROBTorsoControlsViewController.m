@@ -34,6 +34,19 @@
                                                                    selector:@selector(maestro_getErrors_command)
                                                                    userInfo:nil
                                                                     repeats:YES];
+    
+}
+
+- (void) bindArm_R11_controls
+{
+    self.robMainViewController.serialBox.arm_R11_cmdTime = self.arm_R11_cmdTime;
+    self.robMainViewController.serialBox.arm_R11_cmdSleep = self.arm_R11_cmdSleep;
+    self.robMainViewController.serialBox.arm_R11_positionX = self.arm_R11_positionX;
+    self.robMainViewController.serialBox.arm_R11_positionY = self.arm_R11_positionY;
+    self.robMainViewController.serialBox.arm_R11_positionZ = self.arm_R11_positionZ;
+    self.robMainViewController.serialBox.arm_R11_roll = self.arm_R11_roll;
+    self.robMainViewController.serialBox.arm_R11_pitch = self.arm_R11_pitch;
+    self.robMainViewController.serialBox.arm_R11_yaw = self.arm_R11_yaw;
 }
 
 
@@ -79,4 +92,32 @@
      arm_L_gripper:[NSString stringWithFormat:@"%.f", self.arm_L_Gripper_enabled.state == NSOnState? self.arm_L_Gripper.floatValue : offValue]
      ];
 }
+
+- (IBAction)update_arm_R11_Action:(id)sender {
+    
+    double cmdTime = [self.arm_R11_cmdTime doubleValue]/10.0;
+    double cmdSleep = [self.arm_R11_cmdSleep doubleValue]/10.0;
+    double posX = [self.arm_R11_positionX doubleValue]/100.0;
+    double posY = [self.arm_R11_positionY doubleValue]/100.0;
+    double posZ = [self.arm_R11_positionZ doubleValue]/100.0;
+    double roll = [self.arm_R11_roll doubleValue]/100.0;
+    double pitch = [self.arm_R11_pitch doubleValue]/100.0;
+    double yaw = [self.arm_R11_yaw doubleValue]/100.0;
+    
+    self.arm_R11_cmdTime_label.stringValue = [NSString stringWithFormat:@"%f", cmdTime];
+    self.arm_R11_cmdSleep_label.stringValue = [NSString stringWithFormat:@"%f", cmdSleep];
+    self.arm_R11_positionX_label.stringValue = [NSString stringWithFormat:@"%f", posX];
+    self.arm_R11_positionY_label.stringValue = [NSString stringWithFormat:@"%f", posY];
+    self.arm_R11_positionZ_label.stringValue = [NSString stringWithFormat:@"%f", posZ];
+    self.arm_R11_roll_label.stringValue = [NSString stringWithFormat:@"%f", roll];
+    self.arm_R11_pitch_label.stringValue = [NSString stringWithFormat:@"%f", pitch];
+    self.arm_R11_yaw_label.stringValue = [NSString stringWithFormat:@"%f", yaw];
+    
+    [self update_arm_R11_SendCommand:sender];
+}
+
+- (IBAction)update_arm_R11_SendCommand:(id)sender {
+    [self.robMainViewController.serialBox update_arm_R11_Action:sender];
+}
+
 @end
