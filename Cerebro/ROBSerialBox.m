@@ -1539,7 +1539,7 @@ int maestroGetErrors(int fd)
         [arguments addObject:@"--port"];
         [arguments addObject:[NSString stringWithFormat:@"%i", port]];
         
-        //NSLog(@"args = %@", arguments);
+        NSLog(@"args = %@", arguments);
         
         NSTask *move_arm_task = [NSTask new];
         
@@ -1575,7 +1575,7 @@ int maestroGetErrors(int fd)
         [arguments addObject:@"--port"];
         [arguments addObject:[NSString stringWithFormat:@"%i", port]];
         
-        //NSLog(@"args = %@", arguments);
+        NSLog(@"args = %@", arguments);
         
         NSTask *move_arm_task = [NSTask new];
         
@@ -1613,7 +1613,7 @@ int maestroGetErrors(int fd)
         [arguments addObject:@"--port"];
         [arguments addObject:[NSString stringWithFormat:@"%i", port]];
         
-        //NSLog(@"args = %@", arguments);
+        NSLog(@"args = %@", arguments);
         
         NSTask *move_arm_task = [NSTask new];
         
@@ -1651,7 +1651,7 @@ int maestroGetErrors(int fd)
         [arguments addObject:@"--port"];
         [arguments addObject:[NSString stringWithFormat:@"%i", port]];
         
-        //NSLog(@"args = %@", arguments);
+        NSLog(@"args = %@", arguments);
         
         NSTask *move_arm_task = [NSTask new];
         
@@ -1687,7 +1687,7 @@ int maestroGetErrors(int fd)
         [arguments addObject:@"--port"];
         [arguments addObject:[NSString stringWithFormat:@"%i", port]];
         
-        //NSLog(@"args = %@", arguments);
+        NSLog(@"args = %@", arguments);
         
         NSTask *move_arm_task = [NSTask new];
         
@@ -1724,7 +1724,7 @@ int maestroGetErrors(int fd)
         [arguments addObject:@"--port"];
         [arguments addObject:[NSString stringWithFormat:@"%i", port]];
         
-        //NSLog(@"args = %@", arguments);
+        NSLog(@"args = %@", arguments);
         
         NSTask *move_arm_task = [NSTask new];
         
@@ -1780,7 +1780,7 @@ int maestroGetErrors(int fd)
         [arguments addObject:@"10.0.0.5"];
         
         [arguments addObject:@"--port"];
-        [arguments addObject:@"26002"];
+        [arguments addObject:[NSString stringWithFormat:@"%i", port]];
         
         [arguments addObject:@"--cmd_time"];
         [arguments addObject:[NSString stringWithFormat:@"%f", cmdTime]];
@@ -1809,7 +1809,7 @@ int maestroGetErrors(int fd)
         [arguments addObject:@"--servo7"];
         [arguments addObject:[NSString stringWithFormat:@"%f", servo7]];
         
-        //NSLog(@"args = %@", arguments);
+        NSLog(@"args = %@", arguments);
         
         NSTask *move_arm_task = [NSTask new];
         
@@ -1822,9 +1822,9 @@ int maestroGetErrors(int fd)
         
         [move_arm_task launch];
         
-        //NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-        //NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        //NSLog(@"output = %@", output);
+        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        NSLog(@"cmd_position_input = %@", output);
     });
 }
 
@@ -1864,7 +1864,7 @@ int maestroGetErrors(int fd)
         [arguments addObject:@"10.0.0.5"];
         
         [arguments addObject:@"--port"];
-        [arguments addObject:@"26002"];
+        [arguments addObject:[NSString stringWithFormat:@"%i", port]];
         
         [arguments addObject:@"--cmd_time"];
         [arguments addObject:[NSString stringWithFormat:@"%f", cmdTime]];
@@ -1890,7 +1890,7 @@ int maestroGetErrors(int fd)
         [arguments addObject:@"--yaw"];
         [arguments addObject:[NSString stringWithFormat:@"%f", yaw]];
         
-        //NSLog(@"args = %@", arguments);
+        NSLog(@"args = %@", arguments);
         
         NSTask *move_arm_task = [NSTask new];
         
@@ -1903,9 +1903,9 @@ int maestroGetErrors(int fd)
         
         [move_arm_task launch];
         
-        //NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-        //NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        //NSLog(@"output = %@", output);
+        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        NSLog(@"cmd_cartesian_input = %@", output);
     });
 }
 

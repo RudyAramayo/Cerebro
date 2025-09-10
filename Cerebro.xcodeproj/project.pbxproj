@@ -38,38 +38,19 @@
 		D4A38F6D1FFC0CB400092A46 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D4A38F6C1FFC0CB400092A46 /* Foundation.framework */; };
 		D4A38F731FFC77CB00092A46 /* ROBKeyboardControlsViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = D4A38F721FFC77CB00092A46 /* ROBKeyboardControlsViewController.m */; };
 		D4A38F761FFC8BD300092A46 /* ROBSCNViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = D4A38F751FFC8BD300092A46 /* ROBSCNViewController.m */; };
+		D4A8DAD52E71EF90000485DF /* cmd_current_mode_v2.py in Resources */ = {isa = PBXBuildFile; fileRef = D4A8DAD42E71EF90000485DF /* cmd_current_mode_v2.py */; };
+		D4A8DAD62E71F076000485DF /* open_gripper_v2.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C282472E710F56009CCABC /* open_gripper_v2.py */; };
+		D4A8DAD72E71F079000485DF /* close_gripper_v2.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C282492E710F8A009CCABC /* close_gripper_v2.py */; };
 		D4AA3D7A2AC9F4AB007DC656 /* StartTextInput.scpt in Resources */ = {isa = PBXBuildFile; fileRef = D4AA3D792AC9F4AB007DC656 /* StartTextInput.scpt */; };
 		D4AB3DA42E1CF38D00EA2571 /* CameraViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4AB3DA32E1CF38D00EA2571 /* CameraViewController.swift */; };
 		D4AB3DA52E1CF38D00EA2571 /* CameraManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4AB3DA22E1CF38D00EA2571 /* CameraManager.swift */; };
 		D4BDA6732E6E725D0088A5B4 /* cmd_cartesian_input.py in Resources */ = {isa = PBXBuildFile; fileRef = D4BDA6722E6E725D0088A5B4 /* cmd_cartesian_input.py */; };
 		D4C282032E70D5F5009CCABC /* watch_position_out_R11.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C282022E70D5F5009CCABC /* watch_position_out_R11.py */; };
 		D4C282052E70D6D1009CCABC /* cmd_position_input.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C282042E70D6D1009CCABC /* cmd_position_input.py */; };
-		D4C282272E70F132009CCABC /* __init__.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C282152E70F132009CCABC /* __init__.py */; };
-		D4C282282E70F132009CCABC /* cmd_4.cpython-313.pyc in Resources */ = {isa = PBXBuildFile; fileRef = D4C2820E2E70F132009CCABC /* cmd_4.cpython-313.pyc */; };
-		D4C282292E70F132009CCABC /* cmd_9.cpython-313.pyc in Resources */ = {isa = PBXBuildFile; fileRef = D4C282112E70F132009CCABC /* cmd_9.cpython-313.pyc */; };
-		D4C2822A2E70F132009CCABC /* cmd_10.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C2821B2E70F132009CCABC /* cmd_10.py */; };
-		D4C2822B2E70F132009CCABC /* cmd_6.cpython-313.pyc in Resources */ = {isa = PBXBuildFile; fileRef = D4C2820F2E70F132009CCABC /* cmd_6.cpython-313.pyc */; };
-		D4C2822C2E70F132009CCABC /* __init__.cpython-313.pyc in Resources */ = {isa = PBXBuildFile; fileRef = D4C2820C2E70F132009CCABC /* __init__.cpython-313.pyc */; };
-		D4C2822D2E70F132009CCABC /* cmd_1.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C282162E70F132009CCABC /* cmd_1.py */; };
-		D4C2822E2E70F132009CCABC /* cmd_10.cpython-313.pyc in Resources */ = {isa = PBXBuildFile; fileRef = D4C282122E70F132009CCABC /* cmd_10.cpython-313.pyc */; };
-		D4C2822F2E70F132009CCABC /* cmd_110.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C2821C2E70F132009CCABC /* cmd_110.py */; };
 		D4C282302E70F132009CCABC /* gripper_test.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C282222E70F132009CCABC /* gripper_test.py */; };
 		D4C282312E70F132009CCABC /* cmd_position_input_v2.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C282242E70F132009CCABC /* cmd_position_input_v2.py */; };
-		D4C282322E70F132009CCABC /* __init__.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C2821E2E70F132009CCABC /* __init__.py */; };
-		D4C282332E70F132009CCABC /* amber_robot.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C282202E70F132009CCABC /* amber_robot.py */; };
-		D4C282342E70F132009CCABC /* cmd_7.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C282192E70F132009CCABC /* cmd_7.py */; };
-		D4C282352E70F132009CCABC /* cmd_110.cpython-313.pyc in Resources */ = {isa = PBXBuildFile; fileRef = D4C282132E70F132009CCABC /* cmd_110.cpython-313.pyc */; };
 		D4C282362E70F132009CCABC /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = D4C282232E70F132009CCABC /* LICENSE */; };
-		D4C282372E70F132009CCABC /* cmd_7.cpython-313.pyc in Resources */ = {isa = PBXBuildFile; fileRef = D4C282102E70F132009CCABC /* cmd_7.cpython-313.pyc */; };
 		D4C282382E70F132009CCABC /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = D4C282252E70F132009CCABC /* README.md */; };
-		D4C282392E70F132009CCABC /* cmd_9.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C2821A2E70F132009CCABC /* cmd_9.py */; };
-		D4C2823A2E70F132009CCABC /* __init__.cpython-313.pyc in Resources */ = {isa = PBXBuildFile; fileRef = D4C282082E70F132009CCABC /* __init__.cpython-313.pyc */; };
-		D4C2823B2E70F132009CCABC /* cmd_4.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C282172E70F132009CCABC /* cmd_4.py */; };
-		D4C2823C2E70F132009CCABC /* advanced_function.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C2821F2E70F132009CCABC /* advanced_function.py */; };
-		D4C2823D2E70F132009CCABC /* amber_robot.cpython-313.pyc in Resources */ = {isa = PBXBuildFile; fileRef = D4C2820A2E70F132009CCABC /* amber_robot.cpython-313.pyc */; };
-		D4C2823E2E70F132009CCABC /* advanced_function.cpython-313.pyc in Resources */ = {isa = PBXBuildFile; fileRef = D4C282092E70F132009CCABC /* advanced_function.cpython-313.pyc */; };
-		D4C2823F2E70F132009CCABC /* cmd_1.cpython-313.pyc in Resources */ = {isa = PBXBuildFile; fileRef = D4C2820D2E70F132009CCABC /* cmd_1.cpython-313.pyc */; };
-		D4C282402E70F132009CCABC /* cmd_6.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C282182E70F132009CCABC /* cmd_6.py */; };
 		D4C282442E70F285009CCABC /* cmd_position_mode_v2.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C282432E70F27C009CCABC /* cmd_position_mode_v2.py */; };
 		D4C282462E710F46009CCABC /* zero_position_mode_v2.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C282452E710F3D009CCABC /* zero_position_mode_v2.py */; };
 		D4C282482E710F5E009CCABC /* open_gripper_v2.py in Sources */ = {isa = PBXBuildFile; fileRef = D4C282472E710F56009CCABC /* open_gripper_v2.py */; };
@@ -158,34 +139,13 @@
 		D4A38F721FFC77CB00092A46 /* ROBKeyboardControlsViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ROBKeyboardControlsViewController.m; sourceTree = "<group>"; };
 		D4A38F741FFC8BD300092A46 /* ROBSCNViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBSCNViewController.h; sourceTree = "<group>"; };
 		D4A38F751FFC8BD300092A46 /* ROBSCNViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ROBSCNViewController.m; sourceTree = "<group>"; };
+		D4A8DAD42E71EF90000485DF /* cmd_current_mode_v2.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = cmd_current_mode_v2.py; sourceTree = "<group>"; };
 		D4AA3D792AC9F4AB007DC656 /* StartTextInput.scpt */ = {isa = PBXFileReference; lastKnownFileType = file; path = StartTextInput.scpt; sourceTree = "<group>"; };
 		D4AB3DA22E1CF38D00EA2571 /* CameraManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManager.swift; sourceTree = "<group>"; };
 		D4AB3DA32E1CF38D00EA2571 /* CameraViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraViewController.swift; sourceTree = "<group>"; };
 		D4BDA6722E6E725D0088A5B4 /* cmd_cartesian_input.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = cmd_cartesian_input.py; sourceTree = "<group>"; };
 		D4C282022E70D5F5009CCABC /* watch_position_out_R11.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = watch_position_out_R11.py; sourceTree = "<group>"; };
 		D4C282042E70D6D1009CCABC /* cmd_position_input.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = cmd_position_input.py; sourceTree = "<group>"; };
-		D4C282082E70F132009CCABC /* __init__.cpython-313.pyc */ = {isa = PBXFileReference; lastKnownFileType = file; path = "__init__.cpython-313.pyc"; sourceTree = "<group>"; };
-		D4C282092E70F132009CCABC /* advanced_function.cpython-313.pyc */ = {isa = PBXFileReference; lastKnownFileType = file; path = "advanced_function.cpython-313.pyc"; sourceTree = "<group>"; };
-		D4C2820A2E70F132009CCABC /* amber_robot.cpython-313.pyc */ = {isa = PBXFileReference; lastKnownFileType = file; path = "amber_robot.cpython-313.pyc"; sourceTree = "<group>"; };
-		D4C2820C2E70F132009CCABC /* __init__.cpython-313.pyc */ = {isa = PBXFileReference; lastKnownFileType = file; path = "__init__.cpython-313.pyc"; sourceTree = "<group>"; };
-		D4C2820D2E70F132009CCABC /* cmd_1.cpython-313.pyc */ = {isa = PBXFileReference; lastKnownFileType = file; path = "cmd_1.cpython-313.pyc"; sourceTree = "<group>"; };
-		D4C2820E2E70F132009CCABC /* cmd_4.cpython-313.pyc */ = {isa = PBXFileReference; lastKnownFileType = file; path = "cmd_4.cpython-313.pyc"; sourceTree = "<group>"; };
-		D4C2820F2E70F132009CCABC /* cmd_6.cpython-313.pyc */ = {isa = PBXFileReference; lastKnownFileType = file; path = "cmd_6.cpython-313.pyc"; sourceTree = "<group>"; };
-		D4C282102E70F132009CCABC /* cmd_7.cpython-313.pyc */ = {isa = PBXFileReference; lastKnownFileType = file; path = "cmd_7.cpython-313.pyc"; sourceTree = "<group>"; };
-		D4C282112E70F132009CCABC /* cmd_9.cpython-313.pyc */ = {isa = PBXFileReference; lastKnownFileType = file; path = "cmd_9.cpython-313.pyc"; sourceTree = "<group>"; };
-		D4C282122E70F132009CCABC /* cmd_10.cpython-313.pyc */ = {isa = PBXFileReference; lastKnownFileType = file; path = "cmd_10.cpython-313.pyc"; sourceTree = "<group>"; };
-		D4C282132E70F132009CCABC /* cmd_110.cpython-313.pyc */ = {isa = PBXFileReference; lastKnownFileType = file; path = "cmd_110.cpython-313.pyc"; sourceTree = "<group>"; };
-		D4C282152E70F132009CCABC /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
-		D4C282162E70F132009CCABC /* cmd_1.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = cmd_1.py; sourceTree = "<group>"; };
-		D4C282172E70F132009CCABC /* cmd_4.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = cmd_4.py; sourceTree = "<group>"; };
-		D4C282182E70F132009CCABC /* cmd_6.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = cmd_6.py; sourceTree = "<group>"; };
-		D4C282192E70F132009CCABC /* cmd_7.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = cmd_7.py; sourceTree = "<group>"; };
-		D4C2821A2E70F132009CCABC /* cmd_9.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = cmd_9.py; sourceTree = "<group>"; };
-		D4C2821B2E70F132009CCABC /* cmd_10.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = cmd_10.py; sourceTree = "<group>"; };
-		D4C2821C2E70F132009CCABC /* cmd_110.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = cmd_110.py; sourceTree = "<group>"; };
-		D4C2821E2E70F132009CCABC /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
-		D4C2821F2E70F132009CCABC /* advanced_function.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = advanced_function.py; sourceTree = "<group>"; };
-		D4C282202E70F132009CCABC /* amber_robot.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = amber_robot.py; sourceTree = "<group>"; };
 		D4C282222E70F132009CCABC /* gripper_test.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = gripper_test.py; sourceTree = "<group>"; };
 		D4C282232E70F132009CCABC /* LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = LICENSE; sourceTree = "<group>"; };
 		D4C282242E70F132009CCABC /* cmd_position_input_v2.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = cmd_position_input_v2.py; sourceTree = "<group>"; };
@@ -363,67 +323,14 @@
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
-		D4C2820B2E70F132009CCABC /* __pycache__ */ = {
-			isa = PBXGroup;
-			children = (
-				D4C282082E70F132009CCABC /* __init__.cpython-313.pyc */,
-				D4C282092E70F132009CCABC /* advanced_function.cpython-313.pyc */,
-				D4C2820A2E70F132009CCABC /* amber_robot.cpython-313.pyc */,
-			);
-			path = __pycache__;
-			sourceTree = "<group>";
-		};
-		D4C282142E70F132009CCABC /* __pycache__ */ = {
-			isa = PBXGroup;
-			children = (
-				D4C2820C2E70F132009CCABC /* __init__.cpython-313.pyc */,
-				D4C2820D2E70F132009CCABC /* cmd_1.cpython-313.pyc */,
-				D4C2820E2E70F132009CCABC /* cmd_4.cpython-313.pyc */,
-				D4C2820F2E70F132009CCABC /* cmd_6.cpython-313.pyc */,
-				D4C282102E70F132009CCABC /* cmd_7.cpython-313.pyc */,
-				D4C282112E70F132009CCABC /* cmd_9.cpython-313.pyc */,
-				D4C282122E70F132009CCABC /* cmd_10.cpython-313.pyc */,
-				D4C282132E70F132009CCABC /* cmd_110.cpython-313.pyc */,
-			);
-			path = __pycache__;
-			sourceTree = "<group>";
-		};
-		D4C2821D2E70F132009CCABC /* basic_cmd */ = {
-			isa = PBXGroup;
-			children = (
-				D4C282142E70F132009CCABC /* __pycache__ */,
-				D4C282152E70F132009CCABC /* __init__.py */,
-				D4C282162E70F132009CCABC /* cmd_1.py */,
-				D4C282172E70F132009CCABC /* cmd_4.py */,
-				D4C282182E70F132009CCABC /* cmd_6.py */,
-				D4C282192E70F132009CCABC /* cmd_7.py */,
-				D4C2821A2E70F132009CCABC /* cmd_9.py */,
-				D4C2821B2E70F132009CCABC /* cmd_10.py */,
-				D4C2821C2E70F132009CCABC /* cmd_110.py */,
-			);
-			path = basic_cmd;
-			sourceTree = "<group>";
-		};
-		D4C282212E70F132009CCABC /* amber_api */ = {
-			isa = PBXGroup;
-			children = (
-				D4C2820B2E70F132009CCABC /* __pycache__ */,
-				D4C2821D2E70F132009CCABC /* basic_cmd */,
-				D4C2821E2E70F132009CCABC /* __init__.py */,
-				D4C2821F2E70F132009CCABC /* advanced_function.py */,
-				D4C282202E70F132009CCABC /* amber_robot.py */,
-			);
-			path = amber_api;
-			sourceTree = "<group>";
-		};
 		D4C282262E70F132009CCABC /* Amber V2 API */ = {
 			isa = PBXGroup;
 			children = (
-				D4C282212E70F132009CCABC /* amber_api */,
 				D4C282222E70F132009CCABC /* gripper_test.py */,
 				D4C282232E70F132009CCABC /* LICENSE */,
 				D4C282242E70F132009CCABC /* cmd_position_input_v2.py */,
 				D4C282432E70F27C009CCABC /* cmd_position_mode_v2.py */,
+				D4A8DAD42E71EF90000485DF /* cmd_current_mode_v2.py */,
 				D4C282452E710F3D009CCABC /* zero_position_mode_v2.py */,
 				D4C282472E710F56009CCABC /* open_gripper_v2.py */,
 				D4C282492E710F8A009CCABC /* close_gripper_v2.py */,
@@ -555,38 +462,19 @@
 				D4A38F481FFB2AED00092A46 /* Assets.xcassets in Resources */,
 				D4066C5A22828E5F002ACAD1 /* AudioInputTaskController.command in Resources */,
 				D4A38F461FFB2AED00092A46 /* art.scnassets in Resources */,
-				D4C282272E70F132009CCABC /* __init__.py in Resources */,
-				D4C282282E70F132009CCABC /* cmd_4.cpython-313.pyc in Resources */,
-				D4C282292E70F132009CCABC /* cmd_9.cpython-313.pyc in Resources */,
 				D4C282442E70F285009CCABC /* cmd_position_mode_v2.py in Resources */,
-				D4C2822A2E70F132009CCABC /* cmd_10.py in Resources */,
-				D4C2822B2E70F132009CCABC /* cmd_6.cpython-313.pyc in Resources */,
-				D4C2822C2E70F132009CCABC /* __init__.cpython-313.pyc in Resources */,
-				D4C2822D2E70F132009CCABC /* cmd_1.py in Resources */,
-				D4C2822E2E70F132009CCABC /* cmd_10.cpython-313.pyc in Resources */,
-				D4C2822F2E70F132009CCABC /* cmd_110.py in Resources */,
 				D4C282302E70F132009CCABC /* gripper_test.py in Resources */,
 				D4C282462E710F46009CCABC /* zero_position_mode_v2.py in Resources */,
 				D4C282312E70F132009CCABC /* cmd_position_input_v2.py in Resources */,
-				D4C282322E70F132009CCABC /* __init__.py in Resources */,
-				D4C282332E70F132009CCABC /* amber_robot.py in Resources */,
-				D4C282342E70F132009CCABC /* cmd_7.py in Resources */,
-				D4C282352E70F132009CCABC /* cmd_110.cpython-313.pyc in Resources */,
 				D4C282362E70F132009CCABC /* LICENSE in Resources */,
-				D4C282372E70F132009CCABC /* cmd_7.cpython-313.pyc in Resources */,
+				D4A8DAD52E71EF90000485DF /* cmd_current_mode_v2.py in Resources */,
 				D4C2824C2E711D6C009CCABC /* deactivate_mode_v2.py in Resources */,
 				D4C282382E70F132009CCABC /* README.md in Resources */,
-				D4C282392E70F132009CCABC /* cmd_9.py in Resources */,
-				D4C2823A2E70F132009CCABC /* __init__.cpython-313.pyc in Resources */,
-				D4C2823B2E70F132009CCABC /* cmd_4.py in Resources */,
-				D4C2823C2E70F132009CCABC /* advanced_function.py in Resources */,
-				D4C2823D2E70F132009CCABC /* amber_robot.cpython-313.pyc in Resources */,
-				D4C2823E2E70F132009CCABC /* advanced_function.cpython-313.pyc in Resources */,
-				D4C2823F2E70F132009CCABC /* cmd_1.cpython-313.pyc in Resources */,
-				D4C282402E70F132009CCABC /* cmd_6.py in Resources */,
 				D4C282032E70D5F5009CCABC /* watch_position_out_R11.py in Resources */,
 				D4F4802E22F2903E006ADB7A /* RealSenseTaskController.command in Resources */,
 				D4C282052E70D6D1009CCABC /* cmd_position_input.py in Resources */,
+				D4A8DAD62E71F076000485DF /* open_gripper_v2.py in Resources */,
+				D4A8DAD72E71F079000485DF /* close_gripper_v2.py in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
