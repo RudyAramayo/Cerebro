@@ -1271,47 +1271,48 @@ Brake
                                                     <real value="3.4028234663852886e+38"/>
                                                 </customSpacing>
                                             </stackView>
-                                            <stackView distribution="fill" orientation="horizontal" alignment="top" spacing="100" horizontalStackHuggingPriority="249.99998474121094" verticalStackHuggingPriority="249.99998474121094" fixedFrame="YES" detachesHiddenViews="YES" translatesAutoresizingMaskIntoConstraints="NO" id="D2U-GV-zP6">
-                                                <rect key="frame" x="114" y="12" width="136" height="24"/>
+                                            <stackView distribution="fill" orientation="horizontal" alignment="top" spacing="70" horizontalStackHuggingPriority="249.99998474121094" verticalStackHuggingPriority="249.99998474121094" fixedFrame="YES" detachesHiddenViews="YES" translatesAutoresizingMaskIntoConstraints="NO" id="D2U-GV-zP6">
+                                                <rect key="frame" x="0.0" y="13" width="345" height="24"/>
                                                 <subviews>
-                                                    <stackView distribution="fill" orientation="horizontal" alignment="top" spacing="10" horizontalStackHuggingPriority="249.99998474121094" verticalStackHuggingPriority="249.99998474121094" detachesHiddenViews="YES" translatesAutoresizingMaskIntoConstraints="NO" id="hfb-Kz-qKg">
-                                                        <rect key="frame" x="0.0" y="0.0" width="136" height="24"/>
-                                                        <subviews>
-                                                            <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="Tkh-a2-CTx">
-                                                                <rect key="frame" x="0.0" y="0.0" width="66" height="24"/>
-                                                                <buttonCell key="cell" type="push" title="CLOSE" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="OOX-SO-xD7">
-                                                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
-                                                                    <font key="font" metaFont="system"/>
-                                                                </buttonCell>
-                                                                <connections>
-                                                                    <action selector="closeGripper_L10:" target="cHj-5R-xNm" id="aPq-gc-WOz"/>
-                                                                </connections>
-                                                            </button>
-                                                            <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="K9U-bu-eGc">
-                                                                <rect key="frame" x="76" y="0.0" width="60" height="24"/>
-                                                                <buttonCell key="cell" type="push" title="OPEN" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="K24-iH-YG8">
-                                                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
-                                                                    <font key="font" metaFont="system"/>
-                                                                </buttonCell>
-                                                                <connections>
-                                                                    <action selector="openGripper_L10:" target="cHj-5R-xNm" id="w1Y-B7-S1c"/>
-                                                                </connections>
-                                                            </button>
-                                                        </subviews>
-                                                        <visibilityPriorities>
-                                                            <integer value="1000"/>
-                                                            <integer value="1000"/>
-                                                        </visibilityPriorities>
-                                                        <customSpacing>
-                                                            <real value="3.4028234663852886e+38"/>
-                                                            <real value="3.4028234663852886e+38"/>
-                                                        </customSpacing>
-                                                    </stackView>
+                                                    <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="0sT-K1-Xqe">
+                                                        <rect key="frame" x="0.0" y="0.0" width="79" height="24"/>
+                                                        <buttonCell key="cell" type="push" title="Calibrate" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="OUd-mz-VPS">
+                                                            <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                                            <font key="font" metaFont="system"/>
+                                                        </buttonCell>
+                                                        <connections>
+                                                            <action selector="calibrateGripper_L10:" target="cHj-5R-xNm" id="CgX-df-CYa"/>
+                                                        </connections>
+                                                    </button>
+                                                    <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="Tkh-a2-CTx">
+                                                        <rect key="frame" x="149" y="0.0" width="66" height="24"/>
+                                                        <buttonCell key="cell" type="push" title="CLOSE" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="OOX-SO-xD7">
+                                                            <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                                            <font key="font" metaFont="system"/>
+                                                        </buttonCell>
+                                                        <connections>
+                                                            <action selector="closeGripper_L10:" target="cHj-5R-xNm" id="aPq-gc-WOz"/>
+                                                        </connections>
+                                                    </button>
+                                                    <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="K9U-bu-eGc">
+                                                        <rect key="frame" x="285" y="0.0" width="60" height="24"/>
+                                                        <buttonCell key="cell" type="push" title="OPEN" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="K24-iH-YG8">
+                                                            <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                                            <font key="font" metaFont="system"/>
+                                                        </buttonCell>
+                                                        <connections>
+                                                            <action selector="openGripper_L10:" target="cHj-5R-xNm" id="w1Y-B7-S1c"/>
+                                                        </connections>
+                                                    </button>
                                                 </subviews>
                                                 <visibilityPriorities>
                                                     <integer value="1000"/>
+                                                    <integer value="1000"/>
+                                                    <integer value="1000"/>
                                                 </visibilityPriorities>
                                                 <customSpacing>
+                                                    <real value="3.4028234663852886e+38"/>
+                                                    <real value="3.4028234663852886e+38"/>
                                                     <real value="3.4028234663852886e+38"/>
                                                 </customSpacing>
                                             </stackView>
@@ -1811,6 +1812,9 @@ Brake
                                                                 <rect key="frame" x="74" y="2" width="220" height="16"/>
                                                                 <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
                                                                 <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="-300" maxValue="300" tickMarkPosition="above" sliderType="linear" id="jSF-7P-D7s"/>
+                                                                <connections>
+                                                                    <action selector="update_arm_R11_Action:" target="cHj-5R-xNm" id="PiX-No-fHH"/>
+                                                                </connections>
                                                             </slider>
                                                             <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="BZh-p4-N6m">
                                                                 <rect key="frame" x="300" y="3" width="66" height="17"/>
@@ -1843,6 +1847,9 @@ Brake
                                                                 <rect key="frame" x="74" y="1" width="220" height="19"/>
                                                                 <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
                                                                 <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="-300" maxValue="300" tickMarkPosition="above" sliderType="linear" id="I0o-5i-tao"/>
+                                                                <connections>
+                                                                    <action selector="update_arm_R11_Action:" target="cHj-5R-xNm" id="A1f-49-T82"/>
+                                                                </connections>
                                                             </slider>
                                                             <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="8fW-PI-DoO">
                                                                 <rect key="frame" x="300" y="2" width="66" height="17"/>
@@ -1875,6 +1882,9 @@ Brake
                                                                 <rect key="frame" x="74" y="1" width="220" height="19"/>
                                                                 <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
                                                                 <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="-300" maxValue="300" tickMarkPosition="above" sliderType="linear" id="e0J-rc-p4d"/>
+                                                                <connections>
+                                                                    <action selector="update_arm_R11_Action:" target="cHj-5R-xNm" id="MiC-kZ-dp3"/>
+                                                                </connections>
                                                             </slider>
                                                             <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="KXx-0e-AJA">
                                                                 <rect key="frame" x="300" y="2" width="66" height="17"/>
@@ -1907,6 +1917,9 @@ Brake
                                                                 <rect key="frame" x="74" y="1" width="220" height="19"/>
                                                                 <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
                                                                 <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="-300" maxValue="300" tickMarkPosition="above" sliderType="linear" id="H8N-P8-wKR"/>
+                                                                <connections>
+                                                                    <action selector="update_arm_R11_Action:" target="cHj-5R-xNm" id="GLP-KO-uaN"/>
+                                                                </connections>
                                                             </slider>
                                                             <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="ANZ-qL-S4O">
                                                                 <rect key="frame" x="300" y="2" width="66" height="17"/>
@@ -1939,6 +1952,9 @@ Brake
                                                                 <rect key="frame" x="74" y="1" width="220" height="19"/>
                                                                 <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
                                                                 <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="-300" maxValue="300" tickMarkPosition="above" sliderType="linear" id="2NO-AN-GaO"/>
+                                                                <connections>
+                                                                    <action selector="update_arm_R11_Action:" target="cHj-5R-xNm" id="gCM-EJ-og2"/>
+                                                                </connections>
                                                             </slider>
                                                             <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="mq7-Ui-BVd">
                                                                 <rect key="frame" x="300" y="2" width="66" height="17"/>
@@ -1971,6 +1987,9 @@ Brake
                                                                 <rect key="frame" x="74" y="1" width="220" height="19"/>
                                                                 <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
                                                                 <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="-300" maxValue="300" tickMarkPosition="above" sliderType="linear" id="AZf-ad-K3q"/>
+                                                                <connections>
+                                                                    <action selector="update_arm_R11_Action:" target="cHj-5R-xNm" id="iNP-DD-YV7"/>
+                                                                </connections>
                                                             </slider>
                                                             <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="T3p-np-ndp">
                                                                 <rect key="frame" x="300" y="2" width="66" height="17"/>
@@ -2003,6 +2022,9 @@ Brake
                                                                 <rect key="frame" x="74" y="1" width="220" height="19"/>
                                                                 <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
                                                                 <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="-300" maxValue="300" tickMarkPosition="above" sliderType="linear" id="A0C-Sb-O12"/>
+                                                                <connections>
+                                                                    <action selector="update_arm_R11_Action:" target="cHj-5R-xNm" id="Lfu-J5-1Ca"/>
+                                                                </connections>
                                                             </slider>
                                                             <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="5af-jV-Xq6">
                                                                 <rect key="frame" x="300" y="2" width="66" height="17"/>
@@ -2106,47 +2128,48 @@ Brake
                                                     <real value="3.4028234663852886e+38"/>
                                                 </customSpacing>
                                             </stackView>
-                                            <stackView distribution="fill" orientation="horizontal" alignment="top" spacing="100" horizontalStackHuggingPriority="249.99998474121094" verticalStackHuggingPriority="249.99998474121094" fixedFrame="YES" detachesHiddenViews="YES" translatesAutoresizingMaskIntoConstraints="NO" id="A9r-at-NQg">
-                                                <rect key="frame" x="114" y="12" width="136" height="24"/>
+                                            <stackView distribution="fill" orientation="horizontal" alignment="top" spacing="80" horizontalStackHuggingPriority="249.99998474121094" verticalStackHuggingPriority="249.99998474121094" fixedFrame="YES" detachesHiddenViews="YES" translatesAutoresizingMaskIntoConstraints="NO" id="A9r-at-NQg">
+                                                <rect key="frame" x="0.0" y="12" width="365" height="24"/>
                                                 <subviews>
-                                                    <stackView distribution="fill" orientation="horizontal" alignment="top" spacing="10" horizontalStackHuggingPriority="249.99998474121094" verticalStackHuggingPriority="249.99998474121094" detachesHiddenViews="YES" translatesAutoresizingMaskIntoConstraints="NO" id="pKW-yQ-I4L">
-                                                        <rect key="frame" x="0.0" y="0.0" width="136" height="24"/>
-                                                        <subviews>
-                                                            <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="HaL-3w-b86">
-                                                                <rect key="frame" x="0.0" y="0.0" width="66" height="24"/>
-                                                                <buttonCell key="cell" type="push" title="CLOSE" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="cDk-zC-pyk">
-                                                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
-                                                                    <font key="font" metaFont="system"/>
-                                                                </buttonCell>
-                                                                <connections>
-                                                                    <action selector="closeGripper_R11:" target="cHj-5R-xNm" id="BJr-BO-vW4"/>
-                                                                </connections>
-                                                            </button>
-                                                            <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="vQV-dL-EkD">
-                                                                <rect key="frame" x="76" y="0.0" width="60" height="24"/>
-                                                                <buttonCell key="cell" type="push" title="OPEN" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="cpl-oP-j0C">
-                                                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
-                                                                    <font key="font" metaFont="system"/>
-                                                                </buttonCell>
-                                                                <connections>
-                                                                    <action selector="openGripper_R11:" target="cHj-5R-xNm" id="GTF-fV-x63"/>
-                                                                </connections>
-                                                            </button>
-                                                        </subviews>
-                                                        <visibilityPriorities>
-                                                            <integer value="1000"/>
-                                                            <integer value="1000"/>
-                                                        </visibilityPriorities>
-                                                        <customSpacing>
-                                                            <real value="3.4028234663852886e+38"/>
-                                                            <real value="3.4028234663852886e+38"/>
-                                                        </customSpacing>
-                                                    </stackView>
+                                                    <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="HaL-3w-b86">
+                                                        <rect key="frame" x="0.0" y="0.0" width="79" height="24"/>
+                                                        <buttonCell key="cell" type="push" title="Calibrate" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="cDk-zC-pyk">
+                                                            <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                                            <font key="font" metaFont="system"/>
+                                                            <connections>
+                                                                <action selector="calibrateGripper_R11:" target="cHj-5R-xNm" id="ouj-aG-CjV"/>
+                                                            </connections>
+                                                        </buttonCell>
+                                                    </button>
+                                                    <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="qLM-2s-8fZ">
+                                                        <rect key="frame" x="159" y="0.0" width="66" height="24"/>
+                                                        <buttonCell key="cell" type="push" title="CLOSE" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="zeU-ee-oWe">
+                                                            <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                                            <font key="font" metaFont="system"/>
+                                                        </buttonCell>
+                                                        <connections>
+                                                            <action selector="closeGripper_R11:" target="cHj-5R-xNm" id="eG9-kb-dRt"/>
+                                                        </connections>
+                                                    </button>
+                                                    <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="vQV-dL-EkD">
+                                                        <rect key="frame" x="305" y="0.0" width="60" height="24"/>
+                                                        <buttonCell key="cell" type="push" title="OPEN" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="cpl-oP-j0C">
+                                                            <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                                            <font key="font" metaFont="system"/>
+                                                        </buttonCell>
+                                                        <connections>
+                                                            <action selector="openGripper_R11:" target="cHj-5R-xNm" id="GTF-fV-x63"/>
+                                                        </connections>
+                                                    </button>
                                                 </subviews>
                                                 <visibilityPriorities>
                                                     <integer value="1000"/>
+                                                    <integer value="1000"/>
+                                                    <integer value="1000"/>
                                                 </visibilityPriorities>
                                                 <customSpacing>
+                                                    <real value="3.4028234663852886e+38"/>
+                                                    <real value="3.4028234663852886e+38"/>
                                                     <real value="3.4028234663852886e+38"/>
                                                 </customSpacing>
                                             </stackView>

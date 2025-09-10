@@ -62,8 +62,20 @@ class Amber_Robot:
             list_mode.append(c_mode[i])
         return list_mode
 
+    def set_inactive_mode(self):
+        if amber_api.set_inactive_mode(self.IP_ADDR, self.PORT) == 1:
+            return True
+        else:
+            return False
+
     def set_position_mode(self):
         if amber_api.set_position_mode(self.IP_ADDR, self.PORT, self.joint_count) == 1:
+            return True
+        else:
+            return False
+
+    def set_speed_mode(self):
+        if amber_api.set_speed_mode(self.IP_ADDR, self.PORT, self.joint_count) == 1:
             return True
         else:
             return False

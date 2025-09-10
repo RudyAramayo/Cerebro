@@ -1458,12 +1458,16 @@ int maestroGetErrors(int fd)
     [self zeroPosition:sender port:26002];
 }
 
+- (IBAction)calibrateGripper_R11:(id)sender {
+    [self calibrateGripper:sender port:26002];
+}
+
 - (IBAction)openGripper_R11:(id)sender {
-    [self openGripper:sender port:26002 force:[self.arm_R11_force stringValue]];
+    [self openGripper:sender port:26002 force:[NSString stringWithFormat:@"%i",[self.arm_R11_force intValue]]];
 }
 
 - (IBAction)closeGripper_R11:(id)sender {
-    [self closeGripper:sender port:26002 force:[self.arm_R11_force stringValue]];
+    [self closeGripper:sender port:26002 force:[NSString stringWithFormat:@"%i",[self.arm_R11_force intValue]]];
 }
 
 - (IBAction)set_position_mode_R11:(id)sender {
@@ -1492,12 +1496,16 @@ int maestroGetErrors(int fd)
     [self zeroPosition:sender port:26001];
 }
 
+- (IBAction)calibrateGripper_L10:(id)sender {
+    [self calibrateGripper:sender port:26002];
+}
+
 - (IBAction)openGripper_L10:(id)sender {
-    [self openGripper:sender port:26001 force:[self.arm_L10_force stringValue]];
+    [self openGripper:sender port:26001 force:[NSString stringWithFormat:@"%i",[self.arm_L10_force intValue]]];
 }
 
 - (IBAction)closeGripper_L10:(id)sender {
-    [self closeGripper:sender port:26001 force:[self.arm_L10_force stringValue]];
+    [self closeGripper:sender port:26001 force:[NSString stringWithFormat:@"%i",[self.arm_L10_force intValue]]];
 }
 
 - (IBAction)set_position_mode_L10:(id)sender {
@@ -1527,10 +1535,10 @@ int maestroGetErrors(int fd)
         
         NSMutableArray *arguments = @[].mutableCopy;
         
-        NSString *zero_position_mode_v2 = [[NSBundle mainBundle] pathForResource:@"deactivate_mode_v2" ofType:@"py"];
-        //cmd_position_mode_v2.py --ip 10.0.0.5 --port 26002
+        NSString *cmd_deactivate_mode_v2 = [[NSBundle mainBundle] pathForResource:@"cmd_deactivate_mode_v2" ofType:@"py"];
+        //cmd_deactivate_mode_v2.py --ip 10.0.0.5 --port 26002
         
-        [arguments addObject:zero_position_mode_v2];
+        [arguments addObject:cmd_deactivate_mode_v2];
         
         
         [arguments addObject:@"--ip"];
@@ -1554,7 +1562,7 @@ int maestroGetErrors(int fd)
         
         NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
         NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        NSLog(@"deactivate_mode_v2: %@", output);
+        NSLog(@"cmd_deactivate_mode_v2: %@", output);
     });
 }
 
@@ -1564,7 +1572,7 @@ int maestroGetErrors(int fd)
         NSMutableArray *arguments = @[].mutableCopy;
         
         NSString *zero_position_mode_v2 = [[NSBundle mainBundle] pathForResource:@"zero_position_mode_v2" ofType:@"py"];
-        //cmd_position_mode_v2.py --ip 10.0.0.5 --port 26002
+        //zero_position_mode_v2.py --ip 10.0.0.5 --port 26002
         
         [arguments addObject:zero_position_mode_v2];
         
@@ -1594,15 +1602,51 @@ int maestroGetErrors(int fd)
     });
 }
 
+- (void) calibrateGripper:(id)sender port:(int)port {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+        
+        NSMutableArray *arguments = @[].mutableCopy;
+        
+        NSString *calibrateGripper_v2 = [[NSBundle mainBundle] pathForResource:@"calibrate_gripper_v2" ofType:@"py"];
+        //calibrate_gripper_v2.py --ip 10.0.0.5 --port 26002
+        
+        [arguments addObject:calibrateGripper_v2];
+        
+        [arguments addObject:@"--ip"];
+        [arguments addObject:@"10.0.0.5"];
+        
+        [arguments addObject:@"--port"];
+        [arguments addObject:[NSString stringWithFormat:@"%i", port]];
+        
+        NSLog(@"args = %@", arguments);
+        
+        NSTask *move_arm_task = [NSTask new];
+        
+        move_arm_task.launchPath = @"/Users/rob/rob_python/bin/python3";
+        move_arm_task.arguments = arguments;
+        
+        NSPipe *pipe = [NSPipe pipe];
+        move_arm_task.standardOutput = pipe;
+        move_arm_task.standardError = pipe;
+        
+        [move_arm_task launch];
+        
+        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        NSLog(@"calibrateGripper_v2: %@", output);
+    });
+
+}
+
 - (void) openGripper:(id)sender port:(int)port force:(NSString *)force {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
         
         NSMutableArray *arguments = @[].mutableCopy;
         
-        NSString *cmd_position_mode_v2 = [[NSBundle mainBundle] pathForResource:@"open_gripper_v2" ofType:@"py"];
-        //cmd_position_mode_v2.py --ip 10.0.0.5 --port 26002
+        NSString *open_gripper_v2 = [[NSBundle mainBundle] pathForResource:@"open_gripper_v2" ofType:@"py"];
+        //open_gripper_v2.py --ip 10.0.0.5 --port 26002
         
-        [arguments addObject:cmd_position_mode_v2];
+        [arguments addObject:open_gripper_v2];
         
         [arguments addObject:@"--force"];
         [arguments addObject:force];
@@ -1637,10 +1681,10 @@ int maestroGetErrors(int fd)
         
         NSMutableArray *arguments = @[].mutableCopy;
         
-        NSString *cmd_position_mode_v2 = [[NSBundle mainBundle] pathForResource:@"close_gripper_v2" ofType:@"py"];
-        //cmd_position_mode_v2.py --ip 10.0.0.5 --port 26002
+        NSString *close_gripper_v2 = [[NSBundle mainBundle] pathForResource:@"close_gripper_v2" ofType:@"py"];
+        //close_gripper_v2.py --ip 10.0.0.5 --port 26002
         
-        [arguments addObject:cmd_position_mode_v2];
+        [arguments addObject:close_gripper_v2];
         
         [arguments addObject:@"--force"];
         [arguments addObject:force];
@@ -1769,11 +1813,11 @@ int maestroGetErrors(int fd)
         
         NSMutableArray *arguments = @[].mutableCopy;
         
-        NSString *cmd_cartesian_input = [[NSBundle mainBundle] pathForResource:@"cmd_position_input" ofType:@"py"];
+        NSString *cmd_position_input = [[NSBundle mainBundle] pathForResource:@"cmd_position_input_v2" ofType:@"py"];
         //cmd_cartesian_input.py --ip 10.0.0.5 --port 26002 --cmd_time 2 --cmd_sleep 2 --pos_x 0.1 --pos_y -0.33 --pos_z 0.2 --roll 0.0 --pitch -1.5 --yaw 0.5
         //NSLog(@"cmd_cartesian_input = %@", cmd_cartesian_input);
         
-        [arguments addObject:cmd_cartesian_input];
+        [arguments addObject:cmd_position_input];
         
         
         [arguments addObject:@"--ip"];

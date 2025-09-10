@@ -184,6 +184,7 @@
 
 #pragma mark - R11 actions
 - (IBAction)zeroPosition_R11:(id)sender;
+- (IBAction)calibrateGripper_R11:(id)sender;
 - (IBAction)openGripper_R11:(id)sender;
 - (IBAction)closeGripper_R11:(id)sender;
 - (IBAction)set_position_mode_R11:(id)sender;
@@ -195,6 +196,7 @@
 #pragma mark - L10 actions
 
 - (IBAction)zeroPosition_L10:(id)sender;
+- (IBAction)calibrateGripper_L10:(id)sender;
 - (IBAction)openGripper_L10:(id)sender;
 - (IBAction)closeGripper_L10:(id)sender;
 - (IBAction)set_position_mode_L10:(id)sender;

@@ -29,8 +29,28 @@
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self rpLidarCheck];
     });
-    
+    //[self installAmberPythonZipFolderIntoResources];
 }
+
+- (void) installAmberPythonZipFolderIntoResources {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+        NSString *amber_api_zip_path = [[NSBundle mainBundle] pathForResource:@"amber_api" ofType:@"zip"];
+        NSTask *unzipTask = [NSTask new];
+        unzipTask.launchPath = @"/usr/bin/unzip";
+        unzipTask.arguments = @[amber_api_zip_path];
+        
+        NSPipe *pipe = [NSPipe pipe];
+        unzipTask.standardOutput = pipe;
+        unzipTask.standardError = pipe;
+        
+        [unzipTask launch];
+        
+        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        NSLog(@"installAmberPythonZipFolderIntoResources: %@", output);
+    });
+}
+
 
 - (void) cerebroCheck {
     //ps aux | grep Cerebro

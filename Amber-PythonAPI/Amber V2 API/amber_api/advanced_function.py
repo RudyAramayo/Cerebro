@@ -24,15 +24,21 @@ def wait_for_mode(expected, timeout, joint_count=7, IP_ADDR="127.0.0.1", PORT=26
                 return False
 
 
+def set_inactive_mode(IP_ADDR="127.0.0.1", PORT=26001):
+    basic_cmd.set_mode(mode=0, IP_ADDR=IP_ADDR, PORT=PORT)
+
 def set_active_mode(IP_ADDR="127.0.0.1", PORT=26001):
     basic_cmd.set_mode(mode=1, IP_ADDR=IP_ADDR, PORT=PORT)
-
 
 def set_position_mode(IP_ADDR="127.0.0.1", PORT=26001,joint_count=7):
     set_active_mode(IP_ADDR=IP_ADDR, PORT=PORT)
     wait_for_mode(1, 1, joint_count=joint_count, IP_ADDR=IP_ADDR, PORT=PORT)
     basic_cmd.set_mode(mode=2, IP_ADDR=IP_ADDR, PORT=PORT)
 
+def set_speed_mode(IP_ADDR="127.0.0.1", PORT=26001,joint_count=7):
+    set_active_mode(IP_ADDR=IP_ADDR, PORT=PORT)
+    wait_for_mode(1, 1, joint_count=joint_count, IP_ADDR=IP_ADDR, PORT=PORT)
+    basic_cmd.set_mode(mode=3, IP_ADDR=IP_ADDR, PORT=PORT)
 
 def set_current_mode(IP_ADDR="127.0.0.1", PORT=26001,joint_count=7):
     set_active_mode(IP_ADDR=IP_ADDR, PORT=PORT)

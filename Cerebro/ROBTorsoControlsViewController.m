@@ -128,7 +128,19 @@
 }
 
 - (IBAction) zeroPosition_R11:(id)sender {
+    [self.arm_R11_position_servo1 setFloatValue:0.0];
+    [self.arm_R11_position_servo2 setFloatValue:0.0];
+    [self.arm_R11_position_servo3 setFloatValue:0.0];
+    [self.arm_R11_position_servo4 setFloatValue:0.0];
+    [self.arm_R11_position_servo5 setFloatValue:0.0];
+    [self.arm_R11_position_servo6 setFloatValue:0.0];
+    [self.arm_R11_position_servo7 setFloatValue:0.0];
+    
     [self.robMainViewController.serialBox zeroPosition_R11:sender];
+}
+
+- (IBAction)calibrateGripper_R11:(id)sender {
+    [self.robMainViewController.serialBox calibrateGripper_R11:sender];
 }
 
 - (IBAction) openGripper_R11:(id)sender {
@@ -141,8 +153,8 @@
 
 - (IBAction)update_arm_R11_Action:(id)sender {
     
-    double force = [self.arm_R11_force doubleValue];
-    self.arm_R11_force_label.stringValue = [NSString stringWithFormat:@"%f", force];
+    int force = [self.arm_R11_force intValue];
+    self.arm_R11_force_label.stringValue = [NSString stringWithFormat:@"%i", force];
     
     //-----
     
@@ -188,7 +200,19 @@
 }
 
 - (IBAction) zeroPosition_L10:(id)sender {
+    [self.arm_L10_position_servo1 setFloatValue:0.0];
+    [self.arm_L10_position_servo2 setFloatValue:0.0];
+    [self.arm_L10_position_servo3 setFloatValue:0.0];
+    [self.arm_L10_position_servo4 setFloatValue:0.0];
+    [self.arm_L10_position_servo5 setFloatValue:0.0];
+    [self.arm_L10_position_servo6 setFloatValue:0.0];
+    [self.arm_L10_position_servo7 setFloatValue:0.0];
+    
     [self.robMainViewController.serialBox zeroPosition_L10:sender];
+}
+
+- (IBAction)calibrateGripper_L10:(id)sender {
+    [self.robMainViewController.serialBox calibrateGripper_L10:sender];
 }
 
 - (IBAction) openGripper_L10:(id)sender {
@@ -200,8 +224,8 @@
 }
 
 - (IBAction)update_arm_L10_Action:(id)sender {
-    double force = [self.arm_L10_force doubleValue];
-    self.arm_L10_force_label.stringValue = [NSString stringWithFormat:@"%f", force];
+    int force = [self.arm_L10_force intValue];
+    self.arm_L10_force_label.stringValue = [NSString stringWithFormat:@"%i", force];
     
     //-----
     

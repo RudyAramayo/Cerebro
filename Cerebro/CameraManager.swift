@@ -136,13 +136,14 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     }
     
     @objc func utcCameraIsOnline() {
-        do {
-            print("UTCCameraIsOnline")
-            try stopSession()
-            try startSession()
-        } catch {
-            print("error with starting UTC Camera ")
-        }
+        //These attempts to auto bind the camera are failing...
+//        do {
+//            print("UTCCameraIsOnline")
+//            try stopSession()
+//            try startSession()
+//        } catch {
+//            print("error with starting UTC Camera ")
+//        }
 //        if let camera = deviceDiscoverySession?.devices.first ?? AVCaptureDevice.default(for: .video) {
 //            do {
 //                try prepareCamera(for: camera)

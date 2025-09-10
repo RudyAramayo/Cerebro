@@ -1,5 +1,6 @@
 from amber_api.amber_robot import Amber_Robot
 import argparse
+import time
 
 parser = argparse.ArgumentParser(description="Example of argparse with default values.")
 parser.add_argument("--cmd_time", type=float, default=2, help="Time to execute the command (default: %(default)s)")
@@ -36,10 +37,6 @@ print(f"port {args.port}")
 cmd_time = args.cmd_time
 cmd_sleep = args.cmd_sleep
 
-pre_sleep = 0
-post_sleep = cmd_time + cmd_sleep
-
-
 servo1 = args.servo1
 servo2 = args.servo2
 servo3 = args.servo3
@@ -54,52 +51,23 @@ PORT = args.port
 # Set joint count
 joint_count = 7
 
+time.sleep(cmd_sleep)
+
 arm = Amber_Robot(IP_ADDR, PORT, joint_count=joint_count)
-print(f"The robotic arm is now in mode{arm.get_mode()} ")
+#print(f"The robotic arm is now in mode{arm.get_mode()} ")
 # Set robot to Position Mode
-arm.set_position_mode()
+#arm.set_position_mode()
 # Get status from robot
-j_pos, c_pos = arm.get_status()
+#j_pos, c_pos = arm.get_status()
 
-print(f"Joint Position [1,2,3,4,5,6,7] = {j_pos})")
-print(f"Cartesian Position [X,Y,Z,Roll,Pitch,Yaw] = {c_pos}")
-print(f"The robotic arm is now in mode{arm.get_mode()} ")
+#print(f"Joint Position [1,2,3,4,5,6,7] = {j_pos})")
+#print(f"Cartesian Position [X,Y,Z,Roll,Pitch,Yaw] = {c_pos}")
+#print(f"The robotic arm is now in mode{arm.get_mode()} ")
 
-print("Move Joint to [1,1,1,1,1,1,1]")
+#print("Move Joint to [1,1,1,1,1,1,1]")
 # Move Joint
-j_target = [0, 0, 0, 0, 1, 0, 0]  # Joint Position [1,2,3,4,5,6,7]
-arm.move_j(j_target, duration=3)
+j_target = [servo1, servo2, servo3, servo4, servo5, servo6, servo7]  # Joint Position [1,2,3,4,5,6,7]
+arm.move_j(j_target, duration=cmd_time)
 # Wait until finish
-print("Success?")
-print(arm.wait_for_joint(j_target))  # True = pass, False = timeout
-
-
-print("Move Joint to Zero")
-arm.move_zero()
-arm.wait_for_joint([0, 0, 0, 0, 0, 0, 0])
-
-#print("Move Cartesian coordinates")
- # Move Cartesian coordinates
-#c_target = [0, 0, 0.4, 0.2, 0, 0]  # Cartesian Position [X,Y,Z,Roll,Pitch,Yaw]
-#print("Is inverse kinematics correct?")
-#print(arm.move_c(c_target, duration=3))
- # Wait until finish
 #print("Success?")
-#print(arm.wait_for_cartesian(c_target))  # True = pass, False = timeout
-#print("Move Joint to Zero")
- # Move Back to Zero
-#arm.move_zero()
- # Set limit
-#arm.joint_upper_limit = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5,0.5]
- # Default =  [2.0944, 2.0944, 2.0944, 2.0944, 2.0944, 2.0944, 2.0944]
-#arm.joint_lower_limit = [-1, -1, -1, -1, -1, -1, -1]
- # Default =  [-2.0944, -2.0944, -2.0944, -2.0944, -2.0944, -2.0944, -2.0944]
-
-#j_target = [1, 1, 1, 1, 1, 1, 1]
-#print(arm.move_j(j_target, duration=3))
-# Will not move because it exceeds the limit
-
-#c_target = [0, 0, 0.8, 0.0, 0, 0]
-#print("Is inverse kinematics correct?")
-#print(arm.move_c(c_target, duration=3))
-# Will not move because it exceeds the limit
+#print(arm.wait_for_joint(j_target))  # True = pass, False = timeout

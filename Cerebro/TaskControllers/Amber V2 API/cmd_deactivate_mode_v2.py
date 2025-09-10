@@ -17,12 +17,12 @@ PORT = args.port
 joint_count = 7
 
 arm = Amber_Robot(IP_ADDR, PORT, joint_count=joint_count)
-#print(f"The robotic arm is now in mode{arm.get_mode()} ")
-# Set robot to Position Mode
-arm.set_position_mode()
+print(f"The robotic arm is now in mode{arm.get_mode()} ")
+# Set robot to inactive Mode
+arm.set_inactive_mode()
 # Get status from robot
-#j_pos, c_pos = arm.get_status()
+j_pos, c_pos = arm.get_status()
 
-#print(f"Joint Position [1,2,3,4,5,6,7] = {j_pos})")
-#print(f"Cartesian Position [X,Y,Z,Roll,Pitch,Yaw] = {c_pos}")
-#print(f"The robotic arm is now in mode{arm.get_mode()} ")
+print(f"Joint Position [1,2,3,4,5,6,7] = {j_pos})")
+print(f"Cartesian Position [X,Y,Z,Roll,Pitch,Yaw] = {c_pos}")
+print(f"The robotic arm is now in mode{arm.get_mode()} ")

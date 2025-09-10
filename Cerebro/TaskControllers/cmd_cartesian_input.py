@@ -40,10 +40,6 @@ print(f"port {args.port}")
 cmd_time = args.cmd_time
 cmd_sleep = args.cmd_sleep
 
-pre_sleep = 0
-post_sleep = cmd_time + cmd_sleep
-
-
 position_x = args.pos_x
 position_y = args.pos_y
 position_z = args.pos_z
@@ -99,9 +95,9 @@ tmp_1.rpy[2] = rot_y#0.5
 #tmp_1.arm_angle = 0.7
 tmp_1.time = cmd_time#2.0
 
-time.sleep(pre_sleep)
+time.sleep(cmd_sleep)
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-s.bind(("0.0.0.0", 12321))
+#s.bind(("0.0.0.0", 12321))
 s.sendto(tmp_1, (IP_ADDR, args.port))
 
 data, addr = s.recvfrom(1024)
@@ -112,4 +108,3 @@ print("Received: cmd_no={:d}, length={:d}, "
                                           payloadR.length,
                                           payloadR.counter,
                                           payloadR.respond, ))
-time.sleep(post_sleep)

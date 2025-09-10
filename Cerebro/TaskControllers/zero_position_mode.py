@@ -11,14 +11,6 @@ Ref: https://github.com/MrAsana/AMBER_B1_ROS2/wiki/SDK-&-API---UDP-Ethernet-Prot
 parser = argparse.ArgumentParser(description="Example of argparse with default values.")
 parser.add_argument("--cmd_time", type=float, default=2, help="Time to execute the command (default: %(default)s)")
 parser.add_argument("--cmd_sleep", type=float, default=2, help="Time to sleep after command execution (default: %(default)s)")
-parser.add_argument("--servo1", type=float, default=0.0, help="Set position of servo 1")
-parser.add_argument("--servo2", type=float, default=0.0, help="Set position of servo 2")
-parser.add_argument("--servo3", type=float, default=0.0, help="Set position of servo 3")
-parser.add_argument("--servo4", type=float, default=0.0, help="Set position of servo 4")
-parser.add_argument("--servo5", type=float, default=0.0, help="Set position of servo 5")
-parser.add_argument("--servo6", type=float, default=0.0, help="Set position of servo 6")
-parser.add_argument("--servo7", type=float, default=0.0, help="Set position of servo 7")
-parser.add_argument("--servo8", type=float, default=0.0, help="Set position of servo 8")
 
 parser.add_argument("--ip", type=str, default="10.0.0.5", help="IP (default: %(default)s)")
 parser.add_argument("--port", type=int, default=26002, help="IP (default: %(default)s)")
@@ -28,14 +20,6 @@ args = parser.parse_args()
 
 print(f"cmd_time {args.cmd_time}")
 print(f"cmd_sleep {args.cmd_sleep}")
-print(f"servo1 {args.servo1}")
-print(f"servo2 {args.servo2}")
-print(f"servo3 {args.servo3}")
-print(f"servo4 {args.servo4}")
-print(f"servo5 {args.servo5}")
-print(f"servo6 {args.servo6}")
-print(f"servo7 {args.servo7}")
-print(f"servo8 {args.servo8}")
 
 print(f"ip {args.ip}")
 print(f"port {args.port}")
@@ -43,17 +27,14 @@ print(f"port {args.port}")
 cmd_time = args.cmd_time
 cmd_sleep = args.cmd_sleep
 
-pre_sleep = 0
-pre_sleep = 0
-
-servo1 = args.servo1
-servo2 = args.servo2
-servo3 = args.servo3
-servo4 = args.servo4
-servo5 = args.servo5
-servo6 = args.servo6
-servo7 = args.servo7
-servo8 = args.servo8
+servo1 = 0
+servo2 = 0
+servo3 = 0
+servo4 = 0
+servo5 = 0
+servo6 = 0
+servo7 = 0
+servo8 = 0
 
 IP_ADDR = args.ip#"10.0.0.5"                           # ROS master's IP address
 PORT = args.port
@@ -157,7 +138,7 @@ class robot_mode_data(Structure):                                   # ctypes str
 #tmp_1.time = cmd_time
 
 
-time.sleep(pre_sleep)
+time.sleep(cmd_sleep)
 
 #s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 #s.bind(("0.0.0.0", 12321))
@@ -173,7 +154,7 @@ time.sleep(pre_sleep)
 #                                          payloadR.respond, ))
 
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)                # Standard socket processes
-#s.bind(("0.0.0.0", 12321))
+s.bind(("0.0.0.0", 12321))
 payloadS = robot_joint_position(4, 44, 114514,                        # Fill struct for send with numbers
                                 servo1, servo2, servo3, servo4, servo5, servo6, servo7, servo8, cmd_time)          # Unit of angle: rad, 1 rad ≈ 57.296°
 s.sendto(payloadS, (IP_ADDR, PORT))                                # Default port is 25001
@@ -220,4 +201,4 @@ try:
                   payloadR.Yaw_pos, payloadR.X_speed, payloadR.Y_speed, payloadR.Z_speed, payloadR.Roll_speed,
                   payloadR.Pitch_speed,payloadR.Yaw_speed, payloadR.Arm_Angle))
 except socket.timeout:
-    print("socket timeout")
+        return False

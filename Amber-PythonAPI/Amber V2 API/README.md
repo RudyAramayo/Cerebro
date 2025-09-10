@@ -68,6 +68,24 @@ The supported modes are shown in the table below
 
 When switching modes, the robot arm will instantly cut off power for a moment. If it is not at the zero position, it may easily cause personal injury or property damage.
 
+
+### set_inactive_mode()
+
+It exit active mode. Be careful as the arm will collapse so consider parking it first.
+
+Using this function no longer requires manually enter active mode anymore
+
+```python
+arm.set_inactive_mode()
+```
+**Parameter**
+
+none
+
+**Return value**
+
+Boolean, True=success, False=failure
+
 ### set_position_mode()
 
 It will entering active mode and then entering position mode.
@@ -76,6 +94,24 @@ Using this function no longer requires manually enter active mode anymore
 
 ```python
 arm.set_position_mode()
+```
+
+**Parameter**
+
+none
+
+**Return value**
+
+Boolean, True=success, False=failure
+
+### set_speed_mode()
+
+It will entering active mode and then entering speed mode.
+
+Using this function no longer requires manually enter active mode anymore
+
+```python
+arm.set_speed_mode()
 ```
 
 **Parameter**

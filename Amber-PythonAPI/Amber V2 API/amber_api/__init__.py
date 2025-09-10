@@ -7,5 +7,8 @@ from amber_api.basic_cmd.cmd_10 import set_mode
 from amber_api.basic_cmd.cmd_110 import get_mode
 from amber_api.advanced_function import wait_for_joint
 from amber_api.advanced_function import wait_for_cartesian
+from amber_api.advanced_function import set_inactive_mode
 from amber_api.advanced_function import set_position_mode
+from amber_api.advanced_function import set_speed_mode
 from amber_api.advanced_function import set_current_mode
+

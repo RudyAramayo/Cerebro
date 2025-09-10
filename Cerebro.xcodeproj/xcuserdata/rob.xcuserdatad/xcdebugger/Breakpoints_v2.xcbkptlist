@@ -478,8 +478,8 @@
             filePath = "Cerebro/CameraManager.swift"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "214"
-            endingLineNumber = "214"
+            startingLineNumber = "215"
+            endingLineNumber = "215"
             landmarkName = "prepareCamera(for:)"
             landmarkType = "7">
          </BreakpointContent>
@@ -558,8 +558,8 @@
             filePath = "Cerebro/AppDelegate.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "94"
-            endingLineNumber = "94"
+            startingLineNumber = "114"
+            endingLineNumber = "114"
             landmarkName = "-utcWebCamCheck"
             landmarkType = "7">
          </BreakpointContent>
@@ -574,8 +574,8 @@
             filePath = "Cerebro/AppDelegate.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "100"
-            endingLineNumber = "100"
+            startingLineNumber = "120"
+            endingLineNumber = "120"
             landmarkName = "-checkIfUTCWebcamIsOnline"
             landmarkType = "7">
          </BreakpointContent>
@@ -590,8 +590,8 @@
             filePath = "Cerebro/AppDelegate.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "194"
-            endingLineNumber = "194"
+            startingLineNumber = "214"
+            endingLineNumber = "214"
             landmarkName = "-checkIfUTCWebCamIsOnline_SUDO"
             landmarkType = "7">
          </BreakpointContent>
@@ -606,8 +606,8 @@
             filePath = "Cerebro/CameraManager.swift"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "187"
-            endingLineNumber = "187"
+            startingLineNumber = "188"
+            endingLineNumber = "188"
             landmarkName = "deviceConnected(_:)"
             landmarkType = "7">
          </BreakpointContent>
@@ -743,32 +743,48 @@
       <BreakpointProxy
          BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
          <BreakpointContent
-            uuid = "49FE7B82-1861-4DA8-B46B-D8B22D49BFE5"
+            uuid = "BAA98622-613C-4147-988A-15D82D936104"
             shouldBeEnabled = "Yes"
             ignoreCount = "0"
             continueAfterRunningActions = "No"
-            filePath = "Cerebro/ROBSerialBox.m"
+            filePath = "Cerebro/AppDelegate.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "1675"
-            endingLineNumber = "1675"
-            landmarkName = "-set_position_mode_v2:port:"
+            startingLineNumber = "50"
+            endingLineNumber = "50"
+            landmarkName = "-installAmberPythonZipFolderIntoResources"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>
       <BreakpointProxy
          BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
          <BreakpointContent
-            uuid = "56511325-3526-4BD1-9865-3A626C2DC2C2"
+            uuid = "54DC461C-44C6-4A83-A0BD-BCC60ACB5AB1"
             shouldBeEnabled = "Yes"
             ignoreCount = "0"
             continueAfterRunningActions = "No"
             filePath = "Cerebro/ROBSerialBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "1749"
-            endingLineNumber = "1749"
-            landmarkName = "-update_arm_position_v1:port:"
+            startingLineNumber = "1888"
+            endingLineNumber = "1888"
+            landmarkName = "-update_arm_cartesian_v1:port:"
+            landmarkType = "7">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "A7FDCC58-B102-48CA-853C-F2BB096063A5"
+            shouldBeEnabled = "No"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "Cerebro/ROBTorsoControlsViewController.m"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "181"
+            endingLineNumber = "181"
+            landmarkName = "-update_arm_R11_Action:"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>
