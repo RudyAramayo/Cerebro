@@ -40,6 +40,8 @@ protocol CameraManagerProtocol: AnyObject {
     
     func startSession() throws
     func stopSession() throws
+    func bindCamera() throws
+    func bindCameraRebootSession() throws
 }
 
 final class CameraManager: NSObject, CameraManagerProtocol {
@@ -66,8 +68,26 @@ final class CameraManager: NSObject, CameraManagerProtocol {
         initializeCameraDiscoverySession()
         
         //initialize existing Luxonis UTC camera...
-        //let utcNotification = NSNotification.Name.init("UTCWebcamIsOnline")
-        //NotificationCenter.default.addObserver(self, selector: #selector(utcCameraIsOnline), name:utcNotification, object: nil)
+        let utcNotification = NSNotification.Name.init("UTCWebcamIsOnline")
+        NotificationCenter.default.addObserver(self, selector: #selector(utcCameraIsOnline), name:utcNotification, object: nil)
+        if let camera = deviceDiscoverySession?.devices.first ?? AVCaptureDevice.default(for: .video) {
+            try prepareCamera(for: camera)
+        }
+    }
+    
+    func bindCamera() throws {
+        print("BindCamera")
+        initializeCameraDiscoverySession()
+        if let camera = deviceDiscoverySession?.devices.first ?? AVCaptureDevice.default(for: .video) {
+            try prepareCamera(for: camera)
+        }
+    }
+    
+    func bindCameraRebootSession() throws {
+        print("BindCamera")
+        try self.stopSession()
+        try self.startSession()
+        initializeCameraDiscoverySession()
         if let camera = deviceDiscoverySession?.devices.first ?? AVCaptureDevice.default(for: .video) {
             try prepareCamera(for: camera)
         }
@@ -103,19 +123,26 @@ final class CameraManager: NSObject, CameraManagerProtocol {
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(deviceConnected(_:)),
-            name: .AVCaptureDeviceWasConnected,
+            name: AVCaptureDevice.wasConnectedNotification,
             object: nil
         )
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(deviceDisconnected(_:)),
-            name: .AVCaptureDeviceWasDisconnected,
+            name: AVCaptureDevice.wasDisconnectedNotification,
             object: nil
         )
 
     }
     
-//    @objc func utcCameraIsOnline() {
+    @objc func utcCameraIsOnline() {
+        do {
+            print("UTCCameraIsOnline")
+            try stopSession()
+            try startSession()
+        } catch {
+            print("error with starting UTC Camera ")
+        }
 //        if let camera = deviceDiscoverySession?.devices.first ?? AVCaptureDevice.default(for: .video) {
 //            do {
 //                try prepareCamera(for: camera)
@@ -123,7 +150,7 @@ final class CameraManager: NSObject, CameraManagerProtocol {
 //                print("failed to prepare utc camera \(error)")
 //            }
 //        }
-//    }
+    }
     
     // KVO callback
     override func observeValue(

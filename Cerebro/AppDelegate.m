@@ -129,7 +129,7 @@
         [self.utcWebCamCheckTimer invalidate];
         self.utcWebCamCheckTimer = nil;
         
-        //[[NSNotificationCenter defaultCenter] postNotificationName:@"UTCWebcamIsOnline" object:nil];
+        [[NSNotificationCenter defaultCenter] postNotificationName:@"UTCWebcamIsOnline" object:nil];
     } else {
         NSLog(@"Error: UTC Webcam is not running");
         self.utcWebCamIsOnline = NO;

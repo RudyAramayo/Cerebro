@@ -842,7 +842,7 @@
     [self.torsoControlsWindowController showWindow:self]; // show the window}
     self.torsoControlsViewController = (ROBTorsoControlsViewController *)self.torsoControlsWindowController.contentViewController;
     [self.torsoControlsViewController setRobMainViewController:self];
-    [self.torsoControlsViewController bindArm_R11_controls];
+    [self.torsoControlsViewController bindArm_controls];
 }
 
 

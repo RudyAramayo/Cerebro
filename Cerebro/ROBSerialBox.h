@@ -58,6 +58,8 @@
 @property (readwrite, assign) NSButton *exitSafeStartWaistRotationButton;
 @property (readwrite, assign) NSButton *energizeWaistRotationButton;
 
+@property (readwrite, retain) NSSlider *arm_R11_force;
+
 @property (readwrite, retain) NSSlider *arm_R11_cmdTime;
 @property (readwrite, retain) NSSlider *arm_R11_cmdSleep;
 @property (readwrite, retain) NSSlider *arm_R11_positionX;
@@ -67,6 +69,36 @@
 @property (readwrite, retain) NSSlider *arm_R11_pitch;
 @property (readwrite, retain) NSSlider *arm_R11_yaw;
 
+@property (readwrite, retain) NSSlider *arm_R11_position_cmdTime;
+@property (readwrite, retain) NSSlider *arm_R11_position_cmdSleep;
+@property (readwrite, retain) NSSlider *arm_R11_position_servo1;
+@property (readwrite, retain) NSSlider *arm_R11_position_servo2;
+@property (readwrite, retain) NSSlider *arm_R11_position_servo3;
+@property (readwrite, retain) NSSlider *arm_R11_position_servo4;
+@property (readwrite, retain) NSSlider *arm_R11_position_servo5;
+@property (readwrite, retain) NSSlider *arm_R11_position_servo6;
+@property (readwrite, retain) NSSlider *arm_R11_position_servo7;
+
+@property (readwrite, retain) NSSlider *arm_L10_force;
+
+@property (readwrite, retain) NSSlider *arm_L10_cartesian_cmdTime;
+@property (readwrite, retain) NSSlider *arm_L10_cartesian_cmdSleep;
+@property (readwrite, retain) NSSlider *arm_L10_cartesian_positionX;
+@property (readwrite, retain) NSSlider *arm_L10_cartesian_positionY;
+@property (readwrite, retain) NSSlider *arm_L10_cartesian_positionZ;
+@property (readwrite, retain) NSSlider *arm_L10_cartesian_roll;
+@property (readwrite, retain) NSSlider *arm_L10_cartesian_pitch;
+@property (readwrite, retain) NSSlider *arm_L10_cartesian_yaw;
+
+@property (readwrite, retain) NSSlider *arm_L10_position_cmdTime;
+@property (readwrite, retain) NSSlider *arm_L10_position_cmdSleep;
+@property (readwrite, retain) NSSlider *arm_L10_position_servo1;
+@property (readwrite, retain) NSSlider *arm_L10_position_servo2;
+@property (readwrite, retain) NSSlider *arm_L10_position_servo3;
+@property (readwrite, retain) NSSlider *arm_L10_position_servo4;
+@property (readwrite, retain) NSSlider *arm_L10_position_servo5;
+@property (readwrite, retain) NSSlider *arm_L10_position_servo6;
+@property (readwrite, retain) NSSlider *arm_L10_position_servo7;
 
 - (void) serialPortSelected_head;
 - (void) serialPortSelected_torso;
@@ -149,5 +181,26 @@
                                 arm_L_gripper:(NSString *)arm_L_gripper;
 
 
-- (IBAction)update_arm_R11_Action:(id)sender;
+
+#pragma mark - R11 actions
+- (IBAction)zeroPosition_R11:(id)sender;
+- (IBAction)openGripper_R11:(id)sender;
+- (IBAction)closeGripper_R11:(id)sender;
+- (IBAction)set_position_mode_R11:(id)sender;
+- (IBAction)set_current_mode_R11:(id)sender;
+- (IBAction)update_arm_R11_cartesian_Action:(id)sender;
+- (IBAction)update_arm_R11_position_Action:(id)sender;
+- (IBAction)deactivate_R11:(id)sender;
+
+#pragma mark - L10 actions
+
+- (IBAction)zeroPosition_L10:(id)sender;
+- (IBAction)openGripper_L10:(id)sender;
+- (IBAction)closeGripper_L10:(id)sender;
+- (IBAction)set_position_mode_L10:(id)sender;
+- (IBAction)set_current_mode_L10:(id)sender;
+- (IBAction)update_arm_L10_cartesian_Action:(id)sender;
+- (IBAction)update_arm_L10_position_Action:(id)sender;
+- (IBAction)deactivate_L10:(id)sender;
+
 @end

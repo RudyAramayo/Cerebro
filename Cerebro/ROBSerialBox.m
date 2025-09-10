@@ -179,7 +179,7 @@ typedef enum : NSUInteger {
     [NSThread sleepForTimeInterval:1];
     NSString *error = [self openSerialPort:kRHAPI_SERIAL_PORT_BASE baud:kRHAPI_BAUDRATE serialFileDescriptor:&serialFileDescriptor_base contextInt:kBaseSerialContext];
     [NSThread sleepForTimeInterval:1];
-
+    
     if(error!=nil) {
         [self refreshSerialList_base:error];
         [self appendToIncomingText_base:error];
@@ -188,27 +188,27 @@ typedef enum : NSUInteger {
         [self performSelectorInBackground:@selector(incomingTextUpdateThread_base:) withObject:[NSThread currentThread]];
     }
     /*
-    error = [self openSerialPort:kRHAPI_SERIAL_PORT_TORSO baud:kRHAPI_BAUDRATE serialFileDescriptor:&serialFileDescriptor_torso contextInt:kTorsoSerialContext];
-    
-    if(error!=nil) {
-        [self refreshSerialList_torso:error];
-        [self appendToIncomingText_torso:error];
-    } else {
-        [self refreshSerialList_torso:[self.serialListPullDown_torso titleOfSelectedItem]];
-        [self performSelectorInBackground:@selector(incomingTextUpdateThread_torso:) withObject:[NSThread currentThread]];
-    }
-    
-    
-    error = [self openSerialPort:kRHAPI_SERIAL_PORT_HEAD baud:kRHAPI_BAUDRATE serialFileDescriptor:&serialFileDescriptor_head contextInt:kHeadSerialContext];
-    
-    if(error!=nil) {
-        [self refreshSerialList_head:error];
-        [self appendToIncomingText_head:error];
-    } else {
-        [self refreshSerialList_head:[self.serialListPullDown_head titleOfSelectedItem]];
-        [self performSelectorInBackground:@selector(incomingTextUpdateThread_head:) withObject:[NSThread currentThread]];
-    }
-    */
+     error = [self openSerialPort:kRHAPI_SERIAL_PORT_TORSO baud:kRHAPI_BAUDRATE serialFileDescriptor:&serialFileDescriptor_torso contextInt:kTorsoSerialContext];
+     
+     if(error!=nil) {
+     [self refreshSerialList_torso:error];
+     [self appendToIncomingText_torso:error];
+     } else {
+     [self refreshSerialList_torso:[self.serialListPullDown_torso titleOfSelectedItem]];
+     [self performSelectorInBackground:@selector(incomingTextUpdateThread_torso:) withObject:[NSThread currentThread]];
+     }
+     
+     
+     error = [self openSerialPort:kRHAPI_SERIAL_PORT_HEAD baud:kRHAPI_BAUDRATE serialFileDescriptor:&serialFileDescriptor_head contextInt:kHeadSerialContext];
+     
+     if(error!=nil) {
+     [self refreshSerialList_head:error];
+     [self appendToIncomingText_head:error];
+     } else {
+     [self refreshSerialList_head:[self.serialListPullDown_head titleOfSelectedItem]];
+     [self performSelectorInBackground:@selector(incomingTextUpdateThread_head:) withObject:[NSThread currentThread]];
+     }
+     */
     [self connectMaestro];
     
     self.controllerTimer = [NSTimer scheduledTimerWithTimeInterval:0.1 target:self selector:@selector(renderController) userInfo:nil repeats:YES];
@@ -300,11 +300,11 @@ int maestroGetErrors(int fd)
             case 3:
                 while(readThreadRunning_maestro);
                 break;
-            
+                
             default:
                 break;
         }
-         
+        
         // wait for the reading thread to die
         
         
@@ -808,31 +808,31 @@ int maestroGetErrors(int fd)
 - (void) serialPortSelected_head
 {
     /*
-    // open the serial port
-    NSString *error = [self openSerialPort:[self.serialListPullDown_head titleOfSelectedItem] baud:kRHAPI_BAUDRATE serialFileDescriptor:&serialFileDescriptor_head contextInt:kHeadSerialContext];
-    
-    if(error!=nil) {
-        [self refreshSerialList_head:error];
-        [self appendToIncomingText_head:error];
-    } else {
-        [self refreshSerialList_head:[self.serialListPullDown_head titleOfSelectedItem]];
-        [self performSelectorInBackground:@selector(incomingTextUpdateThread_head:) withObject:[NSThread currentThread]];
-    }*/
+     // open the serial port
+     NSString *error = [self openSerialPort:[self.serialListPullDown_head titleOfSelectedItem] baud:kRHAPI_BAUDRATE serialFileDescriptor:&serialFileDescriptor_head contextInt:kHeadSerialContext];
+     
+     if(error!=nil) {
+     [self refreshSerialList_head:error];
+     [self appendToIncomingText_head:error];
+     } else {
+     [self refreshSerialList_head:[self.serialListPullDown_head titleOfSelectedItem]];
+     [self performSelectorInBackground:@selector(incomingTextUpdateThread_head:) withObject:[NSThread currentThread]];
+     }*/
 }
 
 - (void) serialPortSelected_torso
 {
     /*
-    // open the serial port
-    NSString *error = [self openSerialPort:[self.serialListPullDown_torso titleOfSelectedItem] baud:kRHAPI_BAUDRATE serialFileDescriptor:&serialFileDescriptor_torso contextInt:kTorsoSerialContext];
-    
-    if(error!=nil) {
-        [self refreshSerialList_torso:error];
-        [self appendToIncomingText_torso:error];
-    } else {
-        [self refreshSerialList_torso:[self.serialListPullDown_torso titleOfSelectedItem]];
-        [self performSelectorInBackground:@selector(incomingTextUpdateThread_torso:) withObject:[NSThread currentThread]];
-    }*/
+     // open the serial port
+     NSString *error = [self openSerialPort:[self.serialListPullDown_torso titleOfSelectedItem] baud:kRHAPI_BAUDRATE serialFileDescriptor:&serialFileDescriptor_torso contextInt:kTorsoSerialContext];
+     
+     if(error!=nil) {
+     [self refreshSerialList_torso:error];
+     [self appendToIncomingText_torso:error];
+     } else {
+     [self refreshSerialList_torso:[self.serialListPullDown_torso titleOfSelectedItem]];
+     [self performSelectorInBackground:@selector(incomingTextUpdateThread_torso:) withObject:[NSThread currentThread]];
+     }*/
 }
 
 - (void) serialPortSelected_base
@@ -855,32 +855,32 @@ int maestroGetErrors(int fd)
 - (void) serialPortSelected_maestro
 {
     /*
-    // open the serial port
-    NSString *error = [self openSerialPort:[self.serialListPullDown_maestro titleOfSelectedItem] baud:kRHAPI_MAESTRO_BAUDRATE serialFileDescriptor:&serialFileDescriptor_maestro contextInt:kMaestroSerialContext];
-    
-    if(error!=nil) {
-        [self refreshSerialList_maestro:error];
-        [self appendToIncomingText_maestro:error];
-    } else {
-        [self refreshSerialList_maestro:[self.serialListPullDown_maestro titleOfSelectedItem]];
-        [self performSelectorInBackground:@selector(incomingTextUpdateThread_maestro:) withObject:[NSThread currentThread]];
-    }*/
+     // open the serial port
+     NSString *error = [self openSerialPort:[self.serialListPullDown_maestro titleOfSelectedItem] baud:kRHAPI_MAESTRO_BAUDRATE serialFileDescriptor:&serialFileDescriptor_maestro contextInt:kMaestroSerialContext];
+     
+     if(error!=nil) {
+     [self refreshSerialList_maestro:error];
+     [self appendToIncomingText_maestro:error];
+     } else {
+     [self refreshSerialList_maestro:[self.serialListPullDown_maestro titleOfSelectedItem]];
+     [self performSelectorInBackground:@selector(incomingTextUpdateThread_maestro:) withObject:[NSThread currentThread]];
+     }*/
 }
 /*
-// JUST AN EXAMPLE OF CHANGING THE BAUD RATE FOR INFORMATIONAL PUROSES
-- (IBAction) baudAction: (id) cntrl {
-    if (serialFileDescriptor != -1) {
-        speed_t baudRate = kRHAPI_BAUDRATE;
-        
-        // if the new baud rate isn't possible, refresh the serial list
-        //   this will also deselect the current serial port
-        if(ioctl(serialFileDescriptor, IOSSIOSPEED, &baudRate)==-1) {
-            [self refreshSerialList:@"Error: Baud Rate out of bounds"];
-            [self appendToIncomingText_head:@"Error: Baud Rate out of bounds"];
-        }
-    }
-}
-*/
+ // JUST AN EXAMPLE OF CHANGING THE BAUD RATE FOR INFORMATIONAL PUROSES
+ - (IBAction) baudAction: (id) cntrl {
+ if (serialFileDescriptor != -1) {
+ speed_t baudRate = kRHAPI_BAUDRATE;
+ 
+ // if the new baud rate isn't possible, refresh the serial list
+ //   this will also deselect the current serial port
+ if(ioctl(serialFileDescriptor, IOSSIOSPEED, &baudRate)==-1) {
+ [self refreshSerialList:@"Error: Baud Rate out of bounds"];
+ [self appendToIncomingText_head:@"Error: Baud Rate out of bounds"];
+ }
+ }
+ }
+ */
 
 // action from refresh button
 - (IBAction) refreshAction: (id) cntrl {
@@ -940,22 +940,22 @@ int maestroGetErrors(int fd)
 
 
 /*
-CGPoint touchPadPoint = CGPointMake([touchPad_array[0] floatValue], [touchPad_array[1] floatValue]);
-float Lat = [geoPosition_array[0] floatValue];
-float Long = [geoPosition_array[1] floatValue];
-bool tredBrakeLock = [[command_components[8] componentsSeparatedByString:@"tredBrakeLock="][1] boolValue];
-bool flipper1 = [flipper1_array[0] boolValue];
-bool flipper2 = [flipper1_array[1] boolValue];
-bool flipper3 = [flipper1_array[2] boolValue];
-bool flipper4 = [flipper1_array[3] boolValue];
-bool lact1 = [lact_array[0] boolValue];
-bool lact2 = [lact_array[1] boolValue];
-bool lact3 = [lact_array[2] boolValue];
-float speed = [speed_array[0] floatValue];
-bool speed_playPause = [speed_array[1] boolValue];
-bool speed_forward_reverse = [speed_array[2] boolValue];
-NSString *textInput = [command_components[12] componentsSeparatedByString:@"TEXT="][1];
-*/
+ CGPoint touchPadPoint = CGPointMake([touchPad_array[0] floatValue], [touchPad_array[1] floatValue]);
+ float Lat = [geoPosition_array[0] floatValue];
+ float Long = [geoPosition_array[1] floatValue];
+ bool tredBrakeLock = [[command_components[8] componentsSeparatedByString:@"tredBrakeLock="][1] boolValue];
+ bool flipper1 = [flipper1_array[0] boolValue];
+ bool flipper2 = [flipper1_array[1] boolValue];
+ bool flipper3 = [flipper1_array[2] boolValue];
+ bool flipper4 = [flipper1_array[3] boolValue];
+ bool lact1 = [lact_array[0] boolValue];
+ bool lact2 = [lact_array[1] boolValue];
+ bool lact3 = [lact_array[2] boolValue];
+ float speed = [speed_array[0] floatValue];
+ bool speed_playPause = [speed_array[1] boolValue];
+ bool speed_forward_reverse = [speed_array[2] boolValue];
+ NSString *textInput = [command_components[12] componentsSeparatedByString:@"TEXT="][1];
+ */
 
 - (float) animateLeftToTargetSpeed:(float)newTargetSpeed //0-100
 {
@@ -984,7 +984,7 @@ NSString *textInput = [command_components[12] componentsSeparatedByString:@"TEXT
         self.actualSpeedR -= 1;
     //Testing to see what happens here!!!
     self.actualSpeedR = targetSpeed_x5;
-
+    
     return self.actualSpeedR/10;
 }
 
@@ -1058,7 +1058,7 @@ NSString *textInput = [command_components[12] componentsSeparatedByString:@"TEXT
         
     }
     //-----------------------------------------------------
-
+    
     
     if (touchPadPointL.x > -999 && touchPadPointL.y > -999)
     {
@@ -1089,7 +1089,7 @@ NSString *textInput = [command_components[12] componentsSeparatedByString:@"TEXT
         //actual_tred_speed_M2R = [NSString stringWithFormat:@"%04d", actual_speed_M2R];
         
         tredBrakeLockL = false;
-         //  Animate target_speed to the actual_speed values 0-255
+        //  Animate target_speed to the actual_speed values 0-255
         
         //replace255 with touchPadPointMagnitude --- speed is from 0-100
     }
@@ -1138,7 +1138,7 @@ NSString *textInput = [command_components[12] componentsSeparatedByString:@"TEXT
         
         motorDirection_forwardBackward_M1L = (speed_forward_reverse) ? @"+" : @"-";
         motorDirection_forwardBackward_M2R = (speed_forward_reverse) ? @"+" : @"-";
-    
+        
         tredBrakeLockL = false;
         tredBrakeLockR = false;
     }
@@ -1161,13 +1161,13 @@ NSString *textInput = [command_components[12] componentsSeparatedByString:@"TEXT
     
     
     NSString *base_command = [NSString stringWithFormat:@"~+000%i,%@%@,+000%i,%@%@,+000%i,%@%@,%@%@", (int)tredBrakeLockL,
-                         motorDirection_forwardBackward_M1L, actual_tred_speed_M1L, (int)tredBrakeLockR, motorDirection_forwardBackward_M2R,
-                         actual_tred_speed_M2R, (int)flipperBrakeLock, flipper_direction, actual_flipper_speed, lactDirection, lactSpeed];
+                              motorDirection_forwardBackward_M1L, actual_tred_speed_M1L, (int)tredBrakeLockR, motorDirection_forwardBackward_M2R,
+                              actual_tred_speed_M2R, (int)flipperBrakeLock, flipper_direction, actual_flipper_speed, lactDirection, lactSpeed];
     
     //NSLog(@"command = %@", command);
     
     [self writeString:base_command serialFileDescriptor:serialFileDescriptor_base];
-  
+    
     //******
     //Shows me i need to keep pulsing the data
     //Only worked with old wiring system which is now severed
@@ -1228,37 +1228,78 @@ NSString *textInput = [command_components[12] componentsSeparatedByString:@"TEXT
     
     
     /*const char * device = [kRHAPI_SERIAL_PORT_MAESTRO_COM cStringUsingEncoding:NSUTF8StringEncoding];
-    
-    int fd = open(device, O_RDWR | O_NOCTTY);
-    if (fd == -1)
-    {
-        perror(device);
-        return;
-    }
-    
-
-    struct termios options;
-    tcgetattr(fd, &options);
-    options.c_iflag &= ~(INLCR | IGNCR | ICRNL | IXON | IXOFF);
-    options.c_oflag &= ~(ONLCR | OCRNL);
-    options.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
-    tcsetattr(fd, TCSANOW, &options);
-    
-    int position = maestroGetPosition(fd, 0);
-    printf("Current position is %d.\n", position);
-    
-    int target = (position < 6000) ? 7000 : 5000;
-    printf("Setting target to %d (%d us).\n", target, target/4);
-    maestroSetTarget(fd, 0, target);
-    
-    close(fd);
-    */
+     
+     int fd = open(device, O_RDWR | O_NOCTTY);
+     if (fd == -1)
+     {
+     perror(device);
+     return;
+     }
+     
+     
+     struct termios options;
+     tcgetattr(fd, &options);
+     options.c_iflag &= ~(INLCR | IGNCR | ICRNL | IXON | IXOFF);
+     options.c_oflag &= ~(ONLCR | OCRNL);
+     options.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
+     tcsetattr(fd, TCSANOW, &options);
+     
+     int position = maestroGetPosition(fd, 0);
+     printf("Current position is %d.\n", position);
+     
+     int target = (position < 6000) ? 7000 : 5000;
+     printf("Setting target to %d (%d us).\n", target, target/4);
+     maestroSetTarget(fd, 0, target);
+     
+     close(fd);
+     */
     
     
     
     //Track something!!! move this to affect SimpleUserTracker data
     //4000-8000
     /*
+     NSString *head_pan = @"5875"; //6000-left 5800-right 5875-center
+     NSString *head_tilt = @"5000";
+     
+     NSString *arm_R_shoulder_pan = @"7000"; //5000 points downward 7000 up
+     NSString *arm_R_shoulder_tilt = @"6000";
+     NSString *arm_R_elbow = @"6000";
+     NSString *arm_R_wrist_pan = @"6000";
+     NSString *arm_R_wrist_tilt = @"8000";
+     NSString *arm_R_gripper = @"6000";
+     
+     NSString *arm_L_shoulder_pan = @"8000"; //4000 rotate 6000 neutral up backward 7000 points down
+     NSString *arm_L_shoulder_tilt = @"6000";
+     NSString *arm_L_elbow = @"6000";
+     NSString *arm_L_wrist_pan = @"4000";
+     NSString *arm_L_wrist_tilt = @"6000";
+     NSString *arm_L_gripper = @"6000";
+     */
+    /*
+     NSString *torso_command = [NSString stringWithFormat:@"~%@,%@,%@,%@,%@,%@,%@,%@,%@,%@,%@,%@,%@,%@",
+     head_pan,
+     head_tilt,
+     arm_R_shoulder_pan,
+     arm_R_shoulder_tilt,
+     arm_R_elbow,
+     arm_R_wrist_pan,
+     arm_R_wrist_tilt,
+     arm_R_gripper,
+     arm_L_shoulder_pan,
+     arm_L_shoulder_tilt,
+     arm_L_elbow,
+     arm_L_wrist_pan,
+     arm_L_wrist_tilt,
+     arm_L_gripper];
+     
+     [self writeString:torso_command serialFileDescriptor:serialFileDescriptor_torso];*/
+}
+
+- (void) debugTorsoCommandStrings
+{
+    //~5875,5000,7000,6000,6000,6000,8000,6000,8000,6000,6000,4000,6000,6000
+    
     NSString *head_pan = @"5875"; //6000-left 5800-right 5875-center
     NSString *head_tilt = @"5000";
     
@@ -1275,8 +1316,8 @@ NSString *textInput = [command_components[12] componentsSeparatedByString:@"TEXT
     NSString *arm_L_wrist_pan = @"4000";
     NSString *arm_L_wrist_tilt = @"6000";
     NSString *arm_L_gripper = @"6000";
-    */
-    /*
+    
+    
     NSString *torso_command = [NSString stringWithFormat:@"~%@,%@,%@,%@,%@,%@,%@,%@,%@,%@,%@,%@,%@,%@",
                                head_pan,
                                head_tilt,
@@ -1293,47 +1334,6 @@ NSString *textInput = [command_components[12] componentsSeparatedByString:@"TEXT
                                arm_L_wrist_tilt,
                                arm_L_gripper];
     
-    [self writeString:torso_command serialFileDescriptor:serialFileDescriptor_torso];*/
-}
-
-- (void) debugTorsoCommandStrings
-{
-    //~5875,5000,7000,6000,6000,6000,8000,6000,8000,6000,6000,4000,6000,6000
-
-    NSString *head_pan = @"5875"; //6000-left 5800-right 5875-center
-    NSString *head_tilt = @"5000";
- 
-    NSString *arm_R_shoulder_pan = @"7000"; //5000 points downward 7000 up
-    NSString *arm_R_shoulder_tilt = @"6000";
-    NSString *arm_R_elbow = @"6000";
-    NSString *arm_R_wrist_pan = @"6000";
-    NSString *arm_R_wrist_tilt = @"8000";
-    NSString *arm_R_gripper = @"6000";
- 
-    NSString *arm_L_shoulder_pan = @"8000"; //4000 rotate 6000 neutral up backward 7000 points down
-    NSString *arm_L_shoulder_tilt = @"6000";
-    NSString *arm_L_elbow = @"6000";
-    NSString *arm_L_wrist_pan = @"4000";
-    NSString *arm_L_wrist_tilt = @"6000";
-    NSString *arm_L_gripper = @"6000";
- 
-
-    NSString *torso_command = [NSString stringWithFormat:@"~%@,%@,%@,%@,%@,%@,%@,%@,%@,%@,%@,%@,%@,%@",
-                           head_pan,
-                           head_tilt,
-                           arm_R_shoulder_pan,
-                           arm_R_shoulder_tilt,
-                           arm_R_elbow,
-                           arm_R_wrist_pan,
-                           arm_R_wrist_tilt,
-                           arm_R_gripper,
-                           arm_L_shoulder_pan,
-                           arm_L_shoulder_tilt,
-                           arm_L_elbow,
-                           arm_L_wrist_pan,
-                           arm_L_wrist_tilt,
-                           arm_L_gripper];
-
     [self writeString:torso_command serialFileDescriptor:serialFileDescriptor_torso];
 }
 
@@ -1453,7 +1453,382 @@ NSString *textInput = [command_components[12] componentsSeparatedByString:@"TEXT
     }
 }
 
-- (IBAction)update_arm_R11_Action:(id)sender {
+#pragma mark - R11 actions
+- (IBAction)zeroPosition_R11:(id)sender {
+    [self zeroPosition:sender port:26002];
+}
+
+- (IBAction)openGripper_R11:(id)sender {
+    [self openGripper:sender port:26002 force:[self.arm_R11_force stringValue]];
+}
+
+- (IBAction)closeGripper_R11:(id)sender {
+    [self closeGripper:sender port:26002 force:[self.arm_R11_force stringValue]];
+}
+
+- (IBAction)set_position_mode_R11:(id)sender {
+    [self set_position_mode_v2:sender port: 26002];
+}
+
+- (IBAction)set_current_mode_R11:(id)sender {
+    [self set_current_mode_v2:sender port: 26002];
+}
+
+- (IBAction)update_arm_R11_cartesian_Action:(id)sender {
+    [self update_arm_cartesian_v1:sender port: 26002];
+}
+
+- (IBAction)update_arm_R11_position_Action:(id)sender {
+    [self update_arm_position_v1:sender port: 26002];
+}
+
+- (IBAction)deactivate_R11:(id)sender {
+    [self deactivate:(id)sender port: 26002];
+}
+
+#pragma mark - L10 actions
+
+- (IBAction)zeroPosition_L10:(id)sender {
+    [self zeroPosition:sender port:26001];
+}
+
+- (IBAction)openGripper_L10:(id)sender {
+    [self openGripper:sender port:26001 force:[self.arm_L10_force stringValue]];
+}
+
+- (IBAction)closeGripper_L10:(id)sender {
+    [self closeGripper:sender port:26001 force:[self.arm_L10_force stringValue]];
+}
+
+- (IBAction)set_position_mode_L10:(id)sender {
+    [self set_position_mode_v2:sender port: 26001];
+}
+
+- (IBAction)set_current_mode_L10:(id)sender {
+    [self set_current_mode_v2:sender port: 26001];
+}
+
+- (IBAction)update_arm_L10_cartesian_Action:(id)sender {
+    [self update_arm_cartesian_v1:sender port:26001];
+}
+
+- (IBAction)update_arm_L10_position_Action:(id)sender {
+    [self update_arm_position_v1:sender port:26001];
+}
+
+- (IBAction)deactivate_L10:(id)sender {
+    [self deactivate:(id)sender port: 26001];
+}
+
+#pragma mark -
+
+- (void) deactivate:(id)sender port:(int)port {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+        
+        NSMutableArray *arguments = @[].mutableCopy;
+        
+        NSString *zero_position_mode_v2 = [[NSBundle mainBundle] pathForResource:@"deactivate_mode_v2" ofType:@"py"];
+        //cmd_position_mode_v2.py --ip 10.0.0.5 --port 26002
+        
+        [arguments addObject:zero_position_mode_v2];
+        
+        
+        [arguments addObject:@"--ip"];
+        [arguments addObject:@"10.0.0.5"];
+        
+        [arguments addObject:@"--port"];
+        [arguments addObject:[NSString stringWithFormat:@"%i", port]];
+        
+        //NSLog(@"args = %@", arguments);
+        
+        NSTask *move_arm_task = [NSTask new];
+        
+        move_arm_task.launchPath = @"/Users/rob/rob_python/bin/python3";
+        move_arm_task.arguments = arguments;
+        
+        NSPipe *pipe = [NSPipe pipe];
+        move_arm_task.standardOutput = pipe;
+        move_arm_task.standardError = pipe;
+        
+        [move_arm_task launch];
+        
+        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        NSLog(@"deactivate_mode_v2: %@", output);
+    });
+}
+
+- (void) zeroPosition:(id)sender port:(int)port {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+        
+        NSMutableArray *arguments = @[].mutableCopy;
+        
+        NSString *zero_position_mode_v2 = [[NSBundle mainBundle] pathForResource:@"zero_position_mode_v2" ofType:@"py"];
+        //cmd_position_mode_v2.py --ip 10.0.0.5 --port 26002
+        
+        [arguments addObject:zero_position_mode_v2];
+        
+        
+        [arguments addObject:@"--ip"];
+        [arguments addObject:@"10.0.0.5"];
+        
+        [arguments addObject:@"--port"];
+        [arguments addObject:[NSString stringWithFormat:@"%i", port]];
+        
+        //NSLog(@"args = %@", arguments);
+        
+        NSTask *move_arm_task = [NSTask new];
+        
+        move_arm_task.launchPath = @"/Users/rob/rob_python/bin/python3";
+        move_arm_task.arguments = arguments;
+        
+        NSPipe *pipe = [NSPipe pipe];
+        move_arm_task.standardOutput = pipe;
+        move_arm_task.standardError = pipe;
+        
+        [move_arm_task launch];
+        
+        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        NSLog(@"zero_position_mode_v2: %@", output);
+    });
+}
+
+- (void) openGripper:(id)sender port:(int)port force:(NSString *)force {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+        
+        NSMutableArray *arguments = @[].mutableCopy;
+        
+        NSString *cmd_position_mode_v2 = [[NSBundle mainBundle] pathForResource:@"open_gripper_v2" ofType:@"py"];
+        //cmd_position_mode_v2.py --ip 10.0.0.5 --port 26002
+        
+        [arguments addObject:cmd_position_mode_v2];
+        
+        [arguments addObject:@"--force"];
+        [arguments addObject:force];
+        
+        [arguments addObject:@"--ip"];
+        [arguments addObject:@"10.0.0.5"];
+        
+        [arguments addObject:@"--port"];
+        [arguments addObject:[NSString stringWithFormat:@"%i", port]];
+        
+        //NSLog(@"args = %@", arguments);
+        
+        NSTask *move_arm_task = [NSTask new];
+        
+        move_arm_task.launchPath = @"/Users/rob/rob_python/bin/python3";
+        move_arm_task.arguments = arguments;
+        
+        NSPipe *pipe = [NSPipe pipe];
+        move_arm_task.standardOutput = pipe;
+        move_arm_task.standardError = pipe;
+        
+        [move_arm_task launch];
+        
+        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        NSLog(@"open_gripper_v2: %@", output);
+    });
+}
+
+- (void) closeGripper:(id)sender port:(int)port force:(NSString *)force {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+        
+        NSMutableArray *arguments = @[].mutableCopy;
+        
+        NSString *cmd_position_mode_v2 = [[NSBundle mainBundle] pathForResource:@"close_gripper_v2" ofType:@"py"];
+        //cmd_position_mode_v2.py --ip 10.0.0.5 --port 26002
+        
+        [arguments addObject:cmd_position_mode_v2];
+        
+        [arguments addObject:@"--force"];
+        [arguments addObject:force];
+        
+        [arguments addObject:@"--ip"];
+        [arguments addObject:@"10.0.0.5"];
+        
+        [arguments addObject:@"--port"];
+        [arguments addObject:[NSString stringWithFormat:@"%i", port]];
+        
+        //NSLog(@"args = %@", arguments);
+        
+        NSTask *move_arm_task = [NSTask new];
+        
+        move_arm_task.launchPath = @"/Users/rob/rob_python/bin/python3";
+        move_arm_task.arguments = arguments;
+        
+        NSPipe *pipe = [NSPipe pipe];
+        move_arm_task.standardOutput = pipe;
+        move_arm_task.standardError = pipe;
+        
+        [move_arm_task launch];
+        
+        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        NSLog(@"close_gripper_v2: %@", output);
+    });
+}
+
+- (void)set_position_mode_v2:(id)sender port:(int)port {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+        
+        NSMutableArray *arguments = @[].mutableCopy;
+        
+        NSString *cmd_position_mode_v2 = [[NSBundle mainBundle] pathForResource:@"cmd_position_mode_v2" ofType:@"py"];
+        //cmd_position_mode_v2.py --ip 10.0.0.5 --port 26002
+        
+        [arguments addObject:cmd_position_mode_v2];
+        
+        
+        [arguments addObject:@"--ip"];
+        [arguments addObject:@"10.0.0.5"];
+        
+        [arguments addObject:@"--port"];
+        [arguments addObject:[NSString stringWithFormat:@"%i", port]];
+        
+        //NSLog(@"args = %@", arguments);
+        
+        NSTask *move_arm_task = [NSTask new];
+        
+        move_arm_task.launchPath = @"/Users/rob/rob_python/bin/python3";
+        move_arm_task.arguments = arguments;
+        
+        NSPipe *pipe = [NSPipe pipe];
+        move_arm_task.standardOutput = pipe;
+        move_arm_task.standardError = pipe;
+        
+        [move_arm_task launch];
+        
+        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        NSLog(@"cmd_position_mode_v2: %@", output);
+    });
+}
+
+- (void)set_current_mode_v2:(id)sender port:(int)port {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+        
+        
+        NSMutableArray *arguments = @[].mutableCopy;
+        
+        NSString *cmd_position_mode_v2 = [[NSBundle mainBundle] pathForResource:@"cmd_current_mode_v2" ofType:@"py"];
+        //cmd_position_mode_v2.py --ip 10.0.0.5 --port 26002
+        
+        [arguments addObject:cmd_position_mode_v2];
+        
+        
+        [arguments addObject:@"--ip"];
+        [arguments addObject:@"10.0.0.5"];
+        
+        [arguments addObject:@"--port"];
+        [arguments addObject:[NSString stringWithFormat:@"%i", port]];
+        
+        //NSLog(@"args = %@", arguments);
+        
+        NSTask *move_arm_task = [NSTask new];
+        
+        move_arm_task.launchPath = @"/Users/rob/rob_python/bin/python3";
+        move_arm_task.arguments = arguments;
+        
+        NSPipe *pipe = [NSPipe pipe];
+        move_arm_task.standardOutput = pipe;
+        move_arm_task.standardError = pipe;
+        
+        [move_arm_task launch];
+        
+        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        NSLog(@"cmd_current_mode_v2: %@", output);
+    });
+    
+}
+
+- (void) update_arm_position_v1:(id)sender port:(int)port {
+    
+    double cmdTime = [self.arm_R11_position_cmdTime doubleValue]/10.0;
+    double cmdSleep = [self.arm_R11_position_cmdSleep doubleValue]/10.0;
+    double servo1 = [self.arm_R11_position_servo1 doubleValue]/100.0;
+    double servo2 = [self.arm_R11_position_servo2 doubleValue]/100.0;
+    double servo3 = [self.arm_R11_position_servo3 doubleValue]/100.0;
+    double servo4 = [self.arm_R11_position_servo4 doubleValue]/100.0;
+    double servo5 = [self.arm_R11_position_servo5 doubleValue]/100.0;
+    double servo6 = [self.arm_R11_position_servo6 doubleValue]/100.0;
+    double servo7 = [self.arm_R11_position_servo7 doubleValue]/100.0;
+    
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+        
+        NSLog(@"arm_R11_servo1 = %f", servo1);
+        NSLog(@"arm_R11_servo2 = %f", servo2);
+        NSLog(@"arm_R11_servo3 = %f", servo3);
+        NSLog(@"arm_R11_servo4 = %f", servo4);
+        NSLog(@"arm_R11_servo5 = %f", servo5);
+        NSLog(@"arm_R11_servo6 = %f", servo6);
+        NSLog(@"arm_R11_servo7 = %f", servo7);
+        
+        
+        NSMutableArray *arguments = @[].mutableCopy;
+        
+        NSString *cmd_cartesian_input = [[NSBundle mainBundle] pathForResource:@"cmd_position_input" ofType:@"py"];
+        //cmd_cartesian_input.py --ip 10.0.0.5 --port 26002 --cmd_time 2 --cmd_sleep 2 --pos_x 0.1 --pos_y -0.33 --pos_z 0.2 --roll 0.0 --pitch -1.5 --yaw 0.5
+        //NSLog(@"cmd_cartesian_input = %@", cmd_cartesian_input);
+        
+        [arguments addObject:cmd_cartesian_input];
+        
+        
+        [arguments addObject:@"--ip"];
+        [arguments addObject:@"10.0.0.5"];
+        
+        [arguments addObject:@"--port"];
+        [arguments addObject:@"26002"];
+        
+        [arguments addObject:@"--cmd_time"];
+        [arguments addObject:[NSString stringWithFormat:@"%f", cmdTime]];
+        
+        [arguments addObject:@"--cmd_sleep"];
+        [arguments addObject:[NSString stringWithFormat:@"%f", cmdSleep]];
+        
+        [arguments addObject:@"--servo1"];
+        [arguments addObject:[NSString stringWithFormat:@"%f", servo1]];
+        
+        [arguments addObject:@"--servo2"];
+        [arguments addObject:[NSString stringWithFormat:@"%f", servo2]];
+        
+        [arguments addObject:@"--servo3"];
+        [arguments addObject:[NSString stringWithFormat:@"%f", servo3]];
+        
+        [arguments addObject:@"--servo4"];
+        [arguments addObject:[NSString stringWithFormat:@"%f", servo4]];
+        
+        [arguments addObject:@"--servo5"];
+        [arguments addObject:[NSString stringWithFormat:@"%f", servo5]];
+        
+        [arguments addObject:@"--servo6"];
+        [arguments addObject:[NSString stringWithFormat:@"%f", servo6]];
+        
+        [arguments addObject:@"--servo7"];
+        [arguments addObject:[NSString stringWithFormat:@"%f", servo7]];
+        
+        //NSLog(@"args = %@", arguments);
+        
+        NSTask *move_arm_task = [NSTask new];
+        
+        move_arm_task.launchPath = @"/Users/rob/rob_python/bin/python3";
+        move_arm_task.arguments = arguments;
+        
+        NSPipe *pipe = [NSPipe pipe];
+        move_arm_task.standardOutput = pipe;
+        move_arm_task.standardError = pipe;
+        
+        [move_arm_task launch];
+        
+        //NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+        //NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        //NSLog(@"output = %@", output);
+    });
+}
+
+- (void) update_arm_cartesian_v1:(id)sender port:(int)port {
     
     double cmdTime = [self.arm_R11_cmdTime doubleValue]/10.0;
     double cmdSleep = [self.arm_R11_cmdSleep doubleValue]/10.0;
@@ -1463,9 +1838,9 @@ NSString *textInput = [command_components[12] componentsSeparatedByString:@"TEXT
     double roll = [self.arm_R11_roll doubleValue]/100.0;
     double pitch = [self.arm_R11_pitch doubleValue]/100.0;
     double yaw = [self.arm_R11_yaw doubleValue]/100.0;
-        
+    
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-
+        
         NSLog(@"arm_R11_cmdTime = %f", cmdTime);
         NSLog(@"arm_R11_cmdSleep = %f", cmdSleep);
         NSLog(@"arm_R11_positionX = %f", posX);
@@ -1477,7 +1852,7 @@ NSString *textInput = [command_components[12] componentsSeparatedByString:@"TEXT
         
         
         NSMutableArray *arguments = @[].mutableCopy;
-
+        
         NSString *cmd_cartesian_input = [[NSBundle mainBundle] pathForResource:@"cmd_cartesian_input" ofType:@"py"];
         //cmd_cartesian_input.py --ip 10.0.0.5 --port 26002 --cmd_time 2 --cmd_sleep 2 --pos_x 0.1 --pos_y -0.33 --pos_z 0.2 --roll 0.0 --pitch -1.5 --yaw 0.5
         //NSLog(@"cmd_cartesian_input = %@", cmd_cartesian_input);
@@ -1533,6 +1908,8 @@ NSString *textInput = [command_components[12] componentsSeparatedByString:@"TEXT
         //NSLog(@"output = %@", output);
     });
 }
+
+#pragma mark -
 
 - (void) sendHeadCommand:(NSString *)command
 {

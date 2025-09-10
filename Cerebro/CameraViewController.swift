@@ -24,6 +24,33 @@ final class CameraViewController: NSViewController {
         }
     }
     
+    @IBAction func toggleCamera(_ sender: Any?) {
+        do {
+            print("ToggleCamera")
+            try cameraManager.stopSession()
+            try cameraManager.startSession()
+        } catch {
+            print(error.localizedDescription)
+        }
+    }
+    
+    @IBAction func bindCamera(_ sender: Any?) {
+        do {
+            try cameraManager.bindCamera()
+        } catch {
+            print(error.localizedDescription)
+        }
+    }
+    
+    @IBAction func bindCameaRebootSession(_ sender: Any?) {
+        do {
+            try cameraManager.bindCameraRebootSession()
+        } catch {
+            print(error.localizedDescription)
+        }
+    }
+    
+    
     override var representedObject: Any? {
         didSet {
             // Update the view, if already loaded.
