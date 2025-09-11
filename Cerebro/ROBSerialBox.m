@@ -1530,6 +1530,135 @@ int maestroGetErrors(int fd)
 
 #pragma mark -
 
+- (IBAction) sshIntoAmberMasterAndRunCore_R11:(id)sender {
+    NSTask *sshTask = [NSTask new];
+    [sshTask setLaunchPath:@"/usr/local/bin/sshpass"];
+    //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_R
+    [sshTask setArguments:@[@"-p", @"a", @"ssh", @"amber@10.0.0.5", @"/home/amber/R-11/amber_core_R"]];
+    NSPipe *pipe = [NSPipe pipe];
+    sshTask.standardOutput = pipe;
+    sshTask.standardError = pipe;
+    [sshTask launch];
+    
+    NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+    NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    NSLog(@"amberMaster R-11 Core: %@", output);
+ 
+    /*NSFileHandle *readFileHandle_R11 = [pipe fileHandleForReading];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(handlePipeData_R11:)
+                                                 name:NSFileHandleReadCompletionNotification
+                                               object:readFileHandle_R11];
+    [readFileHandle_R11 readInBackgroundAndNotify]; // Start the background reading process*/
+}
+
+- (IBAction) sshIntoAmberMasterAndRunCore_L10:(id)sender {
+    NSTask *sshTask = [NSTask new];
+    [sshTask setLaunchPath:@"/usr/local/bin/sshpass"];
+    //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_R
+    [sshTask setArguments:@[@"-p", @"a", @"ssh", @"amber@10.0.0.5", @"/home/amber/L-10/amber_core_L"]];
+    NSPipe *pipe = [NSPipe pipe];
+    sshTask.standardOutput = pipe;
+    sshTask.standardError = pipe;
+    [sshTask launch];
+    
+    NSFileHandle *readFileHandle_R11 = [pipe fileHandleForReading];
+    
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(handlePipeData_R11:)
+                                                 name:NSFileHandleReadCompletionNotification
+                                               object:readFileHandle_R11];
+    [readFileHandle_R11 readInBackgroundAndNotify]; // Start the background reading process
+}
+
+- (void)handlePipeData_R11:(NSNotification *)notification {
+    NSData *data = notification.userInfo[NSFileHandleNotificationDataItem];
+    if (data.length > 0) {
+        NSString *outputString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        NSLog(@"R11: %@", outputString);
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.amberMasterCoreOutput_R11.string = [self.amberMasterCoreOutput_R11.string stringByAppendingString:outputString];
+        });
+        
+        // Request more data if the task is still running
+        NSFileHandle *readHandle = notification.object;
+        [readHandle readInBackgroundAndNotify];
+    } else {
+        // End of file or task terminated
+        NSLog(@"End of task output.");
+        [[NSNotificationCenter defaultCenter] removeObserver:self
+                                                        name:NSFileHandleReadCompletionNotification
+                                                      object:notification.object];
+    }
+}
+
+- (void)handlePipeData_L10:(NSNotification *)notification {
+    NSData *data = notification.userInfo[NSFileHandleNotificationDataItem];
+    if (data.length > 0) {
+        NSString *outputString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        NSLog(@"L10: %@", outputString);
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.amberMasterCoreOutput_L10.string = [self.amberMasterCoreOutput_L10.string stringByAppendingString:outputString];
+        });
+        // Request more data if the task is still running
+        NSFileHandle *readHandle = notification.object;
+        [readHandle readInBackgroundAndNotify];
+    } else {
+        // End of file or task terminated
+        NSLog(@"End of task output.");
+        [[NSNotificationCenter defaultCenter] removeObserver:self
+                                                        name:NSFileHandleReadCompletionNotification
+                                                      object:notification.object];
+    }
+}
+
+- (IBAction) watch_position_out_R11:(id)sender {
+    [self watch_position_out:sender port:26002];
+}
+
+- (IBAction) watch_position_out_L10:(id)sender {
+    [self watch_position_out:sender port:26001];
+}
+
+- (void) watch_position_out:(id)sender port:(int)port {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+        
+        NSMutableArray *arguments = @[].mutableCopy;
+        
+        NSString *watch_position_out = [[NSBundle mainBundle] pathForResource:@"watch_position_out" ofType:@"py"];
+        //cmd_deactivate_mode_v2.py --ip 10.0.0.5 --port 26002
+        
+        [arguments addObject:watch_position_out];
+        
+        
+        [arguments addObject:@"--ip"];
+        [arguments addObject:@"10.0.0.5"];
+        
+        [arguments addObject:@"--port"];
+        [arguments addObject:[NSString stringWithFormat:@"%i", port]];
+        
+        NSLog(@"args = %@", arguments);
+        
+        NSTask *move_arm_task = [NSTask new];
+        
+        move_arm_task.launchPath = @"/Users/rob/rob_python/bin/python3";
+        move_arm_task.arguments = arguments;
+        
+        NSPipe *pipe = [NSPipe pipe];
+        move_arm_task.standardOutput = pipe;
+        move_arm_task.standardError = pipe;
+        
+        [move_arm_task launch];
+        
+        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        NSLog(@"watch_position_out: %@", output);
+    });
+}
+
+
 - (void) deactivate:(id)sender port:(int)port {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
         

@@ -127,6 +127,19 @@
      ];
 }
 
+- (IBAction)sshIntoAmberMasterAndRunCore_L10:(id)sender {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+        [self.robMainViewController.serialBox sshIntoAmberMasterAndRunCore_L10:self];
+    });
+    
+}
+
+- (IBAction)sshIntoAmberMasterAndRunCore_R11:(id)sender {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+        [self.robMainViewController.serialBox sshIntoAmberMasterAndRunCore_R11:self];
+    });
+}
+
 - (IBAction) zeroPosition_R11:(id)sender {
     [self.arm_R11_position_servo1 setFloatValue:0.0];
     [self.arm_R11_position_servo2 setFloatValue:0.0];

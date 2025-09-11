@@ -492,327 +492,136 @@ Brake
             <objects>
                 <viewController id="cHj-5R-xNm" customClass="ROBTorsoControlsViewController" sceneMemberID="viewController">
                     <view key="view" id="KOH-dH-3ZD">
-                        <rect key="frame" x="0.0" y="0.0" width="887" height="1046"/>
+                        <rect key="frame" x="0.0" y="0.0" width="1390" height="932"/>
                         <autoresizingMask key="autoresizingMask"/>
                         <subviews>
-                            <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Ar6-N9-3vH">
-                                <rect key="frame" x="381" y="805" width="96" height="19"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="5798.9583333333339" tickMarkPosition="above" sliderType="linear" id="tM2-Dq-N4d"/>
-                                <connections>
-                                    <action selector="applyServoCommand:" target="cHj-5R-xNm" id="Pr7-Gn-KRb"/>
-                                </connections>
-                            </slider>
-                            <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="0cB-fr-y6r">
-                                <rect key="frame" x="18" y="984" width="96" height="19"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="5921.875" tickMarkPosition="above" sliderType="linear" id="xqP-7I-fIZ"/>
-                                <connections>
-                                    <action selector="applyServoCommand:" target="cHj-5R-xNm" id="wMm-AO-KAY"/>
-                                </connections>
-                            </slider>
-                            <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Xc7-tm-7KJ">
-                                <rect key="frame" x="18" y="961" width="96" height="19"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4000" maxValue="8000" doubleValue="8000" tickMarkPosition="above" sliderType="linear" id="7J1-Fe-f9J"/>
-                                <connections>
-                                    <action selector="applyServoCommand:" target="cHj-5R-xNm" id="g1K-Xq-cuR"/>
-                                </connections>
-                            </slider>
-                            <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Rm0-hK-IZa">
-                                <rect key="frame" x="18" y="938" width="96" height="19"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="4900" tickMarkPosition="above" sliderType="linear" id="SWb-Z1-uVa"/>
-                                <connections>
-                                    <action selector="applyServoCommand:" target="cHj-5R-xNm" id="iGa-7E-LH3"/>
-                                </connections>
-                            </slider>
-                            <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="0tw-V9-eiq">
-                                <rect key="frame" x="18" y="896" width="96" height="19"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4000" maxValue="8000" doubleValue="5800" tickMarkPosition="above" sliderType="linear" id="dlb-iz-siF"/>
-                                <connections>
-                                    <action selector="applyServoCommand:" target="cHj-5R-xNm" id="Dzp-q4-pWh"/>
-                                </connections>
-                            </slider>
-                            <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Sdn-Q7-fBw">
-                                <rect key="frame" x="18" y="873" width="96" height="19"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4000" maxValue="8000" doubleValue="8000" tickMarkPosition="above" sliderType="linear" id="uQM-6z-M8e"/>
-                                <connections>
-                                    <action selector="applyServoCommand:" target="cHj-5R-xNm" id="Lsh-fw-5qm"/>
-                                </connections>
-                            </slider>
-                            <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="vhB-a3-BAf">
-                                <rect key="frame" x="18" y="850" width="96" height="19"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="8000" tickMarkPosition="above" sliderType="linear" id="2tN-UE-YqD"/>
-                                <connections>
-                                    <action selector="applyServoCommand:" target="cHj-5R-xNm" id="rbU-P8-631"/>
-                                </connections>
-                            </slider>
-                            <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="DX1-NI-9b4">
-                                <rect key="frame" x="773" y="984" width="96" height="19"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="6025.625" tickMarkPosition="above" sliderType="linear" id="rfT-As-d3L"/>
-                                <connections>
-                                    <action selector="applyServoCommand:" target="cHj-5R-xNm" id="vA9-2j-trv"/>
-                                </connections>
-                            </slider>
-                            <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="8ew-oh-hDz">
-                                <rect key="frame" x="773" y="961" width="96" height="19"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="8000" tickMarkPosition="above" sliderType="linear" id="1Rh-6I-Mfs"/>
-                                <connections>
-                                    <action selector="applyServoCommand:" target="cHj-5R-xNm" id="D2T-Mg-ViW"/>
-                                </connections>
-                            </slider>
-                            <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="hG0-md-oq9">
-                                <rect key="frame" x="773" y="938" width="96" height="19"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="7250" tickMarkPosition="above" sliderType="linear" id="dRn-ZA-klD"/>
-                                <connections>
-                                    <action selector="applyServoCommand:" target="cHj-5R-xNm" id="njM-Q2-Ydi"/>
-                                </connections>
-                            </slider>
-                            <slider horizontalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="J1f-FG-Z84">
-                                <rect key="frame" x="421" y="837" width="19" height="76"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4375" maxValue="7675" doubleValue="4885.1726726628149" tickMarkPosition="right" sliderType="linear" id="Bud-rf-B0V"/>
-                                <connections>
-                                    <action selector="applyServoCommand:" target="cHj-5R-xNm" id="0Cp-xN-UBU"/>
-                                </connections>
-                            </slider>
-                            <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="fur-pu-Uhk">
-                                <rect key="frame" x="412" y="1009" width="36" height="17"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Head" id="6LM-k0-FQc">
-                                    <font key="font" metaFont="system"/>
-                                    <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
-                                    <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
-                                </textFieldCell>
-                            </textField>
-                            <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="XpN-vH-yiw">
-                                <rect key="frame" x="46" y="1009" width="40" height="17"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="L Arm" id="Mo2-8f-6O5">
-                                    <font key="font" metaFont="system"/>
-                                    <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
-                                    <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
-                                </textFieldCell>
-                            </textField>
-                            <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="IoM-51-Ywd">
-                                <rect key="frame" x="801" y="1009" width="41" height="17"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="R Arm" id="GVU-uK-Bd2">
-                                    <font key="font" metaFont="system"/>
-                                    <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
-                                    <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
-                                </textFieldCell>
-                            </textField>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="357-Sq-I1C">
-                                <rect key="frame" x="118" y="985" width="22" height="18"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="7kN-vE-MXJ">
-                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
-                                    <font key="font" metaFont="system"/>
-                                </buttonCell>
-                            </button>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="gwn-zR-NMW">
-                                <rect key="frame" x="118" y="962" width="22" height="18"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="xEg-Sv-bDp">
-                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
-                                    <font key="font" metaFont="system"/>
-                                </buttonCell>
-                            </button>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="ezg-xv-Lht">
-                                <rect key="frame" x="118" y="939" width="22" height="18"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="gR2-Uv-Mhc">
-                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
-                                    <font key="font" metaFont="system"/>
-                                </buttonCell>
-                            </button>
-                            <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="SOv-Xf-2bX">
-                                <rect key="frame" x="18" y="919" width="96" height="15"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="8000" tickMarkPosition="above" sliderType="linear" id="QdJ-7k-aUT"/>
-                                <connections>
-                                    <action selector="applyServoCommand:" target="cHj-5R-xNm" id="lfb-bg-OFM"/>
-                                </connections>
-                            </slider>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="vMw-7U-vnP">
-                                <rect key="frame" x="118" y="920" width="18" height="14"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="IJN-Be-nMu">
-                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
-                                    <font key="font" metaFont="system"/>
-                                </buttonCell>
-                            </button>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="AGD-1Y-awj">
-                                <rect key="frame" x="118" y="897" width="22" height="18"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="usk-w9-mt4">
-                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
-                                    <font key="font" metaFont="system"/>
-                                </buttonCell>
-                            </button>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="FYK-OF-zV4">
-                                <rect key="frame" x="118" y="874" width="22" height="18"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="hvk-10-Og5">
-                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
-                                    <font key="font" metaFont="system"/>
-                                </buttonCell>
-                            </button>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="84l-bG-uPH">
-                                <rect key="frame" x="118" y="851" width="22" height="18"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="eks-2t-SdR">
-                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
-                                    <font key="font" metaFont="system"/>
-                                </buttonCell>
-                            </button>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="CSn-jc-2oR">
-                                <rect key="frame" x="503" y="806" width="22" height="18"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="lFF-8N-ODL">
-                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
-                                    <font key="font" metaFont="system"/>
-                                </buttonCell>
-                            </button>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="AMM-Oa-PLc">
-                                <rect key="frame" x="483" y="868" width="22" height="18"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="R9F-Wr-A2V">
-                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
-                                    <font key="font" metaFont="system"/>
-                                </buttonCell>
-                            </button>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="UXA-1L-beq">
-                                <rect key="frame" x="718" y="985" width="22" height="18"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="X3D-nR-200">
-                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
-                                    <font key="font" metaFont="system"/>
-                                </buttonCell>
-                            </button>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="sxx-y3-lb2">
-                                <rect key="frame" x="718" y="962" width="22" height="18"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="nOr-g2-8S6">
-                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
-                                    <font key="font" metaFont="system"/>
-                                </buttonCell>
-                            </button>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="vBW-GG-Nap">
-                                <rect key="frame" x="718" y="939" width="22" height="18"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="qia-ln-2d4">
-                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
-                                    <font key="font" metaFont="system"/>
-                                </buttonCell>
-                            </button>
-                            <box horizontalHuggingPriority="750" fixedFrame="YES" boxType="separator" translatesAutoresizingMaskIntoConstraints="NO" id="QGo-hX-piz">
-                                <rect key="frame" x="160" y="797" width="5" height="229"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                            </box>
-                            <box horizontalHuggingPriority="750" fixedFrame="YES" boxType="separator" translatesAutoresizingMaskIntoConstraints="NO" id="LfV-Wm-2KR">
-                                <rect key="frame" x="693" y="797" width="5" height="229"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                            </box>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="kbv-5W-jo1">
-                                <rect key="frame" x="19" y="789" width="93" height="21"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="push" title="Reconnect" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="NiB-Gz-A7x">
-                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
-                                    <font key="font" metaFont="system"/>
-                                </buttonCell>
-                                <connections>
-                                    <action selector="reconnectMaestro:" target="cHj-5R-xNm" id="mdb-m3-bee"/>
-                                </connections>
-                            </button>
-                            <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="TSU-2Q-oCx">
-                                <rect key="frame" x="773" y="915" width="96" height="19"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="8000" tickMarkPosition="above" sliderType="linear" id="gMt-9v-nAz"/>
-                                <connections>
-                                    <action selector="applyServoCommand:" target="cHj-5R-xNm" id="4if-wW-iKm"/>
-                                </connections>
-                            </slider>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="PFO-w2-fs3">
-                                <rect key="frame" x="718" y="916" width="22" height="18"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="YnK-hP-IQV">
-                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
-                                    <font key="font" metaFont="system"/>
-                                </buttonCell>
-                            </button>
-                            <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="QGR-Ln-Gyn">
-                                <rect key="frame" x="773" y="892" width="96" height="19"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4000" maxValue="8000" doubleValue="6000" tickMarkPosition="above" sliderType="linear" id="qAF-1g-72s"/>
-                                <connections>
-                                    <action selector="applyServoCommand:" target="cHj-5R-xNm" id="uXA-7N-umX"/>
-                                </connections>
-                            </slider>
-                            <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="KqO-6U-HjP">
-                                <rect key="frame" x="773" y="869" width="96" height="19"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4000" maxValue="8000" doubleValue="4450" tickMarkPosition="above" sliderType="linear" id="lca-3f-l19"/>
-                                <connections>
-                                    <action selector="applyServoCommand:" target="cHj-5R-xNm" id="tPW-LF-hlg"/>
-                                </connections>
-                            </slider>
-                            <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="2ns-TJ-mxM">
-                                <rect key="frame" x="773" y="846" width="96" height="19"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4000" maxValue="8000" doubleValue="4000" tickMarkPosition="above" sliderType="linear" id="e7g-PR-gnE"/>
-                                <connections>
-                                    <action selector="applyServoCommand:" target="cHj-5R-xNm" id="dbC-TR-3Cj"/>
-                                </connections>
-                            </slider>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="FQa-RO-u2D">
-                                <rect key="frame" x="718" y="893" width="22" height="18"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="KEe-to-7fj">
-                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
-                                    <font key="font" metaFont="system"/>
-                                </buttonCell>
-                            </button>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="18a-V6-TeO">
-                                <rect key="frame" x="718" y="870" width="22" height="18"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="EGa-BI-spN">
-                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
-                                    <font key="font" metaFont="system"/>
-                                </buttonCell>
-                            </button>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="qeg-c7-QRN">
-                                <rect key="frame" x="718" y="847" width="22" height="18"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="VpF-bg-JIL">
-                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
-                                    <font key="font" metaFont="system"/>
-                                </buttonCell>
-                            </button>
-                            <slider horizontalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="CyK-bn-gZP">
-                                <rect key="frame" x="421" y="927" width="19" height="76"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4300" maxValue="7790" doubleValue="5050" tickMarkPosition="right" sliderType="linear" id="UIa-yF-izD"/>
-                                <connections>
-                                    <action selector="applyServoCommand:" target="cHj-5R-xNm" id="1jw-j1-xfp"/>
-                                </connections>
-                            </slider>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="wbx-6Z-lzo">
-                                <rect key="frame" x="483" y="956" width="22" height="18"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="fwZ-xd-8WN">
-                                    <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
-                                    <font key="font" metaFont="system"/>
-                                </buttonCell>
-                            </button>
+                            <customView fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="VGm-ph-voG">
+                                <rect key="frame" x="807" y="732" width="132" height="180"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                                <subviews>
+                                    <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="TSU-2Q-oCx">
+                                        <rect key="frame" x="36" y="69" width="96" height="19"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
+                                        <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="8000" tickMarkPosition="above" sliderType="linear" id="gMt-9v-nAz"/>
+                                        <connections>
+                                            <action selector="applyServoCommand:" target="cHj-5R-xNm" id="4if-wW-iKm"/>
+                                        </connections>
+                                    </slider>
+                                    <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="hG0-md-oq9">
+                                        <rect key="frame" x="36" y="92" width="96" height="19"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
+                                        <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="7250" tickMarkPosition="above" sliderType="linear" id="dRn-ZA-klD"/>
+                                        <connections>
+                                            <action selector="applyServoCommand:" target="cHj-5R-xNm" id="njM-Q2-Ydi"/>
+                                        </connections>
+                                    </slider>
+                                    <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="QGR-Ln-Gyn">
+                                        <rect key="frame" x="36" y="46" width="96" height="19"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
+                                        <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4000" maxValue="8000" doubleValue="6000" tickMarkPosition="above" sliderType="linear" id="qAF-1g-72s"/>
+                                        <connections>
+                                            <action selector="applyServoCommand:" target="cHj-5R-xNm" id="uXA-7N-umX"/>
+                                        </connections>
+                                    </slider>
+                                    <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="PFO-w2-fs3">
+                                        <rect key="frame" x="0.0" y="70" width="22" height="18"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
+                                        <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="YnK-hP-IQV">
+                                            <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                    </button>
+                                    <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="sxx-y3-lb2">
+                                        <rect key="frame" x="0.0" y="116" width="22" height="18"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
+                                        <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="nOr-g2-8S6">
+                                            <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                    </button>
+                                    <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="KqO-6U-HjP">
+                                        <rect key="frame" x="36" y="23" width="96" height="19"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
+                                        <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4000" maxValue="8000" doubleValue="4450" tickMarkPosition="above" sliderType="linear" id="lca-3f-l19"/>
+                                        <connections>
+                                            <action selector="applyServoCommand:" target="cHj-5R-xNm" id="tPW-LF-hlg"/>
+                                        </connections>
+                                    </slider>
+                                    <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="qeg-c7-QRN">
+                                        <rect key="frame" x="0.0" y="1" width="22" height="18"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
+                                        <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="VpF-bg-JIL">
+                                            <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                    </button>
+                                    <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="DX1-NI-9b4">
+                                        <rect key="frame" x="36" y="138" width="96" height="19"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
+                                        <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="6025.625" tickMarkPosition="above" sliderType="linear" id="rfT-As-d3L"/>
+                                        <connections>
+                                            <action selector="applyServoCommand:" target="cHj-5R-xNm" id="vA9-2j-trv"/>
+                                        </connections>
+                                    </slider>
+                                    <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="IoM-51-Ywd">
+                                        <rect key="frame" x="64" y="163" width="41" height="17"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
+                                        <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="R Arm" id="GVU-uK-Bd2">
+                                            <font key="font" metaFont="system"/>
+                                            <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
+                                            <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
+                                        </textFieldCell>
+                                    </textField>
+                                    <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="FQa-RO-u2D">
+                                        <rect key="frame" x="0.0" y="47" width="22" height="18"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
+                                        <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="KEe-to-7fj">
+                                            <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                    </button>
+                                    <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="vBW-GG-Nap">
+                                        <rect key="frame" x="0.0" y="93" width="22" height="18"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
+                                        <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="qia-ln-2d4">
+                                            <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                    </button>
+                                    <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="2ns-TJ-mxM">
+                                        <rect key="frame" x="36" y="0.0" width="96" height="19"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
+                                        <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4000" maxValue="8000" doubleValue="4000" tickMarkPosition="above" sliderType="linear" id="e7g-PR-gnE"/>
+                                        <connections>
+                                            <action selector="applyServoCommand:" target="cHj-5R-xNm" id="dbC-TR-3Cj"/>
+                                        </connections>
+                                    </slider>
+                                    <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="8ew-oh-hDz">
+                                        <rect key="frame" x="36" y="115" width="96" height="19"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
+                                        <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="8000" tickMarkPosition="above" sliderType="linear" id="1Rh-6I-Mfs"/>
+                                        <connections>
+                                            <action selector="applyServoCommand:" target="cHj-5R-xNm" id="D2T-Mg-ViW"/>
+                                        </connections>
+                                    </slider>
+                                    <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="UXA-1L-beq">
+                                        <rect key="frame" x="0.0" y="139" width="22" height="18"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
+                                        <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="X3D-nR-200">
+                                            <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                    </button>
+                                    <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="18a-V6-TeO">
+                                        <rect key="frame" x="0.0" y="24" width="22" height="18"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
+                                        <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="EGa-BI-spN">
+                                            <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                    </button>
+                                </subviews>
+                            </customView>
                             <customView fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="NXO-9b-yoZ">
                                 <rect key="frame" x="20" y="10" width="404" height="759"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
@@ -1671,7 +1480,7 @@ Brake
                                 </subviews>
                             </customView>
                             <customView fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="vXt-MO-aX0">
-                                <rect key="frame" x="463" y="10" width="404" height="759"/>
+                                <rect key="frame" x="968" y="10" width="404" height="759"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
                                 <subviews>
                                     <stackView distribution="fill" orientation="horizontal" alignment="top" spacing="4" horizontalStackHuggingPriority="249.99998474121094" verticalStackHuggingPriority="249.99998474121094" fixedFrame="YES" detachesHiddenViews="YES" translatesAutoresizingMaskIntoConstraints="NO" id="5cZ-Dz-zGX">
@@ -2527,9 +2336,296 @@ Brake
                                     </button>
                                 </subviews>
                             </customView>
+                            <customView fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="hlx-d1-Zn2">
+                                <rect key="frame" x="451" y="675" width="138" height="237"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                                <subviews>
+                                    <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="SOv-Xf-2bX">
+                                        <rect key="frame" x="0.0" y="130" width="96" height="15"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="8000" tickMarkPosition="above" sliderType="linear" id="QdJ-7k-aUT"/>
+                                        <connections>
+                                            <action selector="applyServoCommand:" target="cHj-5R-xNm" id="lfb-bg-OFM"/>
+                                        </connections>
+                                    </slider>
+                                    <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="gwn-zR-NMW">
+                                        <rect key="frame" x="110" y="173" width="22" height="18"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="xEg-Sv-bDp">
+                                            <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                    </button>
+                                    <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="kbv-5W-jo1">
+                                        <rect key="frame" x="1" y="0.0" width="93" height="21"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <buttonCell key="cell" type="push" title="Reconnect" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="NiB-Gz-A7x">
+                                            <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                        <connections>
+                                            <action selector="reconnectMaestro:" target="cHj-5R-xNm" id="mdb-m3-bee"/>
+                                        </connections>
+                                    </button>
+                                    <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="FYK-OF-zV4">
+                                        <rect key="frame" x="110" y="85" width="22" height="18"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="hvk-10-Og5">
+                                            <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                    </button>
+                                    <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Sdn-Q7-fBw">
+                                        <rect key="frame" x="0.0" y="84" width="96" height="19"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4000" maxValue="8000" doubleValue="8000" tickMarkPosition="above" sliderType="linear" id="uQM-6z-M8e"/>
+                                        <connections>
+                                            <action selector="applyServoCommand:" target="cHj-5R-xNm" id="Lsh-fw-5qm"/>
+                                        </connections>
+                                    </slider>
+                                    <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="0cB-fr-y6r">
+                                        <rect key="frame" x="0.0" y="195" width="96" height="19"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="5921.875" tickMarkPosition="above" sliderType="linear" id="xqP-7I-fIZ"/>
+                                        <connections>
+                                            <action selector="applyServoCommand:" target="cHj-5R-xNm" id="wMm-AO-KAY"/>
+                                        </connections>
+                                    </slider>
+                                    <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="vMw-7U-vnP">
+                                        <rect key="frame" x="110" y="131" width="18" height="14"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="IJN-Be-nMu">
+                                            <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                    </button>
+                                    <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="ezg-xv-Lht">
+                                        <rect key="frame" x="110" y="150" width="22" height="18"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="gR2-Uv-Mhc">
+                                            <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                    </button>
+                                    <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="0tw-V9-eiq">
+                                        <rect key="frame" x="0.0" y="107" width="96" height="19"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4000" maxValue="8000" doubleValue="5800" tickMarkPosition="above" sliderType="linear" id="dlb-iz-siF"/>
+                                        <connections>
+                                            <action selector="applyServoCommand:" target="cHj-5R-xNm" id="Dzp-q4-pWh"/>
+                                        </connections>
+                                    </slider>
+                                    <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="84l-bG-uPH">
+                                        <rect key="frame" x="110" y="62" width="22" height="18"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="eks-2t-SdR">
+                                            <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                    </button>
+                                    <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="vhB-a3-BAf">
+                                        <rect key="frame" x="0.0" y="61" width="96" height="19"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="8000" tickMarkPosition="above" sliderType="linear" id="2tN-UE-YqD"/>
+                                        <connections>
+                                            <action selector="applyServoCommand:" target="cHj-5R-xNm" id="rbU-P8-631"/>
+                                        </connections>
+                                    </slider>
+                                    <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="357-Sq-I1C">
+                                        <rect key="frame" x="110" y="196" width="22" height="18"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="7kN-vE-MXJ">
+                                            <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                    </button>
+                                    <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Rm0-hK-IZa">
+                                        <rect key="frame" x="0.0" y="149" width="96" height="19"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="4900" tickMarkPosition="above" sliderType="linear" id="SWb-Z1-uVa"/>
+                                        <connections>
+                                            <action selector="applyServoCommand:" target="cHj-5R-xNm" id="iGa-7E-LH3"/>
+                                        </connections>
+                                    </slider>
+                                    <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="XpN-vH-yiw">
+                                        <rect key="frame" x="28" y="220" width="40" height="17"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="L Arm" id="Mo2-8f-6O5">
+                                            <font key="font" metaFont="system"/>
+                                            <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
+                                            <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
+                                        </textFieldCell>
+                                    </textField>
+                                    <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Xc7-tm-7KJ">
+                                        <rect key="frame" x="0.0" y="172" width="96" height="19"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4000" maxValue="8000" doubleValue="8000" tickMarkPosition="above" sliderType="linear" id="7J1-Fe-f9J"/>
+                                        <connections>
+                                            <action selector="applyServoCommand:" target="cHj-5R-xNm" id="g1K-Xq-cuR"/>
+                                        </connections>
+                                    </slider>
+                                    <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="AGD-1Y-awj">
+                                        <rect key="frame" x="110" y="108" width="22" height="18"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="usk-w9-mt4">
+                                            <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                    </button>
+                                </subviews>
+                            </customView>
+                            <customView fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="llr-iK-LMt">
+                                <rect key="frame" x="622" y="691" width="139" height="221"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                                <subviews>
+                                    <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Ar6-N9-3vH">
+                                        <rect key="frame" x="0.0" y="0.0" width="96" height="19"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="5798.9583333333339" tickMarkPosition="above" sliderType="linear" id="tM2-Dq-N4d"/>
+                                        <connections>
+                                            <action selector="applyServoCommand:" target="cHj-5R-xNm" id="Pr7-Gn-KRb"/>
+                                        </connections>
+                                    </slider>
+                                    <slider horizontalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="J1f-FG-Z84">
+                                        <rect key="frame" x="42" y="32" width="19" height="76"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4375" maxValue="7675" doubleValue="4885.1726726628149" tickMarkPosition="right" sliderType="linear" id="Bud-rf-B0V"/>
+                                        <connections>
+                                            <action selector="applyServoCommand:" target="cHj-5R-xNm" id="0Cp-xN-UBU"/>
+                                        </connections>
+                                    </slider>
+                                    <slider horizontalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="CyK-bn-gZP">
+                                        <rect key="frame" x="42" y="122" width="19" height="76"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4300" maxValue="7790" doubleValue="5050" tickMarkPosition="right" sliderType="linear" id="UIa-yF-izD"/>
+                                        <connections>
+                                            <action selector="applyServoCommand:" target="cHj-5R-xNm" id="1jw-j1-xfp"/>
+                                        </connections>
+                                    </slider>
+                                    <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="wbx-6Z-lzo">
+                                        <rect key="frame" x="81" y="151" width="22" height="18"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="fwZ-xd-8WN">
+                                            <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                    </button>
+                                    <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="fur-pu-Uhk">
+                                        <rect key="frame" x="33" y="204" width="36" height="17"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Head" id="6LM-k0-FQc">
+                                            <font key="font" metaFont="system"/>
+                                            <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
+                                            <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
+                                        </textFieldCell>
+                                    </textField>
+                                    <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="CSn-jc-2oR">
+                                        <rect key="frame" x="117" y="1" width="22" height="18"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="lFF-8N-ODL">
+                                            <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                    </button>
+                                    <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="AMM-Oa-PLc">
+                                        <rect key="frame" x="81" y="63" width="22" height="18"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="R9F-Wr-A2V">
+                                            <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                    </button>
+                                </subviews>
+                            </customView>
+                            <scrollView fixedFrame="YES" horizontalLineScroll="10" horizontalPageScroll="10" verticalLineScroll="10" verticalPageScroll="10" hasHorizontalScroller="NO" translatesAutoresizingMaskIntoConstraints="NO" id="phz-WS-u9Z">
+                                <rect key="frame" x="20" y="777" width="404" height="135"/>
+                                <autoresizingMask key="autoresizingMask"/>
+                                <clipView key="contentView" drawsBackground="NO" id="Bfx-F6-YVQ">
+                                    <rect key="frame" x="1" y="1" width="402" height="133"/>
+                                    <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                    <subviews>
+                                        <textView wantsLayer="YES" importsGraphics="NO" richText="NO" verticallyResizable="YES" spellingCorrection="YES" smartInsertDelete="YES" id="kej-kR-EWX">
+                                            <rect key="frame" x="0.0" y="0.0" width="402" height="133"/>
+                                            <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                            <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                            <size key="minSize" width="402" height="133"/>
+                                            <size key="maxSize" width="404" height="10000000"/>
+                                        </textView>
+                                    </subviews>
+                                </clipView>
+                                <scroller key="horizontalScroller" hidden="YES" wantsLayer="YES" verticalHuggingPriority="750" horizontal="YES" id="qhA-YI-rwc">
+                                    <rect key="frame" x="-100" y="-100" width="240" height="17"/>
+                                    <autoresizingMask key="autoresizingMask"/>
+                                </scroller>
+                                <scroller key="verticalScroller" wantsLayer="YES" verticalHuggingPriority="750" horizontal="NO" id="cQL-0s-4hi">
+                                    <rect key="frame" x="386" y="1" width="17" height="133"/>
+                                    <autoresizingMask key="autoresizingMask"/>
+                                </scroller>
+                            </scrollView>
+                            <scrollView fixedFrame="YES" horizontalLineScroll="10" horizontalPageScroll="10" verticalLineScroll="10" verticalPageScroll="10" hasHorizontalScroller="NO" translatesAutoresizingMaskIntoConstraints="NO" id="t2a-vQ-FUj">
+                                <rect key="frame" x="968" y="777" width="404" height="135"/>
+                                <autoresizingMask key="autoresizingMask"/>
+                                <clipView key="contentView" drawsBackground="NO" id="rhO-Hb-PRl">
+                                    <rect key="frame" x="1" y="1" width="402" height="133"/>
+                                    <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                    <subviews>
+                                        <textView wantsLayer="YES" importsGraphics="NO" richText="NO" verticallyResizable="YES" spellingCorrection="YES" smartInsertDelete="YES" id="FQi-J0-r6k">
+                                            <rect key="frame" x="0.0" y="0.0" width="402" height="133"/>
+                                            <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                            <color key="textColor" name="textColor" catalog="System" colorSpace="catalog"/>
+                                            <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                            <size key="minSize" width="402" height="133"/>
+                                            <size key="maxSize" width="404" height="10000000"/>
+                                        </textView>
+                                    </subviews>
+                                </clipView>
+                                <scroller key="horizontalScroller" hidden="YES" wantsLayer="YES" verticalHuggingPriority="750" horizontal="YES" id="OQ2-Rk-JfB">
+                                    <rect key="frame" x="-100" y="-100" width="240" height="17"/>
+                                    <autoresizingMask key="autoresizingMask"/>
+                                </scroller>
+                                <scroller key="verticalScroller" wantsLayer="YES" verticalHuggingPriority="750" horizontal="NO" id="8bb-4w-eUb">
+                                    <rect key="frame" x="386" y="1" width="17" height="133"/>
+                                    <autoresizingMask key="autoresizingMask"/>
+                                </scroller>
+                            </scrollView>
+                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Nsc-fk-C9l">
+                                <rect key="frame" x="627" y="83" width="128" height="24"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                <buttonCell key="cell" type="push" title="Record Keyframe" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="pHU-ud-4kE">
+                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                    <font key="font" metaFont="system"/>
+                                </buttonCell>
+                                <connections>
+                                    <action selector="openGripper_L10:" target="cHj-5R-xNm" id="iUr-PZ-rWK"/>
+                                </connections>
+                            </button>
+                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="rJ1-6W-ta2">
+                                <rect key="frame" x="451" y="616" width="138" height="24"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                <buttonCell key="cell" type="push" title="Boot L10 Core" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="wsu-VQ-WDp">
+                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                    <font key="font" metaFont="system"/>
+                                </buttonCell>
+                                <connections>
+                                    <action selector="sshIntoAmberMasterAndRunCore_L10:" target="cHj-5R-xNm" id="cHc-ys-R2h"/>
+                                </connections>
+                            </button>
+                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="ton-Ai-Frn">
+                                <rect key="frame" x="807" y="616" width="138" height="24"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                <buttonCell key="cell" type="push" title="Boot R11 Core" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="bjG-rc-ebd">
+                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                    <font key="font" metaFont="system"/>
+                                </buttonCell>
+                                <connections>
+                                    <action selector="sshIntoAmberMasterAndRunCore_R11:" target="cHj-5R-xNm" id="QP6-JZ-DSh"/>
+                                </connections>
+                            </button>
                         </subviews>
                     </view>
                     <connections>
+                        <outlet property="amberMasterCore_L10" destination="kej-kR-EWX" id="cTU-4B-J2C"/>
+                        <outlet property="amberMasterCore_R11" destination="FQi-J0-r6k" id="hZD-YD-Olp"/>
                         <outlet property="arm_L10_cartesian_cmdSleep" destination="3fY-Vj-i1I" id="J1i-nV-Ni0"/>
                         <outlet property="arm_L10_cartesian_cmdSleep_label" destination="Dj8-9S-EmW" id="jiw-bA-ggV"/>
                         <outlet property="arm_L10_cartesian_cmdTime" destination="1Rm-Qe-doL" id="8ft-ym-yev"/>
@@ -2640,7 +2736,7 @@ Brake
                 </viewController>
                 <customObject id="c6P-5Z-L1h" userLabel="First Responder" customClass="NSResponder" sceneMemberID="firstResponder"/>
             </objects>
-            <point key="canvasLocation" x="2661.5" y="-897"/>
+            <point key="canvasLocation" x="2913" y="-954"/>
         </scene>
         <!--Application-->
         <scene sceneID="JPo-4y-FX3">

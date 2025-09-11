@@ -51,7 +51,7 @@
 		D4AB3DA42E1CF38D00EA2571 /* CameraViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4AB3DA32E1CF38D00EA2571 /* CameraViewController.swift */; };
 		D4AB3DA52E1CF38D00EA2571 /* CameraManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4AB3DA22E1CF38D00EA2571 /* CameraManager.swift */; };
 		D4BDA6732E6E725D0088A5B4 /* cmd_cartesian_input.py in Resources */ = {isa = PBXBuildFile; fileRef = D4BDA6722E6E725D0088A5B4 /* cmd_cartesian_input.py */; };
-		D4C282032E70D5F5009CCABC /* watch_position_out_R11.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C282022E70D5F5009CCABC /* watch_position_out_R11.py */; };
+		D4C282032E70D5F5009CCABC /* watch_position_out.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C282022E70D5F5009CCABC /* watch_position_out.py */; };
 		D4C282052E70D6D1009CCABC /* cmd_position_input.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C282042E70D6D1009CCABC /* cmd_position_input.py */; };
 		D4C282312E70F132009CCABC /* cmd_position_input_v2.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C282242E70F132009CCABC /* cmd_position_input_v2.py */; };
 		D4C282362E70F132009CCABC /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = D4C282232E70F132009CCABC /* LICENSE */; };
@@ -155,7 +155,7 @@
 		D4AB3DA22E1CF38D00EA2571 /* CameraManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManager.swift; sourceTree = "<group>"; };
 		D4AB3DA32E1CF38D00EA2571 /* CameraViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraViewController.swift; sourceTree = "<group>"; };
 		D4BDA6722E6E725D0088A5B4 /* cmd_cartesian_input.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = cmd_cartesian_input.py; sourceTree = "<group>"; };
-		D4C282022E70D5F5009CCABC /* watch_position_out_R11.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = watch_position_out_R11.py; sourceTree = "<group>"; };
+		D4C282022E70D5F5009CCABC /* watch_position_out.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = watch_position_out.py; sourceTree = "<group>"; };
 		D4C282042E70D6D1009CCABC /* cmd_position_input.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = cmd_position_input.py; sourceTree = "<group>"; };
 		D4C282232E70F132009CCABC /* LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = LICENSE; sourceTree = "<group>"; };
 		D4C282242E70F132009CCABC /* cmd_position_input_v2.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = cmd_position_input_v2.py; sourceTree = "<group>"; };
@@ -235,7 +235,7 @@
 				D4C282042E70D6D1009CCABC /* cmd_position_input.py */,
 				D4A8DADC2E721AFA000485DF /* cmd_position_mode.py */,
 				D4A8DADA2E7217BC000485DF /* zero_position_mode.py */,
-				D4C282022E70D5F5009CCABC /* watch_position_out_R11.py */,
+				D4C282022E70D5F5009CCABC /* watch_position_out.py */,
 				D4C282262E70F132009CCABC /* Amber V2 API */,
 				D4AA3D792AC9F4AB007DC656 /* StartTextInput.scpt */,
 				D4066C5922828E5F002ACAD1 /* AudioInputTaskController.command */,
@@ -479,7 +479,7 @@
 				D4A8DAD62E71F076000485DF /* open_gripper_v2.py in Resources */,
 				D4A8DADF2E722508000485DF /* calibrate_gripper_v2.py in Resources */,
 				D4A8DAD72E71F079000485DF /* close_gripper_v2.py in Resources */,
-				D4C282032E70D5F5009CCABC /* watch_position_out_R11.py in Resources */,
+				D4C282032E70D5F5009CCABC /* watch_position_out.py in Resources */,
 				D4A8DADB2E721808000485DF /* zero_position_mode.py in Resources */,
 				D4A8DADD2E721AFF000485DF /* cmd_position_mode.py in Resources */,
 				D4A8DAE32E722D28000485DF /* cmd_speed_mode_v2.py in Resources */,

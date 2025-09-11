@@ -100,6 +100,9 @@
 @property (readwrite, retain) NSSlider *arm_L10_position_servo6;
 @property (readwrite, retain) NSSlider *arm_L10_position_servo7;
 
+@property (readwrite, retain) NSTextView *amberMasterCoreOutput_R11;
+@property (readwrite, retain) NSTextView *amberMasterCoreOutput_L10;
+
 - (void) serialPortSelected_head;
 - (void) serialPortSelected_torso;
 - (void) serialPortSelected_base;
@@ -180,7 +183,11 @@
                              arm_L_wrist_tilt:(NSString *)arm_L_wrist_tilt
                                 arm_L_gripper:(NSString *)arm_L_gripper;
 
+- (IBAction) sshIntoAmberMasterAndRunCore_R11:(id)sender;
+- (IBAction) sshIntoAmberMasterAndRunCore_L10:(id)sender;
 
+- (IBAction) watch_position_out_R11:(id)sender;
+- (IBAction) watch_position_out_L10:(id)sender;
 
 #pragma mark - R11 actions
 - (IBAction)zeroPosition_R11:(id)sender;

@@ -152,6 +152,8 @@
 @property (readwrite, retain) IBOutlet NSTextField *arm_L10_position_servo6_label;
 @property (readwrite, retain) IBOutlet NSTextField *arm_L10_position_servo7_label;
 
+@property (readwrite, retain) IBOutlet NSTextView *amberMasterCore_R11;
+@property (readwrite, retain) IBOutlet NSTextView *amberMasterCore_L10;
 
 - (void) bindArm_controls;
 
