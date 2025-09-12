@@ -82,6 +82,12 @@ OUTPUT: ir sensor array in cm : (fl, fr, l, r, bl, br) from front left to back r
 
 @property (readwrite, retain) NSString *tempTextInput;
 @property (readwrite, retain) NSMutableDictionary *controlModelDataDictionary;
+@property (readwrite, retain) NSMutableData* receivedData_R11_Core;
+@property (readwrite, retain) NSMutableData* receivedData_L10_Core;
+@property (readwrite, assign) BOOL core_R11_isOnline;
+@property (readwrite, assign) BOOL core_L10_isOnline;
+@property (readwrite, retain) NSTask *sshTask_R11_Core;
+@property (readwrite, retain) NSTask *sshTask_L10_Core;
 
 - (NSString *) openSerialPort: (NSString *)serialPortFile baud: (speed_t)baudRate serialFileDescriptor:(int *)serialFileDescriptor contextInt:(int)context;
 
@@ -1454,6 +1460,55 @@ int maestroGetErrors(int fd)
 }
 
 #pragma mark - R11 actions
+
+- (IBAction) sshIntoAmberMasterAndRunCore_R11:(id)sender {
+    NSTask *sshTask_R11_Core = [NSTask new];
+    [sshTask_R11_Core setLaunchPath:@"/usr/local/bin/sshpass"];
+    //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_R
+    [sshTask_R11_Core setArguments:@[@"-p", @"a", @"ssh", @"amber@10.0.0.5", @"cd", @"/home/amber/R-11/;", @"./amber_core_R"]];
+    NSPipe *pipe = [NSPipe pipe];
+    sshTask_R11_Core.standardOutput = pipe;
+    sshTask_R11_Core.standardError = pipe;
+    
+    self.receivedData_R11_Core = [NSMutableData new];
+    
+    NSFileHandle *readFileHandle_R11 = [pipe fileHandleForReading];
+    readFileHandle_R11.readabilityHandler = ^(NSFileHandle *handle) {
+        NSData *data = [handle availableData];
+        
+        // If data is empty, the pipe has closed and we've reached EOF.
+        if ([data length] == 0) {
+            // Stop the handler to prevent further calls.
+            handle.readabilityHandler = nil;
+            self.core_R11_isOnline = false;
+            // At this point, the task might still be running, but the pipe is closed.
+            // You can process the final data here.
+            NSString *finalOutput = [[NSString alloc] initWithData:self.receivedData_R11_Core encoding:NSUTF8StringEncoding];
+            //NSLog(@"R11:\n%@", finalOutput);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                self.amberMasterCoreOutput_R11.string = [self.amberMasterCoreOutput_R11.string stringByAppendingString:finalOutput];
+            });
+        } else {
+            self.core_R11_isOnline = true;
+            // Append the new data to our storage.
+            [self.receivedData_R11_Core appendData:data];
+            
+            // For demonstration, print the partial output.
+            NSString *partialString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+            //NSLog(@"R11: %@", partialString);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                self.amberMasterCoreOutput_R11.string = [self.amberMasterCoreOutput_R11.string stringByAppendingString:partialString];
+            });
+        }
+    };
+
+    [sshTask_R11_Core launch];
+}
+
+- (IBAction) shutdown_R11_core:(id)sender {
+    [self.sshTask_R11_Core terminate];
+}
+
 - (IBAction)zeroPosition_R11:(id)sender {
     [self zeroPosition:sender port:26002];
 }
@@ -1470,6 +1525,10 @@ int maestroGetErrors(int fd)
     [self closeGripper:sender port:26002 force:[NSString stringWithFormat:@"%i",[self.arm_R11_force intValue]]];
 }
 
+- (IBAction) watch_position_out_R11:(id)sender {
+    [self watch_position_out:sender port:26002];
+}
+
 - (IBAction)set_position_mode_R11:(id)sender {
     [self set_position_mode_v2:sender port: 26002];
 }
@@ -1479,11 +1538,53 @@ int maestroGetErrors(int fd)
 }
 
 - (IBAction)update_arm_R11_cartesian_Action:(id)sender {
-    [self update_arm_cartesian_v1:sender port: 26002];
+    double cmdTime = [self.arm_R11_cmdTime doubleValue]/10.0;
+    double cmdSleep = [self.arm_R11_cmdSleep doubleValue]/10.0;
+    double posX = [self.arm_R11_positionX doubleValue]/100.0;
+    double posY = [self.arm_R11_positionY doubleValue]/100.0;
+    double posZ = [self.arm_R11_positionZ doubleValue]/100.0;
+    double roll = [self.arm_R11_roll doubleValue]/100.0;
+    double pitch = [self.arm_R11_pitch doubleValue]/100.0;
+    double yaw = [self.arm_R11_yaw doubleValue]/100.0;
+    
+    [self update_arm_cartesian_v1:sender
+                             port:26002
+                          cmdTime:cmdTime
+                         cmdSleep:cmdSleep
+                             posX:posX
+                             posY:posY
+                             posZ:posZ
+                             roll:roll
+                            pitch:pitch
+                              yaw:yaw];
 }
 
 - (IBAction)update_arm_R11_position_Action:(id)sender {
-    [self update_arm_position_v1:sender port: 26002];
+    double cmdTime = [self.arm_R11_position_cmdTime doubleValue]/10.0;
+    double cmdSleep = [self.arm_R11_position_cmdSleep doubleValue]/10.0;
+    double servo1 = [self.arm_R11_position_servo1 doubleValue]/100.0;
+    double servo2 = [self.arm_R11_position_servo2 doubleValue]/100.0;
+    double servo3 = [self.arm_R11_position_servo3 doubleValue]/100.0;
+    double servo4 = [self.arm_R11_position_servo4 doubleValue]/100.0;
+    double servo5 = [self.arm_R11_position_servo5 doubleValue]/100.0;
+    double servo6 = [self.arm_R11_position_servo6 doubleValue]/100.0;
+    double servo7 = [self.arm_R11_position_servo7 doubleValue]/100.0;
+    
+    [self update_arm_position_v1:sender
+                            port:26002
+                         cmdTime:cmdTime
+                        cmdSleep:cmdSleep
+                          servo1:servo1
+                          servo2:servo2
+                          servo3:servo3
+                          servo4:servo4
+                          servo5:servo5
+                          servo6:servo6
+                          servo7:servo7];
+}
+
+- (IBAction)activate_R11:(id)sender {
+    [self activate:(id)sender port: 26002];
 }
 
 - (IBAction)deactivate_R11:(id)sender {
@@ -1492,12 +1593,63 @@ int maestroGetErrors(int fd)
 
 #pragma mark - L10 actions
 
+- (IBAction) sshIntoAmberMasterAndRunCore_L10:(id)sender {
+    NSTask *sshTask_L10_Core = [NSTask new];
+    [sshTask_L10_Core setLaunchPath:@"/usr/local/bin/sshpass"];
+    //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_R
+    [sshTask_L10_Core setArguments:@[@"-p", @"a", @"ssh", @"amber@10.0.0.5", @"cd", @"/home/amber/L-10/;", @"./amber_core_L"]];
+    NSPipe *pipe = [NSPipe pipe];
+    sshTask_L10_Core.standardOutput = pipe;
+    sshTask_L10_Core.standardError = pipe;
+    
+    self.receivedData_L10_Core = [NSMutableData new];
+    
+    NSFileHandle *readFileHandle_L10 = [pipe fileHandleForReading];
+    readFileHandle_L10.readabilityHandler = ^(NSFileHandle *handle) {
+        NSData *data = [handle availableData];
+        
+        // If data is empty, the pipe has closed and we've reached EOF.
+        if ([data length] == 0) {
+            // Stop the handler to prevent further calls.
+            handle.readabilityHandler = nil;
+            self.core_L10_isOnline = false;
+            // At this point, the task might still be running, but the pipe is closed.
+            // You can process the final data here.
+            NSString *finalOutput = [[NSString alloc] initWithData:self.receivedData_L10_Core encoding:NSUTF8StringEncoding];
+            //NSLog(@"L10:\n%@", finalOutput);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                self.amberMasterCoreOutput_L10.string = [self.amberMasterCoreOutput_L10.string stringByAppendingString:finalOutput];
+                [self.amberMasterCoreOutput_L10 setNeedsDisplay:YES];
+            });
+
+        } else {
+            // Append the new data to our storage.
+            self.core_L10_isOnline = true;
+            [self.receivedData_L10_Core appendData:data];
+            
+            // For demonstration, print the partial output.
+            NSString *partialString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+            //NSLog(@"L10: %@", partialString);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                self.amberMasterCoreOutput_L10.string = [self.amberMasterCoreOutput_L10.string stringByAppendingString:partialString];
+                [self.amberMasterCoreOutput_L10 setNeedsDisplay:YES];
+            });
+        }
+    };
+
+    [sshTask_L10_Core launch];
+}
+
+- (IBAction) shutdown_L10_core:(id)sender {
+    [self.sshTask_L10_Core terminate];
+}
+
 - (IBAction)zeroPosition_L10:(id)sender {
     [self zeroPosition:sender port:26001];
 }
 
 - (IBAction)calibrateGripper_L10:(id)sender {
-    [self calibrateGripper:sender port:26002];
+    [self calibrateGripper:sender port:26001];
 }
 
 - (IBAction)openGripper_L10:(id)sender {
@@ -1506,6 +1658,10 @@ int maestroGetErrors(int fd)
 
 - (IBAction)closeGripper_L10:(id)sender {
     [self closeGripper:sender port:26001 force:[NSString stringWithFormat:@"%i",[self.arm_L10_force intValue]]];
+}
+
+- (IBAction) watch_position_out_L10:(id)sender {
+    [self watch_position_out:sender port:26001];
 }
 
 - (IBAction)set_position_mode_L10:(id)sender {
@@ -1517,11 +1673,53 @@ int maestroGetErrors(int fd)
 }
 
 - (IBAction)update_arm_L10_cartesian_Action:(id)sender {
-    [self update_arm_cartesian_v1:sender port:26001];
+    double cmdTime = [self.arm_L10_cartesian_cmdTime doubleValue]/10.0;
+    double cmdSleep = [self.arm_L10_cartesian_cmdSleep doubleValue]/10.0;
+    double posX = [self.arm_L10_cartesian_positionX doubleValue]/100.0;
+    double posY = [self.arm_L10_cartesian_positionY doubleValue]/100.0;
+    double posZ = [self.arm_L10_cartesian_positionZ doubleValue]/100.0;
+    double roll = [self.arm_L10_cartesian_roll doubleValue]/100.0;
+    double pitch = [self.arm_L10_cartesian_pitch doubleValue]/100.0;
+    double yaw = [self.arm_L10_cartesian_yaw doubleValue]/100.0;
+    
+    [self update_arm_cartesian_v1:sender
+                             port:26001
+                          cmdTime:cmdTime
+                         cmdSleep:cmdSleep
+                             posX:posX
+                             posY:posY
+                             posZ:posZ
+                             roll:roll
+                            pitch:pitch
+                              yaw:yaw];
 }
 
 - (IBAction)update_arm_L10_position_Action:(id)sender {
-    [self update_arm_position_v1:sender port:26001];
+    double cmdTime = [self.arm_L10_position_cmdTime doubleValue]/10.0;
+    double cmdSleep = [self.arm_L10_position_cmdSleep doubleValue]/10.0;
+    double servo1 = [self.arm_L10_position_servo1 doubleValue]/100.0;
+    double servo2 = [self.arm_L10_position_servo2 doubleValue]/100.0;
+    double servo3 = [self.arm_L10_position_servo3 doubleValue]/100.0;
+    double servo4 = [self.arm_L10_position_servo4 doubleValue]/100.0;
+    double servo5 = [self.arm_L10_position_servo5 doubleValue]/100.0;
+    double servo6 = [self.arm_L10_position_servo6 doubleValue]/100.0;
+    double servo7 = [self.arm_L10_position_servo7 doubleValue]/100.0;
+    
+    [self update_arm_position_v1:sender
+                            port:26001
+                         cmdTime:cmdTime
+                        cmdSleep:cmdSleep
+                          servo1:servo1
+                          servo2:servo2
+                          servo3:servo3
+                          servo4:servo4
+                          servo5:servo5
+                          servo6:servo6
+                          servo7:servo7];
+}
+
+- (IBAction)activate_L10:(id)sender {
+    [self activate:(id)sender port: 26001];
 }
 
 - (IBAction)deactivate_L10:(id)sender {
@@ -1529,98 +1727,6 @@ int maestroGetErrors(int fd)
 }
 
 #pragma mark -
-
-- (IBAction) sshIntoAmberMasterAndRunCore_R11:(id)sender {
-    NSTask *sshTask = [NSTask new];
-    [sshTask setLaunchPath:@"/usr/local/bin/sshpass"];
-    //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_R
-    [sshTask setArguments:@[@"-p", @"a", @"ssh", @"amber@10.0.0.5", @"/home/amber/R-11/amber_core_R"]];
-    NSPipe *pipe = [NSPipe pipe];
-    sshTask.standardOutput = pipe;
-    sshTask.standardError = pipe;
-    [sshTask launch];
-    
-    NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-    NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    NSLog(@"amberMaster R-11 Core: %@", output);
- 
-    /*NSFileHandle *readFileHandle_R11 = [pipe fileHandleForReading];
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(handlePipeData_R11:)
-                                                 name:NSFileHandleReadCompletionNotification
-                                               object:readFileHandle_R11];
-    [readFileHandle_R11 readInBackgroundAndNotify]; // Start the background reading process*/
-}
-
-- (IBAction) sshIntoAmberMasterAndRunCore_L10:(id)sender {
-    NSTask *sshTask = [NSTask new];
-    [sshTask setLaunchPath:@"/usr/local/bin/sshpass"];
-    //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_R
-    [sshTask setArguments:@[@"-p", @"a", @"ssh", @"amber@10.0.0.5", @"/home/amber/L-10/amber_core_L"]];
-    NSPipe *pipe = [NSPipe pipe];
-    sshTask.standardOutput = pipe;
-    sshTask.standardError = pipe;
-    [sshTask launch];
-    
-    NSFileHandle *readFileHandle_R11 = [pipe fileHandleForReading];
-    
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(handlePipeData_R11:)
-                                                 name:NSFileHandleReadCompletionNotification
-                                               object:readFileHandle_R11];
-    [readFileHandle_R11 readInBackgroundAndNotify]; // Start the background reading process
-}
-
-- (void)handlePipeData_R11:(NSNotification *)notification {
-    NSData *data = notification.userInfo[NSFileHandleNotificationDataItem];
-    if (data.length > 0) {
-        NSString *outputString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        NSLog(@"R11: %@", outputString);
-
-        dispatch_async(dispatch_get_main_queue(), ^{
-            self.amberMasterCoreOutput_R11.string = [self.amberMasterCoreOutput_R11.string stringByAppendingString:outputString];
-        });
-        
-        // Request more data if the task is still running
-        NSFileHandle *readHandle = notification.object;
-        [readHandle readInBackgroundAndNotify];
-    } else {
-        // End of file or task terminated
-        NSLog(@"End of task output.");
-        [[NSNotificationCenter defaultCenter] removeObserver:self
-                                                        name:NSFileHandleReadCompletionNotification
-                                                      object:notification.object];
-    }
-}
-
-- (void)handlePipeData_L10:(NSNotification *)notification {
-    NSData *data = notification.userInfo[NSFileHandleNotificationDataItem];
-    if (data.length > 0) {
-        NSString *outputString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        NSLog(@"L10: %@", outputString);
-
-        dispatch_async(dispatch_get_main_queue(), ^{
-            self.amberMasterCoreOutput_L10.string = [self.amberMasterCoreOutput_L10.string stringByAppendingString:outputString];
-        });
-        // Request more data if the task is still running
-        NSFileHandle *readHandle = notification.object;
-        [readHandle readInBackgroundAndNotify];
-    } else {
-        // End of file or task terminated
-        NSLog(@"End of task output.");
-        [[NSNotificationCenter defaultCenter] removeObserver:self
-                                                        name:NSFileHandleReadCompletionNotification
-                                                      object:notification.object];
-    }
-}
-
-- (IBAction) watch_position_out_R11:(id)sender {
-    [self watch_position_out:sender port:26002];
-}
-
-- (IBAction) watch_position_out_L10:(id)sender {
-    [self watch_position_out:sender port:26001];
-}
 
 - (void) watch_position_out:(id)sender port:(int)port {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
@@ -1658,7 +1764,6 @@ int maestroGetErrors(int fd)
     });
 }
 
-
 - (void) deactivate:(id)sender port:(int)port {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
         
@@ -1695,6 +1800,43 @@ int maestroGetErrors(int fd)
     });
 }
 
+
+- (void) activate:(id)sender port:(int)port {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+        
+        NSMutableArray *arguments = @[].mutableCopy;
+        
+        NSString *cmd_activate_mode_v2 = [[NSBundle mainBundle] pathForResource:@"cmd_activate_mode_v2" ofType:@"py"];
+        //cmd_activate_mode_v2.py --ip 10.0.0.5 --port 26002
+        
+        [arguments addObject:cmd_activate_mode_v2];
+        
+        
+        [arguments addObject:@"--ip"];
+        [arguments addObject:@"10.0.0.5"];
+        
+        [arguments addObject:@"--port"];
+        [arguments addObject:[NSString stringWithFormat:@"%i", port]];
+        
+        NSLog(@"args = %@", arguments);
+        
+        NSTask *move_arm_task = [NSTask new];
+        
+        move_arm_task.launchPath = @"/Users/rob/rob_python/bin/python3";
+        move_arm_task.arguments = arguments;
+        
+        NSPipe *pipe = [NSPipe pipe];
+        move_arm_task.standardOutput = pipe;
+        move_arm_task.standardError = pipe;
+        
+        [move_arm_task launch];
+        
+        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        NSLog(@"cmd_activate_mode_v2: %@", output);
+    });
+}
+
 - (void) zeroPosition:(id)sender port:(int)port {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
         
@@ -1705,7 +1847,12 @@ int maestroGetErrors(int fd)
         
         [arguments addObject:zero_position_mode_v2];
         
+        [arguments addObject:@"--cmd_time"];
+        [arguments addObject:[NSString stringWithFormat:@"%f", 2.0]];
         
+        [arguments addObject:@"--cmd_sleep"];
+        [arguments addObject:[NSString stringWithFormat:@"%f", 0.0]];
+
         [arguments addObject:@"--ip"];
         [arguments addObject:@"10.0.0.5"];
         
@@ -1917,17 +2064,7 @@ int maestroGetErrors(int fd)
     
 }
 
-- (void) update_arm_position_v1:(id)sender port:(int)port {
-    
-    double cmdTime = [self.arm_R11_position_cmdTime doubleValue]/10.0;
-    double cmdSleep = [self.arm_R11_position_cmdSleep doubleValue]/10.0;
-    double servo1 = [self.arm_R11_position_servo1 doubleValue]/100.0;
-    double servo2 = [self.arm_R11_position_servo2 doubleValue]/100.0;
-    double servo3 = [self.arm_R11_position_servo3 doubleValue]/100.0;
-    double servo4 = [self.arm_R11_position_servo4 doubleValue]/100.0;
-    double servo5 = [self.arm_R11_position_servo5 doubleValue]/100.0;
-    double servo6 = [self.arm_R11_position_servo6 doubleValue]/100.0;
-    double servo7 = [self.arm_R11_position_servo7 doubleValue]/100.0;
+- (void) update_arm_position_v1:(id)sender port:(int)port cmdTime:(double)cmdTime cmdSleep:(double)cmdSleep servo1:(double)servo1  servo2:(double)servo2 servo3:(double)servo3 servo4:(double)servo4 servo5:(double)servo5 servo6:(double)servo6 servo7:(double)servo7 {
     
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
         
@@ -2001,16 +2138,7 @@ int maestroGetErrors(int fd)
     });
 }
 
-- (void) update_arm_cartesian_v1:(id)sender port:(int)port {
-    
-    double cmdTime = [self.arm_R11_cmdTime doubleValue]/10.0;
-    double cmdSleep = [self.arm_R11_cmdSleep doubleValue]/10.0;
-    double posX = [self.arm_R11_positionX doubleValue]/100.0;
-    double posY = [self.arm_R11_positionY doubleValue]/100.0;
-    double posZ = [self.arm_R11_positionZ doubleValue]/100.0;
-    double roll = [self.arm_R11_roll doubleValue]/100.0;
-    double pitch = [self.arm_R11_pitch doubleValue]/100.0;
-    double yaw = [self.arm_R11_yaw doubleValue]/100.0;
+- (void) update_arm_cartesian_v1:(id)sender port:(int)port cmdTime:(double)cmdTime cmdSleep:(double)cmdSleep posX:(double)posX posY:(double)posY posZ:(double)posZ roll:(double)roll pitch:(double)pitch yaw:(double)yaw {
     
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
         

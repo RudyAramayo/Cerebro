@@ -183,6 +183,9 @@
                              arm_L_wrist_tilt:(NSString *)arm_L_wrist_tilt
                                 arm_L_gripper:(NSString *)arm_L_gripper;
 
+- (IBAction) shutdown_R11_core:(id)sender;
+- (IBAction) shutdown_L10_core:(id)sender;
+
 - (IBAction) sshIntoAmberMasterAndRunCore_R11:(id)sender;
 - (IBAction) sshIntoAmberMasterAndRunCore_L10:(id)sender;
 
@@ -198,6 +201,7 @@
 - (IBAction)set_current_mode_R11:(id)sender;
 - (IBAction)update_arm_R11_cartesian_Action:(id)sender;
 - (IBAction)update_arm_R11_position_Action:(id)sender;
+- (IBAction)activate_R11:(id)sender;
 - (IBAction)deactivate_R11:(id)sender;
 
 #pragma mark - L10 actions
@@ -210,6 +214,7 @@
 - (IBAction)set_current_mode_L10:(id)sender;
 - (IBAction)update_arm_L10_cartesian_Action:(id)sender;
 - (IBAction)update_arm_L10_position_Action:(id)sender;
+- (IBAction)activate_L10:(id)sender;
 - (IBAction)deactivate_L10:(id)sender;
 
 @end

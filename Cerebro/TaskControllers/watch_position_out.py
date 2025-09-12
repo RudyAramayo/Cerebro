@@ -104,4 +104,6 @@ def get_status(IP_ADDR=args.ip, port=args.port):
     except socket.timeout:
         return -1
 
-get_status()
+print("getting status")
+get_status(IP_ADDR=args.ip, port=args.port)
+print("done")

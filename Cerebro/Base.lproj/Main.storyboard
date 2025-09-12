@@ -626,12 +626,22 @@ Brake
                                 <rect key="frame" x="20" y="10" width="404" height="759"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
                                 <subviews>
-                                    <stackView distribution="fill" orientation="horizontal" alignment="top" spacing="4" horizontalStackHuggingPriority="249.99998474121094" verticalStackHuggingPriority="249.99998474121094" fixedFrame="YES" detachesHiddenViews="YES" translatesAutoresizingMaskIntoConstraints="NO" id="gu0-aa-OWa">
+                                    <stackView distribution="fill" orientation="horizontal" alignment="top" spacing="19" horizontalStackHuggingPriority="249.99998474121094" verticalStackHuggingPriority="249.99998474121094" fixedFrame="YES" detachesHiddenViews="YES" translatesAutoresizingMaskIntoConstraints="NO" id="gu0-aa-OWa">
                                         <rect key="frame" x="20" y="685" width="363" height="24"/>
                                         <subviews>
+                                            <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="IDI-Se-wuE">
+                                                <rect key="frame" x="0.0" y="0.0" width="74" height="24"/>
+                                                <buttonCell key="cell" type="push" title="Activate" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="R2I-BX-YOZ">
+                                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                                    <font key="font" metaFont="system"/>
+                                                </buttonCell>
+                                                <connections>
+                                                    <action selector="activate_L10_SendCommand:" target="cHj-5R-xNm" id="gne-sv-Jcr"/>
+                                                </connections>
+                                            </button>
                                             <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="qfo-nQ-IX0">
-                                                <rect key="frame" x="0.0" y="0.0" width="134" height="24"/>
-                                                <buttonCell key="cell" type="push" title="Set Position Mode" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="f7c-wW-J0F">
+                                                <rect key="frame" x="93" y="0.0" width="73" height="24"/>
+                                                <buttonCell key="cell" type="push" title="Position" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="f7c-wW-J0F">
                                                     <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
                                                     <font key="font" metaFont="system"/>
                                                 </buttonCell>
@@ -640,8 +650,8 @@ Brake
                                                 </connections>
                                             </button>
                                             <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="pFR-pE-Aw3">
-                                                <rect key="frame" x="138" y="0.0" width="132" height="24"/>
-                                                <buttonCell key="cell" type="push" title="Set Current Mode" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="nmK-d5-AqA">
+                                                <rect key="frame" x="185" y="0.0" width="70" height="24"/>
+                                                <buttonCell key="cell" type="push" title="Current" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="nmK-d5-AqA">
                                                     <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
                                                     <font key="font" metaFont="system"/>
                                                 </buttonCell>
@@ -664,8 +674,10 @@ Brake
                                             <integer value="1000"/>
                                             <integer value="1000"/>
                                             <integer value="1000"/>
+                                            <integer value="1000"/>
                                         </visibilityPriorities>
                                         <customSpacing>
+                                            <real value="3.4028234663852886e+38"/>
                                             <real value="3.4028234663852886e+38"/>
                                             <real value="3.4028234663852886e+38"/>
                                             <real value="3.4028234663852886e+38"/>
@@ -728,7 +740,7 @@ Brake
                                                             <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="QHw-oi-Pqf">
                                                                 <rect key="frame" x="74" y="1" width="220" height="19"/>
                                                                 <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                                                <sliderCell key="cell" continuous="YES" state="on" alignment="left" maxValue="200" doubleValue="20" tickMarkPosition="above" sliderType="linear" id="KXs-t5-eTR"/>
+                                                                <sliderCell key="cell" continuous="YES" state="on" alignment="left" maxValue="200" tickMarkPosition="above" sliderType="linear" id="KXs-t5-eTR"/>
                                                                 <connections>
                                                                     <action selector="update_arm_L10_Action:" target="cHj-5R-xNm" id="fak-lb-yIz"/>
                                                                 </connections>
@@ -1184,7 +1196,7 @@ Brake
                                                             <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="3fY-Vj-i1I">
                                                                 <rect key="frame" x="74" y="1" width="220" height="19"/>
                                                                 <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                                                <sliderCell key="cell" continuous="YES" state="on" alignment="left" maxValue="200" doubleValue="20" tickMarkPosition="above" sliderType="linear" id="7Ri-zb-gzF"/>
+                                                                <sliderCell key="cell" continuous="YES" state="on" alignment="left" maxValue="200" tickMarkPosition="above" sliderType="linear" id="7Ri-zb-gzF"/>
                                                                 <connections>
                                                                     <action selector="update_arm_L10_Action:" target="cHj-5R-xNm" id="WGG-my-Dvw"/>
                                                                 </connections>
@@ -1483,12 +1495,22 @@ Brake
                                 <rect key="frame" x="968" y="10" width="404" height="759"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
                                 <subviews>
-                                    <stackView distribution="fill" orientation="horizontal" alignment="top" spacing="4" horizontalStackHuggingPriority="249.99998474121094" verticalStackHuggingPriority="249.99998474121094" fixedFrame="YES" detachesHiddenViews="YES" translatesAutoresizingMaskIntoConstraints="NO" id="5cZ-Dz-zGX">
+                                    <stackView distribution="fill" orientation="horizontal" alignment="top" spacing="19" horizontalStackHuggingPriority="249.99998474121094" verticalStackHuggingPriority="249.99998474121094" fixedFrame="YES" detachesHiddenViews="YES" translatesAutoresizingMaskIntoConstraints="NO" id="5cZ-Dz-zGX">
                                         <rect key="frame" x="20" y="685" width="363" height="24"/>
                                         <subviews>
+                                            <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="B6X-wX-8k3">
+                                                <rect key="frame" x="0.0" y="0.0" width="74" height="24"/>
+                                                <buttonCell key="cell" type="push" title="Activate" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="eRu-Fp-oeq">
+                                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                                    <font key="font" metaFont="system"/>
+                                                </buttonCell>
+                                                <connections>
+                                                    <action selector="activate_R11_SendCommand:" target="cHj-5R-xNm" id="3pv-l0-mkh"/>
+                                                </connections>
+                                            </button>
                                             <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="772-PB-sAC">
-                                                <rect key="frame" x="0.0" y="0.0" width="134" height="24"/>
-                                                <buttonCell key="cell" type="push" title="Set Position Mode" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="QW0-UD-iiI">
+                                                <rect key="frame" x="93" y="0.0" width="73" height="24"/>
+                                                <buttonCell key="cell" type="push" title="Position" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="QW0-UD-iiI">
                                                     <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
                                                     <font key="font" metaFont="system"/>
                                                 </buttonCell>
@@ -1497,8 +1519,8 @@ Brake
                                                 </connections>
                                             </button>
                                             <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="od6-0Q-Ecp">
-                                                <rect key="frame" x="138" y="0.0" width="132" height="24"/>
-                                                <buttonCell key="cell" type="push" title="Set Current Mode" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="B9E-3p-WjW">
+                                                <rect key="frame" x="185" y="0.0" width="70" height="24"/>
+                                                <buttonCell key="cell" type="push" title="Current" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="B9E-3p-WjW">
                                                     <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
                                                     <font key="font" metaFont="system"/>
                                                 </buttonCell>
@@ -1521,8 +1543,10 @@ Brake
                                             <integer value="1000"/>
                                             <integer value="1000"/>
                                             <integer value="1000"/>
+                                            <integer value="1000"/>
                                         </visibilityPriorities>
                                         <customSpacing>
+                                            <real value="3.4028234663852886e+38"/>
                                             <real value="3.4028234663852886e+38"/>
                                             <real value="3.4028234663852886e+38"/>
                                             <real value="3.4028234663852886e+38"/>
@@ -1585,7 +1609,7 @@ Brake
                                                             <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="RD8-iS-LYQ">
                                                                 <rect key="frame" x="74" y="1" width="220" height="19"/>
                                                                 <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                                                <sliderCell key="cell" continuous="YES" state="on" alignment="left" maxValue="200" doubleValue="20" tickMarkPosition="above" sliderType="linear" id="HyS-TS-igr"/>
+                                                                <sliderCell key="cell" continuous="YES" state="on" alignment="left" maxValue="200" tickMarkPosition="above" sliderType="linear" id="HyS-TS-igr"/>
                                                                 <connections>
                                                                     <action selector="update_arm_R11_Action:" target="cHj-5R-xNm" id="U4s-90-dVJ"/>
                                                                 </connections>
@@ -2041,7 +2065,7 @@ Brake
                                                             <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="5he-1H-eeF">
                                                                 <rect key="frame" x="74" y="1" width="220" height="19"/>
                                                                 <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                                                <sliderCell key="cell" continuous="YES" state="on" alignment="left" maxValue="200" doubleValue="20" tickMarkPosition="above" sliderType="linear" id="OHd-rv-j3B"/>
+                                                                <sliderCell key="cell" continuous="YES" state="on" alignment="left" maxValue="200" tickMarkPosition="above" sliderType="linear" id="OHd-rv-j3B"/>
                                                                 <connections>
                                                                     <action selector="update_arm_R11_Action:" target="cHj-5R-xNm" id="RpK-m0-qHX"/>
                                                                 </connections>
@@ -2544,9 +2568,10 @@ Brake
                                     <rect key="frame" x="1" y="1" width="402" height="133"/>
                                     <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                                     <subviews>
-                                        <textView wantsLayer="YES" importsGraphics="NO" richText="NO" verticallyResizable="YES" spellingCorrection="YES" smartInsertDelete="YES" id="kej-kR-EWX">
+                                        <textView wantsLayer="YES" editable="NO" importsGraphics="NO" richText="NO" verticallyResizable="YES" spellingCorrection="YES" smartInsertDelete="YES" id="kej-kR-EWX">
                                             <rect key="frame" x="0.0" y="0.0" width="402" height="133"/>
                                             <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                            <color key="textColor" name="textColor" catalog="System" colorSpace="catalog"/>
                                             <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
                                             <size key="minSize" width="402" height="133"/>
                                             <size key="maxSize" width="404" height="10000000"/>
@@ -2569,7 +2594,7 @@ Brake
                                     <rect key="frame" x="1" y="1" width="402" height="133"/>
                                     <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                                     <subviews>
-                                        <textView wantsLayer="YES" importsGraphics="NO" richText="NO" verticallyResizable="YES" spellingCorrection="YES" smartInsertDelete="YES" id="FQi-J0-r6k">
+                                        <textView wantsLayer="YES" editable="NO" importsGraphics="NO" richText="NO" verticallyResizable="YES" spellingCorrection="YES" smartInsertDelete="YES" id="FQi-J0-r6k">
                                             <rect key="frame" x="0.0" y="0.0" width="402" height="133"/>
                                             <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                                             <color key="textColor" name="textColor" catalog="System" colorSpace="catalog"/>
@@ -2605,13 +2630,13 @@ Brake
                                 <buttonCell key="cell" type="push" title="Boot L10 Core" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="wsu-VQ-WDp">
                                     <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
                                     <font key="font" metaFont="system"/>
+                                    <connections>
+                                        <action selector="sshIntoAmberMasterAndRunCore_L10:" target="cHj-5R-xNm" id="b8x-Ax-Qqe"/>
+                                    </connections>
                                 </buttonCell>
-                                <connections>
-                                    <action selector="sshIntoAmberMasterAndRunCore_L10:" target="cHj-5R-xNm" id="cHc-ys-R2h"/>
-                                </connections>
                             </button>
                             <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="ton-Ai-Frn">
-                                <rect key="frame" x="807" y="616" width="138" height="24"/>
+                                <rect key="frame" x="808" y="616" width="138" height="24"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                                 <buttonCell key="cell" type="push" title="Boot R11 Core" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="bjG-rc-ebd">
                                     <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
@@ -2619,6 +2644,39 @@ Brake
                                 </buttonCell>
                                 <connections>
                                     <action selector="sshIntoAmberMasterAndRunCore_R11:" target="cHj-5R-xNm" id="QP6-JZ-DSh"/>
+                                </connections>
+                            </button>
+                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="XLI-R7-UGH">
+                                <rect key="frame" x="808" y="544" width="138" height="24"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                <buttonCell key="cell" type="push" title="Watch position out" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="hgn-s4-Sza">
+                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                    <font key="font" metaFont="system"/>
+                                </buttonCell>
+                                <connections>
+                                    <action selector="watchPositionOut_R11:" target="cHj-5R-xNm" id="Ks0-OW-bK1"/>
+                                </connections>
+                            </button>
+                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="JdC-In-BKR">
+                                <rect key="frame" x="448" y="580" width="141" height="24"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                <buttonCell key="cell" type="push" title="Shutdown R11 Core" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="Itc-0R-dLI">
+                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                    <font key="font" metaFont="system"/>
+                                </buttonCell>
+                                <connections>
+                                    <action selector="shutdown_L10_core:" target="cHj-5R-xNm" id="PYi-NE-8bN"/>
+                                </connections>
+                            </button>
+                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="oR2-al-YJJ">
+                                <rect key="frame" x="808" y="580" width="141" height="24"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                <buttonCell key="cell" type="push" title="Shutdown R11 Core" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="7kE-Vp-MgB">
+                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                    <font key="font" metaFont="system"/>
+                                </buttonCell>
+                                <connections>
+                                    <action selector="shutdown_R11_core:" target="cHj-5R-xNm" id="rNM-5H-lXZ"/>
                                 </connections>
                             </button>
                         </subviews>

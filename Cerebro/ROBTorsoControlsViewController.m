@@ -39,6 +39,9 @@
 
 - (void) bindArm_controls
 {
+    self.robMainViewController.serialBox.amberMasterCoreOutput_R11 = self.amberMasterCore_R11;
+    self.robMainViewController.serialBox.amberMasterCoreOutput_L10 = self.amberMasterCore_L10;
+    
     self.robMainViewController.serialBox.arm_R11_force = self.arm_R11_force;
     
     self.robMainViewController.serialBox.arm_R11_cmdTime = self.arm_R11_cmdTime;
@@ -139,6 +142,15 @@
         [self.robMainViewController.serialBox sshIntoAmberMasterAndRunCore_R11:self];
     });
 }
+
+- (IBAction) watchPositionOut_R11:(id)sender {
+    [self.robMainViewController.serialBox watch_position_out_R11:self];
+}
+
+- (IBAction) watchPositionOut_L10:(id)sender {
+    [self.robMainViewController.serialBox watch_position_out_R11:self];
+}
+
 
 - (IBAction) zeroPosition_R11:(id)sender {
     [self.arm_R11_position_servo1 setFloatValue:0.0];
@@ -320,6 +332,10 @@
     [self.robMainViewController.serialBox update_arm_R11_position_Action:sender];
 }
 
+- (IBAction)activate_R11_SendCommand:(id)sender {
+    [self.robMainViewController.serialBox activate_R11:sender];
+}
+
 - (IBAction)deactivate_R11_SendCommand:(id)sender {
     [self.robMainViewController.serialBox deactivate_R11:sender];
 }
@@ -342,10 +358,21 @@
     [self.robMainViewController.serialBox update_arm_L10_position_Action:sender];
 }
 
+- (IBAction)activate_L10_SendCommand:(id)sender {
+    [self.robMainViewController.serialBox activate_L10:sender];
+}
+
 - (IBAction)deactivate_L10_SendCommand:(id)sender {
     [self.robMainViewController.serialBox deactivate_L10:sender];
 }
 
+- (IBAction) shutdown_R11_core:(id)sender {
+    [self.robMainViewController.serialBox shutdown_R11_core:sender];
+}
+
+- (IBAction) shutdown_L10_core:(id)sender {
+    [self.robMainViewController.serialBox shutdown_L10_core:sender];
+}
 
 
 
