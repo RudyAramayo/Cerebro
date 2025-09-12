@@ -82,7 +82,7 @@ def get_status(IP_ADDR=args.ip, port=args.port):
     s.settimeout(3)
     try:
         data, addr = s.recvfrom(1024)
-        print("Receiving: ", data.hex())
+        #print("Receiving: ", data.hex())
         payloadR = robot_mode_data.from_buffer_copy(data)                   # Convert raw data into ctypes struct to print
         #print("Received: cmd_no={:d}, length={:d}, counter={:d}"
         #      .format(payloadR.cmd_no, payloadR.length, payloadR.counter))

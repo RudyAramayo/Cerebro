@@ -49,15 +49,14 @@ joint_count = 7
 time.sleep(cmd_sleep)
 
 arm = Amber_Robot(IP_ADDR, PORT, joint_count=joint_count)
-#print(f"The robotic arm is now in mode{arm.get_mode()} ")
-# Set robot to Position Mode
-#arm.set_position_mode()
-# Get status from robot
-#j_pos, c_pos = arm.get_status()
+print(f"The robotic arm is now in mode{arm.get_mode()} ")
 
-#print(f"Joint Position [1,2,3,4,5,6,7] = {j_pos})")
-#print(f"Cartesian Position [X,Y,Z,Roll,Pitch,Yaw] = {c_pos}")
-#print(f"The robotic arm is now in mode{arm.get_mode()} ")
+# Get status from robot
+j_pos, c_pos = arm.get_status()
+
+print(f"Joint Position [1,2,3,4,5,6,7] = {j_pos})")
+print(f"Cartesian Position [X,Y,Z,Roll,Pitch,Yaw] = {c_pos}")
+print(f"The robotic arm is now in mode{arm.get_mode()} ")
 
 #print("Move Cartesian coordinates")
 # Move Cartesian coordinates

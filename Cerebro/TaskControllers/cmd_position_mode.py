@@ -59,14 +59,14 @@ def set_mode(mode, IP_ADDR="10.0.0.5", PORT=26002):
     try:
         data, addr = s.recvfrom(1024)  # Need receive return
         payloadR = robot_data.from_buffer_copy(data)  # Convert raw data into ctypes struct to print
-        print("Received: cmd_no={:d}, length={:d}, counter={:d}"
+        #print("Received: cmd_no={:d}, length={:d}, counter={:d}"
             .format(payloadR.cmd_no, payloadR.length, payloadR.counter))
         print("pos1={:f} pos2={:f} pos3={:f} pos4={:f} pos5={:f} pos6={:f} pos7={:f} pos8={:f}"
             .format(payloadR.pos_1, payloadR.pos_2, payloadR.pos_3, payloadR.pos_4
                     , payloadR.pos_5, payloadR.pos_6, payloadR.pos_7, payloadR.pos_8,))
-        print("speed1={:f} speed2={:f} speed3={:f} speed4={:f} speed5={:f} speed6={:f} speed7={:f} speed8={:f}"
-            .format(payloadR.speed_1, payloadR.speed_2, payloadR.speed_3, payloadR.speed_4
-                    , payloadR.speed_5, payloadR.speed_6, payloadR.speed_7, payloadR.speed_8,))
+        #print("speed1={:f} speed2={:f} speed3={:f} speed4={:f} speed5={:f} speed6={:f} speed7={:f} speed8={:f}"
+        #    .format(payloadR.speed_1, payloadR.speed_2, payloadR.speed_3, payloadR.speed_4
+        #            , payloadR.speed_5, payloadR.speed_6, payloadR.speed_7, payloadR.speed_8,))
         print("X_pos={:f} Y_pos={:f} Z_pos={:f} R_pos={:f} P_pos={:f} Yaw_pos={:f} X_speed={:f} Y_speed={:f} Z_speed={:f} "
                 "Roll_speed={:f} Pitch_speed={:f} Yaw_speed={:f} Arm_Angle={:f}"
             .format(payloadR.X_pos, payloadR.Y_pos, payloadR.Z_pos, payloadR.Roll_pos, payloadR.Pitch_pos,

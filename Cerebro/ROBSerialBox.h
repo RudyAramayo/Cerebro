@@ -193,6 +193,8 @@
 - (IBAction) watch_position_out_L10:(id)sender;
 
 #pragma mark - R11 actions
+
+- (IBAction)sshIntoAmberMasterAndRunTail_R11:(id)sender;
 - (IBAction)zeroPosition_R11:(id)sender;
 - (IBAction)calibrateGripper_R11:(id)sender;
 - (IBAction)openGripper_R11:(id)sender;
@@ -206,6 +208,7 @@
 
 #pragma mark - L10 actions
 
+- (IBAction)sshIntoAmberMasterAndRunTail_L10:(id)sender;
 - (IBAction)zeroPosition_L10:(id)sender;
 - (IBAction)calibrateGripper_L10:(id)sender;
 - (IBAction)openGripper_L10:(id)sender;

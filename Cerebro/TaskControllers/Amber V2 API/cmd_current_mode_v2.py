@@ -18,7 +18,7 @@ joint_count = 7
 
 arm = Amber_Robot(IP_ADDR, PORT, joint_count=joint_count)
 print(f"The robotic arm is now in mode{arm.get_mode()} ")
-# Set robot to Position Mode
+# Set robot to current Mode
 arm.set_current_mode()
 # Get status from robot
 j_pos, c_pos = arm.get_status()

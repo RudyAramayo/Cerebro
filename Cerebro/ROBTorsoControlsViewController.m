@@ -130,11 +130,22 @@
      ];
 }
 
+- (IBAction)sshIntoAmberMasterAndRunTail_R11:(id)sender {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+        [self.robMainViewController.serialBox sshIntoAmberMasterAndRunTail_R11:self];
+    });
+}
+
+- (IBAction)sshIntoAmberMasterAndRunTail_L10:(id)sender {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+        [self.robMainViewController.serialBox sshIntoAmberMasterAndRunTail_L10:self];
+    });
+}
+
 - (IBAction)sshIntoAmberMasterAndRunCore_L10:(id)sender {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
         [self.robMainViewController.serialBox sshIntoAmberMasterAndRunCore_L10:self];
     });
-    
 }
 
 - (IBAction)sshIntoAmberMasterAndRunCore_R11:(id)sender {

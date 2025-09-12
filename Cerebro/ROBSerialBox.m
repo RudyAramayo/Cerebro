@@ -83,11 +83,15 @@ OUTPUT: ir sensor array in cm : (fl, fr, l, r, bl, br) from front left to back r
 @property (readwrite, retain) NSString *tempTextInput;
 @property (readwrite, retain) NSMutableDictionary *controlModelDataDictionary;
 @property (readwrite, retain) NSMutableData* receivedData_R11_Core;
+@property (readwrite, retain) NSMutableData* receivedData_R11_log;
 @property (readwrite, retain) NSMutableData* receivedData_L10_Core;
+@property (readwrite, retain) NSMutableData* receivedData_L10_log;
 @property (readwrite, assign) BOOL core_R11_isOnline;
 @property (readwrite, assign) BOOL core_L10_isOnline;
 @property (readwrite, retain) NSTask *sshTask_R11_Core;
 @property (readwrite, retain) NSTask *sshTask_L10_Core;
+@property (readwrite, retain) NSTask *sshTask_R11_log;
+@property (readwrite, retain) NSTask *sshTask_L10_log;
 
 - (NSString *) openSerialPort: (NSString *)serialPortFile baud: (speed_t)baudRate serialFileDescriptor:(int *)serialFileDescriptor contextInt:(int)context;
 
@@ -219,6 +223,8 @@ typedef enum : NSUInteger {
     
     self.controllerTimer = [NSTimer scheduledTimerWithTimeInterval:0.1 target:self selector:@selector(renderController) userInfo:nil repeats:YES];
     
+    [self sshIntoAmberMasterAndRunTail_L10:self];
+    [self sshIntoAmberMasterAndRunTail_R11:self];
 }
 
 - (void) connectMaestro
@@ -1461,14 +1467,63 @@ int maestroGetErrors(int fd)
 
 #pragma mark - R11 actions
 
-- (IBAction) sshIntoAmberMasterAndRunCore_R11:(id)sender {
-    NSTask *sshTask_R11_Core = [NSTask new];
-    [sshTask_R11_Core setLaunchPath:@"/usr/local/bin/sshpass"];
-    //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_R
-    [sshTask_R11_Core setArguments:@[@"-p", @"a", @"ssh", @"amber@10.0.0.5", @"cd", @"/home/amber/R-11/;", @"./amber_core_R"]];
+- (IBAction) sshIntoAmberMasterAndRunTail_R11:(id)sender {
+    self.sshTask_R11_Core = [NSTask new];
+    [self.sshTask_R11_Core setLaunchPath:@"/usr/local/bin/sshpass"];
+    //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_L
+    [self.sshTask_R11_Core setArguments:@[@"-p", @"a", @"ssh", @"amber@10.0.0.5", @"tail", @"-n", @"+1", @"-f", @"/home/amber/R-11/core.log"]];
     NSPipe *pipe = [NSPipe pipe];
-    sshTask_R11_Core.standardOutput = pipe;
-    sshTask_R11_Core.standardError = pipe;
+    self.sshTask_R11_Core.standardOutput = pipe;
+    self.sshTask_R11_Core.standardError = pipe;
+    
+    self.receivedData_R11_log = [NSMutableData new];
+    
+    NSFileHandle *readFileHandle_R11 = [pipe fileHandleForReading];
+    readFileHandle_R11.readabilityHandler = ^(NSFileHandle *handle) {
+        NSData *data = [handle availableData];
+        
+        // If data is empty, the pipe has closed and we've reached EOF.
+        if ([data length] == 0) {
+            // Stop the handler to prevent further calls.
+            handle.readabilityHandler = nil;
+            self.core_R11_isOnline = false;
+            // At this point, the task might still be running, but the pipe is closed.
+            // You can process the final data here.
+            NSString *finalOutput = [[NSString alloc] initWithData:self.receivedData_R11_log encoding:NSUTF8StringEncoding];
+            //NSLog(@"L10:\n%@", finalOutput);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                self.amberMasterCoreOutput_R11.string = [self.amberMasterCoreOutput_R11.string stringByAppendingString:finalOutput];
+                [self.amberMasterCoreOutput_R11 setNeedsDisplay:YES];
+                [self.amberMasterCoreOutput_R11 scrollToEndOfDocument:nil];
+            });
+
+        } else {
+            // Append the new data to our storage.
+            self.core_R11_isOnline = true;
+            [self.receivedData_R11_log appendData:data];
+            
+            // For demonstration, print the partial output.
+            NSString *partialString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+            //NSLog(@"L10: %@", partialString);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                self.amberMasterCoreOutput_R11.string = [self.amberMasterCoreOutput_R11.string stringByAppendingString:partialString];
+                [self.amberMasterCoreOutput_R11 setNeedsDisplay:YES];
+                [self.amberMasterCoreOutput_R11 scrollToEndOfDocument:nil];
+            });
+        }
+    };
+
+    [self.sshTask_R11_Core launch];
+}
+
+- (IBAction) sshIntoAmberMasterAndRunCore_R11:(id)sender {
+    self.sshTask_R11_Core = [NSTask new];
+    [self.sshTask_R11_Core setLaunchPath:@"/usr/local/bin/sshpass"];
+    //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_R
+    [self.sshTask_R11_Core setArguments:@[@"-p", @"a", @"ssh", @"amber@10.0.0.5", @"cd", @"/home/amber/R-11/;", @"./amber_core_R"]];
+    NSPipe *pipe = [NSPipe pipe];
+    self.sshTask_R11_Core.standardOutput = pipe;
+    self.sshTask_R11_Core.standardError = pipe;
     
     self.receivedData_R11_Core = [NSMutableData new];
     
@@ -1487,6 +1542,8 @@ int maestroGetErrors(int fd)
             //NSLog(@"R11:\n%@", finalOutput);
             dispatch_async(dispatch_get_main_queue(), ^{
                 self.amberMasterCoreOutput_R11.string = [self.amberMasterCoreOutput_R11.string stringByAppendingString:finalOutput];
+                [self.amberMasterCoreOutput_R11 setNeedsDisplay:YES];
+                [self.amberMasterCoreOutput_R11 scrollToEndOfDocument:nil];
             });
         } else {
             self.core_R11_isOnline = true;
@@ -1498,15 +1555,33 @@ int maestroGetErrors(int fd)
             //NSLog(@"R11: %@", partialString);
             dispatch_async(dispatch_get_main_queue(), ^{
                 self.amberMasterCoreOutput_R11.string = [self.amberMasterCoreOutput_R11.string stringByAppendingString:partialString];
+                [self.amberMasterCoreOutput_R11 setNeedsDisplay:YES];
+                [self.amberMasterCoreOutput_R11 scrollToEndOfDocument:nil];
             });
         }
     };
 
-    [sshTask_R11_Core launch];
+    [self.sshTask_R11_Core launch];
 }
 
 - (IBAction) shutdown_R11_core:(id)sender {
     [self.sshTask_R11_Core terminate];
+    self.sshTask_R11_Core = nil;
+    
+    NSTask *sshTask_kill_R11_Core = [NSTask new];
+    [sshTask_kill_R11_Core setLaunchPath:@"/usr/local/bin/sshpass"];
+    //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_R
+    //echo <password> | sudo -S
+    [sshTask_kill_R11_Core setArguments:@[@"-p", @"a", @"ssh", @"amber@10.0.0.5", @"echo", @"a", @"|", @"sudo", @"-S", @"killall", @"amber_core_R"]];
+    NSPipe *pipe = [NSPipe pipe];
+    sshTask_kill_R11_Core.standardOutput = pipe;
+    sshTask_kill_R11_Core.standardError = pipe;
+    
+    [sshTask_kill_R11_Core launch];
+    
+    NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+    NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    NSLog(@"sshTask_kill_R11_Core: %@", output);
 }
 
 - (IBAction)zeroPosition_R11:(id)sender {
@@ -1593,14 +1668,63 @@ int maestroGetErrors(int fd)
 
 #pragma mark - L10 actions
 
-- (IBAction) sshIntoAmberMasterAndRunCore_L10:(id)sender {
-    NSTask *sshTask_L10_Core = [NSTask new];
-    [sshTask_L10_Core setLaunchPath:@"/usr/local/bin/sshpass"];
-    //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_R
-    [sshTask_L10_Core setArguments:@[@"-p", @"a", @"ssh", @"amber@10.0.0.5", @"cd", @"/home/amber/L-10/;", @"./amber_core_L"]];
+- (IBAction) sshIntoAmberMasterAndRunTail_L10:(id)sender {
+    self.sshTask_L10_Core = [NSTask new];
+    [self.sshTask_L10_Core setLaunchPath:@"/usr/local/bin/sshpass"];
+    //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_L
+    [self.sshTask_L10_Core setArguments:@[@"-p", @"a", @"ssh", @"amber@10.0.0.5", @"tail", @"-n", @"+1", @"-f", @"/home/amber/L-10/core.log"]];
     NSPipe *pipe = [NSPipe pipe];
-    sshTask_L10_Core.standardOutput = pipe;
-    sshTask_L10_Core.standardError = pipe;
+    self.sshTask_L10_Core.standardOutput = pipe;
+    self.sshTask_L10_Core.standardError = pipe;
+    
+    self.receivedData_L10_log = [NSMutableData new];
+    
+    NSFileHandle *readFileHandle_L10 = [pipe fileHandleForReading];
+    readFileHandle_L10.readabilityHandler = ^(NSFileHandle *handle) {
+        NSData *data = [handle availableData];
+        
+        // If data is empty, the pipe has closed and we've reached EOF.
+        if ([data length] == 0) {
+            // Stop the handler to prevent further calls.
+            handle.readabilityHandler = nil;
+            self.core_L10_isOnline = false;
+            // At this point, the task might still be running, but the pipe is closed.
+            // You can process the final data here.
+            NSString *finalOutput = [[NSString alloc] initWithData:self.receivedData_L10_log encoding:NSUTF8StringEncoding];
+            //NSLog(@"L10:\n%@", finalOutput);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                self.amberMasterCoreOutput_L10.string = [self.amberMasterCoreOutput_L10.string stringByAppendingString:finalOutput];
+                [self.amberMasterCoreOutput_L10 setNeedsDisplay:YES];
+                [self.amberMasterCoreOutput_L10 scrollToEndOfDocument:nil];
+            });
+
+        } else {
+            // Append the new data to our storage.
+            self.core_L10_isOnline = true;
+            [self.receivedData_L10_log appendData:data];
+            
+            // For demonstration, print the partial output.
+            NSString *partialString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+            //NSLog(@"L10: %@", partialString);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                self.amberMasterCoreOutput_L10.string = [self.amberMasterCoreOutput_L10.string stringByAppendingString:partialString];
+                [self.amberMasterCoreOutput_L10 setNeedsDisplay:YES];
+                [self.amberMasterCoreOutput_L10 scrollToEndOfDocument:nil];
+            });
+        }
+    };
+
+    [self.sshTask_L10_Core launch];
+}
+
+- (IBAction) sshIntoAmberMasterAndRunCore_L10:(id)sender {
+    self.sshTask_L10_Core = [NSTask new];
+    [self.sshTask_L10_Core setLaunchPath:@"/usr/local/bin/sshpass"];
+    //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_R
+    [self.sshTask_L10_Core setArguments:@[@"-p", @"a", @"ssh", @"amber@10.0.0.5", @"cd", @"/home/amber/L-10/;", @"./amber_core_L"]];
+    NSPipe *pipe = [NSPipe pipe];
+    self.sshTask_L10_Core.standardOutput = pipe;
+    self.sshTask_L10_Core.standardError = pipe;
     
     self.receivedData_L10_Core = [NSMutableData new];
     
@@ -1620,6 +1744,7 @@ int maestroGetErrors(int fd)
             dispatch_async(dispatch_get_main_queue(), ^{
                 self.amberMasterCoreOutput_L10.string = [self.amberMasterCoreOutput_L10.string stringByAppendingString:finalOutput];
                 [self.amberMasterCoreOutput_L10 setNeedsDisplay:YES];
+                [self.amberMasterCoreOutput_L10 scrollToEndOfDocument:nil];
             });
 
         } else {
@@ -1633,15 +1758,31 @@ int maestroGetErrors(int fd)
             dispatch_async(dispatch_get_main_queue(), ^{
                 self.amberMasterCoreOutput_L10.string = [self.amberMasterCoreOutput_L10.string stringByAppendingString:partialString];
                 [self.amberMasterCoreOutput_L10 setNeedsDisplay:YES];
+                [self.amberMasterCoreOutput_L10 scrollToEndOfDocument:nil];
             });
         }
     };
 
-    [sshTask_L10_Core launch];
+    [self.sshTask_L10_Core launch];
 }
 
 - (IBAction) shutdown_L10_core:(id)sender {
     [self.sshTask_L10_Core terminate];
+    
+    NSTask *sshTask_kill_L10_Core = [NSTask new];
+    [sshTask_kill_L10_Core setLaunchPath:@"/usr/local/bin/sshpass"];
+    //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_R
+    //echo <password> | sudo -S
+    [sshTask_kill_L10_Core setArguments:@[@"-p", @"a", @"ssh", @"amber@10.0.0.5", @"echo", @"a", @"|", @"sudo", @"-S", @"killall", @"amber_core_L"]];
+    NSPipe *pipe = [NSPipe pipe];
+    sshTask_kill_L10_Core.standardOutput = pipe;
+    sshTask_kill_L10_Core.standardError = pipe;
+    
+    [sshTask_kill_L10_Core launch];
+    
+    NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+    NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    NSLog(@"sshTask_kill_L10_Core: %@", output);
 }
 
 - (IBAction)zeroPosition_L10:(id)sender {
