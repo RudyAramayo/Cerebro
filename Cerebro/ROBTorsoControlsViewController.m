@@ -148,7 +148,7 @@
 }
 
 - (IBAction) watchPositionOut_L10:(id)sender {
-    [self.robMainViewController.serialBox watch_position_out_R11:self];
+    [self.robMainViewController.serialBox watch_position_out_L10:self];
 }
 
 

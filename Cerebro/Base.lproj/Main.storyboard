@@ -2624,61 +2624,96 @@ Brake
                                     <action selector="openGripper_L10:" target="cHj-5R-xNm" id="iUr-PZ-rWK"/>
                                 </connections>
                             </button>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="rJ1-6W-ta2">
-                                <rect key="frame" x="451" y="616" width="138" height="24"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="push" title="Boot L10 Core" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="wsu-VQ-WDp">
-                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
-                                    <font key="font" metaFont="system"/>
-                                    <connections>
-                                        <action selector="sshIntoAmberMasterAndRunCore_L10:" target="cHj-5R-xNm" id="b8x-Ax-Qqe"/>
-                                    </connections>
-                                </buttonCell>
-                            </button>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="ton-Ai-Frn">
-                                <rect key="frame" x="808" y="616" width="138" height="24"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="push" title="Boot R11 Core" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="bjG-rc-ebd">
-                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
-                                    <font key="font" metaFont="system"/>
-                                </buttonCell>
-                                <connections>
-                                    <action selector="sshIntoAmberMasterAndRunCore_R11:" target="cHj-5R-xNm" id="QP6-JZ-DSh"/>
-                                </connections>
-                            </button>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="XLI-R7-UGH">
-                                <rect key="frame" x="808" y="544" width="138" height="24"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="push" title="Watch position out" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="hgn-s4-Sza">
-                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
-                                    <font key="font" metaFont="system"/>
-                                </buttonCell>
-                                <connections>
-                                    <action selector="watchPositionOut_R11:" target="cHj-5R-xNm" id="Ks0-OW-bK1"/>
-                                </connections>
-                            </button>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="JdC-In-BKR">
-                                <rect key="frame" x="448" y="580" width="141" height="24"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="push" title="Shutdown R11 Core" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="Itc-0R-dLI">
-                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
-                                    <font key="font" metaFont="system"/>
-                                </buttonCell>
-                                <connections>
-                                    <action selector="shutdown_L10_core:" target="cHj-5R-xNm" id="PYi-NE-8bN"/>
-                                </connections>
-                            </button>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="oR2-al-YJJ">
-                                <rect key="frame" x="808" y="580" width="141" height="24"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <buttonCell key="cell" type="push" title="Shutdown R11 Core" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="7kE-Vp-MgB">
-                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
-                                    <font key="font" metaFont="system"/>
-                                </buttonCell>
-                                <connections>
-                                    <action selector="shutdown_R11_core:" target="cHj-5R-xNm" id="rNM-5H-lXZ"/>
-                                </connections>
-                            </button>
+                            <stackView distribution="fill" orientation="vertical" alignment="centerX" spacing="12" horizontalStackHuggingPriority="249.99998474121094" verticalStackHuggingPriority="249.99998474121094" fixedFrame="YES" detachesHiddenViews="YES" translatesAutoresizingMaskIntoConstraints="NO" id="snL-ok-GrG">
+                                <rect key="frame" x="448" y="544" width="141" height="96"/>
+                                <subviews>
+                                    <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="rJ1-6W-ta2">
+                                        <rect key="frame" x="16" y="72" width="110" height="24"/>
+                                        <buttonCell key="cell" type="push" title="Boot L10 Core" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="wsu-VQ-WDp">
+                                            <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                            <connections>
+                                                <action selector="sshIntoAmberMasterAndRunCore_L10:" target="cHj-5R-xNm" id="b8x-Ax-Qqe"/>
+                                            </connections>
+                                        </buttonCell>
+                                    </button>
+                                    <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="JdC-In-BKR">
+                                        <rect key="frame" x="0.0" y="36" width="141" height="24"/>
+                                        <buttonCell key="cell" type="push" title="Shutdown R11 Core" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="Itc-0R-dLI">
+                                            <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                        <connections>
+                                            <action selector="shutdown_L10_core:" target="cHj-5R-xNm" id="PYi-NE-8bN"/>
+                                        </connections>
+                                    </button>
+                                    <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="Flc-TS-bP1">
+                                        <rect key="frame" x="2" y="0.0" width="138" height="24"/>
+                                        <buttonCell key="cell" type="push" title="Watch position out" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="jlC-fP-jkt">
+                                            <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                        <connections>
+                                            <action selector="watchPositionOut_L10:" target="cHj-5R-xNm" id="WCV-to-4ja"/>
+                                        </connections>
+                                    </button>
+                                </subviews>
+                                <visibilityPriorities>
+                                    <integer value="1000"/>
+                                    <integer value="1000"/>
+                                    <integer value="1000"/>
+                                </visibilityPriorities>
+                                <customSpacing>
+                                    <real value="3.4028234663852886e+38"/>
+                                    <real value="3.4028234663852886e+38"/>
+                                    <real value="3.4028234663852886e+38"/>
+                                </customSpacing>
+                            </stackView>
+                            <stackView distribution="fill" orientation="vertical" alignment="centerX" spacing="12" horizontalStackHuggingPriority="249.99998474121094" verticalStackHuggingPriority="249.99998474121094" fixedFrame="YES" detachesHiddenViews="YES" translatesAutoresizingMaskIntoConstraints="NO" id="06G-1c-0B6">
+                                <rect key="frame" x="808" y="544" width="141" height="96"/>
+                                <subviews>
+                                    <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="ton-Ai-Frn">
+                                        <rect key="frame" x="16" y="72" width="109" height="24"/>
+                                        <buttonCell key="cell" type="push" title="Boot R11 Core" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="bjG-rc-ebd">
+                                            <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                        <connections>
+                                            <action selector="sshIntoAmberMasterAndRunCore_R11:" target="cHj-5R-xNm" id="QP6-JZ-DSh"/>
+                                        </connections>
+                                    </button>
+                                    <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="oR2-al-YJJ">
+                                        <rect key="frame" x="0.0" y="36" width="141" height="24"/>
+                                        <buttonCell key="cell" type="push" title="Shutdown R11 Core" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="7kE-Vp-MgB">
+                                            <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                        <connections>
+                                            <action selector="shutdown_R11_core:" target="cHj-5R-xNm" id="rNM-5H-lXZ"/>
+                                        </connections>
+                                    </button>
+                                    <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="XLI-R7-UGH">
+                                        <rect key="frame" x="2" y="0.0" width="138" height="24"/>
+                                        <buttonCell key="cell" type="push" title="Watch position out" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="hgn-s4-Sza">
+                                            <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                        <connections>
+                                            <action selector="watchPositionOut_R11:" target="cHj-5R-xNm" id="Ks0-OW-bK1"/>
+                                        </connections>
+                                    </button>
+                                </subviews>
+                                <visibilityPriorities>
+                                    <integer value="1000"/>
+                                    <integer value="1000"/>
+                                    <integer value="1000"/>
+                                </visibilityPriorities>
+                                <customSpacing>
+                                    <real value="3.4028234663852886e+38"/>
+                                    <real value="3.4028234663852886e+38"/>
+                                    <real value="3.4028234663852886e+38"/>
+                                </customSpacing>
+                            </stackView>
                         </subviews>
                     </view>
                     <connections>
