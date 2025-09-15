@@ -3,7 +3,7 @@ import argparse
 
 parser = argparse.ArgumentParser(description="Example of argparse with default values.")
 
-parser.add_argument("--ip", type=str, default="10.0.0.5", help="IP (default: %(default)s)")
+parser.add_argument("--ip", type=str, help="IP (default: %(default)s)")
 parser.add_argument("--port", type=int, default=26002, help="IP (default: %(default)s)")
 
 args = parser.parse_args()
@@ -11,7 +11,7 @@ args = parser.parse_args()
 print(f"ip {args.ip}")
 print(f"port {args.port}")
 
-IP_ADDR = args.ip#"10.0.0.5"                           # ROS master's IP address
+IP_ADDR = args.ip                           # ROS master's IP address
 PORT = args.port
 # Set joint count
 joint_count = 7

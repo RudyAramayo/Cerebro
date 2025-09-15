@@ -56,7 +56,7 @@
 @property (readwrite, retain) IBOutlet NSButton *arm_L_Gripper_enabled;
 
 
-
+@property (readwrite, retain) IBOutlet NSTextField *amberHostIP_TextField;
 
 #pragma mark - R11
 

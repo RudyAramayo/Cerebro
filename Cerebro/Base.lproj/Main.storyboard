@@ -2,6 +2,7 @@
 <document type="com.apple.InterfaceBuilder3.Cocoa.Storyboard.XIB" version="3.0" toolsVersion="24093.7" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none" useAutolayout="YES" initialViewController="B8D-0N-5wS">
     <dependencies>
         <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="24093.7"/>
+        <plugIn identifier="com.apple.SceneKitIBPlugin" version="24093.7"/>
         <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
     </dependencies>
     <scenes>
@@ -435,6 +436,11 @@ Brake
                         <rect key="frame" x="0.0" y="0.0" width="900" height="600"/>
                         <autoresizingMask key="autoresizingMask"/>
                         <subviews>
+                            <sceneView fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="LV3-nG-swu">
+                                <rect key="frame" x="0.0" y="0.0" width="900" height="600"/>
+                                <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                <color key="backgroundColor" white="1" alpha="0.0" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+                            </sceneView>
                             <stackView distribution="fill" orientation="vertical" alignment="trailing" spacing="21" horizontalStackHuggingPriority="249.99998474121094" verticalStackHuggingPriority="249.99998474121094" fixedFrame="YES" detachesHiddenViews="YES" translatesAutoresizingMaskIntoConstraints="NO" id="wmf-w8-XZu">
                                 <rect key="frame" x="710" y="20" width="170" height="114"/>
                                 <subviews>
@@ -480,8 +486,17 @@ Brake
                                     <real value="3.4028234663852886e+38"/>
                                 </customSpacing>
                             </stackView>
+                            <imageView horizontalHuggingPriority="251" verticalHuggingPriority="251" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="cfz-a0-V0Y">
+                                <rect key="frame" x="743" y="194" width="137" height="130"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                <imageCell key="cell" refusesFirstResponder="YES" alignment="left" imageScaling="proportionallyDown" id="Epx-eZ-A7H"/>
+                            </imageView>
                         </subviews>
                     </view>
+                    <connections>
+                        <outlet property="personMaskImageView" destination="cfz-a0-V0Y" id="vfv-zv-ZqE"/>
+                        <outlet property="skeletonView" destination="LV3-nG-swu" id="X2O-J1-HQ8"/>
+                    </connections>
                 </viewController>
                 <customObject id="2c1-BA-AlT" userLabel="First Responder" customClass="NSResponder" sceneMemberID="firstResponder"/>
             </objects>
@@ -2513,7 +2528,7 @@ Brake
                                     <slider horizontalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="J1f-FG-Z84">
                                         <rect key="frame" x="42" y="32" width="19" height="76"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                        <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4375" maxValue="7675" doubleValue="4885.1726726628149" tickMarkPosition="right" sliderType="linear" id="Bud-rf-B0V"/>
+                                        <sliderCell key="cell" continuous="YES" alignment="left" minValue="4375" maxValue="7675" doubleValue="7262.3420365021002" tickMarkPosition="right" sliderType="linear" id="Bud-rf-B0V"/>
                                         <connections>
                                             <action selector="applyServoCommand:" target="cHj-5R-xNm" id="0Cp-xN-UBU"/>
                                         </connections>
@@ -2521,7 +2536,7 @@ Brake
                                     <slider horizontalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="CyK-bn-gZP">
                                         <rect key="frame" x="42" y="122" width="19" height="76"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                        <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4300" maxValue="7790" doubleValue="5050" tickMarkPosition="right" sliderType="linear" id="UIa-yF-izD"/>
+                                        <sliderCell key="cell" continuous="YES" alignment="left" minValue="4300" maxValue="7790" doubleValue="7790" tickMarkPosition="right" sliderType="linear" id="UIa-yF-izD"/>
                                         <connections>
                                             <action selector="applyServoCommand:" target="cHj-5R-xNm" id="1jw-j1-xfp"/>
                                         </connections>
@@ -2738,9 +2753,39 @@ Brake
                                     <real value="3.4028234663852886e+38"/>
                                 </customSpacing>
                             </stackView>
+                            <stackView distribution="fill" orientation="vertical" alignment="centerX" horizontalStackHuggingPriority="249.99998474121094" verticalStackHuggingPriority="249.99998474121094" fixedFrame="YES" detachesHiddenViews="YES" translatesAutoresizingMaskIntoConstraints="NO" id="ISg-gv-BS9">
+                                <rect key="frame" x="628" y="600" width="128" height="40"/>
+                                <subviews>
+                                    <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="fbY-W8-TcX">
+                                        <rect key="frame" x="20" y="24" width="89" height="16"/>
+                                        <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" alignment="center" title="AmberHostIP" id="Pp3-oc-bx1">
+                                            <font key="font" metaFont="system"/>
+                                            <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
+                                            <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
+                                        </textFieldCell>
+                                    </textField>
+                                    <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="P1j-Rb-9gN">
+                                        <rect key="frame" x="-2" y="0.0" width="132" height="16"/>
+                                        <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" selectable="YES" editable="YES" sendsActionOnEndEditing="YES" alignment="center" title="10.0.0.11" id="fue-ms-uvA">
+                                            <font key="font" metaFont="system"/>
+                                            <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
+                                            <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                        </textFieldCell>
+                                    </textField>
+                                </subviews>
+                                <visibilityPriorities>
+                                    <integer value="1000"/>
+                                    <integer value="1000"/>
+                                </visibilityPriorities>
+                                <customSpacing>
+                                    <real value="3.4028234663852886e+38"/>
+                                    <real value="3.4028234663852886e+38"/>
+                                </customSpacing>
+                            </stackView>
                         </subviews>
                     </view>
                     <connections>
+                        <outlet property="amberHostIP_TextField" destination="P1j-Rb-9gN" id="mIt-v7-JDj"/>
                         <outlet property="amberMasterCore_L10" destination="kej-kR-EWX" id="cTU-4B-J2C"/>
                         <outlet property="amberMasterCore_R11" destination="FQi-J0-r6k" id="hZD-YD-Olp"/>
                         <outlet property="arm_L10_cartesian_cmdSleep" destination="3fY-Vj-i1I" id="J1i-nV-Ni0"/>

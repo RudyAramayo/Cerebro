@@ -30,8 +30,8 @@
             filePath = "Cerebro/ROBSerialBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "600"
-            endingLineNumber = "600"
+            startingLineNumber = "604"
+            endingLineNumber = "604"
             landmarkName = "-incomingTextUpdateThread_base:"
             landmarkType = "7">
          </BreakpointContent>
@@ -46,8 +46,8 @@
             filePath = "Cerebro/ROBSerialBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "750"
-            endingLineNumber = "750"
+            startingLineNumber = "754"
+            endingLineNumber = "754"
             landmarkName = "-refreshSerialList_base:"
             landmarkType = "7">
          </BreakpointContent>
@@ -62,8 +62,8 @@
             filePath = "Cerebro/ROBSerialBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "190"
-            endingLineNumber = "190"
+            startingLineNumber = "191"
+            endingLineNumber = "191"
             landmarkName = "-initialize_connection"
             landmarkType = "7">
          </BreakpointContent>
@@ -78,8 +78,8 @@
             filePath = "Cerebro/ROBSerialBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "802"
-            endingLineNumber = "802"
+            startingLineNumber = "806"
+            endingLineNumber = "806"
             landmarkName = "-writeString:serialFileDescriptor:"
             landmarkType = "7">
          </BreakpointContent>
@@ -94,8 +94,8 @@
             filePath = "Cerebro/ROBSerialBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "812"
-            endingLineNumber = "812"
+            startingLineNumber = "816"
+            endingLineNumber = "816"
             landmarkName = "-writeByte:serialFileDescriptor:"
             landmarkType = "7">
          </BreakpointContent>
@@ -126,40 +126,10 @@
             filePath = "Cerebro/ROBSerialBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "251"
-            endingLineNumber = "251"
+            startingLineNumber = "255"
+            endingLineNumber = "255"
             landmarkName = "maestroGetPosition(fd, channel)"
             landmarkType = "9">
-            <Locations>
-               <Location
-                  uuid = "4070FD2E-FBDF-4C20-89CA-56C78797BEB8 - 6a569734fd7ef630"
-                  shouldBeEnabled = "Yes"
-                  ignoreCount = "0"
-                  continueAfterRunningActions = "No"
-                  symbolName = "maestroGetPosition"
-                  moduleName = "Cerebro.debug.dylib"
-                  usesParentBreakpointCondition = "Yes"
-                  urlString = "file:///Users/rob/Library/Mobile%20Documents/com~apple~CloudDocs/Documents/Dev/R.O.B./Cerebro%20v5/Cerebro/ROBSerialBox.m"
-                  startingColumnNumber = "9223372036854775807"
-                  endingColumnNumber = "9223372036854775807"
-                  startingLineNumber = "254"
-                  endingLineNumber = "254">
-               </Location>
-               <Location
-                  uuid = "4070FD2E-FBDF-4C20-89CA-56C78797BEB8 - 6a569734fd7ef655"
-                  shouldBeEnabled = "Yes"
-                  ignoreCount = "0"
-                  continueAfterRunningActions = "No"
-                  symbolName = "maestroGetPosition"
-                  moduleName = "Cerebro.debug.dylib"
-                  usesParentBreakpointCondition = "Yes"
-                  urlString = "file:///Users/rob/Library/Mobile%20Documents/com~apple~CloudDocs/Documents/Dev/R.O.B./Cerebro%20v5/Cerebro/ROBSerialBox.m"
-                  startingColumnNumber = "9223372036854775807"
-                  endingColumnNumber = "9223372036854775807"
-                  startingLineNumber = "251"
-                  endingLineNumber = "251">
-               </Location>
-            </Locations>
          </BreakpointContent>
       </BreakpointProxy>
       <BreakpointProxy
@@ -172,8 +142,8 @@
             filePath = "Cerebro/ROBSerialBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "273"
-            endingLineNumber = "273"
+            startingLineNumber = "277"
+            endingLineNumber = "277"
             landmarkName = "maestroSetTarget(fd, channel, target)"
             landmarkType = "9">
          </BreakpointContent>
@@ -188,8 +158,8 @@
             filePath = "Cerebro/ROBSerialBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "285"
-            endingLineNumber = "285"
+            startingLineNumber = "289"
+            endingLineNumber = "289"
             landmarkName = "maestroGetErrors(fd)"
             landmarkType = "9">
          </BreakpointContent>
@@ -252,8 +222,8 @@
             filePath = "Cerebro/ROBSerialBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "1047"
-            endingLineNumber = "1047"
+            startingLineNumber = "1051"
+            endingLineNumber = "1051"
             landmarkName = "-controllerPassthrough:touchPadPointR:Lat:Long:tredBrakeLock:flipperForwardIsDown:flipperRelaxBrake:flipperBackwardIsDown:flipperBrakeLock:lact1:lact2:lact3:speed:speed_playPause:speed_forward_reverse:textInput:"
             landmarkType = "7">
          </BreakpointContent>
@@ -796,10 +766,72 @@
             filePath = "Cerebro/ROBTorsoControlsViewController.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "217"
-            endingLineNumber = "217"
+            startingLineNumber = "228"
+            endingLineNumber = "228"
             landmarkName = "-update_arm_R11_Action:"
             landmarkType = "7">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "E41047EA-9CC8-41D4-A407-1F3F511D6F65"
+            shouldBeEnabled = "No"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "Cerebro/HumanBodyPose3DDetector.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "23"
+            endingLineNumber = "23"
+            landmarkName = "calculateLocalAngleToParent(joint:observation:)"
+            landmarkType = "7">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "649842F0-5F79-4C37-8A45-ED6AF08FCFF9"
+            shouldBeEnabled = "Yes"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "Cerebro/CameraViewController.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "249"
+            endingLineNumber = "249"
+            landmarkName = "cameraManager(_:didOutput:from:)"
+            landmarkType = "7">
+            <Locations>
+               <Location
+                  uuid = "649842F0-5F79-4C37-8A45-ED6AF08FCFF9 - a23e9075f976f2a2"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "closure #8 (__C.VNRequest, Swift.Optional&lt;Swift.Error&gt;) -&gt; () in Cerebro.CameraViewController.cameraManager(_: __C.AVCaptureOutput, didOutput: __C.CMSampleBufferRef, from: __C.AVCaptureConnection) -&gt; ()"
+                  moduleName = "Cerebro.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/rob/Library/Mobile%20Documents/com~apple~CloudDocs/Documents/Dev/R.O.B./Cerebro%20v5/Cerebro/CameraViewController.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "250"
+                  endingLineNumber = "250">
+               </Location>
+               <Location
+                  uuid = "649842F0-5F79-4C37-8A45-ED6AF08FCFF9 - a23e9075f976f2c3"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "closure #8 (__C.VNRequest, Swift.Optional&lt;Swift.Error&gt;) -&gt; () in Cerebro.CameraViewController.cameraManager(_: __C.AVCaptureOutput, didOutput: __C.CMSampleBufferRef, from: __C.AVCaptureConnection) -&gt; ()"
+                  moduleName = "Cerebro.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/rob/Library/Mobile%20Documents/com~apple~CloudDocs/Documents/Dev/R.O.B./Cerebro%20v5/Cerebro/CameraViewController.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "249"
+                  endingLineNumber = "249">
+               </Location>
+            </Locations>
          </BreakpointContent>
       </BreakpointProxy>
    </Breakpoints>

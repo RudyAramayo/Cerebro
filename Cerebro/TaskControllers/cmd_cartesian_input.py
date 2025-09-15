@@ -19,7 +19,7 @@ parser.add_argument("--roll", type=float, default=0.0, help="Time to execute the
 parser.add_argument("--pitch", type=float, default=-1.5, help="Time to execute the command (default: %(default)s)")
 parser.add_argument("--yaw", type=float, default=0.5, help="Time to execute the command (default: %(default)s)")
 
-parser.add_argument("--ip", type=str, default="10.0.0.5", help="IP (default: %(default)s)")
+parser.add_argument("--ip", type=str, help="IP (default: %(default)s)")
 parser.add_argument("--port", type=int, default=26002, help="IP (default: %(default)s)")
 
 
@@ -48,7 +48,7 @@ rot_r = args.roll
 rot_p = args.pitch
 rot_y = args.yaw
 
-IP_ADDR = args.ip#"10.0.0.5"                           # ROS master's IP address
+IP_ADDR = args.ip                           # ROS master's IP address
 
 
 class robot_joint_position(Structure):              # ctypes struct for send

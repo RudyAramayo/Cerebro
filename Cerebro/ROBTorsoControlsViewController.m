@@ -12,7 +12,7 @@
 #import "ROBSerialBox.h"
 
 
-@interface ROBTorsoControlsViewController ()
+@interface ROBTorsoControlsViewController () <NSTextFieldDelegate>
 
 @property (readwrite, retain) NSTimer *renderServoControlsTimer;
 @property (readwrite, retain) NSTimer *maestroGetErrorsTimer;
@@ -35,10 +35,21 @@
                                                                    userInfo:nil
                                                                     repeats:YES];
     
+    self.amberHostIP_TextField.delegate = self;
+    
+}
+
+- (void)controlTextDidChange:(NSNotification *)obj {
+    NSTextField *textField = obj.object;
+    if (textField == self.amberHostIP_TextField) {
+        NSLog(@"setting amberHostIP to %@", textField.stringValue);
+        self.robMainViewController.serialBox.amberHostIP = textField.stringValue;
+    }
 }
 
 - (void) bindArm_controls
 {
+    self.robMainViewController.serialBox.amberHostIP = self.amberHostIP_TextField.stringValue;
     self.robMainViewController.serialBox.amberMasterCoreOutput_R11 = self.amberMasterCore_R11;
     self.robMainViewController.serialBox.amberMasterCoreOutput_L10 = self.amberMasterCore_L10;
     

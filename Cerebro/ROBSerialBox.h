@@ -58,6 +58,8 @@
 @property (readwrite, assign) NSButton *exitSafeStartWaistRotationButton;
 @property (readwrite, assign) NSButton *energizeWaistRotationButton;
 
+@property (readwrite, retain) NSString *amberHostIP;
+
 @property (readwrite, retain) NSSlider *arm_R11_force;
 
 @property (readwrite, retain) NSSlider *arm_R11_cmdTime;

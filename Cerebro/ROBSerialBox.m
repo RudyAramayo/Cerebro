@@ -162,6 +162,7 @@ typedef enum : NSUInteger {
 // executes after everything in the xib/nib is initiallized
 - (void)initialize_connection {
     // we don't have a serial port open yet
+    self.amberHostIP = @"10.0.0.11";
     serialFileDescriptor_head = -1;
     serialFileDescriptor_torso = -1;
     serialFileDescriptor_base = -1;
@@ -223,8 +224,11 @@ typedef enum : NSUInteger {
     
     self.controllerTimer = [NSTimer scheduledTimerWithTimeInterval:0.1 target:self selector:@selector(renderController) userInfo:nil repeats:YES];
     
-    [self sshIntoAmberMasterAndRunTail_L10:self];
-    [self sshIntoAmberMasterAndRunTail_R11:self];
+    //give the master controller a few seconds to boot up first
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self sshIntoAmberMasterAndRunTail_L10:self];
+        [self sshIntoAmberMasterAndRunTail_R11:self];
+    });
 }
 
 - (void) connectMaestro
@@ -1468,13 +1472,13 @@ int maestroGetErrors(int fd)
 #pragma mark - R11 actions
 
 - (IBAction) sshIntoAmberMasterAndRunTail_R11:(id)sender {
-    self.sshTask_R11_Core = [NSTask new];
-    [self.sshTask_R11_Core setLaunchPath:@"/usr/local/bin/sshpass"];
+    self.sshTask_R11_log = [NSTask new];
+    [self.sshTask_R11_log setLaunchPath:@"/usr/local/bin/sshpass"];
     //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_L
-    [self.sshTask_R11_Core setArguments:@[@"-p", @"a", @"ssh", @"amber@10.0.0.5", @"tail", @"-n", @"+1", @"-f", @"/home/amber/R-11/core.log"]];
+    [self.sshTask_R11_log setArguments:@[@"-p", @"a", @"ssh", [NSString stringWithFormat:@"amber@%@", self.amberHostIP], @"tail", @"-n", @"+1", @"-f", @"/home/amber/R-11/core.log"]];
     NSPipe *pipe = [NSPipe pipe];
-    self.sshTask_R11_Core.standardOutput = pipe;
-    self.sshTask_R11_Core.standardError = pipe;
+    self.sshTask_R11_log.standardOutput = pipe;
+    self.sshTask_R11_log.standardError = pipe;
     
     self.receivedData_R11_log = [NSMutableData new];
     
@@ -1513,14 +1517,14 @@ int maestroGetErrors(int fd)
         }
     };
 
-    [self.sshTask_R11_Core launch];
+    [self.sshTask_R11_log launch];
 }
 
 - (IBAction) sshIntoAmberMasterAndRunCore_R11:(id)sender {
     self.sshTask_R11_Core = [NSTask new];
     [self.sshTask_R11_Core setLaunchPath:@"/usr/local/bin/sshpass"];
     //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_R
-    [self.sshTask_R11_Core setArguments:@[@"-p", @"a", @"ssh", @"amber@10.0.0.5", @"cd", @"/home/amber/R-11/;", @"./amber_core_R"]];
+    [self.sshTask_R11_Core setArguments:@[@"-p", @"a", @"ssh", [NSString stringWithFormat:@"amber@%@", self.amberHostIP], @"cd", @"/home/amber/R-11/;", @"./amber_core_R"]];
     NSPipe *pipe = [NSPipe pipe];
     self.sshTask_R11_Core.standardOutput = pipe;
     self.sshTask_R11_Core.standardError = pipe;
@@ -1572,7 +1576,7 @@ int maestroGetErrors(int fd)
     [sshTask_kill_R11_Core setLaunchPath:@"/usr/local/bin/sshpass"];
     //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_R
     //echo <password> | sudo -S
-    [sshTask_kill_R11_Core setArguments:@[@"-p", @"a", @"ssh", @"amber@10.0.0.5", @"echo", @"a", @"|", @"sudo", @"-S", @"killall", @"amber_core_R"]];
+    [sshTask_kill_R11_Core setArguments:@[@"-p", @"a", @"ssh", [NSString stringWithFormat:@"amber@%@", self.amberHostIP], @"echo", @"a", @"|", @"sudo", @"-S", @"killall", @"amber_core_R"]];
     NSPipe *pipe = [NSPipe pipe];
     sshTask_kill_R11_Core.standardOutput = pipe;
     sshTask_kill_R11_Core.standardError = pipe;
@@ -1669,13 +1673,13 @@ int maestroGetErrors(int fd)
 #pragma mark - L10 actions
 
 - (IBAction) sshIntoAmberMasterAndRunTail_L10:(id)sender {
-    self.sshTask_L10_Core = [NSTask new];
-    [self.sshTask_L10_Core setLaunchPath:@"/usr/local/bin/sshpass"];
+    self.sshTask_L10_log = [NSTask new];
+    [self.sshTask_L10_log setLaunchPath:@"/usr/local/bin/sshpass"];
     //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_L
-    [self.sshTask_L10_Core setArguments:@[@"-p", @"a", @"ssh", @"amber@10.0.0.5", @"tail", @"-n", @"+1", @"-f", @"/home/amber/L-10/core.log"]];
+    [self.sshTask_L10_log setArguments:@[@"-p", @"a", @"ssh", [NSString stringWithFormat:@"amber@%@", self.amberHostIP], @"tail", @"-n", @"+1", @"-f", @"/home/amber/L-10/core.log"]];
     NSPipe *pipe = [NSPipe pipe];
-    self.sshTask_L10_Core.standardOutput = pipe;
-    self.sshTask_L10_Core.standardError = pipe;
+    self.sshTask_L10_log.standardOutput = pipe;
+    self.sshTask_L10_log.standardError = pipe;
     
     self.receivedData_L10_log = [NSMutableData new];
     
@@ -1714,14 +1718,14 @@ int maestroGetErrors(int fd)
         }
     };
 
-    [self.sshTask_L10_Core launch];
+    [self.sshTask_L10_log launch];
 }
 
 - (IBAction) sshIntoAmberMasterAndRunCore_L10:(id)sender {
     self.sshTask_L10_Core = [NSTask new];
     [self.sshTask_L10_Core setLaunchPath:@"/usr/local/bin/sshpass"];
     //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_R
-    [self.sshTask_L10_Core setArguments:@[@"-p", @"a", @"ssh", @"amber@10.0.0.5", @"cd", @"/home/amber/L-10/;", @"./amber_core_L"]];
+    [self.sshTask_L10_Core setArguments:@[@"-p", @"a", @"ssh", [NSString stringWithFormat:@"amber@%@", self.amberHostIP], @"cd", @"/home/amber/L-10/;", @"./amber_core_L"]];
     NSPipe *pipe = [NSPipe pipe];
     self.sshTask_L10_Core.standardOutput = pipe;
     self.sshTask_L10_Core.standardError = pipe;
@@ -1773,7 +1777,7 @@ int maestroGetErrors(int fd)
     [sshTask_kill_L10_Core setLaunchPath:@"/usr/local/bin/sshpass"];
     //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_R
     //echo <password> | sudo -S
-    [sshTask_kill_L10_Core setArguments:@[@"-p", @"a", @"ssh", @"amber@10.0.0.5", @"echo", @"a", @"|", @"sudo", @"-S", @"killall", @"amber_core_L"]];
+    [sshTask_kill_L10_Core setArguments:@[@"-p", @"a", @"ssh", [NSString stringWithFormat:@"amber@%@", self.amberHostIP], @"echo", @"a", @"|", @"sudo", @"-S", @"killall", @"amber_core_L"]];
     NSPipe *pipe = [NSPipe pipe];
     sshTask_kill_L10_Core.standardOutput = pipe;
     sshTask_kill_L10_Core.standardError = pipe;
@@ -1881,7 +1885,7 @@ int maestroGetErrors(int fd)
         
         
         [arguments addObject:@"--ip"];
-        [arguments addObject:@"10.0.0.5"];
+        [arguments addObject:self.amberHostIP];
         
         [arguments addObject:@"--port"];
         [arguments addObject:[NSString stringWithFormat:@"%i", port]];
@@ -1917,7 +1921,7 @@ int maestroGetErrors(int fd)
         
         
         [arguments addObject:@"--ip"];
-        [arguments addObject:@"10.0.0.5"];
+        [arguments addObject:self.amberHostIP];
         
         [arguments addObject:@"--port"];
         [arguments addObject:[NSString stringWithFormat:@"%i", port]];
@@ -1954,7 +1958,7 @@ int maestroGetErrors(int fd)
         
         
         [arguments addObject:@"--ip"];
-        [arguments addObject:@"10.0.0.5"];
+        [arguments addObject:self.amberHostIP];
         
         [arguments addObject:@"--port"];
         [arguments addObject:[NSString stringWithFormat:@"%i", port]];
@@ -1995,7 +1999,7 @@ int maestroGetErrors(int fd)
         [arguments addObject:[NSString stringWithFormat:@"%f", 0.0]];
 
         [arguments addObject:@"--ip"];
-        [arguments addObject:@"10.0.0.5"];
+        [arguments addObject:self.amberHostIP];
         
         [arguments addObject:@"--port"];
         [arguments addObject:[NSString stringWithFormat:@"%i", port]];
@@ -2030,7 +2034,7 @@ int maestroGetErrors(int fd)
         [arguments addObject:calibrateGripper_v2];
         
         [arguments addObject:@"--ip"];
-        [arguments addObject:@"10.0.0.5"];
+        [arguments addObject:self.amberHostIP];
         
         [arguments addObject:@"--port"];
         [arguments addObject:[NSString stringWithFormat:@"%i", port]];
@@ -2069,7 +2073,7 @@ int maestroGetErrors(int fd)
         [arguments addObject:force];
         
         [arguments addObject:@"--ip"];
-        [arguments addObject:@"10.0.0.5"];
+        [arguments addObject:self.amberHostIP];
         
         [arguments addObject:@"--port"];
         [arguments addObject:[NSString stringWithFormat:@"%i", port]];
@@ -2107,7 +2111,7 @@ int maestroGetErrors(int fd)
         [arguments addObject:force];
         
         [arguments addObject:@"--ip"];
-        [arguments addObject:@"10.0.0.5"];
+        [arguments addObject:self.amberHostIP];
         
         [arguments addObject:@"--port"];
         [arguments addObject:[NSString stringWithFormat:@"%i", port]];
@@ -2143,7 +2147,7 @@ int maestroGetErrors(int fd)
         
         
         [arguments addObject:@"--ip"];
-        [arguments addObject:@"10.0.0.5"];
+        [arguments addObject:self.amberHostIP];
         
         [arguments addObject:@"--port"];
         [arguments addObject:[NSString stringWithFormat:@"%i", port]];
@@ -2180,7 +2184,7 @@ int maestroGetErrors(int fd)
         
         
         [arguments addObject:@"--ip"];
-        [arguments addObject:@"10.0.0.5"];
+        [arguments addObject:self.amberHostIP];
         
         [arguments addObject:@"--port"];
         [arguments addObject:[NSString stringWithFormat:@"%i", port]];
@@ -2228,7 +2232,7 @@ int maestroGetErrors(int fd)
         
         
         [arguments addObject:@"--ip"];
-        [arguments addObject:@"10.0.0.5"];
+        [arguments addObject:self.amberHostIP];
         
         [arguments addObject:@"--port"];
         [arguments addObject:[NSString stringWithFormat:@"%i", port]];
@@ -2303,7 +2307,7 @@ int maestroGetErrors(int fd)
         
         
         [arguments addObject:@"--ip"];
-        [arguments addObject:@"10.0.0.5"];
+        [arguments addObject:self.amberHostIP];
         
         [arguments addObject:@"--port"];
         [arguments addObject:[NSString stringWithFormat:@"%i", port]];

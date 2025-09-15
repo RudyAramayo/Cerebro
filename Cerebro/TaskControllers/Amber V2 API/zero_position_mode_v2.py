@@ -6,7 +6,7 @@ parser = argparse.ArgumentParser(description="Example of argparse with default v
 parser.add_argument("--cmd_time", type=float, default=2, help="Time to execute the command (default: %(default)s)")
 parser.add_argument("--cmd_sleep", type=float, default=2, help="Time to sleep after command execution (default: %(default)s)")
 
-parser.add_argument("--ip", type=str, default="10.0.0.5", help="IP (default: %(default)s)")
+parser.add_argument("--ip", type=str, help="IP (default: %(default)s)")
 parser.add_argument("--port", type=int, default=26002, help="IP (default: %(default)s)")
 
 
@@ -31,7 +31,7 @@ servo6 = 0
 servo7 = 0
 servo8 = 0
 
-IP_ADDR = args.ip#"10.0.0.5"                           # ROS master's IP address
+IP_ADDR = args.ip                           # ROS master's IP address
 PORT = args.port
 # Set joint count
 joint_count = 7

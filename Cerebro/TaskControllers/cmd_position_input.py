@@ -20,7 +20,7 @@ parser.add_argument("--servo6", type=float, default=0.0, help="Set position of s
 parser.add_argument("--servo7", type=float, default=0.0, help="Set position of servo 7")
 parser.add_argument("--servo8", type=float, default=0.0, help="Set position of servo 8")
 
-parser.add_argument("--ip", type=str, default="10.0.0.5", help="IP (default: %(default)s)")
+parser.add_argument("--ip", type=str, help="IP (default: %(default)s)")
 parser.add_argument("--port", type=int, default=26002, help="IP (default: %(default)s)")
 
 
@@ -55,7 +55,7 @@ servo6 = args.servo6
 servo7 = args.servo7
 servo8 = args.servo8
 
-IP_ADDR = args.ip#"10.0.0.5"                           # ROS master's IP address
+IP_ADDR = args.ip                           # ROS master's IP address
 PORT = args.port
 
 #class robot_joint_position(Structure):              # ctypes struct for send

@@ -50,7 +50,10 @@
 		D4AA3D7A2AC9F4AB007DC656 /* StartTextInput.scpt in Resources */ = {isa = PBXBuildFile; fileRef = D4AA3D792AC9F4AB007DC656 /* StartTextInput.scpt */; };
 		D4AB3DA42E1CF38D00EA2571 /* CameraViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4AB3DA32E1CF38D00EA2571 /* CameraViewController.swift */; };
 		D4AB3DA52E1CF38D00EA2571 /* CameraManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4AB3DA22E1CF38D00EA2571 /* CameraManager.swift */; };
+		D4ADDC012E78A51E00631737 /* HumanBodySkeletonRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4ADDC002E78A51E00631737 /* HumanBodySkeletonRenderer.swift */; };
+		D4ADDC072E78A64500631737 /* HumanBodyPose3DDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4ADDC062E78A64500631737 /* HumanBodyPose3DDetector.swift */; };
 		D4B3620A2E72A1F2004E0BD0 /* cmd_activate_mode_v2.py in Resources */ = {isa = PBXBuildFile; fileRef = D4B362092E72A1E9004E0BD0 /* cmd_activate_mode_v2.py */; };
+		D4B83AD72E754ACA006B2863 /* lcm.py in Resources */ = {isa = PBXBuildFile; fileRef = D4B83AD62E754AC1006B2863 /* lcm.py */; };
 		D4BDA6732E6E725D0088A5B4 /* cmd_cartesian_input.py in Resources */ = {isa = PBXBuildFile; fileRef = D4BDA6722E6E725D0088A5B4 /* cmd_cartesian_input.py */; };
 		D4C282032E70D5F5009CCABC /* watch_position_out.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C282022E70D5F5009CCABC /* watch_position_out.py */; };
 		D4C282052E70D6D1009CCABC /* cmd_position_input.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C282042E70D6D1009CCABC /* cmd_position_input.py */; };
@@ -133,7 +136,7 @@
 		D4A38F591FFC007E00092A46 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
 		D4A38F5B1FFC008B00092A46 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
 		D4A38F5D1FFC009300092A46 /* AudioUnit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioUnit.framework; path = System/Library/Frameworks/AudioUnit.framework; sourceTree = SDKROOT; };
-		D4A38F5F1FFC06CF00092A46 /* dictation_start.scpt */ = {isa = PBXFileReference; lastKnownFileType = file; path = dictation_start.scpt; sourceTree = "<group>"; };
+		D4A38F5F1FFC06CF00092A46 /* dictation_start.scpt */ = {isa = PBXFileReference; lastKnownFileType = text; path = dictation_start.scpt; sourceTree = "<group>"; };
 		D4A38F611FFC0C7600092A46 /* ROBSerialBox.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBSerialBox.h; sourceTree = "<group>"; };
 		D4A38F621FFC0C7600092A46 /* ROBSerialBox.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ROBSerialBox.m; sourceTree = "<group>"; };
 		D4A38F641FFC0C9000092A46 /* MultipeerConnectivity.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MultipeerConnectivity.framework; path = System/Library/Frameworks/MultipeerConnectivity.framework; sourceTree = SDKROOT; };
@@ -155,7 +158,10 @@
 		D4AA3D792AC9F4AB007DC656 /* StartTextInput.scpt */ = {isa = PBXFileReference; lastKnownFileType = file; path = StartTextInput.scpt; sourceTree = "<group>"; };
 		D4AB3DA22E1CF38D00EA2571 /* CameraManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManager.swift; sourceTree = "<group>"; };
 		D4AB3DA32E1CF38D00EA2571 /* CameraViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraViewController.swift; sourceTree = "<group>"; };
+		D4ADDC002E78A51E00631737 /* HumanBodySkeletonRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HumanBodySkeletonRenderer.swift; sourceTree = "<group>"; };
+		D4ADDC062E78A64500631737 /* HumanBodyPose3DDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HumanBodyPose3DDetector.swift; sourceTree = "<group>"; };
 		D4B362092E72A1E9004E0BD0 /* cmd_activate_mode_v2.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = cmd_activate_mode_v2.py; sourceTree = "<group>"; };
+		D4B83AD62E754AC1006B2863 /* lcm.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = lcm.py; sourceTree = "<group>"; };
 		D4BDA6722E6E725D0088A5B4 /* cmd_cartesian_input.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = cmd_cartesian_input.py; sourceTree = "<group>"; };
 		D4C282022E70D5F5009CCABC /* watch_position_out.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = watch_position_out.py; sourceTree = "<group>"; };
 		D4C282042E70D6D1009CCABC /* cmd_position_input.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = cmd_position_input.py; sourceTree = "<group>"; };
@@ -284,6 +290,8 @@
 				D4A38F421FFB2AED00092A46 /* ROBMainViewController.h */,
 				D4A38F431FFB2AED00092A46 /* ROBMainViewController.mm */,
 				D4AB3DA22E1CF38D00EA2571 /* CameraManager.swift */,
+				D4ADDC062E78A64500631737 /* HumanBodyPose3DDetector.swift */,
+				D4ADDC002E78A51E00631737 /* HumanBodySkeletonRenderer.swift */,
 				D4AB3DA32E1CF38D00EA2571 /* CameraViewController.swift */,
 				D4A38F5F1FFC06CF00092A46 /* dictation_start.scpt */,
 				D49D755727FFD1AE00142E26 /* AutoNetServer.swift */,
@@ -343,6 +351,7 @@
 				D4A8DAD82E72127D000485DF /* amber_api.zip */,
 				D4C282232E70F132009CCABC /* LICENSE */,
 				D4C2824B2E711D66009CCABC /* cmd_deactivate_mode_v2.py */,
+				D4B83AD62E754AC1006B2863 /* lcm.py */,
 				D4B362092E72A1E9004E0BD0 /* cmd_activate_mode_v2.py */,
 				D4C282432E70F27C009CCABC /* cmd_position_mode_v2.py */,
 				D4A8DAE22E722D1E000485DF /* cmd_speed_mode_v2.py */,
@@ -470,6 +479,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D4AA3D7A2AC9F4AB007DC656 /* StartTextInput.scpt in Resources */,
+				D4B83AD72E754ACA006B2863 /* lcm.py in Resources */,
 				D4A38F601FFC06CF00092A46 /* dictation_start.scpt in Resources */,
 				D4A38F4B1FFB2AED00092A46 /* Main.storyboard in Resources */,
 				D4F673B322EFFC4600A9B6E4 /* ReSpeakerTaskController.command in Resources */,
@@ -516,6 +526,7 @@
 				D4C5252420A65FDD00290BF5 /* ROBConsciousness.m in Sources */,
 				D4F136732325E39A0084A302 /* RTSPClientConnection.mm in Sources */,
 				D4066C6022867F44002ACAD1 /* ROBTorsoControlsViewController.m in Sources */,
+				D4ADDC072E78A64500631737 /* HumanBodyPose3DDetector.swift in Sources */,
 				D4C282482E710F5E009CCABC /* open_gripper_v2.py in Sources */,
 				D4A38F4E1FFB2AEE00092A46 /* main.m in Sources */,
 				D4A38F631FFC0C7600092A46 /* ROBSerialBox.m in Sources */,
@@ -546,6 +557,7 @@
 				D4F136782325E39A0084A302 /* ROBRTSPController.m in Sources */,
 				D40D36FC20B4BE5F0006EF82 /* SimpleUserTrackerTaskController.m in Sources */,
 				D49D755827FFD1AF00142E26 /* AutoNetServerConnection.swift in Sources */,
+				D4ADDC012E78A51E00631737 /* HumanBodySkeletonRenderer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

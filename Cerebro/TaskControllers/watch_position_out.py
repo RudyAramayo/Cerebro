@@ -10,7 +10,7 @@ C++ version:  https://github.com/MrAsana/C_Plus_API/tree/master/amber_gui_4_node
      
 '''
 parser = argparse.ArgumentParser(description="Example of argparse with default values.")
-parser.add_argument("--ip", type=str, default="10.0.0.5", help="IP (default: %(default)s)")
+parser.add_argument("--ip", type=str, help="IP (default: %(default)s)")
 parser.add_argument("--port", type=int, default=26002, help="Port (default: %(default)s)")
 
 args = parser.parse_args()

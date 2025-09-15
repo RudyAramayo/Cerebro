@@ -8,7 +8,7 @@ parser = argparse.ArgumentParser(description="Example of argparse with default v
 
 parser.add_argument("--force", type=int, default=10, help="Gripper force (default: %(default)s)")
 
-parser.add_argument("--ip", type=str, default="10.0.0.5", help="IP (default: %(default)s)")
+parser.add_argument("--ip", type=str, help="IP (default: %(default)s)")
 parser.add_argument("--port", type=int, default=26002, help="IP (default: %(default)s)")
 
 

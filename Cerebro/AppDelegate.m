@@ -141,7 +141,7 @@
     
     NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
     NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    NSLog(@"UTC Output: %@", output);
+    //NSLog(@"UTC Output: %@", output);
     if ([output containsString:@"Device started, please keep this process running"] ||
         [output containsString:@"another process has device opened for exclusive access"] ) {
         NSLog(@"UTC Webcam is Online");
