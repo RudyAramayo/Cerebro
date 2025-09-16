@@ -226,6 +226,9 @@ extension CameraViewController: CameraManagerDelegate {
                 }
             }
         }
+        humanRectanglesRequest.revision = VNDetectHumanRectanglesRequestRevision2
+        humanRectanglesRequest.upperBodyOnly = false
+        
         let humanBodyPoseRequest = VNDetectHumanBodyPoseRequest { request, error in
             if let bodyPoseObservations = request.results as? [VNHumanBodyPoseObservation] {
                 DispatchQueue.main.async {
@@ -624,33 +627,19 @@ class PoseDrawingView: NSView {
             // Set up the drawing attributes.
             context.setStrokeColor(NSColor.red.cgColor)
             context.setLineWidth(2.0)
+
+            let boundingBox = observation.boundingBox
             
-            // The image's coordinate system has (0,0) at the bottom-left.
-            // AppKit's coordinate system has (0,0) at the bottom-left by default,
-            // so we just need to handle the scaling and position.
+            // Convert normalized coordinates to the view's coordinates.
+            let rectInViewSpace = CGRect(
+                x: boundingBox.origin.x * bounds.width,
+                y: boundingBox.origin.y * bounds.height,
+                width: boundingBox.size.width * bounds.width,
+                height: boundingBox.size.height * bounds.height
+            )
             
-//            let viewBounds = self.bounds
-//            let scaleX = viewBounds.width / imageSize.width
-//            let scaleY = viewBounds.height / imageSize.height
-//            let scale = min(scaleX, scaleY)
-//            
-//            let offsetX = (viewBounds.width - imageSize.width * scale) / 2.0
-//            let offsetY = (viewBounds.height - imageSize.height * scale) / 2.0
-//            
-            //for observation in observations {
-                let boundingBox = observation.boundingBox
-                
-                // Convert normalized coordinates to the view's coordinates.
-                let rectInViewSpace = CGRect(
-                    x: /*offsetX +*/ boundingBox.origin.x,// * imageSize.width * scale,
-                    y: /*offsetY +*/ boundingBox.origin.y,// * imageSize.height * scale,
-                    width: boundingBox.size.width,// * imageSize.width * scale,
-                    height: boundingBox.size.height// * imageSize.height * scale
-                )
-                
-                // Draw the bounding box.
-                context.stroke(rectInViewSpace)
-            //}
+            // Draw the bounding box.
+            context.stroke(rectInViewSpace)
         }
         
         // VNHumanBodyPose 2D
