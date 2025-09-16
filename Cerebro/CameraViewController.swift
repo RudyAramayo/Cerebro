@@ -219,23 +219,29 @@ extension CameraViewController: CameraManagerDelegate {
         
         //process samplebuffer here
         let humanRectanglesRequest = VNDetectHumanRectanglesRequest { request, error in
-            for observation in request.results as! [VNHumanObservation] {
-                print("humanRectanglesRequest = \(observation)")
+            if let humanRectanglesObservations = request.results as? [VNHumanObservation] {
+                DispatchQueue.main.async {
+                    self.poseView.humanRect_observations = humanRectanglesObservations
+                    self.poseView.setNeedsDisplay(self.poseView.bounds)
+                }
             }
         }
         let humanBodyPoseRequest = VNDetectHumanBodyPoseRequest { request, error in
-            for observation in request.results as! [VNHumanBodyPoseObservation] {
-                print("humanBodyPoseRequest = \(observation)")
+            if let bodyPoseObservations = request.results as? [VNHumanBodyPoseObservation] {
                 DispatchQueue.main.async {
-                    self.poseView.observations = [observation]
+                    self.poseView.bodyPose_observations = bodyPoseObservations
                     self.poseView.setNeedsDisplay(self.poseView.bounds)
                 }
             }
         }
         let humanHandPoseRequest = VNDetectHumanHandPoseRequest { request, error in
-            for observation in request.results as! [VNHumanHandPoseObservation] {
-                print("humanHandPoseRequest = \(observation)")
+            if let handObservations = request.results as? [VNHumanHandPoseObservation] {
+                DispatchQueue.main.async {
+                    self.poseView.humanHandPose_observations = handObservations
+                    self.poseView.setNeedsDisplay(self.poseView.bounds)
+                }
             }
+            
         }
         let humanBodyPose3DRequest = VNDetectHumanBodyPose3DRequest { request, error in
             for observation in request.results as! [VNHumanBodyPose3DObservation] {
@@ -410,16 +416,15 @@ extension CameraViewController: CameraManagerDelegate {
         let imageRequestHandler = VNImageRequestHandler(cmSampleBuffer: sampleBuffer, options: [:])
         try? imageRequestHandler.perform([
             humanRectanglesRequest,
-            humanBodyPoseRequest,
-            //humanHandPoseRequest,
+            humanBodyPoseRequest,       // √
+            humanHandPoseRequest,
             //humanBodyPose3DRequest,
             //trajectoriesRequest,
             //animalBodyPoseRequest,
             detectFaceRequest,
-            //personInstanceRequest     √
-            //segmentationRequest       √
+            //personInstanceRequest     // √
+            //segmentationRequest       // √
         ])
-        
     }
     
     func processAndDrawMask(observation: VNPixelBufferObservation, on originalCIImage: CIImage) {
@@ -543,16 +548,27 @@ struct BodyJoints {
 }
 
 class PoseDrawingView: NSView {
-    var observations: [VNHumanBodyPoseObservation] = []
+    var humanHandPose_observations: [VNHumanHandPoseObservation] = []
+    var humanRect_observations: [VNHumanObservation] = []
+    var bodyPose_observations: [VNHumanBodyPoseObservation] = []
     var clearScreenTimer: Timer = Timer()
     var kClearScreenTimeInterval = 1.0
     
     @objc func clearScreen() {
         print("clearing screen")
-        self.observations = []
+        self.humanRect_observations = []
+        self.bodyPose_observations = []
         self.setNeedsDisplay(self.bounds)
     }
     
+    let fingerJoints: [[VNHumanHandPoseObservation.JointName]] = [
+            [.thumbCMC, .thumbMP, .thumbIP, .thumbTip],
+            [.wrist, .indexMCP, .indexPIP, .indexDIP, .indexTip],
+            [.wrist, .middleMCP, .middlePIP, .middleDIP, .middleTip],
+            [.wrist, .ringMCP, .ringPIP, .ringDIP, .ringTip],
+            [.wrist, .littleMCP, .littlePIP, .littleDIP, .littleTip]
+        ]
+        
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         clearScreenTimer.invalidate()
@@ -561,9 +577,86 @@ class PoseDrawingView: NSView {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         
         context.setLineWidth(4.0)
+        
+        //VNHumanHandPoseObservation
+        for observation in humanHandPose_observations {
+            guard let recognizedPoints = try? observation.recognizedPoints(.all) else { continue }
+            
+            let pointMap = recognizedPoints.filter { $0.value.confidence > 0.1 }.mapValues {
+                // Convert normalized Vision coordinates to image-sized coordinates
+                let cgPoint = VNImagePointForNormalizedPoint($0.location, Int(bounds.width), Int(bounds.height))
+                return cgPoint
+            }
+            
+            // Draw the connecting lines
+            for finger in fingerJoints {
+                let path = CGMutablePath()
+                var firstPoint = true
+                for jointName in finger {
+                    if let point = pointMap[jointName] {
+                        if firstPoint {
+                            path.move(to: point)
+                            firstPoint = false
+                        } else {
+                            path.addLine(to: point)
+                        }
+                    }
+                }
+                context.addPath(path)
+            }
+            
+            // Draw the points (circles)
+            for point in pointMap.values {
+                context.addEllipse(in: CGRect(x: point.x - 5, y: point.y - 5, width: 10, height: 10))
+            }
+            
+            context.setStrokeColor(CGColor(red: 1.0, green: 0, blue: 0, alpha: 1.0))
+            context.setFillColor(CGColor(red: 1.0, green: 0, blue: 0, alpha: 1.0))
+            context.setLineWidth(3.0)
+            context.strokePath()
+            context.fillPath()
+        }
+        
+        // VNHumanObservation
+        for observation in humanRect_observations {
+            guard let context = NSGraphicsContext.current?.cgContext else { return }
+            
+            // Set up the drawing attributes.
+            context.setStrokeColor(NSColor.red.cgColor)
+            context.setLineWidth(2.0)
+            
+            // The image's coordinate system has (0,0) at the bottom-left.
+            // AppKit's coordinate system has (0,0) at the bottom-left by default,
+            // so we just need to handle the scaling and position.
+            
+//            let viewBounds = self.bounds
+//            let scaleX = viewBounds.width / imageSize.width
+//            let scaleY = viewBounds.height / imageSize.height
+//            let scale = min(scaleX, scaleY)
+//            
+//            let offsetX = (viewBounds.width - imageSize.width * scale) / 2.0
+//            let offsetY = (viewBounds.height - imageSize.height * scale) / 2.0
+//            
+            //for observation in observations {
+                let boundingBox = observation.boundingBox
+                
+                // Convert normalized coordinates to the view's coordinates.
+                let rectInViewSpace = CGRect(
+                    x: /*offsetX +*/ boundingBox.origin.x,// * imageSize.width * scale,
+                    y: /*offsetY +*/ boundingBox.origin.y,// * imageSize.height * scale,
+                    width: boundingBox.size.width,// * imageSize.width * scale,
+                    height: boundingBox.size.height// * imageSize.height * scale
+                )
+                
+                // Draw the bounding box.
+                context.stroke(rectInViewSpace)
+            //}
+        }
+        
+        // VNHumanBodyPose 2D
         context.setStrokeColor(NSColor.green.cgColor)
         
-        for observation in observations {
+        for observation in bodyPose_observations {
             let bodyPoints = observation.getJointPoints(for: bounds.size)
             
             // Draw connections (lines)
