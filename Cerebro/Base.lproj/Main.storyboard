@@ -441,6 +441,20 @@ Brake
                                 <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                                 <color key="backgroundColor" white="1" alpha="0.0" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
                             </sceneView>
+                            <imageView horizontalHuggingPriority="251" verticalHuggingPriority="251" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="cfz-a0-V0Y">
+                                <rect key="frame" x="743" y="194" width="137" height="130"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                <imageCell key="cell" refusesFirstResponder="YES" alignment="left" imageScaling="proportionallyDown" id="Epx-eZ-A7H"/>
+                            </imageView>
+                            <imageView horizontalHuggingPriority="251" verticalHuggingPriority="251" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="02Q-pJ-5V7">
+                                <rect key="frame" x="743" y="332" width="137" height="130"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                <imageCell key="cell" refusesFirstResponder="YES" alignment="left" imageScaling="proportionallyDown" id="CoQ-00-1dY"/>
+                            </imageView>
+                            <customView fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="j8y-Ab-q4M" customClass="PoseDrawingView" customModule="Cerebro" customModuleProvider="target">
+                                <rect key="frame" x="0.0" y="0.0" width="900" height="600"/>
+                                <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                            </customView>
                             <stackView distribution="fill" orientation="vertical" alignment="trailing" spacing="21" horizontalStackHuggingPriority="249.99998474121094" verticalStackHuggingPriority="249.99998474121094" fixedFrame="YES" detachesHiddenViews="YES" translatesAutoresizingMaskIntoConstraints="NO" id="wmf-w8-XZu">
                                 <rect key="frame" x="710" y="20" width="170" height="114"/>
                                 <subviews>
@@ -486,15 +500,12 @@ Brake
                                     <real value="3.4028234663852886e+38"/>
                                 </customSpacing>
                             </stackView>
-                            <imageView horizontalHuggingPriority="251" verticalHuggingPriority="251" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="cfz-a0-V0Y">
-                                <rect key="frame" x="743" y="194" width="137" height="130"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <imageCell key="cell" refusesFirstResponder="YES" alignment="left" imageScaling="proportionallyDown" id="Epx-eZ-A7H"/>
-                            </imageView>
                         </subviews>
                     </view>
                     <connections>
                         <outlet property="personMaskImageView" destination="cfz-a0-V0Y" id="vfv-zv-ZqE"/>
+                        <outlet property="personMaskImageView_maskImage" destination="02Q-pJ-5V7" id="Dca-7f-Fqw"/>
+                        <outlet property="poseView" destination="j8y-Ab-q4M" id="i2i-Or-cCH"/>
                         <outlet property="skeletonView" destination="LV3-nG-swu" id="X2O-J1-HQ8"/>
                     </connections>
                 </viewController>

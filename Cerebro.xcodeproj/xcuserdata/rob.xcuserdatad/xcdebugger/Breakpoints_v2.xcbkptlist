@@ -791,47 +791,49 @@
       <BreakpointProxy
          BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
          <BreakpointContent
-            uuid = "649842F0-5F79-4C37-8A45-ED6AF08FCFF9"
-            shouldBeEnabled = "Yes"
+            uuid = "98F65DC3-3F81-4400-9673-0E935BD69A2B"
+            shouldBeEnabled = "No"
             ignoreCount = "0"
             continueAfterRunningActions = "No"
             filePath = "Cerebro/CameraViewController.swift"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "249"
-            endingLineNumber = "249"
+            startingLineNumber = "228"
+            endingLineNumber = "228"
             landmarkName = "cameraManager(_:didOutput:from:)"
             landmarkType = "7">
-            <Locations>
-               <Location
-                  uuid = "649842F0-5F79-4C37-8A45-ED6AF08FCFF9 - a23e9075f976f2a2"
-                  shouldBeEnabled = "Yes"
-                  ignoreCount = "0"
-                  continueAfterRunningActions = "No"
-                  symbolName = "closure #8 (__C.VNRequest, Swift.Optional&lt;Swift.Error&gt;) -&gt; () in Cerebro.CameraViewController.cameraManager(_: __C.AVCaptureOutput, didOutput: __C.CMSampleBufferRef, from: __C.AVCaptureConnection) -&gt; ()"
-                  moduleName = "Cerebro.debug.dylib"
-                  usesParentBreakpointCondition = "Yes"
-                  urlString = "file:///Users/rob/Library/Mobile%20Documents/com~apple~CloudDocs/Documents/Dev/R.O.B./Cerebro%20v5/Cerebro/CameraViewController.swift"
-                  startingColumnNumber = "9223372036854775807"
-                  endingColumnNumber = "9223372036854775807"
-                  startingLineNumber = "250"
-                  endingLineNumber = "250">
-               </Location>
-               <Location
-                  uuid = "649842F0-5F79-4C37-8A45-ED6AF08FCFF9 - a23e9075f976f2c3"
-                  shouldBeEnabled = "Yes"
-                  ignoreCount = "0"
-                  continueAfterRunningActions = "No"
-                  symbolName = "closure #8 (__C.VNRequest, Swift.Optional&lt;Swift.Error&gt;) -&gt; () in Cerebro.CameraViewController.cameraManager(_: __C.AVCaptureOutput, didOutput: __C.CMSampleBufferRef, from: __C.AVCaptureConnection) -&gt; ()"
-                  moduleName = "Cerebro.debug.dylib"
-                  usesParentBreakpointCondition = "Yes"
-                  urlString = "file:///Users/rob/Library/Mobile%20Documents/com~apple~CloudDocs/Documents/Dev/R.O.B./Cerebro%20v5/Cerebro/CameraViewController.swift"
-                  startingColumnNumber = "9223372036854775807"
-                  endingColumnNumber = "9223372036854775807"
-                  startingLineNumber = "249"
-                  endingLineNumber = "249">
-               </Location>
-            </Locations>
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "589ADAB4-5687-4BB8-B46D-456D1691C48A"
+            shouldBeEnabled = "No"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "Cerebro/CameraViewController.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "223"
+            endingLineNumber = "223"
+            landmarkName = "cameraManager(_:didOutput:from:)"
+            landmarkType = "7">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "E8E38BCF-1C9B-4EEA-AC2E-D654095E5924"
+            shouldBeEnabled = "No"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "Cerebro/CameraViewController.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "551"
+            endingLineNumber = "551"
+            landmarkName = "clearScreen()"
+            landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>
    </Breakpoints>
