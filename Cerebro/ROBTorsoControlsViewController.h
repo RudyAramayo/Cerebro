@@ -57,6 +57,17 @@
 
 
 @property (readwrite, retain) IBOutlet NSTextField *amberHostIP_TextField;
+@property (readwrite, retain) IBOutlet NSTextField *keyframeNameTextField;
+@property (readwrite, retain) IBOutlet NSButton *arm_R11_keyframe_enabled;
+@property (readwrite, retain) IBOutlet NSButton *arm_R11_cartesian_keyframe_enabled;
+@property (readwrite, retain) IBOutlet NSButton *arm_L10_keyframe_enabled;
+@property (readwrite, retain) IBOutlet NSButton *arm_L10_cartesian_keyframe_enabled;
+@property (readwrite, retain) IBOutlet NSTableView *keyframeTableView;
+
+- (IBAction)playCurrentlySelectedKeyframeAnimation:(id)sender;
+- (IBAction)mirrorPosition_R11_to_L10:(id)sender;
+- (IBAction)mirrorPosition_L10_to_R11:(id)sender;
+
 
 #pragma mark - R11
 

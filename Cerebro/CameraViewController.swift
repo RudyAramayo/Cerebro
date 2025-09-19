@@ -97,7 +97,7 @@ extension CameraViewController: CameraManagerDelegate {
     func process_humanBodyPose3D_Observation(_ observation: VNHumanBodyPose3DObservation) {
         if !sceneCreated {
             self.skeletonView.scene = createScene(observation: observation)
-            //sceneCreated = true
+            sceneCreated = true
         } else {
             //This is not working as expected
             updateScene(observation: observation)
@@ -110,17 +110,12 @@ extension CameraViewController: CameraManagerDelegate {
         }
         let nodeDict = renderer.createSkeletonNodes(observation: observation)
         
-        
-        //let rootNode = SCNNode()
         // Clear any previous skeleton from the scene
         myScene.rootNode.childNodes.forEach {
             if $0 != self.renderer.cameraNode {
                 $0.removeFromParentNode()
             }
         }
-        //myScene.rootNode.addChildNode(rootNode)
-
-        //myScene.rootNode.addChildNode(renderer.createCameraNode(observation: observation))
         
         // Add skeleton nodes to the scene.
         let bodyAnchorNode = SCNNode()
@@ -219,6 +214,7 @@ extension CameraViewController: CameraManagerDelegate {
         
         //process samplebuffer here
         let humanRectanglesRequest = VNDetectHumanRectanglesRequest { request, error in
+            self.poseView.humanRect_observations = []
             if let humanRectanglesObservations = request.results as? [VNHumanObservation] {
                 DispatchQueue.main.async {
                     self.poseView.humanRect_observations = humanRectanglesObservations
@@ -230,6 +226,7 @@ extension CameraViewController: CameraManagerDelegate {
         humanRectanglesRequest.upperBodyOnly = false
         
         let humanBodyPoseRequest = VNDetectHumanBodyPoseRequest { request, error in
+            self.poseView.bodyPose_observations = []
             if let bodyPoseObservations = request.results as? [VNHumanBodyPoseObservation] {
                 DispatchQueue.main.async {
                     self.poseView.bodyPose_observations = bodyPoseObservations
@@ -238,6 +235,7 @@ extension CameraViewController: CameraManagerDelegate {
             }
         }
         let humanHandPoseRequest = VNDetectHumanHandPoseRequest { request, error in
+            self.poseView.humanHandPose_observations = []
             if let handObservations = request.results as? [VNHumanHandPoseObservation] {
                 DispatchQueue.main.async {
                     self.poseView.humanHandPose_observations = handObservations
@@ -248,16 +246,7 @@ extension CameraViewController: CameraManagerDelegate {
         }
         let humanBodyPose3DRequest = VNDetectHumanBodyPose3DRequest { request, error in
             for observation in request.results as! [VNHumanBodyPose3DObservation] {
-                //print("--------------------------------------------------")
-                //print("humanBodyPose3DRequest = \(observation)")
-                //observation.availableJointNames.forEach { print($0) }
-                //observation.availableJointsGroupNames.forEach { print($0) }
-                //renderSkeleton(from: observation)
-                //if let scene = self.skeletonView.scene {
                 self.process_humanBodyPose3D_Observation(observation)
-                //}
-                
-                //print("--------------------------------------------------")
             }
         }
         let trajectoriesRequest = VNDetectTrajectoriesRequest(frameAnalysisSpacing: CMTime(value: 1, timescale: 60), trajectoryLength: 1, completionHandler: { request, error in
@@ -418,15 +407,15 @@ extension CameraViewController: CameraManagerDelegate {
         
         let imageRequestHandler = VNImageRequestHandler(cmSampleBuffer: sampleBuffer, options: [:])
         try? imageRequestHandler.perform([
-            humanRectanglesRequest,
+            humanRectanglesRequest,     // √
             humanBodyPoseRequest,       // √
-            humanHandPoseRequest,
-            //humanBodyPose3DRequest,
-            //trajectoriesRequest,
-            //animalBodyPoseRequest,
-            detectFaceRequest,
-            //personInstanceRequest     // √
-            //segmentationRequest       // √
+            humanHandPoseRequest,       // √
+            //humanBodyPose3DRequest,     // √ - Leaks a significant amount of memory even without processing
+                //trajectoriesRequest,
+                //animalBodyPoseRequest,
+            detectFaceRequest,          // √
+            //personInstanceRequest       // √
+                //segmentationRequest       // √
         ])
     }
     
@@ -558,7 +547,8 @@ class PoseDrawingView: NSView {
     var kClearScreenTimeInterval = 1.0
     
     @objc func clearScreen() {
-        print("clearing screen")
+        //print("clearing screen") //This is called every few seconds... not efficient when screen is blank
+        self.humanHandPose_observations = []
         self.humanRect_observations = []
         self.bodyPose_observations = []
         self.setNeedsDisplay(self.bounds)

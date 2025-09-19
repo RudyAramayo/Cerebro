@@ -212,7 +212,7 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     
     private func prepareCamera(for newCameraDevice: AVCaptureDevice?) throws {
         videoSession = AVCaptureSession()
-        videoSession.sessionPreset = AVCaptureSession.Preset.photo
+        videoSession.sessionPreset = AVCaptureSession.Preset.low
         previewLayer = AVCaptureVideoPreviewLayer(session: videoSession)
         previewLayer.videoGravity = .resizeAspectFill
         

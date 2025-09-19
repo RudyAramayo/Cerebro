@@ -2177,10 +2177,10 @@ int maestroGetErrors(int fd)
         
         NSMutableArray *arguments = @[].mutableCopy;
         
-        NSString *cmd_position_mode_v2 = [[NSBundle mainBundle] pathForResource:@"cmd_current_mode_v2" ofType:@"py"];
-        //cmd_position_mode_v2.py --ip 10.0.0.5 --port 26002
+        NSString *cmd_current_mode_v2 = [[NSBundle mainBundle] pathForResource:@"cmd_current_mode_v2" ofType:@"py"];
+        //cmd_current_mode_v2.py --ip 10.0.0.5 --port 26002
         
-        [arguments addObject:cmd_position_mode_v2];
+        [arguments addObject:cmd_current_mode_v2];
         
         
         [arguments addObject:@"--ip"];

@@ -686,8 +686,8 @@
             filePath = "Cerebro/ROBSpeechBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "636"
-            endingLineNumber = "636"
+            startingLineNumber = "640"
+            endingLineNumber = "640"
             landmarkName = "-sayIt:"
             landmarkType = "7">
          </BreakpointContent>
@@ -702,8 +702,8 @@
             filePath = "Cerebro/ROBSpeechBox.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "699"
-            endingLineNumber = "699"
+            startingLineNumber = "703"
+            endingLineNumber = "703"
             landmarkName = "-setOutputLanguage:"
             landmarkType = "7">
          </BreakpointContent>
@@ -766,8 +766,8 @@
             filePath = "Cerebro/ROBTorsoControlsViewController.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "228"
-            endingLineNumber = "228"
+            startingLineNumber = "430"
+            endingLineNumber = "430"
             landmarkName = "-update_arm_R11_Action:"
             landmarkType = "7">
          </BreakpointContent>
@@ -791,22 +791,6 @@
       <BreakpointProxy
          BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
          <BreakpointContent
-            uuid = "E8E38BCF-1C9B-4EEA-AC2E-D654095E5924"
-            shouldBeEnabled = "No"
-            ignoreCount = "0"
-            continueAfterRunningActions = "No"
-            filePath = "Cerebro/CameraViewController.swift"
-            startingColumnNumber = "9223372036854775807"
-            endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "561"
-            endingLineNumber = "561"
-            landmarkName = "clearScreen()"
-            landmarkType = "7">
-         </BreakpointContent>
-      </BreakpointProxy>
-      <BreakpointProxy
-         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
-         <BreakpointContent
             uuid = "DACC8AB8-D61C-460E-8BF0-C8509DD5ABBC"
             shouldBeEnabled = "No"
             ignoreCount = "0"
@@ -814,8 +798,8 @@
             filePath = "Cerebro/CameraViewController.swift"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "586"
-            endingLineNumber = "586"
+            startingLineNumber = "576"
+            endingLineNumber = "576"
             landmarkName = "draw(_:)"
             landmarkType = "7">
          </BreakpointContent>
@@ -830,9 +814,41 @@
             filePath = "Cerebro/CameraViewController.swift"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "625"
-            endingLineNumber = "625"
+            startingLineNumber = "615"
+            endingLineNumber = "615"
             landmarkName = "draw(_:)"
+            landmarkType = "7">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "06155950-9563-4424-89C9-1A924B92F262"
+            shouldBeEnabled = "Yes"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "Cerebro/CameraViewController.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "281"
+            endingLineNumber = "281"
+            landmarkName = "cameraManager(_:didOutput:from:)"
+            landmarkType = "7">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "D92B2E85-48B1-43D1-A38E-FBABECD8B298"
+            shouldBeEnabled = "No"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "Cerebro/KeyframeAnimationManager.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "125"
+            endingLineNumber = "125"
+            landmarkName = "addNewNamedKeyframe()"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>

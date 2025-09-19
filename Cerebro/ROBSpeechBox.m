@@ -630,13 +630,17 @@
         
         AVSpeechUtterance *utterance = [AVSpeechUtterance speechUtteranceWithString:stringToSpeak];
         utterance.voice = self.robsDefaultVoice;
+        //possible parameters to specify in the future
+        //utterance.volume
+        //utterance.rate
+        //utterance.pitchMultiplier
         
         // This voice is using a mexican accent which is wrong
         if (![self.robsPersonalVoice isEqualToString:@""]) {
             //utterance.voice = [AVSpeechSynthesisVoice voiceWithIdentifier:self.robsPersonalVoice];
             NSLog(@"language = %@", utterance.voice.language);
         }
-        //NSLog(@"voice = %@", voice.identifier);
+        //NSLog(@"voice = %@", voice.identifier);w
         
         [self.avSpeechSynthesizer speakUtterance:utterance];
         NSLog(@"Have started to say: %@", stringToSpeak);

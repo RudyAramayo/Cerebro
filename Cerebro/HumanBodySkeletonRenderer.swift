@@ -180,11 +180,11 @@ class HumanBodySkeletonRenderer: NSObject {
                 let recognizedPoint = try observation.recognizedPoint(jointName)
                 let pointFloat3 = recognizedPoint.position.translationVector
                 
-                let node = createNodeForRecognizedPoint(
-                    point3D: pointFloat3,
-                    jointGeometry: defaultNodeGeometry()
-                )
-                nodeJointDict.updateValue(node, forKey: jointName)
+                //let node = createNodeForRecognizedPoint(
+                //    point3D: pointFloat3,
+                //    jointGeometry: defaultNodeGeometry()
+                //)
+                //nodeJointDict.updateValue(node, forKey: jointName)
             } catch {
                 print("Unable to return point: \(error).")
             }

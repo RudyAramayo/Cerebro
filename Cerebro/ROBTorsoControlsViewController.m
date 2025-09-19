@@ -10,14 +10,21 @@
 #import <AppKit/AppKit.h>
 #import "ROBMainViewController.h"
 #import "ROBSerialBox.h"
+#import "Cerebro-Swift.h"
 
-
-@interface ROBTorsoControlsViewController () <NSTextFieldDelegate>
+@interface ROBTorsoControlsViewController () <NSTextFieldDelegate, NSTableViewDelegate, NSTableViewDataSource>
 
 @property (readwrite, retain) NSTimer *renderServoControlsTimer;
 @property (readwrite, retain) NSTimer *maestroGetErrorsTimer;
+@property (readwrite, assign) BOOL is_in_position_mode_R11;
+@property (readwrite, assign) BOOL is_in_current_mode_R11;
+@property (readwrite, assign) BOOL is_in_speed_mode_R11;
+@property (readwrite, assign) BOOL is_in_activated_mode_R11;
 
-
+@property (readwrite, assign) BOOL is_in_position_mode_L10;
+@property (readwrite, assign) BOOL is_in_current_mode_L10;
+@property (readwrite, assign) BOOL is_in_speed_mode_L10;
+@property (readwrite, assign) BOOL is_in_activated_mode_L10;
 @end
 
 @implementation ROBTorsoControlsViewController
@@ -30,14 +37,202 @@
                                                                    userInfo:nil
                                                                     repeats:YES];
     self.maestroGetErrorsTimer = [NSTimer scheduledTimerWithTimeInterval:10.0
-                                                                     target:self
-                                                                   selector:@selector(maestro_getErrors_command)
-                                                                   userInfo:nil
-                                                                    repeats:YES];
+                                                                  target:self
+                                                                selector:@selector(maestro_getErrors_command)
+                                                                userInfo:nil
+                                                                 repeats:YES];
     
     self.amberHostIP_TextField.delegate = self;
     
+    KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
+    //TODO: show this in a selectable tableView list
+    keyframeAnimationManager.animations;
+    
+    self.keyframeNameTextField.stringValue = keyframeAnimationManager.currentAnimation.currentKeyframe.name;
 }
+
+#pragma mark - KeyframeTableViewDelegate/Datasource
+
+- (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView {
+    KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
+    return keyframeAnimationManager.currentAnimation.namedKeyframes.count;
+}
+
+// NSTableViewDelegate methods for view-based table views
+- (NSView *)tableView:(NSTableView *)tableView viewForTableColumn:(NSTableColumn *)tableColumn row:(NSInteger)row {
+    // Get a reusable cell view or create a new one
+    NSTableCellView *cellView = [tableView makeViewWithIdentifier:tableColumn.identifier owner:self];
+
+    if (cellView == nil) {
+        cellView = [[NSTableCellView alloc] initWithFrame:NSZeroRect];
+        cellView.identifier = tableColumn.identifier;
+
+        // Add a text field to the cell view
+        NSTextField *textField = [[NSTextField alloc] initWithFrame:NSZeroRect];
+        textField.translatesAutoresizingMaskIntoConstraints = NO;
+        textField.bordered = NO;
+        textField.editable = NO;
+        textField.backgroundColor = [NSColor clearColor];
+        cellView.textField = textField;
+        [cellView addSubview:textField];
+
+        // Add constraints for the text field
+        [NSLayoutConstraint activateConstraints:@[
+            [textField.leadingAnchor constraintEqualToAnchor:cellView.leadingAnchor constant:5],
+            [textField.trailingAnchor constraintEqualToAnchor:cellView.trailingAnchor constant:-5],
+            [textField.centerYAnchor constraintEqualToAnchor:cellView.centerYAnchor]
+        ]];
+    }
+    
+    KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
+
+    // Populate the cell view with data
+    if ([tableColumn.identifier isEqualToString:@"NamedKeyframes"]) { // Replace with your column identifier
+        if (row < keyframeAnimationManager.currentAnimation.namedKeyframes.count) {
+            cellView.textField.stringValue = keyframeAnimationManager.currentAnimation.namedKeyframes[row].name;
+        }
+    }
+    return cellView;
+}
+
+- (IBAction) playCurrentlySelectedKeyframeAnimation:(id)sender {
+    KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
+    int row = (int) self.keyframeTableView.selectedRow;
+    if (row == -1) {
+        row = 0;
+        [self.keyframeTableView selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
+    }
+    Keyframe *keyframe = keyframeAnimationManager.currentAnimation.namedKeyframes[row];
+
+    BOOL shouldSleep = NO;
+    if (!self.is_in_position_mode_R11 && keyframe.arm_R11_keyframe) {
+        [self set_position_mode_R11_SendCommand:self];
+        shouldSleep = YES;
+    }
+    if (!self.is_in_position_mode_L10 && keyframe.arm_L10_keyframe) {
+        [self set_position_mode_L10_SendCommand:self];
+        shouldSleep = YES;
+    }
+    if (shouldSleep) {
+        sleep(2);
+    }
+    //Since we only have 1 keyframe selected... animate it... just for test purposes
+    //1. get selected keyframe
+    if (keyframe.arm_R11_keyframe) {
+        self.arm_R11_cmdTime.doubleValue = keyframe.arm_R11_cmd_time;
+        self.arm_R11_cmdSleep.doubleValue = keyframe.arm_R11_cmd_sleep;
+        self.arm_R11_position_servo1.doubleValue = keyframe.arm_R11_servo1;
+        self.arm_R11_position_servo2.doubleValue = keyframe.arm_R11_servo2;
+        self.arm_R11_position_servo3.doubleValue = keyframe.arm_R11_servo3;
+        self.arm_R11_position_servo4.doubleValue = keyframe.arm_R11_servo4;
+        self.arm_R11_position_servo5.doubleValue = keyframe.arm_R11_servo5;
+        self.arm_R11_position_servo6.doubleValue = keyframe.arm_R11_servo6;
+        self.arm_R11_position_servo7.doubleValue = keyframe.arm_R11_servo7;
+        
+        [self update_arm_R11_Action:self]; //Updates all the label values with new servo values
+        [self update_arm_R11_position_SendCommand:self]; //Sends the command to the arm
+    }
+    if (keyframe.arm_L10_keyframe) {
+        NSLog(@"keyframe = %f, %f, %f, %f, %f, %f, %f", keyframe.arm_L10_servo1, keyframe.arm_L10_servo2, keyframe.arm_L10_servo3, keyframe.arm_L10_servo4, keyframe.arm_L10_servo5, keyframe.arm_L10_servo6, keyframe.arm_L10_servo7);
+        self.arm_L10_position_cmdTime.doubleValue = keyframe.arm_L10_cmd_time;
+        self.arm_L10_position_cmdSleep.doubleValue = keyframe.arm_L10_cmd_sleep;
+        self.arm_L10_position_servo1.doubleValue = keyframe.arm_L10_servo1;
+        self.arm_L10_position_servo2.doubleValue = keyframe.arm_L10_servo2;
+        self.arm_L10_position_servo3.doubleValue = keyframe.arm_L10_servo3;
+        self.arm_L10_position_servo4.doubleValue = keyframe.arm_L10_servo4;
+        self.arm_L10_position_servo5.doubleValue = keyframe.arm_L10_servo5;
+        self.arm_L10_position_servo6.doubleValue = keyframe.arm_L10_servo6;
+        self.arm_L10_position_servo7.doubleValue = keyframe.arm_L10_servo7;
+        
+        [self update_arm_L10_Action:self]; //Updates all the label values with new servo values
+        [self update_arm_L10_position_SendCommand:self]; //Sends the command to the arm
+    }
+//    for (Keyframe* keyframe in keyframeAnimationManager.currentAnimation.keyframeSequence) {
+//        //This is for animating thorugh the sequence... we only have a selectable keyframe at the moment...
+//    }
+}
+
+- (IBAction)captureKeyframe_Torso:(id)sender {
+    //Example of setting properties to add keyframes. should be saved and loaded properly
+    KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
+    Keyframe *currentKeyframe = keyframeAnimationManager.currentAnimation.currentKeyframe;
+    currentKeyframe.name = self.keyframeNameTextField.stringValue;
+    currentKeyframe.arm_R11_keyframe = self.arm_R11_keyframe_enabled.state == NSControlStateValueOn ? YES : NO;
+    if (currentKeyframe.arm_R11_keyframe) {
+        currentKeyframe.arm_R11_cmd_time = self.arm_R11_cmdTime.doubleValue;
+        currentKeyframe.arm_R11_cmd_sleep = self.arm_R11_cmdSleep.doubleValue;
+        currentKeyframe.arm_R11_servo1 = self.arm_R11_position_servo1.doubleValue;
+        currentKeyframe.arm_R11_servo2 = self.arm_R11_position_servo2.doubleValue;
+        currentKeyframe.arm_R11_servo3 = self.arm_R11_position_servo3.doubleValue;
+        currentKeyframe.arm_R11_servo4 = self.arm_R11_position_servo4.doubleValue;
+        currentKeyframe.arm_R11_servo5 = self.arm_R11_position_servo5.doubleValue;
+        currentKeyframe.arm_R11_servo6 = self.arm_R11_position_servo6.doubleValue;
+        currentKeyframe.arm_R11_servo7 = self.arm_R11_position_servo7.doubleValue;
+    }
+    currentKeyframe.arm_L10_keyframe = self.arm_L10_keyframe_enabled.state == NSControlStateValueOn ? YES : NO;
+    if (currentKeyframe.arm_L10_keyframe) {
+        currentKeyframe.arm_L10_cmd_time = self.arm_L10_position_cmdTime.doubleValue;
+        currentKeyframe.arm_L10_cmd_sleep = self.arm_L10_position_cmdSleep.doubleValue;
+        currentKeyframe.arm_L10_servo1 = self.arm_L10_position_servo1.doubleValue;
+        currentKeyframe.arm_L10_servo2 = self.arm_L10_position_servo2.doubleValue;
+        currentKeyframe.arm_L10_servo3 = self.arm_L10_position_servo3.doubleValue;
+        currentKeyframe.arm_L10_servo4 = self.arm_L10_position_servo4.doubleValue;
+        currentKeyframe.arm_L10_servo5 = self.arm_L10_position_servo5.doubleValue;
+        currentKeyframe.arm_L10_servo6 = self.arm_L10_position_servo6.doubleValue;
+        currentKeyframe.arm_L10_servo7 = self.arm_L10_position_servo7.doubleValue;
+    }
+    //TODO: Bind cartesian commands as well
+    
+    //validate output is set
+//    NSLog(@"servo1 - %f", keyframeAnimationManager.currentAnimation.currentKeyframe.arm_R11_servo1);
+//    NSLog(@"servo2 - %f", keyframeAnimationManager.currentAnimation.currentKeyframe.arm_R11_servo2);
+//    NSLog(@"servo3 - %f", keyframeAnimationManager.currentAnimation.currentKeyframe.arm_R11_servo3);
+//    NSLog(@"servo4 - %f", keyframeAnimationManager.currentAnimation.currentKeyframe.arm_R11_servo4);
+//    NSLog(@"servo5 - %f", keyframeAnimationManager.currentAnimation.currentKeyframe.arm_R11_servo5);
+//    NSLog(@"servo6 - %f", keyframeAnimationManager.currentAnimation.currentKeyframe.arm_R11_servo6);
+//    NSLog(@"servo7 - %f", keyframeAnimationManager.currentAnimation.currentKeyframe.arm_R11_servo7);
+//    
+    NSLog(@"servo1 - %f", keyframeAnimationManager.currentAnimation.currentKeyframe.arm_L10_servo1);
+    NSLog(@"servo2 - %f", keyframeAnimationManager.currentAnimation.currentKeyframe.arm_L10_servo2);
+    NSLog(@"servo3 - %f", keyframeAnimationManager.currentAnimation.currentKeyframe.arm_L10_servo3);
+    NSLog(@"servo4 - %f", keyframeAnimationManager.currentAnimation.currentKeyframe.arm_L10_servo4);
+    NSLog(@"servo5 - %f", keyframeAnimationManager.currentAnimation.currentKeyframe.arm_L10_servo5);
+    NSLog(@"servo6 - %f", keyframeAnimationManager.currentAnimation.currentKeyframe.arm_L10_servo6);
+    NSLog(@"servo7 - %f", keyframeAnimationManager.currentAnimation.currentKeyframe.arm_L10_servo7);
+
+    
+    [keyframeAnimationManager.currentAnimation addNewNamedKeyframe];
+    [keyframeAnimationManager saveCurrentKeyframeAnimation];
+    [self.keyframeTableView reloadData];
+    self.keyframeNameTextField.stringValue = keyframeAnimationManager.currentAnimation.currentKeyframe.name;
+}
+
+- (IBAction)mirrorPosition_R11_to_L10:(id)sender {
+    self.arm_L10_position_cmdTime.doubleValue = self.arm_R11_position_cmdTime.doubleValue;
+    self.arm_L10_position_cmdSleep.doubleValue = self.arm_R11_position_cmdSleep.doubleValue;
+    self.arm_L10_position_servo1.doubleValue = -self.arm_R11_position_servo1.doubleValue;
+    self.arm_L10_position_servo2.doubleValue = -self.arm_R11_position_servo2.doubleValue;
+    self.arm_L10_position_servo3.doubleValue = -self.arm_R11_position_servo3.doubleValue;
+    self.arm_L10_position_servo4.doubleValue = -self.arm_R11_position_servo4.doubleValue;
+    self.arm_L10_position_servo5.doubleValue = -self.arm_R11_position_servo5.doubleValue;
+    self.arm_L10_position_servo6.doubleValue = -self.arm_R11_position_servo6.doubleValue;
+    self.arm_L10_position_servo7.doubleValue = -self.arm_R11_position_servo7.doubleValue;
+    [self update_arm_L10_Action:self];
+}
+
+- (IBAction)mirrorPosition_L10_to_R11:(id)sender {
+    self.arm_R11_position_cmdTime.doubleValue = self.arm_L10_position_cmdTime.doubleValue;
+    self.arm_R11_position_cmdSleep.doubleValue = self.arm_L10_position_cmdSleep.doubleValue;
+    self.arm_R11_position_servo1.doubleValue = -self.arm_L10_position_servo1.doubleValue;
+    self.arm_R11_position_servo2.doubleValue = -self.arm_L10_position_servo2.doubleValue;
+    self.arm_R11_position_servo3.doubleValue = -self.arm_L10_position_servo3.doubleValue;
+    self.arm_R11_position_servo4.doubleValue = -self.arm_L10_position_servo4.doubleValue;
+    self.arm_R11_position_servo5.doubleValue = -self.arm_L10_position_servo5.doubleValue;
+    self.arm_R11_position_servo6.doubleValue = -self.arm_L10_position_servo6.doubleValue;
+    self.arm_R11_position_servo7.doubleValue = -self.arm_L10_position_servo7.doubleValue;
+    [self update_arm_R11_Action:self];
+}
+
 
 - (void)controlTextDidChange:(NSNotification *)obj {
     NSTextField *textField = obj.object;
@@ -121,23 +316,23 @@
     int offValue = 0;
     //[self.robMainViewController.serialBox connectMaestro];
     [self.robMainViewController.serialBox
-     torso_controllerPassthrough_head_pan:[NSString stringWithFormat:@"%.f", self.headPan_enabled.state == NSOnState? self.headPan.floatValue : offValue]
-     head_tilt:[NSString stringWithFormat:@"%.f", self.headTilt_enabled.state == NSOnState? self.headTilt.floatValue : offValue]
-     head_upperNeckTilt:[NSString stringWithFormat:@"%.f", self.headUpperNeckTilt_enabled.state == NSOnState? self.headUpperNeckTilt.floatValue : offValue]
-     arm_R_shoulder_pan:[NSString stringWithFormat:@"%.f", self.arm_R_Shoulder_Pan_enabled.state == NSOnState? self.arm_R_Shoulder_Pan.floatValue: offValue]
-     arm_R_shoulder_tilt:[NSString stringWithFormat:@"%.f", self.arm_R_Shoulder_Tilt_enabled.state == NSOnState? self.arm_R_Shoulder_Tilt.floatValue: offValue]
-     arm_R_elbow_pan:[NSString stringWithFormat:@"%.f", self.arm_R_Elbow_Pan_enabled.state == NSOnState? self.arm_R_Elbow_Pan.floatValue : offValue]
-     arm_R_elbow_tilt:[NSString stringWithFormat:@"%.f", self.arm_R_Elbow_Tilt_enabled.state == NSOnState? self.arm_R_Elbow_Tilt.floatValue : offValue]
-     arm_R_wrist_pan:[NSString stringWithFormat:@"%.f", self.arm_R_Wrist_Pan_enabled.state == NSOnState? self.arm_R_Wrist_Pan.floatValue : offValue]
-     arm_R_wrist_tilt:[NSString stringWithFormat:@"%.f", self.arm_R_Wrist_Tilt_enabled.state == NSOnState? self.arm_R_Wrist_Tilt.floatValue : offValue]
-     arm_R_gripper:[NSString stringWithFormat:@"%.f", self.arm_R_Gripper_enabled.state == NSOnState? self.arm_R_Gripper.floatValue : offValue]
-     arm_L_shoulder_pan:[NSString stringWithFormat:@"%.f", self.arm_L_Shoulder_Pan_enabled.state == NSOnState? self.arm_L_Shoulder_Pan.floatValue : offValue]
-     arm_L_shoulder_tilt:[NSString stringWithFormat:@"%.f", self.arm_L_Shoulder_Tilt_enabled.state == NSOnState? self.arm_L_Shoulder_Tilt.floatValue : offValue]
-     arm_L_elbow_pan:[NSString stringWithFormat:@"%.f", self.arm_L_Elbow_Pan_enabled.state == NSOnState? self.arm_L_Elbow_Pan.floatValue : offValue]
-     arm_L_elbow_tilt:[NSString stringWithFormat:@"%.f", self.arm_L_Elbow_Tilt_enabled.state == NSOnState? self.arm_L_Elbow_Tilt.floatValue : offValue]
-     arm_L_wrist_pan:[NSString stringWithFormat:@"%.f", self.arm_L_Wrist_Pan_enabled.state == NSOnState? self.arm_L_Wrist_Pan.floatValue : offValue]
-     arm_L_wrist_tilt:[NSString stringWithFormat:@"%.f", self.arm_L_Wrist_Tilt_enabled.state == NSOnState? self.arm_L_Wrist_Tilt.floatValue : offValue]
-     arm_L_gripper:[NSString stringWithFormat:@"%.f", self.arm_L_Gripper_enabled.state == NSOnState? self.arm_L_Gripper.floatValue : offValue]
+     torso_controllerPassthrough_head_pan:[NSString stringWithFormat:@"%.f", self.headPan_enabled.state == NSControlStateValueOn? self.headPan.floatValue : offValue]
+     head_tilt:[NSString stringWithFormat:@"%.f", self.headTilt_enabled.state == NSControlStateValueOn? self.headTilt.floatValue : offValue]
+     head_upperNeckTilt:[NSString stringWithFormat:@"%.f", self.headUpperNeckTilt_enabled.state == NSControlStateValueOn? self.headUpperNeckTilt.floatValue : offValue]
+     arm_R_shoulder_pan:[NSString stringWithFormat:@"%.f", self.arm_R_Shoulder_Pan_enabled.state == NSControlStateValueOn? self.arm_R_Shoulder_Pan.floatValue: offValue]
+     arm_R_shoulder_tilt:[NSString stringWithFormat:@"%.f", self.arm_R_Shoulder_Tilt_enabled.state == NSControlStateValueOn? self.arm_R_Shoulder_Tilt.floatValue: offValue]
+     arm_R_elbow_pan:[NSString stringWithFormat:@"%.f", self.arm_R_Elbow_Pan_enabled.state == NSControlStateValueOn? self.arm_R_Elbow_Pan.floatValue : offValue]
+     arm_R_elbow_tilt:[NSString stringWithFormat:@"%.f", self.arm_R_Elbow_Tilt_enabled.state == NSControlStateValueOn? self.arm_R_Elbow_Tilt.floatValue : offValue]
+     arm_R_wrist_pan:[NSString stringWithFormat:@"%.f", self.arm_R_Wrist_Pan_enabled.state == NSControlStateValueOn? self.arm_R_Wrist_Pan.floatValue : offValue]
+     arm_R_wrist_tilt:[NSString stringWithFormat:@"%.f", self.arm_R_Wrist_Tilt_enabled.state == NSControlStateValueOn? self.arm_R_Wrist_Tilt.floatValue : offValue]
+     arm_R_gripper:[NSString stringWithFormat:@"%.f", self.arm_R_Gripper_enabled.state == NSControlStateValueOn? self.arm_R_Gripper.floatValue : offValue]
+     arm_L_shoulder_pan:[NSString stringWithFormat:@"%.f", self.arm_L_Shoulder_Pan_enabled.state == NSControlStateValueOn? self.arm_L_Shoulder_Pan.floatValue : offValue]
+     arm_L_shoulder_tilt:[NSString stringWithFormat:@"%.f", self.arm_L_Shoulder_Tilt_enabled.state == NSControlStateValueOn? self.arm_L_Shoulder_Tilt.floatValue : offValue]
+     arm_L_elbow_pan:[NSString stringWithFormat:@"%.f", self.arm_L_Elbow_Pan_enabled.state == NSControlStateValueOn? self.arm_L_Elbow_Pan.floatValue : offValue]
+     arm_L_elbow_tilt:[NSString stringWithFormat:@"%.f", self.arm_L_Elbow_Tilt_enabled.state == NSControlStateValueOn? self.arm_L_Elbow_Tilt.floatValue : offValue]
+     arm_L_wrist_pan:[NSString stringWithFormat:@"%.f", self.arm_L_Wrist_Pan_enabled.state == NSControlStateValueOn? self.arm_L_Wrist_Pan.floatValue : offValue]
+     arm_L_wrist_tilt:[NSString stringWithFormat:@"%.f", self.arm_L_Wrist_Tilt_enabled.state == NSControlStateValueOn? self.arm_L_Wrist_Tilt.floatValue : offValue]
+     arm_L_gripper:[NSString stringWithFormat:@"%.f", self.arm_L_Gripper_enabled.state == NSControlStateValueOn? self.arm_L_Gripper.floatValue : offValue]
      ];
 }
 
@@ -176,12 +371,19 @@
 
 - (IBAction) zeroPosition_R11:(id)sender {
     [self.arm_R11_position_servo1 setFloatValue:0.0];
+    [self.arm_R11_position_servo1_label setStringValue:@"0.0"];
     [self.arm_R11_position_servo2 setFloatValue:0.0];
+    [self.arm_R11_position_servo2_label setStringValue:@"0.0"];
     [self.arm_R11_position_servo3 setFloatValue:0.0];
+    [self.arm_R11_position_servo3_label setStringValue:@"0.0"];
     [self.arm_R11_position_servo4 setFloatValue:0.0];
+    [self.arm_R11_position_servo4_label setStringValue:@"0.0"];
     [self.arm_R11_position_servo5 setFloatValue:0.0];
+    [self.arm_R11_position_servo5_label setStringValue:@"0.0"];
     [self.arm_R11_position_servo6 setFloatValue:0.0];
+    [self.arm_R11_position_servo6_label setStringValue:@"0.0"];
     [self.arm_R11_position_servo7 setFloatValue:0.0];
+    [self.arm_R11_position_servo7_label setStringValue:@"0.0"];
     
     [self.robMainViewController.serialBox zeroPosition_R11:sender];
 }
@@ -248,12 +450,19 @@
 
 - (IBAction) zeroPosition_L10:(id)sender {
     [self.arm_L10_position_servo1 setFloatValue:0.0];
+    [self.arm_L10_position_servo1_label setStringValue:@"0.0"];
     [self.arm_L10_position_servo2 setFloatValue:0.0];
+    [self.arm_L10_position_servo2_label setStringValue:@"0.0"];
     [self.arm_L10_position_servo3 setFloatValue:0.0];
+    [self.arm_L10_position_servo3_label setStringValue:@"0.0"];
     [self.arm_L10_position_servo4 setFloatValue:0.0];
+    [self.arm_L10_position_servo4_label setStringValue:@"0.0"];
     [self.arm_L10_position_servo5 setFloatValue:0.0];
+    [self.arm_L10_position_servo5_label setStringValue:@"0.0"];
     [self.arm_L10_position_servo6 setFloatValue:0.0];
+    [self.arm_L10_position_servo6_label setStringValue:@"0.0"];
     [self.arm_L10_position_servo7 setFloatValue:0.0];
+    [self.arm_L10_position_servo7_label setStringValue:@"0.0"];
     
     [self.robMainViewController.serialBox zeroPosition_L10:sender];
 }
@@ -339,10 +548,18 @@
 #pragma mark - R11 arm
 
 - (IBAction)set_position_mode_R11_SendCommand:(id)sender {
+    self.is_in_position_mode_R11 = YES;
+    self.is_in_current_mode_R11 = NO;
+    self.is_in_speed_mode_R11 = NO;
+    self.is_in_activated_mode_R11 = YES;
     [self.robMainViewController.serialBox set_position_mode_R11:sender];
 }
 
 - (IBAction)set_current_mode_R11_SendCommand:(id)sender {
+    self.is_in_position_mode_R11 = NO;
+    self.is_in_current_mode_R11 = YES;
+    self.is_in_speed_mode_R11 = NO;
+    self.is_in_activated_mode_R11 = YES;
     [self.robMainViewController.serialBox set_current_mode_R11:sender];
 }
 
@@ -355,20 +572,36 @@
 }
 
 - (IBAction)activate_R11_SendCommand:(id)sender {
+    self.is_in_position_mode_R11 = NO;
+    self.is_in_current_mode_R11 = NO;
+    self.is_in_speed_mode_R11 = NO;
+    self.is_in_activated_mode_R11 = YES;
     [self.robMainViewController.serialBox activate_R11:sender];
 }
 
 - (IBAction)deactivate_R11_SendCommand:(id)sender {
+    self.is_in_position_mode_R11 = NO;
+    self.is_in_current_mode_R11 = NO;
+    self.is_in_speed_mode_R11 = NO;
+    self.is_in_activated_mode_R11 = NO;
     [self.robMainViewController.serialBox deactivate_R11:sender];
 }
 
 #pragma mark - L10 arm
 
 - (IBAction)set_position_mode_L10_SendCommand:(id)sender {
+    self.is_in_position_mode_L10 = YES;
+    self.is_in_current_mode_L10 = NO;
+    self.is_in_speed_mode_L10 = NO;
+    self.is_in_activated_mode_L10 = YES;
     [self.robMainViewController.serialBox set_position_mode_L10:sender];
 }
 
 - (IBAction)set_current_mode_L10_SendCommand:(id)sender {
+    self.is_in_position_mode_L10 = NO;
+    self.is_in_current_mode_L10 = YES;
+    self.is_in_speed_mode_L10 = NO;
+    self.is_in_activated_mode_L10 = YES;
     [self.robMainViewController.serialBox set_current_mode_L10:sender];
 }
 
@@ -381,10 +614,18 @@
 }
 
 - (IBAction)activate_L10_SendCommand:(id)sender {
+    self.is_in_position_mode_L10 = NO;
+    self.is_in_current_mode_L10 = NO;
+    self.is_in_speed_mode_L10 = NO;
+    self.is_in_activated_mode_L10 = YES;
     [self.robMainViewController.serialBox activate_L10:sender];
 }
 
 - (IBAction)deactivate_L10_SendCommand:(id)sender {
+    self.is_in_position_mode_L10 = NO;
+    self.is_in_current_mode_L10 = NO;
+    self.is_in_speed_mode_L10 = NO;
+    self.is_in_activated_mode_L10 = NO;
     [self.robMainViewController.serialBox deactivate_L10:sender];
 }
 

@@ -19,6 +19,7 @@
 		D49D755927FFD1AF00142E26 /* AutoNetServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D49D755727FFD1AE00142E26 /* AutoNetServer.swift */; };
 		D49D755B27FFD1BF00142E26 /* AutoNetDataTransferProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = D49D755A27FFD1BF00142E26 /* AutoNetDataTransferProtocol.swift */; };
 		D49F14342E456EE3001C1824 /* Webcam_color.py in Resources */ = {isa = PBXBuildFile; fileRef = D49F14332E456EE3001C1824 /* Webcam_color.py */; };
+		D4A2E90A2E7A1D3D002B5299 /* KeyframeAnimationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4A2E9092E7A1D32002B5299 /* KeyframeAnimationManager.swift */; };
 		D4A38F411FFB2AED00092A46 /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = D4A38F401FFB2AED00092A46 /* AppDelegate.m */; };
 		D4A38F441FFB2AED00092A46 /* ROBMainViewController.mm in Sources */ = {isa = PBXBuildFile; fileRef = D4A38F431FFB2AED00092A46 /* ROBMainViewController.mm */; };
 		D4A38F461FFB2AED00092A46 /* art.scnassets in Resources */ = {isa = PBXBuildFile; fileRef = D4A38F451FFB2AED00092A46 /* art.scnassets */; };
@@ -120,6 +121,7 @@
 		D49D755727FFD1AE00142E26 /* AutoNetServer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; name = AutoNetServer.swift; path = AutoNet/AutoNetServer/AutoNetServer.swift; sourceTree = "<group>"; };
 		D49D755A27FFD1BF00142E26 /* AutoNetDataTransferProtocol.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; name = AutoNetDataTransferProtocol.swift; path = AutoNet/AutoNetShared/AutoNetDataTransferProtocol.swift; sourceTree = "<group>"; };
 		D49F14332E456EE3001C1824 /* Webcam_color.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = Webcam_color.py; sourceTree = "<group>"; };
+		D4A2E9092E7A1D32002B5299 /* KeyframeAnimationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyframeAnimationManager.swift; sourceTree = "<group>"; };
 		D4A38F3C1FFB2AED00092A46 /* Cerebro.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cerebro.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D4A38F3F1FFB2AED00092A46 /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
 		D4A38F401FFB2AED00092A46 /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
@@ -293,6 +295,7 @@
 				D4ADDC062E78A64500631737 /* HumanBodyPose3DDetector.swift */,
 				D4ADDC002E78A51E00631737 /* HumanBodySkeletonRenderer.swift */,
 				D4AB3DA32E1CF38D00EA2571 /* CameraViewController.swift */,
+				D4A2E9092E7A1D32002B5299 /* KeyframeAnimationManager.swift */,
 				D4A38F5F1FFC06CF00092A46 /* dictation_start.scpt */,
 				D49D755727FFD1AE00142E26 /* AutoNetServer.swift */,
 				D49D755A27FFD1BF00142E26 /* AutoNetDataTransferProtocol.swift */,
@@ -322,8 +325,8 @@
 				D4A38F471FFB2AED00092A46 /* Assets.xcassets */,
 				D4A38F491FFB2AED00092A46 /* Main.storyboard */,
 				D4A38F4C1FFB2AED00092A46 /* Info.plist */,
-				D4A38F4D1FFB2AEE00092A46 /* main.m */,
 				D4A38F4F1FFB2AEE00092A46 /* Cerebro.entitlements */,
+				D4A38F4D1FFB2AEE00092A46 /* main.m */,
 				D40D36F520B4BA060006EF82 /* Cerebro-Bridging-Header.h */,
 			);
 			path = Cerebro;
@@ -543,6 +546,7 @@
 				D4CFB7D22287C81300F2403A /* JoinWifiTaskController.m in Sources */,
 				D4F136772325E39A0084A302 /* RTSPServer.m in Sources */,
 				D4A38F731FFC77CB00092A46 /* ROBKeyboardControlsViewController.m in Sources */,
+				D4A2E90A2E7A1D3D002B5299 /* KeyframeAnimationManager.swift in Sources */,
 				D4F642E22325E17F00DF71AE /* FreenectPCL.mm in Sources */,
 				D4F642E32325E17F00DF71AE /* TrackedPolyRect.m in Sources */,
 				D4F642E52325E17F00DF71AE /* VisionTrackerProcessor.m in Sources */,
