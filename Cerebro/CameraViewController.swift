@@ -97,7 +97,7 @@ extension CameraViewController: CameraManagerDelegate {
     func process_humanBodyPose3D_Observation(_ observation: VNHumanBodyPose3DObservation) {
         if !sceneCreated {
             self.skeletonView.scene = createScene(observation: observation)
-            sceneCreated = true
+            //sceneCreated = true
         } else {
             //This is not working as expected
             updateScene(observation: observation)
@@ -414,7 +414,7 @@ extension CameraViewController: CameraManagerDelegate {
                 //trajectoriesRequest,
                 //animalBodyPoseRequest,
             detectFaceRequest,          // √
-            //personInstanceRequest       // √
+            personInstanceRequest       // √
                 //segmentationRequest       // √
         ])
     }
