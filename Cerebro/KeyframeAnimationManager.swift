@@ -82,7 +82,7 @@ import AppKit
                     let savedData = try Data(contentsOf: keyframeAnimationURL)
                     let decoder = JSONDecoder()
                     let decodedInstance = try decoder.decode(KeyframeAnimation.self, from: savedData)
-                    print("decodedInstance = \(decodedInstance.name) keyframes = \(decodedInstance.keyframeSequence) keyframeA: \(decodedInstance.keyframeSequence.first?.name ?? "noname")")
+                    print("decodedInstance = \(decodedInstance.name) keyframes = \(decodedInstance.namedSequences) keyframeA: \(decodedInstance.namedSequences.first?.name ?? "noname")")
                     self.currentAnimation = decodedInstance
                 }
                 
@@ -103,20 +103,22 @@ import AppKit
 
 @objcMembers public class KeyframeAnimation: NSObject, Codable {
     public var name: String = "Keyframe Animation"
-    public var keyframeSequence: [Keyframe] = []
+    
     public var namedKeyframes: [Keyframe] = []
+    public var namedSequences: [KeyframeSequence] = []
     public var keyframeDict: [String: Keyframe] = [:]
     public var currentKeyframe: Keyframe = Keyframe(name: UUID().uuidString)
+    public var currentSequence: KeyframeSequence = KeyframeSequence()
     
-    init(name: String, keyframeSequence: [Keyframe]) {
+    init(name: String, namedKeyframes: [Keyframe]) {
         self.name = name
-        self.keyframeSequence = keyframeSequence
+        self.namedKeyframes = namedKeyframes
     }
     
     convenience init(name: String) {
         self.init()
         self.name = name
-        self.keyframeSequence = []
+        self.namedSequences = []
     }
     
     public override init() {}
@@ -127,63 +129,99 @@ import AppKit
         currentKeyframe = Keyframe(name: UUID().uuidString)
     }
     
+    public func addNewNamedSequence() {
+        let newSequence = KeyframeSequence()
+        namedSequences.append(newSequence)
+        currentSequence = newSequence
+    }
+    
+    public func removeNamedKeyframe(name: String) {
+        keyframeDict[name] = nil
+        namedKeyframes.removeAll { $0.name == name }
+        if currentKeyframe.name == name {
+            currentKeyframe = namedKeyframes.last ?? Keyframe(name: UUID().uuidString)
+        }
+    }
+    
     public func appendCurrentKeyframeToSequence() {
-        keyframeSequence.append(currentKeyframe)
+        currentSequence.appendKeyframe(currentKeyframe)
+    }
+    
+    public func addKeyframeToCurrentSequence(_ keyframe: Keyframe) {
+        currentSequence.appendKeyframe(keyframe)
+    }
+    
+    public func removeSequenceKeyframe(index: Int) {
+        currentSequence.keyframes.remove(at: index)
+    }
+    
+    public func removeSequence(index: Int) {
+        namedSequences.remove(at: index)
+    }
+}
+
+@objcMembers public class KeyframeSequence: NSObject, Codable {
+    public var name: String = "sequence"
+    public var uuid: UUID = UUID()
+    public var keyframes: [Keyframe] = []
+    
+    func appendKeyframe(_ keyframe: Keyframe) {
+        keyframes.append(keyframe)
     }
 }
 
 @objcMembers public class Keyframe: NSObject, Codable {
-    @objc public var name: String = "keyframe"
+    public var name: String = "keyframe"
+    public var uuid: UUID = UUID()
+    public var arm_R11_keyframe: Bool = false
+    public var arm_R11_cmd_sleep: Double = 0
+    public var arm_R11_cmd_time: Double = 2
+    public var arm_R11_servo1: Double = 0
+    public var arm_R11_servo2: Double = 0
+    public var arm_R11_servo3: Double = 0
+    public var arm_R11_servo4: Double = 0
+    public var arm_R11_servo5: Double = 0
+    public var arm_R11_servo6: Double = 0
+    public var arm_R11_servo7: Double = 0
     
-    @objc public var arm_R11_keyframe: Bool = false
-    @objc public var arm_R11_cmd_sleep: Double = 0
-    @objc public var arm_R11_cmd_time: Double = 2
-    @objc public var arm_R11_servo1: Double = 0
-    @objc public var arm_R11_servo2: Double = 0
-    @objc public var arm_R11_servo3: Double = 0
-    @objc public var arm_R11_servo4: Double = 0
-    @objc public var arm_R11_servo5: Double = 0
-    @objc public var arm_R11_servo6: Double = 0
-    @objc public var arm_R11_servo7: Double = 0
+    public var arm_L10_keyframe: Bool = false
+    public var arm_L10_cmd_sleep: Double = 0
+    public var arm_L10_cmd_time: Double = 2
+    public var arm_L10_servo1: Double = 0
+    public var arm_L10_servo2: Double = 0
+    public var arm_L10_servo3: Double = 0
+    public var arm_L10_servo4: Double = 0
+    public var arm_L10_servo5: Double = 0
+    public var arm_L10_servo6: Double = 0
+    public var arm_L10_servo7: Double = 0
     
-    @objc public var arm_L10_keyframe: Bool = false
-    @objc public var arm_L10_cmd_sleep: Double = 0
-    @objc public var arm_L10_cmd_time: Double = 2
-    @objc public var arm_L10_servo1: Double = 0
-    @objc public var arm_L10_servo2: Double = 0
-    @objc public var arm_L10_servo3: Double = 0
-    @objc public var arm_L10_servo4: Double = 0
-    @objc public var arm_L10_servo5: Double = 0
-    @objc public var arm_L10_servo6: Double = 0
-    @objc public var arm_L10_servo7: Double = 0
+    public var head_keyframe: Bool = false
+    public var head_upperNeck: Double = 0
+    public var head_lowerNeck: Double = 0
+    public var head_neckRotation: Double = 0
     
-    @objc public var head_keyframe: Bool = false
-    @objc public var head_upperNeck: Double = 0
-    @objc public var head_lowerNeck: Double = 0
-    @objc public var head_neckRotation: Double = 0
+    public var tread_movement_keyframe: Bool = false
+    public var tread_movement_cmd_time: Double = 0
+    public var treadR: Double = 0
+    public var treadL: Double = 0
     
-    @objc public var tread_movement_keyframe: Bool = false
-    @objc public var tread_movement_cmd_time: Double = 0
-    @objc public var treadR: Double = 0
-    @objc public var treadL: Double = 0
+    public var flipper_keyframe: Bool = false
+    public var flipper: Double = 0
     
-    @objc public var flipper_keyframe: Bool = false
-    @objc public var flipper: Double = 0
+    public var LACT_keyframe: Bool = false
+    public var LACT_cmd_time: Double = 0
+    public var LACT: Double = 0
     
-    @objc public var LACT_keyframe: Bool = false
-    @objc public var LACT_cmd_time: Double = 0
-    @objc public var LACT: Double = 0
+    public var torsoRotation_keyframe: Bool = false
+    public var torsoRotation_speed: Double = 0
+    public var torsoRotation_finalPosition: Double = 0
     
-    @objc public var torsoRotation_keyframe: Bool = false
-    @objc public var torsoRotation_speed: Double = 0
-    @objc public var torsoRotation_finalPosition: Double = 0
-    
-    @objc public var speechDialog_keyframe: Bool = false
-    @objc public var speech_dialog: String = ""
-    @objc public var speech_language: String = ""
-    @objc public var speech_volume: Double = 0
-    @objc public var speech_rate: Double = 0
-    @objc public var speech_pitchMultiplier: Double = 0
+    public var speechDialog_keyframe: Bool = false
+    public var speech_dialog: String = ""
+    public var speech_language: String = ""
+    public var speech_volume: Double = 0
+    public var speech_rate: Double = 0
+    public var speech_pitchMultiplier: Double = 0
     
     init(name: String) {
         self.name = name

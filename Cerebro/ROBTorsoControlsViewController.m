@@ -55,7 +55,17 @@
 
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView {
     KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
-    return keyframeAnimationManager.currentAnimation.namedKeyframes.count;
+    
+    if (tableView == self.keyframeTableView) {
+        return keyframeAnimationManager.currentAnimation.namedKeyframes.count;
+    }
+    if (tableView == self.keyframeSequenceDetailsTableView) {
+        return keyframeAnimationManager.currentAnimation.currentSequence.keyframes.count;
+    }
+    if (tableView == self.keyframeSequencesTableView) {
+        return keyframeAnimationManager.currentAnimation.namedSequences.count;
+    }
+    return 0;
 }
 
 // NSTableViewDelegate methods for view-based table views
@@ -86,13 +96,197 @@
     
     KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
 
-    // Populate the cell view with data
-    if ([tableColumn.identifier isEqualToString:@"NamedKeyframes"]) { // Replace with your column identifier
-        if (row < keyframeAnimationManager.currentAnimation.namedKeyframes.count) {
-            cellView.textField.stringValue = keyframeAnimationManager.currentAnimation.namedKeyframes[row].name;
+    if (tableView == self.keyframeTableView) {
+        // Populate the cell view with data
+        if ([tableColumn.identifier isEqualToString:@"NamedKeyframes"]) { // Replace with your column identifier
+            if (row < keyframeAnimationManager.currentAnimation.namedKeyframes.count) {
+                cellView.textField.stringValue = keyframeAnimationManager.currentAnimation.namedKeyframes[row].name;
+            }
+        }
+        return cellView;
+
+    }
+    if (tableView == self.keyframeSequenceDetailsTableView) {
+        // Populate the cell view with data
+        if ([tableColumn.identifier isEqualToString:@"SequenceDetails"]) { // Replace with your column identifier
+            if (row < keyframeAnimationManager.currentAnimation.namedSequences.count) {
+                int selectedSequenceRow = (int)self.keyframeSequencesTableView.selectedRow;
+                if (selectedSequenceRow == -1) {
+                    selectedSequenceRow = 0;
+                }
+                
+                cellView.textField.stringValue = keyframeAnimationManager.currentAnimation.namedSequences[selectedSequenceRow].keyframes[row].name;
+            }
+        }
+        return cellView;
+    }
+    if (tableView == self.keyframeSequencesTableView) {
+        // Populate the cell view with data
+        if ([tableColumn.identifier isEqualToString:@"NamedSequences"]) { // Replace with your column identifier
+            if (row < keyframeAnimationManager.currentAnimation.namedSequences.count) {
+                cellView.textField.stringValue = keyframeAnimationManager.currentAnimation.namedSequences[row].name;
+            }
+        }
+        return cellView;
+    }
+
+    return nil;
+}
+
+- (void)tableViewSelectionDidChange:(NSNotification *)notification {
+    NSTableView *tableView = notification.object;
+    NSInteger selectedRow = [tableView selectedRow];
+
+    if (tableView == self.keyframeTableView) {
+        if (selectedRow != -1) { // Check if a row is actually selected
+            KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
+
+            Keyframe *selectedKeyframe = keyframeAnimationManager.currentAnimation.namedKeyframes[selectedRow];
+            keyframeAnimationManager.currentAnimation.currentKeyframe = selectedKeyframe;
+            self.keyframeNameTextField.stringValue = selectedKeyframe.name;
+            [self.keyframeSequenceDetailsTableView reloadData];
+            
+        } else {
+            NSLog(@"No row selected.");
         }
     }
-    return cellView;
+    if (tableView == self.keyframeSequenceDetailsTableView) {
+        
+    }
+    if (tableView == self.keyframeSequencesTableView) {
+        if (selectedRow != -1) { // Check if a row is actually selected
+            KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
+
+            KeyframeSequence *selectedSequence = keyframeAnimationManager.currentAnimation.namedSequences[selectedRow];
+            keyframeAnimationManager.currentAnimation.currentSequence = selectedSequence;
+            self.sequenceNameTextField.stringValue = selectedSequence.name;
+            [self.keyframeSequenceDetailsTableView reloadData];
+            
+        } else {
+            NSLog(@"No row selected.");
+        }
+    }
+}
+
+- (void)controlTextDidChange:(NSNotification *)obj {
+    NSTextField *textField = obj.object;
+    if (textField == self.amberHostIP_TextField) {
+        NSLog(@"setting amberHostIP to %@", textField.stringValue);
+        self.robMainViewController.serialBox.amberHostIP = textField.stringValue;
+    }
+}
+
+- (void)controlTextDidEndEditing:(NSNotification *)obj {
+    KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
+
+    if (obj.object == self.keyframeNameTextField) {
+        keyframeAnimationManager.currentAnimation.currentKeyframe.name = self.keyframeNameTextField.stringValue;
+        [keyframeAnimationManager saveCurrentKeyframeAnimation];
+    }
+    if (obj.object == self.sequenceNameTextField) {
+        keyframeAnimationManager.currentAnimation.currentSequence.name = self.sequenceNameTextField.stringValue;
+        [keyframeAnimationManager saveCurrentKeyframeAnimation];
+        [self.keyframeSequencesTableView reloadData];
+    }
+    
+}
+
+- (NSArray<NSTableViewRowAction *> *)tableView:(NSTableView *)tableView rowActionsForRow:(NSInteger)row edge:(NSTableRowActionEdge)edge {
+    if (tableView == self.keyframeTableView) {
+        if (edge == NSTableRowActionEdgeTrailing) { // Right swipe
+            NSTableViewRowAction *deleteAction = [NSTableViewRowAction rowActionWithStyle:NSTableViewRowActionStyleDestructive
+                                                                                    title:@"Delete"
+                                                                                  handler:^(NSTableViewRowAction * _Nonnull action, NSInteger row) {
+                // 1. Update your data source: Remove the item at 'row' from your underlying data model.
+                //    For example, if you have an NSMutableArray called 'dataArray':
+                //    [self.dataArray removeObjectAtIndex:row];
+                KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
+                Keyframe *removedKeyframe = [keyframeAnimationManager.currentAnimation.namedKeyframes objectAtIndex:row];
+                [keyframeAnimationManager.currentAnimation removeNamedKeyframeWithName:removedKeyframe.name];
+                [keyframeAnimationManager saveCurrentKeyframeAnimation];
+                
+                // 2. Update the table view: Remove the row from the NSTableView with animation.
+                [tableView beginUpdates];
+                [tableView removeRowsAtIndexes:[NSIndexSet indexSetWithIndex:row] withAnimation:NSTableViewAnimationEffectFade];
+                [tableView endUpdates];
+            }];
+            return @[deleteAction];
+        }
+    }
+    if (tableView == self.keyframeSequenceDetailsTableView) {
+        if (edge == NSTableRowActionEdgeTrailing) { // Right swipe
+            NSTableViewRowAction *deleteAction = [NSTableViewRowAction rowActionWithStyle:NSTableViewRowActionStyleDestructive
+                                                                                    title:@"Delete"
+                                                                                  handler:^(NSTableViewRowAction * _Nonnull action, NSInteger row) {
+                // 1. Update your data source: Remove the item at 'row' from your underlying data model.
+                //    For example, if you have an NSMutableArray called 'dataArray':
+                //    [self.dataArray removeObjectAtIndex:row];
+                int selectedSequenceRow = (int)self.keyframeSequencesTableView.selectedRow;
+                if (selectedSequenceRow == -1) {
+                    selectedSequenceRow = 0;
+                }
+                KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
+                //Keyframe *removedKeyframeFromSequence = [keyframeAnimationManager.currentAnimation.namedSequences objectAtIndex:selectedSequenceRow].keyframes[row];
+                [keyframeAnimationManager.currentAnimation removeSequenceKeyframeWithIndex:row];
+                [keyframeAnimationManager saveCurrentKeyframeAnimation];
+                
+                // 2. Update the table view: Remove the row from the NSTableView with animation.
+                [tableView beginUpdates];
+                [tableView removeRowsAtIndexes:[NSIndexSet indexSetWithIndex:row] withAnimation:NSTableViewAnimationEffectFade];
+                [tableView endUpdates];
+            }];
+            return @[deleteAction];
+        }
+    }
+    if (tableView == self.keyframeSequencesTableView) {
+        if (edge == NSTableRowActionEdgeTrailing) { // Right swipe
+            NSTableViewRowAction *deleteAction = [NSTableViewRowAction rowActionWithStyle:NSTableViewRowActionStyleDestructive
+                                                                                    title:@"Delete"
+                                                                                  handler:^(NSTableViewRowAction * _Nonnull action, NSInteger row) {
+                // 1. Update your data source: Remove the item at 'row' from your underlying data model.
+                //    For example, if you have an NSMutableArray called 'dataArray':
+                //    [self.dataArray removeObjectAtIndex:row];
+                int selectedSequenceRow = (int)self.keyframeSequencesTableView.selectedRow;
+
+                KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
+                [keyframeAnimationManager.currentAnimation removeSequenceWithIndex:row];
+                [keyframeAnimationManager saveCurrentKeyframeAnimation];
+                
+                // 2. Update the table view: Remove the row from the NSTableView with animation.
+                [tableView beginUpdates];
+                [tableView removeRowsAtIndexes:[NSIndexSet indexSetWithIndex:row] withAnimation:NSTableViewAnimationEffectFade];
+                [tableView endUpdates];
+            }];
+            return @[deleteAction];
+        }
+    }
+    return @[]; // No actions for leading edge (left swipe) or if not trailing edge
+        
+}
+
+#pragma mark -
+
+- (IBAction)newSequence:(id)sender {
+    KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
+    [keyframeAnimationManager.currentAnimation addNewNamedSequence];
+    [self.keyframeSequencesTableView reloadData];
+    [keyframeAnimationManager saveCurrentKeyframeAnimation];
+}
+
+- (IBAction)copyNamedKeyframeToCurrentSequence:(id)sender {
+    KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
+
+    int selectedNamedKeyframe = (int) self.keyframeTableView.selectedRow;
+    if (selectedNamedKeyframe == -1) {
+        selectedNamedKeyframe = 0;
+    }
+    if (selectedNamedKeyframe < keyframeAnimationManager.currentAnimation.namedKeyframes.count) {
+        Keyframe *keyframe = keyframeAnimationManager.currentAnimation.namedKeyframes[selectedNamedKeyframe];
+        [keyframeAnimationManager.currentAnimation addKeyframeToCurrentSequence:keyframe];
+        [self.keyframeSequenceDetailsTableView reloadData];
+        [keyframeAnimationManager saveCurrentKeyframeAnimation];
+    }
+    
 }
 
 - (IBAction) playCurrentlySelectedKeyframeAnimation:(id)sender {
@@ -231,15 +425,6 @@
     self.arm_R11_position_servo6.doubleValue = -self.arm_L10_position_servo6.doubleValue;
     self.arm_R11_position_servo7.doubleValue = -self.arm_L10_position_servo7.doubleValue;
     [self update_arm_R11_Action:self];
-}
-
-
-- (void)controlTextDidChange:(NSNotification *)obj {
-    NSTextField *textField = obj.object;
-    if (textField == self.amberHostIP_TextField) {
-        NSLog(@"setting amberHostIP to %@", textField.stringValue);
-        self.robMainViewController.serialBox.amberHostIP = textField.stringValue;
-    }
 }
 
 - (void) bindArm_controls

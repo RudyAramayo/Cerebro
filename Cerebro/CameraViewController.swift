@@ -414,7 +414,7 @@ extension CameraViewController: CameraManagerDelegate {
                 //trajectoriesRequest,
                 //animalBodyPoseRequest,
             detectFaceRequest,          // √
-            personInstanceRequest       // √
+            //personInstanceRequest       // √
                 //segmentationRequest       // √
         ])
     }
