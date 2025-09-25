@@ -34,6 +34,7 @@
 - (void) sayIt:(NSString *)stringToSpeak;
 - (void) stopIt:(id)sender;
 - (void) setOutputLanguage:(NSString *)language;
+- (void) startRecognizer;
 
 - (void) switchMood_anger;
 - (void) switchMood_joy;

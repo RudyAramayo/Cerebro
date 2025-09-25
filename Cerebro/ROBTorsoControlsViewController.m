@@ -58,6 +58,10 @@
     self.robMainViewController.speechBox.isSpeaking = false;
 }
 
+- (IBAction)restartSpeech:(id)sender {
+    [self.robMainViewController.speechBox startRecognizer];
+}
+
 #pragma mark - KeyframeTableViewDelegate/Datasource
 
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView {

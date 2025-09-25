@@ -176,5 +176,5 @@
 - (void) bindArm_controls;
 
 - (IBAction)shutup:(id)sender;
-
+- (IBAction)restartSpeech:(id)sender;
 @end

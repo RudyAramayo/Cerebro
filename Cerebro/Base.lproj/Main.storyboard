@@ -3215,6 +3215,17 @@ Brake
                                     </segments>
                                 </segmentedCell>
                             </segmentedControl>
+                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Pcz-HR-1ia">
+                                <rect key="frame" x="439" y="662" width="117" height="24"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                <buttonCell key="cell" type="push" title="Restart Speech" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="R86-aU-Wt2">
+                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                    <font key="font" metaFont="system"/>
+                                </buttonCell>
+                                <connections>
+                                    <action selector="restartSpeech:" target="cHj-5R-xNm" id="hoR-Ty-J4C"/>
+                                </connections>
+                            </button>
                         </subviews>
                     </view>
                     <connections>

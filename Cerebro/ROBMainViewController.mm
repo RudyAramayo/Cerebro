@@ -150,13 +150,19 @@
         NSLog(@"Listening for spoken input");
         [self resetSpeechResponseAttentionTimer];
         
-        NSArray *acknowledgements = @[@"yes", @"go ahead", @"i'm listening", @"can I help you?"];
-        NSString *acknowledgement = [acknowledgements objectAtIndex:arc4random_uniform((uint32_t)acknowledgements.count)];
+        NSArray *thinking_acknowledgements = @[@"let me think", @"I'm thinking", @"hmmmmm, lets see", @"proessing..."];
+        NSString *thinking_acknowledgement = [thinking_acknowledgements objectAtIndex:arc4random_uniform((uint32_t)thinking_acknowledgements.count)];
         
-        [self.speechBox sayIt:acknowledgement];
+        NSArray *greeting_acknowledgements = @[@"Hey there", @"How are you", @"What's up!", @"Greetings"];
+        NSString *greeting_acknowledgement = [greeting_acknowledgements objectAtIndex:arc4random_uniform((uint32_t)greeting_acknowledgements.count)];
+        
+        
         if ([textInput isEqualToString:@"robbie"] || [textInput isEqualToString:@"hey rob"] || [textInput isEqualToString:@"rob"] || [textInput isEqualToString:@"robot"])
         {
-            //return;
+            [self.speechBox sayIt:greeting_acknowledgement];
+            return;
+        } else {
+            [self.speechBox sayIt:thinking_acknowledgement];
         }
     }
     if ([textInput containsString:@"stop"] || [textInput containsString:@"wait"] || [textInput containsString:@"don't move"] || [textInput containsString:@"do not move"])
