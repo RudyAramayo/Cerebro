@@ -12,10 +12,10 @@ import Foundation
 @available(macOS 10.15, *)
 @objcMembers public class ROBAI: NSObject {
     
-    func handleInput(_ text: String, completion: @escaping (String)->Void) {
+    func handleInput(_ text: String, speechWordiness:Int = 1, completion: @escaping (String)->Void) {
         Task {
             do {
-                try await processAIQuery(text: text, completion: { response in
+                try await processAIQuery(text: text, speechWordiness:speechWordiness, completion: { response in
                     completion(response)
                 })
             } catch {
@@ -24,7 +24,7 @@ import Foundation
         }
     }
     
-    func processAIQuery(text: String, completion: @escaping (String)->Void ) async throws {
+    func processAIQuery(text:String, speechWordiness:Int, completion: @escaping (String)->Void ) async throws {
 
         // 1. This is a simple test with the curl command, a python example will allow us to use the live api and keep a conversation going with session ID restore
         //curl "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
@@ -48,7 +48,21 @@ import Foundation
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.addValue("AIzaSyAAungtfsii7SK-zJBf04389rIqxfICaTA", forHTTPHeaderField: "X-goog-api-key")
         
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["contents": [["parts": [["text": text]]]]] as [String: Any], options: [])
+        var finalText = text.replacingOccurrences(of: "Hey Rob", with: "");
+        switch speechWordiness {
+        case 0:
+            finalText = "Briefly in 1 sentences tell me " + text;
+            break
+        case 1:
+            finalText = "Briefly in 2 sentences tell me " + text;
+            break
+        default:
+            finalText = text;
+            break
+        }
+        
+        
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["contents": [["parts": [["text": finalText]]]]] as [String: Any], options: [])
         // 4. Create a URLSession data task
         let task = URLSession.shared.dataTask(with: request) { data, response, error in
             // 5. Handle the response

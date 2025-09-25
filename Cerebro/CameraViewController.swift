@@ -14,16 +14,18 @@ import CoreImage.CIFilterBuiltins
 
 final class CameraViewController: NSViewController {
     private var cameraManager: CameraManagerProtocol!
-    //public var robMainViewController: ROBMainViewController
+    
     @IBOutlet weak var skeletonView: SCNView!
     @IBOutlet weak var personMaskImageView: NSImageView!
     @IBOutlet weak var personMaskImageView_maskImage: NSImageView!
     @IBOutlet weak var poseView: PoseDrawingView!
+    @objc public weak var robMainViewController: ROBMainViewController?
     
     var sceneCreated = false
     let renderer = HumanBodySkeletonRenderer()
     var viewModel: HumanBodyPose3DDetector = HumanBodyPose3DDetector()
     let context = CIContext()
+    
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -261,8 +263,9 @@ extension CameraViewController: CameraManagerDelegate {
         })
         
         let detectFaceRequest = VNDetectFaceRectanglesRequest { request, error in
-            for observation in request.results as! [VNFaceObservation] {
-                print("detectFaceRequest = \(observation)")
+            if let observations = request.results as? [VNFaceObservation] {
+                print("detectFaceRequest = \(observations)")
+                self.robMainViewController?.didSeeNewPeople(observations)
             }
         }
         

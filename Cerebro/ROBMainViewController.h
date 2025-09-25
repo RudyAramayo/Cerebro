@@ -7,6 +7,8 @@
 //
 
 #import <SceneKit/SceneKit.h>
+#import <Vision/Vision.h>
+
 
 @class ROBSerialBox;
 @class ROBSpeechBox;
@@ -44,10 +46,11 @@
 - (void) inputText:(NSString *)textInput;
 - (void) didRespond: (NSString *) responseText;
 //Tracking
-- (void) didSeeNewPerson:(NSString *)userID;
-- (void) lostSightOfPerson:(NSString*)userID;
-- (void) trackingPerson:(NSString *)userID position:(NSString *)position;
-- (void) leashHandPosition:(SCNVector3)position;
+//- (void) didSeeNewPerson:(NSString *)userID;
+//- (void) lostSightOfPerson:(NSString*)userID;
+//- (void) trackingPerson:(NSString *)userID position:(NSString *)position;
+//- (void) leashHandPosition:(SCNVector3)position;
+- (void) didSeeNewPeople:(NSArray<VNFaceObservation*>*)observations;
 
 - (void) shutdownAudioInput;
 - (void) didFinishProcessingSpeech;
@@ -57,5 +60,9 @@
 - (void) didOutputSerialResponse_Base:(NSString *)response;
 - (void) didOutputSerialResponse_Maestro:(NSString *)response;
 - (void) resetSpeechResponseAttentionTimer;
+- (void) setHeadTracking:(BOOL)headTrackingEnabled;
+
+- (void) startListeningAgain;
+- (void) beginToIgnore;
 
 @end

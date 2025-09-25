@@ -10,6 +10,7 @@
 #import <AppKit/AppKit.h>
 #import "ROBMainViewController.h"
 #import "ROBSerialBox.h"
+#import "ROBSpeechBox.h"
 #import "Cerebro-Swift.h"
 
 @interface ROBTorsoControlsViewController () <NSTextFieldDelegate, NSTableViewDelegate, NSTableViewDataSource>
@@ -49,6 +50,12 @@
     keyframeAnimationManager.animations;
     
     self.keyframeNameTextField.stringValue = keyframeAnimationManager.currentAnimation.currentKeyframe.name;
+}
+
+- (IBAction)shutup:(id)sender {
+    [self.robMainViewController.speechBox stopIt:nil];
+    [self.robMainViewController resetSpeechResponseAttentionTimer];
+    self.robMainViewController.speechBox.isSpeaking = false;
 }
 
 #pragma mark - KeyframeTableViewDelegate/Datasource
@@ -477,6 +484,7 @@
     
 }
 
+#pragma mark - Servo Commands
 
 - (void) maestro_getErrors_command
 {

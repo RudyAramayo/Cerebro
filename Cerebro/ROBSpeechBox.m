@@ -31,7 +31,7 @@
 @property (nonatomic, strong) SFSpeechRecognitionTask *task;
 @property (nonatomic, strong) AVAudioEngine *audioEngine;
 
-@property (nonatomic, assign) BOOL isSpeaking;
+
 @property (readwrite, retain) NSMutableArray *localeArray;
 @property (readwrite, assign) int selectedLocaleIndex;
 @property (readwrite, retain) NSTimer *speechDidStopProcessingTimer;
@@ -163,7 +163,6 @@
         [self handlePersonalVoiceAccess];
         
         [self sayIt:@"Orbitus Robot Online"];
-        
     }
     return self;
 }
@@ -229,7 +228,9 @@
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didFinishSpeechUtterance:(AVSpeechUtterance *)utterance
 {
     NSLog(@"didFinishSpeechUtterance");
-    self.isSpeaking = false;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        self.isSpeaking = false;
+    });
     [self.delegate didFinishProcessingSpeech];
 }
 
@@ -309,7 +310,7 @@
                     
                     if (![result.bestTranscription.formattedString isEqualToString:self.currentTextInput]) {
                         //PROCESS SPOKE WORDS HERE
-                        //NSLog(@"final - %@", result.bestTranscription.formattedString);
+                        NSLog(@"final - %@", result.bestTranscription.formattedString);
 
                         if ([result.bestTranscription.formattedString containsString:@"hold on"]) {
                             
@@ -321,7 +322,7 @@
                             if (self.debounceSpeechInputTimer) {
                                 [self.debounceSpeechInputTimer invalidate];
                             }
-                            self.debounceSpeechInputTimer = [NSTimer scheduledTimerWithTimeInterval:1 repeats:NO block:^(NSTimer * _Nonnull timer) {
+                            self.debounceSpeechInputTimer = [NSTimer scheduledTimerWithTimeInterval:0.75 repeats:NO block:^(NSTimer * _Nonnull timer) {
                                 [self.delegate inputText:result.bestTranscription.formattedString];
                             }];
                         }
@@ -350,7 +351,11 @@
             }];
             
             [inputNode installTapOnBus:0 bufferSize:1024 format:[inputNode outputFormatForBus:0] block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when){
-                [self.speechRequest appendAudioPCMBuffer:buffer];
+                
+                if (!self.isSpeaking) {
+                    NSLog(@"appending audio buffer");
+                    [self.speechRequest appendAudioPCMBuffer:buffer];
+                }
             }];
             
             

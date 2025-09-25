@@ -5,7 +5,7 @@
 //  Created by Rob Makina on 1/1/18.
 //  Copyright © 2018 Rob Makina. All rights reserved.
 //
-
+#import "AppDelegate.h"
 #import "ROBMainViewController.h"
 #import "ROBSerialBox.h"
 #import "ROBBaseControllerModel.h"
@@ -63,7 +63,7 @@
 @property (readwrite, retain) ROBTorsoControlsViewController *torsoControlsViewController;
 
 @property (readwrite, retain) NSWindowController *cameraWindowController;
-@property (readwrite, retain) ROBTorsoControlsViewController *cameraViewController;
+@property (readwrite, retain) CameraViewController *cameraViewController;
 
 @property (readwrite, retain) NSWindowController *tastsWindowController;
 @property (readwrite, retain) NSTimer *speechResponseAttentionTimer;
@@ -92,6 +92,7 @@
 @property (readwrite, retain) IBOutlet NSTextView *realSense_t265_TaskTextView;
 
 @property (readwrite, assign) bool followingMode;
+@property (readwrite, assign) BOOL isNeckLifted;
 @property (readwrite, assign) bool ignoreText;
 @property (readwrite, assign) int currentPersonTrackingID;
 @property (readwrite, assign) int followingSpeed;
@@ -101,6 +102,7 @@
 @property (readwrite, assign) float currentPerson_positionZ;
 @property (readwrite, assign) float currentPerson_pan;
 @property (readwrite, assign) float currentPerson_tilt;
+@property (readwrite, assign) float currentPerson_upperNeckTilt;
 
 @property (readwrite, assign) int actualValue;
 @property (readwrite, assign) int targetValue;
@@ -110,6 +112,7 @@
 @property (readwrite, assign) int pulse_count;
 @property (readwrite, assign) bool NiTE_IS_ON;
 
+@property (readwrite, retain) NSTimer *liftNeckAnimationTimer;
 @end
 
 @implementation ROBMainViewController
@@ -122,21 +125,19 @@
 
 - (void) willStartProcessingSpeech
 {
-    //[self.audioInputTaskController beginToIgnore];
+    NSLog(@"willStartProcessingSpeech ROBMainViewController");
 }
 
 - (void) didFinishProcessingSpeech
 {
-    //[self.audioInputTaskController startTask:self];
-    //[self.audioInputTaskController startListeningAgain];
-    
-    //self.speechTextView.editable = YES;
-    //[[[self tastsWindowController] window] makeFirstResponder:self.speechTextView];
-    //[self.speechTextView becomeFirstResponder];
-
+    NSLog(@"didFinishProcessingSpeech ROBMainViewController");
+    //TODO: should we reset after so we can keep a conversation going?!?
+    [self resetSpeechResponseAttentionTimer];
 }
 
 - (void) willSpeakWord:(NSRange)characterRange ofString:(NSString *)string {
+    NSLog(@"willSpeakWord ROBMainViewController");
+    //somehow then I used this the speech append audio buffer fails?
     //[self resetSpeechResponseAttentionTimer];
 }
 
@@ -155,7 +156,7 @@
         [self.speechBox sayIt:acknowledgement];
         if ([textInput isEqualToString:@"robbie"] || [textInput isEqualToString:@"hey rob"] || [textInput isEqualToString:@"rob"] || [textInput isEqualToString:@"robot"])
         {
-            return;
+            //return;
         }
     }
     if ([textInput containsString:@"stop"] || [textInput containsString:@"wait"] || [textInput containsString:@"don't move"] || [textInput containsString:@"do not move"])
@@ -177,7 +178,9 @@
         //[self.audioInputTaskController queryTextInpu: ttextInput]; //SENDS TEXT TO GOOGLE GEMINI THROUGH PYTHON
         //[self.speechBox inputText:textInput]; //CakeChat input was here
         NSLog(@"textInput = %@", textInput);
-        [self.robAI handleInput:textInput completion:^(NSString * _Nonnull response) {
+        int speechWordiness = self.torsoControlsViewController.speechWordinessChoice.selectedSegment;
+        
+        [self.robAI handleInput:textInput speechWordiness:speechWordiness completion:^(NSString * _Nonnull response) {
             //NSLog(@"response = %@", response);
             [self.speechBox sayIt:response];
         }];
@@ -209,7 +212,6 @@
     [self.autoNetServer sendString:@"Clear input text message"];
 }
 
-
 - (void)viewDidLoad
 {
     [super viewDidLoad];
@@ -232,6 +234,7 @@
     self.followingSpeed = 0;
     self.currentPersonTrackingID = 1;
     self.ignoreText = true;
+    self.isNeckLifted = NO;
     //-----
     //Initialize AutoNet
     self.autoNetServer = [[AutoNetServer alloc] initWithService:@"_roboNet._tcp" port:12345 dataDelegate:self];
@@ -278,6 +281,9 @@
     
     self.speechBox = [ROBSpeechBox new];
     self.speechBox.delegate = self;
+    
+    [self startListeningAgain];
+    
     self.outputLanguage = [[NSUserDefaults standardUserDefaults] valueForKey:@"outputLanguage"];
     [self.speechBox setOutputLanguage:self.outputLanguage];    
     
@@ -296,6 +302,7 @@
 - (void) startListeningAgain
 {
     self.ignoreText = NO;
+    [self resetSpeechResponseAttentionTimer];
 }
 
 
@@ -304,57 +311,103 @@
     self.ignoreText = YES;
 }
 
-- (void) didSeeNewPerson:(NSString *)userID
-{
-    [self.speechBox didSeeNewPerson:userID];
-    if (self.followingMode)
-    {
-        self.currentPersonTrackingID = [userID intValue];
-    }
-}
-
-
-- (void) lostSightOfPerson:(NSString*)userID
-{
-    [self.speechBox lostSightOfPerson:userID];
+- (void) didSeeNewPeople:(NSArray *)observations {
     
+    dispatch_async(dispatch_get_main_queue(), ^{
+        //if (self.isNeckLifted)
+            //NSLog(@"neck lifted state is on");
+        //if (self.liftNeckAnimationTimer)
+            //NSLog(@"liftNeckAnimationTimer %@", self.liftNeckAnimationTimer);
+        
+        if (!self.isNeckLifted) {
+            float targetHeadTilt = 6168.94; //This is the upright neck
+            float targetHeadUpperNeckTilt = 6868.81;
+            //[[self.torsoControlsViewController headTilt] setFloatValue:self.currentPerson_tilt];
+            
+            if (self.liftNeckAnimationTimer == nil) {
+                self.liftNeckAnimationTimer = [NSTimer scheduledTimerWithTimeInterval:0.1 repeats:YES block:^(NSTimer * _Nonnull timer) {
+                    //exit condition
+                    if (self.currentPerson_tilt >= targetHeadTilt-1 && self.currentPerson_tilt <= targetHeadTilt+1 &&
+                        self.currentPerson_upperNeckTilt >= targetHeadUpperNeckTilt-1 && self.currentPerson_upperNeckTilt <= targetHeadUpperNeckTilt+1) {
+                        self.isNeckLifted = YES;
+                        [self.liftNeckAnimationTimer invalidate];
+                        self.liftNeckAnimationTimer = nil;
+                        return;
+                    }
+                    float currentHeadTilt = [self.torsoControlsViewController.headTilt floatValue];
+                    float currentHeadUpperNeckTilt = [self.torsoControlsViewController.headUpperNeckTilt floatValue];
+                    float deltaHeadTilt = targetHeadTilt - currentHeadTilt;
+                    float deltaHeadUpperNeckTilt = targetHeadUpperNeckTilt - currentHeadUpperNeckTilt;
+                    float deltaTilt_finalValue = 0.0;
+                    
+                    float neckSpeed = 50.0;
+                    if (deltaHeadTilt > neckSpeed) {
+                        deltaTilt_finalValue = neckSpeed;
+                    }
+                    if (deltaHeadTilt < -neckSpeed) {
+                        deltaTilt_finalValue = -neckSpeed;
+                    }
+                    if (deltaHeadTilt > -neckSpeed && deltaHeadTilt <= neckSpeed) {
+                        deltaTilt_finalValue = deltaHeadTilt;
+                    }
+                    
+                    float upperNeckSpeed = 50.0;
+                    float deltaUpperNeckTilt_finalValue = 0.0;
+                    if (deltaHeadUpperNeckTilt > upperNeckSpeed) {
+                        deltaUpperNeckTilt_finalValue = upperNeckSpeed;
+                    }
+                    if (deltaHeadUpperNeckTilt < -upperNeckSpeed) {
+                        deltaUpperNeckTilt_finalValue = -upperNeckSpeed;
+                    }
+                    if (deltaHeadUpperNeckTilt > -upperNeckSpeed && deltaHeadUpperNeckTilt <= upperNeckSpeed) {
+                        deltaUpperNeckTilt_finalValue = deltaHeadUpperNeckTilt;
+                    }
+                    
+                    //NSLog(@"about to set tilt from = %f to %f", [self.torsoControlsViewController.headTilt floatValue], [self.torsoControlsViewController.headTilt floatValue] + deltaTilt_finalValue);
+                    self.currentPerson_tilt = [self.torsoControlsViewController.headTilt floatValue] + deltaTilt_finalValue;
+                    
+                    //NSLog(@"about to set upperNeckTilt from = %f to %f", [self.torsoControlsViewController.headUpperNeckTilt floatValue], [self.torsoControlsViewController.headUpperNeckTilt floatValue] + deltaUpperNeckTilt_finalValue);
+                    self.currentPerson_upperNeckTilt = [self.torsoControlsViewController.headUpperNeckTilt floatValue] + deltaUpperNeckTilt_finalValue;
+                    
+                    [[self.torsoControlsViewController headTilt] setFloatValue:self.currentPerson_tilt];
+                    [[self.torsoControlsViewController headUpperNeckTilt] setFloatValue:self.currentPerson_upperNeckTilt];
+                }];
+            }
+            return;
+        } else {
+            self.currentPerson_pan = [self.torsoControlsViewController.headPan floatValue];
+            self.currentPerson_tilt = [self.torsoControlsViewController.headTilt floatValue];
+            self.currentPerson_upperNeckTilt = [self.torsoControlsViewController.headUpperNeckTilt floatValue];
+            
+            id observation = observations.firstObject;
+            
+            for (id observation in observations) {
+                //detectFaceRequest = <VNFaceObservation: 0x81403ce00> 82B411FB-A8EF-45B1-8545-FB0FEC8F978B
+                // VNDetectFaceRectanglesRequestRevision3
+                // confidence=0.713637
+                // boundingBox=[0.847449, 0.470797, 0.175094, 0.311277]
+                
+                [observation boundingBox];
+                if ([observation confidence] > 0.6) {
+                    [self trackingPerson:@"1" position:[observation boundingBox]];
+                }
+            }
+        }
+    });
+
 }
 
-
-- (void) leashHandPosition:(SCNVector3)position
+- (void) trackingPerson:(NSString *)userID position:(NSRect)headPosition
 {
+    //Is tracking enabled?
     
-    
-    //float xOffset_L = 0;//(position.x > 0) ? 1.0 : -1.0;
-    //float xOffset_R = 0;//(position.x > 0) ? -1.0 : 1.0;
-    [self animateToValue];
-    //[self.serialBox controllerPassthrough:CGPointMake(self.actualValue, xOffset_L) touchPadPointR:CGPointMake(self.actualValue, xOffset_R) Lat:0 Long:0 tredBrakeLock:false flipperForwardIsDown:false flipperRelaxBrake:false flipperBackwardIsDown:false flipperBrakeLock:false lact1:false lact2:false lact3:false speed:100 speed_playPause:false speed_forward_reverse:false textInput:@""];
-
+        if (self.torsoControlsViewController.headTracking_enabled.state == NSControlStateValueOn) {
+            float center_x = headPosition.origin.x + headPosition.size.width/2.0;
+            float center_y = headPosition.origin.y + headPosition.size.height/2.0;
+            //NSLog(@"head size = %f, %f", headPosition.size.width, headPosition.size.height);
+            [self trackingPerson:userID x:center_x y:center_y z:1.0];
+        }
 }
-
-- (void) animateToValue
-{
-    if (self.actualValue < self.targetValue)
-    {
-        self.actualValue += 0.1;
-    }
-    if (self.actualValue > self.targetValue)
-    {
-        self.actualValue -= 0.1;
-    }
-}
-
-
-- (void) trackingPerson:(NSString *)userID position:(NSString *)position
-{
-    NSArray *positionComponents = [position componentsSeparatedByString:@","];
-    float x = [positionComponents[0] floatValue];
-    float y = [positionComponents[1] floatValue];
-    float z = [positionComponents[2] floatValue];
-    
-    [self trackingPerson:userID x:x y:y z:z];
-}
-
 
 - (void) trackingPerson:(NSString *)userID x:(float)x y:(float)y z:(float)z
 {
@@ -366,22 +419,37 @@
         
         dispatch_async(dispatch_get_main_queue(), ^(void) {
             
+            self.currentPerson_tilt = 6168.94;
+
+            //NSLog(@"Original values: pan %f, tilt %f, upperTilt %f", self.currentPerson_pan, self.currentPerson_tilt, self.currentPerson_upperNeckTilt);
+            
+            float pan_speed = 100;
+            float upperNeckTilt_speed = 60;
+            
             if (x > 0.55)
-                self.currentPerson_pan = self.currentPerson_pan - (1000 * (x-0.55));
+                self.currentPerson_pan = self.currentPerson_pan - (pan_speed * (x-0.55));
             if (x < 0.45)
-                self.currentPerson_pan = self.currentPerson_pan + (1000 * (0.45-x));
+                self.currentPerson_pan = self.currentPerson_pan + (pan_speed * (0.45-x));
             if (y > 0.55)
-                self.currentPerson_tilt = self.currentPerson_tilt - (500 * (y-0.55));
+                self.currentPerson_upperNeckTilt = self.currentPerson_upperNeckTilt + (upperNeckTilt_speed * (y-0.55));
             if (y < 0.45)
-                self.currentPerson_tilt = self.currentPerson_tilt + (500 * (0.45-y));
+                self.currentPerson_upperNeckTilt = self.currentPerson_upperNeckTilt - (upperNeckTilt_speed * (0.45-y));
+            
+            //NSLog(@"About to set:    pan %f, tilt %f, upperTilt %f", self.currentPerson_pan, self.currentPerson_tilt, self.currentPerson_upperNeckTilt);
+            
+            // !!! CLAMP VALUES SO WE DON"T BREAK SOMETHING EXPENSIVE LIKE THE CAMERA ON THE HEAD !!!
+            if (self.currentPerson_upperNeckTilt > 7400) {
+                self.currentPerson_upperNeckTilt = 7400;
+            }
             
             [[self.torsoControlsViewController headPan] setFloatValue:self.currentPerson_pan];
-            [[self.torsoControlsViewController headTilt] setFloatValue:self.currentPerson_tilt];
-            
-            //[[self.torsoControlsViewController headPan] setFloatValue:5900 + (x*200)]; // SimpleUserTracker Values
-            //[[self.torsoControlsViewController headTilt] setFloatValue:5400 - (y*200)]; // SimpleUserTracker Values
+            //[[self.torsoControlsViewController headTilt] setFloatValue:self.currentPerson_tilt];
+            [[self.torsoControlsViewController headUpperNeckTilt] setFloatValue:self.currentPerson_upperNeckTilt];
         });
     }
+    
+    return;
+    
     
     if (self.followingMode)
     {
@@ -831,8 +899,9 @@
     NSStoryboard *storyBoard = [NSStoryboard storyboardWithName:@"Main" bundle:nil]; // get a reference to the storyboard
     self.cameraWindowController = [storyBoard instantiateControllerWithIdentifier:@"CameraWindowController"]; // instantiate your window controller
     [self.cameraWindowController showWindow:self]; // show the window}
-    self.cameraViewController = (ROBTorsoControlsViewController *)self.torsoControlsWindowController.contentViewController;
-    //[self.cameraViewController setRobMainViewController:self];
+    self.cameraViewController = (CameraViewController *)self.cameraWindowController.contentViewController;
+    self.cameraViewController.robMainViewController = self;
+    //[self.cameraViewController bindROBMainViewControllerWithRobMainViewController:self];
 }
 
 - (void) showROB_Torso_Controls

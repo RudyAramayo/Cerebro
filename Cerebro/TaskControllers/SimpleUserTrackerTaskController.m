@@ -92,11 +92,11 @@
             
             if ([command containsString:@"New"])
             {
-                [self.delegate didSeeNewPerson:userID];
+                //[self.delegate didSeeNewPerson:userID];
             }
             if ([command containsString:@"Calibrating..."]) {}
             if ([command containsString:@"Out of Scene"]) {
-                [self.delegate lostSightOfPerson:userID];
+                //[self.delegate lostSightOfPerson:userID];
             }
             //[08475726] User #1:    New
             //[08509095] User #1:    Calibrating...
@@ -108,7 +108,7 @@
             NSString *userPosition = [outputString componentsSeparatedByString:@". ("][1];
             userPosition = [userPosition substringToIndex:userPosition.length-2]; //truncate ending )
             //NSLog(@"user%@ = %@", userID, userPosition);
-            [self.delegate trackingPerson:userID position:userPosition];
+            //[self.delegate trackingPerson:userID position:userPosition];
 
         }
             

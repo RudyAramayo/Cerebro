@@ -17,6 +17,7 @@
     
 }
 @property (readwrite, retain) ROBMainViewController *delegate;
+@property (nonatomic, assign) BOOL isSpeaking;
 
 @property (readwrite, retain) NSString *emotion;
 @property (readwrite, retain) NSMutableArray *commands;

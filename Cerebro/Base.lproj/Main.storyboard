@@ -2586,11 +2586,11 @@ Brake
                                 </subviews>
                             </customView>
                             <customView fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="llr-iK-LMt">
-                                <rect key="frame" x="787" y="691" width="139" height="221"/>
+                                <rect key="frame" x="787" y="641" width="139" height="271"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
                                 <subviews>
                                     <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Ar6-N9-3vH">
-                                        <rect key="frame" x="0.0" y="0.0" width="96" height="19"/>
+                                        <rect key="frame" x="0.0" y="50" width="96" height="19"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
                                         <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="5798.9583333333339" tickMarkPosition="above" sliderType="linear" id="tM2-Dq-N4d"/>
                                         <connections>
@@ -2598,7 +2598,7 @@ Brake
                                         </connections>
                                     </slider>
                                     <slider horizontalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="J1f-FG-Z84">
-                                        <rect key="frame" x="42" y="32" width="19" height="76"/>
+                                        <rect key="frame" x="42" y="82" width="19" height="76"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
                                         <sliderCell key="cell" continuous="YES" alignment="left" minValue="4375" maxValue="7675" doubleValue="7262.3420365021002" tickMarkPosition="right" sliderType="linear" id="Bud-rf-B0V"/>
                                         <connections>
@@ -2606,7 +2606,7 @@ Brake
                                         </connections>
                                     </slider>
                                     <slider horizontalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="CyK-bn-gZP">
-                                        <rect key="frame" x="42" y="122" width="19" height="76"/>
+                                        <rect key="frame" x="42" y="172" width="19" height="76"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
                                         <sliderCell key="cell" continuous="YES" alignment="left" minValue="4300" maxValue="7790" doubleValue="7790" tickMarkPosition="right" sliderType="linear" id="UIa-yF-izD"/>
                                         <connections>
@@ -2614,7 +2614,7 @@ Brake
                                         </connections>
                                     </slider>
                                     <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="wbx-6Z-lzo">
-                                        <rect key="frame" x="81" y="151" width="22" height="18"/>
+                                        <rect key="frame" x="81" y="201" width="22" height="18"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
                                         <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="fwZ-xd-8WN">
                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
@@ -2622,7 +2622,7 @@ Brake
                                         </buttonCell>
                                     </button>
                                     <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="fur-pu-Uhk">
-                                        <rect key="frame" x="33" y="204" width="36" height="17"/>
+                                        <rect key="frame" x="33" y="254" width="36" height="17"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
                                         <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Head" id="6LM-k0-FQc">
                                             <font key="font" metaFont="system"/>
@@ -2631,7 +2631,7 @@ Brake
                                         </textFieldCell>
                                     </textField>
                                     <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="CSn-jc-2oR">
-                                        <rect key="frame" x="117" y="1" width="22" height="18"/>
+                                        <rect key="frame" x="117" y="51" width="22" height="18"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
                                         <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="lFF-8N-ODL">
                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
@@ -2639,9 +2639,17 @@ Brake
                                         </buttonCell>
                                     </button>
                                     <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="AMM-Oa-PLc">
-                                        <rect key="frame" x="81" y="63" width="22" height="18"/>
+                                        <rect key="frame" x="81" y="113" width="22" height="18"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
                                         <buttonCell key="cell" type="check" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="R9F-Wr-A2V">
+                                            <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                            <font key="font" metaFont="system"/>
+                                        </buttonCell>
+                                    </button>
+                                    <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="U7c-Rp-x91">
+                                        <rect key="frame" x="10" y="8" width="119" height="18"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                        <buttonCell key="cell" type="check" title="Head Tracking" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="Lfw-Wl-jBd">
                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                             <font key="font" metaFont="system"/>
                                         </buttonCell>
@@ -2758,7 +2766,7 @@ Brake
                                 </customSpacing>
                             </stackView>
                             <stackView distribution="fill" orientation="vertical" alignment="centerX" horizontalStackHuggingPriority="249.99998474121094" verticalStackHuggingPriority="249.99998474121094" fixedFrame="YES" detachesHiddenViews="YES" translatesAutoresizingMaskIntoConstraints="NO" id="ISg-gv-BS9">
-                                <rect key="frame" x="796" y="631" width="128" height="40"/>
+                                <rect key="frame" x="462" y="698" width="128" height="40"/>
                                 <subviews>
                                     <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="fbY-W8-TcX">
                                         <rect key="frame" x="20" y="24" width="89" height="16"/>
@@ -2787,7 +2795,7 @@ Brake
                                 </customSpacing>
                             </stackView>
                             <stackView distribution="fill" orientation="vertical" alignment="centerX" horizontalStackHuggingPriority="249.99998474121094" verticalStackHuggingPriority="249.99998474121094" fixedFrame="YES" detachesHiddenViews="YES" translatesAutoresizingMaskIntoConstraints="NO" id="lFC-lp-0I2">
-                                <rect key="frame" x="450.5" y="534" width="182" height="72"/>
+                                <rect key="frame" x="451" y="534" width="182" height="72"/>
                                 <subviews>
                                     <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="U1j-CL-YQm">
                                         <rect key="frame" x="32" y="56" width="119" height="16"/>
@@ -2885,7 +2893,7 @@ Brake
                                     </subviews>
                                 </clipView>
                                 <scroller key="horizontalScroller" hidden="YES" wantsLayer="YES" verticalHuggingPriority="750" horizontal="YES" id="LwJ-0u-Uv6">
-                                    <rect key="frame" x="1" y="169" width="193" height="17"/>
+                                    <rect key="frame" x="1" y="443" width="193" height="17"/>
                                     <autoresizingMask key="autoresizingMask"/>
                                 </scroller>
                                 <scroller key="verticalScroller" hidden="YES" wantsLayer="YES" verticalHuggingPriority="750" horizontal="NO" id="sHs-Rn-YJu">
@@ -2965,14 +2973,14 @@ Brake
                                     <real value="3.4028234663852886e+38"/>
                                 </customSpacing>
                             </stackView>
-                            <scrollView fixedFrame="YES" autohidesScrollers="YES" horizontalLineScroll="24" horizontalPageScroll="10" verticalLineScroll="24" verticalPageScroll="10" usesPredominantAxisScrolling="NO" translatesAutoresizingMaskIntoConstraints="NO" id="ZXd-P5-Ew6">
+                            <scrollView fixedFrame="YES" autohidesScrollers="YES" horizontalLineScroll="52" horizontalPageScroll="10" verticalLineScroll="52" verticalPageScroll="10" usesPredominantAxisScrolling="NO" translatesAutoresizingMaskIntoConstraints="NO" id="ZXd-P5-Ew6">
                                 <rect key="frame" x="759" y="53" width="195" height="461"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                                 <clipView key="contentView" id="g2B-5z-u2L">
                                     <rect key="frame" x="1" y="1" width="193" height="459"/>
                                     <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                                     <subviews>
-                                        <tableView verticalHuggingPriority="750" allowsExpansionToolTips="YES" columnAutoresizingStyle="lastColumnOnly" multipleSelection="NO" autosaveColumns="NO" rowHeight="24" rowSizeStyle="automatic" headerView="9K6-ik-HIX" viewBased="YES" id="wbu-ik-Rol">
+                                        <tableView verticalHuggingPriority="750" allowsExpansionToolTips="YES" columnAutoresizingStyle="lastColumnOnly" multipleSelection="NO" autosaveColumns="NO" rowHeight="52" rowSizeStyle="automatic" headerView="9K6-ik-HIX" viewBased="YES" id="wbu-ik-Rol">
                                             <rect key="frame" x="0.0" y="0.0" width="193" height="431"/>
                                             <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                                             <size key="intercellSpacing" width="17" height="0.0"/>
@@ -3020,7 +3028,7 @@ Brake
                                     </subviews>
                                 </clipView>
                                 <scroller key="horizontalScroller" hidden="YES" wantsLayer="YES" verticalHuggingPriority="750" horizontal="YES" id="Dvb-rn-F1p">
-                                    <rect key="frame" x="1" y="169" width="193" height="17"/>
+                                    <rect key="frame" x="1" y="443" width="193" height="17"/>
                                     <autoresizingMask key="autoresizingMask"/>
                                 </scroller>
                                 <scroller key="verticalScroller" hidden="YES" wantsLayer="YES" verticalHuggingPriority="750" horizontal="NO" id="kZb-aO-OJG">
@@ -3064,14 +3072,14 @@ Brake
                                     <real value="3.4028234663852886e+38"/>
                                 </customSpacing>
                             </stackView>
-                            <scrollView fixedFrame="YES" autohidesScrollers="YES" horizontalLineScroll="24" horizontalPageScroll="10" verticalLineScroll="24" verticalPageScroll="10" usesPredominantAxisScrolling="NO" translatesAutoresizingMaskIntoConstraints="NO" id="6LL-Ov-a11">
+                            <scrollView fixedFrame="YES" autohidesScrollers="YES" horizontalLineScroll="80" horizontalPageScroll="10" verticalLineScroll="80" verticalPageScroll="10" usesPredominantAxisScrolling="NO" translatesAutoresizingMaskIntoConstraints="NO" id="6LL-Ov-a11">
                                 <rect key="frame" x="1080" y="53" width="195" height="461"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                                 <clipView key="contentView" id="Q9Z-ww-C63">
                                     <rect key="frame" x="1" y="1" width="193" height="459"/>
                                     <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                                     <subviews>
-                                        <tableView verticalHuggingPriority="750" allowsExpansionToolTips="YES" columnAutoresizingStyle="lastColumnOnly" multipleSelection="NO" autosaveColumns="NO" rowHeight="24" rowSizeStyle="automatic" headerView="LhM-U5-mkd" viewBased="YES" id="P7f-99-QGj">
+                                        <tableView verticalHuggingPriority="750" allowsExpansionToolTips="YES" columnAutoresizingStyle="lastColumnOnly" multipleSelection="NO" autosaveColumns="NO" rowHeight="80" rowSizeStyle="automatic" headerView="LhM-U5-mkd" viewBased="YES" id="P7f-99-QGj">
                                             <rect key="frame" x="0.0" y="0.0" width="193" height="431"/>
                                             <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                                             <size key="intercellSpacing" width="17" height="0.0"/>
@@ -3119,7 +3127,7 @@ Brake
                                     </subviews>
                                 </clipView>
                                 <scroller key="horizontalScroller" hidden="YES" wantsLayer="YES" verticalHuggingPriority="750" horizontal="YES" id="h4r-Uu-MB3">
-                                    <rect key="frame" x="1" y="169" width="193" height="17"/>
+                                    <rect key="frame" x="1" y="443" width="193" height="17"/>
                                     <autoresizingMask key="autoresizingMask"/>
                                 </scroller>
                                 <scroller key="verticalScroller" hidden="YES" wantsLayer="YES" verticalHuggingPriority="750" horizontal="NO" id="w17-yb-F1b">
@@ -3184,6 +3192,29 @@ Brake
                                     <action selector="copyNamedKeyframeToCurrentSequence:" target="cHj-5R-xNm" id="j4w-Ts-Tac"/>
                                 </connections>
                             </button>
+                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="8yK-bQ-kJa">
+                                <rect key="frame" x="439" y="626" width="68" height="24"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                <buttonCell key="cell" type="push" title="Shutup" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="xoP-Zj-exN">
+                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                    <font key="font" metaFont="system"/>
+                                </buttonCell>
+                                <connections>
+                                    <action selector="shutup:" target="cHj-5R-xNm" id="X0z-JL-k47"/>
+                                </connections>
+                            </button>
+                            <segmentedControl verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="3Dy-7p-QAI">
+                                <rect key="frame" x="537" y="626" width="216" height="24"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                                <segmentedCell key="cell" borderStyle="border" alignment="left" style="rounded" trackingMode="selectOne" id="oVz-Ar-fpk">
+                                    <font key="font" metaFont="system"/>
+                                    <segments>
+                                        <segment label="Brief"/>
+                                        <segment label="2 sentences" selected="YES" tag="1"/>
+                                        <segment label="Detailed"/>
+                                    </segments>
+                                </segmentedCell>
+                            </segmentedControl>
                         </subviews>
                     </view>
                     <connections>
@@ -3298,6 +3329,7 @@ Brake
                         <outlet property="headPan_enabled" destination="CSn-jc-2oR" id="v6l-Ip-UFm"/>
                         <outlet property="headTilt" destination="J1f-FG-Z84" id="ol7-Bl-ffR"/>
                         <outlet property="headTilt_enabled" destination="AMM-Oa-PLc" id="XTJ-23-l5E"/>
+                        <outlet property="headTracking_enabled" destination="U7c-Rp-x91" id="9Z4-Dt-OFB"/>
                         <outlet property="headUpperNeckTilt" destination="CyK-bn-gZP" id="Ig1-Z9-N7b"/>
                         <outlet property="headUpperNeckTilt_enabled" destination="wbx-6Z-lzo" id="wmq-Q3-VyY"/>
                         <outlet property="keyframeNameTextField" destination="ASX-6U-swl" id="nCN-rL-yDB"/>
@@ -3305,6 +3337,7 @@ Brake
                         <outlet property="keyframeSequencesTableView" destination="P7f-99-QGj" id="TIf-lo-RzQ"/>
                         <outlet property="keyframeTableView" destination="Gme-fa-zN2" id="cLL-Q5-pnp"/>
                         <outlet property="sequenceNameTextField" destination="I61-7u-P2i" id="7UN-0t-8Gj"/>
+                        <outlet property="speechWordinessChoice" destination="3Dy-7p-QAI" id="R70-cd-UQ4"/>
                     </connections>
                 </viewController>
                 <customObject id="c6P-5Z-L1h" userLabel="First Responder" customClass="NSResponder" sceneMemberID="firstResponder"/>

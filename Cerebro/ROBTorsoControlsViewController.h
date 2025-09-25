@@ -67,6 +67,8 @@
 @property (readwrite, retain) IBOutlet NSTableView *keyframeSequencesTableView;
 @property (readwrite, retain) IBOutlet NSTableView *keyframeSequenceDetailsTableView;
 
+@property (readwrite, retain) IBOutlet NSButton *headTracking_enabled;
+
 - (IBAction)playCurrentlySelectedKeyframeAnimation:(id)sender;
 - (IBAction)mirrorPosition_R11_to_L10:(id)sender;
 - (IBAction)mirrorPosition_L10_to_R11:(id)sender;
@@ -169,6 +171,10 @@
 @property (readwrite, retain) IBOutlet NSTextView *amberMasterCore_R11;
 @property (readwrite, retain) IBOutlet NSTextView *amberMasterCore_L10;
 
+@property (readwrite, retain) IBOutlet NSSegmentedControl *speechWordinessChoice;
+
 - (void) bindArm_controls;
+
+- (IBAction)shutup:(id)sender;
 
 @end
