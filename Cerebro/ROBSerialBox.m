@@ -43,6 +43,9 @@ OUTPUT: ir sensor array in cm : (fl, fr, l, r, bl, br) from front left to back r
 #import "ROBMainViewController.h"
 #import "ROBSpeechBox.h"
 #import "ROBBaseControllerModel.h"
+#import "ROBPythonRuntime.h"
+#import "ROBSystemDependencyManager.h"
+#import "ROBTaskLaunchGuard.h"
 
 
 #define kRHAPI_BAUDRATE 250000
@@ -63,6 +66,11 @@ OUTPUT: ir sensor array in cm : (fl, fr, l, r, bl, br) from front left to back r
 #define kMaxTurnSpeed 100
 #define kMaxMovementSpeed 255
 
+// ROBController publishes at 5 Hz. Three missed snapshots expire authority;
+// after one neutral/braked write Cerebro stops writing so the Arduino hardware
+// deadman can de-energize independently.
+static NSTimeInterval const kControllerSnapshotFreshnessSeconds = 0.6;
+
 #define kHeadSerialContext 0
 #define kTorsoSerialContext 1
 #define kBaseSerialContext 2
@@ -76,6 +84,7 @@ OUTPUT: ir sensor array in cm : (fl, fr, l, r, bl, br) from front left to back r
 }
 @property (readwrite, assign) float actualSpeedL;
 @property (readwrite, assign) float actualSpeedR;
+@property (readwrite, assign) BOOL masterControllerInputWasFresh;
 
 @property (readwrite, retain) NSTimer *verbalInputTimer;
 @property (readwrite, retain) NSTimer *controllerTimer;
@@ -92,6 +101,18 @@ OUTPUT: ir sensor array in cm : (fl, fr, l, r, bl, br) from front left to back r
 @property (readwrite, retain) NSTask *sshTask_L10_Core;
 @property (readwrite, retain) NSTask *sshTask_R11_log;
 @property (readwrite, retain) NSTask *sshTask_L10_log;
+
+- (void)runPythonArguments:(NSArray<NSString *> *)arguments operation:(NSString *)operation;
+- (void)runTiccmdArguments:(NSArray<NSString *> *)arguments;
+- (void)performSSHpassOperation:(NSString *)operation block:(dispatch_block_t)block;
+- (BOOL)launchSSHpassTask:(NSTask *)task operation:(NSString *)operation;
+- (void)reportSSHpassError:(NSError *)error operation:(NSString *)operation;
+- (void)startSSHIntoAmberMasterAndRunTail_R11;
+- (void)startSSHIntoAmberMasterAndRunCore_R11;
+- (void)startShutdown_R11_core;
+- (void)startSSHIntoAmberMasterAndRunTail_L10;
+- (void)startSSHIntoAmberMasterAndRunCore_L10;
+- (void)startShutdown_L10_core;
 
 - (NSString *) openSerialPort: (NSString *)serialPortFile baud: (speed_t)baudRate serialFileDescriptor:(int *)serialFileDescriptor contextInt:(int)context;
 
@@ -1401,19 +1422,42 @@ int maestroGetErrors(int fd)
     //we need to control a local speed value that is going to compete with the controller. who overrides who?
 }
 
+- (void)runTiccmdArguments:(NSArray<NSString *> *)arguments
+{
+    NSString *configuredPath = [[NSUserDefaults standardUserDefaults] stringForKey:@"ROBTiccmdExecutablePath"];
+    NSString *selection = configuredPath.length > 0
+        ? configuredPath
+        : @"/Applications/Pololu Tic Stepper Motor Controller.app/Contents/MacOS/ticcmd";
+    NSString *ticcmdPath = [[selection stringByExpandingTildeInPath] stringByStandardizingPath];
+    if (![[NSFileManager defaultManager] isExecutableFileAtPath:ticcmdPath]) {
+        NSLog(@"Pololu ticcmd is unavailable at %@. Install the Pololu Tic software or set ROBTiccmdExecutablePath.", ticcmdPath);
+        return;
+    }
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSTask *ticcmd = [[NSTask alloc] init];
+        ticcmd.executableURL = [NSURL fileURLWithPath:ticcmdPath];
+        ticcmd.arguments = arguments;
+        NSPipe *pipe = [NSPipe pipe];
+        ticcmd.standardOutput = pipe;
+        ticcmd.standardError = pipe;
+
+        NSError *launchError = nil;
+        if (!ROBLaunchTaskSafely(ticcmd, &launchError)) {
+            NSLog(@"Pololu ticcmd could not start: %@", launchError.localizedDescription);
+            return;
+        }
+        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+        if (ticcmd.terminationStatus != 0 || output.length > 0) {
+            NSLog(@"Pololu ticcmd: %@", output);
+        }
+    });
+}
+
 - (IBAction)waistRotationResetAction:(id)sender
 {
-    NSTask *ticcmd = [NSTask new];
-    ticcmd.launchPath = @"/Applications/Pololu Tic Stepper Motor Controller.app/Contents/MacOS/ticcmd";
-    ticcmd.arguments = @[@"--reset"];
-    
-    NSPipe *pipe = [NSPipe pipe];
-    ticcmd.standardOutput = pipe;
-    
-    [ticcmd launch];
-    
-    NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-    NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    [self runTiccmdArguments:@[@"--reset"]];
 }
 
 - (IBAction)waistRotationSliderAction:(NSSlider *)sender
@@ -1436,17 +1480,7 @@ int maestroGetErrors(int fd)
     [arguments addObject:@"-p"];
     [arguments addObject:waistRotationValue];
     
-    NSTask *ticcmd = [NSTask new];
-    ticcmd.launchPath = @"/Applications/Pololu Tic Stepper Motor Controller.app/Contents/MacOS/ticcmd";
-    ticcmd.arguments = arguments;
-    
-    NSPipe *pipe = [NSPipe pipe];
-    ticcmd.standardOutput = pipe;
-    
-    [ticcmd launch];
-    
-    NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-    NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    [self runTiccmdArguments:arguments];
 }
 
 - (IBAction)exitSafeStartWaistRotationToggle:(id)sender
@@ -1469,13 +1503,77 @@ int maestroGetErrors(int fd)
     }
 }
 
+- (void)performSSHpassOperation:(NSString *)operation block:(dispatch_block_t)block
+{
+    [[ROBSystemDependencyManager sharedManager]
+        ensureSSHpassInstalledWithCompletion:^(BOOL success, NSString *output, NSError *error) {
+            if (!success) {
+                [self reportSSHpassError:error operation:operation];
+                return;
+            }
+            block();
+        }];
+}
+
+- (BOOL)launchSSHpassTask:(NSTask *)task operation:(NSString *)operation
+{
+    NSError *error = nil;
+    if (![[ROBSystemDependencyManager sharedManager] launchSSHpassTask:task
+                                                              password:@"a"
+                                                                 error:&error]) {
+        [self reportSSHpassError:error operation:operation];
+        return NO;
+    }
+    return YES;
+}
+
+- (void)reportSSHpassError:(NSError *)error operation:(NSString *)operation
+{
+    NSString *message = [NSString stringWithFormat:@"%@ unavailable: %@\n",
+                         operation,
+                         error.localizedDescription ?: @"unknown SSH error"];
+    NSLog(@"%@", [message stringByTrimmingCharactersInSet:[NSCharacterSet newlineCharacterSet]]);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.amberMasterCoreOutput_R11 != nil) {
+            self.amberMasterCoreOutput_R11.string =
+                [self.amberMasterCoreOutput_R11.string stringByAppendingString:message];
+            [self.amberMasterCoreOutput_R11 scrollToEndOfDocument:nil];
+        }
+        if (self.amberMasterCoreOutput_L10 != nil) {
+            self.amberMasterCoreOutput_L10.string =
+                [self.amberMasterCoreOutput_L10.string stringByAppendingString:message];
+            [self.amberMasterCoreOutput_L10 scrollToEndOfDocument:nil];
+        }
+    });
+}
+
 #pragma mark - R11 actions
 
 - (IBAction) sshIntoAmberMasterAndRunTail_R11:(id)sender {
-    self.sshTask_R11_log = [NSTask new];
-    [self.sshTask_R11_log setLaunchPath:@"/usr/local/bin/sshpass"];
-    //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_L
-    [self.sshTask_R11_log setArguments:@[@"-p", @"a", @"ssh", [NSString stringWithFormat:@"amber@%@", self.amberHostIP], @"tail", @"-n", @"+1", @"-f", @"/home/amber/R-11/core.log"]];
+    if (self.sshTask_R11_log.isRunning) {
+        return;
+    }
+    [self performSSHpassOperation:@"R11 log connection" block:^{
+        [self startSSHIntoAmberMasterAndRunTail_R11];
+    }];
+}
+
+- (void)startSSHIntoAmberMasterAndRunTail_R11
+{
+    if (self.sshTask_R11_log.isRunning) {
+        return;
+    }
+    NSError *taskError = nil;
+    self.sshTask_R11_log = [[ROBSystemDependencyManager sharedManager]
+        newSSHpassTaskWithSSHArguments:@[
+            [NSString stringWithFormat:@"amber@%@", self.amberHostIP],
+            @"tail", @"-n", @"+1", @"-f", @"/home/amber/R-11/core.log"
+        ]
+        error:&taskError];
+    if (self.sshTask_R11_log == nil) {
+        [self reportSSHpassError:taskError operation:@"R11 log connection"];
+        return;
+    }
     NSPipe *pipe = [NSPipe pipe];
     self.sshTask_R11_log.standardOutput = pipe;
     self.sshTask_R11_log.standardError = pipe;
@@ -1517,14 +1615,37 @@ int maestroGetErrors(int fd)
         }
     };
 
-    [self.sshTask_R11_log launch];
+    if (![self launchSSHpassTask:self.sshTask_R11_log operation:@"R11 log connection"]) {
+        readFileHandle_R11.readabilityHandler = nil;
+        self.sshTask_R11_log = nil;
+    }
 }
 
 - (IBAction) sshIntoAmberMasterAndRunCore_R11:(id)sender {
-    self.sshTask_R11_Core = [NSTask new];
-    [self.sshTask_R11_Core setLaunchPath:@"/usr/local/bin/sshpass"];
-    //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_R
-    [self.sshTask_R11_Core setArguments:@[@"-p", @"a", @"ssh", [NSString stringWithFormat:@"amber@%@", self.amberHostIP], @"cd", @"/home/amber/R-11/;", @"./amber_core_R"]];
+    if (self.sshTask_R11_Core.isRunning) {
+        return;
+    }
+    [self performSSHpassOperation:@"R11 core connection" block:^{
+        [self startSSHIntoAmberMasterAndRunCore_R11];
+    }];
+}
+
+- (void)startSSHIntoAmberMasterAndRunCore_R11
+{
+    if (self.sshTask_R11_Core.isRunning) {
+        return;
+    }
+    NSError *taskError = nil;
+    self.sshTask_R11_Core = [[ROBSystemDependencyManager sharedManager]
+        newSSHpassTaskWithSSHArguments:@[
+            [NSString stringWithFormat:@"amber@%@", self.amberHostIP],
+            @"cd", @"/home/amber/R-11/;", @"./amber_core_R"
+        ]
+        error:&taskError];
+    if (self.sshTask_R11_Core == nil) {
+        [self reportSSHpassError:taskError operation:@"R11 core connection"];
+        return;
+    }
     NSPipe *pipe = [NSPipe pipe];
     self.sshTask_R11_Core.standardOutput = pipe;
     self.sshTask_R11_Core.standardError = pipe;
@@ -1565,23 +1686,44 @@ int maestroGetErrors(int fd)
         }
     };
 
-    [self.sshTask_R11_Core launch];
+    if (![self launchSSHpassTask:self.sshTask_R11_Core operation:@"R11 core connection"]) {
+        readFileHandle_R11.readabilityHandler = nil;
+        self.sshTask_R11_Core = nil;
+    }
 }
 
 - (IBAction) shutdown_R11_core:(id)sender {
-    [self.sshTask_R11_Core terminate];
+    if (self.sshTask_R11_Core.isRunning) {
+        [self.sshTask_R11_Core terminate];
+    }
     self.sshTask_R11_Core = nil;
-    
-    NSTask *sshTask_kill_R11_Core = [NSTask new];
-    [sshTask_kill_R11_Core setLaunchPath:@"/usr/local/bin/sshpass"];
-    //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_R
-    //echo <password> | sudo -S
-    [sshTask_kill_R11_Core setArguments:@[@"-p", @"a", @"ssh", [NSString stringWithFormat:@"amber@%@", self.amberHostIP], @"echo", @"a", @"|", @"sudo", @"-S", @"killall", @"amber_core_R"]];
+    [self performSSHpassOperation:@"R11 core shutdown" block:^{
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            [self startShutdown_R11_core];
+        });
+    }];
+}
+
+- (void)startShutdown_R11_core
+{
+    NSError *taskError = nil;
+    NSTask *sshTask_kill_R11_Core = [[ROBSystemDependencyManager sharedManager]
+        newSSHpassTaskWithSSHArguments:@[
+            [NSString stringWithFormat:@"amber@%@", self.amberHostIP],
+            @"echo", @"a", @"|", @"sudo", @"-S", @"killall", @"amber_core_R"
+        ]
+        error:&taskError];
+    if (sshTask_kill_R11_Core == nil) {
+        [self reportSSHpassError:taskError operation:@"R11 core shutdown"];
+        return;
+    }
     NSPipe *pipe = [NSPipe pipe];
     sshTask_kill_R11_Core.standardOutput = pipe;
     sshTask_kill_R11_Core.standardError = pipe;
-    
-    [sshTask_kill_R11_Core launch];
+
+    if (![self launchSSHpassTask:sshTask_kill_R11_Core operation:@"R11 core shutdown"]) {
+        return;
+    }
     
     NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
     NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
@@ -1673,10 +1815,30 @@ int maestroGetErrors(int fd)
 #pragma mark - L10 actions
 
 - (IBAction) sshIntoAmberMasterAndRunTail_L10:(id)sender {
-    self.sshTask_L10_log = [NSTask new];
-    [self.sshTask_L10_log setLaunchPath:@"/usr/local/bin/sshpass"];
-    //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_L
-    [self.sshTask_L10_log setArguments:@[@"-p", @"a", @"ssh", [NSString stringWithFormat:@"amber@%@", self.amberHostIP], @"tail", @"-n", @"+1", @"-f", @"/home/amber/L-10/core.log"]];
+    if (self.sshTask_L10_log.isRunning) {
+        return;
+    }
+    [self performSSHpassOperation:@"L10 log connection" block:^{
+        [self startSSHIntoAmberMasterAndRunTail_L10];
+    }];
+}
+
+- (void)startSSHIntoAmberMasterAndRunTail_L10
+{
+    if (self.sshTask_L10_log.isRunning) {
+        return;
+    }
+    NSError *taskError = nil;
+    self.sshTask_L10_log = [[ROBSystemDependencyManager sharedManager]
+        newSSHpassTaskWithSSHArguments:@[
+            [NSString stringWithFormat:@"amber@%@", self.amberHostIP],
+            @"tail", @"-n", @"+1", @"-f", @"/home/amber/L-10/core.log"
+        ]
+        error:&taskError];
+    if (self.sshTask_L10_log == nil) {
+        [self reportSSHpassError:taskError operation:@"L10 log connection"];
+        return;
+    }
     NSPipe *pipe = [NSPipe pipe];
     self.sshTask_L10_log.standardOutput = pipe;
     self.sshTask_L10_log.standardError = pipe;
@@ -1718,14 +1880,37 @@ int maestroGetErrors(int fd)
         }
     };
 
-    [self.sshTask_L10_log launch];
+    if (![self launchSSHpassTask:self.sshTask_L10_log operation:@"L10 log connection"]) {
+        readFileHandle_L10.readabilityHandler = nil;
+        self.sshTask_L10_log = nil;
+    }
 }
 
 - (IBAction) sshIntoAmberMasterAndRunCore_L10:(id)sender {
-    self.sshTask_L10_Core = [NSTask new];
-    [self.sshTask_L10_Core setLaunchPath:@"/usr/local/bin/sshpass"];
-    //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_R
-    [self.sshTask_L10_Core setArguments:@[@"-p", @"a", @"ssh", [NSString stringWithFormat:@"amber@%@", self.amberHostIP], @"cd", @"/home/amber/L-10/;", @"./amber_core_L"]];
+    if (self.sshTask_L10_Core.isRunning) {
+        return;
+    }
+    [self performSSHpassOperation:@"L10 core connection" block:^{
+        [self startSSHIntoAmberMasterAndRunCore_L10];
+    }];
+}
+
+- (void)startSSHIntoAmberMasterAndRunCore_L10
+{
+    if (self.sshTask_L10_Core.isRunning) {
+        return;
+    }
+    NSError *taskError = nil;
+    self.sshTask_L10_Core = [[ROBSystemDependencyManager sharedManager]
+        newSSHpassTaskWithSSHArguments:@[
+            [NSString stringWithFormat:@"amber@%@", self.amberHostIP],
+            @"cd", @"/home/amber/L-10/;", @"./amber_core_L"
+        ]
+        error:&taskError];
+    if (self.sshTask_L10_Core == nil) {
+        [self reportSSHpassError:taskError operation:@"L10 core connection"];
+        return;
+    }
     NSPipe *pipe = [NSPipe pipe];
     self.sshTask_L10_Core.standardOutput = pipe;
     self.sshTask_L10_Core.standardError = pipe;
@@ -1767,22 +1952,44 @@ int maestroGetErrors(int fd)
         }
     };
 
-    [self.sshTask_L10_Core launch];
+    if (![self launchSSHpassTask:self.sshTask_L10_Core operation:@"L10 core connection"]) {
+        readFileHandle_L10.readabilityHandler = nil;
+        self.sshTask_L10_Core = nil;
+    }
 }
 
 - (IBAction) shutdown_L10_core:(id)sender {
-    [self.sshTask_L10_Core terminate];
-    
-    NSTask *sshTask_kill_L10_Core = [NSTask new];
-    [sshTask_kill_L10_Core setLaunchPath:@"/usr/local/bin/sshpass"];
-    //sshpass -p a ssh amber@10.0.0.5 /home/amber/R-11/amber_core_R
-    //echo <password> | sudo -S
-    [sshTask_kill_L10_Core setArguments:@[@"-p", @"a", @"ssh", [NSString stringWithFormat:@"amber@%@", self.amberHostIP], @"echo", @"a", @"|", @"sudo", @"-S", @"killall", @"amber_core_L"]];
+    if (self.sshTask_L10_Core.isRunning) {
+        [self.sshTask_L10_Core terminate];
+    }
+    self.sshTask_L10_Core = nil;
+    [self performSSHpassOperation:@"L10 core shutdown" block:^{
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            [self startShutdown_L10_core];
+        });
+    }];
+}
+
+- (void)startShutdown_L10_core
+{
+    NSError *taskError = nil;
+    NSTask *sshTask_kill_L10_Core = [[ROBSystemDependencyManager sharedManager]
+        newSSHpassTaskWithSSHArguments:@[
+            [NSString stringWithFormat:@"amber@%@", self.amberHostIP],
+            @"echo", @"a", @"|", @"sudo", @"-S", @"killall", @"amber_core_L"
+        ]
+        error:&taskError];
+    if (sshTask_kill_L10_Core == nil) {
+        [self reportSSHpassError:taskError operation:@"L10 core shutdown"];
+        return;
+    }
     NSPipe *pipe = [NSPipe pipe];
     sshTask_kill_L10_Core.standardOutput = pipe;
     sshTask_kill_L10_Core.standardError = pipe;
-    
-    [sshTask_kill_L10_Core launch];
+
+    if (![self launchSSHpassTask:sshTask_kill_L10_Core operation:@"L10 core shutdown"]) {
+        return;
+    }
     
     NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
     NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
@@ -1873,6 +2080,17 @@ int maestroGetErrors(int fd)
 
 #pragma mark -
 
+- (void)runPythonArguments:(NSArray<NSString *> *)arguments operation:(NSString *)operation
+{
+    NSError *error = nil;
+    NSString *output = [[ROBPythonRuntime sharedRuntime] runPythonWithArguments:arguments error:&error];
+    if (error != nil) {
+        NSLog(@"%@: %@", operation, error.localizedDescription);
+        return;
+    }
+    NSLog(@"%@: %@", operation, output ?: @"");
+}
+
 - (void) watch_position_out:(id)sender port:(int)port {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
         
@@ -1892,20 +2110,7 @@ int maestroGetErrors(int fd)
         
         NSLog(@"args = %@", arguments);
         
-        NSTask *move_arm_task = [NSTask new];
-        
-        move_arm_task.launchPath = @"/Users/rob/rob_python/bin/python3";
-        move_arm_task.arguments = arguments;
-        
-        NSPipe *pipe = [NSPipe pipe];
-        move_arm_task.standardOutput = pipe;
-        move_arm_task.standardError = pipe;
-        
-        [move_arm_task launch];
-        
-        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        NSLog(@"watch_position_out: %@", output);
+        [self runPythonArguments:arguments operation:@"watch_position_out"];
     });
 }
 
@@ -1928,20 +2133,7 @@ int maestroGetErrors(int fd)
         
         NSLog(@"args = %@", arguments);
         
-        NSTask *move_arm_task = [NSTask new];
-        
-        move_arm_task.launchPath = @"/Users/rob/rob_python/bin/python3";
-        move_arm_task.arguments = arguments;
-        
-        NSPipe *pipe = [NSPipe pipe];
-        move_arm_task.standardOutput = pipe;
-        move_arm_task.standardError = pipe;
-        
-        [move_arm_task launch];
-        
-        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        NSLog(@"cmd_deactivate_mode_v2: %@", output);
+        [self runPythonArguments:arguments operation:@"cmd_deactivate_mode_v2"];
     });
 }
 
@@ -1965,20 +2157,7 @@ int maestroGetErrors(int fd)
         
         NSLog(@"args = %@", arguments);
         
-        NSTask *move_arm_task = [NSTask new];
-        
-        move_arm_task.launchPath = @"/Users/rob/rob_python/bin/python3";
-        move_arm_task.arguments = arguments;
-        
-        NSPipe *pipe = [NSPipe pipe];
-        move_arm_task.standardOutput = pipe;
-        move_arm_task.standardError = pipe;
-        
-        [move_arm_task launch];
-        
-        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        NSLog(@"cmd_activate_mode_v2: %@", output);
+        [self runPythonArguments:arguments operation:@"cmd_activate_mode_v2"];
     });
 }
 
@@ -2006,20 +2185,7 @@ int maestroGetErrors(int fd)
         
         NSLog(@"args = %@", arguments);
         
-        NSTask *move_arm_task = [NSTask new];
-        
-        move_arm_task.launchPath = @"/Users/rob/rob_python/bin/python3";
-        move_arm_task.arguments = arguments;
-        
-        NSPipe *pipe = [NSPipe pipe];
-        move_arm_task.standardOutput = pipe;
-        move_arm_task.standardError = pipe;
-        
-        [move_arm_task launch];
-        
-        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        NSLog(@"zero_position_mode_v2: %@", output);
+        [self runPythonArguments:arguments operation:@"zero_position_mode_v2"];
     });
 }
 
@@ -2041,20 +2207,7 @@ int maestroGetErrors(int fd)
         
         NSLog(@"args = %@", arguments);
         
-        NSTask *move_arm_task = [NSTask new];
-        
-        move_arm_task.launchPath = @"/Users/rob/rob_python/bin/python3";
-        move_arm_task.arguments = arguments;
-        
-        NSPipe *pipe = [NSPipe pipe];
-        move_arm_task.standardOutput = pipe;
-        move_arm_task.standardError = pipe;
-        
-        [move_arm_task launch];
-        
-        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        NSLog(@"calibrateGripper_v2: %@", output);
+        [self runPythonArguments:arguments operation:@"calibrateGripper_v2"];
     });
 
 }
@@ -2080,20 +2233,7 @@ int maestroGetErrors(int fd)
         
         NSLog(@"args = %@", arguments);
         
-        NSTask *move_arm_task = [NSTask new];
-        
-        move_arm_task.launchPath = @"/Users/rob/rob_python/bin/python3";
-        move_arm_task.arguments = arguments;
-        
-        NSPipe *pipe = [NSPipe pipe];
-        move_arm_task.standardOutput = pipe;
-        move_arm_task.standardError = pipe;
-        
-        [move_arm_task launch];
-        
-        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        NSLog(@"open_gripper_v2: %@", output);
+        [self runPythonArguments:arguments operation:@"open_gripper_v2"];
     });
 }
 
@@ -2118,20 +2258,7 @@ int maestroGetErrors(int fd)
         
         NSLog(@"args = %@", arguments);
         
-        NSTask *move_arm_task = [NSTask new];
-        
-        move_arm_task.launchPath = @"/Users/rob/rob_python/bin/python3";
-        move_arm_task.arguments = arguments;
-        
-        NSPipe *pipe = [NSPipe pipe];
-        move_arm_task.standardOutput = pipe;
-        move_arm_task.standardError = pipe;
-        
-        [move_arm_task launch];
-        
-        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        NSLog(@"close_gripper_v2: %@", output);
+        [self runPythonArguments:arguments operation:@"close_gripper_v2"];
     });
 }
 
@@ -2154,20 +2281,7 @@ int maestroGetErrors(int fd)
         
         NSLog(@"args = %@", arguments);
         
-        NSTask *move_arm_task = [NSTask new];
-        
-        move_arm_task.launchPath = @"/Users/rob/rob_python/bin/python3";
-        move_arm_task.arguments = arguments;
-        
-        NSPipe *pipe = [NSPipe pipe];
-        move_arm_task.standardOutput = pipe;
-        move_arm_task.standardError = pipe;
-        
-        [move_arm_task launch];
-        
-        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        NSLog(@"cmd_position_mode_v2: %@", output);
+        [self runPythonArguments:arguments operation:@"cmd_position_mode_v2"];
     });
 }
 
@@ -2191,20 +2305,7 @@ int maestroGetErrors(int fd)
         
         NSLog(@"args = %@", arguments);
         
-        NSTask *move_arm_task = [NSTask new];
-        
-        move_arm_task.launchPath = @"/Users/rob/rob_python/bin/python3";
-        move_arm_task.arguments = arguments;
-        
-        NSPipe *pipe = [NSPipe pipe];
-        move_arm_task.standardOutput = pipe;
-        move_arm_task.standardError = pipe;
-        
-        [move_arm_task launch];
-        
-        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        NSLog(@"cmd_current_mode_v2: %@", output);
+        [self runPythonArguments:arguments operation:@"cmd_current_mode_v2"];
     });
     
 }
@@ -2266,20 +2367,7 @@ int maestroGetErrors(int fd)
         
         NSLog(@"args = %@", arguments);
         
-        NSTask *move_arm_task = [NSTask new];
-        
-        move_arm_task.launchPath = @"/Users/rob/rob_python/bin/python3";
-        move_arm_task.arguments = arguments;
-        
-        NSPipe *pipe = [NSPipe pipe];
-        move_arm_task.standardOutput = pipe;
-        move_arm_task.standardError = pipe;
-        
-        [move_arm_task launch];
-        
-        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        NSLog(@"cmd_position_input = %@", output);
+        [self runPythonArguments:arguments operation:@"cmd_position_input"];
     });
 }
 
@@ -2338,20 +2426,7 @@ int maestroGetErrors(int fd)
         
         NSLog(@"args = %@", arguments);
         
-        NSTask *move_arm_task = [NSTask new];
-        
-        move_arm_task.launchPath = @"/Users/rob/rob_python/bin/python3";
-        move_arm_task.arguments = arguments;
-        
-        NSPipe *pipe = [NSPipe pipe];
-        move_arm_task.standardOutput = pipe;
-        move_arm_task.standardError = pipe;
-        
-        [move_arm_task launch];
-        
-        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        NSLog(@"cmd_cartesian_input = %@", output);
+        [self runPythonArguments:arguments operation:@"cmd_cartesian_input"];
     });
 }
 
@@ -2417,7 +2492,12 @@ int maestroGetErrors(int fd)
     //render should fire the code [below here:]
     ROBBaseControllerModel *controllerModelData = [self.controlModelDataDictionary valueForKey:self.masterControllerID];
     
-    if (controllerModelData != nil)
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    BOOL snapshotIsFresh = controllerModelData != nil &&
+        controllerModelData.receivedAtUptime > 0 &&
+        now - controllerModelData.receivedAtUptime <= kControllerSnapshotFreshnessSeconds;
+
+    if (snapshotIsFresh)
     {
         //NSLog(@"//       ---------             RENDER CONTROLLER           ----------              //");
         //MasterControllerId data should go through
@@ -2437,18 +2517,45 @@ int maestroGetErrors(int fd)
                     speed_playPause:controllerModelData.speed_playPause
               speed_forward_reverse:controllerModelData.speed_forward_reverse
                           textInput:controllerModelData.textInput];
+        self.masterControllerInputWasFresh = YES;
     }
-    else
+    else if (self.masterControllerInputWasFresh)
     {
-        //NSLog(@"//*********** %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% ***********//");
-        [self controllerPassthrough:CGPointMake(0.0, 0.0) touchPadPointR:CGPointMake(0.0, 0.0) Lat:0 Long:0 tredBrakeLock:false flipperForwardIsDown:false flipperRelaxBrake:false flipperBackwardIsDown:false flipperBrakeLock:false lact1:false lact2:false lact3:false speed:0.0 speed_playPause:false speed_forward_reverse:false textInput:@""];
+        [self stopBaseMotionAndDropHeartbeat];
     }
+}
+
+- (void)stopBaseMotionAndDropHeartbeat
+{
+    // Values below -999 bypass joystick processing so the requested tread
+    // brake bits remain set. This is written exactly once; renderController
+    // then stays silent until a fresh authorized snapshot arrives.
+    [self controllerPassthrough:CGPointMake(-1000.0, -1000.0)
+                  touchPadPointR:CGPointMake(-1000.0, -1000.0)
+                             Lat:0
+                            Long:0
+                   tredBrakeLock:true
+            flipperForwardIsDown:false
+               flipperRelaxBrake:false
+           flipperBackwardIsDown:false
+                flipperBrakeLock:true
+                           lact1:false
+                           lact2:false
+                           lact3:false
+                           speed:0.0
+                 speed_playPause:false
+           speed_forward_reverse:false
+                       textInput:@""];
+    self.masterControllerInputWasFresh = NO;
 }
 
 
 //Sent by the controller to authorize autonomous mode or become the masterController input
 - (void) switchToMasterControllerID:(NSString *)controllerID
 {
+    if (![self.masterControllerID isEqualToString:controllerID] && self.masterControllerInputWasFresh) {
+        [self stopBaseMotionAndDropHeartbeat];
+    }
     self.masterControllerID = controllerID;
 }
 
@@ -2456,13 +2563,9 @@ int maestroGetErrors(int fd)
 - (void) controllerId:(NSString *)controllerId controllerModelData:(ROBBaseControllerModel *)controllerModelData
 {
     //store the control model data in the dictionary of data
+    controllerModelData.receivedAtUptime = NSProcessInfo.processInfo.systemUptime;
     [self.controlModelDataDictionary setValue:controllerModelData forKey:controllerId];
 }
 
 
 @end
-
-
-
-
-

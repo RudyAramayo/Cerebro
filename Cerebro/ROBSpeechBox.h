@@ -9,15 +9,26 @@
 #import <Foundation/Foundation.h>
 #import <AppKit/AppKit.h>
 #import <Cocoa/Cocoa.h>
+#import <AVFoundation/AVFoundation.h>
 
-@class ROBMainViewController;
+@protocol ROBSpeechDelegate <NSObject>
+
+- (void)willStartProcessingSpeech;
+- (void)didFinishProcessingSpeech;
+- (void)inputText:(NSString *)textInput;
+- (void)willSpeakWord:(NSRange)characterRange ofString:(NSString *)string;
+
+@optional
+- (void)didCaptureAudioBuffer:(AVAudioPCMBuffer *)buffer;
+
+@end
 
 @interface ROBSpeechBox : NSObject <NSSpeechRecognizerDelegate>
 {
     
 }
-@property (readwrite, retain) ROBMainViewController *delegate;
-@property (nonatomic, assign) BOOL isSpeaking;
+@property (nonatomic, weak) id<ROBSpeechDelegate> delegate;
+@property (atomic, assign) BOOL isSpeaking;
 
 @property (readwrite, retain) NSString *emotion;
 @property (readwrite, retain) NSMutableArray *commands;
@@ -28,13 +39,13 @@
 @property (readwrite, retain) NSString *previousInputText_3;
 @property (readwrite, retain) NSString *previousInputAnswer_3;
 
-- (void) inputText:(NSString *)inputText;
 - (void) didSeeNewPerson:(NSString *)userID;
 - (void) lostSightOfPerson:(NSString*)userID;
 - (void) sayIt:(NSString *)stringToSpeak;
 - (void) stopIt:(id)sender;
 - (void) setOutputLanguage:(NSString *)language;
 - (void) startRecognizer;
+- (void) shutdown;
 
 - (void) switchMood_anger;
 - (void) switchMood_joy;

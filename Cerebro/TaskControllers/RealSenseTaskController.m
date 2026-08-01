@@ -8,6 +8,7 @@
 
 #import "RealSenseTaskController.h"
 #import "ROBMainViewController.h"
+#import "ROBTaskLaunchGuard.h"
 
 
 @interface RealSenseTaskController ()
@@ -38,7 +39,9 @@
         
         NSString *path = [[NSBundle mainBundle] pathForResource:@"RealSenseTaskController" ofType:@"command"];
         self.task = [NSTask new];
-        self.task.launchPath = path;
+        if (path.length > 0) {
+            self.task.executableURL = [NSURL fileURLWithPath:path];
+        }
         //self.task.arguments = @[@""];
 
         __weak RealSenseTaskController *weakSelf = self;
@@ -56,7 +59,12 @@
         [self captureStandardOutputAndRouteToTextView:self.task];
 
         
-        [self.task launch];
+        NSError *launchError = nil;
+        if (!ROBLaunchTaskSafely(self.task, &launchError)) {
+            NSLog(@"RealSense task could not launch: %@", launchError.localizedDescription);
+            self.shouldRelaunch = false;
+            return;
+        }
         [self.task waitUntilExit];
         
     });

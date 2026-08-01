@@ -19,9 +19,8 @@
 @import Speech;
 @import AVFoundation;
 
-@interface ROBSpeechBox() <AVSpeechSynthesizerDelegate, SFSpeechRecognizerDelegate, SFSpeechRecognitionTaskDelegate, NSSpeechSynthesizerDelegate>
+@interface ROBSpeechBox() <AVSpeechSynthesizerDelegate, SFSpeechRecognizerDelegate, SFSpeechRecognitionTaskDelegate, AVCaptureAudioDataOutputSampleBufferDelegate>
 
-@property (readwrite, retain) NSSpeechSynthesizer *speechSynth;
 @property (nonatomic, strong) AVSpeechSynthesizer *avSpeechSynthesizer;
 
 //new properties
@@ -34,12 +33,23 @@
 
 @property (readwrite, retain) NSMutableArray *localeArray;
 @property (readwrite, assign) int selectedLocaleIndex;
-@property (readwrite, retain) NSTimer *speechDidStopProcessingTimer;
 @property (readwrite, retain) NSTimer *debounceSpeechInputTimer;
 @property (readwrite, retain) NSString *currentTextInput;
 @property (readwrite, retain) NSString *robsPersonalVoice;
 @property (readwrite, retain) NSString *robsDefaultVoiceIdentifier;
 @property (readwrite, retain) AVSpeechSynthesisVoice *robsDefaultVoice;
+@property (nonatomic, assign) BOOL microphoneTapInstalled;
+@property (nonatomic, assign) BOOL recognizerStartInProgress;
+@property (nonatomic, assign) BOOL recognizerRestartScheduled;
+@property (nonatomic, assign) BOOL isShuttingDown;
+@property (nonatomic, assign) NSUInteger recognitionGeneration;
+
+- (void)beginRecognitionSession;
+- (void)startAudioCapture;
+- (void)scheduleRecognizerRestart;
+- (void)teardownSpeechRecognition;
+- (void)teardownAudioCapture;
+- (void)finishSpeechEventForSynthesizer:(AVSpeechSynthesizer *)synthesizer;
 @end
 
 
@@ -170,13 +180,8 @@
 - (void) resume_listening
 {
     [[NSApplication sharedApplication] becomeFirstResponder];
-        
-    if (self.audioEngine.isRunning)
-    {
-        [self.audioEngine stop];
-        [self.speechRequest endAudio];
-    }
-    else{
+
+    if (!self.audioEngine || !self.audioEngine.isRunning) {
         [self setupSpeechRecognition];
     }
     NSLog(@"Listening");
@@ -186,12 +191,12 @@
 - (void) setupSpeechRecognition
 {
     self.isSpeaking = false;
-    
+    self.isShuttingDown = NO;
+    if (!self.audioEngine) {
+        self.audioEngine = [[AVAudioEngine alloc] init];
+    }
+    [self startAudioCapture];
     [self startRecognizer];
-    
-    self.audioEngine = [[AVAudioEngine alloc] init];
-    self.avSpeechSynthesizer  = [[AVSpeechSynthesizer alloc] init];
-    [self.avSpeechSynthesizer setDelegate:self];
 
 }
 
@@ -222,16 +227,15 @@
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didStartSpeechUtterance:(AVSpeechUtterance *)utterance
 {
     NSLog(@"didStartSpeechUtterance");
+    self.isSpeaking = true;
+    [self.delegate willStartProcessingSpeech];
 }
 
 
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didFinishSpeechUtterance:(AVSpeechUtterance *)utterance
 {
     NSLog(@"didFinishSpeechUtterance");
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        self.isSpeaking = false;
-    });
-    [self.delegate didFinishProcessingSpeech];
+    [self finishSpeechEventForSynthesizer:synthesizer];
 }
 
 
@@ -250,26 +254,33 @@
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didCancelSpeechUtterance:(AVSpeechUtterance *)utterance
 {
     NSLog(@"didCancelSpeechUtterance");
+    [self finishSpeechEventForSynthesizer:synthesizer];
+}
+
+- (void)finishSpeechEventForSynthesizer:(AVSpeechSynthesizer *)synthesizer
+{
+    // Let AVSpeechSynthesizer advance to its next queued utterance before
+    // reopening microphone capture. This also avoids a cancel/new-utterance
+    // race when a local stop acknowledgement replaces current speech.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.isShuttingDown) {
+            self.isSpeaking = false;
+            return;
+        }
+        self.isSpeaking = synthesizer.isSpeaking;
+        if (!self.isSpeaking) {
+            [self.delegate didFinishProcessingSpeech];
+        }
+    });
 }
 
 
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer willSpeakRangeOfSpeechString:(NSRange)characterRange utterance:(AVSpeechUtterance *)utterance
 {
-    int speechDidFailToProcessTimeout = 3;
     self.isSpeaking = true;
-    //self.isProcessingSpeech = true;
-    [self.delegate willStartProcessingSpeech];
     NSString *word = [utterance.speechString substringWithRange:characterRange];
     NSLog(@"willSpeakWord = %@", word);
-    
-    if (self.speechDidStopProcessingTimer) {
-        [self.speechDidStopProcessingTimer invalidate];
-    }
-    self.speechDidStopProcessingTimer = [NSTimer scheduledTimerWithTimeInterval:speechDidFailToProcessTimeout repeats:NO block:^(NSTimer * _Nonnull timer) {
-        NSLog(@"isSpeaking is false");
-        self.isSpeaking = false;
-    }];
-    
+
     [self.delegate willSpeakWord:characterRange ofString:utterance.speechString];
 }
 
@@ -277,113 +288,162 @@
 
 - (void)startRecognizer
 {
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self startRecognizer];
+        });
+        return;
+    }
+    if (self.isShuttingDown || self.recognizerStartInProgress || self.task != nil) {
+        return;
+    }
+
+    self.recognizerStartInProgress = YES;
+    SFSpeechRecognizerAuthorizationStatus status = [SFSpeechRecognizer authorizationStatus];
+    if (status == SFSpeechRecognizerAuthorizationStatusAuthorized) {
+        [self beginRecognitionSession];
+        return;
+    }
+    if (status != SFSpeechRecognizerAuthorizationStatusNotDetermined) {
+        self.recognizerStartInProgress = NO;
+        NSLog(@"Speech recognition is not authorized");
+        return;
+    }
+
+    [SFSpeechRecognizer requestAuthorization:^(SFSpeechRecognizerAuthorizationStatus authorizationStatus) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (authorizationStatus == SFSpeechRecognizerAuthorizationStatusAuthorized && !self.isShuttingDown) {
+                [self beginRecognitionSession];
+            } else {
+                self.recognizerStartInProgress = NO;
+                NSLog(@"Speech recognition authorization was not granted");
+            }
+        });
+    }];
+}
+
+- (void)beginRecognitionSession
+{
+    self.recognizerStartInProgress = NO;
+    self.recognizerRestartScheduled = NO;
+    if (self.isShuttingDown) {
+        return;
+    }
+
+    [self teardownSpeechRecognition];
+    NSUInteger generation = self.recognitionGeneration;
+
     NSString *locale = [self.localeArray[self.selectedLocaleIndex] valueForKey:@"locale_id"];
     self.currentTextInput = @"";
-    NSLog(@"starting speech recognizer with Locale - %@", locale);
     self.speechRecognizer = [[SFSpeechRecognizer alloc] initWithLocale:[NSLocale localeWithLocaleIdentifier:locale]];
     self.speechRecognizer.delegate = self;
-    
-    [SFSpeechRecognizer requestAuthorization:^(SFSpeechRecognizerAuthorizationStatus status) {
-        if (status == SFSpeechRecognizerAuthorizationStatusAuthorized){
-            
-            self.speechRequest = [SFSpeechAudioBufferRecognitionRequest new];
-            self.speechRequest.shouldReportPartialResults = YES;
-            self.speechRequest.requiresOnDeviceRecognition = YES;
-            
-            AVAudioInputNode *inputNode = [self.audioEngine inputNode];
+    if (!self.speechRecognizer.supportsOnDeviceRecognition) {
+        NSLog(@"On-device speech recognition is unavailable for locale %@; Gemini microphone capture remains active", locale);
+        self.speechRecognizer = nil;
+        return;
+    }
+    self.speechRequest = [SFSpeechAudioBufferRecognitionRequest new];
+    self.speechRequest.shouldReportPartialResults = YES;
+    self.speechRequest.requiresOnDeviceRecognition = YES;
 
-            if (self.speechRequest == nil) {
-                NSLog(@"Unable to created a SFSpeechAudioBufferRecognitionRequest object");
+    __weak typeof(self) weakSelf = self;
+    self.task = [self.speechRecognizer recognitionTaskWithRequest:self.speechRequest resultHandler:^(SFSpeechRecognitionResult *result, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) self = weakSelf;
+            if (!self || self.isShuttingDown || generation != self.recognitionGeneration) {
+                return;
             }
-            
-            if (inputNode == nil) {
-                NSLog(@"Unable to created a inputNode object");
-            }
-                        
-            self.task = [self.speechRecognizer recognitionTaskWithRequest:self.speechRequest resultHandler:^(SFSpeechRecognitionResult* result, NSError *error){
-                BOOL isFinal = false;
-                
-                if (result != nil)
-                {
-                    //NSLog(@"final - %@", result.bestTranscription.formattedString);
-                    isFinal = result.isFinal;
-                    
-                    if (![result.bestTranscription.formattedString isEqualToString:self.currentTextInput]) {
-                        //PROCESS SPOKE WORDS HERE
-                        NSLog(@"final - %@", result.bestTranscription.formattedString);
 
-                        if ([result.bestTranscription.formattedString containsString:@"hold on"]) {
-                            
-                        }
-                            
-                        self.currentTextInput = result.bestTranscription.formattedString;
-                        
-                        if (!self.isSpeaking) {
-                            if (self.debounceSpeechInputTimer) {
-                                [self.debounceSpeechInputTimer invalidate];
-                            }
-                            self.debounceSpeechInputTimer = [NSTimer scheduledTimerWithTimeInterval:0.75 repeats:NO block:^(NSTimer * _Nonnull timer) {
-                                [self.delegate inputText:result.bestTranscription.formattedString];
-                            }];
-                        }
-                    }
-                }
-                
-                if (error != nil || isFinal)
-                {
-                    if (!isFinal)
-                        NSLog(@"error = %@", error.localizedDescription);
-                    else
-                        NSLog(@"restarting speech recognition ");
-                    
-                    [self.audioEngine stop];
-                    [inputNode removeTapOnBus:0];
-                    
-                    self.speechRequest = nil;
-                    self.task = nil;
-                    
-                    //self.recordButton.enabled = true;
-                    //[self.recordButton setTitle:@"Stop Recording"];
-                    
-                    [self startRecognizer];
-                }
-                
-            }];
-            
-            [inputNode installTapOnBus:0 bufferSize:1024 format:[inputNode outputFormatForBus:0] block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when){
-                
+            BOOL isFinal = result.isFinal;
+            NSString *transcription = result.bestTranscription.formattedString;
+            if (transcription.length > 0 && ![transcription isEqualToString:self.currentTextInput]) {
+                self.currentTextInput = transcription;
                 if (!self.isSpeaking) {
-                    NSLog(@"appending audio buffer");
-                    [self.speechRequest appendAudioPCMBuffer:buffer];
+                    [self.debounceSpeechInputTimer invalidate];
+                    self.debounceSpeechInputTimer = [NSTimer scheduledTimerWithTimeInterval:0.75 repeats:NO block:^(NSTimer *timer) {
+                        [self.delegate inputText:transcription];
+                    }];
                 }
-            }];
-            
-            
-            NSError *outError;
-            
-            [self.audioEngine prepare];
-            [self.audioEngine startAndReturnError:&outError];
-            
-            if (outError)
-                NSLog(@"Error %@", outError);
+            }
 
-            dispatch_async(dispatch_get_main_queue(), ^{
-                NSLog(@"\n(Go ahead, I'm listening)");
-                //self.textView.text = [self.textView.text stringByAppendingString:@"\n(Go ahead, I'm listening)" ];
-            });
-            
-
-            
-            //---------
-            // Shows a different audio tap method that shows sample buffers
-            // should call startCapture method in main queue or it may crash
-            //dispatch_async(dispatch_get_main_queue(), ^{
-            //    [self startCapture];
-            //});
-            //---------
-            
-        }
+            if (error || isFinal) {
+                if (error) {
+                    NSLog(@"Speech recognition error: %@", error.localizedDescription);
+                }
+                [self scheduleRecognizerRestart];
+            }
+        });
     }];
+
+    NSLog(@"Starting speech recognizer with locale %@", locale);
+}
+
+- (void)startAudioCapture
+{
+    if (self.isShuttingDown) {
+        return;
+    }
+    if (!self.audioEngine) {
+        self.audioEngine = [[AVAudioEngine alloc] init];
+    }
+
+    AVAudioInputNode *inputNode = self.audioEngine.inputNode;
+    if (!self.microphoneTapInstalled) {
+        __weak typeof(self) weakSelf = self;
+        [inputNode installTapOnBus:0 bufferSize:1024 format:[inputNode outputFormatForBus:0] block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when) {
+            __strong typeof(weakSelf) self = weakSelf;
+            if (!self || self.isShuttingDown || self.isSpeaking) {
+                return;
+            }
+            [self.speechRequest appendAudioPCMBuffer:buffer];
+            if ([self.delegate respondsToSelector:@selector(didCaptureAudioBuffer:)]) {
+                [self.delegate didCaptureAudioBuffer:buffer];
+            }
+        }];
+        self.microphoneTapInstalled = YES;
+    }
+
+    if (!self.audioEngine.isRunning) {
+        NSError *audioError = nil;
+        [self.audioEngine prepare];
+        [self.audioEngine startAndReturnError:&audioError];
+        if (audioError) {
+            NSLog(@"Unable to start microphone capture: %@", audioError.localizedDescription);
+        }
+    }
+}
+
+- (void)scheduleRecognizerRestart
+{
+    if (self.isShuttingDown || self.recognizerRestartScheduled) {
+        return;
+    }
+    self.recognizerRestartScheduled = YES;
+    [self teardownSpeechRecognition];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        self.recognizerRestartScheduled = NO;
+        [self startRecognizer];
+    });
+}
+
+- (void)teardownSpeechRecognition
+{
+    self.recognitionGeneration += 1;
+    [self.speechRequest endAudio];
+    [self.task cancel];
+    self.task = nil;
+    self.speechRequest = nil;
+}
+
+- (void)teardownAudioCapture
+{
+    if (self.audioEngine) {
+        [self.audioEngine stop];
+        if (self.microphoneTapInstalled) {
+            [self.audioEngine.inputNode removeTapOnBus:0];
+            self.microphoneTapInstalled = NO;
+        }
+    }
 }
 
 - (void)endRecognizer
@@ -391,7 +451,8 @@
     // END capture and END voice Reco
     // or Apple will terminate this task after 30000ms.
     [self endCapture];
-    [self.speechRequest endAudio];
+    [self teardownSpeechRecognition];
+    [self teardownAudioCapture];
 }
 
 - (void)startCapture
@@ -464,10 +525,11 @@
     });
     
     if ([result isFinal]) {
-        [self.audioEngine stop];
-        [self.audioEngine.inputNode removeTapOnBus:0];
-        self.task = nil;
-        self.speechRequest = nil;
+        // The microphone tap is shared with Gemini and must remain installed
+        // while the local recognizer rolls over to a fresh request.
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self scheduleRecognizerRestart];
+        });
     }
 }
 
@@ -612,13 +674,14 @@
 
 - (void)sayIt:(NSString *)stringToSpeak
 {
-    self.isSpeaking = true;
     dispatch_async(dispatch_get_main_queue(), ^(){
         // Is the string zero-length?
         if ([stringToSpeak length] == 0) {
             NSLog(@"string is of zero-length");
+            self.isSpeaking = false;
             return;
         }
+        self.isSpeaking = true;
         
         //To Allow for pauses in the google gemini responses
         // Use the below algorithm and try to break up the speech and queue up each element instead, once didFinishSpeaking is reached try to continue with the next element
@@ -881,7 +944,31 @@
 - (void)stopIt:(id)sender {
     NSLog(@"stopping");
     //[self.speechSynth stopSpeaking];
+    BOOL wasSpeaking = self.avSpeechSynthesizer.isSpeaking;
     [self.avSpeechSynthesizer stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
+    if (!wasSpeaking) {
+        self.isSpeaking = false;
+    }
+}
+
+- (void)shutdown {
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self shutdown];
+        });
+        return;
+    }
+    if (self.isShuttingDown) {
+        return;
+    }
+    self.isShuttingDown = YES;
+    self.recognizerRestartScheduled = NO;
+    [self.debounceSpeechInputTimer invalidate];
+    self.debounceSpeechInputTimer = nil;
+    [self teardownSpeechRecognition];
+    [self teardownAudioCapture];
+    [self.avSpeechSynthesizer stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
+    self.isSpeaking = false;
 }
 
 

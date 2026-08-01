@@ -7,11 +7,32 @@
 //
 
 #import "AppDelegate.h"
+#import "ROBPythonRuntime.h"
+#import "ROBPythonSettingsWindowController.h"
+#import "ROBSystemDependencyManager.h"
+#import "ROBTaskLaunchGuard.h"
+#import <signal.h>
+#import <unistd.h>
+
+static NSString * const ROBDepthCameraSocketDefaultsKey = @"ROBDepthCameraSocketPath";
+static NSString * const ROBDepthCameraServiceReadyNotification = @"ROBDepthCameraServiceReady";
+static NSString * const ROBLegacyLuxonisUVCDefaultsKey = @"ROBAllowLuxonisUVCFallback";
 
 @interface AppDelegate ()
 @property (readwrite, retain) NSTimer *rplidarCheckTimer;
 @property (readwrite, retain) NSTimer *utcWebCamCheckTimer;
 @property (readwrite, assign) BOOL utcWebCamIsOnline;
+@property (readwrite, retain) NSTask *utcWebCamTask;
+@property (readwrite, retain) NSPipe *utcWebCamPipe;
+@property (readwrite, retain) NSMutableString *utcWebCamOutput;
+@property (readwrite, strong) dispatch_queue_t utcWebCamOutputQueue;
+@property (readwrite, retain) ROBPythonSettingsWindowController *pythonSettingsWindowController;
+@property (readwrite, assign) BOOL presentedPythonSettingsForCurrentError;
+@property (readwrite, assign) BOOL pythonEnvironmentNeedsAttention;
+@property (readwrite, assign) BOOL utcWebCamPreflightRunning;
+@property (readwrite, assign) BOOL restartUTCWebCamAfterTermination;
+@property (readwrite, assign) NSUInteger pythonRuntimeGeneration;
+@property (readwrite, assign) BOOL reportedMissingRPLidarApplication;
 
 @end
 
@@ -23,31 +44,73 @@
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification
 {
     self.utcWebCamIsOnline = NO;
+    self.utcWebCamOutput = [NSMutableString string];
+    self.utcWebCamOutputQueue = dispatch_queue_create("com.orbitusrobotics.Cerebro.UTCWebCamOutput", DISPATCH_QUEUE_SERIAL);
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(pythonRuntimeDidChange:)
+                                                 name:ROBPythonRuntimeDidChangeNotification
+                                               object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(pythonConfigurationRequired:)
+                                                 name:ROBPythonRuntimeConfigurationRequiredNotification
+                                               object:nil];
+    [[ROBSystemDependencyManager sharedManager]
+        ensureSSHpassInstalledWithCompletion:^(BOOL success, NSString *output, NSError *error) {
+            if (success) {
+                NSLog(@"Cerebro system dependency ready: %@", output);
+            } else {
+                NSLog(@"Cerebro system dependency needs attention: %@", error.localizedDescription);
+            }
+        }];
     [self cerebroCheck];
     [self utcWebCamCheck];
     //Give RPLidar 10 seconds to warm up as the macmini is booting quite fast
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self rpLidarCheck];
     });
-    //[self installAmberPythonZipFolderIntoResources];
 }
 
-- (void) installAmberPythonZipFolderIntoResources {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-        NSString *amber_api_zip_path = [[NSBundle mainBundle] pathForResource:@"amber_api" ofType:@"zip"];
-        NSTask *unzipTask = [NSTask new];
-        unzipTask.launchPath = @"/usr/bin/unzip";
-        unzipTask.arguments = @[amber_api_zip_path];
-        
-        NSPipe *pipe = [NSPipe pipe];
-        unzipTask.standardOutput = pipe;
-        unzipTask.standardError = pipe;
-        
-        [unzipTask launch];
-        
-        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        NSLog(@"installAmberPythonZipFolderIntoResources: %@", output);
+- (void)applicationWillTerminate:(NSNotification *)notification
+{
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [self.rplidarCheckTimer invalidate];
+    [self.utcWebCamCheckTimer invalidate];
+    [self stopUTCWebCamTask];
+}
+
+- (IBAction)showPythonSettings:(id)sender
+{
+    if (self.pythonSettingsWindowController == nil) {
+        self.pythonSettingsWindowController = [[ROBPythonSettingsWindowController alloc] init];
+    }
+    [NSApp activateIgnoringOtherApps:YES];
+    [self.pythonSettingsWindowController showWindow:sender];
+}
+
+- (void)pythonConfigurationRequired:(NSNotification *)notification
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSError *error = notification.userInfo[@"error"];
+        if (error != nil) {
+            NSLog(@"Python configuration required: %@", error.localizedDescription);
+        }
+        self.pythonEnvironmentNeedsAttention = YES;
+        if (!self.presentedPythonSettingsForCurrentError) {
+            self.presentedPythonSettingsForCurrentError = YES;
+            [self showPythonSettings:nil];
+        }
+    });
+}
+
+- (void)pythonRuntimeDidChange:(NSNotification *)notification
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.presentedPythonSettingsForCurrentError = NO;
+        self.pythonEnvironmentNeedsAttention = NO;
+        self.pythonRuntimeGeneration += 1;
+        self.utcWebCamPreflightRunning = NO;
+        self.utcWebCamIsOnline = NO;
+        [self restartUTCWebCamForRuntimeChange];
     });
 }
 
@@ -56,13 +119,17 @@
     //ps aux | grep Cerebro
     //system("ps aux | grep Cerebro");
     NSTask *cerebroIsRunning = [NSTask new];
-    cerebroIsRunning.launchPath = @"/bin/ps";
+    cerebroIsRunning.executableURL = [NSURL fileURLWithPath:@"/bin/ps"];
     cerebroIsRunning.arguments = @[@"aux"]; // | grep Cerebro
     
     NSPipe *pipe = [NSPipe pipe];
     cerebroIsRunning.standardOutput = pipe;
     
-    [cerebroIsRunning launch];
+    NSError *launchError = nil;
+    if (!ROBLaunchTaskSafely(cerebroIsRunning, &launchError)) {
+        NSLog(@"Cerebro process check could not start: %@", launchError.localizedDescription);
+        return;
+    }
     //[cerebroIsRunning waitUntilExit];
     
     NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
@@ -82,24 +149,55 @@
         // /usr/bin/open /Users/rob/Library/Developer/Xcode/DerivedData/RPLidar-fziuydzdocbagjfcyicbboaqukse/Build/Products/Debug-iphoneos/.XCInstall/RPLidar.app
         
         NSTask *rpLidarIsRunning = [NSTask new];
-        rpLidarIsRunning.launchPath = @"/bin/ps";
+        rpLidarIsRunning.executableURL = [NSURL fileURLWithPath:@"/bin/ps"];
         rpLidarIsRunning.arguments = @[@"aux"];
         
         NSPipe *pipe = [NSPipe pipe];
         rpLidarIsRunning.standardOutput = pipe;
         
-        [rpLidarIsRunning launch];
+        NSError *processCheckError = nil;
+        if (!ROBLaunchTaskSafely(rpLidarIsRunning, &processCheckError)) {
+            NSLog(@"RPLidar process check could not start: %@", processCheckError.localizedDescription);
+            return;
+        }
         
         NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
         NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
         
         if ([output componentsSeparatedByString:@"RPLidar.app"].count < 2) { //If we have a count of 2 then 1 RPLidar instance is running
-            NSLog(@"Launching RPLidar...");
+            NSString *configuredPath = [[NSUserDefaults standardUserDefaults]
+                stringForKey:@"ROBRPLidarApplicationPath"];
+            NSArray<NSString *> *candidates = configuredPath.length > 0
+                ? @[configuredPath]
+                : @[@"/Applications/RPLidar.app", @"~/Applications/RPLidar.app"];
+            NSString *rplidarApplicationPath = nil;
+            for (NSString *candidate in candidates) {
+                NSString *expandedPath = [[candidate stringByExpandingTildeInPath]
+                    stringByStandardizingPath];
+                BOOL isDirectory = NO;
+                if ([[NSFileManager defaultManager] fileExistsAtPath:expandedPath
+                                                         isDirectory:&isDirectory] && isDirectory) {
+                    rplidarApplicationPath = expandedPath;
+                    break;
+                }
+            }
+            if (rplidarApplicationPath.length == 0) {
+                if (!self.reportedMissingRPLidarApplication) {
+                    NSLog(@"RPLidar application is unavailable; install it in Applications or set ROBRPLidarApplicationPath.");
+                    self.reportedMissingRPLidarApplication = YES;
+                }
+                return;
+            }
+            self.reportedMissingRPLidarApplication = NO;
+            NSLog(@"Launching RPLidar at %@...", rplidarApplicationPath);
             
             NSTask *launchRPLidar = [NSTask new];
-            launchRPLidar.launchPath = @"/usr/bin/open";
-            launchRPLidar.arguments = @[@"/Users/rob/Library/Developer/Xcode/DerivedData/RPLidar-enennkoiyqapwdaqnrwmbdbpatdu/Build/Products/Debug-iphoneos/.XCInstall/RPLidar.app"];
-            [launchRPLidar launch];
+            launchRPLidar.executableURL = [NSURL fileURLWithPath:@"/usr/bin/open"];
+            launchRPLidar.arguments = @[rplidarApplicationPath];
+            NSError *openError = nil;
+            if (!ROBLaunchTaskSafely(launchRPLidar, &openError)) {
+                NSLog(@"RPLidar launcher could not start: %@", openError.localizedDescription);
+            }
         } else {
             //NSLog(@"RPLidar check passsed...");
         }
@@ -107,151 +205,242 @@
 }
 
 - (void) utcWebCamCheck {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+    [self checkIfUTCWebcamIsOnline];
+    self.utcWebCamCheckTimer = [NSTimer scheduledTimerWithTimeInterval:20 repeats:YES block:^(NSTimer * _Nonnull timer) {
         [self checkIfUTCWebcamIsOnline];
-        self.utcWebCamCheckTimer = [NSTimer scheduledTimerWithTimeInterval:20 repeats:YES block:^(NSTimer * _Nonnull timer) {
-            //python3 /Users/rob/Library/Mobile\ Documents/com~apple~CloudDocs/dev/Gemini/Webcam_color.py
-            [self checkIfUTCWebcamIsOnline];
-        }];
-    });
+    }];
 }
 
 - (void) checkIfUTCWebcamIsOnline {
-    if (self.utcWebCamIsOnline) {
-        NSLog(@"UTC Webcam is already online but timer is still running... bailing out!!!");
-        [self.utcWebCamCheckTimer invalidate];
-        self.utcWebCamCheckTimer = nil;
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:ROBLegacyLuxonisUVCDefaultsKey]) {
+        if (self.utcWebCamTask.isRunning) {
+            [self stopUTCWebCamTask];
+        }
+        self.utcWebCamIsOnline = NO;
         return;
     }
-    
-    NSLog(@"Attempting to bring UTC Webcam Online");
-    
-    NSTask *utcCamIsRunning = [NSTask new];
-    utcCamIsRunning.launchPath = @"~/rob_python/bin/python3";
-    
+    if (self.pythonEnvironmentNeedsAttention || self.utcWebCamPreflightRunning ||
+        self.utcWebCamIsOnline || self.utcWebCamTask.isRunning) {
+        return;
+    }
+
+    self.utcWebCamPreflightRunning = YES;
+    NSUInteger generation = self.pythonRuntimeGeneration;
+    [[ROBPythonRuntime sharedRuntime] validateEnvironmentWithCompletion:^(BOOL success, NSString *output, NSError *error) {
+        if (generation != self.pythonRuntimeGeneration) {
+            return;
+        }
+        self.utcWebCamPreflightRunning = NO;
+        if (!success) {
+            self.pythonEnvironmentNeedsAttention = YES;
+            NSError *configurationError = error ?: [NSError
+                errorWithDomain:ROBPythonRuntimeErrorDomain
+                           code:ROBPythonRuntimeErrorCommandFailed
+                       userInfo:@{NSLocalizedDescriptionKey: @"The selected Python environment did not pass validation."}];
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:ROBPythonRuntimeConfigurationRequiredNotification
+                              object:[ROBPythonRuntime sharedRuntime]
+                            userInfo:@{@"error": configurationError}];
+            return;
+        }
+        [self startUTCWebcamProcess];
+    }];
+}
+
+- (void)startUTCWebcamProcess
+{
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:ROBLegacyLuxonisUVCDefaultsKey]) {
+        return;
+    }
+    if (self.pythonEnvironmentNeedsAttention || self.utcWebCamIsOnline || self.utcWebCamTask.isRunning) {
+        return;
+    }
+
+    NSLog(@"Attempting to start the DepthAI RGB-D service");
+
     NSString *webcam_color_script_path = [[NSBundle mainBundle] pathForResource:@"Webcam_color" ofType:@"py"];
+    if (webcam_color_script_path.length == 0) {
+        NSLog(@"DepthAI service could not start because Webcam_color.py is missing from the application bundle.");
+        return;
+    }
     NSLog(@"scriptPath = %@", webcam_color_script_path);
-    utcCamIsRunning.arguments = @[webcam_color_script_path];
-    
-    NSPipe *pipe = [NSPipe pipe];
-    utcCamIsRunning.standardOutput = pipe;
-    utcCamIsRunning.standardError = pipe;
-    
-    [utcCamIsRunning launch];
-    
-    NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-    NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    //NSLog(@"UTC Output: %@", output);
-    if ([output containsString:@"Device started, please keep this process running"] ||
-        [output containsString:@"another process has device opened for exclusive access"] ) {
-        NSLog(@"UTC Webcam is Online");
-        self.utcWebCamIsOnline = YES;
-        [self.utcWebCamCheckTimer invalidate];
-        self.utcWebCamCheckTimer = nil;
-        
-        [[NSNotificationCenter defaultCenter] postNotificationName:@"UTCWebcamIsOnline" object:nil];
-    } else {
-        NSLog(@"Error: UTC Webcam is not running");
-        self.utcWebCamIsOnline = NO;
+
+    NSURL *applicationSupportURL = [[[NSFileManager defaultManager]
+        URLsForDirectory:NSApplicationSupportDirectory
+               inDomains:NSUserDomainMask] firstObject];
+    NSURL *serviceDirectory = [applicationSupportURL URLByAppendingPathComponent:@"Cerebro"
+                                                                      isDirectory:YES];
+    NSError *directoryError = nil;
+    if (![[NSFileManager defaultManager] createDirectoryAtURL:serviceDirectory
+                                  withIntermediateDirectories:YES
+                                                   attributes:nil
+                                                        error:&directoryError]) {
+        NSLog(@"DepthAI service directory is unavailable: %@", directoryError.localizedDescription);
+        return;
+    }
+    NSString *socketPath = [[serviceDirectory URLByAppendingPathComponent:@"depth-camera.sock"] path];
+    [[NSUserDefaults standardUserDefaults] setObject:socketPath forKey:ROBDepthCameraSocketDefaultsKey];
+
+    NSError *taskError = nil;
+    NSString *parentProcessID = [NSString stringWithFormat:@"%d", getpid()];
+    NSTask *task = [[ROBPythonRuntime sharedRuntime]
+        newTaskWithArguments:@[
+            webcam_color_script_path,
+            @"--socket", socketPath,
+            @"--parent-pid", parentProcessID
+        ]
+                         error:&taskError];
+    if (task == nil) {
+        NSLog(@"UTC Webcam Python configuration error: %@", taskError.localizedDescription);
+        return;
+    }
+
+    self.utcWebCamOutput = [NSMutableString string];
+    self.utcWebCamPipe = [NSPipe pipe];
+    task.standardOutput = self.utcWebCamPipe;
+    task.standardError = self.utcWebCamPipe;
+    self.utcWebCamTask = task;
+
+    __weak AppDelegate *weakSelf = self;
+    NSFileHandle *readHandle = self.utcWebCamPipe.fileHandleForReading;
+    dispatch_queue_t outputQueue = self.utcWebCamOutputQueue;
+    NSUInteger taskGeneration = self.pythonRuntimeGeneration;
+    readHandle.readabilityHandler = ^(NSFileHandle *handle) {
+        dispatch_sync(outputQueue, ^{
+            NSData *data = handle.availableData;
+            if (data.length == 0) {
+                return;
+            }
+            NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+            if (output.length > 0) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if (weakSelf.utcWebCamTask == task &&
+                        weakSelf.pythonRuntimeGeneration == taskGeneration) {
+                        [weakSelf handleUTCWebCamOutput:output];
+                    }
+                });
+            }
+        });
+    };
+
+    task.terminationHandler = ^(NSTask *completedTask) {
+        readHandle.readabilityHandler = nil;
+        dispatch_sync(outputQueue, ^{
+            NSData *remainingData = [readHandle readDataToEndOfFile];
+            NSString *remainingOutput = [[NSString alloc] initWithData:remainingData
+                                                               encoding:NSUTF8StringEncoding] ?: @"";
+            dispatch_async(dispatch_get_main_queue(), ^{
+                AppDelegate *strongSelf = weakSelf;
+                if (strongSelf == nil || strongSelf.utcWebCamTask != completedTask) {
+                    return;
+                }
+                BOOL belongsToCurrentRuntime = strongSelf.pythonRuntimeGeneration == taskGeneration;
+                BOOL shouldRestart = strongSelf.restartUTCWebCamAfterTermination;
+                if (belongsToCurrentRuntime && !shouldRestart && remainingOutput.length > 0) {
+                    [strongSelf handleUTCWebCamOutput:remainingOutput];
+                }
+                strongSelf.utcWebCamTask = nil;
+                strongSelf.utcWebCamPipe = nil;
+                strongSelf.utcWebCamIsOnline = NO;
+                NSLog(@"DepthAI service exited with status %d", completedTask.terminationStatus);
+                strongSelf.restartUTCWebCamAfterTermination = NO;
+                if (shouldRestart && !strongSelf.pythonEnvironmentNeedsAttention) {
+                    [strongSelf checkIfUTCWebcamIsOnline];
+                }
+            });
+        });
+    };
+
+    if (!ROBLaunchTaskSafely(task, &taskError)) {
+        readHandle.readabilityHandler = nil;
+        self.utcWebCamTask = nil;
+        self.utcWebCamPipe = nil;
+        NSLog(@"DepthAI service could not launch Python: %@", taskError.localizedDescription);
+        [[NSNotificationCenter defaultCenter]
+            postNotificationName:ROBPythonRuntimeConfigurationRequiredNotification
+                          object:[ROBPythonRuntime sharedRuntime]
+                        userInfo:@{@"error": taskError}];
     }
 }
 
-- (void) checkIfUTCWebCamIsOnline_SUDO {
-    // The password for the sudo user. In a real application, this should be handled securely,
-    // not hardcoded or passed directly as a string like this.
-//    let sudoPassword = "your_sudo_password" // Replace with actual password or secure retrieval method
-//    let passwordWithNewline = sudoPassword + "\n"
-//
-//    // The command to execute with sudo privileges
-//    let commandToExecute = "ls -l /private/var/log" // Example: list contents of a restricted directory
-//
-//    let sudoProcess = Process()
-//    sudoProcess.launchPath = "/usr/bin/sudo"
-//    sudoProcess.arguments = ["-S", "/bin/sh", "-c", commandToExecute]
-//
-//    // Create pipes for standard input, output, and error
-//    let stdinPipe = Pipe()
-//    let stdoutPipe = Pipe()
-//    let stderrPipe = Pipe()
-//
-//    sudoProcess.standardInput = stdinPipe
-//    sudoProcess.standardOutput = stdoutPipe
-//    sudoProcess.standardError = stderrPipe
-//
-//    do {
-//        try sudoProcess.run()
-//
-//        // Write the password to the standard input of the sudo process
-//        stdinPipe.fileHandleForWriting.write(passwordWithNewline.data(using: .utf8)!)
-//        try stdinPipe.fileHandleForWriting.close() // Close the write handle to signal end of input
-//
-//        // Read output from the sudo command
-//        let outputData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-//        let errorData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-//
-//        let output = String(data: outputData, encoding: .utf8) ?? ""
-//        let errorOutput = String(data: errorData, encoding: .utf8) ?? ""
-//
-//        sudoProcess.waitUntilExit()
-//
-//        if sudoProcess.terminationStatus == 0 {
-//            print("Command executed successfully:")
-//            print(output)
-//        } else {
-//            print("Command failed with error:")
-//            print(errorOutput)
-//        }
-//
-//    } catch {
-//        print("Error launching sudo process: \(error.localizedDescription)")
-//    }
-    
-    OSStatus status;
-    AuthorizationRef authorizationRef;
-    
-    // Create an authorization reference
-    status = AuthorizationCreate(NULL, kAuthorizationEmptyEnvironment, kAuthorizationFlagDefaults, &authorizationRef);
-    if (status != errSecSuccess) {
-        NSLog(@"Error creating authorization reference: %d", status);
-        return;
+- (void)handleUTCWebCamOutput:(NSString *)output
+{
+    [self.utcWebCamOutput appendString:output];
+    if (self.utcWebCamOutput.length > 32768) {
+        [self.utcWebCamOutput deleteCharactersInRange:NSMakeRange(0, self.utcWebCamOutput.length - 32768)];
     }
-    NSString *webcam_color_script_path = [[NSBundle mainBundle] pathForResource:@"Webcam_color" ofType:@"py"];
-    NSLog(@"scriptPath = %@", webcam_color_script_path);
+    NSLog(@"DepthAI service: %@", [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
 
-    // Define the command to execute
-    const char *toolPath = "~/rob_python/bin/python3"; // Example: create a file
-    const char *arguments[] = {[webcam_color_script_path cStringUsingEncoding:NSUTF8StringEncoding], NULL}; // Example: file path
+    if (!self.pythonEnvironmentNeedsAttention &&
+        ([self.utcWebCamOutput containsString:@"ModuleNotFoundError"] ||
+         [self.utcWebCamOutput containsString:@"No module named 'depthai'"])) {
+        NSError *dependencyError = [NSError
+            errorWithDomain:ROBPythonRuntimeErrorDomain
+                       code:ROBPythonRuntimeErrorCommandFailed
+                   userInfo:@{
+                       NSLocalizedDescriptionKey: @"The selected Python environment is missing the depthai dependency.",
+                       NSLocalizedRecoverySuggestionErrorKey: @"Open Python Settings and install the managed dependencies."
+                   }];
+        [[NSNotificationCenter defaultCenter]
+            postNotificationName:ROBPythonRuntimeConfigurationRequiredNotification
+                          object:[ROBPythonRuntime sharedRuntime]
+                        userInfo:@{@"error": dependencyError}];
+    }
 
-    // Request authorization to execute the command as root
-    AuthorizationItem items[] = { { kAuthorizationRuleAuthenticateAsAdmin, 0, NULL, 0 } };
-    AuthorizationRights rights = { sizeof(items) / sizeof(items[0]), items };
-    AuthorizationFlags flags = kAuthorizationFlagInteractionAllowed | kAuthorizationFlagPreAuthorize | kAuthorizationFlagExtendRights;
-    
-    status = AuthorizationCopyRights(authorizationRef, &rights, NULL, flags, NULL);
-    if (status != errSecSuccess) {
-        NSLog(@"Error copying rights: %d", status);
-        AuthorizationFree(authorizationRef, kAuthorizationFlagDefaults);
+    if ([self.utcWebCamOutput containsString:@"CEREBRO_DEPTHCAM_READY "]) {
+        if (self.utcWebCamIsOnline) {
+            return;
+        }
+        NSLog(@"DepthAI RGB-D service is ready");
+        self.utcWebCamIsOnline = YES;
+        [[NSNotificationCenter defaultCenter]
+            postNotificationName:ROBDepthCameraServiceReadyNotification
+                          object:nil
+                        userInfo:@{ @"socketPath": [[NSUserDefaults standardUserDefaults]
+                            stringForKey:ROBDepthCameraSocketDefaultsKey] ?: @"" }];
+    }
+}
+
+- (void)restartUTCWebCamForRuntimeChange
+{
+    NSTask *task = self.utcWebCamTask;
+    if (task.isRunning) {
+        self.restartUTCWebCamAfterTermination = YES;
+        self.utcWebCamPipe.fileHandleForReading.readabilityHandler = nil;
+        pid_t processIdentifier = task.processIdentifier;
+        [task terminate];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)),
+                       dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            if (task.isRunning && task.processIdentifier == processIdentifier && processIdentifier > 0) {
+                NSLog(@"DepthAI service did not exit after SIGTERM; sending SIGKILL to child %d.", processIdentifier);
+                kill(processIdentifier, SIGKILL);
+            }
+        });
         return;
     }
-    
-    // Execute the command with root privileges
-    FILE *pipe = NULL;
-    status = AuthorizationExecuteWithPrivileges(authorizationRef, toolPath, kAuthorizationFlagDefaults, (char *const *)arguments, &pipe);
-    if (status != errSecSuccess) {
-        NSLog(@"Error executing command with privileges: %d", status);
-        AuthorizationFree(authorizationRef, kAuthorizationFlagDefaults);
-        return;
+    [self stopUTCWebCamTask];
+    [self checkIfUTCWebcamIsOnline];
+}
+
+- (void)stopUTCWebCamTask
+{
+    self.restartUTCWebCamAfterTermination = NO;
+    NSTask *task = self.utcWebCamTask;
+    self.utcWebCamTask = nil;
+    self.utcWebCamPipe.fileHandleForReading.readabilityHandler = nil;
+    self.utcWebCamPipe = nil;
+    if (task.isRunning) {
+        pid_t processIdentifier = task.processIdentifier;
+        [task terminate];
+        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:1.5];
+        while (task.isRunning && deadline.timeIntervalSinceNow > 0) {
+            [NSThread sleepForTimeInterval:0.02];
+        }
+        if (task.isRunning && task.processIdentifier == processIdentifier && processIdentifier > 0) {
+            NSLog(@"DepthAI service did not stop cleanly; sending SIGKILL to child %d.", processIdentifier);
+            kill(processIdentifier, SIGKILL);
+        }
     }
-    
-    // Close the pipe if opened
-    if (pipe) {
-        fclose(pipe);
-    }
-    
-    NSLog(@"Command executed successfully with sudo privileges.");
-    
-    // Free the authorization reference
-    AuthorizationFree(authorizationRef, kAuthorizationFlagDefaults);
 }
 
 @end

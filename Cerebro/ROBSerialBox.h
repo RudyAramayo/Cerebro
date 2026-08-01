@@ -149,6 +149,8 @@
 - (IBAction)energizeToggle:(id)sender;
 
 - (void) controllerId:(NSString *)controllerId controllerModelData:(ROBBaseControllerModel *)controllerModelData;
+- (void)switchToMasterControllerID:(NSString *)controllerID;
+- (void)stopBaseMotionAndDropHeartbeat;
 
 - (IBAction)controllerPassthrough:(CGPoint)touchPadPointL
                    touchPadPointR:(CGPoint)touchPadPointR

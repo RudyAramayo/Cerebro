@@ -8,6 +8,8 @@
 
 #import "ReSpeakerTaskController.h"
 #import "ROBMainViewController.h"
+#import "ROBPythonRuntime.h"
+#import "ROBTaskLaunchGuard.h"
 
 
 @interface ReSpeakerTaskController ()
@@ -36,10 +38,22 @@
 
     dispatch_async(aQueue, ^{
         
-        NSString *path = [[NSBundle mainBundle] pathForResource:@"ReSpeakerTaskController" ofType:@"command"];
-        self.task = [NSTask new];
-        self.task.launchPath = path;
-        //self.task.arguments = @[@""];
+        NSString *scriptPath = [[NSUserDefaults standardUserDefaults] stringForKey:@"ROBReSpeakerScriptPath"];
+        scriptPath = [scriptPath stringByExpandingTildeInPath];
+        if (scriptPath.length == 0 || ![[NSFileManager defaultManager] isReadableFileAtPath:scriptPath]) {
+            NSLog(@"ReSpeaker Python script is not configured; set ROBReSpeakerScriptPath before enabling this legacy task.");
+            self.shouldRelaunch = false;
+            return;
+        }
+
+        NSError *taskError = nil;
+        self.task = [[ROBPythonRuntime sharedRuntime] newTaskWithArguments:@[scriptPath]
+                                                                    error:&taskError];
+        if (self.task == nil) {
+            NSLog(@"ReSpeaker Python task could not be configured: %@", taskError.localizedDescription);
+            self.shouldRelaunch = false;
+            return;
+        }
 
         __weak ReSpeakerTaskController *weakSelf = self;
 
@@ -56,7 +70,11 @@
         [self captureStandardOutputAndRouteToTextView:self.task];
 
         
-        [self.task launch];
+        if (!ROBLaunchTaskSafely(self.task, &taskError)) {
+            NSLog(@"ReSpeaker Python task could not launch: %@", taskError.localizedDescription);
+            self.shouldRelaunch = false;
+            return;
+        }
         [self.task waitUntilExit];
         
     });

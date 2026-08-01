@@ -27,5 +27,8 @@
 @property (readwrite, assign) bool speed_playPause;
 @property (readwrite, assign) bool speed_forward_reverse;
 @property (readwrite, retain) NSString *textInput;
+// Monotonic receive time assigned by ROBSerialBox. A controller snapshot is
+// never replayed indefinitely after its transport disappears.
+@property (readwrite, assign) NSTimeInterval receivedAtUptime;
 
 @end

@@ -21,13 +21,21 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Spy on you</string>
+	<string>Cerebro uses the microphone for on-device speech recognition and, when Gemini Robotics is enabled, streams audio to Google Gemini.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_robctl._udp</string>
+		<string>_robvideo._udp</string>
+		<string>_roboNet._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Cerebro discovers and securely communicates with paired robot controllers and streams requested robot-camera video on the local network.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Watch you</string>
+	<string>Cerebro uses the robot camera for perception and, when enabled by a paired controller, streams encoded video on the local network or sends sampled images to Google Gemini.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Hear you</string>
+	<string>Cerebro uses Apple on-device speech recognition for wake handling, local transcripts, and local stop phrases.</string>
 	<key>NSSystemAdministrationUsageDescription</key>
-	<string>Control you</string>
+	<string>Cerebro uses administration access only for configured robot control tasks.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

@@ -8,6 +8,8 @@
 
 #import "AudioInputTaskController.h"
 #import "ROBMainViewController.h"
+#import "ROBPythonRuntime.h"
+#import "ROBTaskLaunchGuard.h"
 
 
 @interface AudioInputTaskController ()
@@ -63,26 +65,60 @@
                 self.currentIncommingVerbalMessage = queryInput;
                 
                 
-                NSString *path = @"/usr/local/bin/python3";
-                self.task = [NSTask new];
-                self.task.launchPath = path;
-                //self.task.arguments = @[@"/Users/rob/dev/openai_test.py", [NSString stringWithFormat:@"\"%@\"", self.currentIncommingVerbalMessage]];
-                self.task.arguments = @[@"/Users/rob/Library/Mobile\ Documents/com~apple~CloudDocs/dev/google_ai_test.py", [NSString stringWithFormat:@"\"%@\"", self.currentIncommingVerbalMessage]];
+                // This legacy integration is currently superseded by ROBAI,
+                // but keep it safe if it is re-enabled. The script path must
+                // be explicitly configured instead of relying on a developer
+                // home-directory path.
+                NSString *scriptPath = [[NSUserDefaults standardUserDefaults]
+                    stringForKey:@"ROBLegacyGoogleAIScriptPath"];
+                if (scriptPath.length == 0 ||
+                    ![[NSFileManager defaultManager] isReadableFileAtPath:[scriptPath stringByExpandingTildeInPath]]) {
+                    NSLog(@"Legacy Google AI Python script is not configured; ROBAI should handle this request.");
+                    self.alreadyProcessing = NO;
+                    self.isListening = NO;
+                    dispatch_async(dispatch_get_main_queue(), ^(){
+                        self.textView.editable = YES;
+                    });
+                    return;
+                }
+
+                NSError *taskError = nil;
+                self.task = [[ROBPythonRuntime sharedRuntime]
+                    newTaskWithArguments:@[[scriptPath stringByExpandingTildeInPath],
+                                           [NSString stringWithFormat:@"\"%@\"", self.currentIncommingVerbalMessage]]
+                                     error:&taskError];
+                if (self.task == nil) {
+                    NSLog(@"Legacy Google AI Python task could not be configured: %@", taskError.localizedDescription);
+                    self.alreadyProcessing = NO;
+                    self.isListening = NO;
+                    dispatch_async(dispatch_get_main_queue(), ^(){
+                        self.textView.editable = YES;
+                    });
+                    return;
+                }
                 
                 __weak AudioInputTaskController *weakSelf = self;
                 
                 self.task.terminationHandler = ^(NSTask *task){
                     dispatch_async(dispatch_get_main_queue(), ^(){
                         NSLog(@"************* COMPLETED TASK *************");
-                        self.alreadyProcessing = NO;
-                        self.textView.string = @"";
+                        weakSelf.alreadyProcessing = NO;
+                        weakSelf.textView.string = @"";
                     });
                 };
                 
                 
                 [self captureStandardOutputAndRouteToTextView:self.task];
                 
-                [self.task launch];
+                if (!ROBLaunchTaskSafely(self.task, &taskError)) {
+                    NSLog(@"Legacy Google AI Python task could not launch: %@", taskError.localizedDescription);
+                    self.alreadyProcessing = NO;
+                    self.isListening = NO;
+                    dispatch_async(dispatch_get_main_queue(), ^(){
+                        self.textView.editable = YES;
+                    });
+                    return;
+                }
                 [self.task waitUntilExit];
             }
             
@@ -107,7 +143,11 @@
 
 - (void) shutdownTask
 {
-    [self.task terminate];
+    if (self.task.isRunning) {
+        [self.task terminate];
+    }
+    self.alreadyProcessing = NO;
+    self.isListening = NO;
 }
 
 - (void) captureStandardOutputAndRouteToTextView:(NSTask *)task

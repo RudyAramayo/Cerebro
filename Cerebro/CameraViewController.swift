@@ -13,7 +13,11 @@ import SceneKit
 import CoreImage.CIFilterBuiltins
 
 final class CameraViewController: NSViewController {
-    private var cameraManager: CameraManagerProtocol!
+    private var cameraManager: CameraManagerProtocol?
+    private var videoServer: ROBVideoServer?
+    private var cameraViewIsVisible = false
+    private var remoteVideoIsActive = false
+    private var cameraSessionIsRequested = false
     
     @IBOutlet weak var skeletonView: SCNView!
     @IBOutlet weak var personMaskImageView: NSImageView!
@@ -29,28 +33,50 @@ final class CameraViewController: NSViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
+        let manager = CameraManager(containerView: view)
+        manager.delegate = self
+        cameraManager = manager
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationWillTerminate),
+            name: NSApplication.willTerminateNotification,
+            object: nil
+        )
+
         do {
-            cameraManager = try CameraManager(containerView: view)
-            cameraManager.delegate = self
+            let videoServer = try ROBVideoServer()
+            videoServer.subscriptionActivityDidChange = { [weak self] isActive in
+                guard let self else { return }
+                self.remoteVideoIsActive = isActive
+                self.reconcileCameraSession()
+            }
+            try videoServer.start()
+            self.videoServer = videoServer
+            manager.videoSampleHandler = { [weak videoServer] sampleBuffer in
+                videoServer?.offer(sampleBuffer)
+            }
         } catch {
-            // Cath the error here
-            print(error.localizedDescription)
+            // Perception remains available if the optional media service fails.
+            print("ROBVideo startup failed: \(error.localizedDescription)")
         }
         
         setupSceneKitView()
     }
     
     @IBAction func toggleCamera(_ sender: Any?) {
+        guard let cameraManager else { return }
         do {
             print("ToggleCamera")
             try cameraManager.stopSession()
             try cameraManager.startSession()
+            cameraSessionIsRequested = true
         } catch {
             print(error.localizedDescription)
         }
     }
     
     @IBAction func bindCamera(_ sender: Any?) {
+        guard let cameraManager else { return }
         do {
             try cameraManager.bindCamera()
         } catch {
@@ -59,6 +85,7 @@ final class CameraViewController: NSViewController {
     }
     
     @IBAction func bindCameaRebootSession(_ sender: Any?) {
+        guard let cameraManager else { return }
         do {
             try cameraManager.bindCameraRebootSession()
         } catch {
@@ -75,20 +102,38 @@ final class CameraViewController: NSViewController {
     
     override func viewDidAppear() {
         super.viewDidAppear()
-        do {
-            try cameraManager.startSession()
-        } catch {
-            // Cath the error here
-            print(error.localizedDescription)
-        }
+        cameraViewIsVisible = true
+        reconcileCameraSession()
     }
     
     override func viewDidDisappear() {
         super.viewDidDisappear()
+        cameraViewIsVisible = false
+        reconcileCameraSession()
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+        videoServer?.stop()
+    }
+
+    @objc private func applicationWillTerminate() {
+        videoServer?.stop()
+        try? cameraManager?.stopSession()
+    }
+
+    private func reconcileCameraSession() {
+        guard let cameraManager else { return }
+        let shouldRun = cameraViewIsVisible || remoteVideoIsActive
+        guard shouldRun != cameraSessionIsRequested else { return }
         do {
-            try cameraManager.stopSession()
+            if shouldRun {
+                try cameraManager.startSession()
+            } else {
+                try cameraManager.stopSession()
+            }
+            cameraSessionIsRequested = shouldRun
         } catch {
-            // Cath the error here
             print(error.localizedDescription)
         }
     }
@@ -212,39 +257,48 @@ extension CameraViewController: CameraManagerDelegate {
         return outputImage
     }
     
-    func cameraManager(_ output: CameraCaptureOutput, didOutput sampleBuffer: CameraSampleBuffer, from connection: CameraCaptureConnection) {
-        
+    func cameraManager(_ manager: CameraManagerProtocol, didOutput frameSet: CameraFrameSet) {
+        let sampleBuffer = frameSet.rgbSampleBuffer
+        if let depth = frameSet.alignedDepth {
+            robMainViewController?.didCaptureAlignedDepthData(
+                depth.millimetersLittleEndian,
+                width: UInt(depth.width),
+                height: UInt(depth.height),
+                sequence: frameSet.sequence,
+                timestampNanoseconds: frameSet.timestampNanoseconds
+            )
+        } else {
+            robMainViewController?.clearAlignedDepthFrame()
+        }
+
+        // ROBAI performs its own one-frame-per-second throttle and JPEG
+        // encoding on a separate queue, so the capture callback stays cheap.
+        robMainViewController?.didCaptureCameraSampleBuffer(sampleBuffer)
+
         //process samplebuffer here
         let humanRectanglesRequest = VNDetectHumanRectanglesRequest { request, error in
-            self.poseView.humanRect_observations = []
-            if let humanRectanglesObservations = request.results as? [VNHumanObservation] {
-                DispatchQueue.main.async {
-                    self.poseView.humanRect_observations = humanRectanglesObservations
-                    self.poseView.setNeedsDisplay(self.poseView.bounds)
-                }
+            let observations = (request.results as? [VNHumanObservation]) ?? []
+            DispatchQueue.main.async {
+                self.poseView.humanRect_observations = observations
+                self.poseView.setNeedsDisplay(self.poseView.bounds)
             }
         }
         humanRectanglesRequest.revision = VNDetectHumanRectanglesRequestRevision2
         humanRectanglesRequest.upperBodyOnly = false
         
         let humanBodyPoseRequest = VNDetectHumanBodyPoseRequest { request, error in
-            self.poseView.bodyPose_observations = []
-            if let bodyPoseObservations = request.results as? [VNHumanBodyPoseObservation] {
-                DispatchQueue.main.async {
-                    self.poseView.bodyPose_observations = bodyPoseObservations
-                    self.poseView.setNeedsDisplay(self.poseView.bounds)
-                }
+            let observations = (request.results as? [VNHumanBodyPoseObservation]) ?? []
+            DispatchQueue.main.async {
+                self.poseView.bodyPose_observations = observations
+                self.poseView.setNeedsDisplay(self.poseView.bounds)
             }
         }
         let humanHandPoseRequest = VNDetectHumanHandPoseRequest { request, error in
-            self.poseView.humanHandPose_observations = []
-            if let handObservations = request.results as? [VNHumanHandPoseObservation] {
-                DispatchQueue.main.async {
-                    self.poseView.humanHandPose_observations = handObservations
-                    self.poseView.setNeedsDisplay(self.poseView.bounds)
-                }
+            let observations = (request.results as? [VNHumanHandPoseObservation]) ?? []
+            DispatchQueue.main.async {
+                self.poseView.humanHandPose_observations = observations
+                self.poseView.setNeedsDisplay(self.poseView.bounds)
             }
-            
         }
         let humanBodyPose3DRequest = VNDetectHumanBodyPose3DRequest { request, error in
             for observation in request.results as! [VNHumanBodyPose3DObservation] {
@@ -420,6 +474,22 @@ extension CameraViewController: CameraManagerDelegate {
             //personInstanceRequest       // √
                 //segmentationRequest       // √
         ])
+    }
+
+    func cameraManager(
+        _ manager: CameraManagerProtocol,
+        didChange state: CameraSourceState,
+        detail: String?
+    ) {
+        videoServer?.updateCameraState(state)
+        if state != .streamingRGBD {
+            robMainViewController?.clearAlignedDepthFrame()
+        }
+        if let detail, !detail.isEmpty {
+            print("Camera state \(state.rawValue): \(detail)")
+        } else {
+            print("Camera state \(state.rawValue)")
+        }
     }
     
     func processAndDrawMask(observation: VNPixelBufferObservation, on originalCIImage: CIImage) {

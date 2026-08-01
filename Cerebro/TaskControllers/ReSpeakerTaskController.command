@@ -5,4 +5,9 @@
 #echo "ReSpeaker DOA"
 #echo "*********************************"
 
-/usr/local/bin/python3 /Users/rob/Desktop/DOA/doa.py
+if [ -z "$CEREBRO_RESPEAKER_SCRIPT" ]; then
+    echo "CEREBRO_RESPEAKER_SCRIPT is not configured" >&2
+    exit 64
+fi
+
+"${CEREBRO_PYTHON_EXECUTABLE:-python3}" "$CEREBRO_RESPEAKER_SCRIPT"

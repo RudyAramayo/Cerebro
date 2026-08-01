@@ -5,4 +5,5 @@
 #import "AppDelegate.h"
 #import "ROBMainViewController.h"
 #import "ROBSerialBox.h"
+#import "ROBBaseControllerModel.h"
 #import "ROBSpeechBox.h"

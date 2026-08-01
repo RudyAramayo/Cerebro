@@ -8,6 +8,7 @@
 
 #import "JoinWifiTaskController.h"
 #import "ROBMainViewController.h"
+#import "ROBTaskLaunchGuard.h"
 
 
 @interface JoinWifiTaskController ()
@@ -40,7 +41,9 @@
         
         NSString *path = [[NSBundle mainBundle] pathForResource:@"JoinWifiTaskController" ofType:@"command"];
         self.task = [NSTask new];
-        self.task.launchPath = path;
+        if (path.length > 0) {
+            self.task.executableURL = [NSURL fileURLWithPath:path];
+        }
         self.task.arguments = @[networkDevice, ssid, password];
 
         __weak JoinWifiTaskController *weakSelf = self;
@@ -60,7 +63,12 @@
         [self captureStandardOutputAndRouteToTextView:self.task];
 
         
-        [self.task launch];
+        NSError *launchError = nil;
+        if (!ROBLaunchTaskSafely(self.task, &launchError)) {
+            NSLog(@"Join Wi-Fi task could not launch: %@", launchError.localizedDescription);
+            self.isListening = NO;
+            return;
+        }
         [self.task waitUntilExit];
         
     });
@@ -69,7 +77,10 @@
 
 - (void) shutdownTask
 {
-    [self.task terminate];
+    if (self.task.isRunning) {
+        [self.task terminate];
+    }
+    self.isListening = NO;
 }
 
 - (void) captureStandardOutputAndRouteToTextView:(NSTask *)task

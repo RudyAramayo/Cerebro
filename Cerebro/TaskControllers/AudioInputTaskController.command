@@ -6,6 +6,9 @@ echo "AudioInputTaskController"
 echo $1
 echo "*********************************"
 
-export GOOGLE_APPLICATION_CREDENTIALS="/Users/rob/Desktop/ROBOT-d309c5b55928.json"
+if [ -z "$CEREBRO_AUDIO_INPUT_SCRIPT" ]; then
+    echo "CEREBRO_AUDIO_INPUT_SCRIPT is not configured" >&2
+    exit 64
+fi
 
-/usr/local/bin/python3 /Users/rob/Desktop/python_google_speech $1
+"${CEREBRO_PYTHON_EXECUTABLE:-python3}" "$CEREBRO_AUDIO_INPUT_SCRIPT" "$1"

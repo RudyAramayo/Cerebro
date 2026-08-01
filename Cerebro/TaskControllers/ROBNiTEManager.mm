@@ -8,6 +8,7 @@
 #include "NiTE.h"
 
 #import "ROBNiTEManager.h"
+#import "ROBTaskLaunchGuard.h"
 //#import "FreenectPCL.h"
 
 
@@ -116,7 +117,7 @@ void updateUserState(const nite::UserData& user, unsigned long long ts)
     NSFileHandle *file = self.pipe.fileHandleForReading;
     
     self.task = [[NSTask alloc] init];
-    self.task.launchPath = @"/libs/NiTE/Samples/Bin/SimpleUserTracker";
+    self.task.executableURL = [NSURL fileURLWithPath:@"/libs/NiTE/Samples/Bin/SimpleUserTracker"];
     
     /*
     if (![self.previousInputText isEqualToString:@""])
@@ -137,7 +138,11 @@ void updateUserState(const nite::UserData& user, unsigned long long ts)
     
     [file waitForDataInBackgroundAndNotify];
     
-    [self.task launch];
+    NSError *launchError = nil;
+    if (!ROBLaunchTaskSafely(self.task, &launchError)) {
+        NSLog(@"NiTE SimpleUserTracker task could not launch: %@", launchError.localizedDescription);
+        return;
+    }
     [self.task waitUntilExit];
     
     

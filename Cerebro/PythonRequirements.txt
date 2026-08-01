@@ -1,0 +1,2 @@
+# Webcam_color.py uses the DepthAI v3.8 RGB-D pipeline API.
+depthai==3.8.0
