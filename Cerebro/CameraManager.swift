@@ -121,7 +121,10 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     private let previewLock = NSLock()
 
     private var videoSession: AVCaptureSession?
-    private var previewLayer: AVCaptureVideoPreviewLayer?
+    /// The layer stays alive across source changes. Assigning its `session`
+    /// creates or removes an AVCaptureConnection, so that property is mutated
+    /// only on sessionQueue with the rest of the capture graph.
+    private let previewLayer: AVCaptureVideoPreviewLayer
     private var depthPreviewLayer: AVSampleBufferDisplayLayer?
     private var deviceDiscoverySession: AVCaptureDevice.DiscoverySession
     private var notificationTokens: [NSObjectProtocol] = []
@@ -143,7 +146,12 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     var videoSampleHandler: ((CMSampleBuffer) -> Void)?
 
     init(containerView: NSView) {
+        let previewLayer: AVCaptureVideoPreviewLayer = {
+            dispatchPrecondition(condition: .onQueue(.main))
+            return AVCaptureVideoPreviewLayer()
+        }()
         self.containerView = containerView
+        self.previewLayer = previewLayer
         self.deviceDiscoverySession = AVCaptureDevice.DiscoverySession(
             deviceTypes: [.continuityCamera, .external],
             mediaType: .video,
@@ -159,7 +167,22 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     deinit {
         depthClient?.stop()
         notificationTokens.forEach(NotificationCenter.default.removeObserver)
-        videoSession?.stopRunning()
+
+        // Do not synchronously wait here: deinit can run on captureQueue while
+        // sessionQueue is draining it. Capturing only AVFoundation resources
+        // lets teardown remain serialized without retaining this manager.
+        let session = videoSession
+        let output = videoDataOutput
+        let previewLayer = previewLayer
+        let captureQueue = captureQueue
+        sessionQueue.async {
+            if session?.isRunning == true {
+                session?.stopRunning()
+            }
+            output?.setSampleBufferDelegate(nil, queue: nil)
+            captureQueue.sync {}
+            previewLayer.session = nil
+        }
     }
 
     func startSession() throws {
@@ -255,6 +278,7 @@ final class CameraManager: NSObject, CameraManagerProtocol {
                 guard self.videoSession?.inputs.compactMap({ ($0 as? AVCaptureDeviceInput)?.device.uniqueID })
                     .contains(device.uniqueID) == true else { return }
                 self.videoSession?.stopRunning()
+                self.previewLayer.session = nil
                 self.videoSession = nil
                 if self.activeSource == .avFoundationRGB {
                     self.activeSource = nil
@@ -348,7 +372,7 @@ final class CameraManager: NSObject, CameraManagerProtocol {
                 deliveryGeneration = self.currentDeliveryGeneration()
                 self.activeSource = .depthAIService
                 self.stopFallbackCaptureAndDrainCallbacks()
-                self.installDepthPreviewLayer()
+                self.installDepthPreviewLayer(generation: deliveryGeneration)
                 self.report(.streamingRGBD, detail: "Receiving synchronized RGB and aligned depth.")
             }
             self.enqueueLatestPreview(frameSet.rgbSampleBuffer)
@@ -512,12 +536,16 @@ final class CameraManager: NSObject, CameraManagerProtocol {
             session.commitConfiguration()
 
             videoSession?.stopRunning()
+            previewLayer.session = nil
             if activeSource == .avFoundationRGB {
                 activeSource = nil
                 advanceDeliveryGeneration()
             }
             videoSession = session
             videoDataOutput = output
+            // Setting this property implicitly creates the preview connection.
+            // It must complete before startRunning() enumerates connections.
+            previewLayer.session = session
         } catch {
             removeAVFoundationFallback(
                 detail: "RGB fallback could not bind: \(error.localizedDescription)"
@@ -527,6 +555,7 @@ final class CameraManager: NSObject, CameraManagerProtocol {
 
     private func removeAVFoundationFallback(detail: String) {
         videoSession?.stopRunning()
+        previewLayer.session = nil
         videoSession = nil
         videoDataOutput = nil
         let wasActiveFallback = activeSource == .avFoundationRGB
@@ -561,7 +590,7 @@ final class CameraManager: NSObject, CameraManagerProtocol {
         guard wantsRunning, activeSource != .depthAIService, let session = videoSession else { return }
         if activeSource != .avFoundationRGB {
             advanceDeliveryGeneration()
-            installAVFoundationPreviewLayer(for: session)
+            installAVFoundationPreviewLayer(generation: currentDeliveryGeneration())
         }
         activeSource = .avFoundationRGB
         if let videoDataOutput {
@@ -584,26 +613,23 @@ final class CameraManager: NSObject, CameraManagerProtocol {
         captureQueue.sync {}
     }
 
-    private func installAVFoundationPreviewLayer(for session: AVCaptureSession) {
+    private func installAVFoundationPreviewLayer(generation: UInt64) {
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
+            guard let self, self.deliveryGenerationIsCurrent(generation) else { return }
             self.depthPreviewLayer?.removeFromSuperlayer()
             self.depthPreviewLayer = nil
 
-            let layer = AVCaptureVideoPreviewLayer(session: session)
-            layer.videoGravity = .resizeAspectFill
-            layer.frame = self.containerView.bounds
+            self.previewLayer.videoGravity = .resizeAspectFill
+            self.previewLayer.frame = self.containerView.bounds
             self.containerView.wantsLayer = true
-            self.containerView.layer = layer
-            self.previewLayer = layer
+            self.containerView.layer = self.previewLayer
         }
     }
 
-    private func installDepthPreviewLayer() {
+    private func installDepthPreviewLayer(generation: UInt64) {
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.previewLayer?.removeFromSuperlayer()
-            self.previewLayer = nil
+            guard let self, self.deliveryGenerationIsCurrent(generation) else { return }
+            self.previewLayer.removeFromSuperlayer()
 
             let layer = AVSampleBufferDisplayLayer()
             layer.videoGravity = .resizeAspectFill
