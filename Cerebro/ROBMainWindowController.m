@@ -96,11 +96,16 @@
         BOOL unresolvedSystemDependency =
             self.systemDependenciesNeedAttention && !self.systemDependencyInstallInProgress;
         BOOL needsAttention = self.pythonRuntimeNeedsAttention || unresolvedSystemDependency;
+        NSString *installingPackageManager = ROBSystemPackageManagerDisplayName(
+            [ROBSystemDependencyManager sharedManager].installingPackageManager);
         self.pythonSettingsButton.title = needsAttention ? @"⚠ Settings…" : @"Settings…";
         if (self.systemDependencyInstallInProgress && self.pythonRuntimeNeedsAttention) {
-            self.pythonSettingsButton.toolTip = @"The Python environment needs attention; installing sshpass with Homebrew…";
+            self.pythonSettingsButton.toolTip = [NSString stringWithFormat:
+                @"The Python environment needs attention; installing sshpass with %@…",
+                installingPackageManager];
         } else if (self.systemDependencyInstallInProgress) {
-            self.pythonSettingsButton.toolTip = @"Installing sshpass with Homebrew…";
+            self.pythonSettingsButton.toolTip = [NSString stringWithFormat:
+                @"Installing sshpass with %@…", installingPackageManager];
         } else if (self.pythonRuntimeNeedsAttention && self.systemDependenciesNeedAttention) {
             self.pythonSettingsButton.toolTip = @"Python and sshpass dependencies need attention";
         } else if (self.pythonRuntimeNeedsAttention) {

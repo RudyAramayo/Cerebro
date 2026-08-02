@@ -12,6 +12,8 @@ import ImageIO
 
 @objc public protocol ROBAIDelegate: AnyObject {
     @objc optional func robAI(_ robAI: ROBAI, didReceiveResponseText text: String)
+    @objc optional func robAI(_ robAI: ROBAI, didReceiveInputTranscription text: String)
+    @objc optional func robAI(_ robAI: ROBAI, didFailRequestWithDetail detail: String)
     @objc optional func robAI(_ robAI: ROBAI, didChangeConnectionState state: String, detail: String?)
     @objc optional func robAIWasInterrupted(_ robAI: ROBAI)
     @objc optional func robAI(_ robAI: ROBAI, didReceiveToolCall call: ROBAIRobotToolCall)
@@ -125,6 +127,14 @@ import ImageIO
         audioEncoder?.endStream()
     }
 
+    /// Records that the on-device recognizer heard an utterance while Gemini
+    /// owns the microphone. The text is deliberately not resent: this only
+    /// gives the raw-audio turn a bounded response deadline.
+    public func noteMicrophoneTurnAwaitingResponse() {
+        let session = liveSession
+        Task { await session?.noteMicrophoneTurnAwaitingResponse() }
+    }
+
     public func sendVideoSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
         guard isLiveSessionReady else { return }
         videoEncoder?.enqueue(sampleBuffer)
@@ -134,7 +144,7 @@ import ImageIO
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty else { return }
         let session = liveSession
-        Task { await session?.sendOrderedText(trimmedText) }
+        Task { await session?.sendTextTurn(trimmedText) }
     }
 
     public func sendText(_ text: String, speechWordiness: Int) {
@@ -176,6 +186,18 @@ import ImageIO
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.delegate?.robAI?(self, didReceiveResponseText: text)
+            }
+
+        case .inputTranscription(let text):
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.delegate?.robAI?(self, didReceiveInputTranscription: text)
+            }
+
+        case .requestFailed(let detail):
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.delegate?.robAI?(self, didFailRequestWithDetail: detail)
             }
 
         case .interrupted:
@@ -225,6 +247,8 @@ private actor GeminiRoboticsLiveSession {
     enum Event {
         case connectionState(ConnectionState, String?)
         case completedText(String)
+        case inputTranscription(String)
+        case requestFailed(String)
         case interrupted
         case toolCalls([GeminiRoboticsToolCall])
         case cancelledToolCalls([String])
@@ -259,10 +283,24 @@ private actor GeminiRoboticsLiveSession {
     private var resumptionHandle: String?
     private var resumptionHandleDate: Date?
     private var responseText = ""
+    private var outputTranscription = GeminiTranscriptionAccumulator()
+    private var microphoneTurnAssociation = GeminiMicrophoneTurnAssociation()
     private var audioQueue: [AudioQueueItem] = []
     private var pendingTextTurns: [String] = []
     private var textTurnIsInFlight = false
     private var inFlightTextTurn: String?
+    private var inFlightTextTurnID: UInt64?
+    private var nextTextTurnID: UInt64 = 0
+    private var turnDeadlineTracker = GeminiTurnDeadlineTracker()
+    private var responseStartDeadlineTask: Task<Void, Never>?
+    private var turnCompletionDeadlineTask: Task<Void, Never>?
+    private var microphoneTurnDeadlineTracker = GeminiTurnDeadlineTracker()
+    private var microphoneResponseStartDeadlineTask: Task<Void, Never>?
+    private var microphoneTurnCompletionDeadlineTask: Task<Void, Never>?
+    private var inFlightMicrophoneTurnID: UInt64?
+    private var nextMicrophoneTurnID: UInt64 = 0
+    private var microphoneTurnHasResponse = false
+    private var lastModelTurnCompletionTime: TimeInterval?
     private var pendingVideoJPEG: Data?
     private var lastVideoSendTime: TimeInterval = 0
     private var toolCallLedger: [String: ToolCallState] = [:]
@@ -292,11 +330,19 @@ private actor GeminiRoboticsLiveSession {
         runGeneration &+= 1
         shouldRun = false
         setupIsComplete = false
-        responseText = ""
+        resetResponseState()
         audioQueue.removeAll()
         pendingTextTurns.removeAll()
         textTurnIsInFlight = false
         inFlightTextTurn = nil
+        inFlightTextTurnID = nil
+        cancelTextTurnDeadlines()
+        turnDeadlineTracker = GeminiTurnDeadlineTracker()
+        cancelMicrophoneTurnDeadlines()
+        microphoneTurnDeadlineTracker = GeminiTurnDeadlineTracker()
+        inFlightMicrophoneTurnID = nil
+        microphoneTurnHasResponse = false
+        lastModelTurnCompletionTime = nil
         pendingVideoJPEG = nil
         resumptionHandle = nil
         resumptionHandleDate = nil
@@ -350,13 +396,72 @@ private actor GeminiRoboticsLiveSession {
         startVideoDrainIfNeeded()
     }
 
-    func sendOrderedText(_ text: String) async {
+    func sendTextTurn(_ text: String) async {
         guard !text.isEmpty else { return }
         if pendingTextTurns.count >= 5 {
             pendingTextTurns.removeFirst()
         }
         pendingTextTurns.append(text)
         await sendNextTextTurnIfPossible()
+    }
+
+    func noteMicrophoneTurnAwaitingResponse() {
+        guard setupIsComplete,
+              configuration.streamsAudio else {
+            return
+        }
+
+        let now = ProcessInfo.processInfo.systemUptime
+        let hasTrackedTurn = textTurnIsInFlight || inFlightMicrophoneTurnID != nil
+        let disposition = microphoneTurnAssociation.noteLocalTranscript(
+            hasTrackedTurn: hasTrackedTurn
+        )
+        // A raw-audio callback during a queued text response can represent a
+        // barge-in. Preserve that ordering signal, but never run both deadline
+        // owners concurrently.
+        if textTurnIsInFlight {
+            return
+        }
+
+        // A final on-device transcription callback can arrive just after a
+        // very fast Gemini response. Do not turn that late callback into a
+        // phantom request failure. ROBSpeech keeps capture half-duplex during
+        // the remainder of the response, so this window cannot mask a real
+        // follow-up utterance.
+        let responseAlreadyStarted = disposition == .associateWithActiveResponse
+        if disposition == .beginAwaitingResponse,
+           let lastModelTurnCompletionTime,
+           now - lastModelTurnCompletionTime < 1.0 {
+            return
+        }
+        if let turnID = inFlightMicrophoneTurnID {
+            guard !microphoneTurnHasResponse else { return }
+            microphoneTurnDeadlineTracker.begin(turnID: turnID, now: now)
+            if responseAlreadyStarted {
+                microphoneTurnHasResponse = true
+                microphoneTurnDeadlineTracker.noteResponse(turnID: turnID)
+            }
+            beginMicrophoneTurnDeadlineTasks(
+                turnID: turnID,
+                responseAlreadyStarted: microphoneTurnHasResponse
+            )
+            return
+        }
+
+        nextMicrophoneTurnID &+= 1
+        let turnID = nextMicrophoneTurnID
+        inFlightMicrophoneTurnID = turnID
+        microphoneTurnHasResponse = false
+        microphoneTurnDeadlineTracker.begin(turnID: turnID, now: now)
+        if responseAlreadyStarted {
+            microphoneTurnHasResponse = true
+            microphoneTurnDeadlineTracker.noteResponse(turnID: turnID)
+        }
+        beginMicrophoneTurnDeadlineTasks(
+            turnID: turnID,
+            responseAlreadyStarted: microphoneTurnHasResponse
+        )
+        NSLog("Gemini Robotics microphone turn %@ detected", String(turnID))
     }
 
     func sendToolResponse(callID: String, name: String, result: [String: Any]) async {
@@ -408,6 +513,12 @@ private actor GeminiRoboticsLiveSession {
                 break
             } catch {
                 guard shouldRun, generation == runGeneration, !Task.isCancelled else { break }
+                failInFlightTextTurn(
+                    detail: "The Gemini connection ended before the request completed. Please try again."
+                )
+                failInFlightMicrophoneTurn(
+                    detail: "The Gemini connection ended before the microphone request completed. Please try again."
+                )
                 eventHandler(.connectionState(.failed, error.localizedDescription))
                 retryAttempt += 1
             }
@@ -444,14 +555,7 @@ private actor GeminiRoboticsLiveSession {
         let webSocket = URLSession.shared.webSocketTask(with: url)
         socket = webSocket
         setupIsComplete = false
-        if !attemptedResumption {
-            if let inFlightTextTurn {
-                pendingTextTurns.insert(inFlightTextTurn, at: 0)
-                self.inFlightTextTurn = nil
-                textTurnIsInFlight = false
-            }
-            responseText = ""
-        }
+        resetResponseState()
         audioQueue.removeAll()
         webSocket.resume()
 
@@ -489,12 +593,10 @@ private actor GeminiRoboticsLiveSession {
                 if !setupIsComplete && attemptedResumption {
                     resumptionHandle = nil
                     resumptionHandleDate = nil
-                    if let inFlightTextTurn {
-                        pendingTextTurns.insert(inFlightTextTurn, at: 0)
-                        self.inFlightTextTurn = nil
-                        textTurnIsInFlight = false
-                    }
-                    responseText = ""
+                    failInFlightTextTurn(
+                        detail: "Gemini could not resume the request. Please try again."
+                    )
+                    resetResponseState()
                 }
                 throw NSError(
                     domain: "GeminiRoboticsLiveSession",
@@ -520,33 +622,85 @@ private actor GeminiRoboticsLiveSession {
                 resumptionHandleDate = nil
             }
 
+            if let inputTranscription = serverEvent.inputTranscription,
+               !inputTranscription.isEmpty {
+                eventHandler(.inputTranscription(inputTranscription))
+            }
+
+            // Live may deliver `interrupted` and the old turn's `turnComplete`
+            // in separate envelopes. Discard that old tail without allowing it
+            // to finalize or clear the new raw-microphone watchdog.
+            if microphoneTurnAssociation.awaitingInterruptedTurnCompletion,
+               !serverEvent.interrupted {
+                if serverEvent.turnComplete {
+                    _ = microphoneTurnAssociation.consumeInterruptedTurnCompletion()
+                    resetResponseBuffers()
+                    await sendNextTextTurnIfPossible()
+                }
+                if !serverEvent.cancelledToolCallIDs.isEmpty {
+                    handleToolCallCancellations(serverEvent.cancelledToolCallIDs)
+                }
+                if serverEvent.shouldReconnect {
+                    failInFlightTextTurn(
+                        detail: "Gemini requested a reconnect before completing the request. Please try again."
+                    )
+                    failInFlightMicrophoneTurn(
+                        detail: "Gemini requested a reconnect before completing the microphone request. Please try again."
+                    )
+                    return
+                }
+                continue
+            }
+
+            let hasUsableModelOutput = !serverEvent.textFragments.isEmpty ||
+                !(serverEvent.outputTranscription ?? "").isEmpty ||
+                !serverEvent.toolCalls.isEmpty
+            if hasUsableModelOutput || serverEvent.generationComplete {
+                microphoneTurnAssociation.noteModelResponseStarted()
+                noteInFlightTextTurnResponse()
+                noteInFlightMicrophoneTurnResponse()
+            }
+
             if serverEvent.interrupted {
-                responseText = ""
+                let shouldArmMicrophoneFollowup = microphoneTurnAssociation.noteInterruption()
+                lastModelTurnCompletionTime = nil
+                resetResponseBuffers()
+                completeInFlightTextTurnDeadline()
+                completeInFlightMicrophoneTurnDeadline()
                 textTurnIsInFlight = false
                 inFlightTextTurn = nil
+                inFlightTextTurnID = nil
                 eventHandler(.interrupted)
-                await sendNextTextTurnIfPossible()
+                if shouldArmMicrophoneFollowup {
+                    beginNewMicrophoneTurn(now: ProcessInfo.processInfo.systemUptime)
+                }
+                if serverEvent.turnComplete {
+                    _ = microphoneTurnAssociation.consumeInterruptedTurnCompletion()
+                    await sendNextTextTurnIfPossible()
+                }
             } else {
                 responseText += serverEvent.textFragments.joined()
+                if let fragment = serverEvent.outputTranscription {
+                    appendTranscriptFragment(fragment)
+                }
                 if serverEvent.turnComplete {
-                    let completedText = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
-                    responseText = ""
-                    textTurnIsInFlight = false
-                    inFlightTextTurn = nil
-                    if !completedText.isEmpty {
-                        eventHandler(.completedText(completedText))
-                    }
-                    await sendNextTextTurnIfPossible()
+                    await finalizeCompletedTurn()
                 }
             }
 
-            if !serverEvent.toolCalls.isEmpty {
+            if !serverEvent.interrupted, !serverEvent.toolCalls.isEmpty {
                 await handleToolCalls(serverEvent.toolCalls)
             }
             if !serverEvent.cancelledToolCallIDs.isEmpty {
                 handleToolCallCancellations(serverEvent.cancelledToolCallIDs)
             }
             if serverEvent.shouldReconnect {
+                failInFlightTextTurn(
+                    detail: "Gemini requested a reconnect before completing the request. Please try again."
+                )
+                failInFlightMicrophoneTurn(
+                    detail: "Gemini requested a reconnect before completing the microphone request. Please try again."
+                )
                 return
             }
         }
@@ -555,22 +709,244 @@ private actor GeminiRoboticsLiveSession {
     private func sendNextTextTurnIfPossible() async {
         guard setupIsComplete,
               !textTurnIsInFlight,
+              inFlightMicrophoneTurnID == nil,
               !pendingTextTurns.isEmpty,
               let socket else {
             return
         }
 
         let text = pendingTextTurns.removeFirst()
+        nextTextTurnID &+= 1
+        let turnID = nextTextTurnID
         textTurnIsInFlight = true
         inFlightTextTurn = text
+        inFlightTextTurnID = turnID
+        beginTextTurnDeadlines(turnID: turnID)
         do {
-            try await send(GeminiRoboticsProtocol.orderedTextMessage(text), over: socket)
+            try await send(GeminiRoboticsProtocol.realtimeTextMessage(text), over: socket)
+            NSLog("Gemini Robotics text turn %@ sent", String(turnID))
         } catch {
-            textTurnIsInFlight = false
-            inFlightTextTurn = nil
-            pendingTextTurns.insert(text, at: 0)
+            failInFlightTextTurn(
+                detail: "Cerebro could not send the request to Gemini. Please try again."
+            )
             socket.cancel(with: .goingAway, reason: nil)
         }
+    }
+
+    private func appendTranscriptFragment(_ fragment: String) {
+        guard !fragment.isEmpty else { return }
+        outputTranscription.append(fragment)
+    }
+
+    private func finalizeCompletedTurn() async {
+        let modelText = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let transcribedText = outputTranscription.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let completedText = modelText.isEmpty ? transcribedText : modelText
+        let hadTextTurn = textTurnIsInFlight
+        let hadMicrophoneTurn = inFlightMicrophoneTurnID != nil
+
+        completeInFlightTextTurnDeadline()
+        completeInFlightMicrophoneTurnDeadline()
+        lastModelTurnCompletionTime = ProcessInfo.processInfo.systemUptime
+
+        resetResponseState()
+        textTurnIsInFlight = false
+        inFlightTextTurn = nil
+        inFlightTextTurnID = nil
+
+        if !completedText.isEmpty {
+            eventHandler(.completedText(completedText))
+        } else if hadTextTurn || hadMicrophoneTurn {
+            eventHandler(.requestFailed("Gemini completed the request without a usable spoken response."))
+        }
+        await sendNextTextTurnIfPossible()
+    }
+
+    private func resetResponseState() {
+        resetResponseBuffers()
+        microphoneTurnAssociation.reset()
+    }
+
+    private func resetResponseBuffers() {
+        responseText = ""
+        outputTranscription.reset()
+    }
+
+    private func beginTextTurnDeadlines(turnID: UInt64) {
+        turnDeadlineTracker.begin(
+            turnID: turnID,
+            now: ProcessInfo.processInfo.systemUptime
+        )
+        responseStartDeadlineTask?.cancel()
+        turnCompletionDeadlineTask?.cancel()
+
+        let responseDelay = turnDeadlineTracker.responseStartTimeout
+        responseStartDeadlineTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: UInt64(responseDelay * 1_000_000_000))
+            } catch {
+                return
+            }
+            await self?.handleTextTurnDeadline(turnID: turnID)
+        }
+
+        let completionDelay = turnDeadlineTracker.turnCompletionTimeout
+        turnCompletionDeadlineTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: UInt64(completionDelay * 1_000_000_000))
+            } catch {
+                return
+            }
+            await self?.handleTextTurnDeadline(turnID: turnID)
+        }
+    }
+
+    private func noteInFlightTextTurnResponse() {
+        guard let turnID = inFlightTextTurnID else { return }
+        turnDeadlineTracker.noteResponse(turnID: turnID)
+    }
+
+    private func completeInFlightTextTurnDeadline() {
+        if let turnID = inFlightTextTurnID {
+            turnDeadlineTracker.complete(turnID: turnID)
+        }
+        cancelTextTurnDeadlines()
+    }
+
+    private func cancelTextTurnDeadlines() {
+        responseStartDeadlineTask?.cancel()
+        responseStartDeadlineTask = nil
+        turnCompletionDeadlineTask?.cancel()
+        turnCompletionDeadlineTask = nil
+    }
+
+    private func handleTextTurnDeadline(turnID: UInt64) {
+        guard textTurnIsInFlight, inFlightTextTurnID == turnID else { return }
+        guard let expiration = turnDeadlineTracker.expiration(
+            turnID: turnID,
+            now: ProcessInfo.processInfo.systemUptime
+        ) else {
+            return
+        }
+
+        let detail: String
+        switch expiration {
+        case .responseNotStarted:
+            detail = "Gemini did not start a response within 15 seconds. Please try again."
+        case .turnNotCompleted:
+            detail = "Gemini did not finish the response. Please try again."
+        }
+        if failInFlightTextTurn(detail: detail) {
+            socket?.cancel(with: .goingAway, reason: nil)
+        }
+    }
+
+    @discardableResult
+    private func failInFlightTextTurn(detail: String) -> Bool {
+        guard textTurnIsInFlight else { return false }
+        completeInFlightTextTurnDeadline()
+        resetResponseState()
+        textTurnIsInFlight = false
+        inFlightTextTurn = nil
+        inFlightTextTurnID = nil
+        eventHandler(.requestFailed(detail))
+        return true
+    }
+
+    private func beginMicrophoneTurnDeadlineTasks(
+        turnID: UInt64,
+        responseAlreadyStarted: Bool
+    ) {
+        microphoneResponseStartDeadlineTask?.cancel()
+        microphoneTurnCompletionDeadlineTask?.cancel()
+
+        if !responseAlreadyStarted {
+            let responseDelay = microphoneTurnDeadlineTracker.responseStartTimeout
+            microphoneResponseStartDeadlineTask = Task { [weak self] in
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(responseDelay * 1_000_000_000))
+                } catch {
+                    return
+                }
+                await self?.handleMicrophoneTurnDeadline(turnID: turnID)
+            }
+        } else {
+            microphoneResponseStartDeadlineTask = nil
+        }
+
+        let completionDelay = microphoneTurnDeadlineTracker.turnCompletionTimeout
+        microphoneTurnCompletionDeadlineTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: UInt64(completionDelay * 1_000_000_000))
+            } catch {
+                return
+            }
+            await self?.handleMicrophoneTurnDeadline(turnID: turnID)
+        }
+    }
+
+    private func beginNewMicrophoneTurn(now: TimeInterval) {
+        nextMicrophoneTurnID &+= 1
+        let turnID = nextMicrophoneTurnID
+        inFlightMicrophoneTurnID = turnID
+        microphoneTurnHasResponse = false
+        microphoneTurnDeadlineTracker.begin(turnID: turnID, now: now)
+        beginMicrophoneTurnDeadlineTasks(turnID: turnID, responseAlreadyStarted: false)
+        NSLog("Gemini Robotics microphone turn %@ detected after interruption", String(turnID))
+    }
+
+    private func noteInFlightMicrophoneTurnResponse() {
+        guard let turnID = inFlightMicrophoneTurnID else { return }
+        microphoneTurnHasResponse = true
+        microphoneTurnDeadlineTracker.noteResponse(turnID: turnID)
+        microphoneResponseStartDeadlineTask?.cancel()
+        microphoneResponseStartDeadlineTask = nil
+    }
+
+    private func completeInFlightMicrophoneTurnDeadline() {
+        if let turnID = inFlightMicrophoneTurnID {
+            microphoneTurnDeadlineTracker.complete(turnID: turnID)
+        }
+        cancelMicrophoneTurnDeadlines()
+        inFlightMicrophoneTurnID = nil
+        microphoneTurnHasResponse = false
+    }
+
+    private func cancelMicrophoneTurnDeadlines() {
+        microphoneResponseStartDeadlineTask?.cancel()
+        microphoneResponseStartDeadlineTask = nil
+        microphoneTurnCompletionDeadlineTask?.cancel()
+        microphoneTurnCompletionDeadlineTask = nil
+    }
+
+    private func handleMicrophoneTurnDeadline(turnID: UInt64) {
+        guard inFlightMicrophoneTurnID == turnID else { return }
+        guard let expiration = microphoneTurnDeadlineTracker.expiration(
+            turnID: turnID,
+            now: ProcessInfo.processInfo.systemUptime
+        ) else {
+            return
+        }
+
+        let detail: String
+        switch expiration {
+        case .responseNotStarted:
+            detail = "Gemini did not start a response to the microphone input within 15 seconds. Please try again."
+        case .turnNotCompleted:
+            detail = "Gemini did not finish the microphone response. Please try again."
+        }
+        if failInFlightMicrophoneTurn(detail: detail) {
+            socket?.cancel(with: .goingAway, reason: nil)
+        }
+    }
+
+    @discardableResult
+    private func failInFlightMicrophoneTurn(detail: String) -> Bool {
+        guard inFlightMicrophoneTurnID != nil else { return false }
+        completeInFlightMicrophoneTurnDeadline()
+        resetResponseState()
+        eventHandler(.requestFailed(detail))
+        return true
     }
 
     private func startVideoDrainIfNeeded() {

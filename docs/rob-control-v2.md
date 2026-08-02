@@ -17,6 +17,13 @@ QUIC provides ordered reliable delivery for control, cancellation, results,
 Lidar, and UI messages while retaining the correctly advertised UDP transport.
 The code intentionally does not use replayable fast-open/0-RTT control data.
 
+Cerebro persists the canonical certificate DER in a uniquely addressed
+Keychain record and installs the matching certificate item only once. One
+in-process server-identity context supplies the control listener, video
+listener, Bonjour robot ID, server authentication material, and every issued
+pairing code. Repeated startup or pairing-panel access must therefore neither
+create duplicate certificates nor change the pinned leaf fingerprint.
+
 Encoded camera media does not use this stream. Cerebro advertises a separate
 authenticated `_robvideo._udp` / `robvideo/1` QUIC service so media congestion
 cannot delay robot-control messages. A video subscription must name the exact
@@ -137,6 +144,53 @@ The old code and every clone remain rejected. Revocation is server-authoritative
 removing a credential only from the client is an unpair operation, not a
 substitute for revoking it in Cerebro.
 
+A deliberate server-certificate replacement is a robot-wide re-enrollment
+event because every controller and publisher pins the old leaf fingerprint.
+Cerebro preserves its robot UUID and server secret when installing a new
+canonical certificate, but operators must revoke stale device credentials and
+issue fresh codes. The app must never silently generate a new leaf during an
+ordinary restart or while opening the pairing UI.
+
+The first launch after adopting canonical certificate storage is the one
+intentional exception: when the canonical DER record does not exist, Cerebro
+uses its existing tagged P-256 private key to create and persist one replacement
+leaf. Any pre-upgrade controller pin is then stale. In **Manage Paired
+Devices…**, revoke the old device entry, choose **Pair ROBController**, and
+install that newly issued code on ROBController. Historical certificate items
+may be removed during this one-time maintenance, but preserve the tagged
+private key, server profile, and peer registry; subsequent launches must reuse
+the canonical leaf and fingerprint.
+
+## Identity persistence regression fixture
+
+The standalone fixture uses a temporary file-based Keychain, three fresh
+identity-store instances, and real Security.framework certificate storage. Run
+it from the repository root in a normal macOS Terminal or Xcode environment;
+restrictive sandboxes can reject file-based Keychain creation. It asserts that
+all loads return one fingerprint and leave exactly one certificate:
+
+```sh
+(
+set -e
+robctl_fixture_dir="$(mktemp -d "${TMPDIR:-/tmp}/cerebro-robctl-fixture.XXXXXX")"
+trap 'rm -rf -- "$robctl_fixture_dir"' EXIT HUP INT TERM
+
+xcrun swiftc -swift-version 5 \
+  -module-cache-path "$robctl_fixture_dir/module-cache" \
+  -parse-as-library \
+  -D ROB_CONTROL_IDENTITY_FIXTURE \
+  Cerebro/AutoNet/AutoNetShared/AutoNetDataTransferProtocol.swift \
+  Tests/ROBControlTransportIntegrationTests.swift \
+  -o "$robctl_fixture_dir/robcontrol-transport-fixture"
+
+"$robctl_fixture_dir/robcontrol-transport-fixture"
+)
+```
+
+Current SDKs report deprecation warnings for the fixture-only file-based
+`SecKeychain` APIs. Production identity storage continues to use the app's
+normal login Keychain; the temporary fixture keychain is deleted on exit.
+
 ## Apple Watch companion
 
 The ROBController Watch app does not receive the robot credential or connect to
@@ -194,3 +248,5 @@ fallbacks.
    Arduino deadman interval.
 9. Test cancel/result recovery and controller reconnection.
 10. Disable the legacy environment/default switch for normal operation.
+11. Run the identity persistence fixture, restart Cerebro twice, and verify the
+    canonical certificate count and public fingerprint remain unchanged.

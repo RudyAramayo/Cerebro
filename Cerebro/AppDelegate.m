@@ -33,6 +33,7 @@ static NSString * const ROBLegacyLuxonisUVCDefaultsKey = @"ROBAllowLuxonisUVCFal
 @property (readwrite, assign) BOOL restartUTCWebCamAfterTermination;
 @property (readwrite, assign) NSUInteger pythonRuntimeGeneration;
 @property (readwrite, assign) BOOL reportedMissingRPLidarApplication;
+- (BOOL)cerebroCheck;
 
 @end
 
@@ -43,6 +44,10 @@ static NSString * const ROBLegacyLuxonisUVCDefaultsKey = @"ROBAllowLuxonisUVCFal
 
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification
 {
+    if ([self cerebroCheck]) {
+        return;
+    }
+
     self.utcWebCamIsOnline = NO;
     self.utcWebCamOutput = [NSMutableString string];
     self.utcWebCamOutputQueue = dispatch_queue_create("com.orbitusrobotics.Cerebro.UTCWebCamOutput", DISPATCH_QUEUE_SERIAL);
@@ -54,15 +59,13 @@ static NSString * const ROBLegacyLuxonisUVCDefaultsKey = @"ROBAllowLuxonisUVCFal
                                              selector:@selector(pythonConfigurationRequired:)
                                                  name:ROBPythonRuntimeConfigurationRequiredNotification
                                                object:nil];
-    [[ROBSystemDependencyManager sharedManager]
-        ensureSSHpassInstalledWithCompletion:^(BOOL success, NSString *output, NSError *error) {
-            if (success) {
-                NSLog(@"Cerebro system dependency ready: %@", output);
-            } else {
-                NSLog(@"Cerebro system dependency needs attention: %@", error.localizedDescription);
-            }
-        }];
-    [self cerebroCheck];
+    ROBSystemDependencyManager *dependencyManager = [ROBSystemDependencyManager sharedManager];
+    [dependencyManager refreshSSHpassAvailability];
+    if (dependencyManager.sshpassPath.length > 0) {
+        NSLog(@"Cerebro system dependency ready: sshpass at %@", dependencyManager.sshpassPath);
+    } else {
+        NSLog(@"Cerebro system dependency needs attention: choose Homebrew or MacPorts in Settings to install sshpass");
+    }
     [self utcWebCamCheck];
     //Give RPLidar 10 seconds to warm up as the macmini is booting quite fast
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -115,32 +118,52 @@ static NSString * const ROBLegacyLuxonisUVCDefaultsKey = @"ROBAllowLuxonisUVCFal
 }
 
 
-- (void) cerebroCheck {
-    //ps aux | grep Cerebro
-    //system("ps aux | grep Cerebro");
-    NSTask *cerebroIsRunning = [NSTask new];
-    cerebroIsRunning.executableURL = [NSURL fileURLWithPath:@"/bin/ps"];
-    cerebroIsRunning.arguments = @[@"aux"]; // | grep Cerebro
-    
-    NSPipe *pipe = [NSPipe pipe];
-    cerebroIsRunning.standardOutput = pipe;
-    
-    NSError *launchError = nil;
-    if (!ROBLaunchTaskSafely(cerebroIsRunning, &launchError)) {
-        NSLog(@"Cerebro process check could not start: %@", launchError.localizedDescription);
-        return;
+- (BOOL)cerebroCheck
+{
+    NSString *bundleIdentifier = NSBundle.mainBundle.bundleIdentifier;
+    if (bundleIdentifier.length == 0) {
+        NSLog(@"Cerebro could not determine its bundle identifier; skipping the duplicate-instance check");
+        return NO;
     }
-    //[cerebroIsRunning waitUntilExit];
-    
-    NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-    NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    
-    if ([output componentsSeparatedByString:@"Cerebro.app/Contents/MacOS/Cerebro"].count > 2) { //If we have a count greater than 2 then we have multiple instances of Cerebro.app running
-        NSLog(@"Cerebro is already running! Exiting");
-        exit(1);
+
+    NSRunningApplication *currentApplication = NSRunningApplication.currentApplication;
+    NSRunningApplication *winner = nil;
+    for (NSRunningApplication *candidate in
+         [NSRunningApplication runningApplicationsWithBundleIdentifier:bundleIdentifier]) {
+        if (candidate.isTerminated || candidate.processIdentifier <= 0) {
+            continue;
+        }
+
+        if (winner == nil) {
+            winner = candidate;
+            continue;
+        }
+
+        NSDate *candidateLaunchDate = candidate.launchDate ?: NSDate.distantFuture;
+        NSDate *winnerLaunchDate = winner.launchDate ?: NSDate.distantFuture;
+        NSComparisonResult launchOrder = [candidateLaunchDate compare:winnerLaunchDate];
+        if (launchOrder == NSOrderedAscending ||
+            (launchOrder == NSOrderedSame &&
+             candidate.processIdentifier < winner.processIdentifier)) {
+            winner = candidate;
+        }
     }
-    
-    //NSLog(@"Cerebro check passsed...");
+
+    if (winner == nil || winner.processIdentifier == currentApplication.processIdentifier) {
+        return NO;
+    }
+
+    BOOL activationRequested =
+        [winner activateWithOptions:NSApplicationActivateAllWindows];
+    if (!activationRequested && winner.isTerminated) {
+        return NO;
+    }
+
+    NSLog(@"Cerebro process %d is already running; closing duplicate process %d",
+          winner.processIdentifier,
+          currentApplication.processIdentifier);
+    [NSApp terminate:nil];
+    return YES;
 }
 - (void) rpLidarCheck {
     

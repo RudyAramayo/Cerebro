@@ -178,7 +178,26 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
 
 - (void)robAI:(ROBAI *)robAI didReceiveResponseText:(NSString *)text
 {
+    NSLog(@"Gemini Robotics response: %@", text);
+    if (self.audioInputTaskController.textView != nil) {
+        self.audioInputTaskController.textView.string =
+            [self.audioInputTaskController.textView.string
+                stringByAppendingString:[NSString stringWithFormat:@"\nROB: %@\n", text]];
+    }
     [self didRespond:text];
+}
+
+- (void)robAI:(ROBAI *)robAI didReceiveInputTranscription:(NSString *)text
+{
+    // This is server-originated confirmation of what Gemini understood, not
+    // the separate on-device Apple speech-recognition transcript.
+    NSLog(@"Gemini Robotics heard: %@", text);
+}
+
+- (void)robAI:(ROBAI *)robAI didFailRequestWithDetail:(NSString *)detail
+{
+    NSLog(@"Gemini Robotics request failed: %@", detail);
+    [self.speechBox sayIt:@"I couldn't get a response from Gemini. Please try again."];
 }
 
 - (void)robAI:(ROBAI *)robAI didChangeConnectionState:(NSString *)state detail:(NSString *)detail
@@ -535,7 +554,7 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
 {
     textInput = [textInput lowercaseString];
     // Only suppress duplicate local transcript turns while the raw-audio Live
-    // session is actually ready. During reconnects, ordered text remains a
+    // session is actually ready. During reconnects, realtime text remains a
     // useful bounded fallback and is queued by ROBAI until setup completes.
     BOOL geminiOwnsMicrophone = self.robAI.isLiveSessionReady && self.robAI.streamsMicrophoneAudio;
     if ([textInput containsString:@"robbie"] || [textInput containsString:@"hey rob"] || [textInput containsString:@"rob"] || [textInput containsString:@"robot"])
@@ -553,7 +572,11 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
         
         if ([textInput isEqualToString:@"robbie"] || [textInput isEqualToString:@"hey rob"] || [textInput isEqualToString:@"rob"] || [textInput isEqualToString:@"robot"])
         {
-            if (!geminiOwnsMicrophone) {
+            if (geminiOwnsMicrophone) {
+                if (!self.speechBox.isSpeaking) {
+                    [self.robAI noteMicrophoneTurnAwaitingResponse];
+                }
+            } else {
                 [self.speechBox sayIt:greeting_acknowledgement];
             }
             return;
@@ -581,11 +604,18 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
         [self.speechBox sayIt:@"Follow mode requires ROBController authorization"];
         return;
     }
-    if (!self.ignoreText && !geminiOwnsMicrophone) {
-        NSLog(@"textInput = %@", textInput);
-        NSInteger speechWordiness = self.torsoControlsViewController.speechWordinessChoice.selectedSegment;
-
-        [self.robAI sendText:textInput speechWordiness:speechWordiness];
+    if (!self.ignoreText) {
+        if (geminiOwnsMicrophone) {
+            // Do not resend the transcript. It is only a local signal that a
+            // raw-audio turn should receive a bounded Gemini response.
+            if (!self.speechBox.isSpeaking) {
+                [self.robAI noteMicrophoneTurnAwaitingResponse];
+            }
+        } else {
+            NSLog(@"textInput = %@", textInput);
+            NSInteger speechWordiness = self.torsoControlsViewController.speechWordinessChoice.selectedSegment;
+            [self.robAI sendText:textInput speechWordiness:speechWordiness];
+        }
     } else if (self.ignoreText) {
         NSLog(@"!!!!!!!!!!!!  IGNORING TEXT !!!!!!!!!!!!!!!");
         NSLog(@"textInput = %@", textInput);

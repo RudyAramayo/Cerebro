@@ -42,6 +42,7 @@ struct GeminiRoboticsConfiguration {
     let streamsAudio: Bool
     let streamsVideo: Bool
     let exposesRobotActionTool: Bool
+    let responseModality: String
 
     static func fromEnvironment(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> GeminiRoboticsConfiguration? {
         guard environment.booleanValue(for: "GEMINI_ROBOTICS_ENABLED", default: false) else {
@@ -59,6 +60,10 @@ struct GeminiRoboticsConfiguration {
 
         let configuredModel = environment.nonemptyValue(for: "GEMINI_ROBOTICS_MODEL") ?? defaultModel
         let model = configuredModel.hasPrefix("models/") ? configuredModel : "models/\(configuredModel)"
+        let configuredResponseModality = environment
+            .nonemptyValue(for: "GEMINI_ROBOTICS_RESPONSE_MODALITY")?
+            .uppercased()
+        let responseModality = configuredResponseModality == "AUDIO" ? "AUDIO" : "TEXT"
 
         return GeminiRoboticsConfiguration(
             credential: credential,
@@ -66,7 +71,8 @@ struct GeminiRoboticsConfiguration {
             systemInstruction: environment.nonemptyValue(for: "GEMINI_ROBOTICS_SYSTEM_INSTRUCTION") ?? defaultSystemInstruction,
             streamsAudio: environment.booleanValue(for: "GEMINI_ROBOTICS_STREAM_AUDIO", default: true),
             streamsVideo: environment.booleanValue(for: "GEMINI_ROBOTICS_STREAM_VIDEO", default: true),
-            exposesRobotActionTool: environment.booleanValue(for: "GEMINI_ROBOT_ACTION_TOOL_ENABLED", default: false)
+            exposesRobotActionTool: environment.booleanValue(for: "GEMINI_ROBOT_ACTION_TOOL_ENABLED", default: false),
+            responseModality: responseModality
         )
     }
 
@@ -111,6 +117,9 @@ struct GeminiRoboticsToolCall {
 struct GeminiRoboticsServerEvent {
     var setupComplete = false
     var textFragments: [String] = []
+    var inputTranscription: String?
+    var outputTranscription: String?
+    var generationComplete = false
     var turnComplete = false
     var interrupted = false
     var toolCalls: [GeminiRoboticsToolCall] = []
@@ -119,6 +128,123 @@ struct GeminiRoboticsServerEvent {
     var isResumable: Bool?
     var shouldReconnect = false
     var serverError: String?
+}
+
+struct GeminiTurnDeadlineTracker {
+    enum Expiration: Equatable {
+        case responseNotStarted(turnID: UInt64)
+        case turnNotCompleted(turnID: UInt64)
+    }
+
+    let responseStartTimeout: TimeInterval
+    let turnCompletionTimeout: TimeInterval
+
+    private(set) var activeTurnID: UInt64?
+    private var startedAt: TimeInterval?
+    private var responseStarted = false
+
+    init(responseStartTimeout: TimeInterval = 15, turnCompletionTimeout: TimeInterval = 120) {
+        self.responseStartTimeout = responseStartTimeout
+        self.turnCompletionTimeout = turnCompletionTimeout
+    }
+
+    mutating func begin(turnID: UInt64, now: TimeInterval) {
+        activeTurnID = turnID
+        startedAt = now
+        responseStarted = false
+    }
+
+    mutating func noteResponse(turnID: UInt64) {
+        guard activeTurnID == turnID else { return }
+        responseStarted = true
+    }
+
+    mutating func complete(turnID: UInt64) {
+        guard activeTurnID == turnID else { return }
+        activeTurnID = nil
+        startedAt = nil
+        responseStarted = false
+    }
+
+    func expiration(turnID: UInt64, now: TimeInterval) -> Expiration? {
+        guard activeTurnID == turnID, let startedAt else { return nil }
+        let elapsed = now - startedAt
+        if elapsed >= turnCompletionTimeout {
+            return .turnNotCompleted(turnID: turnID)
+        }
+        if !responseStarted, elapsed >= responseStartTimeout {
+            return .responseNotStarted(turnID: turnID)
+        }
+        return nil
+    }
+}
+
+struct GeminiTranscriptionAccumulator {
+    private(set) var text = ""
+
+    mutating func append(_ fragment: String) {
+        text += fragment
+    }
+
+    mutating func reset() {
+        text = ""
+    }
+}
+
+struct GeminiMicrophoneTurnAssociation {
+    enum TranscriptDisposition: Equatable {
+        case beginAwaitingResponse
+        case associateWithActiveResponse
+        case beginOrRefreshInterruptedFollowup
+    }
+
+    private(set) var modelResponseIsActive = false
+    private(set) var transcriptNoticePendingAfterInterruption = false
+    private(set) var awaitingInterruptedTurnCompletion = false
+
+    mutating func noteModelResponseStarted() {
+        modelResponseIsActive = true
+    }
+
+    mutating func noteLocalTranscript(hasTrackedTurn: Bool = false) -> TranscriptDisposition {
+        if awaitingInterruptedTurnCompletion {
+            return .beginOrRefreshInterruptedFollowup
+        }
+        guard modelResponseIsActive else {
+            if hasTrackedTurn {
+                transcriptNoticePendingAfterInterruption = true
+            }
+            return .beginAwaitingResponse
+        }
+        // The callback may belong to the current input or to barge-in audio
+        // that Gemini is about to report as an interruption. Associate it with
+        // the current response now, but retain enough state to arm the next
+        // turn if the interruption event follows.
+        transcriptNoticePendingAfterInterruption = true
+        return .associateWithActiveResponse
+    }
+
+    mutating func noteInterruption() -> Bool {
+        let shouldArmFollowup = transcriptNoticePendingAfterInterruption
+        modelResponseIsActive = false
+        transcriptNoticePendingAfterInterruption = false
+        awaitingInterruptedTurnCompletion = true
+        return shouldArmFollowup
+    }
+
+    mutating func consumeInterruptedTurnCompletion() -> Bool {
+        guard awaitingInterruptedTurnCompletion else { return false }
+        awaitingInterruptedTurnCompletion = false
+        modelResponseIsActive = false
+        transcriptNoticePendingAfterInterruption = false
+        return true
+    }
+
+    mutating func reset() {
+        modelResponseIsActive = false
+        transcriptNoticePendingAfterInterruption = false
+        awaitingInterruptedTurnCompletion = false
+    }
 }
 
 enum GeminiRoboticsProtocolError: LocalizedError {
@@ -143,8 +269,10 @@ enum GeminiRoboticsProtocol {
         var setup: [String: Any] = [
             "model": configuration.model,
             "generationConfig": [
-                "responseModalities": ["TEXT"]
+                "responseModalities": [configuration.responseModality]
             ],
+            "inputAudioTranscription": [:],
+            "outputAudioTranscription": [:],
             "systemInstruction": [
                 "parts": [["text": configuration.systemInstruction]]
             ],
@@ -189,15 +317,9 @@ enum GeminiRoboticsProtocol {
         ]
     }
 
-    static func orderedTextMessage(_ text: String) -> [String: Any] {
+    static func realtimeTextMessage(_ text: String) -> [String: Any] {
         [
-            "clientContent": [
-                "turns": [[
-                    "role": "user",
-                    "parts": [["text": text]]
-                ]],
-                "turnComplete": true
-            ]
+            "realtimeInput": ["text": text]
         ]
     }
 
@@ -238,6 +360,13 @@ enum GeminiRoboticsProtocol {
                let parts = modelTurn["parts"] as? [[String: Any]] {
                 event.textFragments = parts.compactMap { $0["text"] as? String }
             }
+            if let transcription = serverContent["inputTranscription"] as? [String: Any] {
+                event.inputTranscription = transcription["text"] as? String
+            }
+            if let transcription = serverContent["outputTranscription"] as? [String: Any] {
+                event.outputTranscription = transcription["text"] as? String
+            }
+            event.generationComplete = serverContent["generationComplete"] as? Bool ?? false
             event.turnComplete = serverContent["turnComplete"] as? Bool ?? false
             event.interrupted = serverContent["interrupted"] as? Bool ?? false
         }

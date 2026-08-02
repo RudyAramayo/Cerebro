@@ -46,7 +46,6 @@ import Network
             let mode = try AutoNetTransportMode(service: service)
             let credential: ROBControlCredential?
             if case .v2 = mode {
-                _ = try ROBControlPairing.ensurePairingCode()
                 credential = try ROBControlPairing.serverAuthenticationMaterial()
             } else {
                 credential = nil

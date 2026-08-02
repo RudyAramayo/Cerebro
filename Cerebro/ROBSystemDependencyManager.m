@@ -8,13 +8,30 @@
 
 NSString * const ROBSystemDependenciesDidChangeNotification = @"ROBSystemDependenciesDidChangeNotification";
 NSString * const ROBSystemDependencyErrorDomain = @"com.orbitusrobotics.Cerebro.SystemDependencies";
+static NSString * const ROBPreferredSystemPackageManagerDefaultsKey = @"ROBPreferredSystemPackageManager";
+
+NSString *ROBSystemPackageManagerDisplayName(ROBSystemPackageManager packageManager)
+{
+    switch (packageManager) {
+        case ROBSystemPackageManagerHomebrew:
+            return @"Homebrew";
+        case ROBSystemPackageManagerMacPorts:
+            return @"MacPorts";
+    }
+    return @"Unknown package manager";
+}
 
 @interface ROBSystemDependencyManager ()
 @property (nonatomic, assign, readwrite, getter=isInstallingSSHpass) BOOL installingSSHpass;
+@property (nonatomic, assign, readwrite) ROBSystemPackageManager installingPackageManager;
 @property (nonatomic, strong, readwrite, nullable) NSError *lastSSHpassError;
+@property (nonatomic, copy, nullable) NSString *lastKnownSSHpassPath;
 @property (nonatomic, strong) NSMutableArray<ROBSystemDependencyCompletion> *pendingSSHpassCompletions;
 @property (nonatomic, strong, nullable) NSTask *sshpassInstallTask;
+@property (nonatomic, copy, nullable) NSString *installingExecutablePath;
 - (nullable NSString *)firstExecutableFromCandidates:(NSArray<NSString *> *)candidates;
+- (nullable NSString *)validatedMacPortsPathAndReturnError:(NSError **)error;
+- (NSString *)shellQuotedArgument:(NSString *)argument;
 - (NSDictionary<NSString *, NSString *> *)taskEnvironmentPrependingDirectories:(NSArray<NSString *> *)directories;
 - (NSError *)errorWithCode:(ROBSystemDependencyErrorCode)code
                description:(NSString *)description
@@ -42,8 +59,41 @@ NSString * const ROBSystemDependencyErrorDomain = @"com.orbitusrobotics.Cerebro.
     self = [super init];
     if (self) {
         _pendingSSHpassCompletions = [NSMutableArray array];
+        _installingPackageManager = ROBSystemPackageManagerHomebrew;
     }
     return self;
+}
+
+- (ROBSystemPackageManager)preferredPackageManager
+{
+    NSNumber *savedValue = [[NSUserDefaults standardUserDefaults]
+        objectForKey:ROBPreferredSystemPackageManagerDefaultsKey];
+    if (savedValue != nil) {
+        NSInteger rawValue = savedValue.integerValue;
+        if (rawValue == ROBSystemPackageManagerHomebrew ||
+            rawValue == ROBSystemPackageManagerMacPorts) {
+            return (ROBSystemPackageManager)rawValue;
+        }
+    }
+
+    if (self.macPortsPath.length > 0 && self.homebrewPath.length == 0) {
+        return ROBSystemPackageManagerMacPorts;
+    }
+    return ROBSystemPackageManagerHomebrew;
+}
+
+- (void)setPreferredPackageManager:(ROBSystemPackageManager)preferredPackageManager
+{
+    if (preferredPackageManager != ROBSystemPackageManagerHomebrew &&
+        preferredPackageManager != ROBSystemPackageManagerMacPorts) {
+        return;
+    }
+    [[NSUserDefaults standardUserDefaults]
+        setInteger:preferredPackageManager
+            forKey:ROBPreferredSystemPackageManagerDefaultsKey];
+    self.lastSSHpassError = nil;
+    self.lastKnownSSHpassPath = self.sshpassPath;
+    [self postDependenciesDidChange];
 }
 
 - (NSString *)firstExecutableFromCandidates:(NSArray<NSString *> *)candidates
@@ -87,20 +137,140 @@ NSString * const ROBSystemDependencyErrorDomain = @"com.orbitusrobotics.Cerebro.
     ]]];
 }
 
+- (NSString *)macPortsPath
+{
+    return [self validatedMacPortsPathAndReturnError:NULL];
+}
+
+- (NSError *)macPortsValidationError
+{
+    NSError *error = nil;
+    [self validatedMacPortsPathAndReturnError:&error];
+    return error;
+}
+
+- (NSString *)validatedMacPortsPathAndReturnError:(NSError **)error
+{
+    NSString *portPath = @"/opt/local/bin/port";
+    if (![[NSFileManager defaultManager] fileExistsAtPath:portPath]) {
+        return nil;
+    }
+
+    NSArray<NSDictionary<NSString *, id> *> *checks = @[
+        @{@"path": @"/opt", @"type": NSFileTypeDirectory},
+        @{@"path": @"/opt/local", @"type": NSFileTypeDirectory},
+        @{@"path": @"/opt/local/bin", @"type": NSFileTypeDirectory},
+        @{@"path": portPath, @"type": NSFileTypeRegular}
+    ];
+    for (NSDictionary<NSString *, id> *check in checks) {
+        NSString *path = check[@"path"];
+        NSError *attributesError = nil;
+        NSDictionary<NSFileAttributeKey, id> *attributes =
+            [[NSFileManager defaultManager] attributesOfItemAtPath:path
+                                                             error:&attributesError];
+        NSNumber *ownerID = attributes[NSFileOwnerAccountID];
+        NSNumber *permissions = attributes[NSFilePosixPermissions];
+        NSString *fileType = attributes[NSFileType];
+        BOOL correctType = [fileType isEqualToString:check[@"type"]];
+        BOOL rootOwned = ownerID.unsignedIntegerValue == 0;
+        BOOL writableByNonOwner = (permissions.unsignedIntegerValue & 0022) != 0;
+        if (attributes == nil || !correctType || !rootOwned || writableByNonOwner) {
+            NSString *detail = attributesError.localizedDescription ?: [NSString stringWithFormat:
+                @"%@ must be root-owned, must not be group/world-writable, and must have the expected file type.", path];
+            if (error != NULL) {
+                *error = [self errorWithCode:ROBSystemDependencyErrorUntrustedPackageManager
+                                 description:@"Cerebro found an unsafe MacPorts installation and will not suggest running it with administrator privileges."
+                          recoverySuggestion:@"Repair or reinstall MacPorts from https://www.macports.org/install.php, then return to Cerebro Settings."
+                                      output:detail];
+            }
+            return nil;
+        }
+    }
+    if (![[NSFileManager defaultManager] isExecutableFileAtPath:portPath]) {
+        if (error != NULL) {
+            *error = [self errorWithCode:ROBSystemDependencyErrorUntrustedPackageManager
+                             description:@"The canonical MacPorts executable is not executable."
+                      recoverySuggestion:@"Repair or reinstall MacPorts from https://www.macports.org/install.php, then return to Cerebro Settings."
+                                  output:portPath];
+        }
+        return nil;
+    }
+    return portPath;
+}
+
+- (NSString *)pathForPackageManager:(ROBSystemPackageManager)packageManager
+{
+    switch (packageManager) {
+        case ROBSystemPackageManagerHomebrew:
+            return self.homebrewPath;
+        case ROBSystemPackageManagerMacPorts:
+            return self.macPortsPath;
+    }
+    return nil;
+}
+
+- (NSString *)shellQuotedArgument:(NSString *)argument
+{
+    NSString *escaped = [argument stringByReplacingOccurrencesOfString:@"'"
+                                                            withString:@"'\\''"];
+    return [NSString stringWithFormat:@"'%@'", escaped];
+}
+
+- (NSString *)sshpassInstallCommandForPackageManager:(ROBSystemPackageManager)packageManager
+{
+    NSString *managerPath = [self pathForPackageManager:packageManager];
+    if (managerPath.length == 0) {
+        return nil;
+    }
+    return [self sshpassInstallCommandForPackageManager:packageManager
+                                         executablePath:managerPath];
+}
+
+- (NSString *)sshpassInstallCommandForPackageManager:(ROBSystemPackageManager)packageManager
+                                       executablePath:(NSString *)executablePath
+{
+    if (executablePath.length == 0) {
+        return nil;
+    }
+    NSString *quotedPath = [self shellQuotedArgument:
+        [executablePath stringByStandardizingPath]];
+    switch (packageManager) {
+        case ROBSystemPackageManagerHomebrew:
+            return [NSString stringWithFormat:@"%@ install sshpass", quotedPath];
+        case ROBSystemPackageManagerMacPorts:
+            return [NSString stringWithFormat:@"sudo %@ install sshpass", quotedPath];
+    }
+    return nil;
+}
+
+- (BOOL)requiresExternalAuthorizationForPackageManager:(ROBSystemPackageManager)packageManager
+{
+    return packageManager == ROBSystemPackageManagerMacPorts;
+}
+
 - (NSString *)sshpassPath
 {
-    NSMutableArray<NSString *> *knownPaths = [NSMutableArray arrayWithArray:@[
+    NSMutableArray<NSString *> *knownPaths = [NSMutableArray array];
+    ROBSystemPackageManager preferred = self.preferredPackageManager;
+    NSArray<NSNumber *> *managerOrder = preferred == ROBSystemPackageManagerMacPorts
+        ? @[@(ROBSystemPackageManagerMacPorts), @(ROBSystemPackageManagerHomebrew)]
+        : @[@(ROBSystemPackageManagerHomebrew), @(ROBSystemPackageManagerMacPorts)];
+    for (NSNumber *managerValue in managerOrder) {
+        NSString *managerPath = [self pathForPackageManager:(ROBSystemPackageManager)managerValue.integerValue];
+        if (managerPath.length == 0) {
+            continue;
+        }
+        NSString *prefix = [[managerPath stringByDeletingLastPathComponent]
+                            stringByDeletingLastPathComponent];
+        [knownPaths addObject:[[prefix stringByAppendingPathComponent:@"bin"]
+                               stringByAppendingPathComponent:@"sshpass"]];
+    }
+    [knownPaths addObjectsFromArray:@[
+        @"/opt/local/bin/sshpass",
         @"/opt/homebrew/bin/sshpass",
         @"/usr/local/bin/sshpass",
         @"/home/linuxbrew/.linuxbrew/bin/sshpass"
     ]];
-    NSString *brewPath = self.homebrewPath;
-    if (brewPath.length > 0) {
-        NSString *brewPrefix = [[brewPath stringByDeletingLastPathComponent] stringByDeletingLastPathComponent];
-        [knownPaths insertObject:[[brewPrefix stringByAppendingPathComponent:@"bin"]
-                                  stringByAppendingPathComponent:@"sshpass"]
-                       atIndex:0];
-    }
     return [self firstExecutableFromCandidates:[self pathCandidatesForExecutable:@"sshpass"
                                                                       knownPaths:knownPaths]];
 }
@@ -149,17 +319,73 @@ NSString * const ROBSystemDependencyErrorDomain = @"com.orbitusrobotics.Cerebro.
     });
 }
 
-- (void)ensureSSHpassInstalledWithCompletion:(ROBSystemDependencyCompletion)completion
+- (void)refreshSSHpassAvailability
 {
     if (![NSThread isMainThread]) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            [self ensureSSHpassInstalledWithCompletion:completion];
+            [self refreshSSHpassAvailability];
         });
+        return;
+    }
+
+    NSString *currentPath = self.sshpassPath;
+    BOOL changed = (self.lastKnownSSHpassPath == nil) != (currentPath == nil) ||
+        (self.lastKnownSSHpassPath != nil &&
+         ![self.lastKnownSSHpassPath isEqualToString:currentPath]);
+    if (!changed) {
+        return;
+    }
+    self.lastKnownSSHpassPath = currentPath;
+    if (currentPath.length > 0) {
+        self.lastSSHpassError = nil;
+    }
+    [self postDependenciesDidChange];
+}
+
+- (void)installSSHpassWithPackageManager:(ROBSystemPackageManager)packageManager
+                  expectedExecutablePath:(NSString *)expectedExecutablePath
+                              completion:(ROBSystemDependencyCompletion)completion
+{
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self installSSHpassWithPackageManager:packageManager
+                            expectedExecutablePath:expectedExecutablePath
+                                        completion:completion];
+        });
+        return;
+    }
+
+    if (packageManager != ROBSystemPackageManagerHomebrew &&
+        packageManager != ROBSystemPackageManagerMacPorts) {
+        NSError *error = [self errorWithCode:ROBSystemDependencyErrorInvalidPackageManager
+                                 description:@"Cerebro cannot install sshpass with the selected package manager."
+                          recoverySuggestion:@"Choose Homebrew or MacPorts in Cerebro Settings."
+                                      output:nil];
+        self.lastSSHpassError = error;
+        [self postDependenciesDidChange];
+        if (completion != nil) {
+            completion(NO, @"", error);
+        }
+        return;
+    }
+
+    NSString *expectedPath = [expectedExecutablePath stringByStandardizingPath];
+    if (expectedPath.length == 0) {
+        NSError *error = [self errorWithCode:ROBSystemDependencyErrorInvalidPackageManager
+                                 description:@"The package-manager path confirmed by the operator is missing."
+                          recoverySuggestion:@"Return to Cerebro Settings and confirm the installation command again."
+                                      output:nil];
+        self.lastSSHpassError = error;
+        [self postDependenciesDidChange];
+        if (completion != nil) {
+            completion(NO, @"", error);
+        }
         return;
     }
 
     NSString *installedPath = self.sshpassPath;
     if (installedPath.length > 0) {
+        self.lastKnownSSHpassPath = installedPath;
         self.lastSSHpassError = nil;
         if (completion != nil) {
             completion(YES,
@@ -170,30 +396,91 @@ NSString * const ROBSystemDependencyErrorDomain = @"com.orbitusrobotics.Cerebro.
         return;
     }
 
+    if (self.isInstallingSSHpass) {
+        if (packageManager == self.installingPackageManager &&
+            [expectedPath isEqualToString:self.installingExecutablePath]) {
+            if (completion != nil) {
+                [self.pendingSSHpassCompletions addObject:[completion copy]];
+            }
+            return;
+        }
+        NSString *activeName = ROBSystemPackageManagerDisplayName(self.installingPackageManager);
+        NSError *error = [self errorWithCode:ROBSystemDependencyErrorInstallInProgress
+                                 description:[NSString stringWithFormat:@"Cerebro is already installing sshpass with %@.", activeName]
+                          recoverySuggestion:@"Wait for that installation to finish before choosing another package manager."
+                                      output:nil];
+        if (completion != nil) {
+            completion(NO, @"", error);
+        }
+        return;
+    }
+
+    NSString *managerName = ROBSystemPackageManagerDisplayName(packageManager);
+    NSString *currentManagerPath = [[self pathForPackageManager:packageManager]
+                                    stringByStandardizingPath];
+    if (currentManagerPath.length == 0) {
+        NSError *validationError = packageManager == ROBSystemPackageManagerMacPorts
+            ? self.macPortsValidationError
+            : nil;
+        ROBSystemDependencyErrorCode errorCode = packageManager == ROBSystemPackageManagerHomebrew
+            ? ROBSystemDependencyErrorHomebrewUnavailable
+            : ROBSystemDependencyErrorPackageManagerUnavailable;
+        NSString *helpURL = packageManager == ROBSystemPackageManagerHomebrew
+            ? @"https://brew.sh/"
+            : @"https://www.macports.org/install.php";
+        NSError *error = validationError ?: [self errorWithCode:errorCode
+                                 description:[NSString stringWithFormat:@"Cerebro could not install sshpass because %@ is not installed.", managerName]
+                          recoverySuggestion:[NSString stringWithFormat:@"Install %@ from %@, then return to Cerebro Settings and retry.", managerName, helpURL]
+                                      output:nil];
+        self.lastSSHpassError = error;
+        [self postDependenciesDidChange];
+        if (completion != nil) {
+            completion(NO, @"", error);
+        }
+        return;
+    }
+
+    if (![currentManagerPath isEqualToString:expectedPath]) {
+        NSError *error = [self errorWithCode:ROBSystemDependencyErrorInvalidPackageManager
+                                 description:[NSString stringWithFormat:@"The %@ executable changed after the operator reviewed the command.", managerName]
+                          recoverySuggestion:@"Cerebro did not run anything. Return to Settings and review the updated command before retrying."
+                                      output:[NSString stringWithFormat:@"Reviewed: %@\nCurrent: %@", expectedPath, currentManagerPath]];
+        self.lastSSHpassError = error;
+        [self postDependenciesDidChange];
+        if (completion != nil) {
+            completion(NO, @"", error);
+        }
+        return;
+    }
+
+    NSString *managerPath = expectedPath;
+    if ([self requiresExternalAuthorizationForPackageManager:packageManager]) {
+        NSString *command = [self sshpassInstallCommandForPackageManager:packageManager
+                                                           executablePath:managerPath] ?: @"sudo port install sshpass";
+        NSError *error = [self errorWithCode:ROBSystemDependencyErrorAdministratorAuthorizationRequired
+                                 description:@"MacPorts requires administrator authorization to install sshpass."
+                          recoverySuggestion:@"Copy the displayed command from Cerebro Settings and run it in Terminal. Cerebro never collects the administrator password."
+                                      output:command];
+        self.lastSSHpassError = error;
+        [self postDependenciesDidChange];
+        if (completion != nil) {
+            completion(NO, command, error);
+        }
+        return;
+    }
+
     if (completion != nil) {
         [self.pendingSSHpassCompletions addObject:[completion copy]];
     }
-    if (self.isInstallingSSHpass) {
-        return;
-    }
-
-    NSString *brewPath = self.homebrewPath;
-    if (brewPath.length == 0) {
-        NSError *error = [self errorWithCode:ROBSystemDependencyErrorHomebrewUnavailable
-                                 description:@"Cerebro could not install sshpass because Homebrew is not installed."
-                          recoverySuggestion:@"Install Homebrew from https://brew.sh, then return to Cerebro Settings and retry."
-                                      output:nil];
-        [self finishSSHpassInstallationWithSuccess:NO output:@"" error:error];
-        return;
-    }
-
     self.installingSSHpass = YES;
+    self.installingPackageManager = packageManager;
+    self.installingExecutablePath = managerPath;
     self.lastSSHpassError = nil;
     NSTask *task = [[NSTask alloc] init];
-    task.executableURL = [NSURL fileURLWithPath:brewPath];
+    task.executableURL = [NSURL fileURLWithPath:managerPath];
     task.arguments = @[@"install", @"sshpass"];
     task.environment = [self taskEnvironmentPrependingDirectories:@[
-        [brewPath stringByDeletingLastPathComponent]
+        [managerPath stringByDeletingLastPathComponent]
     ]];
     NSPipe *pipe = [NSPipe pipe];
     task.standardOutput = pipe;
@@ -202,11 +489,24 @@ NSString * const ROBSystemDependencyErrorDomain = @"com.orbitusrobotics.Cerebro.
     [self postDependenciesDidChange];
 
     NSMutableData *outputData = [NSMutableData data];
+    dispatch_group_t pipeDrainGroup = dispatch_group_create();
+    dispatch_group_enter(pipeDrainGroup);
+    __block BOOL pipeDrainFinished = NO;
+    void (^finishPipeDrain)(void) = ^{
+        @synchronized (outputData) {
+            if (pipeDrainFinished) {
+                return;
+            }
+            pipeDrainFinished = YES;
+            dispatch_group_leave(pipeDrainGroup);
+        }
+    };
     NSFileHandle *readHandle = pipe.fileHandleForReading;
     readHandle.readabilityHandler = ^(NSFileHandle *handle) {
         NSData *chunk = handle.availableData;
         if (chunk.length == 0) {
             handle.readabilityHandler = nil;
+            finishPipeDrain();
             return;
         }
         @synchronized (outputData) {
@@ -214,31 +514,33 @@ NSString * const ROBSystemDependencyErrorDomain = @"com.orbitusrobotics.Cerebro.
         }
     };
     task.terminationHandler = ^(NSTask *completedTask) {
-        readHandle.readabilityHandler = nil;
-        NSData *capturedOutput = nil;
-        @synchronized (outputData) {
-            capturedOutput = [outputData copy];
-        }
-        NSString *output = [[NSString alloc] initWithData:capturedOutput
-                                                  encoding:NSUTF8StringEncoding] ?: @"";
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (self.sshpassInstallTask != completedTask) {
-                return;
+        dispatch_group_notify(pipeDrainGroup,
+                              dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            NSData *capturedOutput = nil;
+            @synchronized (outputData) {
+                capturedOutput = [outputData copy];
             }
-            NSString *resolvedPath = self.sshpassPath;
-            if (completedTask.terminationStatus != 0 || resolvedPath.length == 0) {
-                NSError *error = [self errorWithCode:ROBSystemDependencyErrorInstallFailed
-                                         description:[NSString stringWithFormat:@"Homebrew could not install sshpass (status %d).", completedTask.terminationStatus]
-                                  recoverySuggestion:@"Review the Homebrew output, correct the installation problem, and retry."
-                                              output:output];
-                [self finishSSHpassInstallationWithSuccess:NO output:output error:error];
-                return;
-            }
+            NSString *output = [[NSString alloc] initWithData:capturedOutput
+                                                      encoding:NSUTF8StringEncoding] ?: @"";
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (self.sshpassInstallTask != completedTask) {
+                    return;
+                }
+                NSString *resolvedPath = self.sshpassPath;
+                if (completedTask.terminationStatus != 0 || resolvedPath.length == 0) {
+                    NSError *error = [self errorWithCode:ROBSystemDependencyErrorInstallFailed
+                                             description:[NSString stringWithFormat:@"%@ could not install sshpass (status %d).", managerName, completedTask.terminationStatus]
+                                      recoverySuggestion:[NSString stringWithFormat:@"Review the %@ output, correct the installation problem, and retry.", managerName]
+                                                  output:output];
+                    [self finishSSHpassInstallationWithSuccess:NO output:output error:error];
+                    return;
+                }
 
-            NSString *successOutput = output.length > 0
-                ? output
-                : [NSString stringWithFormat:@"sshpass installed at %@", resolvedPath];
-            [self finishSSHpassInstallationWithSuccess:YES output:successOutput error:nil];
+                NSString *successOutput = output.length > 0
+                    ? output
+                    : [NSString stringWithFormat:@"sshpass installed at %@", resolvedPath];
+                [self finishSSHpassInstallationWithSuccess:YES output:successOutput error:nil];
+            });
         });
     };
 
@@ -246,9 +548,10 @@ NSString * const ROBSystemDependencyErrorDomain = @"com.orbitusrobotics.Cerebro.
         NSError *launchError = nil;
         if (!ROBLaunchTaskSafely(task, &launchError)) {
             readHandle.readabilityHandler = nil;
+            finishPipeDrain();
             NSError *error = [self errorWithCode:ROBSystemDependencyErrorInstallFailed
-                                     description:[NSString stringWithFormat:@"Homebrew could not start: %@", launchError.localizedDescription]
-                              recoverySuggestion:@"Check the Homebrew installation and retry from Cerebro Settings."
+                                     description:[NSString stringWithFormat:@"%@ could not start: %@", managerName, launchError.localizedDescription]
+                              recoverySuggestion:[NSString stringWithFormat:@"Check the %@ installation and retry from Cerebro Settings.", managerName]
                                           output:nil];
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (self.sshpassInstallTask == task) {
@@ -267,6 +570,8 @@ NSString * const ROBSystemDependencyErrorDomain = @"com.orbitusrobotics.Cerebro.
     self.installingSSHpass = NO;
     self.lastSSHpassError = error;
     self.sshpassInstallTask = nil;
+    self.installingExecutablePath = nil;
+    self.lastKnownSSHpassPath = self.sshpassPath;
     NSArray<ROBSystemDependencyCompletion> *completions = [self.pendingSSHpassCompletions copy];
     [self.pendingSSHpassCompletions removeAllObjects];
     [self postDependenciesDidChange];

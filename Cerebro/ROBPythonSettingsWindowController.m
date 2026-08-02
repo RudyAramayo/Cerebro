@@ -13,6 +13,7 @@
 @property (nonatomic, strong) NSTextView *logTextView;
 @property (nonatomic, strong) NSProgressIndicator *progressIndicator;
 @property (nonatomic, strong) NSTextField *systemDependencyLabel;
+@property (nonatomic, strong) NSPopUpButton *systemPackageManagerPopup;
 @property (nonatomic, strong) NSButton *installSSHpassButton;
 @property (nonatomic, strong) NSArray<NSButton *> *actionButtons;
 @property (nonatomic, assign) NSUInteger operationGeneration;
@@ -21,6 +22,8 @@
 - (void)applyPythonSelectionAtPath:(NSString *)selection;
 - (void)refreshControlAvailability;
 - (void)refreshSystemDependencyStatus;
+- (ROBSystemPackageManager)selectedSystemPackageManager;
+- (void)updateSSHpassActionAccessibility;
 - (void)validateAfterInstallForGeneration:(NSUInteger)generation pipOutput:(NSString *)pipOutput;
 @end
 
@@ -28,7 +31,7 @@
 
 - (instancetype)init
 {
-    NSRect frame = NSMakeRect(0, 0, 680, 500);
+    NSRect frame = NSMakeRect(0, 0, 680, 580);
     NSWindow *window = [[NSWindow alloc]
         initWithContentRect:frame
                   styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
@@ -84,47 +87,47 @@
 {
     NSView *contentView = self.window.contentView;
 
-    NSTextField *heading = [self labelWithString:@"Python Environment" frame:NSMakeRect(24, 450, 632, 28)];
+    NSTextField *heading = [self labelWithString:@"Python Environment" frame:NSMakeRect(24, 530, 632, 28)];
     heading.font = [NSFont boldSystemFontOfSize:20.0];
     [contentView addSubview:heading];
 
     NSTextField *explanation = [self labelWithString:
         @"Cerebro uses this interpreter for the DepthAI webcam service and bundled Amber arm scripts. Choose an existing virtualenv/Conda environment, or create a Cerebro-managed environment."
-        frame:NSMakeRect(24, 398, 632, 44)];
+        frame:NSMakeRect(24, 478, 632, 44)];
     explanation.textColor = [NSColor secondaryLabelColor];
     [contentView addSubview:explanation];
 
     [contentView addSubview:[self labelWithString:@"Python executable or environment directory:"
-                                             frame:NSMakeRect(24, 370, 632, 20)]];
+                                             frame:NSMakeRect(24, 450, 632, 20)]];
 
-    self.pythonPathField = [[NSTextField alloc] initWithFrame:NSMakeRect(24, 334, 492, 28)];
+    self.pythonPathField = [[NSTextField alloc] initWithFrame:NSMakeRect(24, 414, 492, 28)];
     self.pythonPathField.placeholderString = @"/path/to/environment/bin/python3";
     self.pythonPathField.font = [NSFont monospacedSystemFontOfSize:12.0 weight:NSFontWeightRegular];
     [contentView addSubview:self.pythonPathField];
 
     NSButton *chooseButton = [self buttonWithTitle:@"Choose…"
-                                             frame:NSMakeRect(528, 332, 128, 32)
+                                             frame:NSMakeRect(528, 412, 128, 32)
                                             action:@selector(choosePython:)];
     [contentView addSubview:chooseButton];
 
     NSButton *applyButton = [self buttonWithTitle:@"Use Selected Python"
-                                            frame:NSMakeRect(20, 286, 174, 34)
+                                            frame:NSMakeRect(20, 366, 174, 34)
                                            action:@selector(applySelection:)];
     NSButton *detectButton = [self buttonWithTitle:@"Use Auto-Detected"
-                                             frame:NSMakeRect(198, 286, 164, 34)
+                                             frame:NSMakeRect(198, 366, 164, 34)
                                             action:@selector(useAutoDetectedPython:)];
     NSButton *managedButton = [self buttonWithTitle:@"Create Managed Environment + Install"
-                                              frame:NSMakeRect(366, 286, 294, 34)
+                                              frame:NSMakeRect(366, 366, 294, 34)
                                              action:@selector(createManagedEnvironment:)];
     [contentView addSubview:applyButton];
     [contentView addSubview:detectButton];
     [contentView addSubview:managedButton];
 
-    self.statusLabel = [self labelWithString:@"Checking environment…" frame:NSMakeRect(24, 250, 632, 22)];
+    self.statusLabel = [self labelWithString:@"Checking environment…" frame:NSMakeRect(24, 330, 632, 22)];
     self.statusLabel.font = [NSFont boldSystemFontOfSize:13.0];
     [contentView addSubview:self.statusLabel];
 
-    NSScrollView *logScrollView = [[NSScrollView alloc] initWithFrame:NSMakeRect(24, 116, 632, 126)];
+    NSScrollView *logScrollView = [[NSScrollView alloc] initWithFrame:NSMakeRect(24, 196, 632, 126)];
     logScrollView.hasVerticalScroller = YES;
     logScrollView.borderType = NSBezelBorder;
     self.logTextView = [[NSTextView alloc] initWithFrame:logScrollView.contentView.bounds];
@@ -137,31 +140,57 @@
 
     NSString *packageText = [NSString stringWithFormat:@"Managed packages: %@. The Amber API is bundled with Cerebro.",
                              [[[ROBPythonRuntime sharedRuntime] requiredPackages] componentsJoinedByString:@", "]];
-    NSTextField *packageLabel = [self labelWithString:packageText frame:NSMakeRect(24, 88, 632, 20)];
+    NSTextField *packageLabel = [self labelWithString:packageText frame:NSMakeRect(24, 168, 632, 20)];
     packageLabel.textColor = [NSColor secondaryLabelColor];
     [contentView addSubview:packageLabel];
 
+    NSTextField *systemToolsHeading = [self labelWithString:@"System Tools"
+                                                      frame:NSMakeRect(24, 106, 632, 18)];
+    systemToolsHeading.font = [NSFont boldSystemFontOfSize:13.0];
+    [contentView addSubview:systemToolsHeading];
+
     self.systemDependencyLabel = [self labelWithString:@"Checking system tools…"
-                                                  frame:NSMakeRect(24, 64, 632, 20)];
+                                                  frame:NSMakeRect(24, 68, 632, 36)];
     self.systemDependencyLabel.textColor = [NSColor secondaryLabelColor];
-    self.systemDependencyLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
-    self.systemDependencyLabel.maximumNumberOfLines = 1;
+    self.systemDependencyLabel.lineBreakMode = NSLineBreakByWordWrapping;
+    self.systemDependencyLabel.maximumNumberOfLines = 2;
+    self.systemDependencyLabel.selectable = YES;
+    self.systemDependencyLabel.accessibilityLabel = @"sshpass status";
     [contentView addSubview:self.systemDependencyLabel];
 
     NSButton *installButton = [self buttonWithTitle:@"Install Python Packages"
-                                              frame:NSMakeRect(20, 22, 210, 34)
+                                              frame:NSMakeRect(20, 128, 210, 34)
                                              action:@selector(installDependencies:)];
     NSButton *checkButton = [self buttonWithTitle:@"Check Python"
-                                            frame:NSMakeRect(234, 22, 150, 34)
-                                           action:@selector(checkEnvironment:)];
+                                            frame:NSMakeRect(234, 128, 150, 34)
+                                            action:@selector(checkEnvironment:)];
+
+    NSTextField *packageManagerLabel = [self labelWithString:@"Install sshpass with:"
+                                                       frame:NSMakeRect(24, 36, 118, 20)];
+    [contentView addSubview:packageManagerLabel];
+    self.systemPackageManagerPopup = [[NSPopUpButton alloc]
+        initWithFrame:NSMakeRect(144, 28, 172, 30)
+            pullsDown:NO];
+    [self.systemPackageManagerPopup addItemWithTitle:@"Homebrew"];
+    self.systemPackageManagerPopup.lastItem.tag = ROBSystemPackageManagerHomebrew;
+    [self.systemPackageManagerPopup addItemWithTitle:@"MacPorts"];
+    self.systemPackageManagerPopup.lastItem.tag = ROBSystemPackageManagerMacPorts;
+    self.systemPackageManagerPopup.target = self;
+    self.systemPackageManagerPopup.action = @selector(systemPackageManagerChanged:);
+    self.systemPackageManagerPopup.accessibilityLabel = @"Package manager for installing sshpass";
+    [self.systemPackageManagerPopup selectItemWithTag:
+        [ROBSystemDependencyManager sharedManager].preferredPackageManager];
+    [contentView addSubview:self.systemPackageManagerPopup];
+
     self.installSSHpassButton = [self buttonWithTitle:@"Install sshpass"
-                                                frame:NSMakeRect(388, 22, 240, 34)
+                                                frame:NSMakeRect(324, 26, 286, 34)
                                                action:@selector(installSSHpass:)];
+    self.installSSHpassButton.accessibilityLabel = @"Install or recheck sshpass";
     [contentView addSubview:installButton];
     [contentView addSubview:checkButton];
     [contentView addSubview:self.installSSHpassButton];
 
-    self.progressIndicator = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(636, 30, 20, 20)];
+    self.progressIndicator = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(628, 34, 20, 20)];
     self.progressIndicator.style = NSProgressIndicatorStyleSpinning;
     self.progressIndicator.displayedWhenStopped = NO;
     [contentView addSubview:self.progressIndicator];
@@ -176,6 +205,7 @@
 {
     [super showWindow:sender];
     [self.window makeKeyAndOrderFront:sender];
+    [[ROBSystemDependencyManager sharedManager] refreshSSHpassAvailability];
     [self refreshSystemDependencyStatus];
     [self refreshFromRuntimeAndValidate:!self.operationInProgress];
 }
@@ -213,18 +243,46 @@
         button.enabled = !self.operationInProgress;
     }
     self.installSSHpassButton.enabled = !self.operationInProgress && !manager.isInstallingSSHpass;
+    self.systemPackageManagerPopup.enabled = !self.operationInProgress && !manager.isInstallingSSHpass;
     self.pythonPathField.enabled = !self.operationInProgress;
     if (self.operationInProgress || manager.isInstallingSSHpass) {
+        self.progressIndicator.accessibilityLabel = manager.isInstallingSSHpass
+            ? [NSString stringWithFormat:@"Installing sshpass with %@",
+                ROBSystemPackageManagerDisplayName(manager.installingPackageManager)]
+            : @"Python environment operation in progress";
         [self.progressIndicator startAnimation:nil];
     } else {
         [self.progressIndicator stopAnimation:nil];
     }
 }
 
+- (ROBSystemPackageManager)selectedSystemPackageManager
+{
+    NSInteger selectedTag = self.systemPackageManagerPopup.selectedTag;
+    if (selectedTag == ROBSystemPackageManagerHomebrew ||
+        selectedTag == ROBSystemPackageManagerMacPorts) {
+        return (ROBSystemPackageManager)selectedTag;
+    }
+    return [ROBSystemDependencyManager sharedManager].preferredPackageManager;
+}
+
+- (void)updateSSHpassActionAccessibility
+{
+    self.installSSHpassButton.accessibilityLabel = self.installSSHpassButton.title;
+    self.installSSHpassButton.accessibilityHelp =
+        self.systemDependencyLabel.toolTip ?: self.systemDependencyLabel.stringValue;
+}
+
 - (void)refreshSystemDependencyStatus
 {
     ROBSystemDependencyManager *manager = [ROBSystemDependencyManager sharedManager];
     [self refreshControlAvailability];
+    ROBSystemPackageManager selectedManager = [self selectedSystemPackageManager];
+    NSString *managerName = ROBSystemPackageManagerDisplayName(selectedManager);
+    NSString *managerPath = [manager pathForPackageManager:selectedManager];
+    self.systemPackageManagerPopup.accessibilityHelp = managerPath.length > 0
+        ? [NSString stringWithFormat:@"%@ detected at %@", managerName, managerPath]
+        : [NSString stringWithFormat:@"%@ is not currently available", managerName];
     NSString *sshpassPath = manager.sshpassPath;
     if (sshpassPath.length > 0) {
         self.systemDependencyLabel.stringValue =
@@ -232,13 +290,17 @@
         self.systemDependencyLabel.textColor = [NSColor systemGreenColor];
         self.systemDependencyLabel.toolTip = sshpassPath;
         self.installSSHpassButton.title = @"Recheck sshpass";
+        [self updateSSHpassActionAccessibility];
         return;
     }
     if (manager.isInstallingSSHpass) {
-        self.systemDependencyLabel.stringValue = @"System tool: installing sshpass with Homebrew…";
+        NSString *installingName = ROBSystemPackageManagerDisplayName(manager.installingPackageManager);
+        self.systemDependencyLabel.stringValue =
+            [NSString stringWithFormat:@"System tool: installing sshpass with %@…", installingName];
         self.systemDependencyLabel.textColor = [NSColor systemOrangeColor];
         self.systemDependencyLabel.toolTip = nil;
         self.installSSHpassButton.title = @"Installing sshpass…";
+        [self updateSSHpassActionAccessibility];
         return;
     }
     NSError *lastError = manager.lastSSHpassError;
@@ -249,19 +311,38 @@
         self.systemDependencyLabel.toolTip =
             [self messageForError:lastError output:lastError.userInfo[@"commandOutput"] ?: @""];
         self.installSSHpassButton.title = @"Retry sshpass Install";
+        [self updateSSHpassActionAccessibility];
         return;
     }
-    if (manager.homebrewPath.length == 0) {
-        self.systemDependencyLabel.stringValue = @"System tool: sshpass missing — Homebrew is required.";
+    if (managerPath.length == 0) {
+        NSError *validationError = selectedManager == ROBSystemPackageManagerMacPorts
+            ? manager.macPortsValidationError
+            : nil;
+        self.systemDependencyLabel.stringValue = validationError != nil
+            ? @"System tool: the MacPorts installation failed security validation."
+            : [NSString stringWithFormat:@"System tool: sshpass missing — %@ is not installed.", managerName];
         self.systemDependencyLabel.textColor = [NSColor systemRedColor];
-        self.systemDependencyLabel.toolTip = manager.lastSSHpassError.localizedDescription;
-        self.installSSHpassButton.title = @"Open Homebrew…";
+        self.systemDependencyLabel.toolTip = validationError != nil
+            ? [self messageForError:validationError
+                             output:validationError.userInfo[@"commandOutput"] ?: @""]
+            : manager.lastSSHpassError.localizedDescription;
+        self.installSSHpassButton.title = validationError != nil
+            ? @"Open MacPorts Repair Help…"
+            : [NSString stringWithFormat:@"Get %@…", managerName];
     } else {
-        self.systemDependencyLabel.stringValue = @"System tool: sshpass missing — automatic install is available.";
+        BOOL externalAuthorization =
+            [manager requiresExternalAuthorizationForPackageManager:selectedManager];
+        self.systemDependencyLabel.stringValue = externalAuthorization
+            ? [NSString stringWithFormat:@"System tool: sshpass missing — %@ command is ready.", managerName]
+            : [NSString stringWithFormat:@"System tool: sshpass missing — %@ install is available.", managerName];
         self.systemDependencyLabel.textColor = [NSColor systemOrangeColor];
-        self.systemDependencyLabel.toolTip = nil;
-        self.installSSHpassButton.title = @"Install sshpass";
+        self.systemDependencyLabel.toolTip =
+            [manager sshpassInstallCommandForPackageManager:selectedManager];
+        self.installSSHpassButton.title = externalAuthorization
+            ? [NSString stringWithFormat:@"Install with %@ in Terminal…", managerName]
+            : [NSString stringWithFormat:@"Install with %@…", managerName];
     }
+    [self updateSSHpassActionAccessibility];
 }
 
 - (void)setLogText:(NSString *)text
@@ -476,21 +557,121 @@
     [self validateCurrentEnvironment];
 }
 
+- (void)systemPackageManagerChanged:(id)sender
+{
+    ROBSystemDependencyManager *manager = [ROBSystemDependencyManager sharedManager];
+    ROBSystemPackageManager selectedManager = [self selectedSystemPackageManager];
+    manager.preferredPackageManager = selectedManager;
+    [self refreshSystemDependencyStatus];
+
+    NSString *managerName = ROBSystemPackageManagerDisplayName(selectedManager);
+    NSString *managerPath = [manager pathForPackageManager:selectedManager];
+    NSString *message = managerPath.length > 0
+        ? [NSString stringWithFormat:@"Selected %@ at %@ for sshpass installation.", managerName, managerPath]
+        : [NSString stringWithFormat:@"Selected %@. Install it first, then return to Cerebro Settings.", managerName];
+    [self setLogText:message];
+}
+
 - (void)installSSHpass:(id)sender
 {
     ROBSystemDependencyManager *manager = [ROBSystemDependencyManager sharedManager];
-    if (manager.sshpassPath.length == 0 && manager.homebrewPath.length == 0) {
-        NSURL *homebrewURL = [NSURL URLWithString:@"https://brew.sh/"];
-        if (homebrewURL != nil) {
-            [[NSWorkspace sharedWorkspace] openURL:homebrewURL];
-        }
+    if (manager.sshpassPath.length > 0) {
         [self refreshSystemDependencyStatus];
-        self.systemDependencyLabel.toolTip = @"Cerebro opened the official Homebrew installation page. After installing Homebrew, return here and click Install sshpass.";
+        [self setLogText:[NSString stringWithFormat:@"sshpass is ready at %@", manager.sshpassPath]];
         return;
     }
 
-    [manager ensureSSHpassInstalledWithCompletion:nil];
-    [self refreshSystemDependencyStatus];
+    ROBSystemPackageManager selectedManager = [self selectedSystemPackageManager];
+    manager.preferredPackageManager = selectedManager;
+    NSString *managerName = ROBSystemPackageManagerDisplayName(selectedManager);
+    NSString *managerPath = [manager pathForPackageManager:selectedManager];
+    if (managerPath.length == 0) {
+        NSError *validationError = selectedManager == ROBSystemPackageManagerMacPorts
+            ? manager.macPortsValidationError
+            : nil;
+        NSString *URLString = selectedManager == ROBSystemPackageManagerMacPorts
+            ? @"https://www.macports.org/install.php"
+            : @"https://brew.sh/";
+        NSURL *installationURL = [NSURL URLWithString:URLString];
+        if (installationURL != nil) {
+            [[NSWorkspace sharedWorkspace] openURL:installationURL];
+        }
+        [self refreshSystemDependencyStatus];
+        NSString *message = validationError != nil
+            ? [self messageForError:validationError
+                             output:validationError.userInfo[@"commandOutput"] ?: @""]
+            : [NSString stringWithFormat:
+                @"Cerebro opened the official %@ installation page. Cerebro will not install the package manager itself. After installing %@, return here and install sshpass.",
+                managerName, managerName];
+        self.systemDependencyLabel.toolTip = message;
+        [self setLogText:message];
+        return;
+    }
+
+    NSString *command = [manager sshpassInstallCommandForPackageManager:selectedManager
+                                                          executablePath:managerPath];
+    if (command.length == 0) {
+        [self setLogText:[NSString stringWithFormat:@"Cerebro could not construct the %@ installation command.", managerName]];
+        return;
+    }
+
+    BOOL externalAuthorization =
+        [manager requiresExternalAuthorizationForPackageManager:selectedManager];
+    NSAlert *confirmation = [[NSAlert alloc] init];
+    confirmation.alertStyle = NSAlertStyleInformational;
+    confirmation.messageText = [NSString stringWithFormat:@"Install sshpass with %@?", managerName];
+    confirmation.informativeText = externalAuthorization
+        ? [NSString stringWithFormat:
+            @"MacPorts normally requires administrator authorization. Cerebro will copy this command and open Terminal; paste it there and macOS will request authorization. Cerebro never receives the administrator password.\n\n%@",
+            command]
+        : [NSString stringWithFormat:
+            @"Cerebro will run this command only after you confirm:\n\n%@",
+            command];
+    [confirmation addButtonWithTitle:externalAuthorization
+        ? @"Copy Command and Open Terminal"
+        : @"Install"];
+    [confirmation addButtonWithTitle:@"Cancel"];
+
+    [confirmation beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
+        if (response != NSAlertFirstButtonReturn) {
+            return;
+        }
+
+        if (externalAuthorization) {
+            NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
+            [pasteboard clearContents];
+            [pasteboard setString:command forType:NSPasteboardTypeString];
+
+            NSArray<NSString *> *terminalPaths = @[
+                @"/System/Applications/Utilities/Terminal.app",
+                @"/Applications/Utilities/Terminal.app"
+            ];
+            NSString *terminalPath = nil;
+            for (NSString *candidate in terminalPaths) {
+                if ([[NSFileManager defaultManager] fileExistsAtPath:candidate]) {
+                    terminalPath = candidate;
+                    break;
+                }
+            }
+            BOOL openedTerminal = terminalPath.length > 0 &&
+                [[NSWorkspace sharedWorkspace] openURL:[NSURL fileURLWithPath:terminalPath]];
+            NSString *result = openedTerminal
+                ? [NSString stringWithFormat:@"Copied to the clipboard and opened Terminal:\n\n%@\n\nPaste the command, press Return, and return to Cerebro when MacPorts finishes. Cerebro will recheck sshpass when it becomes active.", command]
+                : [NSString stringWithFormat:@"Copied to the clipboard. Open Terminal and run:\n\n%@\n\nReturn to Cerebro when MacPorts finishes.", command];
+            [self setLogText:result];
+            self.systemDependencyLabel.toolTip = result;
+            return;
+        }
+
+        [self setLogText:[NSString stringWithFormat:@"Running:\n\n%@", command]];
+        [manager installSSHpassWithPackageManager:selectedManager
+                           expectedExecutablePath:managerPath
+                                       completion:^(BOOL success, NSString *output, NSError *error) {
+            [self refreshSystemDependencyStatus];
+            [self setLogText:success ? output : [self messageForError:error output:output]];
+        }];
+        [self refreshSystemDependencyStatus];
+    }];
 }
 
 - (void)runtimeDidChange:(NSNotification *)notification
@@ -509,6 +690,7 @@
 
 - (void)applicationDidBecomeActive:(NSNotification *)notification
 {
+    [[ROBSystemDependencyManager sharedManager] refreshSSHpassAvailability];
     [self refreshSystemDependencyStatus];
 }
 

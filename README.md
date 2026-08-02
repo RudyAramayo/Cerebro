@@ -74,15 +74,27 @@ wire contract and the remaining Vision Pro adapter work.
 
 At launch, Cerebro also checks for `sshpass`, which is required by the existing
 Amber password-authenticated SSH controls. It searches the GUI process `PATH`
-and both supported Homebrew locations (`/opt/homebrew` on Apple Silicon and
-`/usr/local` on Intel). If `sshpass` is missing but Homebrew is already
-installed, Cerebro asynchronously runs `brew install sshpass`; the official
-formula is documented at <https://formulae.brew.sh/formula/sshpass>.
+and standard Homebrew locations (`/opt/homebrew` on Apple Silicon and
+`/usr/local` on Intel) as well as the default MacPorts location
+(`/opt/local/bin`). Cerebro never starts a package installation at launch.
 
-Cerebro does not silently bootstrap Homebrew itself. When Homebrew is missing,
-the Amber log connections are skipped without crashing and **Settings…** shows
-the unmet prerequisite with a link to the official installer. Once installation
-finishes, pending Amber SSH operations continue with the resolved executable.
+When `sshpass` is missing, open **Settings…** and explicitly choose Homebrew or
+MacPorts. Homebrew installation runs only after the operator confirms the exact
+`brew install sshpass` command. The standard MacPorts workflow requires
+administrator authorization, so Cerebro displays and copies
+`sudo /opt/local/bin/port install sshpass`, opens Terminal, and leaves password
+entry to macOS; Cerebro never receives the administrator password. Before
+offering that privileged command, Cerebro requires the canonical MacPorts path
+and verifies that it and its parent directories are root-owned and not writable
+by a group or other users. If the selected package manager is absent, Cerebro
+opens only its official installation page and does not bootstrap it. The
+`sshpass` Homebrew formula and MacPorts port
+are documented at <https://formulae.brew.sh/formula/sshpass> and
+<https://ports.macports.org/port/sshpass/>.
+
+Until `sshpass` is available, Amber log connections are skipped without
+crashing. Cerebro rechecks when the app becomes active and then resolves either
+the selected package manager's installation or any valid `sshpass` on `PATH`.
 The SSH login password is supplied to `sshpass` through an anonymous pipe
 instead of the process argument list. SSH connection attempts also use bounded
 connect and keepalive settings so an unreachable robot does not wait forever.

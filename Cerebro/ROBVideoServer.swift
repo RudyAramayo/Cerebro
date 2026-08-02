@@ -510,7 +510,6 @@ final class ROBVideoServer {
             throw ROBVideoTransportError.listenerUnavailable
         }
         self.port = endpointPort
-        _ = try ROBControlPairing.ensurePairingCode()
         credential = try ROBControlPairing.serverAuthenticationMaterial()
 
         let parameters = try ROBControlPairing.makeVideoServerParameters()

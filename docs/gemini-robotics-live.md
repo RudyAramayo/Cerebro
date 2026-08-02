@@ -19,9 +19,10 @@ CameraManager sample buffer
   -> JPEG
   -> Gemini realtimeInput.video
 
-Gemini serverContent text fragments
-  -> accumulated until turnComplete
+Gemini serverContent model text or outputTranscription
+  -> coalesced through turnComplete
   -> ROBMainViewController
+  -> on-screen ROB transcript
   -> existing [ROBSpeechBox sayIt:]
 ```
 
@@ -33,13 +34,29 @@ from being sent back to Gemini before acoustic echo cancellation is available.
 The existing on-device Apple speech recognizer remains active for local
 transcription, wake handling, and local stop phrases. Its transcript is not
 submitted again while the Gemini raw-audio session is ready, preventing
-duplicate turns. During a reconnect, the transcript path can queue a bounded
-ordered text turn until setup completes.
+duplicate turns. When raw audio is disabled, the local transcript uses
+`realtimeInput.text` immediately. Cerebro enables server-side input
+transcription so `Gemini Robotics heard:` in the Xcode console confirms what
+Gemini understood independently of Apple's local transcript.
+
+The ER2 streaming preview returns spoken output through
+`serverContent.outputTranscription` even when its accepted setup modality is
+`TEXT`. Cerebro coalesces that transcription, waits for `turnComplete`, and
+passes the completed reply to `ROBSpeechBox`. This preserves ROB's configured
+system voice and existing half-duplex echo suppression. A missing response no
+longer blocks every later request: text and locally detected raw-microphone turns
+have a 15-second response-start deadline and a 120-second absolute completion
+deadline, after which Cerebro speaks a failure notice and reconnects without
+automatically replaying a potentially tool-bearing request. The on-device
+transcript is used only to arm and debounce the raw-audio deadline; its text is
+never submitted as a duplicate request.
 
 ## Authentication
 
-No Gemini credential is stored in source code, the application bundle, or the
-Xcode project.
+No Gemini credential should be committed to source code, the application
+bundle, or a shared Xcode scheme. A developer-local scheme variable is suitable
+only when that scheme is excluded from Git; production credentials belong in a
+backend-issued ephemeral-token flow or another secret store.
 
 For local development, add this environment variable to the Cerebro scheme in
 Xcode under **Run > Arguments > Environment Variables**:
@@ -76,7 +93,8 @@ running with Gemini disabled and logs the missing configuration.
 | --- | --- | --- |
 | `GEMINI_ROBOTICS_ENABLED` | `false` | Must be set to `true` before any camera or microphone data is transmitted. |
 | `GEMINI_ROBOTICS_MODEL` | `gemini-robotics-er-2-streaming-preview` | Model override. The `models/` prefix is added automatically. |
-| `GEMINI_ROBOTICS_STREAM_AUDIO` | `true` | Streams microphone audio. Set to `false` to use ordered local transcript turns instead. |
+| `GEMINI_ROBOTICS_RESPONSE_MODALITY` | `TEXT` | Setup response modality. The configured ER2 preview was live-validated with `TEXT`; set `AUDIO` only for a model whose Live contract requires it. Both paths use output transcription for ROBSpeech. |
+| `GEMINI_ROBOTICS_STREAM_AUDIO` | `true` | Streams microphone audio. Set to `false` to submit the local Apple transcript through `realtimeInput.text` instead. |
 | `GEMINI_ROBOTICS_STREAM_VIDEO` | `true` | Streams throttled JPEG camera frames. |
 | `GEMINI_ROBOTICS_SYSTEM_INSTRUCTION` | Built-in ROB instruction | Overrides wake-name, response-style, and physical-action guidance. |
 | `GEMINI_ROBOT_ACTION_TOOL_ENABLED` | `false` | Declares the blocking `robot_action` tool and enables the Cerebro-to-ROBController action bridge. Keep disabled except during supervised protocol testing. |
@@ -84,7 +102,8 @@ running with Gemini disabled and logs the missing configuration.
 Connection states are logged as `connecting`, `ready`, `reconnecting`,
 `failed`, or `disconnected`. The session keeps the latest resumable handle,
 enables sliding-window context compression, reconnects after `goAway`, and uses
-bounded exponential backoff after failures.
+bounded exponential backoff after failures. Successful text sends are logged by
+turn number without logging the prompt, credential, or media payload.
 
 ## ROBController action bridge
 
@@ -287,10 +306,20 @@ swiftc \
 /tmp/CerebroGeminiProtocolFixtureTests
 ```
 
-The fixtures verify setup/model serialization, secure endpoint construction,
-audio and JPEG message envelopes, completed text turns, blocking tool calls,
-cancellations, session-resumption handles, and `goAway` handling. They do not
-make a billable network request.
+The fixtures verify setup/model serialization, transcription enablement,
+`realtimeInput.text`, audio and JPEG envelopes, independent input/output
+transcription messages, generation-versus-turn completion, deadline state,
+callback-before-interruption and interruption-before-callback barge-in ordering,
+blocking tool calls, cancellations, session-resumption handles, and `goAway`
+handling. They do not make a billable network request.
+
+On 2026-08-01, a sanitized manual round trip compiled against the repository's
+protocol implementation reached `setupComplete`, sent the test request through
+`realtimeInput.text`, and parsed the configured ER2 preview's
+`outputTranscription` response as `seven`. A second pass sent synthetic mono
+PCM16 audio at 16 kHz through the same protocol helpers; Gemini's server-side
+input transcription returned `Hey Rob, reply with exactly the word seven.` and
+the model's output transcription returned `seven`.
 
 Run the standalone `ROBRobotActionProtocol` v1 envelope fixtures:
 
@@ -315,8 +344,15 @@ network listener or operate hardware.
 - Ephemeral-token refresh is not yet implemented in-process.
 - The integration is half-duplex; user barge-in during synthesized speech is
   deferred until an echo-cancelled audio path is added.
-- The Live API connection is exercised through build and protocol fixtures,
-  not through a checked-in credential or automated billable test.
+- Live behavior has a manual sanitized round-trip check, but there is no
+  checked-in credential or automated billable network test.
+- The raw-microphone response-start watchdog uses Apple's on-device transcript
+  as its non-resending turn signal. If on-device recognition is unavailable for
+  the selected locale, successful Gemini audio turns still work and server
+  transcription is still logged, but a silent turn does not get that local
+  15-second watchdog.
+- The synthetic PCM round trip validates Gemini and the wire protocol, not the
+  physical microphone or `AVAudioEngine` conversion on a particular Mac.
 - Camera input is semantic context at one FPS. It is not a visual-servoing or
   collision-avoidance loop, and camera frames alone do not trigger a proactive
   model turn.

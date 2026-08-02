@@ -1505,14 +1505,20 @@ int maestroGetErrors(int fd)
 
 - (void)performSSHpassOperation:(NSString *)operation block:(dispatch_block_t)block
 {
-    [[ROBSystemDependencyManager sharedManager]
-        ensureSSHpassInstalledWithCompletion:^(BOOL success, NSString *output, NSError *error) {
-            if (!success) {
-                [self reportSSHpassError:error operation:operation];
-                return;
-            }
-            block();
+    ROBSystemDependencyManager *manager = [ROBSystemDependencyManager sharedManager];
+    if (manager.sshpassPath.length == 0) {
+        NSString *managerName = ROBSystemPackageManagerDisplayName(manager.preferredPackageManager);
+        NSError *error = [NSError errorWithDomain:ROBSystemDependencyErrorDomain
+                                             code:ROBSystemDependencyErrorToolUnavailable
+                                         userInfo:@{
+            NSLocalizedDescriptionKey: @"sshpass is not installed.",
+            NSLocalizedRecoverySuggestionErrorKey: [NSString stringWithFormat:
+                @"Open Cerebro Settings and explicitly install sshpass with %@.", managerName]
         }];
+        [self reportSSHpassError:error operation:operation];
+        return;
+    }
+    block();
 }
 
 - (BOOL)launchSSHpassTask:(NSTask *)task operation:(NSString *)operation
@@ -1529,9 +1535,15 @@ int maestroGetErrors(int fd)
 
 - (void)reportSSHpassError:(NSError *)error operation:(NSString *)operation
 {
-    NSString *message = [NSString stringWithFormat:@"%@ unavailable: %@\n",
-                         operation,
-                         error.localizedDescription ?: @"unknown SSH error"];
+    NSString *suggestion = error.userInfo[NSLocalizedRecoverySuggestionErrorKey];
+    NSString *message = suggestion.length > 0
+        ? [NSString stringWithFormat:@"%@ unavailable: %@ %@\n",
+            operation,
+            error.localizedDescription ?: @"unknown SSH error",
+            suggestion]
+        : [NSString stringWithFormat:@"%@ unavailable: %@\n",
+            operation,
+            error.localizedDescription ?: @"unknown SSH error"];
     NSLog(@"%@", [message stringByTrimmingCharactersInSet:[NSCharacterSet newlineCharacterSet]]);
     dispatch_async(dispatch_get_main_queue(), ^{
         if (self.amberMasterCoreOutput_R11 != nil) {

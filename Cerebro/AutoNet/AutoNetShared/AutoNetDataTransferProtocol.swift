@@ -307,6 +307,29 @@ private struct ROBControlStoredPeerRegistry: Codable {
     label: "com.orbitusrobotics.robctl.v2.credential-registry")
   private static var cachedPeerRegistry: ROBControlStoredPeerRegistry?
 
+  #if os(macOS)
+    private struct ServerIdentityContext {
+      let loadedIdentity: ROBControlIdentityStore.LoadedIdentity
+      let credential: ROBControlCredential
+    }
+
+    private static let serverIdentityQueue = DispatchQueue(
+      label: "com.orbitusrobotics.robctl.v2.server-identity")
+    private static var cachedServerIdentityContext: ServerIdentityContext?
+  #endif
+
+  #if ROB_CONTROL_IDENTITY_FIXTURE && os(macOS)
+    static func runIdentityPersistenceFixture(
+      keychain: SecKeychain,
+      iterations: Int = 3
+    ) throws -> (fingerprints: [Data], certificateCount: Int) {
+      try ROBControlIdentityStore.runPersistenceFixture(
+        keychain: keychain,
+        iterations: iterations
+      )
+    }
+  #endif
+
   public static var isPaired: Bool {
     guard let credential = try? loadCredential(account: clientProfileAccount) else { return false }
     return credential.isValid
@@ -478,7 +501,7 @@ private struct ROBControlStoredPeerRegistry: Codable {
 
   static func makeV2ServerParameters() throws -> NWParameters {
     #if os(macOS)
-      let loadedIdentity = try ROBControlIdentityStore.loadOrCreate()
+      let loadedIdentity = try serverIdentityContext().loadedIdentity
       let quic = NWProtocolQUIC.Options(alpn: [applicationProtocol])
       quic.direction = .bidirectional
       quic.idleTimeout = 10_000
@@ -501,7 +524,7 @@ private struct ROBControlStoredPeerRegistry: Codable {
   /// independent from robot control.
   static func makeVideoServerParameters() throws -> NWParameters {
     #if os(macOS)
-      let loadedIdentity = try ROBControlIdentityStore.loadOrCreate()
+      let loadedIdentity = try serverIdentityContext().loadedIdentity
       let quic = NWProtocolQUIC.Options(alpn: [ROBVideoTransport.applicationProtocol])
       quic.direction = .bidirectional
       quic.idleTimeout = 10_000
@@ -812,46 +835,65 @@ private struct ROBControlStoredPeerRegistry: Codable {
 
   private static func serverCredential() throws -> ROBControlCredential {
     #if os(macOS)
-      let loadedIdentity = try ROBControlIdentityStore.loadOrCreate()
-      let fingerprint = Data(
-        SHA256.hash(data: SecCertificateCopyData(loadedIdentity.certificate) as Data))
-      let existing = try loadCredential(account: serverProfileAccount)
-      if let existing,
-        existing.certificateSHA256 == fingerprint
-      {
-        return existing
-      }
-
-      let migratedSecret: Data?
-      if let oldSecret = try loadData(account: legacySecretAccount),
-        oldSecret.count == requiredSecretLength
-      {
-        migratedSecret = oldSecret
-      } else if let environmentSecret = ProcessInfo.processInfo.environment[environmentKey],
-        let decoded = Data(base64Encoded: environmentSecret), decoded.count == requiredSecretLength
-      {
-        migratedSecret = decoded
-      } else {
-        migratedSecret = nil
-      }
-
-      let credential = ROBControlCredential(
-        version: 2,
-        robotID: existing?.robotID ?? UUID(),
-        controllerID: existing?.controllerID ?? UUID(),
-        serviceType: serviceType,
-        applicationProtocol: applicationProtocol,
-        certificateSHA256: fingerprint,
-        sharedSecret: try existing?.sharedSecret ?? migratedSecret
-          ?? secureRandomData(count: requiredSecretLength)
-      )
-      try storeCredential(credential, account: serverProfileAccount)
-      return credential
+      return try serverIdentityContext().credential
     #else
       throw AutoNetTransportError.identityUnavailable(
         "Cerebro's server identity is supported only on macOS")
     #endif
   }
+
+  #if os(macOS)
+    private static func serverIdentityContext() throws -> ServerIdentityContext {
+      try serverIdentityQueue.sync {
+        if let cachedServerIdentityContext {
+          return cachedServerIdentityContext
+        }
+
+        let loadedIdentity = try ROBControlIdentityStore.loadOrCreate()
+        let fingerprint = Data(
+          SHA256.hash(data: SecCertificateCopyData(loadedIdentity.certificate) as Data))
+        let existing = try loadCredential(account: serverProfileAccount)
+
+        let credential: ROBControlCredential
+        if let existing, existing.certificateSHA256 == fingerprint {
+          credential = existing
+        } else {
+          let migratedSecret: Data?
+          if let oldSecret = try loadData(account: legacySecretAccount),
+            oldSecret.count == requiredSecretLength
+          {
+            migratedSecret = oldSecret
+          } else if let environmentSecret = ProcessInfo.processInfo.environment[environmentKey],
+            let decoded = Data(base64Encoded: environmentSecret),
+            decoded.count == requiredSecretLength
+          {
+            migratedSecret = decoded
+          } else {
+            migratedSecret = nil
+          }
+
+          credential = ROBControlCredential(
+            version: 2,
+            robotID: existing?.robotID ?? UUID(),
+            controllerID: existing?.controllerID ?? UUID(),
+            serviceType: serviceType,
+            applicationProtocol: applicationProtocol,
+            certificateSHA256: fingerprint,
+            sharedSecret: try existing?.sharedSecret ?? migratedSecret
+              ?? secureRandomData(count: requiredSecretLength)
+          )
+          try storeCredential(credential, account: serverProfileAccount)
+        }
+
+        let context = ServerIdentityContext(
+          loadedIdentity: loadedIdentity,
+          credential: credential
+        )
+        cachedServerIdentityContext = context
+        return context
+      }
+    }
+  #endif
 
   private static func secureRandomData(count: Int) throws -> Data {
     var data = Data(count: count)
@@ -945,66 +987,143 @@ private enum ROBControlDER {
     private static let certificateLabel = "ROB Control QUIC Server Identity v1"
     private static let keyLabel = "ROB Control QUIC P-256 Key v1"
     private static let keyTag = Data("com.orbitusrobotics.robctl.v2.p256.v1".utf8)
+    private static let canonicalCertificateService = "com.orbitusrobotics.robctl.v2"
+    private static let canonicalCertificateAccount = "cerebro-server-certificate-der-v1"
+    private static let maximumCertificateLength = 64 * 1_024
+    private static let shared = ROBControlIdentityStore()
+
     struct LoadedIdentity {
       let identity: SecIdentity
       let certificate: SecCertificate
     }
 
-    static func loadOrCreate() throws -> LoadedIdentity {
-      if let certificate = try loadCertificate() {
-        var identity: SecIdentity?
-        let status = SecIdentityCreateWithCertificate(nil, certificate, &identity)
-        guard status == errSecSuccess, let identity else {
-          throw AutoNetTransportError.identityUnavailable(
-            "private key missing (OSStatus \(status))")
-        }
-        return LoadedIdentity(identity: identity, certificate: certificate)
-      }
-      let privateKey = try loadPrivateKey() ?? createPrivateKey()
-      let certificateData = try makeSelfSignedCertificate(privateKey: privateKey)
-      guard let certificate = SecCertificateCreateWithData(nil, certificateData as CFData) else {
-        throw AutoNetTransportError.identityUnavailable("generated X.509 certificate was rejected")
-      }
-      let status = SecItemAdd(
-        [
-          kSecClass as String: kSecClassCertificate, kSecAttrLabel as String: certificateLabel,
-          kSecValueRef as String: certificate,
-        ] as CFDictionary, nil)
-      guard status == errSecSuccess || status == errSecDuplicateItem else {
-        throw AutoNetTransportError.keychain(status)
-      }
-      let stored = try loadCertificate() ?? certificate
-      var identity: SecIdentity?
-      let identityStatus = SecIdentityCreateWithCertificate(nil, stored, &identity)
-      guard identityStatus == errSecSuccess, let identity else {
-        throw AutoNetTransportError.identityUnavailable(
-          "could not form SecIdentity (OSStatus \(identityStatus))")
-      }
-      return LoadedIdentity(identity: identity, certificate: stored)
+    private let keychain: SecKeychain?
+    private let queue = DispatchQueue(label: "com.orbitusrobotics.robctl.v2.identity-store")
+    private var cachedIdentity: LoadedIdentity?
+
+    private init(keychain: SecKeychain? = nil) {
+      self.keychain = keychain
     }
 
-    private static func loadCertificate() throws -> SecCertificate? {
-      let query: [String: Any] = [
-        kSecClass as String: kSecClassCertificate, kSecAttrLabel as String: certificateLabel,
-        kSecReturnRef as String: true, kSecMatchLimit as String: kSecMatchLimitOne,
-      ]
+    static func loadOrCreate() throws -> LoadedIdentity {
+      try shared.loadOrCreateIdentity()
+    }
+
+    private func loadOrCreateIdentity() throws -> LoadedIdentity {
+      try queue.sync {
+        if let cachedIdentity {
+          return cachedIdentity
+        }
+
+        let certificateData: Data
+        if let storedCertificateData = try loadCanonicalCertificateData() {
+          certificateData = storedCertificateData
+        } else {
+          let privateKey = try loadOrCreatePrivateKey()
+          let generatedCertificateData = try makeSelfSignedCertificate(privateKey: privateKey)
+          certificateData = try storeCanonicalCertificateDataIfAbsent(generatedCertificateData)
+        }
+
+        let certificate = try makeCertificate(from: certificateData)
+        try installCertificateIfNeeded(certificate)
+        let identity = try makeIdentity(certificate: certificate)
+        let loadedIdentity = LoadedIdentity(identity: identity, certificate: certificate)
+        cachedIdentity = loadedIdentity
+        return loadedIdentity
+      }
+    }
+
+    private func loadCanonicalCertificateData() throws -> Data? {
+      var query = lookupQuery(canonicalCertificateQuery())
+      query[kSecReturnData as String] = true
+      query[kSecMatchLimit as String] = kSecMatchLimitOne
+
       var item: CFTypeRef?
       let status = SecItemCopyMatching(query as CFDictionary, &item)
-      if status == errSecItemNotFound { return nil }
-      guard status == errSecSuccess, let certificate = item as! SecCertificate? else {
+      if status == errSecItemNotFound {
+        return nil
+      }
+      guard status == errSecSuccess, let data = item as? Data else {
         throw AutoNetTransportError.keychain(status)
+      }
+      guard !data.isEmpty, data.count <= Self.maximumCertificateLength,
+        SecCertificateCreateWithData(nil, data as CFData) != nil
+      else {
+        throw AutoNetTransportError.identityUnavailable(
+          "the canonical certificate stored in Keychain is invalid")
+      }
+      return data
+    }
+
+    private func storeCanonicalCertificateDataIfAbsent(_ candidate: Data) throws -> Data {
+      guard !candidate.isEmpty, candidate.count <= Self.maximumCertificateLength else {
+        throw AutoNetTransportError.identityUnavailable(
+          "the generated certificate has an invalid size")
+      }
+
+      var addQuery = insertionQuery(canonicalCertificateQuery())
+      addQuery[kSecValueData as String] = candidate
+      addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+      let status = SecItemAdd(addQuery as CFDictionary, nil)
+      if status == errSecSuccess {
+        return candidate
+      }
+      guard status == errSecDuplicateItem,
+        let storedCertificateData = try loadCanonicalCertificateData()
+      else {
+        throw AutoNetTransportError.keychain(status)
+      }
+      return storedCertificateData
+    }
+
+    private func canonicalCertificateQuery() -> [String: Any] {
+      [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: Self.canonicalCertificateService,
+        kSecAttrAccount as String: Self.canonicalCertificateAccount,
+      ]
+    }
+
+    private func makeCertificate(from data: Data) throws -> SecCertificate {
+      guard let certificate = SecCertificateCreateWithData(nil, data as CFData) else {
+        throw AutoNetTransportError.identityUnavailable(
+          "the canonical X.509 certificate could not be decoded")
       }
       return certificate
     }
 
-    private static func loadPrivateKey() throws -> SecKey? {
-      let query: [String: Any] = [
+    private func installCertificateIfNeeded(_ certificate: SecCertificate) throws {
+      let status = SecItemAdd(
+        insertionQuery([
+          kSecClass as String: kSecClassCertificate,
+          kSecAttrLabel as String: Self.certificateLabel,
+          kSecValueRef as String: certificate,
+        ]) as CFDictionary,
+        nil
+      )
+      guard status == errSecSuccess || status == errSecDuplicateItem else {
+        throw AutoNetTransportError.keychain(status)
+      }
+    }
+
+    private func makeIdentity(certificate: SecCertificate) throws -> SecIdentity {
+      var identity: SecIdentity?
+      let status = SecIdentityCreateWithCertificate(keychain, certificate, &identity)
+      guard status == errSecSuccess, let identity else {
+        throw AutoNetTransportError.identityUnavailable(
+          "private key missing for the canonical certificate (OSStatus \(status))")
+      }
+      return identity
+    }
+
+    private func loadPrivateKey() throws -> SecKey? {
+      let query = lookupQuery([
         kSecClass as String: kSecClassKey,
         kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
         kSecAttrKeyClass as String: kSecAttrKeyClassPrivate,
-        kSecAttrApplicationTag as String: keyTag, kSecReturnRef as String: true,
+        kSecAttrApplicationTag as String: Self.keyTag, kSecReturnRef as String: true,
         kSecMatchLimit as String: kSecMatchLimitOne,
-      ]
+      ])
       var item: CFTypeRef?
       let status = SecItemCopyMatching(query as CFDictionary, &item)
       if status == errSecItemNotFound { return nil }
@@ -1014,15 +1133,31 @@ private enum ROBControlDER {
       return key
     }
 
-    private static func createPrivateKey() throws -> SecKey {
-      let attributes: [String: Any] = [
+    private func loadOrCreatePrivateKey() throws -> SecKey {
+      if let existing = try loadPrivateKey() {
+        return existing
+      }
+      do {
+        return try createPrivateKey()
+      } catch {
+        // A concurrent cold-start process may have installed the tagged key
+        // between our lookup and creation attempt. Reuse that winner.
+        if let winner = try loadPrivateKey() {
+          return winner
+        }
+        throw error
+      }
+    }
+
+    private func createPrivateKey() throws -> SecKey {
+      let attributes = insertionQuery([
         kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
         kSecAttrKeySizeInBits as String: 256,
         kSecPrivateKeyAttrs as String: [
-          kSecAttrIsPermanent as String: true, kSecAttrApplicationTag as String: keyTag,
-          kSecAttrLabel as String: keyLabel,
+          kSecAttrIsPermanent as String: true, kSecAttrApplicationTag as String: Self.keyTag,
+          kSecAttrLabel as String: Self.keyLabel,
         ],
-      ]
+      ])
       var error: Unmanaged<CFError>?
       guard let key = SecKeyCreateRandomKey(attributes as CFDictionary, &error) else {
         throw AutoNetTransportError.identityUnavailable(
@@ -1031,7 +1166,25 @@ private enum ROBControlDER {
       return key
     }
 
-    private static func makeSelfSignedCertificate(privateKey: SecKey) throws -> Data {
+    private func lookupQuery(_ values: [String: Any]) -> [String: Any] {
+      guard let keychain else {
+        return values
+      }
+      var scoped = values
+      scoped[kSecMatchSearchList as String] = [keychain]
+      return scoped
+    }
+
+    private func insertionQuery(_ values: [String: Any]) -> [String: Any] {
+      guard let keychain else {
+        return values
+      }
+      var scoped = values
+      scoped[kSecUseKeychain as String] = keychain
+      return scoped
+    }
+
+    private func makeSelfSignedCertificate(privateKey: SecKey) throws -> Data {
       guard let publicKey = SecKeyCopyPublicKey(privateKey) else {
         throw AutoNetTransportError.identityUnavailable("public key unavailable")
       }
@@ -1049,7 +1202,7 @@ private enum ROBControlDER {
         ROBControlDER.set([
           ROBControlDER.sequence([
             try ROBControlDER.objectIdentifier("2.5.4.3"),
-            ROBControlDER.utf8String("Cerebro ROB Control"),
+            ROBControlDER.utf8String(Self.certificateLabel),
           ])
         ])
       ])
@@ -1101,6 +1254,80 @@ private enum ROBControlDER {
       }
       return ROBControlDER.sequence([tbs, signatureAlgorithm, ROBControlDER.bitString(signature)])
     }
+
+    #if ROB_CONTROL_IDENTITY_FIXTURE
+      fileprivate static func runPersistenceFixture(
+        keychain: SecKeychain,
+        iterations: Int
+      ) throws -> (fingerprints: [Data], certificateCount: Int) {
+        guard iterations > 1 else {
+          throw AutoNetTransportError.identityUnavailable(
+            "the identity persistence fixture requires multiple loads")
+        }
+
+        var keyError: Unmanaged<CFError>?
+        guard
+          let signingKey = SecKeyCreateRandomKey(
+            [
+              kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
+              kSecAttrKeySizeInBits as String: 256,
+            ] as CFDictionary,
+            &keyError
+          )
+        else {
+          throw AutoNetTransportError.identityUnavailable(
+            keyError?.takeRetainedValue().localizedDescription
+              ?? "the fixture signing key could not be created")
+        }
+
+        var fingerprints: [Data] = []
+        for _ in 0..<iterations {
+          let store = ROBControlIdentityStore(keychain: keychain)
+          let certificate = try store.loadOrCreateFixtureCertificate(signingKey: signingKey)
+          fingerprints.append(
+            Data(SHA256.hash(data: SecCertificateCopyData(certificate) as Data)))
+        }
+
+        let counter = ROBControlIdentityStore(keychain: keychain)
+        return (fingerprints, try counter.certificateCount())
+      }
+
+      private func loadOrCreateFixtureCertificate(signingKey: SecKey) throws -> SecCertificate {
+        try queue.sync {
+          let certificateData: Data
+          if let storedCertificateData = try loadCanonicalCertificateData() {
+            certificateData = storedCertificateData
+          } else {
+            let generatedCertificateData = try makeSelfSignedCertificate(privateKey: signingKey)
+            certificateData = try storeCanonicalCertificateDataIfAbsent(generatedCertificateData)
+          }
+          let certificate = try makeCertificate(from: certificateData)
+          try installCertificateIfNeeded(certificate)
+          return certificate
+        }
+      }
+
+      private func certificateCount() throws -> Int {
+        let query = lookupQuery([
+          kSecClass as String: kSecClassCertificate,
+          kSecReturnRef as String: true,
+          kSecMatchLimit as String: kSecMatchLimitAll,
+        ])
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        if status == errSecItemNotFound {
+          return 0
+        }
+        guard status == errSecSuccess else {
+          throw AutoNetTransportError.keychain(status)
+        }
+        guard let certificates = item as? [SecCertificate] else {
+          throw AutoNetTransportError.identityUnavailable(
+            "the fixture Keychain returned an unexpected certificate result")
+        }
+        return certificates.count
+      }
+    #endif
   }
 #endif
 

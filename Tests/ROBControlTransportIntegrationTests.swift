@@ -1,5 +1,33 @@
 import Foundation
 
+#if ROB_CONTROL_IDENTITY_FIXTURE && os(macOS)
+import Network
+import Security
+
+enum ROBVideoTransport {
+    static let applicationProtocol = "robvideo/1"
+}
+
+@available(macOS 12.0, *)
+final class ROBVideoFramer: NWProtocolFramerImplementation {
+    static let definition = NWProtocolFramer.Definition(implementation: ROBVideoFramer.self)
+    static var label: String { "ROBVideoFixture" }
+
+    required init(framer: NWProtocolFramer.Instance) {}
+    func start(framer: NWProtocolFramer.Instance) -> NWProtocolFramer.StartResult { .ready }
+    func wakeup(framer: NWProtocolFramer.Instance) {}
+    func stop(framer: NWProtocolFramer.Instance) -> Bool { true }
+    func cleanup(framer: NWProtocolFramer.Instance) {}
+    func handleInput(framer: NWProtocolFramer.Instance) -> Int { 0 }
+    func handleOutput(
+        framer: NWProtocolFramer.Instance,
+        message: NWProtocolFramer.Message,
+        messageLength: Int,
+        isComplete: Bool
+    ) {}
+}
+#endif
+
 private enum TransportFixtureError: Error, CustomStringConvertible {
     case failed(String)
 
@@ -40,8 +68,11 @@ struct ROBControlTransportIntegrationTests {
         try testCredentialRoleCompatibility(using: credential)
         try testAuthorizationPolicy()
         try testLidarTelemetry()
+        #if ROB_CONTROL_IDENTITY_FIXTURE && os(macOS)
+        try testPersistentServerIdentity()
+        #endif
 
-        print("ROB control pairing, role authorization, and Lidar telemetry fixtures passed")
+        print("ROB control pairing, identity persistence, role authorization, and Lidar telemetry fixtures passed")
     }
 
     private static func testAuthentication(with credential: ROBControlCredential) throws {
@@ -297,6 +328,95 @@ struct ROBControlTransportIntegrationTests {
             "A scan mixed with map data was accepted"
         )
     }
+
+    #if ROB_CONTROL_IDENTITY_FIXTURE && os(macOS)
+    private static func testPersistentServerIdentity() throws {
+        let keychainURL = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "CerebroROBControlIdentityFixture-\(UUID().uuidString).keychain-db"
+        )
+        let password = "fixture-\(UUID().uuidString)"
+        var keychain: SecKeychain?
+        var fixtureError: Error?
+
+        do {
+            let createStatus = keychainURL.path.withCString { pathPointer in
+                password.withCString { passwordPointer in
+                    SecKeychainCreate(
+                        pathPointer,
+                        UInt32(password.utf8.count),
+                        passwordPointer,
+                        false,
+                        nil,
+                        &keychain
+                    )
+                }
+            }
+            try expect(createStatus == errSecSuccess, "Could not create the isolated fixture Keychain")
+            let fixtureKeychain = try require(keychain, "The isolated fixture Keychain was unavailable")
+            let unlockStatus = password.withCString { passwordPointer in
+                SecKeychainUnlock(
+                    fixtureKeychain,
+                    UInt32(password.utf8.count),
+                    passwordPointer,
+                    true
+                )
+            }
+            try expect(unlockStatus == errSecSuccess, "Could not unlock the isolated fixture Keychain")
+
+            let result = try ROBControlPairing.runIdentityPersistenceFixture(
+                keychain: fixtureKeychain,
+                iterations: 3
+            )
+            try expect(result.fingerprints.count == 3, "The identity fixture skipped a load")
+            try expect(
+                Set(result.fingerprints).count == 1,
+                "Repeated identity loads rotated the TLS certificate fingerprint"
+            )
+            try expect(
+                result.certificateCount == 1,
+                "Repeated identity loads created duplicate TLS certificates"
+            )
+        } catch {
+            fixtureError = error
+        }
+
+        var cleanupMessages: [String] = []
+        if let keychain {
+            let deleteStatus = SecKeychainDelete(keychain)
+            if deleteStatus != errSecSuccess && deleteStatus != errSecNoSuchKeychain {
+                cleanupMessages.append(
+                    "SecKeychainDelete failed with OSStatus \(deleteStatus)"
+                )
+            }
+        }
+
+        if FileManager.default.fileExists(atPath: keychainURL.path) {
+            do {
+                try FileManager.default.removeItem(at: keychainURL)
+            } catch {
+                cleanupMessages.append(
+                    "could not remove \(keychainURL.lastPathComponent): \(error.localizedDescription)"
+                )
+            }
+        }
+        if FileManager.default.fileExists(atPath: keychainURL.path) {
+            cleanupMessages.append("the temporary fixture Keychain still exists after cleanup")
+        }
+
+        if let fixtureError {
+            if cleanupMessages.isEmpty {
+                throw fixtureError
+            }
+            throw TransportFixtureError.failed(
+                "\(fixtureError); cleanup also failed: \(cleanupMessages.joined(separator: "; "))"
+            )
+        }
+        try expect(
+            cleanupMessages.isEmpty,
+            "Temporary fixture Keychain cleanup failed: \(cleanupMessages.joined(separator: "; "))"
+        )
+    }
+    #endif
 
     private static func expect(_ condition: @autoclosure () -> Bool, _ message: String) throws {
         guard condition() else { throw TransportFixtureError.failed(message) }
