@@ -17,6 +17,7 @@ final class CameraViewController: NSViewController {
     private var videoServer: ROBVideoServer?
     private var cameraViewIsVisible = false
     private var remoteVideoIsActive = false
+    private var geminiVideoIsActive = false
     private var cameraSessionIsRequested = false
     
     @IBOutlet weak var skeletonView: SCNView!
@@ -92,6 +93,22 @@ final class CameraViewController: NSViewController {
             print(error.localizedDescription)
         }
     }
+
+    /// Adds Gemini as an independent camera consumer. Controller/Vision Pro
+    /// video demand remains owned by ROBVideoServer and cannot be disabled by
+    /// the Gemini runtime switch.
+    @objc(setGeminiVideoDemandActive:)
+    func setGeminiVideoDemandActive(_ isActive: Bool) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { [weak self] in
+                self?.setGeminiVideoDemandActive(isActive)
+            }
+            return
+        }
+        guard geminiVideoIsActive != isActive else { return }
+        geminiVideoIsActive = isActive
+        reconcileCameraSession()
+    }
     
     
     override var representedObject: Any? {
@@ -124,7 +141,7 @@ final class CameraViewController: NSViewController {
 
     private func reconcileCameraSession() {
         guard let cameraManager else { return }
-        let shouldRun = cameraViewIsVisible || remoteVideoIsActive
+        let shouldRun = cameraViewIsVisible || remoteVideoIsActive || geminiVideoIsActive
         guard shouldRun != cameraSessionIsRequested else { return }
         do {
             if shouldRun {

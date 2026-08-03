@@ -47,6 +47,8 @@
 - (IBAction)showControls:(id)sender;
 - (IBAction)showSerialDebug:(id)sender;
 - (IBAction)showMainNavigation:(id)sender;
+- (IBAction)showGeminiDiagnostics:(id)sender;
+- (IBAction)showStageShow:(id)sender;
 
 - (IBAction) joinSupaRobonet_WIFI:(id)sender;
 - (IBAction) joinATT9m78y5D:(id)sender;

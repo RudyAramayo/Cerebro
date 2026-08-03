@@ -94,16 +94,61 @@ running with Gemini disabled and logs the missing configuration.
 | `GEMINI_ROBOTICS_ENABLED` | `false` | Must be set to `true` before any camera or microphone data is transmitted. |
 | `GEMINI_ROBOTICS_MODEL` | `gemini-robotics-er-2-streaming-preview` | Model override. The `models/` prefix is added automatically. |
 | `GEMINI_ROBOTICS_RESPONSE_MODALITY` | `TEXT` | Setup response modality. The configured ER2 preview was live-validated with `TEXT`; set `AUDIO` only for a model whose Live contract requires it. Both paths use output transcription for ROBSpeech. |
-| `GEMINI_ROBOTICS_STREAM_AUDIO` | `true` | Streams microphone audio. Set to `false` to submit the local Apple transcript through `realtimeInput.text` instead. |
-| `GEMINI_ROBOTICS_STREAM_VIDEO` | `true` | Streams throttled JPEG camera frames. |
+| `GEMINI_ROBOTICS_STREAM_AUDIO` | `true` | First-run default for microphone streaming. The in-app switch becomes authoritative after the operator changes it. When off, local Apple transcripts use `realtimeInput.text` while Gemini is connected. |
+| `GEMINI_ROBOTICS_STREAM_VIDEO` | `true` | First-run default for sampled JPEG camera input. The in-app switch becomes authoritative after the operator changes it. |
 | `GEMINI_ROBOTICS_SYSTEM_INSTRUCTION` | Built-in ROB instruction | Overrides wake-name, response-style, and physical-action guidance. |
 | `GEMINI_ROBOT_ACTION_TOOL_ENABLED` | `false` | Declares the blocking `robot_action` tool and enables the Cerebro-to-ROBController action bridge. Keep disabled except during supervised protocol testing. |
 
-Connection states are logged as `connecting`, `ready`, `reconnecting`,
-`failed`, or `disconnected`. The session keeps the latest resumable handle,
+Unrecognized values for the microphone, camera, or robot-action flags fail
+closed. Connection states are logged as `off`, `connecting`, `ready`,
+`reconnecting`, `failed`, or `disconnected`. The session keeps the latest resumable handle,
 enables sliding-window context compression, reconnects after `goAway`, and uses
 bounded exponential backoff after failures. Successful text sends are logged by
 turn number without logging the prompt, credential, or media payload.
+
+### Runtime controls and diagnostics
+
+Use the **Gemini…** button in Cerebro's main-window title bar to open a live,
+redacted control and diagnostics panel. It provides three independent switches:
+
+- **Connect to Gemini** opens or closes the Live WebSocket. Off blocks new
+  text, microphone, and camera input, clears queued media, and prevents
+  automatic reconnects. Pending controller-authorized robot actions receive a
+  cancellation request and Cerebro applies its local software stop first.
+- **Send microphone audio to Gemini** gates raw PCM forwarding immediately.
+  Turning it off flushes Gemini's cached audio with `audioStreamEnd`; Apple's
+  local recognizer remains active and provides text fallback while connected.
+  A fallback text turn is held until the actor has completed that audio-off
+  transition, so it cannot overtake `audioStreamEnd` on the WebSocket.
+- **Send sampled camera frames to Gemini** gates JPEG encoding and WebSocket
+  forwarding. It does not turn off Cerebro perception or ROBController/Vision
+  Pro video subscriptions, which are separate camera consumers.
+
+The three choices are saved in `UserDefaults`. On the first launch with no saved
+choice, the explicit launch configuration supplies the defaults. Credentials,
+model, response modality, system instruction, and physical-action tool exposure
+remain launch-time configuration and are never written to `UserDefaults`.
+
+The active path is **Raw microphone audio** only after the Live-session actor
+has applied the requested raw-audio policy and the session is ready. It changes
+to **Local speech recognition -> text** while raw audio is disabled, still
+waiting to be applied, or the session is reconnecting, matching the fallback
+Cerebro actually uses. It changes to **Disabled** when the Gemini connection
+switch is off. The requested microphone and camera rows show `true (waiting)`
+until the actor acknowledges the transition, then `true (effective)`. Static
+environment or credential changes still require a full Cerebro relaunch.
+
+The panel also reports JPEG frames encoded, frames whose local WebSocket send
+completed, the last-send time, and a redacted category summary of the last
+server event. A sent count is not a per-frame receipt or semantic-vision
+acknowledgement from Gemini. Counters reset when the `ROBAI` instance is
+recreated. The diagnostics state never retains credentials, media, transcript
+text, tool arguments, raw server JSON, or session-resumption handles.
+
+The off switches guarantee that Cerebro stops admitting and sending the
+corresponding inputs after the runtime transition. Provider-side usage and
+billing can be delayed, so use the Gemini provider console for authoritative
+token accounting.
 
 ## ROBController action bridge
 
@@ -212,8 +257,13 @@ observed state was only pending, or when approval arrives after its deadline,
 because a lost or delayed acceptance packet must not let it assume that nothing
 moved.
 
-The local spoken `stop`/`wait` handler stops synthesized speech and the legacy
-follow mode only. It is not a hardware-stop acknowledgement.
+`stop_motion` is dispatched ahead of ordinary blocking tool work. Gemini stop,
+local spoken stop, stage-show cancellation, autonomy stop, and shutdown converge
+on a local software-stop path that stops speech/local coordinators, writes one
+neutral/braked base frame, drops the heartbeat, and returns base authority to
+`Brain`. The tool result reports Amber arm disposition as unverified because no
+feedback-capable arm hold API exists. This is not a physical E-stop or an arm
+stop acknowledgement.
 
 ### Safety boundary and transport
 
@@ -280,6 +330,43 @@ Build motion upward in independently testable layers:
 This keeps animation expressive while ensuring that the model chooses bounded
 intent and the robot's local deterministic code owns every trajectory.
 
+### Stage-show rehearsal
+
+The main-window **Show…** panel loads the bundled Maker Faire sample or another
+`.robshow.json` document. `ROBStageShow` v1 permits `speak`, `wait`,
+`gemini_turn`, `play_gesture`, and `checkpoint` cues. Unknown fields are rejected
+so show files cannot smuggle servo values, joint arrays, network endpoints, or
+shell commands into the runtime.
+
+**Dry Run** walks the validated plan without speech, Gemini, or hardware calls.
+**Run Offline** uses authored speech and deterministic fallbacks. **Run Local**
+asks a schema-constrained local stage director for a validated spoken line and
+does not contact Gemini. **Run Adaptive** lets the local provider choose a
+bounded stage beat and delivery enum, then sends a trusted Cerebro-built brief to Gemini through the existing
+context-correlated text path, and lets Live add current camera/audio awareness.
+Camera/audio context is available only when its independent Gemini runtime
+switches are enabled; confirm encoded/sent frame counters in **Gemini…** before
+the show. The cue deadline is shared between local planning and Gemini. If
+Gemini fails after a local plan, Cerebro uses that local line; otherwise it uses
+the authored fallback.
+
+The implemented, contract-validated local provider is a loopback-only `llama.cpp` HTTP client using
+`/v1/chat/completions`, `response_format` JSON schema, and `/health`. Missing,
+loading, malformed, timed-out, and cancelled servers are recoverable. A future
+MLX Swift implementation can register behind the same provider protocol; the
+MLX selection currently reports unavailable because no pinned MLX package or
+model runtime is linked in this target.
+
+Every non-stop Gemini physical-action tool call originating from a stage context
+is rejected, even after that cue or show has timed out or completed.
+Named gesture requests also fail closed until an immutable calibrated gesture
+catalog and feedback-capable executor are installed.
+
+The full implementation sequence is documented in
+[Gemini robotics, stage-show, and local action plan](gemini-robotics-stage-action-plan.md).
+Local server setup and the exact provider contract are documented in
+[local improvisation provider](local-improvisation-provider.md).
+
 ## Validation
 
 Build the unsigned Debug application:
@@ -306,12 +393,14 @@ swiftc \
 /tmp/CerebroGeminiProtocolFixtureTests
 ```
 
-The fixtures verify setup/model serialization, transcription enablement,
-`realtimeInput.text`, audio and JPEG envelopes, independent input/output
+The fixtures verify setup/model serialization, fail-closed media/tool flags,
+runtime preference defaults and overrides, transcription enablement,
+`realtimeInput.text`, audio, `audioStreamEnd`, and JPEG envelopes, independent input/output
 transcription messages, generation-versus-turn completion, deadline state,
 callback-before-interruption and interruption-before-callback barge-in ordering,
-blocking tool calls, cancellations, session-resumption handles, and `goAway`
-handling. They do not make a billable network request.
+blocking tool calls, cancellations, session-resumption handles, `goAway`
+handling, effective diagnostics modes and counters, and redaction of diagnostic
+event summaries. They do not make a billable network request.
 
 On 2026-08-01, a sanitized manual round trip compiled against the repository's
 protocol implementation reached `setupComplete`, sent the test request through
@@ -326,6 +415,7 @@ Run the standalone `ROBRobotActionProtocol` v1 envelope fixtures:
 ```bash
 swiftc \
   Cerebro/ROBRobotActionProtocol.swift \
+  Cerebro/ROBAutonomyCoordinator.swift \
   Tests/ROBRobotActionProtocolFixtureTests.swift \
   -o /tmp/CerebroRobotActionProtocolFixtureTests
 
@@ -338,6 +428,69 @@ autonomy start/stop/session bounds, coordinator Lidar activation, and binding
 the outer envelope sender to the versioned inner message. They do not start the
 network listener or operate hardware.
 
+Run the Foundation-only stage-show fixtures:
+
+```bash
+swiftc -module-cache-path /tmp/cerebro-swift-module-cache \
+  -parse-as-library \
+  Cerebro/ROBLocalImprovisationProtocol.swift \
+  Cerebro/ROBLlamaCppImprovisationProvider.swift \
+  Cerebro/ROBStageShowProtocol.swift \
+  Cerebro/ROBStageShowCoordinator.swift \
+  Tests/ROBStageShowFixtureTests.swift \
+  -o /tmp/ROBStageShowFixtureTests
+
+/tmp/ROBStageShowFixtureTests
+```
+
+They cover strict schema round trips, rejection of raw servo/SSH fields,
+duplicate IDs and duration bounds, dry-run side-effect isolation, offline,
+local-only, local-to-Gemini, and authored fallback routing, suppression of late
+local completions, optional gesture failure, and idempotent cancellation. They
+do not speak, contact a model server, contact Gemini, or operate hardware.
+
+Run the local-provider protocol and llama.cpp envelope fixtures:
+
+```bash
+swiftc -module-cache-path /tmp/cerebro-swift-module-cache \
+  -parse-as-library \
+  Cerebro/ROBLocalImprovisationProtocol.swift \
+  Cerebro/ROBLlamaCppImprovisationProvider.swift \
+  Tests/ROBLocalImprovisationFixtureTests.swift \
+  -o /tmp/ROBLocalImprovisationFixtureTests
+
+/tmp/ROBLocalImprovisationFixtureTests
+```
+
+These fixtures cover the exact shallow JSON schema, strict post-generation
+validation, loopback endpoint restrictions, llama.cpp request serialization,
+OpenAI-compatible response extraction, health/loading states, malformed
+responses, and response-size bounds without starting a server.
+
+## Reusable AI interface next steps
+
+1. Extract a provider-neutral conversation interface from `ROBAI` with typed
+   text, audio, video, tool-call, connection, and usage events. Keep Gemini
+   protocol serialization in one adapter rather than exposing it to the main
+   view controller.
+2. Inject a credential provider, WebSocket transport, clock, and retry sleeper.
+   This enables ephemeral-token refresh and deterministic off/on/reconnect tests
+   without a live, billable provider connection.
+3. Add an Xcode test target around the session actor. Prove rapid-toggle
+   last-write-wins behavior, no media egress after an acknowledged off
+   transition, exactly one terminal result per accepted request, queue
+   backpressure, and stale-generation rejection.
+4. Pin each spoken utterance to one route at utterance start. The current
+   ready-state decision at the final Apple transcript callback can still change
+   during a reconnect, risking a partial raw-audio turn or a duplicate text
+   fallback at that boundary.
+5. Add redacted local usage counters for session duration, text requests, audio
+   bytes/chunks, video bytes/frames, and dropped work. Treat provider usage
+   metadata or the provider console—not local estimates—as authoritative for
+   billing.
+6. Move AI orchestration and robot-action cancellation out of the large main
+   view controller into a dedicated coordinator with a small Objective-C bridge.
+
 ## Current limitations
 
 - Live API availability and model access still require a valid Google project.
@@ -346,6 +499,11 @@ network listener or operate hardware.
   deferred until an echo-cancelled audio path is added.
 - Live behavior has a manual sanitized round-trip check, but there is no
   checked-in credential or automated billable network test.
+- Runtime transitions use a last-write-wins policy revision plus independent
+  connection, audio, and video generations. The UI reports actor-applied state,
+  but this acknowledgement is a local egress boundary rather than a provider
+  billing receipt.
+- The diagnostics counters cover video frames, not provider token usage.
 - The raw-microphone response-start watchdog uses Apple's on-device transcript
   as its non-resending turn signal. If on-device recognition is unavailable for
   the selected locale, successful Gemini audio turns still work and server

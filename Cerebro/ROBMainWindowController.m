@@ -5,11 +5,14 @@
 
 #import "ROBMainWindowController.h"
 #import "AppDelegate.h"
+#import "ROBMainViewController.h"
 #import "ROBPythonRuntime.h"
 #import "ROBSystemDependencyManager.h"
 
 @interface ROBMainWindowController ()
 @property (nonatomic, strong) NSButton *pythonSettingsButton;
+@property (nonatomic, strong) NSButton *geminiDiagnosticsButton;
+@property (nonatomic, strong) NSButton *stageShowButton;
 @property (nonatomic, strong) NSTitlebarAccessoryViewController *settingsAccessoryController;
 @property (nonatomic, assign) BOOL pythonRuntimeNeedsAttention;
 @property (nonatomic, assign) BOOL systemDependenciesNeedAttention;
@@ -29,8 +32,24 @@
     self.pythonSettingsButton.frame = NSMakeRect(0, 0, 148, 28);
     self.pythonSettingsButton.toolTip = @"Manage Cerebro's Python environment and system tools";
 
-    NSView *accessoryView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 156, 30)];
-    self.pythonSettingsButton.frame = NSMakeRect(4, 1, 148, 28);
+    self.geminiDiagnosticsButton = [NSButton buttonWithTitle:@"Gemini…"
+                                                      target:self
+                                                      action:@selector(openGeminiDiagnostics:)];
+    self.geminiDiagnosticsButton.bezelStyle = NSBezelStyleTexturedRounded;
+    self.geminiDiagnosticsButton.toolTip = @"Connect or disconnect Gemini and control microphone/camera streaming";
+
+    self.stageShowButton = [NSButton buttonWithTitle:@"Show…"
+                                              target:self
+                                              action:@selector(openStageShow:)];
+    self.stageShowButton.bezelStyle = NSBezelStyleTexturedRounded;
+    self.stageShowButton.toolTip = @"Validate, dry-run, and rehearse a connection-tolerant stage show";
+
+    NSView *accessoryView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 384, 30)];
+    self.stageShowButton.frame = NSMakeRect(4, 1, 98, 28);
+    self.geminiDiagnosticsButton.frame = NSMakeRect(108, 1, 112, 28);
+    self.pythonSettingsButton.frame = NSMakeRect(226, 1, 148, 28);
+    [accessoryView addSubview:self.stageShowButton];
+    [accessoryView addSubview:self.geminiDiagnosticsButton];
     [accessoryView addSubview:self.pythonSettingsButton];
 
     self.settingsAccessoryController = [[NSTitlebarAccessoryViewController alloc] init];
@@ -67,6 +86,22 @@
     id appDelegate = NSApp.delegate;
     if ([appDelegate respondsToSelector:@selector(showPythonSettings:)]) {
         [appDelegate showPythonSettings:sender];
+    }
+}
+
+- (void)openGeminiDiagnostics:(id)sender
+{
+    ROBMainViewController *mainViewController = (ROBMainViewController *)self.contentViewController;
+    if ([mainViewController respondsToSelector:@selector(showGeminiDiagnostics:)]) {
+        [mainViewController showGeminiDiagnostics:sender];
+    }
+}
+
+- (void)openStageShow:(id)sender
+{
+    ROBMainViewController *mainViewController = (ROBMainViewController *)self.contentViewController;
+    if ([mainViewController respondsToSelector:@selector(showStageShow:)]) {
+        [mainViewController showStageShow:sender];
     }
 }
 

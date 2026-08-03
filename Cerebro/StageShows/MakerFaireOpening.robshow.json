@@ -1,0 +1,48 @@
+{
+  "cues" : [
+    {
+      "id" : "safety-check",
+      "kind" : "checkpoint",
+      "text" : "Confirm the stage is clear, the robot is supervised, and the physical E-stop is ready."
+    },
+    {
+      "id" : "welcome",
+      "kind" : "speak",
+      "text" : "Good evening, humans. I am ROB, a machine with two arms, one camera, and absolutely no backstage rider."
+    },
+    {
+      "duration_seconds" : 0.7,
+      "id" : "beat-one",
+      "kind" : "wait"
+    },
+    {
+      "duration_seconds" : 6,
+      "fallback_text" : "I asked the cloud for a joke, but the Wi-Fi is still assembling itself.",
+      "id" : "live-joke",
+      "kind" : "gemini_turn",
+      "text" : "Deliver one family-friendly, one-sentence joke about a robot performing at a maker faire. Do not request or claim any physical action."
+    },
+    {
+      "duration_seconds" : 0.5,
+      "id" : "beat-two",
+      "kind" : "wait"
+    },
+    {
+      "duration_seconds" : 5,
+      "gesture" : "b1.salute",
+      "id" : "optional-salute",
+      "kind" : "play_gesture",
+      "required" : false
+    },
+    {
+      "id" : "close",
+      "kind" : "speak",
+      "text" : "This rehearsal runs locally when the network disappears. The dramatic pauses are entirely intentional."
+    }
+  ],
+  "schema" : "com.orbitusrobotics.stage-show",
+  "show_id" : "maker-faire-opening",
+  "summary" : "A connection-tolerant opening with local/Gemini improvisation, an authored fallback, and an optional named gesture.",
+  "title" : "Maker Faire Opening",
+  "version" : 1
+}

@@ -122,7 +122,8 @@ Camera and microphone streaming are disabled unless explicitly enabled with
 The optional, default-off `robot_action` tool is integrated with
 `ROBRobotActionProtocol` v1. Cerebro places its versioned JSON action messages
 inside the robot-control envelope. ROBController is the operator approval and
-status console; Cerebro remains the hardware coordinator.
+status console. Approval currently records operator intent only: neither
+ROBController nor Cerebro starts a physical action after approval.
 Only terminal action results return to Gemini, whose completed response is
 spoken through the same `ROBSpeechBox` path.
 
@@ -137,6 +138,30 @@ GEMINI_API_KEY=<development key>
 `GEMINI_EPHEMERAL_TOKEN` may replace the API key. Enabling the tool does not
 enable motors: ROBController must also advertise that it accepts the requested
 action.
+
+The main-window **Show…** panel provides a connection-tolerant stage-show
+runner. It validates a strict v1 JSON format, dry-runs without side effects,
+runs authored dialogue entirely offline, and now supports a schema-constrained
+local stage director. **Run Local** speaks a validated local improvisation
+without cloud access. **Run Adaptive** asks the local director for an allow-listed
+beat and delivery, builds a trusted Gemini brief in Cerebro, lets Gemini Live add
+current camera/audio awareness, and falls
+back to the validated local line when available, otherwise the mandatory
+authored line. Camera/audio awareness applies only when those Gemini runtime
+inputs are enabled; verify the effective switches and frame counters in
+**Gemini…** before a show. The implemented, contract-validated provider uses a loopback
+`llama.cpp` server; a model-neutral registry leaves a
+fail-safe seam for native MLX Swift guided generation. Show files can name a
+gesture but cannot contain raw joints, servo values, hosts, ports, or shell
+commands. Gesture cues currently fail closed because the repository does not
+yet have a calibrated catalog or feedback-capable executor. Non-stop Gemini
+action tools originating from a stage turn are rejected even if that cue or show
+has already timed out or completed.
+
+Gemini `stop_motion` and local spoken stop now use a priority software-stop lane:
+Cerebro stops local coordinators, sends one neutral/braked base frame, drops the
+base heartbeat, and returns authority to `Brain` without waiting for the action
+approval queue. The result explicitly reports Amber arm hold as unverified.
 
 The robot/controller control plane now defaults to `_robctl._udp`: a reliable
 QUIC stream over UDP with TLS 1.3, an exactly pinned Cerebro certificate, and a
@@ -179,8 +204,18 @@ transforms, complete four-axis neck mapping, joint feedback, IK, collision
 checking, and a verified grasp executor. The session and result protocols are
 in place for those capabilities as they are added.
 
-See [Gemini Robotics Live integration](docs/gemini-robotics-live.md) for setup,
-configuration, protocol behavior, safety boundaries, and validation commands.
+Use the main-window **Gemini…** control to disconnect the AI session or toggle
+Gemini microphone and sampled-camera input without restarting Cerebro. Local
+speech recognition, perception, and controller/Vision Pro video remain
+independent. See [Gemini Robotics Live integration](docs/gemini-robotics-live.md)
+for setup, runtime-control behavior, protocol details, safety boundaries, and
+validation commands.
+See [Gemini robotics, stage-show, and local action plan](docs/gemini-robotics-stage-action-plan.md)
+for the show workflow and phased gesture, robot-state, URDF, IK, RGB-D, and
+offline-model architecture.
+See [local improvisation provider](docs/local-improvisation-provider.md) for
+llama.cpp launch/setup, runtime modes, schema and fallback behavior, diagnostics,
+validation commands, and the native MLX Swift adapter seam.
 See [ROB control transport v2](docs/rob-control-v2.md) for pairing and migration,
 and [controller-activated autonomy](docs/controller-activated-autonomy.md) for
 the current behavior and the arm/servo integration roadmap.

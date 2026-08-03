@@ -69,9 +69,24 @@ struct GeminiRoboticsConfiguration {
             credential: credential,
             model: model,
             systemInstruction: environment.nonemptyValue(for: "GEMINI_ROBOTICS_SYSTEM_INSTRUCTION") ?? defaultSystemInstruction,
-            streamsAudio: environment.booleanValue(for: "GEMINI_ROBOTICS_STREAM_AUDIO", default: true),
-            streamsVideo: environment.booleanValue(for: "GEMINI_ROBOTICS_STREAM_VIDEO", default: true),
-            exposesRobotActionTool: environment.booleanValue(for: "GEMINI_ROBOT_ACTION_TOOL_ENABLED", default: false),
+            // Media and physical-action flags fail closed when a value is
+            // present but malformed. A typo such as "flase" must never turn
+            // a privacy- or safety-sensitive capability on.
+            streamsAudio: environment.booleanValue(
+                for: "GEMINI_ROBOTICS_STREAM_AUDIO",
+                default: true,
+                invalid: false
+            ),
+            streamsVideo: environment.booleanValue(
+                for: "GEMINI_ROBOTICS_STREAM_VIDEO",
+                default: true,
+                invalid: false
+            ),
+            exposesRobotActionTool: environment.booleanValue(
+                for: "GEMINI_ROBOT_ACTION_TOOL_ENABLED",
+                default: false,
+                invalid: false
+            ),
             responseModality: responseModality
         )
     }
@@ -95,6 +110,68 @@ struct GeminiRoboticsConfiguration {
     }
 }
 
+/// Persisted operator intent for the current Cerebro process. Credentials,
+/// model selection, response modality, and tool exposure remain immutable
+/// launch configuration; only these token- and privacy-sensitive switches can
+/// change while the app is running.
+struct GeminiRoboticsRuntimeSettings: Equatable {
+    static let connectionEnabledDefaultsKey = "com.orbitusrobotics.cerebro.gemini.connection-enabled"
+    static let audioStreamingDefaultsKey = "com.orbitusrobotics.cerebro.gemini.audio-streaming-enabled"
+    static let videoStreamingDefaultsKey = "com.orbitusrobotics.cerebro.gemini.video-streaming-enabled"
+
+    var connectionEnabled: Bool
+    var streamsAudio: Bool
+    var streamsVideo: Bool
+
+    init(
+        configuration: GeminiRoboticsConfiguration?,
+        storedConnectionEnabled: Bool? = nil,
+        storedAudioStreamingEnabled: Bool? = nil,
+        storedVideoStreamingEnabled: Bool? = nil
+    ) {
+        guard let configuration else {
+            connectionEnabled = false
+            streamsAudio = false
+            streamsVideo = false
+            return
+        }
+
+        // Preserve existing deployments on first launch of this version, then
+        // let explicit UI choices take precedence on later launches.
+        connectionEnabled = storedConnectionEnabled ?? true
+        streamsAudio = storedAudioStreamingEnabled ?? configuration.streamsAudio
+        streamsVideo = storedVideoStreamingEnabled ?? configuration.streamsVideo
+    }
+
+    init(configuration: GeminiRoboticsConfiguration?, defaults: UserDefaults) {
+        self.init(
+            configuration: configuration,
+            storedConnectionEnabled: Self.storedBool(
+                forKey: Self.connectionEnabledDefaultsKey,
+                defaults: defaults
+            ),
+            storedAudioStreamingEnabled: Self.storedBool(
+                forKey: Self.audioStreamingDefaultsKey,
+                defaults: defaults
+            ),
+            storedVideoStreamingEnabled: Self.storedBool(
+                forKey: Self.videoStreamingDefaultsKey,
+                defaults: defaults
+            )
+        )
+    }
+
+    func persist(to defaults: UserDefaults) {
+        defaults.set(connectionEnabled, forKey: Self.connectionEnabledDefaultsKey)
+        defaults.set(streamsAudio, forKey: Self.audioStreamingDefaultsKey)
+        defaults.set(streamsVideo, forKey: Self.videoStreamingDefaultsKey)
+    }
+
+    private static func storedBool(forKey key: String, defaults: UserDefaults) -> Bool? {
+        (defaults.object(forKey: key) as? NSNumber)?.boolValue
+    }
+}
+
 enum GeminiRoboticsPrompt {
     static func spokenText(_ text: String, speechWordiness: Int) -> String {
         switch speechWordiness {
@@ -114,6 +191,24 @@ struct GeminiRoboticsToolCall {
     let arguments: [String: Any]
 }
 
+enum GeminiRoboticsToolPolicy {
+    static func isStageContextID(_ contextID: String?) -> Bool {
+        contextID?.hasPrefix("stage:") == true
+    }
+
+    /// A stop request is a safety signal, not ordinary queued work. It may be
+    /// dispatched while another blocking tool call is awaiting an operator or
+    /// executor result. The receiver still returns a normal correlated tool
+    /// response, but it must apply the local software stop first.
+    static func requiresPriorityDispatch(_ call: GeminiRoboticsToolCall) -> Bool {
+        guard call.name == "robot_action",
+              let action = call.arguments["action"] as? String else {
+            return false
+        }
+        return action == "stop_motion"
+    }
+}
+
 struct GeminiRoboticsServerEvent {
     var setupComplete = false
     var textFragments: [String] = []
@@ -128,6 +223,168 @@ struct GeminiRoboticsServerEvent {
     var isResumable: Bool?
     var shouldReconnect = false
     var serverError: String?
+}
+
+enum GeminiRoboticsDiagnosticsInputMode: String, Equatable {
+    case disabled
+    case localText
+    case rawAudio
+
+    var displayName: String {
+        switch self {
+        case .disabled:
+            return "Disabled"
+        case .localText:
+            return "Local speech recognition -> text"
+        case .rawAudio:
+            return "Raw microphone audio"
+        }
+    }
+}
+
+struct GeminiRoboticsDiagnosticsSnapshot: Equatable {
+    let isConfigured: Bool
+    let isConnectionEnabled: Bool
+    let model: String?
+    let streamsAudio: Bool
+    let streamsVideo: Bool
+    let isAudioStreamingApplied: Bool
+    let isVideoStreamingApplied: Bool
+    let exposesRobotActionTool: Bool
+    let responseModality: String?
+    let connectionState: String
+    let inputMode: GeminiRoboticsDiagnosticsInputMode
+    let videoFramesEncoded: UInt64
+    let videoFramesSent: UInt64
+    let lastVideoSendDate: Date?
+    let lastServerEvent: String?
+    let lastServerEventDate: Date?
+}
+
+/// Thread-safe, redacted runtime telemetry for the diagnostics UI. This store
+/// intentionally never retains credentials, media, transcripts, tool
+/// arguments, raw server JSON, or session-resumption handles.
+final class GeminiRoboticsDiagnosticsStore {
+    private let lock = NSLock()
+    private let isConfigured: Bool
+    private let model: String?
+    private var isConnectionEnabled: Bool
+    private var streamsAudio: Bool
+    private var streamsVideo: Bool
+    private var isAudioStreamingApplied = false
+    private var isVideoStreamingApplied = false
+    private let exposesRobotActionTool: Bool
+    private let responseModality: String?
+    private var connectionState: String
+    private var videoFramesEncoded: UInt64 = 0
+    private var videoFramesSent: UInt64 = 0
+    private var lastVideoSendDate: Date?
+    private var lastServerEvent: String?
+    private var lastServerEventDate: Date?
+
+    init(
+        configuration: GeminiRoboticsConfiguration?,
+        runtimeSettings: GeminiRoboticsRuntimeSettings? = nil
+    ) {
+        let effectiveSettings = runtimeSettings ?? GeminiRoboticsRuntimeSettings(
+            configuration: configuration
+        )
+        isConfigured = configuration != nil
+        model = configuration?.model
+        isConnectionEnabled = effectiveSettings.connectionEnabled
+        streamsAudio = effectiveSettings.streamsAudio
+        streamsVideo = effectiveSettings.streamsVideo
+        exposesRobotActionTool = configuration?.exposesRobotActionTool ?? false
+        responseModality = configuration?.responseModality
+        if configuration == nil {
+            connectionState = "unavailable"
+        } else {
+            connectionState = effectiveSettings.connectionEnabled ? "not started" : "off"
+        }
+    }
+
+    func noteRuntimeSettings(_ settings: GeminiRoboticsRuntimeSettings) {
+        lock.lock()
+        isConnectionEnabled = settings.connectionEnabled
+        streamsAudio = settings.streamsAudio
+        streamsVideo = settings.streamsVideo
+        lock.unlock()
+    }
+
+    /// Records policy that the Live-session actor has actually applied. Keep
+    /// this separate from requested settings so diagnostics and microphone
+    /// routing never claim a rapid toggle took effect before the transition
+    /// (including `audioStreamEnd`) completed.
+    func noteRuntimeSettingsApplied(_ settings: GeminiRoboticsRuntimeSettings) {
+        lock.lock()
+        isAudioStreamingApplied = settings.connectionEnabled && settings.streamsAudio
+        isVideoStreamingApplied = settings.connectionEnabled && settings.streamsVideo
+        lock.unlock()
+    }
+
+    func noteConnectionState(_ state: String) {
+        lock.lock()
+        connectionState = state
+        lock.unlock()
+    }
+
+    func noteVideoFrameEncoded() {
+        lock.lock()
+        if videoFramesEncoded < UInt64.max {
+            videoFramesEncoded += 1
+        }
+        lock.unlock()
+    }
+
+    func noteVideoFrameSent(at date: Date = Date()) {
+        lock.lock()
+        if videoFramesSent < UInt64.max {
+            videoFramesSent += 1
+        }
+        lastVideoSendDate = date
+        lock.unlock()
+    }
+
+    func noteServerEvent(_ event: GeminiRoboticsServerEvent, at date: Date = Date()) {
+        let summary = GeminiRoboticsProtocol.diagnosticsSummary(for: event)
+        lock.lock()
+        lastServerEvent = summary
+        lastServerEventDate = date
+        lock.unlock()
+    }
+
+    func snapshot() -> GeminiRoboticsDiagnosticsSnapshot {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let inputMode: GeminiRoboticsDiagnosticsInputMode
+        if !isConfigured || !isConnectionEnabled {
+            inputMode = .disabled
+        } else if isAudioStreamingApplied && connectionState == "ready" {
+            inputMode = .rawAudio
+        } else {
+            inputMode = .localText
+        }
+
+        return GeminiRoboticsDiagnosticsSnapshot(
+            isConfigured: isConfigured,
+            isConnectionEnabled: isConnectionEnabled,
+            model: model,
+            streamsAudio: streamsAudio,
+            streamsVideo: streamsVideo,
+            isAudioStreamingApplied: isAudioStreamingApplied,
+            isVideoStreamingApplied: isVideoStreamingApplied,
+            exposesRobotActionTool: exposesRobotActionTool,
+            responseModality: responseModality,
+            connectionState: connectionState,
+            inputMode: inputMode,
+            videoFramesEncoded: videoFramesEncoded,
+            videoFramesSent: videoFramesSent,
+            lastVideoSendDate: lastVideoSendDate,
+            lastServerEvent: lastServerEvent,
+            lastServerEventDate: lastServerEventDate
+        )
+    }
 }
 
 struct GeminiTurnDeadlineTracker {
@@ -265,6 +522,47 @@ enum GeminiRoboticsProtocolError: LocalizedError {
 }
 
 enum GeminiRoboticsProtocol {
+    static func diagnosticsSummary(for event: GeminiRoboticsServerEvent) -> String {
+        var categories: [String] = []
+        if event.setupComplete {
+            categories.append("setup complete")
+        }
+        if !event.textFragments.isEmpty {
+            categories.append("model output (\(event.textFragments.count) part\(event.textFragments.count == 1 ? "" : "s"))")
+        }
+        if event.inputTranscription != nil {
+            categories.append("input transcription")
+        }
+        if event.outputTranscription != nil {
+            categories.append("output transcription")
+        }
+        if event.generationComplete {
+            categories.append("generation complete")
+        }
+        if event.turnComplete {
+            categories.append("turn complete")
+        }
+        if event.interrupted {
+            categories.append("interrupted")
+        }
+        if !event.toolCalls.isEmpty {
+            categories.append("tool calls (\(event.toolCalls.count))")
+        }
+        if !event.cancelledToolCallIDs.isEmpty {
+            categories.append("tool cancellations (\(event.cancelledToolCallIDs.count))")
+        }
+        if event.isResumable != nil {
+            categories.append("session resumption update")
+        }
+        if event.shouldReconnect {
+            categories.append("go away")
+        }
+        if event.serverError != nil {
+            categories.append("server error")
+        }
+        return categories.isEmpty ? "message received" : categories.joined(separator: ", ")
+    }
+
     static func setupMessage(configuration: GeminiRoboticsConfiguration, resumptionHandle: String?) -> [String: Any] {
         var setup: [String: Any] = [
             "model": configuration.model,
@@ -457,7 +755,11 @@ private extension Dictionary where Key == String, Value == String {
         return value
     }
 
-    func booleanValue(for key: String, default defaultValue: Bool) -> Bool {
+    func booleanValue(
+        for key: String,
+        default defaultValue: Bool,
+        invalid invalidValue: Bool? = nil
+    ) -> Bool {
         guard let rawValue = nonemptyValue(for: key)?.lowercased() else {
             return defaultValue
         }
@@ -467,7 +769,7 @@ private extension Dictionary where Key == String, Value == String {
         case "0", "false", "no", "off":
             return false
         default:
-            return defaultValue
+            return invalidValue ?? defaultValue
         }
     }
 }

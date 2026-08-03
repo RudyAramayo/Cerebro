@@ -60,7 +60,7 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
 
 @end
 
-@interface ROBMainViewController () <HumanTrackingDelegate, TrackingDelegate, AutoNetServerDataDelegate, NSTextViewDelegate, ROBAIDelegate, ROBAutonomyCoordinatorDelegate>
+@interface ROBMainViewController () <HumanTrackingDelegate, TrackingDelegate, AutoNetServerDataDelegate, NSTextViewDelegate, ROBAIDelegate, ROBAutonomyCoordinatorDelegate, ROBStageShowCoordinatorDelegate, ROBGeminiRuntimeControlDelegate>
 
 //--- Head , Torso, Base SerialBox bindings
 
@@ -107,6 +107,9 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
 
 @property (readwrite, retain) AutoNetServer *autoNetServer;
 @property (readwrite, retain) ROBAI *robAI;
+@property (readwrite, retain) ROBGeminiDiagnosticsWindowController *geminiDiagnosticsWindowController;
+@property (readwrite, retain) ROBStageShowWindowController *stageShowWindowController;
+@property (readwrite, retain) ROBStageShowCoordinator *stageShowCoordinator;
 @property (readwrite, retain) ROBAutonomyCoordinator *autonomyCoordinator;
 
 // Gemini proposes high-level actions; this bridge only coordinates approval,
@@ -166,6 +169,8 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
 - (void)robotActionBridgeTick:(NSTimer *)timer;
 - (NSString *)robotActionStateString:(ROBRobotActionState)state;
 - (BOOL)robotActionMessageIsAddressedToCerebro:(ROBRobotActionMessage *)message;
+- (void)cancelPendingGeminiRobotActionsWithReason:(NSString *)reason;
+- (void)updateGeminiCameraDemand;
 @end
 
 @implementation ROBMainViewController
@@ -187,6 +192,19 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
     [self didRespond:text];
 }
 
+- (void)robAI:(ROBAI *)robAI
+        didReceiveResponseText:(NSString *)text
+                    contextID:(NSString *)contextID
+{
+    if ([contextID hasPrefix:@"stage:"]) {
+        // A late stage response is deliberately swallowed after its authored
+        // fallback has started; it must not interrupt a later show cue.
+        (void)[self.stageShowCoordinator acceptGeminiResponse:text requestID:contextID];
+        return;
+    }
+    [self didRespond:text];
+}
+
 - (void)robAI:(ROBAI *)robAI didReceiveInputTranscription:(NSString *)text
 {
     // This is server-originated confirmation of what Gemini understood, not
@@ -197,6 +215,23 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
 - (void)robAI:(ROBAI *)robAI didFailRequestWithDetail:(NSString *)detail
 {
     NSLog(@"Gemini Robotics request failed: %@", detail);
+    if ([detail containsString:@"turned off"]) {
+        return;
+    }
+    [self.speechBox sayIt:@"I couldn't get a response from Gemini. Please try again."];
+}
+
+- (void)robAI:(ROBAI *)robAI
+        didFailRequestWithDetail:(NSString *)detail
+                       contextID:(NSString *)contextID
+{
+    if ([contextID hasPrefix:@"stage:"]) {
+        (void)[self.stageShowCoordinator failGeminiTurn:detail requestID:contextID];
+        return;
+    }
+    if ([detail containsString:@"turned off"]) {
+        return;
+    }
     [self.speechBox sayIt:@"I couldn't get a response from Gemini. Please try again."];
 }
 
@@ -207,6 +242,72 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
     } else {
         NSLog(@"Gemini Robotics state: %@", state);
     }
+    [self updateGeminiCameraDemand];
+}
+
+- (void)robAIRuntimePolicyDidApply:(ROBAI *)robAI
+{
+    [self updateGeminiCameraDemand];
+}
+
+#pragma mark - Gemini Runtime Controls
+
+- (void)setGeminiConnectionEnabled:(BOOL)enabled
+{
+    if (!enabled) {
+        [self cancelPendingGeminiRobotActionsWithReason:
+            @"Gemini was turned off; stop or hold safely"];
+    }
+    [self.robAI setGeminiConnectionEnabled:enabled];
+    [self updateGeminiCameraDemand];
+}
+
+- (void)setGeminiMicrophoneStreamingEnabled:(BOOL)enabled
+{
+    [self.robAI setMicrophoneStreamingEnabled:enabled];
+}
+
+- (void)setGeminiCameraStreamingEnabled:(BOOL)enabled
+{
+    [self.robAI setCameraStreamingEnabled:enabled];
+    [self updateGeminiCameraDemand];
+}
+
+- (void)cancelPendingGeminiRobotActionsWithReason:(NSString *)reason
+{
+    NSArray<NSString *> *callIDs = [self.pendingRobotActionRequests.allKeys copy];
+    if (callIDs.count == 0) {
+        return;
+    }
+
+    // Apply the deterministic local stop before any best-effort network
+    // cancellation so turning Gemini off cannot leave motion waiting on I/O.
+    [self applyPrioritySoftwareStopWithReason:reason];
+
+    for (NSString *callID in callIDs) {
+        ROBRobotActionMessage *request = self.pendingRobotActionRequests[callID];
+        if (request == nil) {
+            continue;
+        }
+        ROBRobotActionMessage *cancellation = self.pendingRobotActionCancellations[callID];
+        if (cancellation == nil) {
+            cancellation = [ROBRobotActionMessage actionCancelWithCallID:callID
+                                                                   reason:reason
+                                                                 senderID:self.robotActionSenderID
+                                                              recipientID:request.recipientID];
+            self.pendingRobotActionCancellations[callID] = cancellation;
+        }
+        [self.geminiCancellingRobotToolCallIDs addObject:callID];
+        [self sendRobotActionMessage:cancellation];
+    }
+}
+
+- (void)updateGeminiCameraDemand
+{
+    BOOL geminiVideoIsActive = self.robAI.isGeminiConnectionEnabled &&
+        self.robAI.isLiveSessionReady &&
+        self.robAI.streamsCameraVideo;
+    [self.cameraViewController setGeminiVideoDemandActive:geminiVideoIsActive];
 }
 
 - (void)robAIWasInterrupted:(ROBAI *)robAI
@@ -238,30 +339,66 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
         return;
     }
 
+    if ([action isEqualToString:@"stop_motion"]) {
+        // Stop is a preemptive local safety lane. It must not wait behind the
+        // controller approval ledger or imply that the uninstrumented Amber
+        // arms have reached a verified hold.
+        if (self.stageShowCoordinator.isRunning) {
+            [self.stageShowCoordinator cancelWithReason:@"Gemini requested stop_motion"];
+        } else {
+            [self applyPrioritySoftwareStopWithReason:@"Gemini requested stop_motion"];
+        }
+        [robAI sendToolResponseWithCallID:call.callID
+                                     name:call.name
+                                   result:@{
+                                       @"status": @"partial",
+                                       @"base_status": @"software_stopped",
+                                       @"arm_status": @"unverified",
+                                       @"detail": @"Cerebro stopped local coordinators, emitted one neutral braked base frame, and dropped the base heartbeat. Amber arm hold cannot yet be observed."
+                                   }];
+        return;
+    }
+
+    // Origin travels with the tool call even if the blocking queue releases it
+    // after the stage cue has timed out or the show has stopped. Stage dialogue
+    // is never an implicit motion authorization. Stop remains available through
+    // the priority lane above.
+    if (call.isStageOrigin) {
+        [robAI sendToolResponseWithCallID:call.callID
+                                     name:call.name
+                                   result:@{
+                                       @"status": @"rejected",
+                                       @"reason": @"Stage-originated dialogue cannot authorize physical robot actions"
+                                   }];
+        return;
+    }
+
+    // Continue to fail closed for uncorrelated calls while the deterministic
+    // stage runner owns the performance, even if they came from another input.
+    if (self.stageShowCoordinator.isRunning) {
+        [robAI sendToolResponseWithCallID:call.callID
+                                     name:call.name
+                                   result:@{
+                                       @"status": @"rejected",
+                                       @"reason": @"Physical-action tools are disabled while a stage show is running"
+                                   }];
+        return;
+    }
+
     // Once the operator activates an autonomy session, the local coordinator
     // owns all bounded robot behavior without per-action controller prompts.
     // Unsupported physical actions fail honestly instead of being presented
     // as though a grasp or trajectory executor exists.
     if (self.autonomyCoordinator.active) {
-        if ([action isEqualToString:@"stop_motion"]) {
-            [self.autonomyCoordinator stopWithReason:@"Gemini requested stop_motion"];
-            [robAI sendToolResponseWithCallID:call.callID
-                                         name:call.name
-                                       result:@{
-                                           @"status": @"completed",
-                                           @"detail": @"Autonomous motion stopped"
-                                       }];
-        } else {
-            NSString *reason = [action isEqualToString:@"request_pick"]
-                ? @"Picking is not enabled: the robot still needs calibrated camera-to-arm transforms, IK, collision checking, and joint feedback"
-                : @"This action does not yet have a local deterministic executor in autonomy mode";
-            [robAI sendToolResponseWithCallID:call.callID
-                                         name:call.name
-                                       result:@{
-                                           @"status": @"failed",
-                                           @"detail": reason
-                                       }];
-        }
+        NSString *reason = [action isEqualToString:@"request_pick"]
+            ? @"Picking is not enabled: the robot still needs calibrated camera-to-arm transforms, IK, collision checking, and joint feedback"
+            : @"This action does not yet have a local deterministic executor in autonomy mode";
+        [robAI sendToolResponseWithCallID:call.callID
+                                     name:call.name
+                                   result:@{
+                                       @"status": @"failed",
+                                       @"detail": reason
+                                   }];
         return;
     }
 
@@ -270,6 +407,19 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
     ROBRobotActionMessage *existingRequest = self.pendingRobotActionRequests[call.callID];
     if (existingRequest != nil) {
         [self sendRobotActionMessage:existingRequest];
+        return;
+    }
+
+    // A Live-session reconnect must not erase the robot's physical blocking
+    // boundary. Wait for the prior controller action (including a requested
+    // cancellation) to reach a terminal state before admitting a new call ID.
+    if (self.pendingRobotActionRequests.count > 0) {
+        [robAI sendToolResponseWithCallID:call.callID
+                                     name:call.name
+                                   result:@{
+                                       @"status": @"rejected",
+                                       @"reason": @"A previous robot action is still active or awaiting confirmed cancellation"
+                                   }];
         return;
     }
 
@@ -535,6 +685,7 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
 - (void) didFinishProcessingSpeech
 {
     NSLog(@"didFinishProcessingSpeech ROBMainViewController");
+    [self.stageShowCoordinator speechDidFinish];
     //TODO: should we reset after so we can keep a conversation going?!?
     [self resetSpeechResponseAttentionTimer];
 }
@@ -557,7 +708,28 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
     // session is actually ready. During reconnects, realtime text remains a
     // useful bounded fallback and is queued by ROBAI until setup completes.
     BOOL geminiOwnsMicrophone = self.robAI.isLiveSessionReady && self.robAI.streamsMicrophoneAudio;
-    if ([textInput containsString:@"robbie"] || [textInput containsString:@"hey rob"] || [textInput containsString:@"rob"] || [textInput containsString:@"robot"])
+    BOOL geminiConnectionEnabled = self.robAI.isGeminiConnectionEnabled;
+    NSArray<NSString *> *addressTokens = [textInput componentsSeparatedByCharactersInSet:
+        [[NSCharacterSet alphanumericCharacterSet] invertedSet]];
+    BOOL addressesROB = [addressTokens containsObject:@"robbie"] ||
+        [addressTokens containsObject:@"rob"] ||
+        [addressTokens containsObject:@"robot"];
+    NSString *pendingThinkingAcknowledgement = nil;
+
+    // Safety phrases stay local and effective even when Gemini is unavailable
+    // or intentionally turned off.
+    if ([textInput containsString:@"stop"] || [textInput containsString:@"wait"] || [textInput containsString:@"don't move"] || [textInput containsString:@"do not move"])
+    {
+        if (self.stageShowCoordinator.isRunning) {
+            [self.stageShowCoordinator cancelWithReason:@"Local spoken stop"];
+        } else {
+            [self applyPrioritySoftwareStopWithReason:@"Local spoken stop"];
+        }
+        [self.speechBox sayIt:@"Base motion stopped. Arm hold is not yet verified."];
+        return;
+    }
+
+    if (addressesROB)
     {
         self.ignoreText = false;
         NSLog(@"Listening for spoken input");
@@ -572,7 +744,9 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
         
         if ([textInput isEqualToString:@"robbie"] || [textInput isEqualToString:@"hey rob"] || [textInput isEqualToString:@"rob"] || [textInput isEqualToString:@"robot"])
         {
-            if (geminiOwnsMicrophone) {
+            if (!geminiConnectionEnabled) {
+                [self.speechBox sayIt:@"Gemini is turned off. Use the Gemini controls to connect."];
+            } else if (geminiOwnsMicrophone) {
                 if (!self.speechBox.isSpeaking) {
                     [self.robAI noteMicrophoneTurnAwaitingResponse];
                 }
@@ -580,20 +754,12 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
                 [self.speechBox sayIt:greeting_acknowledgement];
             }
             return;
+        } else if (!geminiConnectionEnabled) {
+            [self.speechBox sayIt:@"Gemini is turned off. Use the Gemini controls to connect."];
+            return;
         } else if (!geminiOwnsMicrophone) {
-            [self.speechBox sayIt:thinking_acknowledgement];
+            pendingThinkingAcknowledgement = thinking_acknowledgement;
         }
-    }
-    if ([textInput containsString:@"stop"] || [textInput containsString:@"wait"] || [textInput containsString:@"don't move"] || [textInput containsString:@"do not move"])
-    {
-        self.currentPersonTrackingID = -1;
-        self.followingMode = false;
-        [self.speechBox stopIt:nil];
-        // This local phrase stops speech/follow mode only. It must not claim a
-        // hardware stop because tread and actuator authority lives outside the
-        // Gemini bridge and must be confirmed by ROBController.
-        [self.speechBox sayIt:@"Stopping speech and follow mode"];
-        return;
     }
     if (!geminiOwnsMicrophone && [textInput containsString:@"follow"])
     {
@@ -605,6 +771,10 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
         return;
     }
     if (!self.ignoreText) {
+        if (!geminiConnectionEnabled) {
+            NSLog(@"Gemini is off; retaining the local transcript without submitting it");
+            return;
+        }
         if (geminiOwnsMicrophone) {
             // Do not resend the transcript. It is only a local signal that a
             // raw-audio turn should receive a bounded Gemini response.
@@ -614,7 +784,10 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
         } else {
             NSLog(@"textInput = %@", textInput);
             NSInteger speechWordiness = self.torsoControlsViewController.speechWordinessChoice.selectedSegment;
-            [self.robAI sendText:textInput speechWordiness:speechWordiness];
+            BOOL accepted = [self.robAI sendText:textInput speechWordiness:speechWordiness];
+            if (accepted && pendingThinkingAcknowledgement.length > 0) {
+                [self.speechBox sayIt:pendingThinkingAcknowledgement];
+            }
         }
     } else if (self.ignoreText) {
         NSLog(@"!!!!!!!!!!!!  IGNORING TEXT !!!!!!!!!!!!!!!");
@@ -676,6 +849,9 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
     self.robotActionSenderID = [NSString stringWithFormat:@"Cerebro:%@", hostName];
     self.autonomyCoordinator = [[ROBAutonomyCoordinator alloc] initWithRobotID:self.robotActionSenderID];
     self.autonomyCoordinator.delegate = self;
+    self.stageShowCoordinator = [[ROBStageShowCoordinator alloc] init];
+    self.stageShowCoordinator.delegate = self;
+    [self.stageShowCoordinator reloadLocalImprovisationProvider];
     self.robotActionControllerCapabilities = @[];
     self.pendingRobotToolCalls = [NSMutableDictionary dictionary];
     self.pendingRobotActionRequests = [NSMutableDictionary dictionary];
@@ -785,11 +961,72 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
         [self sendRobotActionMessage:cancellation];
     }
     [self.robAI disconnect];
+    if (self.stageShowCoordinator.isRunning) {
+        [self.stageShowCoordinator cancelWithReason:@"Cerebro is shutting down"];
+    }
     [self.autonomyCoordinator shutdown];
     [self.speechBox shutdown];
 }
 
 #pragma mark - Controller-authorized autonomy
+
+- (void)applyPrioritySoftwareStopWithReason:(NSString *)reason
+{
+    self.currentPersonTrackingID = -1;
+    self.followingMode = false;
+    [self.speechBox stopIt:nil];
+    if (self.autonomyCoordinator.active) {
+        [self.autonomyCoordinator stopWithReason:reason];
+    }
+    [self.serialBox stopBaseMotionAndDropHeartbeat];
+    [self.serialBox switchToMasterControllerID:@"Brain"];
+    NSLog(@"Priority software stop applied: %@. Amber arm disposition is unverified.", reason);
+}
+
+#pragma mark - Stage show coordinator
+
+- (void)stageShowCoordinator:(ROBStageShowCoordinator *)coordinator
+                       speak:(NSString *)text
+                       cueID:(NSString *)cueID
+{
+    [self.speechBox sayIt:text];
+}
+
+- (void)stageShowCoordinator:(ROBStageShowCoordinator *)coordinator
+           requestGeminiTurn:(NSString *)prompt
+                       cueID:(NSString *)cueID
+                   requestID:(NSString *)requestID
+                     timeout:(NSTimeInterval)timeout
+{
+    if (self.robAI.isLiveSessionReady) {
+        [self.robAI sendText:prompt contextID:requestID];
+    } else {
+        (void)[coordinator failGeminiTurn:@"Gemini Live is unavailable" requestID:requestID];
+    }
+}
+
+- (void)stageShowCoordinator:(ROBStageShowCoordinator *)coordinator
+            cancelGeminiTurn:(NSString *)requestID
+{
+    [self.robAI cancelTextTurnWithContextID:requestID];
+}
+
+- (void)stageShowCoordinator:(ROBStageShowCoordinator *)coordinator
+              requestGesture:(NSString *)name
+                       cueID:(NSString *)cueID
+                     timeout:(NSTimeInterval)timeout
+{
+    // The legacy keyframe path has no bounds-safe catalog, cancellation, or
+    // observed completion. Keep the named intent visible to rehearsals while
+    // failing closed until the supervised gesture executor is installed.
+    (void)[coordinator completeGestureWithSuccess:NO
+                                            detail:@"No calibrated, feedback-capable gesture executor is installed"];
+}
+
+- (void)stageShowCoordinatorDidRequestStop:(ROBStageShowCoordinator *)coordinator
+{
+    [self applyPrioritySoftwareStopWithReason:@"Stage show stopped"];
+}
 
 - (void)autonomyCoordinator:(ROBAutonomyCoordinator *)coordinator
              applyLeftTread:(double)leftTread
@@ -1778,6 +2015,7 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
     [self.cameraWindowController showWindow:self]; // show the window}
     self.cameraViewController = (CameraViewController *)self.cameraWindowController.contentViewController;
     self.cameraViewController.robMainViewController = self;
+    [self updateGeminiCameraDemand];
     //[self.cameraViewController bindROBMainViewControllerWithRobMainViewController:self];
 }
 
@@ -1895,6 +2133,31 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
 - (IBAction)showSerialDebug:(id)sender
 {
     NSLog(@"show serial debug");
+}
+
+- (IBAction)showGeminiDiagnostics:(id)sender
+{
+    if (self.robAI == nil) {
+        return;
+    }
+    if (self.geminiDiagnosticsWindowController == nil) {
+        self.geminiDiagnosticsWindowController =
+            [[ROBGeminiDiagnosticsWindowController alloc] initWithRobAI:self.robAI];
+        self.geminiDiagnosticsWindowController.controlDelegate = self;
+    }
+    [self.geminiDiagnosticsWindowController showWindow:sender];
+}
+
+- (IBAction)showStageShow:(id)sender
+{
+    if (self.stageShowCoordinator == nil) {
+        return;
+    }
+    if (self.stageShowWindowController == nil) {
+        self.stageShowWindowController =
+            [[ROBStageShowWindowController alloc] initWithStageShowCoordinator:self.stageShowCoordinator];
+    }
+    [self.stageShowWindowController showWindow:sender];
 }
 
 

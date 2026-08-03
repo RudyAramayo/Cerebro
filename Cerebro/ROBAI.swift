@@ -10,11 +10,30 @@ import CoreImage
 import Foundation
 import ImageIO
 
+private enum GeminiRoboticsRuntimeSettingDomain {
+    case connection
+    case audio
+    case video
+}
+
+private struct GeminiRoboticsRuntimePolicy {
+    let settings: GeminiRoboticsRuntimeSettings
+    let revision: UInt64
+    let connectionGeneration: UInt64
+    let audioGeneration: UInt64
+    let videoGeneration: UInt64
+}
+
 @objc public protocol ROBAIDelegate: AnyObject {
     @objc optional func robAI(_ robAI: ROBAI, didReceiveResponseText text: String)
+    @objc(robAI:didReceiveResponseText:contextID:)
+    optional func robAI(_ robAI: ROBAI, didReceiveResponseText text: String, contextID: String)
     @objc optional func robAI(_ robAI: ROBAI, didReceiveInputTranscription text: String)
     @objc optional func robAI(_ robAI: ROBAI, didFailRequestWithDetail detail: String)
+    @objc(robAI:didFailRequestWithDetail:contextID:)
+    optional func robAI(_ robAI: ROBAI, didFailRequestWithDetail detail: String, contextID: String)
     @objc optional func robAI(_ robAI: ROBAI, didChangeConnectionState state: String, detail: String?)
+    @objc optional func robAIRuntimePolicyDidApply(_ robAI: ROBAI)
     @objc optional func robAIWasInterrupted(_ robAI: ROBAI)
     @objc optional func robAI(_ robAI: ROBAI, didReceiveToolCall call: ROBAIRobotToolCall)
     @objc optional func robAI(_ robAI: ROBAI, didCancelToolCallIDs callIDs: [String])
@@ -24,11 +43,23 @@ import ImageIO
     public let callID: String
     public let name: String
     public let arguments: NSDictionary
+    /// Correlates a tool call with the text turn that caused it. This value is
+    /// immutable so a queued call keeps its safety origin even after its stage
+    /// show has advanced or stopped.
+    public let originContextID: String?
+    public let isStageOrigin: Bool
 
-    init(callID: String, name: String, arguments: [String: Any]) {
+    init(
+        callID: String,
+        name: String,
+        arguments: [String: Any],
+        originContextID: String?
+    ) {
         self.callID = callID
         self.name = name
         self.arguments = arguments as NSDictionary
+        self.originContextID = originContextID
+        isStageOrigin = GeminiRoboticsToolPolicy.isStageContextID(originContextID)
         super.init()
     }
 }
@@ -38,8 +69,21 @@ import ImageIO
     public weak var delegate: ROBAIDelegate?
 
     public var isConfigured: Bool { configuration != nil }
-    public var streamsMicrophoneAudio: Bool { configuration?.streamsAudio ?? false }
-    public var streamsCameraVideo: Bool { configuration?.streamsVideo ?? false }
+    public var isGeminiConnectionEnabled: Bool {
+        statusLock.lock()
+        defer { statusLock.unlock() }
+        return runtimeSettings.connectionEnabled
+    }
+    public var streamsMicrophoneAudio: Bool {
+        statusLock.lock()
+        defer { statusLock.unlock() }
+        return runtimeSettings.streamsAudio && appliedMicrophoneStreaming
+    }
+    public var streamsCameraVideo: Bool {
+        statusLock.lock()
+        defer { statusLock.unlock() }
+        return runtimeSettings.streamsVideo && appliedCameraStreaming
+    }
     public var isLiveSessionReady: Bool {
         statusLock.lock()
         defer { statusLock.unlock() }
@@ -47,8 +91,19 @@ import ImageIO
     }
 
     private let configuration: GeminiRoboticsConfiguration?
+    private let userDefaults: UserDefaults
+    private let diagnosticsStore: GeminiRoboticsDiagnosticsStore
     private let statusLock = NSLock()
     private var liveSessionReady = false
+    private var runtimeSettings: GeminiRoboticsRuntimeSettings
+    private var runtimeSettingsRevision: UInt64 = 1
+    private var connectionGeneration: UInt64 = 1
+    private var audioGeneration: UInt64 = 1
+    private var videoGeneration: UInt64 = 1
+    private var appliedMicrophoneStreaming = false
+    private var appliedCameraStreaming = false
+    private var cancelledTextContextIDs: Set<String> = []
+    private var cancelledTextContextOrder: [String] = []
     private var liveSession: GeminiRoboticsLiveSession?
     private var audioEventStream: GeminiOrderedAudioEventStream?
     private var audioEncoder: GeminiPCM16Encoder?
@@ -56,34 +111,63 @@ import ImageIO
 
     public override init() {
         let configuration = GeminiRoboticsConfiguration.fromEnvironment()
+        let userDefaults = UserDefaults.standard
+        let runtimeSettings = GeminiRoboticsRuntimeSettings(
+            configuration: configuration,
+            defaults: userDefaults
+        )
         self.configuration = configuration
+        self.userDefaults = userDefaults
+        self.runtimeSettings = runtimeSettings
+        let diagnosticsStore = GeminiRoboticsDiagnosticsStore(
+            configuration: configuration,
+            runtimeSettings: runtimeSettings
+        )
+        self.diagnosticsStore = diagnosticsStore
         super.init()
 
         guard let configuration else {
             return
         }
 
-        let session = GeminiRoboticsLiveSession(configuration: configuration) { [weak self] event in
+        let initialPolicy = GeminiRoboticsRuntimePolicy(
+            settings: runtimeSettings,
+            revision: runtimeSettingsRevision,
+            connectionGeneration: connectionGeneration,
+            audioGeneration: audioGeneration,
+            videoGeneration: videoGeneration
+        )
+        let session = GeminiRoboticsLiveSession(
+            configuration: configuration,
+            diagnosticsStore: diagnosticsStore,
+            runtimePolicy: initialPolicy
+        ) { [weak self] event in
             self?.handle(event)
         }
         liveSession = session
 
-        if configuration.streamsAudio {
-            let audioEventStream = GeminiOrderedAudioEventStream(session: session)
-            self.audioEventStream = audioEventStream
-            audioEncoder = GeminiPCM16Encoder(
-                didEncode: { [weak audioEventStream] data in
-                    audioEventStream?.enqueuePCM16(data)
-                },
-                didEndStream: { [weak audioEventStream] in
-                    audioEventStream?.enqueueStreamEnd()
-                }
-            )
-        }
+        // Allocate media adapters whenever Gemini is configured. The runtime
+        // gates below ensure they do no work until the operator enables them.
+        let audioEventStream = GeminiOrderedAudioEventStream(session: session)
+        self.audioEventStream = audioEventStream
+        audioEncoder = GeminiPCM16Encoder(
+            didEncode: { [weak audioEventStream] data, generation in
+                audioEventStream?.enqueuePCM16(data, generation: generation)
+            },
+            didEndStream: { [weak audioEventStream] generation in
+                audioEventStream?.enqueueStreamEnd(generation: generation)
+            }
+        )
 
-        if configuration.streamsVideo {
-            videoEncoder = GeminiJPEGEncoder { [weak session] data in
-                Task { await session?.sendVideoJPEG(data) }
+        videoEncoder = GeminiJPEGEncoder { [weak session, diagnosticsStore] data, generation in
+            Task {
+                let accepted = await session?.sendVideoJPEG(
+                    data,
+                    generation: generation
+                ) ?? false
+                if accepted {
+                    diagnosticsStore.noteVideoFrameEncoded()
+                }
             }
         }
     }
@@ -91,24 +175,87 @@ import ImageIO
     deinit {
         audioEventStream?.finish()
         let session = liveSession
-        Task { await session?.stop() }
+        Task { await session?.stop(connectionState: .disconnected, failureDetail: nil) }
     }
 
     public func start() {
         guard let liveSession else {
-            notifyConnectionState("disabled", detail: "Set GEMINI_ROBOTICS_ENABLED=true and provide GEMINI_EPHEMERAL_TOKEN or GEMINI_API_KEY to enable streaming.")
+            diagnosticsStore.noteConnectionState("unavailable")
+            notifyConnectionState("unavailable", detail: "Set GEMINI_ROBOTICS_ENABLED=true and provide GEMINI_EPHEMERAL_TOKEN or GEMINI_API_KEY to enable streaming.")
             return
         }
-        Task { await liveSession.start() }
+        let policy = runtimePolicySnapshot()
+        guard policy.settings.connectionEnabled else {
+            diagnosticsStore.noteConnectionState("off")
+            notifyConnectionState("off", detail: "Gemini is turned off in Cerebro.")
+            return
+        }
+        Task {
+            await liveSession.applyRuntimePolicy(policy)
+        }
     }
 
     public func disconnect() {
         statusLock.lock()
         liveSessionReady = false
         statusLock.unlock()
+        diagnosticsStore.noteConnectionState("disconnected")
         audioEncoder?.reset()
+        videoEncoder?.reset()
         let session = liveSession
-        Task { await session?.stop() }
+        Task { await session?.stop(connectionState: .disconnected, failureDetail: nil) }
+    }
+
+    public func setGeminiConnectionEnabled(_ enabled: Bool) {
+        guard configuration != nil else {
+            notifyConnectionState(
+                "unavailable",
+                detail: "Gemini cannot connect until launch configuration and a credential are available."
+            )
+            return
+        }
+        guard let policy = updateRuntimeSettings(
+            domain: .connection,
+            mutation: { $0.connectionEnabled = enabled }
+        ) else {
+            return
+        }
+
+        if !enabled {
+            statusLock.lock()
+            liveSessionReady = false
+            statusLock.unlock()
+            audioEncoder?.reset()
+            videoEncoder?.reset()
+            diagnosticsStore.noteConnectionState("turning off")
+        } else {
+            diagnosticsStore.noteConnectionState("starting")
+        }
+        applyRuntimePolicy(policy)
+    }
+
+    public func setMicrophoneStreamingEnabled(_ enabled: Bool) {
+        guard configuration != nil,
+              let policy = updateRuntimeSettings(
+                  domain: .audio,
+                  mutation: { $0.streamsAudio = enabled }
+              ) else {
+            return
+        }
+        audioEncoder?.reset()
+        applyRuntimePolicy(policy)
+    }
+
+    public func setCameraStreamingEnabled(_ enabled: Bool) {
+        guard configuration != nil,
+              let policy = updateRuntimeSettings(
+                  domain: .video,
+                  mutation: { $0.streamsVideo = enabled }
+              ) else {
+            return
+        }
+        videoEncoder?.reset()
+        applyRuntimePolicy(policy)
     }
 
     public func sendAudioBuffer(_ buffer: AVAudioPCMBuffer) {
@@ -116,38 +263,104 @@ import ImageIO
         // for session-state contention; dropping one buffer is preferable to
         // blocking the audio render thread.
         guard statusLock.try() else { return }
-        let isReady = liveSessionReady
+        let shouldSend = liveSessionReady &&
+            runtimeSettings.connectionEnabled &&
+            runtimeSettings.streamsAudio
+        let generation = audioGeneration
         statusLock.unlock()
-        guard isReady else { return }
-        audioEncoder?.enqueue(buffer)
+        guard shouldSend else { return }
+        audioEncoder?.enqueue(buffer, generation: generation)
     }
 
     public func sendAudioStreamEnd() {
-        guard isLiveSessionReady else { return }
-        audioEncoder?.endStream()
+        let policy = runtimePolicySnapshot()
+        guard isLiveSessionReady,
+              policy.settings.connectionEnabled,
+              policy.settings.streamsAudio else {
+            return
+        }
+        audioEncoder?.endStream(generation: policy.audioGeneration)
     }
 
     /// Records that the on-device recognizer heard an utterance while Gemini
     /// owns the microphone. The text is deliberately not resent: this only
     /// gives the raw-audio turn a bounded response deadline.
     public func noteMicrophoneTurnAwaitingResponse() {
+        let policy = runtimePolicySnapshot()
+        guard isLiveSessionReady,
+              policy.settings.connectionEnabled,
+              policy.settings.streamsAudio else {
+            return
+        }
         let session = liveSession
-        Task { await session?.noteMicrophoneTurnAwaitingResponse() }
+        Task {
+            await session?.noteMicrophoneTurnAwaitingResponse(
+                generation: policy.audioGeneration
+            )
+        }
     }
 
     public func sendVideoSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
-        guard isLiveSessionReady else { return }
-        videoEncoder?.enqueue(sampleBuffer)
+        let policy = runtimePolicySnapshot()
+        guard isLiveSessionReady,
+              policy.settings.connectionEnabled,
+              policy.settings.streamsVideo else {
+            return
+        }
+        videoEncoder?.enqueue(sampleBuffer, generation: policy.videoGeneration)
     }
 
-    public func sendText(_ text: String) {
+    @discardableResult
+    public func sendText(_ text: String) -> Bool {
+        sendText(text, contextID: nil)
+    }
+
+    @objc(sendText:contextID:)
+    @discardableResult
+    public func sendText(_ text: String, contextID: String?) -> Bool {
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedText.isEmpty else { return }
-        let session = liveSession
-        Task { await session?.sendTextTurn(trimmedText) }
+        guard !trimmedText.isEmpty else { return false }
+        if let contextID, textContextIsCancelled(contextID) {
+            return false
+        }
+        let policy = runtimePolicySnapshot()
+        guard policy.settings.connectionEnabled, let session = liveSession else {
+            handle(.requestFailed(
+                configuration == nil
+                    ? "Gemini is unavailable because Cerebro has no enabled credential configuration."
+                    : "Gemini is turned off in Cerebro.",
+                contextID: contextID
+            ))
+            return false
+        }
+        Task {
+            await session.sendTextTurn(
+                trimmedText,
+                contextID: contextID,
+                generation: policy.connectionGeneration,
+                minimumPolicyRevision: policy.revision
+            )
+        }
+        return true
     }
 
-    public func sendText(_ text: String, speechWordiness: Int) {
+    /// Prevents a correlated text turn from being submitted later if it is
+    /// still queued and aborts the current Live connection if that turn was
+    /// already sent. The actor retains a cancellation tombstone so this is
+    /// race-safe with the asynchronous enqueue performed by `sendText`.
+    @objc(cancelTextTurnWithContextID:)
+    public func cancelTextTurn(contextID: String) {
+        let trimmedContextID = contextID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedContextID.isEmpty else { return }
+        rememberCancelledTextContext(trimmedContextID)
+        let session = liveSession
+        Task {
+            await session?.cancelTextTurn(contextID: trimmedContextID)
+        }
+    }
+
+    @discardableResult
+    public func sendText(_ text: String, speechWordiness: Int) -> Bool {
         // Preserve ROB's wake/address phrase: the system instruction uses it
         // to decide whether a new conversation should receive a response.
         sendText(GeminiRoboticsPrompt.spokenText(text, speechWordiness: speechWordiness))
@@ -174,18 +387,123 @@ import ImageIO
         Task { await session?.confirmToolCallCancellation(callID: callID) }
     }
 
+    @nonobjc func diagnosticsSnapshot() -> GeminiRoboticsDiagnosticsSnapshot {
+        diagnosticsStore.snapshot()
+    }
+
+    @nonobjc private func runtimePolicySnapshot() -> GeminiRoboticsRuntimePolicy {
+        statusLock.lock()
+        defer { statusLock.unlock() }
+        return GeminiRoboticsRuntimePolicy(
+            settings: runtimeSettings,
+            revision: runtimeSettingsRevision,
+            connectionGeneration: connectionGeneration,
+            audioGeneration: audioGeneration,
+            videoGeneration: videoGeneration
+        )
+    }
+
+    @nonobjc private func updateRuntimeSettings(
+        domain: GeminiRoboticsRuntimeSettingDomain,
+        mutation: (inout GeminiRoboticsRuntimeSettings) -> Void
+    ) -> GeminiRoboticsRuntimePolicy? {
+        statusLock.lock()
+        var updatedSettings = runtimeSettings
+        mutation(&updatedSettings)
+        guard updatedSettings != runtimeSettings else {
+            statusLock.unlock()
+            return nil
+        }
+        runtimeSettings = updatedSettings
+        runtimeSettingsRevision &+= 1
+        switch domain {
+        case .connection:
+            // A connection boundary must reject all media produced for the
+            // old WebSocket as well as text intended for its conversation.
+            connectionGeneration &+= 1
+            audioGeneration &+= 1
+            videoGeneration &+= 1
+            appliedMicrophoneStreaming = false
+            appliedCameraStreaming = false
+        case .audio:
+            audioGeneration &+= 1
+            if !updatedSettings.streamsAudio {
+                appliedMicrophoneStreaming = false
+            }
+        case .video:
+            videoGeneration &+= 1
+            if !updatedSettings.streamsVideo {
+                appliedCameraStreaming = false
+            }
+        }
+        let policy = GeminiRoboticsRuntimePolicy(
+            settings: updatedSettings,
+            revision: runtimeSettingsRevision,
+            connectionGeneration: connectionGeneration,
+            audioGeneration: audioGeneration,
+            videoGeneration: videoGeneration
+        )
+        statusLock.unlock()
+
+        updatedSettings.persist(to: userDefaults)
+        diagnosticsStore.noteRuntimeSettings(updatedSettings)
+        return policy
+    }
+
+    @nonobjc private func applyRuntimePolicy(
+        _ policy: GeminiRoboticsRuntimePolicy
+    ) {
+        guard let session = liveSession else { return }
+        Task {
+            await session.applyRuntimePolicy(policy)
+        }
+    }
+
     private func handle(_ event: GeminiRoboticsLiveSession.Event) {
         switch event {
         case .connectionState(let state, let detail):
             statusLock.lock()
-            liveSessionReady = state == .ready
+            let connectionIsRequested = runtimeSettings.connectionEnabled
+            liveSessionReady = connectionIsRequested && state == .ready
             statusLock.unlock()
-            notifyConnectionState(state.rawValue, detail: detail)
+            if connectionIsRequested || state == .off || state == .disconnected {
+                diagnosticsStore.noteConnectionState(state.rawValue)
+                notifyConnectionState(state.rawValue, detail: detail)
+            }
 
-        case .completedText(let text):
+        case .runtimePolicyApplied(let policy):
+            statusLock.lock()
+            guard policy.revision == runtimeSettingsRevision else {
+                statusLock.unlock()
+                return
+            }
+            appliedMicrophoneStreaming = policy.settings.connectionEnabled &&
+                policy.settings.streamsAudio
+            appliedCameraStreaming = policy.settings.connectionEnabled &&
+                policy.settings.streamsVideo
+            statusLock.unlock()
+            diagnosticsStore.noteRuntimeSettingsApplied(policy.settings)
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                self.delegate?.robAI?(self, didReceiveResponseText: text)
+                self.delegate?.robAIRuntimePolicyDidApply?(self)
+            }
+
+        case .completedText(let text, let contextID):
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if let contextID {
+                    guard !self.textContextIsCancelled(contextID) else { return }
+                    let handled: Void? = self.delegate?.robAI?(
+                        self,
+                        didReceiveResponseText: text,
+                        contextID: contextID
+                    )
+                    if handled == nil {
+                        self.delegate?.robAI?(self, didReceiveResponseText: text)
+                    }
+                } else {
+                    self.delegate?.robAI?(self, didReceiveResponseText: text)
+                }
             }
 
         case .inputTranscription(let text):
@@ -194,10 +512,22 @@ import ImageIO
                 self.delegate?.robAI?(self, didReceiveInputTranscription: text)
             }
 
-        case .requestFailed(let detail):
+        case .requestFailed(let detail, let contextID):
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                self.delegate?.robAI?(self, didFailRequestWithDetail: detail)
+                if let contextID {
+                    guard !self.textContextIsCancelled(contextID) else { return }
+                    let handled: Void? = self.delegate?.robAI?(
+                        self,
+                        didFailRequestWithDetail: detail,
+                        contextID: contextID
+                    )
+                    if handled == nil {
+                        self.delegate?.robAI?(self, didFailRequestWithDetail: detail)
+                    }
+                } else {
+                    self.delegate?.robAI?(self, didFailRequestWithDetail: detail)
+                }
             }
 
         case .interrupted:
@@ -208,12 +538,14 @@ import ImageIO
 
         case .toolCalls(let calls):
             DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                for call in calls {
+                guard let self, self.isGeminiConnectionEnabled else { return }
+                for attributedCall in calls {
+                    let call = attributedCall.call
                     let bridgedCall = ROBAIRobotToolCall(
                         callID: call.id,
                         name: call.name,
-                        arguments: call.arguments
+                        arguments: call.arguments,
+                        originContextID: attributedCall.contextID
                     )
                     self.delegate?.robAI?(self, didReceiveToolCall: bridgedCall)
                 }
@@ -233,10 +565,34 @@ import ImageIO
             self.delegate?.robAI?(self, didChangeConnectionState: state, detail: detail)
         }
     }
+
+    private func rememberCancelledTextContext(_ contextID: String) {
+        statusLock.lock()
+        if cancelledTextContextIDs.insert(contextID).inserted {
+            cancelledTextContextOrder.append(contextID)
+            if cancelledTextContextOrder.count > 1_024 {
+                let expiredContextID = cancelledTextContextOrder.removeFirst()
+                cancelledTextContextIDs.remove(expiredContextID)
+            }
+        }
+        statusLock.unlock()
+    }
+
+    private func textContextIsCancelled(_ contextID: String) -> Bool {
+        statusLock.lock()
+        defer { statusLock.unlock() }
+        return cancelledTextContextIDs.contains(contextID)
+    }
+}
+
+private struct GeminiRoboticsAttributedToolCall {
+    let call: GeminiRoboticsToolCall
+    let contextID: String?
 }
 
 private actor GeminiRoboticsLiveSession {
     enum ConnectionState: String {
+        case off
         case connecting
         case ready
         case reconnecting
@@ -246,23 +602,35 @@ private actor GeminiRoboticsLiveSession {
 
     enum Event {
         case connectionState(ConnectionState, String?)
-        case completedText(String)
+        case runtimePolicyApplied(GeminiRoboticsRuntimePolicy)
+        case completedText(String, contextID: String?)
         case inputTranscription(String)
-        case requestFailed(String)
+        case requestFailed(String, contextID: String?)
         case interrupted
-        case toolCalls([GeminiRoboticsToolCall])
+        case toolCalls([GeminiRoboticsAttributedToolCall])
         case cancelledToolCalls([String])
     }
 
     private enum AudioQueueItem {
-        case pcm(Data)
-        case streamEnd
+        case pcm(Data, generation: UInt64)
+        case streamEnd(generation: UInt64)
+    }
+
+    private struct PendingVideoFrame {
+        let data: Data
+        let generation: UInt64
     }
 
     private struct ToolResponsePayload {
         let callID: String
         let name: String
         let result: [String: Any]
+    }
+
+    private struct TextTurn {
+        let text: String
+        let contextID: String?
+        let minimumPolicyRevision: UInt64
     }
 
     private enum ToolCallState {
@@ -273,12 +641,26 @@ private actor GeminiRoboticsLiveSession {
     }
 
     private let configuration: GeminiRoboticsConfiguration
+    private let diagnosticsStore: GeminiRoboticsDiagnosticsStore
     private let eventHandler: (Event) -> Void
+    private var audioStreamingEnabled: Bool
+    private var videoStreamingEnabled: Bool
+    private var runtimePolicyRevision: UInt64
+    private var appliedRuntimePolicyRevision: UInt64 = 0
+    private var connectionGeneration: UInt64
+    private var audioGeneration: UInt64
+    private var videoGeneration: UInt64
     private var shouldRun = false
     private var setupIsComplete = false
     private var connectionTask: Task<Void, Never>?
     private var audioDrainTask: Task<Void, Never>?
     private var videoDrainTask: Task<Void, Never>?
+    private var nextAudioDrainID: UInt64 = 0
+    private var activeAudioDrainID: UInt64?
+    private var nextVideoDrainID: UInt64 = 0
+    private var activeVideoDrainID: UInt64?
+    private var audioDisableTransitionIsInFlight = false
+    private var audioDisableTransitionWaiters: [CheckedContinuation<Void, Never>] = []
     private var socket: URLSessionWebSocketTask?
     private var resumptionHandle: String?
     private var resumptionHandleDate: Date?
@@ -286,9 +668,12 @@ private actor GeminiRoboticsLiveSession {
     private var outputTranscription = GeminiTranscriptionAccumulator()
     private var microphoneTurnAssociation = GeminiMicrophoneTurnAssociation()
     private var audioQueue: [AudioQueueItem] = []
-    private var pendingTextTurns: [String] = []
+    private var pendingTextTurns: [TextTurn] = []
+    private var cancelledTextContextIDs: Set<String> = []
+    private var cancelledTextContextOrder: [String] = []
+    private var retiredTextContextIDForSocket: String?
     private var textTurnIsInFlight = false
-    private var inFlightTextTurn: String?
+    private var inFlightTextTurn: TextTurn?
     private var inFlightTextTurnID: UInt64?
     private var nextTextTurnID: UInt64 = 0
     private var turnDeadlineTracker = GeminiTurnDeadlineTracker()
@@ -301,19 +686,120 @@ private actor GeminiRoboticsLiveSession {
     private var nextMicrophoneTurnID: UInt64 = 0
     private var microphoneTurnHasResponse = false
     private var lastModelTurnCompletionTime: TimeInterval?
-    private var pendingVideoJPEG: Data?
+    private var pendingVideoJPEG: PendingVideoFrame?
     private var lastVideoSendTime: TimeInterval = 0
     private var toolCallLedger: [String: ToolCallState] = [:]
-    private var toolExecutionQueue: [GeminiRoboticsToolCall] = []
+    private var toolExecutionQueue: [GeminiRoboticsAttributedToolCall] = []
     private var activeToolCallID: String?
     private var pendingToolResponses: [String: ToolResponsePayload] = [:]
     private var pendingToolResponseOrder: [String] = []
+    private var nextToolResponseFlushID: UInt64 = 0
+    private var activeToolResponseFlushID: UInt64?
     private var runGeneration: UInt = 0
+    private var policyApplicationGeneration: UInt64 = 0
     private let maximumQueuedAudioItems = 10
+    private let maximumCancelledTextContexts = 1_024
 
-    init(configuration: GeminiRoboticsConfiguration, eventHandler: @escaping (Event) -> Void) {
+    init(
+        configuration: GeminiRoboticsConfiguration,
+        diagnosticsStore: GeminiRoboticsDiagnosticsStore,
+        runtimePolicy: GeminiRoboticsRuntimePolicy,
+        eventHandler: @escaping (Event) -> Void
+    ) {
         self.configuration = configuration
+        self.diagnosticsStore = diagnosticsStore
+        audioStreamingEnabled = runtimePolicy.settings.streamsAudio
+        videoStreamingEnabled = runtimePolicy.settings.streamsVideo
+        runtimePolicyRevision = runtimePolicy.revision
+        connectionGeneration = runtimePolicy.connectionGeneration
+        audioGeneration = runtimePolicy.audioGeneration
+        videoGeneration = runtimePolicy.videoGeneration
         self.eventHandler = eventHandler
+    }
+
+    func applyRuntimePolicy(_ policy: GeminiRoboticsRuntimePolicy) async {
+        let applicationGeneration = policyApplicationGeneration
+        // Keep any connection-preserving policy behind an in-flight
+        // `audioStreamEnd`. Connection-off bypasses the barrier so privacy and
+        // robot safety never wait on a network send; cancelling the socket will
+        // release the older transition.
+        if policy.settings.connectionEnabled && audioDisableTransitionIsInFlight {
+            await waitForAudioDisableTransition()
+        }
+        // Tasks created by rapid UI changes may reach this actor out of order.
+        // The monotonically increasing revision makes the last requested
+        // policy authoritative regardless of scheduling order.
+        guard policy.revision >= runtimePolicyRevision else { return }
+        let connectionChanged = policy.connectionGeneration != connectionGeneration
+        let audioChanged = policy.audioGeneration != audioGeneration
+        let videoChanged = policy.videoGeneration != videoGeneration
+        let audioWasEnabled = audioStreamingEnabled
+        let videoWasEnabled = videoStreamingEnabled
+        runtimePolicyRevision = policy.revision
+        connectionGeneration = policy.connectionGeneration
+        audioGeneration = policy.audioGeneration
+        videoGeneration = policy.videoGeneration
+        audioStreamingEnabled = policy.settings.streamsAudio
+        videoStreamingEnabled = policy.settings.streamsVideo
+
+        if connectionChanged {
+            stop(
+                connectionState: policy.settings.connectionEnabled ? .disconnected : .off,
+                failureDetail: "Gemini was turned off before this request completed.",
+                invalidatePendingPolicies: false
+            )
+        } else if audioChanged && audioWasEnabled && !audioStreamingEnabled {
+            audioDisableTransitionIsInFlight = true
+            await disableAudioStreaming()
+            finishAudioDisableTransition()
+        } else if audioChanged {
+            audioDrainTask?.cancel()
+            audioDrainTask = nil
+            activeAudioDrainID = nil
+            audioQueue.removeAll()
+        }
+        if videoChanged {
+            pendingVideoJPEG = nil
+            videoDrainTask?.cancel()
+            videoDrainTask = nil
+            activeVideoDrainID = nil
+        }
+        if !videoWasEnabled && videoStreamingEnabled {
+            lastVideoSendTime = 0
+        }
+
+        // An older audio-off transition can suspend while sending
+        // `audioStreamEnd`. Do not let it publish state or restart a session if
+        // a newer policy was applied during that suspension.
+        guard policy.revision == runtimePolicyRevision,
+              applicationGeneration == policyApplicationGeneration else {
+            return
+        }
+        appliedRuntimePolicyRevision = policy.revision
+        eventHandler(.runtimePolicyApplied(policy))
+        guard policy.settings.connectionEnabled else { return }
+        start()
+        await sendNextTextTurnIfPossible()
+    }
+
+    private func waitForAudioDisableTransition() async {
+        guard audioDisableTransitionIsInFlight else { return }
+        await withCheckedContinuation { continuation in
+            if audioDisableTransitionIsInFlight {
+                audioDisableTransitionWaiters.append(continuation)
+            } else {
+                continuation.resume()
+            }
+        }
+    }
+
+    private func finishAudioDisableTransition() {
+        audioDisableTransitionIsInFlight = false
+        let waiters = audioDisableTransitionWaiters
+        audioDisableTransitionWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
     }
 
     func start() {
@@ -326,10 +812,32 @@ private actor GeminiRoboticsLiveSession {
         }
     }
 
-    func stop() {
+    func stop(
+        connectionState: ConnectionState,
+        failureDetail: String?,
+        invalidatePendingPolicies: Bool = true
+    ) {
+        if invalidatePendingPolicies {
+            policyApplicationGeneration &+= 1
+        }
         runGeneration &+= 1
         shouldRun = false
         setupIsComplete = false
+        if let failureDetail {
+            failAcceptedTextTurns(detail: failureDetail)
+            failInFlightMicrophoneTurn(detail: failureDetail)
+        }
+        let activeToolCallIDs = toolCallLedger.compactMap { callID, state -> String? in
+            switch state {
+            case .pending, .cancelling:
+                return callID
+            case .completed, .cancelled:
+                return nil
+            }
+        }
+        if !activeToolCallIDs.isEmpty {
+            eventHandler(.cancelledToolCalls(activeToolCallIDs.sorted()))
+        }
         resetResponseState()
         audioQueue.removeAll()
         pendingTextTurns.removeAll()
@@ -351,19 +859,28 @@ private actor GeminiRoboticsLiveSession {
         activeToolCallID = nil
         pendingToolResponses.removeAll()
         pendingToolResponseOrder.removeAll()
+        activeToolResponseFlushID = nil
         audioDrainTask?.cancel()
         audioDrainTask = nil
+        activeAudioDrainID = nil
         videoDrainTask?.cancel()
         videoDrainTask = nil
+        activeVideoDrainID = nil
         connectionTask?.cancel()
         connectionTask = nil
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
-        eventHandler(.connectionState(.disconnected, nil))
+        eventHandler(.connectionState(connectionState, nil))
     }
 
-    func enqueueAudioPCM16(_ data: Data) {
-        guard setupIsComplete, !data.isEmpty else { return }
+    func enqueueAudioPCM16(_ data: Data, generation: UInt64) {
+        guard generation == audioGeneration,
+              audioStreamingEnabled,
+              shouldRun,
+              setupIsComplete,
+              !data.isEmpty else {
+            return
+        }
         if audioQueue.count >= maximumQueuedAudioItems {
             guard let oldestPCMIndex = audioQueue.firstIndex(where: { item in
                 if case .pcm = item { return true }
@@ -373,12 +890,17 @@ private actor GeminiRoboticsLiveSession {
             }
             audioQueue.remove(at: oldestPCMIndex)
         }
-        audioQueue.append(.pcm(data))
+        audioQueue.append(.pcm(data, generation: generation))
         startAudioDrainIfNeeded()
     }
 
-    func enqueueAudioStreamEnd() {
-        guard setupIsComplete else { return }
+    func enqueueAudioStreamEnd(generation: UInt64) {
+        guard generation == audioGeneration,
+              audioStreamingEnabled,
+              shouldRun,
+              setupIsComplete else {
+            return
+        }
         while audioQueue.count >= maximumQueuedAudioItems,
               let oldestPCMIndex = audioQueue.firstIndex(where: { item in
                   if case .pcm = item { return true }
@@ -386,28 +908,100 @@ private actor GeminiRoboticsLiveSession {
               }) {
             audioQueue.remove(at: oldestPCMIndex)
         }
-        audioQueue.append(.streamEnd)
+        audioQueue.append(.streamEnd(generation: generation))
         startAudioDrainIfNeeded()
     }
 
-    func sendVideoJPEG(_ data: Data) async {
-        guard setupIsComplete, !data.isEmpty else { return }
-        pendingVideoJPEG = data
+    func sendVideoJPEG(_ data: Data, generation: UInt64) async -> Bool {
+        guard generation == videoGeneration,
+              videoStreamingEnabled,
+              shouldRun,
+              setupIsComplete,
+              !data.isEmpty else {
+            return false
+        }
+        pendingVideoJPEG = PendingVideoFrame(data: data, generation: generation)
         startVideoDrainIfNeeded()
+        return true
     }
 
-    func sendTextTurn(_ text: String) async {
+    func sendTextTurn(
+        _ text: String,
+        contextID: String? = nil,
+        generation: UInt64,
+        minimumPolicyRevision: UInt64
+    ) async {
         guard !text.isEmpty else { return }
-        if pendingTextTurns.count >= 5 {
-            pendingTextTurns.removeFirst()
+        if let contextID, cancelledTextContextIDs.contains(contextID) {
+            return
         }
-        pendingTextTurns.append(text)
+        guard generation == connectionGeneration, shouldRun else {
+            eventHandler(.requestFailed(
+                "Gemini was turned off before Cerebro could submit the request.",
+                contextID: contextID
+            ))
+            return
+        }
+        guard pendingTextTurns.count < 5 else {
+            eventHandler(.requestFailed(
+                "Gemini's request queue is full. Please try again after the current response.",
+                contextID: contextID
+            ))
+            return
+        }
+        pendingTextTurns.append(TextTurn(
+            text: text,
+            contextID: contextID,
+            minimumPolicyRevision: minimumPolicyRevision
+        ))
         await sendNextTextTurnIfPossible()
     }
 
-    func noteMicrophoneTurnAwaitingResponse() {
+    /// Cancels both sides of the send/enqueue race. The retained context ID
+    /// prevents a not-yet-scheduled `sendTextTurn` task from adding stale work
+    /// after this method has already removed the current queue entry.
+    func cancelTextTurn(contextID: String) async {
+        rememberCancelledTextContext(contextID)
+        pendingTextTurns.removeAll { $0.contextID == contextID }
+
+        guard textTurnIsInFlight,
+              inFlightTextTurn?.contextID == contextID else {
+            await sendNextTextTurnIfPossible()
+            return
+        }
+
+        retiredTextContextIDForSocket = contextID
+        completeInFlightTextTurnDeadline()
+        resetResponseState()
+        textTurnIsInFlight = false
+        inFlightTextTurn = nil
+        inFlightTextTurnID = nil
+
+        // Gemini Live has no per-turn client cancellation message. Closing the
+        // current socket is the only way to abort a prompt that was already
+        // sent. Do not resume the server session that owned that prompt, but
+        // retain its origin marker through reconnect so any already-delivered
+        // tail remains attributable and fail-closed.
+        resumptionHandle = nil
+        resumptionHandleDate = nil
+        setupIsComplete = false
+        let cancelledSocket = socket
+        cancelledSocket?.cancel(with: .goingAway, reason: nil)
+    }
+
+    private func rememberCancelledTextContext(_ contextID: String) {
+        guard cancelledTextContextIDs.insert(contextID).inserted else { return }
+        cancelledTextContextOrder.append(contextID)
+        if cancelledTextContextOrder.count > maximumCancelledTextContexts {
+            let expiredContextID = cancelledTextContextOrder.removeFirst()
+            cancelledTextContextIDs.remove(expiredContextID)
+        }
+    }
+
+    func noteMicrophoneTurnAwaitingResponse(generation: UInt64) {
         guard setupIsComplete,
-              configuration.streamsAudio else {
+              generation == audioGeneration,
+              audioStreamingEnabled else {
             return
         }
 
@@ -450,6 +1044,7 @@ private actor GeminiRoboticsLiveSession {
 
         nextMicrophoneTurnID &+= 1
         let turnID = nextMicrophoneTurnID
+        retiredTextContextIDForSocket = nil
         inFlightMicrophoneTurnID = turnID
         microphoneTurnHasResponse = false
         microphoneTurnDeadlineTracker.begin(turnID: turnID, now: now)
@@ -559,12 +1154,6 @@ private actor GeminiRoboticsLiveSession {
         audioQueue.removeAll()
         webSocket.resume()
 
-        let setup = GeminiRoboticsProtocol.setupMessage(
-            configuration: configuration,
-            resumptionHandle: resumptionHandle
-        )
-        try await send(setup, over: webSocket)
-
         defer {
             webSocket.cancel(with: .goingAway, reason: nil)
             if generation == runGeneration, socket === webSocket {
@@ -573,8 +1162,19 @@ private actor GeminiRoboticsLiveSession {
             }
         }
 
+        let setup = GeminiRoboticsProtocol.setupMessage(
+            configuration: configuration,
+            resumptionHandle: resumptionHandle
+        )
+        try await send(setup, over: webSocket)
+        try requireCurrentConnection(generation: generation, webSocket: webSocket)
+
         while shouldRun, generation == runGeneration, !Task.isCancelled {
             let message = try await webSocket.receive()
+            // Actor methods are reentrant at every await. An off/on cycle can
+            // replace the socket while this receive is suspended; never apply
+            // a packet from that previous Gemini session to the new one.
+            try requireCurrentConnection(generation: generation, webSocket: webSocket)
             let data: Data
             switch message {
             case .data(let receivedData):
@@ -589,6 +1189,11 @@ private actor GeminiRoboticsLiveSession {
             }
 
             let serverEvent = try GeminiRoboticsProtocol.parseServerMessage(data)
+            // Capture this before `finalizeCompletedTurn()` clears the active
+            // text turn. Gemini may include tool calls and turnComplete in the
+            // same envelope. A retired context covers a cancelled turn's tail.
+            let toolCallContextID = inFlightTextTurn?.contextID ?? retiredTextContextIDForSocket
+            diagnosticsStore.noteServerEvent(serverEvent)
             if let serverError = serverEvent.serverError {
                 if !setupIsComplete && attemptedResumption {
                     resumptionHandle = nil
@@ -609,7 +1214,9 @@ private actor GeminiRoboticsLiveSession {
                 setupIsComplete = true
                 eventHandler(.connectionState(.ready, nil))
                 await flushPendingToolResponsesIfPossible()
+                try requireCurrentConnection(generation: generation, webSocket: webSocket)
                 await sendNextTextTurnIfPossible()
+                try requireCurrentConnection(generation: generation, webSocket: webSocket)
             }
 
             if serverEvent.isResumable == true,
@@ -636,6 +1243,7 @@ private actor GeminiRoboticsLiveSession {
                     _ = microphoneTurnAssociation.consumeInterruptedTurnCompletion()
                     resetResponseBuffers()
                     await sendNextTextTurnIfPossible()
+                    try requireCurrentConnection(generation: generation, webSocket: webSocket)
                 }
                 if !serverEvent.cancelledToolCallIDs.isEmpty {
                     handleToolCallCancellations(serverEvent.cancelledToolCallIDs)
@@ -663,6 +1271,9 @@ private actor GeminiRoboticsLiveSession {
 
             if serverEvent.interrupted {
                 let shouldArmMicrophoneFollowup = microphoneTurnAssociation.noteInterruption()
+                if textTurnIsInFlight {
+                    retiredTextContextIDForSocket = inFlightTextTurn?.contextID
+                }
                 lastModelTurnCompletionTime = nil
                 resetResponseBuffers()
                 completeInFlightTextTurnDeadline()
@@ -677,6 +1288,7 @@ private actor GeminiRoboticsLiveSession {
                 if serverEvent.turnComplete {
                     _ = microphoneTurnAssociation.consumeInterruptedTurnCompletion()
                     await sendNextTextTurnIfPossible()
+                    try requireCurrentConnection(generation: generation, webSocket: webSocket)
                 }
             } else {
                 responseText += serverEvent.textFragments.joined()
@@ -685,11 +1297,18 @@ private actor GeminiRoboticsLiveSession {
                 }
                 if serverEvent.turnComplete {
                     await finalizeCompletedTurn()
+                    try requireCurrentConnection(generation: generation, webSocket: webSocket)
                 }
             }
 
             if !serverEvent.interrupted, !serverEvent.toolCalls.isEmpty {
-                await handleToolCalls(serverEvent.toolCalls)
+                await handleToolCalls(
+                    serverEvent.toolCalls,
+                    contextID: toolCallContextID,
+                    generation: generation,
+                    webSocket: webSocket
+                )
+                try requireCurrentConnection(generation: generation, webSocket: webSocket)
             }
             if !serverEvent.cancelledToolCallIDs.isEmpty {
                 handleToolCallCancellations(serverEvent.cancelledToolCallIDs)
@@ -706,29 +1325,59 @@ private actor GeminiRoboticsLiveSession {
         }
     }
 
+    private func requireCurrentConnection(
+        generation: UInt,
+        webSocket: URLSessionWebSocketTask
+    ) throws {
+        guard connectionIsCurrent(generation: generation, webSocket: webSocket) else {
+            throw CancellationError()
+        }
+    }
+
+    private func connectionIsCurrent(
+        generation: UInt,
+        webSocket: URLSessionWebSocketTask
+    ) -> Bool {
+        shouldRun &&
+            generation == runGeneration &&
+            socket === webSocket &&
+            !Task.isCancelled
+    }
+
     private func sendNextTextTurnIfPossible() async {
+        pendingTextTurns.removeAll { turn in
+            guard let contextID = turn.contextID else { return false }
+            return cancelledTextContextIDs.contains(contextID)
+        }
         guard setupIsComplete,
+              !audioDisableTransitionIsInFlight,
               !textTurnIsInFlight,
               inFlightMicrophoneTurnID == nil,
-              !pendingTextTurns.isEmpty,
+              let nextTurn = pendingTextTurns.first,
+              nextTurn.minimumPolicyRevision <= appliedRuntimePolicyRevision,
               let socket else {
             return
         }
 
-        let text = pendingTextTurns.removeFirst()
+        let turn = pendingTextTurns.removeFirst()
+        retiredTextContextIDForSocket = nil
         nextTextTurnID &+= 1
         let turnID = nextTextTurnID
         textTurnIsInFlight = true
-        inFlightTextTurn = text
+        inFlightTextTurn = turn
         inFlightTextTurnID = turnID
         beginTextTurnDeadlines(turnID: turnID)
         do {
-            try await send(GeminiRoboticsProtocol.realtimeTextMessage(text), over: socket)
+            try await send(GeminiRoboticsProtocol.realtimeTextMessage(turn.text), over: socket)
             NSLog("Gemini Robotics text turn %@ sent", String(turnID))
         } catch {
-            failInFlightTextTurn(
-                detail: "Cerebro could not send the request to Gemini. Please try again."
-            )
+            if textTurnIsInFlight,
+               inFlightTextTurnID == turnID,
+               self.socket === socket {
+                failInFlightTextTurn(
+                    detail: "Cerebro could not send the request to Gemini. Please try again."
+                )
+            }
             socket.cancel(with: .goingAway, reason: nil)
         }
     }
@@ -744,6 +1393,15 @@ private actor GeminiRoboticsLiveSession {
         let completedText = modelText.isEmpty ? transcribedText : modelText
         let hadTextTurn = textTurnIsInFlight
         let hadMicrophoneTurn = inFlightMicrophoneTurnID != nil
+        let textContextID = inFlightTextTurn?.contextID
+        if hadTextTurn {
+            // Keep attribution after turnComplete in case Gemini sends a tool
+            // tail in a following envelope. A new input turn clears it.
+            retiredTextContextIDForSocket = textContextID
+        }
+        let textContextWasCancelled = textContextID.map {
+            cancelledTextContextIDs.contains($0)
+        } ?? false
 
         completeInFlightTextTurnDeadline()
         completeInFlightMicrophoneTurnDeadline()
@@ -754,10 +1412,13 @@ private actor GeminiRoboticsLiveSession {
         inFlightTextTurn = nil
         inFlightTextTurnID = nil
 
-        if !completedText.isEmpty {
-            eventHandler(.completedText(completedText))
-        } else if hadTextTurn || hadMicrophoneTurn {
-            eventHandler(.requestFailed("Gemini completed the request without a usable spoken response."))
+        if !textContextWasCancelled, !completedText.isEmpty {
+            eventHandler(.completedText(completedText, contextID: hadTextTurn ? textContextID : nil))
+        } else if !textContextWasCancelled, hadTextTurn || hadMicrophoneTurn {
+            eventHandler(.requestFailed(
+                "Gemini completed the request without a usable spoken response.",
+                contextID: hadTextTurn ? textContextID : nil
+            ))
         }
         await sendNextTextTurnIfPossible()
     }
@@ -765,6 +1426,39 @@ private actor GeminiRoboticsLiveSession {
     private func resetResponseState() {
         resetResponseBuffers()
         microphoneTurnAssociation.reset()
+    }
+
+    private func failAcceptedTextTurns(detail: String) {
+        _ = failInFlightTextTurn(detail: detail)
+        let queuedTurns = pendingTextTurns
+        pendingTextTurns.removeAll()
+        for turn in queuedTurns {
+            if let contextID = turn.contextID,
+               cancelledTextContextIDs.contains(contextID) {
+                continue
+            }
+            eventHandler(.requestFailed(detail, contextID: turn.contextID))
+        }
+    }
+
+    private func disableAudioStreaming() async {
+        audioDrainTask?.cancel()
+        audioDrainTask = nil
+        activeAudioDrainID = nil
+        audioQueue.removeAll()
+        _ = failInFlightMicrophoneTurn(
+            detail: "Gemini microphone streaming was turned off before this request completed."
+        )
+
+        // Automatic activity detection is used by the setup message. Gemini's
+        // Live contract asks clients to flush cached audio when the microphone
+        // is paused, then permits the stream to reopen with a later audio blob.
+        guard setupIsComplete, shouldRun, let socket else { return }
+        do {
+            try await send(GeminiRoboticsProtocol.audioStreamEndMessage(), over: socket)
+        } catch {
+            socket.cancel(with: .goingAway, reason: nil)
+        }
     }
 
     private func resetResponseBuffers() {
@@ -844,12 +1538,19 @@ private actor GeminiRoboticsLiveSession {
     @discardableResult
     private func failInFlightTextTurn(detail: String) -> Bool {
         guard textTurnIsInFlight else { return false }
+        let contextID = inFlightTextTurn?.contextID
+        retiredTextContextIDForSocket = contextID
+        let contextWasCancelled = contextID.map {
+            cancelledTextContextIDs.contains($0)
+        } ?? false
         completeInFlightTextTurnDeadline()
         resetResponseState()
         textTurnIsInFlight = false
         inFlightTextTurn = nil
         inFlightTextTurnID = nil
-        eventHandler(.requestFailed(detail))
+        if !contextWasCancelled {
+            eventHandler(.requestFailed(detail, contextID: contextID))
+        }
         return true
     }
 
@@ -888,6 +1589,7 @@ private actor GeminiRoboticsLiveSession {
     private func beginNewMicrophoneTurn(now: TimeInterval) {
         nextMicrophoneTurnID &+= 1
         let turnID = nextMicrophoneTurnID
+        retiredTextContextIDForSocket = nil
         inFlightMicrophoneTurnID = turnID
         microphoneTurnHasResponse = false
         microphoneTurnDeadlineTracker.begin(turnID: turnID, now: now)
@@ -945,19 +1647,26 @@ private actor GeminiRoboticsLiveSession {
         guard inFlightMicrophoneTurnID != nil else { return false }
         completeInFlightMicrophoneTurnDeadline()
         resetResponseState()
-        eventHandler(.requestFailed(detail))
+        eventHandler(.requestFailed(detail, contextID: nil))
         return true
     }
 
     private func startVideoDrainIfNeeded() {
         guard videoDrainTask == nil else { return }
+        nextVideoDrainID &+= 1
+        let drainID = nextVideoDrainID
+        activeVideoDrainID = drainID
         videoDrainTask = Task { [weak self] in
-            await self?.drainVideoQueue()
+            await self?.drainVideoQueue(drainID: drainID)
         }
     }
 
-    private func drainVideoQueue() async {
-        while setupIsComplete, pendingVideoJPEG != nil, !Task.isCancelled {
+    private func drainVideoQueue(drainID: UInt64) async {
+        while activeVideoDrainID == drainID,
+              setupIsComplete,
+              videoStreamingEnabled,
+              pendingVideoJPEG != nil,
+              !Task.isCancelled {
             let elapsed = ProcessInfo.processInfo.systemUptime - lastVideoSendTime
             if elapsed < 1.0 {
                 do {
@@ -967,25 +1676,54 @@ private actor GeminiRoboticsLiveSession {
                 }
             }
 
-            guard setupIsComplete,
-                  let data = pendingVideoJPEG,
+            guard activeVideoDrainID == drainID,
+                  setupIsComplete,
+                  videoStreamingEnabled,
+                  let frame = pendingVideoJPEG,
+                  frame.generation == videoGeneration,
                   let socket else {
                 break
             }
             pendingVideoJPEG = nil
             do {
-                try await send(GeminiRoboticsProtocol.realtimeVideoMessage(data), over: socket)
+                try await send(
+                    GeminiRoboticsProtocol.realtimeVideoMessage(frame.data),
+                    over: socket
+                )
+                guard activeVideoDrainID == drainID,
+                      setupIsComplete,
+                      videoStreamingEnabled,
+                      frame.generation == videoGeneration,
+                      self.socket === socket,
+                      !Task.isCancelled else {
+                    break
+                }
                 lastVideoSendTime = ProcessInfo.processInfo.systemUptime
+                diagnosticsStore.noteVideoFrameSent()
             } catch {
-                pendingVideoJPEG = data
+                if activeVideoDrainID == drainID,
+                   videoStreamingEnabled,
+                   frame.generation == videoGeneration,
+                   self.socket === socket {
+                    pendingVideoJPEG = frame
+                }
                 socket.cancel(with: .goingAway, reason: nil)
                 break
             }
         }
-        videoDrainTask = nil
+        if activeVideoDrainID == drainID {
+            activeVideoDrainID = nil
+            videoDrainTask = nil
+        }
     }
 
-    private func handleToolCalls(_ calls: [GeminiRoboticsToolCall]) async {
+    private func handleToolCalls(
+        _ calls: [GeminiRoboticsToolCall],
+        contextID: String?,
+        generation: UInt,
+        webSocket: URLSessionWebSocketTask
+    ) async {
+        var priorityCalls: [GeminiRoboticsAttributedToolCall] = []
         for call in calls {
             if let existingState = toolCallLedger[call.id] {
                 switch existingState {
@@ -998,16 +1736,36 @@ private actor GeminiRoboticsLiveSession {
             }
 
             toolCallLedger[call.id] = .pending(name: call.name)
-            toolExecutionQueue.append(call)
+            let attributedCall = GeminiRoboticsAttributedToolCall(
+                call: call,
+                contextID: contextID
+            )
+            if GeminiRoboticsToolPolicy.requiresPriorityDispatch(call) {
+                priorityCalls.append(attributedCall)
+            } else {
+                toolExecutionQueue.append(attributedCall)
+            }
         }
 
         await flushPendingToolResponsesIfPossible()
+        guard connectionIsCurrent(
+            generation: generation,
+            webSocket: webSocket
+        ) else {
+            return
+        }
+        if !priorityCalls.isEmpty {
+            // Safety stops are delivered out of band. They do not replace or
+            // release the current blocking action slot; their correlated tool
+            // responses can be sent independently once the stop is applied.
+            eventHandler(.toolCalls(priorityCalls))
+        }
         dispatchNextToolCallIfPossible()
     }
 
     private func handleToolCallCancellations(_ callIDs: [String]) {
         for callID in callIDs {
-            toolExecutionQueue.removeAll { $0.id == callID }
+            toolExecutionQueue.removeAll { $0.call.id == callID }
             if activeToolCallID == callID {
                 switch toolCallLedger[callID] {
                 case .pending(let name):
@@ -1032,7 +1790,7 @@ private actor GeminiRoboticsLiveSession {
     private func dispatchNextToolCallIfPossible() {
         guard activeToolCallID == nil, !toolExecutionQueue.isEmpty else { return }
         let call = toolExecutionQueue.removeFirst()
-        activeToolCallID = call.id
+        activeToolCallID = call.call.id
         eventHandler(.toolCalls([call]))
     }
 
@@ -1044,7 +1802,19 @@ private actor GeminiRoboticsLiveSession {
     }
 
     private func flushPendingToolResponsesIfPossible() async {
-        guard setupIsComplete, let socket else { return }
+        guard activeToolResponseFlushID == nil,
+              setupIsComplete,
+              let socket else {
+            return
+        }
+        nextToolResponseFlushID &+= 1
+        let flushID = nextToolResponseFlushID
+        activeToolResponseFlushID = flushID
+        defer {
+            if activeToolResponseFlushID == flushID {
+                activeToolResponseFlushID = nil
+            }
+        }
         while let callID = pendingToolResponseOrder.first,
               let response = pendingToolResponses[callID] {
             do {
@@ -1056,6 +1826,16 @@ private actor GeminiRoboticsLiveSession {
                     ),
                     over: socket
                 )
+                // `stop()` or a reconnect can clear or replace these queues
+                // while the WebSocket send suspends this actor method.
+                guard setupIsComplete,
+                      shouldRun,
+                      activeToolResponseFlushID == flushID,
+                      self.socket === socket,
+                      pendingToolResponseOrder.first == callID,
+                      pendingToolResponses[callID] != nil else {
+                    break
+                }
                 pendingToolResponseOrder.removeFirst()
                 pendingToolResponses.removeValue(forKey: callID)
             } catch {
@@ -1067,31 +1847,54 @@ private actor GeminiRoboticsLiveSession {
 
     private func startAudioDrainIfNeeded() {
         guard audioDrainTask == nil else { return }
+        nextAudioDrainID &+= 1
+        let drainID = nextAudioDrainID
+        activeAudioDrainID = drainID
         audioDrainTask = Task { [weak self] in
-            await self?.drainAudioQueue()
+            await self?.drainAudioQueue(drainID: drainID)
         }
     }
 
-    private func drainAudioQueue() async {
-        while setupIsComplete, !audioQueue.isEmpty, !Task.isCancelled {
+    private func drainAudioQueue(drainID: UInt64) async {
+        while activeAudioDrainID == drainID,
+              setupIsComplete,
+              audioStreamingEnabled,
+              !audioQueue.isEmpty,
+              !Task.isCancelled {
             let item = audioQueue.removeFirst()
             let message: [String: Any]
+            let itemGeneration: UInt64
             switch item {
-            case .pcm(let data):
+            case .pcm(let data, let generation):
+                guard generation == audioGeneration else { continue }
+                itemGeneration = generation
                 message = GeminiRoboticsProtocol.realtimeAudioMessage(data)
-            case .streamEnd:
+            case .streamEnd(let generation):
+                guard generation == audioGeneration else { continue }
+                itemGeneration = generation
                 message = GeminiRoboticsProtocol.audioStreamEndMessage()
             }
 
-            guard let socket else { break }
+            guard audioStreamingEnabled, let socket else { break }
             do {
                 try await send(message, over: socket)
+                guard activeAudioDrainID == drainID,
+                      setupIsComplete,
+                      audioStreamingEnabled,
+                      itemGeneration == audioGeneration,
+                      self.socket === socket,
+                      !Task.isCancelled else {
+                    break
+                }
             } catch {
                 socket.cancel(with: .goingAway, reason: nil)
                 break
             }
         }
-        audioDrainTask = nil
+        if activeAudioDrainID == drainID {
+            activeAudioDrainID = nil
+            audioDrainTask = nil
+        }
     }
 
     private func send(_ object: [String: Any], over socket: URLSessionWebSocketTask) async throws {
@@ -1102,8 +1905,8 @@ private actor GeminiRoboticsLiveSession {
 
 private final class GeminiOrderedAudioEventStream {
     private enum Event {
-        case pcm16(Data)
-        case streamEnd
+        case pcm16(Data, generation: UInt64)
+        case streamEnd(generation: UInt64)
     }
 
     private let continuation: AsyncStream<Event>.Continuation
@@ -1123,10 +1926,10 @@ private final class GeminiOrderedAudioEventStream {
             for await event in stream {
                 guard let session else { break }
                 switch event {
-                case .pcm16(let data):
-                    await session.enqueueAudioPCM16(data)
-                case .streamEnd:
-                    await session.enqueueAudioStreamEnd()
+                case .pcm16(let data, let generation):
+                    await session.enqueueAudioPCM16(data, generation: generation)
+                case .streamEnd(let generation):
+                    await session.enqueueAudioStreamEnd(generation: generation)
                     self?.markStreamEndConsumed()
                 }
             }
@@ -1137,24 +1940,24 @@ private final class GeminiOrderedAudioEventStream {
         finish()
     }
 
-    func enqueuePCM16(_ data: Data) {
+    func enqueuePCM16(_ data: Data, generation: UInt64) {
         stateLock.lock()
         guard !streamEndIsBuffered else {
             stateLock.unlock()
             return
         }
-        continuation.yield(.pcm16(data))
+        continuation.yield(.pcm16(data, generation: generation))
         stateLock.unlock()
     }
 
-    func enqueueStreamEnd() {
+    func enqueueStreamEnd(generation: UInt64) {
         stateLock.lock()
         guard !streamEndIsBuffered else {
             stateLock.unlock()
             return
         }
         streamEndIsBuffered = true
-        continuation.yield(.streamEnd)
+        continuation.yield(.streamEnd(generation: generation))
         stateLock.unlock()
     }
 
@@ -1174,8 +1977,8 @@ private final class GeminiOrderedAudioEventStream {
 private final class GeminiPCM16Encoder {
     private let queue = DispatchQueue(label: "com.orbitusrobotics.cerebro.gemini.audio-conversion")
     private let pendingLock = NSLock()
-    private let didEncode: (Data) -> Void
-    private let didEndStream: () -> Void
+    private let didEncode: (Data, UInt64) -> Void
+    private let didEndStream: (UInt64) -> Void
     private var pendingBufferCount = 0
     private var converter: AVAudioConverter?
     private var converterInputFormat: AVAudioFormat?
@@ -1187,12 +1990,15 @@ private final class GeminiPCM16Encoder {
         interleaved: true
     )!
 
-    init(didEncode: @escaping (Data) -> Void, didEndStream: @escaping () -> Void) {
+    init(
+        didEncode: @escaping (Data, UInt64) -> Void,
+        didEndStream: @escaping (UInt64) -> Void
+    ) {
         self.didEncode = didEncode
         self.didEndStream = didEndStream
     }
 
-    func enqueue(_ buffer: AVAudioPCMBuffer) {
+    func enqueue(_ buffer: AVAudioPCMBuffer, generation: UInt64) {
         guard buffer.frameLength > 0 else { return }
 
         guard pendingLock.try() else { return }
@@ -1212,13 +2018,13 @@ private final class GeminiPCM16Encoder {
             guard let self else { return }
             defer { self.decrementPendingCount() }
             guard let data = self.convert(copiedBuffer), !data.isEmpty else { return }
-            self.didEncode(data)
+            self.didEncode(data, generation)
         }
     }
 
-    func endStream() {
+    func endStream(generation: UInt64) {
         queue.async { [weak self] in
-            self?.didEndStream()
+            self?.didEndStream(generation)
         }
     }
 
@@ -1311,28 +2117,35 @@ private final class GeminiJPEGEncoder {
     private let queue = DispatchQueue(label: "com.orbitusrobotics.cerebro.gemini.video-encoding")
     private let throttleLock = NSLock()
     private let context = CIContext(options: [.cacheIntermediates: false])
-    private let didEncode: (Data) -> Void
+    private let didEncode: (Data, UInt64) -> Void
     private var lastAcceptedFrameTime: TimeInterval = 0
+    private var encodeIsPending = false
     private let minimumFrameInterval: TimeInterval = 1.0
     private let maximumDimension: CGFloat = 768
 
-    init(didEncode: @escaping (Data) -> Void) {
+    init(didEncode: @escaping (Data, UInt64) -> Void) {
         self.didEncode = didEncode
     }
 
-    func enqueue(_ sampleBuffer: CMSampleBuffer) {
+    func enqueue(_ sampleBuffer: CMSampleBuffer, generation: UInt64) {
         let now = ProcessInfo.processInfo.systemUptime
         throttleLock.lock()
-        guard now - lastAcceptedFrameTime >= minimumFrameInterval else {
+        guard !encodeIsPending,
+              now - lastAcceptedFrameTime >= minimumFrameInterval else {
             throttleLock.unlock()
             return
         }
         lastAcceptedFrameTime = now
+        encodeIsPending = true
         throttleLock.unlock()
 
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            finishPendingEncode()
+            return
+        }
         queue.async { [weak self, pixelBuffer] in
             guard let self else { return }
+            defer { self.finishPendingEncode() }
             let sourceImage = CIImage(cvPixelBuffer: pixelBuffer)
             let largestDimension = max(sourceImage.extent.width, sourceImage.extent.height)
             let scale = largestDimension > self.maximumDimension
@@ -1351,7 +2164,19 @@ private final class GeminiJPEGEncoder {
             ) else {
                 return
             }
-            self.didEncode(jpegData)
+            self.didEncode(jpegData, generation)
         }
+    }
+
+    func reset() {
+        throttleLock.lock()
+        lastAcceptedFrameTime = 0
+        throttleLock.unlock()
+    }
+
+    private func finishPendingEncode() {
+        throttleLock.lock()
+        encodeIsPending = false
+        throttleLock.unlock()
     }
 }
