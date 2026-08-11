@@ -550,17 +550,20 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
     ROBPackedPoint3 *vertices = vertexData.mutableBytes;
     NSMutableData *indexData = [NSMutableData dataWithLength:points.count * sizeof(uint32_t)];
     uint32_t *indices = indexData.mutableBytes;
-    NSMutableData *colorData = [NSMutableData dataWithLength:points.count * 4];
-    uint8_t *packedColors = colorData.mutableBytes;
+    typedef struct { float r, g, b, a; } ROBPackedColor4;
+    NSMutableData *colorData = [NSMutableData dataWithLength:points.count * sizeof(ROBPackedColor4)];
+    ROBPackedColor4 *packedColors = colorData.mutableBytes;
     for (NSUInteger index = 0; index < points.count; index++) {
         SCNVector3 point = points[index].SCNVector3Value;
         vertices[index] = (ROBPackedPoint3){(float)point.x, (float)point.y, (float)point.z};
         indices[index] = (uint32_t)index;
         uint32_t rgba = index < colors.count ? colors[index].unsignedIntValue : 0xFFFFFFFF;
-        packedColors[index * 4] = (rgba >> 24) & 0xFF;
-        packedColors[index * 4 + 1] = (rgba >> 16) & 0xFF;
-        packedColors[index * 4 + 2] = (rgba >> 8) & 0xFF;
-        packedColors[index * 4 + 3] = rgba & 0xFF;
+        packedColors[index] = (ROBPackedColor4){
+            (float)((rgba >> 24) & 0xFF) / 255.0f,
+            (float)((rgba >> 16) & 0xFF) / 255.0f,
+            (float)((rgba >> 8) & 0xFF) / 255.0f,
+            (float)(rgba & 0xFF) / 255.0f
+        };
     }
     SCNGeometrySource *source = [SCNGeometrySource geometrySourceWithData:vertexData
                                                                  semantic:SCNGeometrySourceSemanticVertex
@@ -573,11 +576,11 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
     SCNGeometrySource *colorSource = [SCNGeometrySource geometrySourceWithData:colorData
                                                                       semantic:SCNGeometrySourceSemanticColor
                                                                    vectorCount:points.count
-                                                               floatComponents:NO
+                                                               floatComponents:YES
                                                            componentsPerVector:4
-                                                             bytesPerComponent:1
+                                                             bytesPerComponent:sizeof(float)
                                                                     dataOffset:0
-                                                                    dataStride:4];
+                                                                    dataStride:sizeof(ROBPackedColor4)];
     SCNGeometryElement *element = [SCNGeometryElement geometryElementWithData:indexData
                                                                 primitiveType:SCNGeometryPrimitiveTypePoint
                                                                primitiveCount:points.count
