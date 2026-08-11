@@ -23,6 +23,7 @@ enum DataMessageType: UInt32 {
   case pairingAccepted = 5
   case pairingRejected = 6
   case lidarTelemetry = 7
+  case pairingHello = 8
 }
 
 enum AutoNetTransportError: LocalizedError {

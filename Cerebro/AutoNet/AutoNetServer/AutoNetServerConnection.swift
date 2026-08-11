@@ -10,6 +10,7 @@ import Network
 public final class AutoNetServerConnection {
     private enum AuthenticationState {
         case transportConnecting
+        case awaitingHello
         case awaitingProof(ROBControlAuthChallenge)
         case sendingAccepted
         case authenticated
@@ -84,7 +85,7 @@ public final class AutoNetServerConnection {
                     }
                     isReady = true
                     print("ROBControl connection \(id) recovered its authenticated QUIC path")
-                case .awaitingProof, .sendingAccepted, .stopped:
+                case .awaitingHello, .awaitingProof, .sendingAccepted, .stopped:
                     break
                 }
             }
@@ -103,14 +104,23 @@ public final class AutoNetServerConnection {
             stop(error: AutoNetTransportError.authenticationFailed)
             return
         }
+        authenticationState = .awaitingHello
+        let timeout = DispatchWorkItem { [weak self] in
+            self?.stop(error: AutoNetTransportError.authenticationFailed)
+        }
+        authenticationTimeoutWorkItem = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.authenticationTimeout, execute: timeout)
+        receiveNextMessage()
+    }
+
+    private func sendV2Challenge() {
+        guard case .awaitingHello = authenticationState, let credential else {
+            stop(error: AutoNetTransportError.authenticationFailed)
+            return
+        }
         do {
             let challenge = try ROBControlAuthenticator.makeChallenge(robotID: credential.robotID)
             authenticationState = .awaitingProof(challenge)
-            let timeout = DispatchWorkItem { [weak self] in
-                self?.stop(error: AutoNetTransportError.authenticationFailed)
-            }
-            authenticationTimeoutWorkItem = timeout
-            DispatchQueue.main.asyncAfter(deadline: .now() + Self.authenticationTimeout, execute: timeout)
             sendFrame(type: .pairingChallenge, data: challenge.encoded) { [weak self] error in
                 guard let self else { return }
                 if let error {
@@ -175,7 +185,8 @@ public final class AutoNetServerConnection {
                     self.stop(error: AutoNetTransportError.authorizationFailed)
                     return
                 }
-            case .pairingChallenge, .pairingProof, .pairingAccepted, .pairingRejected, .invalid:
+            case .pairingChallenge, .pairingProof, .pairingAccepted, .pairingRejected,
+                 .pairingHello, .invalid:
                 self.stop(error: NWError.posix(.EPROTO))
                 return
             }
@@ -184,6 +195,18 @@ public final class AutoNetServerConnection {
     }
 
     private func handleAuthenticationMessage(type: DataMessageType, data: Data) {
+        if case .awaitingHello = authenticationState {
+            guard type == .pairingHello,
+                  data.count >= 36,
+                  let identifier = String(data: data.prefix(36), encoding: .utf8),
+                  let deviceID = UUID(uuidString: identifier),
+                  (try? ROBControlPairing.activePeerAuthenticationRecord(for: deviceID)) != nil else {
+                rejectAuthentication()
+                return
+            }
+            sendV2Challenge()
+            return
+        }
         guard type == .pairingProof,
               case .awaitingProof(let challenge) = authenticationState,
               let proof = ROBControlAuthProof(data) else {
