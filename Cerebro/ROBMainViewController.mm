@@ -1834,6 +1834,18 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     BOOL gripperControlValid = gripperControlVersionIsValid
         && ([leftGripperClosedText isEqualToString:@"0"] || [leftGripperClosedText isEqualToString:@"1"])
         && ([rightGripperClosedText isEqualToString:@"0"] || [rightGripperClosedText isEqualToString:@"1"]);
+    NSString *torsoRotationText = messageDictionary[@"torso.rotation.normalized"];
+    double torsoRotation = 0;
+    NSScanner *torsoScanner = [torsoRotationText isKindOfClass:NSString.class]
+        ? [NSScanner scannerWithString:torsoRotationText]
+        : nil;
+    BOOL torsoControlValid = [messageDictionary[@"torso.control.version"] isEqualToString:@"1"]
+        && torsoScanner != nil
+        && [torsoScanner scanDouble:&torsoRotation]
+        && torsoScanner.isAtEnd
+        && isfinite(torsoRotation)
+        && torsoRotation >= -1.0
+        && torsoRotation <= 1.0;
 
     //NSLog(@"sender = %@. message = %@", sender, msg);
 
@@ -2119,6 +2131,8 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         controllerModelData.gripperControlActive = gripperControlValid;
         controllerModelData.leftGripperClosed = gripperControlValid && [leftGripperClosedText isEqualToString:@"1"];
         controllerModelData.rightGripperClosed = gripperControlValid && [rightGripperClosedText isEqualToString:@"1"];
+        controllerModelData.torsoControlActive = torsoControlValid;
+        controllerModelData.torsoRotation = torsoControlValid ? (float)torsoRotation : 0;
         controllerModelData.leftControllerPoseValid = leftControllerPoseValid;
         controllerModelData.leftControllerPositionX = (float)leftControllerPose[0];
         controllerModelData.leftControllerPositionY = (float)leftControllerPose[1];

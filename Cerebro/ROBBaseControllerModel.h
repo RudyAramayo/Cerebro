@@ -35,6 +35,8 @@
 @property (readwrite, assign) bool gripperControlActive;
 @property (readwrite, assign) bool leftGripperClosed;
 @property (readwrite, assign) bool rightGripperClosed;
+@property (readwrite, assign) bool torsoControlActive;
+@property (readwrite, assign) float torsoRotation;
 // visionOS world-space controller poses. Values are accepted only after strict finite/range
 // validation. They are inputs for a future calibrated IK layer and never drive arm hardware
 // directly from this model.

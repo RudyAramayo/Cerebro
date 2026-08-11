@@ -61,28 +61,33 @@
       </BuildableProductRunnable>
       <EnvironmentVariables>
          <EnvironmentVariable
-            key = "LIBUSB_DEBUG"
-            value = "3"
+            key = "GEMINI_API_KEY"
+            value = "AIzaSyCJJYIJBOajwis7bGvYDC_4d2-AnSwA5Q8"
             isEnabled = "YES">
          </EnvironmentVariable>
          <EnvironmentVariable
-            key = "NITE2_INCLUDE"
-            value = "/Users/rob/Desktop/openni-2.2/NITE/NiTE/Include"
+            key = "GEMINI_ROBOTICS_ENABLED"
+            value = "true"
             isEnabled = "YES">
          </EnvironmentVariable>
          <EnvironmentVariable
-            key = "NITE2_REDIST64"
-            value = "/Users/rob/Desktop/openni-2.2/NITE/NiTE/Redist"
+            key = "GEMINI_ROBOTICS_STREAM_AUDIO"
+            value = "true"
             isEnabled = "YES">
          </EnvironmentVariable>
          <EnvironmentVariable
-            key = "OPENNI2_INCLUDE"
-            value = "/Users/rob/Desktop/openni-2.2/OpenNI/MacOSX/OpenNI/Include"
+            key = "GEMINI_ROBOTICS_STREAM_VIDEO"
+            value = "true"
             isEnabled = "YES">
          </EnvironmentVariable>
          <EnvironmentVariable
-            key = "OPENNI2_REDIST"
-            value = "/Users/rob/Desktop/openni-2.2/OpenNI/MacOSX/OpenNI/Redist"
+            key = "GEMINI_ROBOTICS_RESPONSE_MODALITY"
+            value = "TEXT"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "GEMINI_ROBOT_ACTION_TOOL_ENABLED"
+            value = "false"
             isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>

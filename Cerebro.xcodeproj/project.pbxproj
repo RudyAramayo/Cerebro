@@ -69,6 +69,7 @@
 		D4AA3D7A2AC9F4AB007DC656 /* StartTextInput.scpt in Resources */ = {isa = PBXBuildFile; fileRef = D4AA3D792AC9F4AB007DC656 /* StartTextInput.scpt */; };
 		D4AB3DA42E1CF38D00EA2571 /* CameraViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4AB3DA32E1CF38D00EA2571 /* CameraViewController.swift */; };
 		D4AB3DA52E1CF38D00EA2571 /* CameraManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4AB3DA22E1CF38D00EA2571 /* CameraManager.swift */; };
+		D4AB3DA62F10000100EA2571 /* ROBHologramExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4AB3DA72F10000100EA2571 /* ROBHologramExporter.swift */; };
 		D4ADDC012E78A51E00631737 /* HumanBodySkeletonRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4ADDC002E78A51E00631737 /* HumanBodySkeletonRenderer.swift */; };
 		D4ADDC072E78A64500631737 /* HumanBodyPose3DDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4ADDC062E78A64500631737 /* HumanBodyPose3DDetector.swift */; };
 		D4B3620A2E72A1F2004E0BD0 /* cmd_activate_mode_v2.py in Resources */ = {isa = PBXBuildFile; fileRef = D4B362092E72A1E9004E0BD0 /* cmd_activate_mode_v2.py */; };
@@ -199,6 +200,7 @@
 		D4AA3D792AC9F4AB007DC656 /* StartTextInput.scpt */ = {isa = PBXFileReference; lastKnownFileType = file; path = StartTextInput.scpt; sourceTree = "<group>"; };
 		D4AB3DA22E1CF38D00EA2571 /* CameraManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManager.swift; sourceTree = "<group>"; };
 		D4AB3DA32E1CF38D00EA2571 /* CameraViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraViewController.swift; sourceTree = "<group>"; };
+		D4AB3DA72F10000100EA2571 /* ROBHologramExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBHologramExporter.swift; sourceTree = "<group>"; };
 		D4ADDC002E78A51E00631737 /* HumanBodySkeletonRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HumanBodySkeletonRenderer.swift; sourceTree = "<group>"; };
 		D4ADDC062E78A64500631737 /* HumanBodyPose3DDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HumanBodyPose3DDetector.swift; sourceTree = "<group>"; };
 		D4B362092E72A1E9004E0BD0 /* cmd_activate_mode_v2.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = cmd_activate_mode_v2.py; sourceTree = "<group>"; };
@@ -344,6 +346,7 @@
 				D4ADDC062E78A64500631737 /* HumanBodyPose3DDetector.swift */,
 				D4ADDC002E78A51E00631737 /* HumanBodySkeletonRenderer.swift */,
 				D4AB3DA32E1CF38D00EA2571 /* CameraViewController.swift */,
+				D4AB3DA72F10000100EA2571 /* ROBHologramExporter.swift */,
 				C0D4B0012F00000100000001 /* ROBVideoProtocol.swift */,
 				C0D4B0022F00000100000001 /* ROBCameraH264Encoder.swift */,
 				C0D4B0032F00000100000001 /* ROBVideoServer.swift */,
@@ -602,6 +605,7 @@
 				D4A38F631FFC0C7600092A46 /* ROBSerialBox.m in Sources */,
 				D4AB3DA42E1CF38D00EA2571 /* CameraViewController.swift in Sources */,
 				D4AB3DA52E1CF38D00EA2571 /* CameraManager.swift in Sources */,
+				D4AB3DA62F10000100EA2571 /* ROBHologramExporter.swift in Sources */,
 				C0D4A0012F00000100000001 /* ROBVideoProtocol.swift in Sources */,
 				C0D4A0022F00000100000001 /* ROBCameraH264Encoder.swift in Sources */,
 				C0D4A0032F00000100000001 /* ROBVideoServer.swift in Sources */,

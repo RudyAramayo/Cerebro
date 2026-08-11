@@ -11,6 +11,7 @@
 #import "ROBPythonSettingsWindowController.h"
 #import "ROBSystemDependencyManager.h"
 #import "ROBTaskLaunchGuard.h"
+#import "Cerebro-Swift.h"
 #import <signal.h>
 #import <unistd.h>
 
@@ -38,6 +39,7 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 @property (readwrite, assign) BOOL reportedMissingRPLidarApplication;
 @property (readwrite, retain) NSMenuItem *developmentModeMenuItem;
 @property (readwrite, retain) NSMenuItem *controllerDiagnosticsMenuItem;
+@property (readwrite, retain) NSMenuItem *hologramExportMenuItem;
 - (BOOL)cerebroCheck;
 
 @end
@@ -97,6 +99,12 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         keyEquivalent:@""];
     self.controllerDiagnosticsMenuItem.target = self;
     [submenu addItem:self.controllerDiagnosticsMenuItem];
+    self.hologramExportMenuItem = [[NSMenuItem alloc]
+        initWithTitle:@"Capture Hologram Web Package…"
+               action:@selector(exportHologramMessage:)
+        keyEquivalent:@""];
+    self.hologramExportMenuItem.target = self;
+    [submenu addItem:self.hologramExportMenuItem];
 
     NSMenuItem *developmentItem = [[NSMenuItem alloc] initWithTitle:@"Development"
                                                              action:nil
@@ -111,6 +119,7 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     BOOL enabled = [[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey];
     self.developmentModeMenuItem.state = enabled ? NSControlStateValueOn : NSControlStateValueOff;
     self.controllerDiagnosticsMenuItem.enabled = enabled;
+    self.hologramExportMenuItem.enabled = enabled;
 }
 
 - (IBAction)toggleDevelopmentMode:(id)sender
@@ -133,6 +142,15 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     [[NSNotificationCenter defaultCenter]
         postNotificationName:ROBShowControllerInputDiagnosticsNotification
                       object:self];
+}
+
+- (IBAction)exportHologramMessage:(id)sender
+{
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey]) {
+        NSBeep();
+        return;
+    }
+    [[ROBHologramExporter shared] exportInteractively];
 }
 
 - (void)applicationWillTerminate:(NSNotification *)notification

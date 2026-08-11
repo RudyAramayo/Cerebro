@@ -21,7 +21,7 @@ import threading
 
 
 PROTOCOL_MAGIC = b"CDP1"
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 FRAME_SIZE = (640, 400)
 FRAME_RATE = 30.0
 DEVICE_RECONNECT_ATTEMPTS = 3
@@ -165,7 +165,7 @@ def timestamp_nanoseconds(frame):
     )
 
 
-def frame_payload(rgb_frame, depth_frame):
+def frame_payload(rgb_frame, depth_frame, left_frame, right_frame):
     rgb_width = int(rgb_frame.getWidth())
     rgb_height = int(rgb_frame.getHeight())
     depth_width = int(depth_frame.getWidth())
@@ -191,6 +191,17 @@ def frame_payload(rgb_frame, depth_frame):
         )
     depth_bytes = depth_native.astype("<u2", copy=False).tobytes(order="C")
 
+    left_bytes = memoryview(left_frame.getData()).tobytes()
+    right_bytes = memoryview(right_frame.getData()).tobytes()
+    mono_width = int(left_frame.getWidth())
+    mono_height = int(left_frame.getHeight())
+    expected_mono_length = mono_width * mono_height
+    if (len(left_bytes) != expected_mono_length or
+            len(right_bytes) != expected_mono_length or
+            int(right_frame.getWidth()) != mono_width or
+            int(right_frame.getHeight()) != mono_height):
+        raise RuntimeError("unexpected rectified stereo frame dimensions")
+
     header = {
         "protocol_version": PROTOCOL_VERSION,
         "sequence": int(rgb_frame.getSequenceNum()),
@@ -204,18 +215,27 @@ def frame_payload(rgb_frame, depth_frame):
         "depth_format": "DEPTH16LE",
         "depth_unit": "millimeter",
         "depth_length": len(depth_bytes),
+        "stereo_width": mono_width,
+        "stereo_height": mono_height,
+        "stereo_format": "GRAY8",
+        "left_length": len(left_bytes),
+        "right_length": len(right_bytes),
     }
     header_bytes = json.dumps(
         header, ensure_ascii=False, separators=(",", ":")
     ).encode("utf-8")
-    return header_bytes, rgb_bytes, depth_bytes
+    return header_bytes, rgb_bytes, depth_bytes, left_bytes, right_bytes
 
 
-def send_frame(client, rgb_frame, depth_frame):
-    header, rgb_bytes, depth_bytes = frame_payload(rgb_frame, depth_frame)
+def send_frame(client, rgb_frame, depth_frame, left_frame, right_frame):
+    header, rgb_bytes, depth_bytes, left_bytes, right_bytes = frame_payload(
+        rgb_frame, depth_frame, left_frame, right_frame
+    )
     client.sendall(PROTOCOL_MAGIC + struct.pack(">I", len(header)) + header)
     client.sendall(rgb_bytes)
     client.sendall(depth_bytes)
+    client.sendall(left_bytes)
+    client.sendall(right_bytes)
 
 
 def stream_camera(client, stop_event):
@@ -243,18 +263,37 @@ def stream_camera(client, stop_event):
                 enableUndistortion=True,
             )
 
-            depth_node = pipeline.create(dai.node.Depth).build(
-                dai.node.Depth.Algorithm.AUTO,
-                fps=FRAME_RATE,
-                size=FRAME_SIZE,
+            # OAK-D Pro is an RVC2 device. DepthAI's automatic v3 Depth node
+            # does not always infer its OV9282 stereo pair, so wire the two
+            # physical mono sensors explicitly and align their result to RGB.
+            left_camera = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_B)
+            right_camera = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_C)
+            left_output = left_camera.requestOutput(
+                FRAME_SIZE, type=dai.ImgFrame.Type.GRAY8, fps=FRAME_RATE,
+                enableUndistortion=False,
             )
-            depth_node.setAlignTo(rgb_output)
+            right_output = right_camera.requestOutput(
+                FRAME_SIZE, type=dai.ImgFrame.Type.GRAY8, fps=FRAME_RATE,
+                enableUndistortion=False,
+            )
+            stereo = pipeline.create(dai.node.StereoDepth)
+            stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.ROBOTICS)
+            stereo.setLeftRightCheck(True)
+            stereo.setSubpixel(True)
+            left_output.link(stereo.left)
+            right_output.link(stereo.right)
+
+            align = pipeline.create(dai.node.ImageAlign)
+            stereo.depth.link(align.input)
+            rgb_output.link(align.inputAlignTo)
 
             sync = pipeline.create(dai.node.Sync)
             sync.setSyncThreshold(SYNC_THRESHOLD)
             sync.setSyncAttempts(3)
             rgb_output.link(sync.inputs["rgb"])
-            depth_node.depth.link(sync.inputs["depth"])
+            align.outputAligned.link(sync.inputs["depth"])
+            stereo.rectifiedLeft.link(sync.inputs["left"])
+            stereo.rectifiedRight.link(sync.inputs["right"])
             queue = sync.out.createOutputQueue(maxSize=1, blocking=False)
 
             pipeline.start()
@@ -269,11 +308,13 @@ def stream_camera(client, stop_event):
 
                 rgb_frame = group["rgb"]
                 depth_frame = group["depth"]
+                left_frame = group["left"]
+                right_frame = group["right"]
                 if not isinstance(rgb_frame, dai.ImgFrame) or not isinstance(
                     depth_frame, dai.ImgFrame
                 ):
                     raise RuntimeError("DepthAI sync group is missing RGB or depth")
-                send_frame(client, rgb_frame, depth_frame)
+                send_frame(client, rgb_frame, depth_frame, left_frame, right_frame)
 
             if not stop_event.is_set():
                 raise RuntimeError("DepthAI pipeline stopped unexpectedly")

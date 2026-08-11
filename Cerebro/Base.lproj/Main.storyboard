@@ -320,7 +320,7 @@ Brake
                             <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="vkg-Qr-cRZ">
                                 <rect key="frame" x="234" y="14" width="778" height="22"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="-18400" maxValue="18400" tickMarkPosition="above" sliderType="linear" id="FrQ-Cc-gD3">
+                                <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="-36800" maxValue="36800" tickMarkPosition="above" sliderType="linear" id="FrQ-Cc-gD3">
                                     <font key="font" metaFont="cellTitle"/>
                                 </sliderCell>
                                 <connections>

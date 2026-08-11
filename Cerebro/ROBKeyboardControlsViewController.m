@@ -46,6 +46,7 @@
     
     self.robMainViewController.serialBox.exitSafeStartWaistRotationButton = self.exitSafeStartWaistRotationButton;
     self.robMainViewController.serialBox.energizeWaistRotationButton = self.energizeWaistRotationButton;
+    self.robMainViewController.serialBox.waistRotationSlider = self.waistRotationSlider;
 }
 
 

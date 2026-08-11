@@ -151,6 +151,7 @@
 - (void) controllerId:(NSString *)controllerId controllerModelData:(ROBBaseControllerModel *)controllerModelData;
 - (void)applyVisionNeckPan:(float)pan tilt:(float)tilt;
 - (void)applyVisionGrippersActive:(BOOL)active leftClosed:(BOOL)leftClosed rightClosed:(BOOL)rightClosed;
+- (void)applyVisionTorsoActive:(BOOL)active rotation:(float)rotation;
 - (void)switchToMasterControllerID:(NSString *)controllerID;
 - (void)stopBaseMotionAndDropHeartbeat;
 

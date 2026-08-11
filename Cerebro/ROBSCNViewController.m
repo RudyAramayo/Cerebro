@@ -2,6 +2,7 @@
 #import "ROBBaseControllerModel.h"
 #import <QuartzCore/QuartzCore.h>
 #import <simd/quaternion.h>
+#import "Cerebro-Swift.h"
 
 static NSTimeInterval const ROBControllerDiagnosticStaleInterval = 0.5;
 static NSTimeInterval const ROBIRDiagnosticStaleInterval = 0.75;
@@ -44,6 +45,9 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
 @property (readwrite, assign) BOOL leftGripperClosed;
 @property (readwrite, assign) BOOL rightGripperClosed;
 @property (readwrite, assign) NSTimeInterval lastRobotIntegrationUptime;
+@property (readwrite, retain) SCNNode *liveRGBCloudNode;
+@property (readwrite, strong) dispatch_queue_t cloudQueue;
+@property (readwrite, assign) BOOL cloudUpdatePending;
 @end
 
 @implementation ROBSCNViewController
@@ -55,6 +59,9 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
         self.robo_scnView = scnView;
         self.lastSender = @"No controller";
         [self loadScene];
+        self.cloudQueue = dispatch_queue_create("com.orbitusrobotics.Cerebro.live-rgb-cloud", DISPATCH_QUEUE_SERIAL);
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(receivedDepthCloudFrame:)
+                                                     name:@"ROBDepthCloudFrame" object:nil];
         self.freshnessTimer = [NSTimer scheduledTimerWithTimeInterval:0.1
                                                                target:self
                                                              selector:@selector(refreshFreshness:)
@@ -71,6 +78,7 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
 
 - (void)invalidate
 {
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:@"ROBDepthCloudFrame" object:nil];
     [self.freshnessTimer invalidate];
     self.freshnessTimer = nil;
     self.robo_scnView.playing = NO;
@@ -169,6 +177,10 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
 
     self.robotNode = [SCNNode node];
     [scene.rootNode addChildNode:self.robotNode];
+
+    self.liveRGBCloudNode = [SCNNode node];
+    self.liveRGBCloudNode.name = @"Live OAK RGB point cloud";
+    [scene.rootNode addChildNode:self.liveRGBCloudNode];
 
     SCNBox *robotBody = [SCNBox boxWithWidth:0.72 height:0.46 length:0.56 chamferRadius:0.08];
     robotBody.materials = @[[self materialWithColor:[NSColor colorWithWhite:0.18 alpha:1] emission:0.05]];
@@ -510,6 +522,122 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
     self.treadCommandsAreActive = NO;
     [self updateTreadNode:self.leftTreadNode demand:0 color:NSColor.systemCyanColor];
     [self updateTreadNode:self.rightTreadNode demand:0 color:NSColor.systemGreenColor];
+}
+
+- (void)receivedDepthCloudFrame:(NSNotification *)notification
+{
+    ROBDepthCloudFrame *frame = [notification.object isKindOfClass:ROBDepthCloudFrame.class]
+        ? notification.object : nil;
+    if (frame == nil || self.cloudUpdatePending) return;
+    self.cloudUpdatePending = YES;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        SCNMatrix4 robotTransform = self.robotNode.presentationNode.worldTransform;
+        dispatch_async(self.cloudQueue, ^{
+            [self processDepthFrame:frame robotTransform:robotTransform];
+        });
+    });
+}
+
+- (SCNGeometry *)pointGeometry:(NSArray<NSValue *> *)points colors:(NSArray<NSNumber *> *)colors pointSize:(CGFloat)size
+{
+    if (points.count == 0) return nil;
+    // SCNVector3 uses three 64-bit CGFloat values on macOS (24 bytes), while
+    // this geometry source explicitly advertises three 32-bit floats. Packing
+    // the vertices removes the stride mismatch that rendered surfaces as a
+    // small number of vertical pixel columns.
+    typedef struct { float x, y, z; } ROBPackedPoint3;
+    NSMutableData *vertexData = [NSMutableData dataWithLength:points.count * sizeof(ROBPackedPoint3)];
+    ROBPackedPoint3 *vertices = vertexData.mutableBytes;
+    NSMutableData *indexData = [NSMutableData dataWithLength:points.count * sizeof(uint32_t)];
+    uint32_t *indices = indexData.mutableBytes;
+    NSMutableData *colorData = [NSMutableData dataWithLength:points.count * 4];
+    uint8_t *packedColors = colorData.mutableBytes;
+    for (NSUInteger index = 0; index < points.count; index++) {
+        SCNVector3 point = points[index].SCNVector3Value;
+        vertices[index] = (ROBPackedPoint3){(float)point.x, (float)point.y, (float)point.z};
+        indices[index] = (uint32_t)index;
+        uint32_t rgba = index < colors.count ? colors[index].unsignedIntValue : 0xFFFFFFFF;
+        packedColors[index * 4] = (rgba >> 24) & 0xFF;
+        packedColors[index * 4 + 1] = (rgba >> 16) & 0xFF;
+        packedColors[index * 4 + 2] = (rgba >> 8) & 0xFF;
+        packedColors[index * 4 + 3] = rgba & 0xFF;
+    }
+    SCNGeometrySource *source = [SCNGeometrySource geometrySourceWithData:vertexData
+                                                                 semantic:SCNGeometrySourceSemanticVertex
+                                                              vectorCount:points.count
+                                                          floatComponents:YES
+                                                      componentsPerVector:3
+                                                        bytesPerComponent:sizeof(float)
+                                                               dataOffset:0
+                                                               dataStride:sizeof(ROBPackedPoint3)];
+    SCNGeometrySource *colorSource = [SCNGeometrySource geometrySourceWithData:colorData
+                                                                      semantic:SCNGeometrySourceSemanticColor
+                                                                   vectorCount:points.count
+                                                               floatComponents:NO
+                                                           componentsPerVector:4
+                                                             bytesPerComponent:1
+                                                                    dataOffset:0
+                                                                    dataStride:4];
+    SCNGeometryElement *element = [SCNGeometryElement geometryElementWithData:indexData
+                                                                primitiveType:SCNGeometryPrimitiveTypePoint
+                                                               primitiveCount:points.count
+                                                                bytesPerIndex:sizeof(uint32_t)];
+    element.pointSize = size;
+    element.minimumPointScreenSpaceRadius = 1;
+    element.maximumPointScreenSpaceRadius = 4;
+    SCNGeometry *geometry = [SCNGeometry geometryWithSources:@[source, colorSource] elements:@[element]];
+    SCNMaterial *material = [SCNMaterial material];
+    material.diffuse.contents = NSColor.whiteColor;
+    material.lightingModelName = SCNLightingModelConstant;
+    geometry.firstMaterial = material;
+    return geometry;
+}
+
+- (void)processDepthFrame:(ROBDepthCloudFrame *)frame robotTransform:(SCNMatrix4)robotTransform
+{
+    const uint8_t *bytes = frame.millimetersLittleEndian.bytes;
+    NSInteger width = frame.width, height = frame.height;
+    float focal = (float)width / (2.0f * tanf(69.0f * (float)M_PI / 360.0f));
+    float cx = (float)(width - 1) / 2.0f, cy = (float)(height - 1) / 2.0f;
+    NSMutableArray<NSValue *> *points = [NSMutableArray arrayWithCapacity:(width / 4) * (height / 4)];
+    NSMutableArray<NSNumber *> *colors = [NSMutableArray arrayWithCapacity:(width / 4) * (height / 4)];
+    CVPixelBufferRef rgb = frame.rgbPixelBuffer;
+    if (rgb != NULL) CVPixelBufferLockBaseAddress(rgb, kCVPixelBufferLock_ReadOnly);
+    uint8_t *rgbBase = rgb != NULL ? CVPixelBufferGetBaseAddress(rgb) : NULL;
+    size_t rgbRowBytes = rgb != NULL ? CVPixelBufferGetBytesPerRow(rgb) : 0;
+    size_t rgbWidth = rgb != NULL ? CVPixelBufferGetWidth(rgb) : 0;
+    size_t rgbHeight = rgb != NULL ? CVPixelBufferGetHeight(rgb) : 0;
+
+    for (NSInteger y = 0; y < height; y += 4) {
+        for (NSInteger x = 0; x < width; x += 4) {
+            NSInteger offset = (y * width + x) * 2;
+            uint16_t mm = bytes[offset] | ((uint16_t)bytes[offset + 1] << 8);
+            if (mm < 150 || mm > 10000) continue;
+            float z = (float)mm / 1000.0f;
+            SCNVector3 local = SCNVector3Make(((float)x - cx) * z / focal,
+                                              1.05f - ((float)y - cy) * z / focal,
+                                              -z);
+            SCNVector3 world = SCNVector3Make(
+                robotTransform.m11 * local.x + robotTransform.m21 * local.y + robotTransform.m31 * local.z + robotTransform.m41,
+                robotTransform.m12 * local.x + robotTransform.m22 * local.y + robotTransform.m32 * local.z + robotTransform.m42,
+                robotTransform.m13 * local.x + robotTransform.m23 * local.y + robotTransform.m33 * local.z + robotTransform.m43
+            );
+            uint32_t rgba = 0x80D8FFFF;
+            if (rgbBase != NULL && x < rgbWidth && y < rgbHeight) {
+                uint8_t *pixel = rgbBase + y * rgbRowBytes + x * 4;
+                rgba = ((uint32_t)pixel[2] << 24) | ((uint32_t)pixel[1] << 16) |
+                       ((uint32_t)pixel[0] << 8) | 0xFF;
+            }
+            [points addObject:[NSValue valueWithSCNVector3:world]];
+            [colors addObject:@(rgba)];
+        }
+    }
+    if (rgb != NULL) CVPixelBufferUnlockBaseAddress(rgb, kCVPixelBufferLock_ReadOnly);
+    SCNGeometry *geometry = [self pointGeometry:points colors:colors pointSize:2];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.liveRGBCloudNode.geometry = geometry;
+        self.cloudUpdatePending = NO;
+    });
 }
 
 @end

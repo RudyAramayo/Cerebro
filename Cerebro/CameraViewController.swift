@@ -12,6 +12,180 @@ import CoreImage
 import SceneKit
 import CoreImage.CIFilterBuiltins
 
+extension Notification.Name {
+    static let ROBDepthCloudFrame = Notification.Name("ROBDepthCloudFrame")
+}
+
+@objcMembers public final class ROBDepthCloudFrame: NSObject {
+    public let millimetersLittleEndian: NSData
+    public let width: Int
+    public let height: Int
+    public let rgbPixelBuffer: CVPixelBuffer?
+
+    fileprivate init(depth: CameraDepthFrame, rgbSampleBuffer: CMSampleBuffer) {
+        millimetersLittleEndian = depth.millimetersLittleEndian as NSData
+        width = depth.width
+        height = depth.height
+        rgbPixelBuffer = CMSampleBufferGetImageBuffer(rgbSampleBuffer)
+    }
+}
+
+private final class ROBDepthOverlayRenderer {
+    private let queue = DispatchQueue(label: "com.orbitusrobotics.Cerebro.depth-overlay", qos: .utility)
+    private let lock = NSLock()
+    private var busy = false
+    private var lastRender: CFTimeInterval = 0
+
+    func offer(depth: CameraDepthFrame, completion: @escaping (NSImage) -> Void) {
+        let now = CACurrentMediaTime()
+        lock.lock()
+        guard !busy, now - lastRender >= 0.1 else { lock.unlock(); return }
+        busy = true; lastRender = now; lock.unlock()
+        queue.async { [weak self] in
+            guard let self else { return }
+            let bitmap = NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: depth.width, pixelsHigh: depth.height,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: depth.width * 4, bitsPerPixel: 32
+            )
+            if let output = bitmap?.bitmapData {
+                depth.millimetersLittleEndian.withUnsafeBytes { raw in
+                    let bytes = raw.bindMemory(to: UInt8.self)
+                    for index in 0..<(depth.width * depth.height) {
+                        let mm = Int(UInt16(bytes[index * 2]) | (UInt16(bytes[index * 2 + 1]) << 8))
+                        let destination = output.advanced(by: index * 4)
+                        guard mm >= 150, mm <= 10_000 else {
+                            destination[0] = 0; destination[1] = 0; destination[2] = 0; destination[3] = 0
+                            continue
+                        }
+                        let t = max(0, min(1, Float(mm - 300) / 5_700))
+                        destination[0] = UInt8(255 * (1 - t))
+                        destination[1] = UInt8(255 * (1 - abs(t * 2 - 1)))
+                        destination[2] = UInt8(255 * t)
+                        destination[3] = 255
+                    }
+                }
+            }
+            let image = NSImage(size: NSSize(width: depth.width, height: depth.height))
+            if let bitmap { image.addRepresentation(bitmap) }
+            DispatchQueue.main.async {
+                completion(image)
+                self.lock.lock(); self.busy = false; self.lock.unlock()
+            }
+        }
+    }
+}
+
+/// Builds one GPU point primitive rather than thousands of SceneKit nodes.
+/// Sampling every fourth pixel caps a 640x400 frame at 16,000 points, and the
+/// five-Hz gate keeps diagnostics from competing with perception or control.
+private final class ROBDepthPointCloudRenderer {
+    private let queue = DispatchQueue(label: "com.orbitusrobotics.Cerebro.depth-point-cloud", qos: .utility)
+    private let lock = NSLock()
+    private var isBuilding = false
+    private var lastBuildTime: CFTimeInterval = 0
+
+    func offer(depth: CameraDepthFrame, rgbSampleBuffer: CMSampleBuffer, in view: SCNView) {
+        let now = CACurrentMediaTime()
+        lock.lock()
+        guard !isBuilding, now - lastBuildTime >= 0.2 else { lock.unlock(); return }
+        isBuilding = true
+        lastBuildTime = now
+        lock.unlock()
+
+        let rgbBuffer = CMSampleBufferGetImageBuffer(rgbSampleBuffer)
+        queue.async { [weak self, weak view] in
+            guard let self else { return }
+            let geometry = self.geometry(depth: depth, rgbBuffer: rgbBuffer)
+            DispatchQueue.main.async {
+                defer {
+                    self.lock.lock(); self.isBuilding = false; self.lock.unlock()
+                }
+                guard let view, let geometry else { return }
+                let scene = SCNScene()
+                let cloud = SCNNode(geometry: geometry)
+                scene.rootNode.addChildNode(cloud)
+
+                let camera = SCNNode()
+                camera.camera = SCNCamera()
+                camera.camera?.zNear = 0.01
+                camera.camera?.zFar = 12
+                camera.position = SCNVector3(0, 0, 0)
+                scene.rootNode.addChildNode(camera)
+                view.scene = scene
+                view.pointOfView = camera
+            }
+        }
+    }
+
+    private func geometry(depth: CameraDepthFrame, rgbBuffer: CVPixelBuffer?) -> SCNGeometry? {
+        let stride = 4
+        let width = depth.width
+        let height = depth.height
+        guard width > 0, height > 0 else { return nil }
+        let fx = Float(width) / (2 * tan(69 * .pi / 360))
+        let fy = fx
+        let cx = Float(width - 1) / 2
+        let cy = Float(height - 1) / 2
+        var vertices: [SIMD3<Float>] = []
+        var colors: [SIMD4<UInt8>] = []
+        vertices.reserveCapacity((width / stride) * (height / stride))
+        colors.reserveCapacity(vertices.capacity)
+
+        if let rgbBuffer { CVPixelBufferLockBaseAddress(rgbBuffer, .readOnly) }
+        defer { if let rgbBuffer { CVPixelBufferUnlockBaseAddress(rgbBuffer, .readOnly) } }
+        let rgbWidth = rgbBuffer.map(CVPixelBufferGetWidth) ?? 0
+        let rgbHeight = rgbBuffer.map(CVPixelBufferGetHeight) ?? 0
+        let rgbRowBytes = rgbBuffer.map(CVPixelBufferGetBytesPerRow) ?? 0
+        let rgbBase = rgbBuffer.flatMap(CVPixelBufferGetBaseAddress)?.assumingMemoryBound(to: UInt8.self)
+
+        depth.millimetersLittleEndian.withUnsafeBytes { raw in
+            let bytes = raw.bindMemory(to: UInt8.self)
+            for y in Swift.stride(from: 0, to: height, by: stride) {
+                for x in Swift.stride(from: 0, to: width, by: stride) {
+                    let offset = (y * width + x) * 2
+                    let millimeters = UInt16(bytes[offset]) | (UInt16(bytes[offset + 1]) << 8)
+                    guard millimeters >= 150, millimeters <= 10_000 else { continue }
+                    let z = Float(millimeters) / 1000
+                    vertices.append(SIMD3((Float(x) - cx) * z / fx, -(Float(y) - cy) * z / fy, -z))
+                    if let rgbBase, x < rgbWidth, y < rgbHeight {
+                        let pixel = rgbBase.advanced(by: y * rgbRowBytes + x * 4)
+                        colors.append(SIMD4(pixel[2], pixel[1], pixel[0], 255))
+                    } else {
+                        colors.append(SIMD4(80, 210, 255, 255))
+                    }
+                }
+            }
+        }
+        guard !vertices.isEmpty else { return nil }
+        let vertexData = vertices.withUnsafeBytes { Data($0) }
+        let colorData = colors.withUnsafeBytes { Data($0) }
+        let vertexSource = SCNGeometrySource(
+            data: vertexData, semantic: .vertex, vectorCount: vertices.count,
+            usesFloatComponents: true, componentsPerVector: 3,
+            bytesPerComponent: MemoryLayout<Float>.size,
+            dataOffset: 0, dataStride: MemoryLayout<SIMD3<Float>>.stride
+        )
+        let colorSource = SCNGeometrySource(
+            data: colorData, semantic: .color, vectorCount: colors.count,
+            usesFloatComponents: false, componentsPerVector: 4,
+            bytesPerComponent: 1, dataOffset: 0,
+            dataStride: MemoryLayout<SIMD4<UInt8>>.stride
+        )
+        var indices = (0..<vertices.count).map(UInt32.init)
+        let indexData = indices.withUnsafeMutableBytes { Data($0) }
+        let element = SCNGeometryElement(
+            data: indexData, primitiveType: .point,
+            primitiveCount: vertices.count,
+            bytesPerIndex: MemoryLayout<UInt32>.size
+        )
+        element.pointSize = 2
+        element.minimumPointScreenSpaceRadius = 1
+        element.maximumPointScreenSpaceRadius = 3
+        return SCNGeometry(sources: [vertexSource, colorSource], elements: [element])
+    }
+}
+
 final class CameraViewController: NSViewController {
     private var cameraManager: CameraManagerProtocol?
     private var videoServer: ROBVideoServer?
@@ -30,6 +204,9 @@ final class CameraViewController: NSViewController {
     let renderer = HumanBodySkeletonRenderer()
     var viewModel: HumanBodyPose3DDetector = HumanBodyPose3DDetector()
     let context = CIContext()
+    private let depthOverlayRenderer = ROBDepthOverlayRenderer()
+    private let depthOverlayView = NSImageView()
+    private let depthOpacitySlider = NSSlider(value: 0.45, minValue: 0, maxValue: 1, target: nil, action: nil)
     
     
     override func viewDidLoad() {
@@ -62,6 +239,7 @@ final class CameraViewController: NSViewController {
         }
         
         setupSceneKitView()
+        setupDepthOverlay()
     }
     
     @IBAction func toggleCamera(_ sender: Any?) {
@@ -254,7 +432,41 @@ extension CameraViewController: CameraManagerDelegate {
     }
     
     func setupSceneKitView() {
-        self.skeletonView.backgroundColor = .clear
+        self.skeletonView.isHidden = true
+    }
+
+    private func setupDepthOverlay() {
+        depthOverlayView.imageScaling = .scaleProportionallyUpOrDown
+        depthOverlayView.alphaValue = depthOpacitySlider.doubleValue
+        depthOverlayView.translatesAutoresizingMaskIntoConstraints = false
+        depthOverlayView.isHidden = true
+        view.addSubview(depthOverlayView, positioned: .below, relativeTo: poseView)
+
+        let label = NSTextField(labelWithString: "RGB   Depth overlay")
+        label.textColor = .white
+        label.drawsBackground = true
+        label.backgroundColor = NSColor.black.withAlphaComponent(0.65)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        depthOpacitySlider.target = self
+        depthOpacitySlider.action = #selector(depthOpacityChanged(_:))
+        depthOpacitySlider.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(label, positioned: .above, relativeTo: depthOverlayView)
+        view.addSubview(depthOpacitySlider, positioned: .above, relativeTo: label)
+        NSLayoutConstraint.activate([
+            depthOverlayView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            depthOverlayView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            depthOverlayView.topAnchor.constraint(equalTo: view.topAnchor),
+            depthOverlayView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            label.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 18),
+            label.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -18),
+            depthOpacitySlider.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 10),
+            depthOpacitySlider.centerYAnchor.constraint(equalTo: label.centerYAnchor),
+            depthOpacitySlider.widthAnchor.constraint(equalToConstant: 220)
+        ])
+    }
+
+    @objc private func depthOpacityChanged(_ sender: NSSlider) {
+        depthOverlayView.alphaValue = sender.doubleValue
     }
     
     func applySourceOverCompositing(inputImage: CIImage, backgroundImage: CIImage) -> CIImage? {
@@ -277,6 +489,18 @@ extension CameraViewController: CameraManagerDelegate {
     func cameraManager(_ manager: CameraManagerProtocol, didOutput frameSet: CameraFrameSet) {
         let sampleBuffer = frameSet.rgbSampleBuffer
         if let depth = frameSet.alignedDepth {
+            let hologramFrame = ROBDepthCloudFrame(depth: depth, rgbSampleBuffer: sampleBuffer)
+            ROBHologramExporter.shared.capture(hologramFrame)
+            if cameraViewIsVisible {
+                depthOverlayRenderer.offer(depth: depth) { [weak self] image in
+                    self?.depthOverlayView.image = image
+                    self?.depthOverlayView.isHidden = false
+                }
+            }
+            NotificationCenter.default.post(
+                name: .ROBDepthCloudFrame,
+                object: hologramFrame
+            )
             robMainViewController?.didCaptureAlignedDepthData(
                 depth.millimetersLittleEndian,
                 width: UInt(depth.width),

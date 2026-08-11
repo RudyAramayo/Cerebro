@@ -68,6 +68,14 @@ struct CameraDepthFrame {
     }
 }
 
+/// Rectified grayscale views from the OAK stereo pair. These remain useful
+/// when tuning IR illumination, validating calibration, and debugging depth.
+struct CameraStereoFrame {
+    let width: Int
+    let height: Int
+    let pixels: Data
+}
+
 /// The common frame contract used by RGB-only and RGB-D camera providers.
 struct CameraFrameSet {
     let source: CameraSource
@@ -75,6 +83,8 @@ struct CameraFrameSet {
     let timestampNanoseconds: UInt64
     let rgbSampleBuffer: CMSampleBuffer
     let alignedDepth: CameraDepthFrame?
+    var rectifiedLeft: CameraStereoFrame? = nil
+    var rectifiedRight: CameraStereoFrame? = nil
 }
 
 protocol CameraManagerDelegate: AnyObject {
@@ -686,7 +696,7 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
 
 private final class DepthCameraServiceClient {
     private static let protocolMagic = Data([0x43, 0x44, 0x50, 0x31]) // CDP1
-    private static let protocolVersion = 1
+    private static let protocolVersion = 2
     private static let maximumHeaderBytes = 64 * 1024
     private static let maximumPayloadBytes = 64 * 1024 * 1024
 
@@ -869,28 +879,42 @@ private final class DepthCameraServiceClient {
                 height: header.depthHeight,
                 bytesPerPixel: 2
             )
+            let expectedStereoLength = Self.expectedPayloadLength(
+                width: header.stereoWidth,
+                height: header.stereoHeight,
+                bytesPerPixel: 1
+            )
             guard header.protocolVersion == Self.protocolVersion,
                   header.rgbFormat == "RGB888",
                   header.depthFormat == "DEPTH16LE",
                   header.depthUnit == "millimeter",
+                  header.stereoFormat == "GRAY8",
                   header.rgbWidth == header.depthWidth,
                   header.rgbHeight == header.depthHeight,
                   let expectedRGBLength,
                   let expectedDepthLength,
+                  let expectedStereoLength,
                   header.rgbLength == expectedRGBLength,
                   header.depthLength == expectedDepthLength,
                   header.rgbLength <= Self.maximumPayloadBytes,
-                  header.depthLength <= Self.maximumPayloadBytes - header.rgbLength else {
+                  header.leftLength == expectedStereoLength,
+                  header.rightLength == expectedStereoLength,
+                  header.rgbLength + header.depthLength + header.leftLength + header.rightLength <= Self.maximumPayloadBytes else {
                 throw DepthCameraIPCError.invalidHeader
             }
 
             let packetLength = 8 + headerLength + header.rgbLength + header.depthLength
+                + header.leftLength + header.rightLength
             guard receiveBuffer.count >= packetLength else { return }
 
             let rgbStart = 8 + headerLength
             let depthStart = rgbStart + header.rgbLength
+            let leftStart = depthStart + header.depthLength
+            let rightStart = leftStart + header.leftLength
             let rgbData = receiveBuffer.subdata(in: rgbStart..<depthStart)
-            let depthData = receiveBuffer.subdata(in: depthStart..<packetLength)
+            let depthData = receiveBuffer.subdata(in: depthStart..<leftStart)
+            let leftData = receiveBuffer.subdata(in: leftStart..<rightStart)
+            let rightData = receiveBuffer.subdata(in: rightStart..<packetLength)
             receiveBuffer.removeSubrange(0..<packetLength)
 
             guard let sampleBuffer = Self.makeRGBSampleBuffer(
@@ -915,7 +939,9 @@ private final class DepthCameraServiceClient {
                     width: header.depthWidth,
                     height: header.depthHeight,
                     millimetersLittleEndian: depthData
-                )
+                ),
+                rectifiedLeft: CameraStereoFrame(width: header.stereoWidth, height: header.stereoHeight, pixels: leftData),
+                rectifiedRight: CameraStereoFrame(width: header.stereoWidth, height: header.stereoHeight, pixels: rightData)
             ), activeRunGeneration)
         }
     }
@@ -1002,10 +1028,14 @@ private final class DepthCameraServiceClient {
             return nil
         }
 
-        let clampedTimestamp = min(timestampNanoseconds, UInt64(Int64.max))
+        // AVSampleBufferDisplayLayer runs on the host clock. The OAK timestamp
+        // belongs to the device clock and is retained in CameraFrameSet for
+        // RGB/depth correlation, but using it as a presentation timestamp can
+        // leave the display layer waiting forever after its first image.
+        let hostPresentationTime = CMClockGetTime(CMClockGetHostTimeClock())
         var timing = CMSampleTimingInfo(
             duration: .invalid,
-            presentationTimeStamp: CMTime(value: Int64(clampedTimestamp), timescale: 1_000_000_000),
+            presentationTimeStamp: hostPresentationTime,
             decodeTimeStamp: .invalid
         )
         var optionalSampleBuffer: CMSampleBuffer?
@@ -1066,6 +1096,11 @@ private struct DepthCameraPacketHeader: Decodable {
     let depthFormat: String
     let depthUnit: String
     let depthLength: Int
+    let stereoWidth: Int
+    let stereoHeight: Int
+    let stereoFormat: String
+    let leftLength: Int
+    let rightLength: Int
 
     enum CodingKeys: String, CodingKey {
         case protocolVersion = "protocol_version"
@@ -1080,6 +1115,11 @@ private struct DepthCameraPacketHeader: Decodable {
         case depthFormat = "depth_format"
         case depthUnit = "depth_unit"
         case depthLength = "depth_length"
+        case stereoWidth = "stereo_width"
+        case stereoHeight = "stereo_height"
+        case stereoFormat = "stereo_format"
+        case leftLength = "left_length"
+        case rightLength = "right_length"
     }
 }
 

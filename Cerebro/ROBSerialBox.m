@@ -75,6 +75,10 @@ static NSTimeInterval const kROBBaseProbeTimeoutSeconds = 15.0;
 // after one neutral/braked write Cerebro stops writing so the Arduino hardware
 // deadman can de-energize independently.
 static NSTimeInterval const kControllerSnapshotFreshnessSeconds = 0.6;
+// The Tic rotating-plate UI permits one 36,800-unit turn in either direction.
+// Vision head-following intentionally uses at most the 18,400-unit half-turn.
+static int const kROBTicWaistFullTurnPositionUnits = 36800;
+static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 
 #define kHeadSerialContext 0
 #define kTorsoSerialContext 1
@@ -95,6 +99,9 @@ static NSTimeInterval const kControllerSnapshotFreshnessSeconds = 0.6;
 @property (readwrite, assign) BOOL visionGripperStateIsKnown;
 @property (readwrite, assign) BOOL lastVisionLeftGripperClosed;
 @property (readwrite, assign) BOOL lastVisionRightGripperClosed;
+@property (readwrite, assign) BOOL visionTorsoControlWasActive;
+@property (readwrite, assign) int visionTorsoBaselinePosition;
+@property (readwrite, assign) int lastVisionTorsoTarget;
 
 @property (readwrite, retain) NSTimer *verbalInputTimer;
 @property (readwrite, retain) NSTimer *controllerTimer;
@@ -1592,6 +1599,58 @@ int maestroGetErrors(int fd)
     }
 }
 
+- (void)applyVisionTorsoActive:(BOOL)active rotation:(float)rotation
+{
+    if (!active || !isfinite(rotation)) {
+        if (self.visionTorsoControlWasActive) {
+            self.visionTorsoControlWasActive = NO;
+            exitSafeStart_waistRotation = false;
+            energize_waistRotation = false;
+            [self.exitSafeStartWaistRotationButton setState:NSControlStateValueOff];
+            [self.energizeWaistRotationButton setState:NSControlStateValueOff];
+            [self runTiccmdArguments:@[@"--enter-safe-start", @"--deenergize"]];
+        }
+        return;
+    }
+
+    float boundedRotation = MAX(-1.0f, MIN(1.0f, rotation));
+    BOOL justActivated = !self.visionTorsoControlWasActive;
+    if (!self.visionTorsoControlWasActive) {
+        self.visionTorsoControlWasActive = YES;
+        self.visionTorsoBaselinePosition = self.waistRotationSlider != nil
+            ? self.waistRotationSlider.intValue
+            : self.lastVisionTorsoTarget;
+        self.lastVisionTorsoTarget = self.visionTorsoBaselinePosition;
+        exitSafeStart_waistRotation = true;
+        energize_waistRotation = true;
+        [self.exitSafeStartWaistRotationButton setState:NSControlStateValueOn];
+        [self.energizeWaistRotationButton setState:NSControlStateValueOn];
+    }
+
+    int minimumPosition = self.waistRotationSlider != nil
+        ? (int)self.waistRotationSlider.minValue
+        : -kROBTicWaistFullTurnPositionUnits;
+    int maximumPosition = self.waistRotationSlider != nil
+        ? (int)self.waistRotationSlider.maxValue
+        : kROBTicWaistFullTurnPositionUnits;
+    int requested = self.visionTorsoBaselinePosition
+        + (int)lroundf(boundedRotation * kROBTicWaistHeadFollowMaximumUnits);
+    requested = MAX(minimumPosition, MIN(maximumPosition, requested));
+    // At the 10 Hz controller render rate, this limits target movement to 6000
+    // Tic position units per second. The Tic's configured motor limits remain authoritative.
+    int maximumStep = 600;
+    int delta = MAX(-maximumStep, MIN(maximumStep, requested - self.lastVisionTorsoTarget));
+    int target = self.lastVisionTorsoTarget + delta;
+    if (!justActivated && target == self.lastVisionTorsoTarget && self.waistRotationSlider.intValue == target) {
+        return;
+    }
+    self.lastVisionTorsoTarget = target;
+    [self.waistRotationSlider setIntValue:target];
+    [self runTiccmdArguments:@[
+        @"--exit-safe-start", @"--energize", @"-p", [NSString stringWithFormat:@"%d", target]
+    ]];
+}
+
 - (void) debugTorsoCommandStrings
 {
     //~5875,5000,7000,6000,6000,6000,8000,6000,8000,6000,6000,4000,6000,6000
@@ -2794,6 +2853,8 @@ int maestroGetErrors(int fd)
         [self applyVisionGrippersActive:controllerModelData.gripperControlActive
                              leftClosed:controllerModelData.leftGripperClosed
                             rightClosed:controllerModelData.rightGripperClosed];
+        [self applyVisionTorsoActive:controllerModelData.torsoControlActive
+                           rotation:controllerModelData.torsoRotation];
         self.masterControllerInputWasFresh = YES;
     }
     else if (self.masterControllerInputWasFresh)
@@ -2804,6 +2865,7 @@ int maestroGetErrors(int fd)
 
 - (void)stopBaseMotionAndDropHeartbeat
 {
+    [self applyVisionTorsoActive:NO rotation:0];
     // Values below -999 bypass joystick processing so the requested tread
     // brake bits remain set. This is written exactly once; renderController
     // then stays silent until a fresh authorized snapshot arrives.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Dependency-free fixture test for Cerebro's DepthAI IPC v1 producer."""
+"""Dependency-free fixture test for Cerebro's DepthAI IPC v2 producer."""
 
 from datetime import timedelta
 import importlib.util
@@ -68,6 +68,20 @@ class FakeDepthFrame:
         return FakeDepthArray()
 
 
+class FakeMonoFrame:
+    def __init__(self, values):
+        self.values = bytes(values)
+
+    def getWidth(self):
+        return 2
+
+    def getHeight(self):
+        return 1
+
+    def getData(self):
+        return self.values
+
+
 def receive_exact(sock, length):
     output = bytearray()
     while len(output) < length:
@@ -95,16 +109,20 @@ def main():
 
     sender, receiver = socket.socketpair()
     try:
-        service.send_frame(sender, FakeRGBFrame(), FakeDepthFrame())
+        left_source = FakeMonoFrame((7, 8))
+        right_source = FakeMonoFrame((9, 10))
+        service.send_frame(sender, FakeRGBFrame(), FakeDepthFrame(), left_source, right_source)
         prefix = receive_exact(receiver, 8)
         assert prefix[:4] == b"CDP1"
         header_length = struct.unpack(">I", prefix[4:])[0]
         header = json.loads(receive_exact(receiver, header_length))
         rgb = receive_exact(receiver, header["rgb_length"])
         depth = receive_exact(receiver, header["depth_length"])
+        left = receive_exact(receiver, header["left_length"])
+        right = receive_exact(receiver, header["right_length"])
 
         assert header == {
-            "protocol_version": 1,
+            "protocol_version": 2,
             "sequence": 42,
             "timestamp_ns": 3_250_000_000,
             "rgb_width": 2,
@@ -116,14 +134,21 @@ def main():
             "depth_format": "DEPTH16LE",
             "depth_unit": "millimeter",
             "depth_length": 4,
+            "stereo_width": 2,
+            "stereo_height": 1,
+            "stereo_format": "GRAY8",
+            "left_length": 2,
+            "right_length": 2,
         }
         assert rgb == FakeRGBFrame.bytes
         assert depth == bytes((0x34, 0x12, 0xCD, 0xAB))
+        assert left == bytes((7, 8))
+        assert right == bytes((9, 10))
     finally:
         sender.close()
         receiver.close()
 
-    print("Depth camera IPC v1 fixture passed")
+    print("Depth camera IPC v2 fixture passed")
 
 
 if __name__ == "__main__":
