@@ -27,6 +27,14 @@
 @property (readwrite, assign) bool speed_playPause;
 @property (readwrite, assign) bool speed_forward_reverse;
 @property (readwrite, retain) NSString *textInput;
+// Normalized, dead-man-gated camera/neck demand received from the active controller.
+@property (readwrite, assign) bool neckControlActive;
+@property (readwrite, assign) float neckPan;
+@property (readwrite, assign) float neckTilt;
+// Edge-triggered Amber gripper demand. This is commanded state, not measured feedback.
+@property (readwrite, assign) bool gripperControlActive;
+@property (readwrite, assign) bool leftGripperClosed;
+@property (readwrite, assign) bool rightGripperClosed;
 // visionOS world-space controller poses. Values are accepted only after strict finite/range
 // validation. They are inputs for a future calibrated IK layer and never drive arm hardware
 // directly from this model.

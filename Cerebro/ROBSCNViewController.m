@@ -16,6 +16,8 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
 @property (readwrite, retain) SCNNode *robotNode;
 @property (readwrite, retain) SCNNode *leftTreadNode;
 @property (readwrite, retain) SCNNode *rightTreadNode;
+@property (readwrite, retain) SCNNode *neckPanNode;
+@property (readwrite, retain) SCNNode *cameraHeadNode;
 @property (readwrite, retain) SCNNode *statusTextNode;
 @property (readwrite, retain) SCNNode *detailTextNode;
 @property (readwrite, retain) SCNNode *irTextNode;
@@ -35,6 +37,12 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
 @property (readwrite, assign) CGFloat leftTreadDemand;
 @property (readwrite, assign) CGFloat rightTreadDemand;
 @property (readwrite, assign) BOOL treadCommandsAreActive;
+@property (readwrite, assign) BOOL neckCommandIsActive;
+@property (readwrite, assign) CGFloat neckPanDemand;
+@property (readwrite, assign) CGFloat neckTiltDemand;
+@property (readwrite, assign) BOOL gripperCommandIsActive;
+@property (readwrite, assign) BOOL leftGripperClosed;
+@property (readwrite, assign) BOOL rightGripperClosed;
 @property (readwrite, assign) NSTimeInterval lastRobotIntegrationUptime;
 @end
 
@@ -176,6 +184,20 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
     [self.robotNode addChildNode:self.leftTreadNode];
     [self.robotNode addChildNode:self.rightTreadNode];
 
+    self.neckPanNode = [SCNNode node];
+    self.neckPanNode.position = SCNVector3Make(0, 0.72, 0);
+    [self.robotNode addChildNode:self.neckPanNode];
+    SCNCylinder *neck = [SCNCylinder cylinderWithRadius:0.08 height:0.28];
+    neck.firstMaterial = [self materialWithColor:NSColor.systemOrangeColor emission:0.25];
+    SCNNode *neckBody = [SCNNode nodeWithGeometry:neck];
+    neckBody.position = SCNVector3Make(0, 0.14, 0);
+    [self.neckPanNode addChildNode:neckBody];
+    SCNBox *cameraHead = [SCNBox boxWithWidth:0.30 height:0.17 length:0.20 chamferRadius:0.04];
+    cameraHead.firstMaterial = [self materialWithColor:NSColor.systemOrangeColor emission:0.45];
+    self.cameraHeadNode = [SCNNode nodeWithGeometry:cameraHead];
+    self.cameraHeadNode.position = SCNVector3Make(0, 0.34, -0.03);
+    [self.neckPanNode addChildNode:self.cameraHeadNode];
+
     // Sensor order matches the Base firmware telemetry: FL, FR, L, R, BL, BR.
     self.irBeamOrigins = @[
         [NSValue valueWithSCNVector3:SCNVector3Make(-0.22, 0.33, -0.30)],
@@ -286,6 +308,19 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
         && model.touchPadPointL.y > -999
         && model.touchPadPointR.y > -999;
 
+    if (model.neckControlActive) {
+        self.neckCommandIsActive = YES;
+        self.neckPanDemand = model.neckPan;
+        self.neckTiltDemand = model.neckTilt;
+        self.neckPanNode.eulerAngles = SCNVector3Make(0, model.neckPan * (float)(M_PI / 3.0), 0);
+        self.cameraHeadNode.eulerAngles = SCNVector3Make(-model.neckTilt * (float)M_PI_4, 0, 0);
+    } else {
+        self.neckCommandIsActive = NO;
+    }
+    self.gripperCommandIsActive = model.gripperControlActive;
+    self.leftGripperClosed = model.leftGripperClosed;
+    self.rightGripperClosed = model.rightGripperClosed;
+
     [self integrateRobotAtUptime:model.receivedAtUptime];
 
     [SCNTransaction begin];
@@ -369,9 +404,17 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
     status.firstMaterial.diffuse.contents = NSColor.systemGreenColor;
     SCNText *detail = (SCNText *)self.detailTextNode.geometry;
     NSString *driveState = self.treadCommandsAreActive ? @"DRIVE ACTIVE" : @"BRAKED";
-    detail.string = [NSString stringWithFormat:@"%@  •  %.0f ms  •  %@  •  TREADS %+.2f / %+.2f  •  L:%@  R:%@",
+    NSString *neckState = self.neckCommandIsActive
+        ? [NSString stringWithFormat:@"HEAD %+.2f / %+.2f", self.neckPanDemand, self.neckTiltDemand]
+        : @"HEAD HELD";
+    NSString *gripperState = self.gripperCommandIsActive
+        ? [NSString stringWithFormat:@"GRIP CMD L:%@ R:%@",
+           self.leftGripperClosed ? @"CLOSED" : @"OPEN",
+           self.rightGripperClosed ? @"CLOSED" : @"OPEN"]
+        : @"GRIP HELD";
+    detail.string = [NSString stringWithFormat:@"%@  •  %.0f ms  •  %@  •  %@  •  %@  •  TREADS %+.2f / %+.2f  •  L:%@  R:%@",
                      self.lastSender, age * 1000.0,
-                     driveState, self.leftTreadDemand, self.rightTreadDemand,
+                     driveState, neckState, gripperState, self.leftTreadDemand, self.rightTreadDemand,
                      self.leftPoseValid ? @"POSE" : @"NO POSE",
                      self.rightPoseValid ? @"POSE" : @"NO POSE"];
 }

@@ -1828,6 +1828,12 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         && parseControllerPose(messageDictionary[@"controller.pose.left"], leftControllerPose);
     BOOL rightControllerPoseValid = controllerPoseVersionIsValid
         && parseControllerPose(messageDictionary[@"controller.pose.right"], rightControllerPose);
+    BOOL gripperControlVersionIsValid = [messageDictionary[@"gripper.control.version"] isEqualToString:@"1"];
+    NSString *leftGripperClosedText = messageDictionary[@"gripper.left.closed"];
+    NSString *rightGripperClosedText = messageDictionary[@"gripper.right.closed"];
+    BOOL gripperControlValid = gripperControlVersionIsValid
+        && ([leftGripperClosedText isEqualToString:@"0"] || [leftGripperClosedText isEqualToString:@"1"])
+        && ([rightGripperClosedText isEqualToString:@"0"] || [rightGripperClosedText isEqualToString:@"1"]);
 
     //NSLog(@"sender = %@. message = %@", sender, msg);
 
@@ -2104,6 +2110,15 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         controllerModelData.speed_playPause = speed_playPause;
         controllerModelData.speed_forward_reverse = speed_forward_reverse;
         controllerModelData.textInput = textInput;
+        controllerModelData.neckControlActive = isfinite(yaw) && isfinite(pitch)
+            && yaw >= -1.0f && yaw <= 1.0f
+            && pitch >= -1.0f && pitch <= 1.0f
+            && roll >= 0.5f;
+        controllerModelData.neckPan = controllerModelData.neckControlActive ? yaw : 0;
+        controllerModelData.neckTilt = controllerModelData.neckControlActive ? pitch : 0;
+        controllerModelData.gripperControlActive = gripperControlValid;
+        controllerModelData.leftGripperClosed = gripperControlValid && [leftGripperClosedText isEqualToString:@"1"];
+        controllerModelData.rightGripperClosed = gripperControlValid && [rightGripperClosedText isEqualToString:@"1"];
         controllerModelData.leftControllerPoseValid = leftControllerPoseValid;
         controllerModelData.leftControllerPositionX = (float)leftControllerPose[0];
         controllerModelData.leftControllerPositionY = (float)leftControllerPose[1];

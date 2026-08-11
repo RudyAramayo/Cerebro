@@ -90,6 +90,11 @@ static NSTimeInterval const kControllerSnapshotFreshnessSeconds = 0.6;
 @property (readwrite, assign) float actualSpeedL;
 @property (readwrite, assign) float actualSpeedR;
 @property (readwrite, assign) BOOL masterControllerInputWasFresh;
+@property (readwrite, assign) int lastVisionNeckPanTarget;
+@property (readwrite, assign) int lastVisionNeckTiltTarget;
+@property (readwrite, assign) BOOL visionGripperStateIsKnown;
+@property (readwrite, assign) BOOL lastVisionLeftGripperClosed;
+@property (readwrite, assign) BOOL lastVisionRightGripperClosed;
 
 @property (readwrite, retain) NSTimer *verbalInputTimer;
 @property (readwrite, retain) NSTimer *controllerTimer;
@@ -202,6 +207,8 @@ typedef enum : NSUInteger {
     serialFileDescriptor_maestro = -1;
     self.actualSpeedL = 0;
     self.actualSpeedR = 0;
+    self.lastVisionNeckPanTarget = 6000;
+    self.lastVisionNeckTiltTarget = 6045;
     readThreadRunning_head = FALSE;
     readThreadRunning_torso = FALSE;
     readThreadRunning_base = FALSE;
@@ -1538,6 +1545,53 @@ int maestroGetErrors(int fd)
      [self writeString:torso_command serialFileDescriptor:serialFileDescriptor_torso];*/
 }
 
+- (void)applyVisionNeckPan:(float)pan tilt:(float)tilt
+{
+    if (!isfinite(pan) || !isfinite(tilt) || serialFileDescriptor_maestro < 0) {
+        return;
+    }
+    // Normalized Vision Pro demands are converted only here, behind Cerebro's
+    // fresh-master-controller gate. Channel 0 is neck pan and channel 2 is the
+    // upper camera tilt used by the existing face tracker.
+    float boundedPan = MAX(-1.0f, MIN(1.0f, pan));
+    float boundedTilt = MAX(-1.0f, MIN(1.0f, tilt));
+    int requestedPan = (int)lroundf(6000.0f + boundedPan * 2000.0f);
+    int requestedTilt = (int)lroundf(6045.0f - boundedTilt * 1745.0f);
+    // renderController runs at 10 Hz. Limit each accepted step so a tracking
+    // discontinuity or rapid head turn cannot command a full-range servo jump.
+    int maximumStep = 80;
+    int panDelta = MAX(-maximumStep, MIN(maximumStep, requestedPan - self.lastVisionNeckPanTarget));
+    int tiltDelta = MAX(-maximumStep, MIN(maximumStep, requestedTilt - self.lastVisionNeckTiltTarget));
+    self.lastVisionNeckPanTarget += panDelta;
+    self.lastVisionNeckTiltTarget += tiltDelta;
+    maestroSetTarget(serialFileDescriptor_maestro, 0, self.lastVisionNeckPanTarget);
+    maestroSetTarget(serialFileDescriptor_maestro, 2, self.lastVisionNeckTiltTarget);
+}
+
+- (void)applyVisionGrippersActive:(BOOL)active leftClosed:(BOOL)leftClosed rightClosed:(BOOL)rightClosed
+{
+    if (!active) {
+        // Force a fresh edge after the operator reacquires the dead-man hold;
+        // releasing safety authority never opens or closes a gripper by itself.
+        self.visionGripperStateIsKnown = NO;
+        return;
+    }
+    BOOL updateLeft = !self.visionGripperStateIsKnown
+        || leftClosed != self.lastVisionLeftGripperClosed;
+    BOOL updateRight = !self.visionGripperStateIsKnown
+        || rightClosed != self.lastVisionRightGripperClosed;
+    self.visionGripperStateIsKnown = YES;
+    self.lastVisionLeftGripperClosed = leftClosed;
+    self.lastVisionRightGripperClosed = rightClosed;
+
+    if (updateLeft) {
+        leftClosed ? [self closeGripper_L10:nil] : [self openGripper_L10:nil];
+    }
+    if (updateRight) {
+        rightClosed ? [self closeGripper_R11:nil] : [self openGripper_R11:nil];
+    }
+}
+
 - (void) debugTorsoCommandStrings
 {
     //~5875,5000,7000,6000,6000,6000,8000,6000,8000,6000,6000,4000,6000,6000
@@ -2734,6 +2788,12 @@ int maestroGetErrors(int fd)
                     speed_playPause:controllerModelData.speed_playPause
               speed_forward_reverse:controllerModelData.speed_forward_reverse
                           textInput:controllerModelData.textInput];
+        if (controllerModelData.neckControlActive) {
+            [self applyVisionNeckPan:controllerModelData.neckPan tilt:controllerModelData.neckTilt];
+        }
+        [self applyVisionGrippersActive:controllerModelData.gripperControlActive
+                             leftClosed:controllerModelData.leftGripperClosed
+                            rightClosed:controllerModelData.rightGripperClosed];
         self.masterControllerInputWasFresh = YES;
     }
     else if (self.masterControllerInputWasFresh)
