@@ -4,6 +4,32 @@ Cerebro is the macOS controller and operator interface for the R.O.B. droid.
 
 <img width="2393" height="1063" alt="Screenshot 2025-08-05 at 3 58 58 PM" src="https://github.com/user-attachments/assets/951fcac3-bdcf-470d-927f-fce3f94018d1" />
 
+## Base Arduino discovery
+
+Base is the only Arduino role currently installed. At launch and when the
+operator uses Refresh, Cerebro scans USB callout devices at 250,000 baud and
+resets each candidate and passively waits for the existing firmware line
+`BEGIN BASE STARTUP SEQUENCE`. The retired sketches identify themselves as
+Head or Torso instead. Cerebro keeps only the Base-matching port, so a
+different USB hub can change `/dev/cu.*` names without requiring a saved port
+selection. No probe or command bytes are sent to unidentified boards, and no
+Arduino firmware change or flash is required. Detection allows up to 15 seconds
+for the existing IMU startup to finish.
+
+Head and Torso names remain in the legacy interface for later cleanup, but
+Cerebro does not automatically open them. The startup line is discovery metadata,
+not authentication or evidence that wiring and motion safety have been tested.
+
+## Existing IR obstacle warnings
+
+No Base firmware flash is required for the current IR display. Cerebro recognizes
+the existing `WARNING! FRONT`, `WARNING! BACK`, and corresponding blocking-error
+lines. The SceneKit controller-input view highlights the front or rear sensor pair
+in red for three seconds. When warnings become quiet it reports **clearance
+unknown**, never **path clear**, because the legacy firmware emits no explicit
+clear event or numeric distance. These grass-sensitive IR warnings are advisory;
+RPLidar remains the source for room geometry and traversable-path decisions.
+
 ## Python environment
 
 Cerebro no longer assumes a developer-specific Python path. Open **Settings…**

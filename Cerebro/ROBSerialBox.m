@@ -46,9 +46,14 @@ OUTPUT: ir sensor array in cm : (fl, fr, l, r, bl, br) from front left to back r
 #import "ROBPythonRuntime.h"
 #import "ROBSystemDependencyManager.h"
 #import "ROBTaskLaunchGuard.h"
+#include <sys/select.h>
 
 
 #define kRHAPI_BAUDRATE 250000
+// This exact line already exists in the long-running Base firmware. Head and Torso use
+// their own role names, so Cerebro can identify Base without requiring a show-day flash.
+static NSString * const kROBBaseLegacyStartupIdentity = @"BEGIN BASE STARTUP SEQUENCE";
+static NSTimeInterval const kROBBaseProbeTimeoutSeconds = 15.0;
 
 #define kRHAPI_SERIAL_PORT_HEAD     @"/dev/cu.usbmodem1431301"
 #define kRHAPI_SERIAL_PORT_TORSO    @"/dev/cu.usbmodem144201"
@@ -95,6 +100,8 @@ static NSTimeInterval const kControllerSnapshotFreshnessSeconds = 0.6;
 @property (readwrite, retain) NSMutableData* receivedData_R11_log;
 @property (readwrite, retain) NSMutableData* receivedData_L10_Core;
 @property (readwrite, retain) NSMutableData* receivedData_L10_log;
+@property (readwrite, retain) NSMutableData *baseSerialReceiveBuffer;
+@property (readwrite, assign) BOOL baseDetectionInProgress;
 @property (readwrite, assign) BOOL core_R11_isOnline;
 @property (readwrite, assign) BOOL core_L10_isOnline;
 @property (readwrite, retain) NSTask *sshTask_R11_Core;
@@ -115,6 +122,11 @@ static NSTimeInterval const kControllerSnapshotFreshnessSeconds = 0.6;
 - (void)startShutdown_L10_core;
 
 - (NSString *) openSerialPort: (NSString *)serialPortFile baud: (speed_t)baudRate serialFileDescriptor:(int *)serialFileDescriptor contextInt:(int)context;
+- (NSArray<NSString *> *)usbSerialPortPaths;
+- (void)connectToDetectedBase;
+- (BOOL)probeBaseFirmwareAtPath:(NSString *)path fileDescriptor:(int *)matchedFileDescriptor;
+- (void)consumeBaseSerialBytes:(const void *)bytes length:(NSUInteger)length;
+- (void)handleBaseSerialLine:(NSString *)line;
 
 - (void)appendToIncomingText_head: (id) text;
 - (void)appendToIncomingText_torso: (id) text;
@@ -200,25 +212,19 @@ typedef enum : NSUInteger {
     energize_waistRotation = false;
     
     self.currentIncommingVerbalMessage = @"";
-    // first thing is to refresh the serial port list
-    [self refreshSerialList_base:kRHAPI_SERIAL_PORT_BASE];
+    self.baseSerialReceiveBuffer = [NSMutableData data];
+    // Base is the only Arduino role presently installed. Head and Torso lists remain visible as
+    // legacy UI until the planned interface cleanup, but Cerebro no longer attempts to open them.
+    [self refreshSerialList_base:@"Detecting Base firmware…"];
     [self refreshSerialList_torso:kRHAPI_SERIAL_PORT_TORSO];
     [self refreshSerialList_head:kRHAPI_SERIAL_PORT_HEAD];
     [self refreshSerialList_maestro:kRHAPI_SERIAL_PORT_MAESTRO_COM];
     self.controlModelDataDictionary = [NSMutableDictionary new];
     // now put the cursor in the text field
     //[serialInputField becomeFirstResponder];
-    [NSThread sleepForTimeInterval:1];
-    NSString *error = [self openSerialPort:kRHAPI_SERIAL_PORT_BASE baud:kRHAPI_BAUDRATE serialFileDescriptor:&serialFileDescriptor_base contextInt:kBaseSerialContext];
-    [NSThread sleepForTimeInterval:1];
-    
-    if(error!=nil) {
-        [self refreshSerialList_base:error];
-        [self appendToIncomingText_base:error];
-    } else {
-        [self refreshSerialList_base:[self.serialListPullDown_base titleOfSelectedItem]];
-        [self performSelectorInBackground:@selector(incomingTextUpdateThread_base:) withObject:[NSThread currentThread]];
-    }
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        [self connectToDetectedBase];
+    });
     /*
      error = [self openSerialPort:kRHAPI_SERIAL_PORT_TORSO baud:kRHAPI_BAUDRATE serialFileDescriptor:&serialFileDescriptor_torso contextInt:kTorsoSerialContext];
      
@@ -250,6 +256,140 @@ typedef enum : NSUInteger {
         [self sshIntoAmberMasterAndRunTail_L10:self];
         [self sshIntoAmberMasterAndRunTail_R11:self];
     });
+}
+
+- (NSArray<NSString *> *)usbSerialPortPaths
+{
+    NSMutableArray<NSString *> *paths = [NSMutableArray array];
+    io_iterator_t iterator = IO_OBJECT_NULL;
+    kern_return_t result = IOServiceGetMatchingServices(
+        kIOMainPortDefault,
+        IOServiceMatching(kIOSerialBSDServiceValue),
+        &iterator
+    );
+    if (result != KERN_SUCCESS) {
+        return paths;
+    }
+
+    io_object_t service;
+    while ((service = IOIteratorNext(iterator))) {
+        CFTypeRef value = IORegistryEntryCreateCFProperty(
+            service,
+            CFSTR(kIOCalloutDeviceKey),
+            kCFAllocatorDefault,
+            0
+        );
+        if (value != NULL && CFGetTypeID(value) == CFStringGetTypeID()) {
+            NSString *path = CFBridgingRelease(value);
+            // Limit probing to USB callout devices. Never touch Bluetooth, network, or dial-in
+            // channels, and never send a probe byte that another controller could interpret.
+            if ([path hasPrefix:@"/dev/cu.usbmodem"] || [path hasPrefix:@"/dev/cu.usbserial"]) {
+                [paths addObject:path];
+            }
+        } else if (value != NULL) {
+            CFRelease(value);
+        }
+        IOObjectRelease(service);
+    }
+    IOObjectRelease(iterator);
+    return [paths sortedArrayUsingSelector:@selector(localizedStandardCompare:)];
+}
+
+- (void)connectToDetectedBase
+{
+    @synchronized (self) {
+        if (self.baseDetectionInProgress) {
+            [self appendToIncomingText_base:@"\nBase firmware detection is already running.\n"];
+            return;
+        }
+        self.baseDetectionInProgress = YES;
+    }
+
+    NSArray<NSString *> *paths = [self usbSerialPortPaths];
+    for (NSString *path in paths) {
+        int candidateFileDescriptor = -1;
+        [self appendToIncomingText_base:[NSString stringWithFormat:@"\nDetecting Base firmware on %@…\n", path]];
+        if ([self probeBaseFirmwareAtPath:path fileDescriptor:&candidateFileDescriptor]) {
+            serialFileDescriptor_base = candidateFileDescriptor;
+            [self.baseSerialReceiveBuffer setLength:0];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self refreshSerialList_base:path];
+            });
+            [self appendToIncomingText_base:[NSString stringWithFormat:@"Base firmware verified on %@\n", path]];
+            [self performSelectorInBackground:@selector(incomingTextUpdateThread_base:)
+                                   withObject:[NSThread currentThread]];
+            @synchronized (self) { self.baseDetectionInProgress = NO; }
+            return;
+        }
+        if (candidateFileDescriptor != -1) {
+            close(candidateFileDescriptor);
+        }
+    }
+
+    NSString *message = paths.count == 0
+        ? @"No USB serial devices were found. Connect the Base Arduino and refresh."
+        : @"No USB serial device emitted the existing Base startup response. Check its power/IMU startup, then refresh or choose a port manually.";
+    [self appendToIncomingText_base:[@"\n" stringByAppendingString:message]];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self refreshSerialList_base:message];
+    });
+    @synchronized (self) { self.baseDetectionInProgress = NO; }
+}
+
+- (BOOL)probeBaseFirmwareAtPath:(NSString *)path fileDescriptor:(int *)matchedFileDescriptor
+{
+    int candidateFileDescriptor = -1;
+    NSString *error = [self openSerialPort:path
+                                      baud:kRHAPI_BAUDRATE
+                      serialFileDescriptor:&candidateFileDescriptor
+                                contextInt:kBaseSerialContext];
+    if (error != nil) {
+        return NO;
+    }
+
+    // Opening an Arduino serial device commonly resets it, but make the reset pulse explicit so
+    // the already-flashed sketch reliably reprints its existing role-specific startup line.
+    // This changes no firmware and sends no serial command bytes.
+    ioctl(candidateFileDescriptor, TIOCSDTR);
+    struct timespec resetPulse = { .tv_sec = 0, .tv_nsec = 100 * 1000 * 1000 };
+    nanosleep(&resetPulse, NULL);
+    ioctl(candidateFileDescriptor, TIOCCDTR);
+
+    NSData *identity = [kROBBaseLegacyStartupIdentity dataUsingEncoding:NSUTF8StringEncoding];
+    NSMutableData *received = [NSMutableData data];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:kROBBaseProbeTimeoutSeconds];
+    while (deadline.timeIntervalSinceNow > 0) {
+        fd_set readSet;
+        FD_ZERO(&readSet);
+        FD_SET(candidateFileDescriptor, &readSet);
+        NSTimeInterval remaining = MAX(0, deadline.timeIntervalSinceNow);
+        struct timeval timeout = {
+            .tv_sec = (time_t)remaining,
+            .tv_usec = (suseconds_t)((remaining - floor(remaining)) * 1000000.0)
+        };
+        int ready = select(candidateFileDescriptor + 1, &readSet, NULL, NULL, &timeout);
+        if (ready <= 0) {
+            break;
+        }
+
+        uint8_t bytes[256];
+        ssize_t count = read(candidateFileDescriptor, bytes, sizeof(bytes));
+        if (count <= 0) {
+            break;
+        }
+        [received appendBytes:bytes length:(NSUInteger)count];
+        if ([received rangeOfData:identity options:0 range:NSMakeRange(0, received.length)].location != NSNotFound) {
+            *matchedFileDescriptor = candidateFileDescriptor;
+            return YES;
+        }
+        if (received.length > 8192) {
+            [received replaceBytesInRange:NSMakeRange(0, received.length - 4096)
+                                withBytes:NULL
+                                   length:0];
+        }
+    }
+    close(candidateFileDescriptor);
+    return NO;
 }
 
 - (void) connectMaestro
@@ -627,7 +767,6 @@ int maestroGetErrors(int fd)
     const int BUFFER_SIZE = 100;
     char byte_buffer[BUFFER_SIZE]; // buffer for holding incoming data
     long numBytes=0; // number of bytes read during read
-    NSString *text; // incoming text from the serial port
     
     // assign a high priority to this thread
     [NSThread setThreadPriority:1.0];
@@ -637,17 +776,7 @@ int maestroGetErrors(int fd)
         // read() blocks until some data is available or the port is closed
         numBytes = read(serialFileDescriptor_base, byte_buffer, BUFFER_SIZE); // read up to the size of the buffer
         if(numBytes>0) {
-            // create an NSString from the incoming bytes (the bytes aren't null terminated)
-            //DEPRICATION:
-            text = [NSString stringWithCString:byte_buffer length:numBytes];
-            //text = [NSString stringWithCString:byte_buffer encoding:NSUTF8StringEncoding];
-            
-            // this text can't be directly sent to the text area from this thread
-            //  BUT, we can call a selctor on the main thread.
-            
-            //[self performSelectorOnMainThread:@selector(appendToIncomingText_base:)
-            //                       withObject:text
-            //                    waitUntilDone:YES];
+            [self consumeBaseSerialBytes:byte_buffer length:(NSUInteger)numBytes];
         } else {
             break; // Stop the thread if there is an error
         }
@@ -664,6 +793,77 @@ int maestroGetErrors(int fd)
     
     // give back the pool
     //[pool release];
+}
+
+- (void)consumeBaseSerialBytes:(const void *)bytes length:(NSUInteger)length
+{
+    [self.baseSerialReceiveBuffer appendBytes:bytes length:length];
+    const uint8_t newline = '\n';
+    while (self.baseSerialReceiveBuffer.length > 0) {
+        NSRange newlineRange = [self.baseSerialReceiveBuffer rangeOfData:[NSData dataWithBytes:&newline length:1]
+                                                                 options:0
+                                                                   range:NSMakeRange(0, self.baseSerialReceiveBuffer.length)];
+        if (newlineRange.location == NSNotFound) {
+            // Malformed or noisy devices cannot grow the receive buffer without bound.
+            if (self.baseSerialReceiveBuffer.length > 4096) {
+                [self.baseSerialReceiveBuffer replaceBytesInRange:NSMakeRange(0, self.baseSerialReceiveBuffer.length - 2048)
+                                                        withBytes:NULL
+                                                           length:0];
+            }
+            return;
+        }
+
+        NSData *lineData = [self.baseSerialReceiveBuffer subdataWithRange:NSMakeRange(0, newlineRange.location)];
+        [self.baseSerialReceiveBuffer replaceBytesInRange:NSMakeRange(0, NSMaxRange(newlineRange))
+                                                withBytes:NULL
+                                                   length:0];
+        NSString *line = [[NSString alloc] initWithData:lineData encoding:NSUTF8StringEncoding];
+        if (line != nil) {
+            [self handleBaseSerialLine:[line stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]];
+        }
+    }
+}
+
+- (void)handleBaseSerialLine:(NSString *)line
+{
+    BOOL frontWarning = [line containsString:@"WARNING! FRONT"] ||
+        [line containsString:@"OBSTACLE IS BLOCKING FRONT"];
+    BOOL backWarning = [line containsString:@"WARNING! BACK"] ||
+        [line containsString:@"OBSTACLE IS BLOCKING BACK"];
+    if (frontWarning || backWarning) {
+        NSTimeInterval received = NSProcessInfo.processInfo.systemUptime;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self.delegate updateBaseLegacyIRWarningFront:frontWarning
+                                                     back:backWarning
+                                                 received:received];
+        });
+        return;
+    }
+
+    static NSString * const prefix = @"ROB:IR=";
+    if (![line hasPrefix:prefix]) { return; }
+
+    NSArray<NSString *> *fields = [[line substringFromIndex:prefix.length] componentsSeparatedByString:@","];
+    if (fields.count != 6) { return; }
+    NSMutableArray<NSNumber *> *values = [NSMutableArray arrayWithCapacity:6];
+    NSCharacterSet *nonDigits = NSCharacterSet.decimalDigitCharacterSet.invertedSet;
+    for (NSString *field in fields) {
+        if (field.length == 0 || [field rangeOfCharacterFromSet:nonDigits].location != NSNotFound) { return; }
+        NSInteger value = field.integerValue;
+        if (value > 1000) { return; }
+        [values addObject:@(value)];
+    }
+
+    NSTimeInterval received = NSProcessInfo.processInfo.systemUptime;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self.delegate updateBaseIRFrontLeft:values[0].integerValue
+                                  frontRight:values[1].integerValue
+                                        left:values[2].integerValue
+                                       right:values[3].integerValue
+                                    backLeft:values[4].integerValue
+                                   backRight:values[5].integerValue
+                                    received:received];
+    });
 }
 
 
@@ -938,6 +1138,11 @@ int maestroGetErrors(int fd)
         close(serialFileDescriptor_base);
         serialFileDescriptor_base = -1;
     }
+
+    [self refreshSerialList_base:@"Detecting Base firmware\u2026"];
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+        [self connectToDetectedBase];
+    });
     
 }
 

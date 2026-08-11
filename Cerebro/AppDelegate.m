@@ -17,6 +17,9 @@
 static NSString * const ROBDepthCameraSocketDefaultsKey = @"ROBDepthCameraSocketPath";
 static NSString * const ROBDepthCameraServiceReadyNotification = @"ROBDepthCameraServiceReady";
 static NSString * const ROBLegacyLuxonisUVCDefaultsKey = @"ROBAllowLuxonisUVCFallback";
+static NSString * const ROBDevelopmentModeDefaultsKey = @"ROBDevelopmentMode";
+static NSString * const ROBShowControllerInputDiagnosticsNotification = @"ROBShowControllerInputDiagnostics";
+static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopmentModeDidChange";
 
 @interface AppDelegate ()
 @property (readwrite, retain) NSTimer *rplidarCheckTimer;
@@ -33,6 +36,8 @@ static NSString * const ROBLegacyLuxonisUVCDefaultsKey = @"ROBAllowLuxonisUVCFal
 @property (readwrite, assign) BOOL restartUTCWebCamAfterTermination;
 @property (readwrite, assign) NSUInteger pythonRuntimeGeneration;
 @property (readwrite, assign) BOOL reportedMissingRPLidarApplication;
+@property (readwrite, retain) NSMenuItem *developmentModeMenuItem;
+@property (readwrite, retain) NSMenuItem *controllerDiagnosticsMenuItem;
 - (BOOL)cerebroCheck;
 
 @end
@@ -47,6 +52,8 @@ static NSString * const ROBLegacyLuxonisUVCDefaultsKey = @"ROBAllowLuxonisUVCFal
     if ([self cerebroCheck]) {
         return;
     }
+
+    [self installDevelopmentMenu];
 
     self.utcWebCamIsOnline = NO;
     self.utcWebCamOutput = [NSMutableString string];
@@ -71,6 +78,61 @@ static NSString * const ROBLegacyLuxonisUVCDefaultsKey = @"ROBAllowLuxonisUVCFal
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self rpLidarCheck];
     });
+}
+
+- (void)installDevelopmentMenu
+{
+    NSMenu *submenu = [[NSMenu alloc] initWithTitle:@"Development"];
+    self.developmentModeMenuItem = [[NSMenuItem alloc]
+        initWithTitle:@"Development Mode"
+               action:@selector(toggleDevelopmentMode:)
+        keyEquivalent:@""];
+    self.developmentModeMenuItem.target = self;
+    [submenu addItem:self.developmentModeMenuItem];
+    [submenu addItem:NSMenuItem.separatorItem];
+
+    self.controllerDiagnosticsMenuItem = [[NSMenuItem alloc]
+        initWithTitle:@"Open Controller Input Scene…"
+               action:@selector(showControllerInputDiagnostics:)
+        keyEquivalent:@""];
+    self.controllerDiagnosticsMenuItem.target = self;
+    [submenu addItem:self.controllerDiagnosticsMenuItem];
+
+    NSMenuItem *developmentItem = [[NSMenuItem alloc] initWithTitle:@"Development"
+                                                             action:nil
+                                                      keyEquivalent:@""];
+    developmentItem.submenu = submenu;
+    [NSApp.mainMenu addItem:developmentItem];
+    [self updateDevelopmentMenuState];
+}
+
+- (void)updateDevelopmentMenuState
+{
+    BOOL enabled = [[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey];
+    self.developmentModeMenuItem.state = enabled ? NSControlStateValueOn : NSControlStateValueOff;
+    self.controllerDiagnosticsMenuItem.enabled = enabled;
+}
+
+- (IBAction)toggleDevelopmentMode:(id)sender
+{
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    BOOL enabled = ![defaults boolForKey:ROBDevelopmentModeDefaultsKey];
+    [defaults setBool:enabled forKey:ROBDevelopmentModeDefaultsKey];
+    [self updateDevelopmentMenuState];
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:ROBDevelopmentModeDidChangeNotification
+                      object:self];
+}
+
+- (IBAction)showControllerInputDiagnostics:(id)sender
+{
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey]) {
+        NSBeep();
+        return;
+    }
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:ROBShowControllerInputDiagnosticsNotification
+                      object:self];
 }
 
 - (void)applicationWillTerminate:(NSNotification *)notification

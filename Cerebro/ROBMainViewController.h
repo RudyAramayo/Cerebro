@@ -39,6 +39,17 @@
 @property (readwrite, assign) IBOutlet NSTextView *speechTextView;
 @property (readwrite, assign) IBOutlet NSTextView *speechTranscriptTextView;
 @property (readwrite, retain) ROBSerialBox *serialBox;
+
+- (void)updateBaseIRFrontLeft:(NSInteger)frontLeft
+                   frontRight:(NSInteger)frontRight
+                         left:(NSInteger)left
+                        right:(NSInteger)right
+                     backLeft:(NSInteger)backLeft
+                    backRight:(NSInteger)backRight
+                     received:(NSTimeInterval)receivedAtUptime;
+- (void)updateBaseLegacyIRWarningFront:(BOOL)front
+                                  back:(BOOL)back
+                              received:(NSTimeInterval)receivedAtUptime;
 @property (readwrite, retain) ROBSpeechBox *speechBox;
 /// Immutable latest depth snapshot aligned to RGB. UInt16 little-endian
 /// millimeters; zero is invalid. Nil whenever RGB-D is not live.

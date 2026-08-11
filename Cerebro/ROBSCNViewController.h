@@ -17,5 +17,8 @@
 
 - (instancetype)initWithRobo_scnView:(SCNView *)scnView;
 - (void)updateWithControllerModel:(ROBBaseControllerModel *)model sender:(NSString *)sender;
+- (void)updateWithIRDistances:(NSArray<NSNumber *> *)distances receivedAtUptime:(NSTimeInterval)uptime;
+- (void)updateWithLegacyIRWarningFront:(BOOL)front back:(BOOL)back receivedAtUptime:(NSTimeInterval)uptime;
+- (void)invalidate;
 
 @end

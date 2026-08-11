@@ -35,6 +35,9 @@
 static NSTimeInterval const kRobotActionControllerFreshnessSeconds = 3.5;
 static NSTimeInterval const kRobotActionApprovalLifetimeSeconds = 30.0;
 static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
+static NSString * const ROBDevelopmentModeDefaultsKey = @"ROBDevelopmentMode";
+static NSString * const ROBShowControllerInputDiagnosticsNotification = @"ROBShowControllerInputDiagnostics";
+static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopmentModeDidChange";
 
 #import "AVFoundation/AVFoundation.h"
 #import "Cerebro-Swift.h"
@@ -821,23 +824,17 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
 - (void)viewDidLoad
 {
     [super viewDidLoad];
-    SCNView *controllerDiagnosticView = [[SCNView alloc] initWithFrame:NSMakeRect(0, 0, 960, 620)];
-    NSWindow *controllerDiagnosticWindow = [[NSWindow alloc]
-        initWithContentRect:NSMakeRect(0, 0, 960, 620)
-                  styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
-                             NSWindowStyleMaskResizable | NSWindowStyleMaskMiniaturizable)
-                    backing:NSBackingStoreBuffered
-                      defer:NO];
-    controllerDiagnosticWindow.title = @"ROB Received VR Controller Diagnostics";
-    controllerDiagnosticWindow.contentView = controllerDiagnosticView;
-    self.controllerDiagnosticsWindowController = [[NSWindowController alloc]
-        initWithWindow:controllerDiagnosticWindow];
-    self.scnViewController = [[ROBSCNViewController alloc]
-        initWithRobo_scnView:controllerDiagnosticView];
-    [self.controllerDiagnosticsWindowController showWindow:self];
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(applicationWillTerminate:)
                                                  name:NSApplicationWillTerminateNotification
+                                               object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(showControllerInputDiagnostics:)
+                                                 name:ROBShowControllerInputDiagnosticsNotification
+                                               object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(developmentModeDidChange:)
+                                                 name:ROBDevelopmentModeDidChangeNotification
                                                object:nil];
     //-----------------------------
     //---- Setup User Defaults ----
@@ -944,6 +941,70 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
         [NSApp activateIgnoringOtherApps:YES];
         [[self.tastsWindowController window] makeKeyAndOrderFront:nil];
     });
+}
+
+- (void)showControllerInputDiagnostics:(NSNotification *)notification
+{
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey]) {
+        return;
+    }
+    if (self.controllerDiagnosticsWindowController == nil) {
+        SCNView *view = [[SCNView alloc] initWithFrame:NSMakeRect(0, 0, 960, 620)];
+        NSWindow *window = [[NSWindow alloc]
+            initWithContentRect:NSMakeRect(0, 0, 960, 620)
+                      styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
+                                 NSWindowStyleMaskResizable | NSWindowStyleMaskMiniaturizable)
+                        backing:NSBackingStoreBuffered
+                          defer:NO];
+        window.title = @"ROB Received VR Controller Diagnostics";
+        window.contentView = view;
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(controllerDiagnosticsWindowWillClose:)
+                                                     name:NSWindowWillCloseNotification
+                                                   object:window];
+        self.controllerDiagnosticsWindowController = [[NSWindowController alloc] initWithWindow:window];
+        self.scnViewController = [[ROBSCNViewController alloc] initWithRobo_scnView:view];
+    }
+    [NSApp activateIgnoringOtherApps:YES];
+    [self.controllerDiagnosticsWindowController showWindow:self];
+}
+
+- (void)updateBaseIRFrontLeft:(NSInteger)frontLeft
+                   frontRight:(NSInteger)frontRight
+                         left:(NSInteger)left
+                        right:(NSInteger)right
+                     backLeft:(NSInteger)backLeft
+                    backRight:(NSInteger)backRight
+                     received:(NSTimeInterval)receivedAtUptime
+{
+    [self.scnViewController updateWithIRDistances:@[@(frontLeft), @(frontRight), @(left), @(right), @(backLeft), @(backRight)]
+                                  receivedAtUptime:receivedAtUptime];
+}
+
+- (void)updateBaseLegacyIRWarningFront:(BOOL)front
+                                  back:(BOOL)back
+                              received:(NSTimeInterval)receivedAtUptime
+{
+    [self.scnViewController updateWithLegacyIRWarningFront:front
+                                                      back:back
+                                          receivedAtUptime:receivedAtUptime];
+}
+
+- (void)controllerDiagnosticsWindowWillClose:(NSNotification *)notification
+{
+    [[NSNotificationCenter defaultCenter] removeObserver:self
+                                                    name:NSWindowWillCloseNotification
+                                                  object:notification.object];
+    [self.scnViewController invalidate];
+    self.scnViewController = nil;
+    self.controllerDiagnosticsWindowController = nil;
+}
+
+- (void)developmentModeDidChange:(NSNotification *)notification
+{
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey]) {
+        [self.controllerDiagnosticsWindowController close];
+    }
 }
 
 - (void)dealloc

@@ -11,5 +11,7 @@
 @interface AppDelegate : NSObject <NSApplicationDelegate>
 
 - (IBAction)showPythonSettings:(id)sender;
+- (IBAction)toggleDevelopmentMode:(id)sender;
+- (IBAction)showControllerInputDiagnostics:(id)sender;
 
 @end
