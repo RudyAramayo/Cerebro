@@ -80,6 +80,7 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
 //-----
 
 @property (readwrite, retain) ROBSCNViewController *scnViewController;
+@property (readwrite, retain) NSWindowController *controllerDiagnosticsWindowController;
 @property (readwrite, retain) NSTimer *niteHeartbeatTimer;
 
 //@property (readwrite, retain) ROBLeap *robLeap;
@@ -820,6 +821,20 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
 - (void)viewDidLoad
 {
     [super viewDidLoad];
+    SCNView *controllerDiagnosticView = [[SCNView alloc] initWithFrame:NSMakeRect(0, 0, 960, 620)];
+    NSWindow *controllerDiagnosticWindow = [[NSWindow alloc]
+        initWithContentRect:NSMakeRect(0, 0, 960, 620)
+                  styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
+                             NSWindowStyleMaskResizable | NSWindowStyleMaskMiniaturizable)
+                    backing:NSBackingStoreBuffered
+                      defer:NO];
+    controllerDiagnosticWindow.title = @"ROB Received VR Controller Diagnostics";
+    controllerDiagnosticWindow.contentView = controllerDiagnosticView;
+    self.controllerDiagnosticsWindowController = [[NSWindowController alloc]
+        initWithWindow:controllerDiagnosticWindow];
+    self.scnViewController = [[ROBSCNViewController alloc]
+        initWithRobo_scnView:controllerDiagnosticView];
+    [self.controllerDiagnosticsWindowController showWindow:self];
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(applicationWillTerminate:)
                                                  name:NSApplicationWillTerminateNotification
@@ -1716,6 +1731,43 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
     NSString *msg = [messageDictionary valueForKey:@"message"];
     NSString *sender = [messageDictionary valueForKey:@"sender"];
 
+    BOOL (^parseControllerPose)(id, double[8]) = ^BOOL(id rawValue, double output[8]) {
+        if (![rawValue isKindOfClass:NSString.class]) {
+            return NO;
+        }
+        NSArray<NSString *> *parts = [(NSString *)rawValue componentsSeparatedByString:@","];
+        if (parts.count != 8) {
+            return NO;
+        }
+        for (NSUInteger index = 0; index < parts.count; index++) {
+            NSScanner *scanner = [NSScanner scannerWithString:parts[index]];
+            if (![scanner scanDouble:&output[index]] || !scanner.isAtEnd || !isfinite(output[index])) {
+                return NO;
+            }
+        }
+        if (fabs(output[0]) > 20 || fabs(output[1]) > 20 || fabs(output[2]) > 20 || output[7] < 0) {
+            return NO;
+        }
+        double quaternionMagnitude = sqrt(
+            output[3] * output[3] + output[4] * output[4]
+                + output[5] * output[5] + output[6] * output[6]
+        );
+        if (quaternionMagnitude <= 0.5 || quaternionMagnitude >= 1.5) {
+            return NO;
+        }
+        for (NSUInteger index = 3; index <= 6; index++) {
+            output[index] /= quaternionMagnitude;
+        }
+        return YES;
+    };
+    double leftControllerPose[8] = {0};
+    double rightControllerPose[8] = {0};
+    BOOL controllerPoseVersionIsValid = [messageDictionary[@"controller.pose.version"] isEqualToString:@"1"];
+    BOOL leftControllerPoseValid = controllerPoseVersionIsValid
+        && parseControllerPose(messageDictionary[@"controller.pose.left"], leftControllerPose);
+    BOOL rightControllerPoseValid = controllerPoseVersionIsValid
+        && parseControllerPose(messageDictionary[@"controller.pose.right"], rightControllerPose);
+
     //NSLog(@"sender = %@. message = %@", sender, msg);
 
     if (error != nil) {
@@ -1991,8 +2043,27 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
         controllerModelData.speed_playPause = speed_playPause;
         controllerModelData.speed_forward_reverse = speed_forward_reverse;
         controllerModelData.textInput = textInput;
+        controllerModelData.leftControllerPoseValid = leftControllerPoseValid;
+        controllerModelData.leftControllerPositionX = (float)leftControllerPose[0];
+        controllerModelData.leftControllerPositionY = (float)leftControllerPose[1];
+        controllerModelData.leftControllerPositionZ = (float)leftControllerPose[2];
+        controllerModelData.leftControllerOrientationX = (float)leftControllerPose[3];
+        controllerModelData.leftControllerOrientationY = (float)leftControllerPose[4];
+        controllerModelData.leftControllerOrientationZ = (float)leftControllerPose[5];
+        controllerModelData.leftControllerOrientationW = (float)leftControllerPose[6];
+        controllerModelData.leftControllerPoseTimestamp = leftControllerPose[7];
+        controllerModelData.rightControllerPoseValid = rightControllerPoseValid;
+        controllerModelData.rightControllerPositionX = (float)rightControllerPose[0];
+        controllerModelData.rightControllerPositionY = (float)rightControllerPose[1];
+        controllerModelData.rightControllerPositionZ = (float)rightControllerPose[2];
+        controllerModelData.rightControllerOrientationX = (float)rightControllerPose[3];
+        controllerModelData.rightControllerOrientationY = (float)rightControllerPose[4];
+        controllerModelData.rightControllerOrientationZ = (float)rightControllerPose[5];
+        controllerModelData.rightControllerOrientationW = (float)rightControllerPose[6];
+        controllerModelData.rightControllerPoseTimestamp = rightControllerPose[7];
         
         [self.serialBox controllerId:sender controllerModelData:controllerModelData];
+        [self.scnViewController updateWithControllerModel:controllerModelData sender:sender];
         
         NSDictionary *messageDict = @{@"message": @"Hey I got your message",
                                       @"sender":[[NSHost currentHost] name]};
