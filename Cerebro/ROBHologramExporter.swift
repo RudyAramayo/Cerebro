@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import CoreImage
 import Darwin
 
 /// Captures the newest synchronized RGB-D frame and exports a GitHub Pages-ready
@@ -289,8 +290,14 @@ import Darwin
         try Self.readme.write(to: folder.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
 
         let usda = folder.appendingPathComponent("hologram.usda")
-        try usd(points, detail: detail).write(to: usda, atomically: true, encoding: .utf8)
-        try createUSDZ(from: usda, at: folder.appendingPathComponent("hologram.usdz"))
+        let textureURL = folder.appendingPathComponent("hologram-rgb.jpg")
+        try writeRGBTexture(frame: frame, to: textureURL)
+        try texturedUSD(frame: frame, detail: detail).write(to: usda, atomically: true, encoding: .utf8)
+        try createUSDZ(
+            from: usda,
+            at: folder.appendingPathComponent("hologram.usdz"),
+            additionalFiles: [textureURL]
+        )
         try? fileManager.removeItem(at: usda)
     }
 
@@ -410,6 +417,117 @@ import Darwin
     private func metadata(pointCount: Int, detail: Int) -> String {
         """
         {"format":"ROB-HOLOGRAM-1","pointCount":\(pointCount),"voxelDetail":\(detail),"units":"meters","coordinateSystem":"camera-right-up-back","capturedAt":"\(ISO8601DateFormatter().string(from: Date()))"}
+        """
+    }
+
+    private func writeRGBTexture(frame: ROBDepthCloudFrame, to url: URL) throws {
+        guard let buffer = frame.rgbPixelBuffer else { throw ExportError.noRGB }
+        let image = CIImage(cvPixelBuffer: buffer)
+        let context = CIContext(options: [.useSoftwareRenderer: false])
+        guard let cgImage = context.createCGImage(image, from: image.extent) else {
+            throw ExportError.noRGB
+        }
+        let bitmap = NSBitmapImageRep(cgImage: cgImage)
+        guard let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.92]) else {
+            throw ExportError.noRGB
+        }
+        try jpeg.write(to: url, options: .atomic)
+    }
+
+    private func texturedUSD(frame: ROBDepthCloudFrame, detail: Int) -> String {
+        let width = frame.width, height = frame.height
+        let depth = frame.millimetersLittleEndian.bytes.assumingMemoryBound(to: UInt8.self)
+        let gridStep = [1: 4, 2: 3, 3: 2][detail] ?? 4
+        let columns = Array(stride(from: 0, to: width, by: gridStep))
+        let rows = Array(stride(from: 0, to: height, by: gridStep))
+        let focal = Float(width) / (2 * tan(69 * .pi / 360))
+        let cx = Float(width - 1) / 2, cy = Float(height - 1) / 2
+        func millimeters(x: Int, y: Int) -> UInt16 {
+            let offset = (y * width + x) * 2
+            return UInt16(depth[offset]) | (UInt16(depth[offset + 1]) << 8)
+        }
+        var positions: [String] = [], uvs: [String] = []
+        var sourceDepths: [UInt16] = [], vertexByCell: [Int] = []
+        positions.reserveCapacity(columns.count * rows.count)
+        uvs.reserveCapacity(columns.count * rows.count)
+        sourceDepths.reserveCapacity(columns.count * rows.count)
+        vertexByCell.reserveCapacity(columns.count * rows.count)
+        for y in rows {
+            for x in columns {
+                let mm = millimeters(x: x, y: y)
+                sourceDepths.append(mm)
+                guard mm >= 200, mm <= 8_000 else { vertexByCell.append(-1); continue }
+                let meters = Float(mm) / 1000
+                let index = positions.count
+                vertexByCell.append(index)
+                positions.append("(\((Float(x) - cx) * meters / focal), \(-(Float(y) - cy) * meters / focal), \(-meters))")
+                uvs.append("(\(Float(x) / Float(max(width - 1, 1))), \(1 - Float(y) / Float(max(height - 1, 1))))")
+            }
+        }
+        var indices: [String] = [], counts: [String] = []
+        let discontinuity: Int = detail == 3 ? 180 : 220
+        for row in 0..<(rows.count - 1) {
+            for column in 0..<(columns.count - 1) {
+                let aCell = row * columns.count + column
+                let bCell = aCell + 1
+                let dCell = (row + 1) * columns.count + column
+                let cCell = dCell + 1
+                let cells = [aCell, bCell, cCell, dCell]
+                let vertices = cells.map { vertexByCell[$0] }
+                guard vertices.allSatisfy({ $0 >= 0 }) else { continue }
+                let depths = cells.map { Int(sourceDepths[$0]) }
+                guard (depths.max()! - depths.min()!) <= discontinuity else { continue }
+                indices.append(contentsOf: vertices.map(String.init))
+                counts.append("4")
+            }
+        }
+        return """
+        #usda 1.0
+        (
+            defaultPrim = "Hologram"
+            metersPerUnit = 1
+            upAxis = "Y"
+        )
+        def Xform "Hologram" {
+            double3 xformOp:translate = (0, 0.9144, 0)
+            float3 xformOp:scale = (0.45, 0.45, 0.45)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Material "RGBSurface" {
+                token outputs:surface.connect = </Hologram/RGBSurface/PreviewSurface.outputs:surface>
+                def Shader "UVReader" {
+                    uniform token info:id = "UsdPrimvarReader_float2"
+                    token inputs:varname = "st"
+                    float2 outputs:result
+                }
+                def Shader "RGBTexture" {
+                    uniform token info:id = "UsdUVTexture"
+                    asset inputs:file = @hologram-rgb.jpg@
+                    float2 inputs:st.connect = </Hologram/RGBSurface/UVReader.outputs:result>
+                    token inputs:sourceColorSpace = "sRGB"
+                    float3 outputs:rgb
+                }
+                def Shader "PreviewSurface" {
+                    uniform token info:id = "UsdPreviewSurface"
+                    color3f inputs:diffuseColor.connect = </Hologram/RGBSurface/RGBTexture.outputs:rgb>
+                    float inputs:metallic = 0
+                    float inputs:roughness = 0.9
+                    token outputs:surface
+                }
+            }
+            def Mesh "RGBDepthSurface" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            ) {
+                uniform token subdivisionScheme = "none"
+                bool doubleSided = true
+                rel material:binding = </Hologram/RGBSurface>
+                int[] faceVertexCounts = [\(counts.joined(separator: ","))]
+                int[] faceVertexIndices = [\(indices.joined(separator: ","))]
+                point3f[] points = [\(positions.joined(separator: ",\n"))]
+                texCoord2f[] primvars:st = [\(uvs.joined(separator: ",\n"))] (
+                    interpolation = "vertex"
+                )
+            }
+        }
         """
     }
 
@@ -669,9 +787,10 @@ import Darwin
     }
 
     private enum ExportError: LocalizedError {
-        case noDepth, usdz(String), audio(String)
+        case noDepth, noRGB, usdz(String), audio(String)
         var errorDescription: String? {
             switch self { case .noDepth: return "The current depth image contains no usable points."
+            case .noRGB: return "The synchronized RGB image is unavailable for the Apple AR texture."
             case .usdz(let detail): return "Could not create the Apple AR asset: \(detail)"
             case .audio(let detail): return detail }
         }
