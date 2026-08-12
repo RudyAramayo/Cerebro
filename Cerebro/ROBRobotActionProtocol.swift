@@ -41,7 +41,8 @@ public enum ROBRobotActionProposalCodec {
               let action = object["action"] as? String,
               ROBRobotActionMessage.supportedActions.contains(action),
               let arguments = object["arguments"] as? NSDictionary,
-              JSONSerialization.isValidJSONObject(arguments) else {
+              JSONSerialization.isValidJSONObject(arguments),
+              hasExactArgumentKeys(arguments, action: action) else {
             throw ROBRobotActionProtocolError.invalidMessage("proposal contains unknown fields or an unsupported action")
         }
 
@@ -57,6 +58,18 @@ public enum ROBRobotActionProposalCodec {
             throw ROBRobotActionProtocolError.invalidMessage(validationError)
         }
         return message
+    }
+
+    private static func hasExactArgumentKeys(_ arguments: NSDictionary, action: String) -> Bool {
+        let keys = Set(arguments.allKeys.compactMap { $0 as? String })
+        guard keys.count == arguments.count else { return false }
+        switch action {
+        case "look_at", "request_pick": return keys == ["target_id"]
+        case "play_gesture": return keys == ["gesture"]
+        case "navigate_relative": return keys == ["distance_m", "yaw_rad", "speed_scale"]
+        case "stop_motion": return keys.isEmpty
+        default: return false
+        }
     }
 
     public static var jsonSchema: [String: Any] {

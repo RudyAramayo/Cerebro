@@ -227,6 +227,7 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
         ring.firstMaterial = [self materialWithColor:ringColors[index] emission:0.75];
         SCNNode *ringNode = [SCNNode nodeWithGeometry:ring];
         ringNode.position = SCNVector3Make(x, 0.84, -0.275);
+        ringNode.eulerAngles = SCNVector3Make((float)M_PI_2, 0, 0);
         [self.robotNode addChildNode:ringNode];
         SCNCylinder *speaker = [SCNCylinder cylinderWithRadius:0.08 height:0.018];
         speaker.firstMaterial = [self materialWithColor:[NSColor colorWithWhite:0.025 alpha:1] emission:0];

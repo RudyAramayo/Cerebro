@@ -19,6 +19,7 @@ struct ROBRobotActionProtocolFixtureTests {
         try testInvalidAndExpiredRequests()
         try testOversizedPayloadsAreRejected()
         try testEnvelopeSenderBinding()
+        try testStrictModelActionProposals()
         try testAutonomySessionRoundTripAndBounds()
         try testAutonomyCoordinatorSessionAndLidar()
         print("ROB robot-action protocol fixtures passed")
@@ -195,6 +196,30 @@ struct ROBRobotActionProtocolFixtureTests {
         )
         try expect(ROBRobotActionWireCodec.decodeEnvelopeData(Data("not an archive".utf8) as NSData) == nil,
                    "Malformed archive was accepted")
+    }
+
+    private static func testStrictModelActionProposals() throws {
+        let valid = Data(#"{"action":"navigate_relative","arguments":{"distance_m":0.2,"yaw_rad":0.1,"speed_scale":0.15}}"#.utf8)
+        let proposal = try ROBRobotActionProposalCodec.decode(valid)
+        try expect(proposal.kind == .actionRequest, "Valid model proposal was not converted to a pending request")
+        try expect(proposal.validationError == nil, "Valid model proposal failed protocol validation")
+
+        let rejected = [
+            #"Here is the action: {"action":"stop_motion","arguments":{}}"#,
+            #"{"action":"delete_robot","arguments":{}}"#,
+            #"{"action":"stop_motion","arguments":{},"comment":"please"}"#,
+            #"{"action":"stop_motion","arguments":{"surprise":true}}"#,
+            #"```json\n{"action":"stop_motion","arguments":{}}\n```"#,
+            #"{"action":"navigate_relative","arguments":{"distance_m":8,"yaw_rad":0,"speed_scale":1}}"#
+        ]
+        for document in rejected {
+            do {
+                _ = try ROBRobotActionProposalCodec.decode(Data(document.utf8))
+                throw FixtureFailure.failed("Unsafe or non-JSON-only model proposal was accepted: \(document)")
+            } catch is ROBRobotActionProtocolError {
+                // Expected: no prose recovery and no unknown/out-of-range actions.
+            }
+        }
     }
 
     private static func testAutonomySessionRoundTripAndBounds() throws {
