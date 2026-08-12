@@ -31,12 +31,12 @@ import Darwin
     }
 
     private func movieARPointBudget(for detail: Int) -> Int {
-        [1: 2_000, 2: 4_000, 3: 7_000][detail] ?? 2_000
+        [1: 4_000, 2: 10_000, 3: 18_000][detail] ?? 4_000
     }
 
     private func arVoxelHalfSize(for detail: Int, movie: Bool) -> Float {
         if movie {
-            return [1: 0.008, 2: 0.005, 3: 0.0035][detail] ?? 0.008
+            return [1: 0.006, 2: 0.0035, 3: 0.00225][detail] ?? 0.006
         }
         return [1: 0.005, 2: 0.00325, 3: 0.00225][detail] ?? 0.005
     }
@@ -44,7 +44,7 @@ import Darwin
     public func showCaptureSettings() {
         let alert = NSAlert()
         alert.messageText = "Hologram Voxel Detail"
-        alert.informativeText = "This controls browser capture and Apple AR Quick Look resolution. High exports up to 45,000 still-image AR voxels; Ultra exports up to 90,000 with smaller voxel faces. Movie limits are lower to keep animation practical on iPhone."
+        alert.informativeText = "This controls browser capture and Apple AR Quick Look resolution. Ultra movie exports preserve up to 18,000 animated voxels per AR frame with 64 RGB material colors and smaller voxel faces. High and Ultra create substantially larger USDZ files."
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: 58))
@@ -496,7 +496,7 @@ import Darwin
                 token outputs:surface.connect = </Hologram/RGBSurface/PreviewSurface.outputs:surface>
                 def Shader "UVReader" {
                     uniform token info:id = "UsdPrimvarReader_float2"
-                    token inputs:varname = "st"
+                    string inputs:varname = "st"
                     float2 outputs:result
                 }
                 def Shader "RGBTexture" {
@@ -633,7 +633,16 @@ import Darwin
 
     private func animatedUSD(frames: [MovieFrame], audioName: String?, detail: Int) -> String {
         let maximumPointsPerFrame = movieARPointBudget(for: detail)
-        let arFrames = frames.map { frame -> ARMovieFrame in
+        // Spend the mobile USDZ budget on spatial detail instead of repeating
+        // nearly identical 8 Hz frames. Quick Look interpolates vertex samples.
+        let minimumARFrameInterval: Float = detail == 3 ? 0.25 : (detail == 2 ? 0.20 : 0.125)
+        var lastARFrameTime: Float = -.infinity
+        let selectedFrames = frames.enumerated().compactMap { index, frame -> MovieFrame? in
+            let keep = frame.timestamp - lastARFrameTime >= minimumARFrameInterval || index == frames.count - 1
+            if keep { lastARFrameTime = frame.timestamp }
+            return keep ? frame : nil
+        }
+        let arFrames = selectedFrames.map { frame -> ARMovieFrame in
             let step = max(1, Int(ceil(Double(frame.points.count) / Double(maximumPointsPerFrame))))
             let points = frame.points.enumerated().compactMap { index, point in
                 index.isMultiple(of: step) ? point : nil
@@ -655,14 +664,12 @@ import Darwin
         let centerZ = (minimumZ + maximumZ) / 2
         let halfSize = arVoxelHalfSize(for: detail, movie: true)
         func paletteKey(_ point: Point) -> Int {
-            min(Int(point.r) * 3 / 256, 2) * 9 +
-            min(Int(point.g) * 3 / 256, 2) * 3 +
-            min(Int(point.b) * 3 / 256, 2)
+            (Int(point.r >> 6) << 4) | (Int(point.g >> 6) << 2) | Int(point.b >> 6)
         }
         let usedKeys = Set(allPoints.map(paletteKey)).sorted()
-        let levels: [Float] = [42 / 255, 128 / 255, 213 / 255]
+        let levels: [Float] = [31 / 255, 96 / 255, 160 / 255, 224 / 255]
         let materials = usedKeys.map { key -> String in
-            let r = levels[key / 9], g = levels[(key / 3) % 3], b = levels[key % 3]
+            let r = levels[key >> 4], g = levels[(key >> 2) & 3], b = levels[key & 3]
             return """
                 def Material "RGBMaterial_\(key)" {
                     token outputs:surface.connect = </Hologram/RGBMaterial_\(key)/PreviewSurface.outputs:surface>
@@ -871,7 +878,7 @@ private extension ROBHologramExporter {
 
     A static Three.js RGB point-cloud transmission exported by Cerebro.
 
-    Choose **Development → Hologram Voxel Detail…** before capture to select Standard, High, or Ultra resolution. Apple AR exports up to 15,000, 45,000, or 90,000 voxels respectively, with progressively smaller voxel faces. Higher settings create substantially larger USDZ assets.
+    Choose **Development → Hologram Voxel Detail…** before capture to select Standard, High, or Ultra resolution. The browser retains the RGB point cloud. Apple AR uses a connected depth surface with the captured RGB image mapped onto it; higher settings use a finer depth grid and create larger USDZ assets.
 
     Preview locally (module loading requires HTTP):
 
@@ -883,7 +890,7 @@ private extension ROBHologramExporter {
 
     - Desktop/mobile browsers: interactive Three.js point cloud.
     - WebXR browsers supporting `immersive-ar`: the generated AR button starts passthrough AR.
-    - iPhone, iPad, and Apple Vision Pro: **Place hologram in AR** opens the bundled USDZ using Apple AR Quick Look.
+    - iPhone, iPad, and Apple Vision Pro: **Place hologram in AR** opens a recognizable RGB-textured depth reconstruction using Apple AR Quick Look.
 
     The CDN dependency is pinned to Three.js 0.180.0. Vendor it locally before long-term archival if the page must work offline.
     """#
@@ -893,7 +900,7 @@ private extension ROBHologramExporter {
 
     A synchronized RGB-D voxel recording with microphone audio, interactive Three.js playback, and an animated USDZ for Apple AR Quick Look.
 
-    Choose **Development → Hologram Voxel Detail…** before recording to select Standard, High, or Ultra resolution. Apple AR movie exports use up to 2,000, 4,000, or 7,000 animated voxels per frame respectively, with progressively smaller voxel faces.
+    Choose **Development → Hologram Voxel Detail…** before recording to select Standard, High, or Ultra resolution. Apple AR movie exports use up to 4,000, 10,000, or 18,000 animated voxels per frame respectively, with 64 RGB material colors and progressively smaller voxel faces. Ultra favors spatial resolution by using four interpolated geometry samples per second.
 
     Preview locally (camera AR and JavaScript modules require HTTP):
 
@@ -907,7 +914,7 @@ private extension ROBHologramExporter {
     - Tap **Watch in Apple AR** on iPhone, iPad, or Apple Vision Pro for animated USDZ playback with audio.
     - Non-Apple browsers with immersive WebXR support receive a passthrough AR button.
 
-    The AR copy intentionally uses fewer voxels and a compact 27-color RGB palette to keep mobile playback responsive. The browser copy retains the denser recorded RGB point frames.
+    The AR copy uses a bounded 64-color RGB palette and detail-dependent geometry sampling to keep mobile playback responsive. The browser copy retains the denser recorded RGB point frames.
     """#
 
     static let localServer = #"""
