@@ -159,6 +159,14 @@ struct ROBStageShowFixtureTests {
         let bundledURL = URL(fileURLWithPath: "Cerebro/StageShows/MakerFaireOpening.robshow.json")
         let bundled = try ROBStageShowCodec.decode(Data(contentsOf: bundledURL))
         try expect(bundled == decoded, "Bundled sample and compiled fallback diverged")
+
+        let comedyURL = URL(fileURLWithPath: "Cerebro/StageShows/OrbitusTenMinuteComedy.robshow.json")
+        let comedy = try ROBStageShowCodec.decode(Data(contentsOf: comedyURL))
+        let runtime = ROBStageShowCodec.estimatedDuration(of: comedy)
+        try expect(comedy.cues.count >= 35, "Ten-minute comedy show is unexpectedly short")
+        try expect((9 * 60 ... 11 * 60).contains(runtime), "Comedy show runtime is not approximately ten minutes")
+        try expect(comedy.cues.filter { $0.kind == .geminiTurn }.count >= 5,
+                   "Comedy show needs multiple adaptive moments")
     }
 
     private static func testUnknownHardwareFieldsAreRejected() throws {

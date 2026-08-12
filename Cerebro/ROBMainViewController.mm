@@ -115,6 +115,11 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 @property (readwrite, retain) ROBStageShowWindowController *stageShowWindowController;
 @property (readwrite, retain) ROBStageShowCoordinator *stageShowCoordinator;
 @property (readwrite, retain) ROBAutonomyCoordinator *autonomyCoordinator;
+@property (readwrite, assign) NSUInteger saberChoreographyGeneration;
+- (void)executeSaberTransforms:(NSArray<ROBSaberTransform *> *)transforms
+                         index:(NSUInteger)index
+                    generation:(NSUInteger)generation
+                   coordinator:(ROBStageShowCoordinator *)coordinator;
 
 // Gemini proposes high-level actions; this bridge only coordinates approval,
 // cancellation, and operator-confirmed results with ROBController. A future
@@ -1092,15 +1097,61 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
                        cueID:(NSString *)cueID
                      timeout:(NSTimeInterval)timeout
 {
-    // The legacy keyframe path has no bounds-safe catalog, cancellation, or
-    // observed completion. Keep the named intent visible to rehearsals while
-    // failing closed until the supervised gesture executor is installed.
-    (void)[coordinator completeGestureWithSuccess:NO
-                                            detail:@"No calibrated, feedback-capable gesture executor is installed"];
+    NSArray<ROBSaberTransform *> *transforms =
+        [[ROBSaberChoreographyCatalog shared] transformsForGesture:name];
+    if (transforms == nil) {
+        (void)[coordinator completeGestureWithSuccess:NO
+                                                detail:@"Gesture is not in the calibrated Stage Show choreography catalog"];
+        return;
+    }
+    if (![ROBSaberSafetyGate shared].isArmed) {
+        (void)[coordinator completeGestureWithSuccess:NO
+                                                detail:@"Supervised saber choreography is not armed by the operator"];
+        return;
+    }
+    if (self.serialBox == nil) {
+        (void)[coordinator completeGestureWithSuccess:NO detail:@"Amber arm controller is unavailable"];
+        return;
+    }
+    NSTimeInterval sequenceDuration = 0;
+    for (ROBSaberTransform *transform in transforms) sequenceDuration += transform.duration;
+    if (sequenceDuration > timeout) {
+        (void)[coordinator completeGestureWithSuccess:NO detail:@"Gesture cue is shorter than its bounded choreography"];
+        return;
+    }
+    self.saberChoreographyGeneration += 1;
+    [self executeSaberTransforms:transforms index:0
+                      generation:self.saberChoreographyGeneration coordinator:coordinator];
+}
+
+- (void)executeSaberTransforms:(NSArray<ROBSaberTransform *> *)transforms
+                         index:(NSUInteger)index
+                    generation:(NSUInteger)generation
+                   coordinator:(ROBStageShowCoordinator *)coordinator
+{
+    if (generation != self.saberChoreographyGeneration || ![ROBSaberSafetyGate shared].isArmed) return;
+    if (index >= transforms.count) {
+        (void)[coordinator completeGestureWithSuccess:YES detail:@"Supervised saber choreography completed"];
+        return;
+    }
+    ROBSaberTransform *transform = transforms[index];
+    BOOL accepted = [self.serialBox commandRightAmberSaberX:transform.x y:transform.y z:transform.z
+                                                       roll:transform.roll pitch:transform.pitch yaw:transform.yaw
+                                                   duration:transform.duration];
+    if (!accepted) {
+        (void)[coordinator completeGestureWithSuccess:NO detail:@"Saber transform failed the actuator-side bounds check"];
+        return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(transform.duration * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        [self executeSaberTransforms:transforms index:index + 1 generation:generation coordinator:coordinator];
+    });
 }
 
 - (void)stageShowCoordinatorDidRequestStop:(ROBStageShowCoordinator *)coordinator
 {
+    self.saberChoreographyGeneration += 1;
+    [ROBSaberSafetyGate shared].isArmed = NO;
     [self applyPrioritySoftwareStopWithReason:@"Stage show stopped"];
 }
 

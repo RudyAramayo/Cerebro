@@ -220,6 +220,20 @@ public enum ROBStageShowCodec {
         }
     }
 
+    /// Audience-facing runtime estimate used by the show catalog. Authored
+    /// speech assumes roughly 130 words/minute (about 13 characters/second).
+    /// Checkpoints are operator-paced and intentionally excluded. Validation
+    /// retains its more conservative 8-character/second upper-bound estimate.
+    public static func estimatedDuration(of show: ROBStageShow) -> TimeInterval {
+        show.cues.reduce(0) { total, cue in
+            switch cue.kind {
+            case .speak: return total + Double(cue.text?.count ?? 0) / 13.0
+            case .wait, .playGesture, .geminiTurn: return total + (cue.durationSeconds ?? 0)
+            case .checkpoint: return total
+            }
+        }
+    }
+
     private static func validate(_ cue: ROBStageCue) throws {
         switch cue.kind {
         case .speak:

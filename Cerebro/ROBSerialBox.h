@@ -227,4 +227,10 @@
 - (IBAction)activate_L10:(id)sender;
 - (IBAction)deactivate_L10:(id)sender;
 
+/// Narrow Stage Show bridge. Callers must supply an allow-listed, prevalidated
+/// choreography transform; this method performs a second bounds check.
+- (BOOL)commandRightAmberSaberX:(double)x y:(double)y z:(double)z
+                           roll:(double)roll pitch:(double)pitch yaw:(double)yaw
+                       duration:(NSTimeInterval)duration;
+
 @end

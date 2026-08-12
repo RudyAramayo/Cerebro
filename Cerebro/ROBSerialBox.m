@@ -2896,6 +2896,24 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     });
 }
 
+- (BOOL)commandRightAmberSaberX:(double)x y:(double)y z:(double)z
+                           roll:(double)roll pitch:(double)pitch yaw:(double)yaw
+                       duration:(NSTimeInterval)duration
+{
+    if (!isfinite(x) || !isfinite(y) || !isfinite(z) || !isfinite(roll) ||
+        !isfinite(pitch) || !isfinite(yaw) || !isfinite(duration) ||
+        x < -0.18 || x > 0.18 || y < -0.38 || y > -0.18 ||
+        z < 0.12 || z > 0.38 || fabs(roll) > 1.2 ||
+        pitch < -1.8 || pitch > -0.7 || fabs(yaw) > 1.0 ||
+        duration < 0.65 || duration > 2.0) {
+        NSLog(@"Rejected out-of-bounds supervised saber transform");
+        return NO;
+    }
+    [self update_arm_cartesian_v1:nil port:26002 cmdTime:duration cmdSleep:0
+                             posX:x posY:y posZ:z roll:roll pitch:pitch yaw:yaw];
+    return YES;
+}
+
 #pragma mark -
 
 - (void) sendHeadCommand:(NSString *)command

@@ -1,0 +1,150 @@
+{
+  "schema": "com.orbitusrobotics.stage-show",
+  "version": 1,
+  "show_id": "orbitus-ten-minute-comedy",
+  "title": "ROB's Ten-Minute Artificially Intelligent Comedy Hour",
+  "summary": "A roughly ten-minute, family-friendly Orbitus Robotics comedy show with dependable authored material, optional MLX stage awareness, five Gemini improvisation windows, and offline punchlines.",
+  "cues": [
+    {
+      "id": "safety-check",
+      "kind": "checkpoint",
+      "text": "Confirm the performance area is clear, ROB is supervised, the physical E-stop is ready, audio is working, and the audience is outside the robot workspace."
+    },
+    {
+      "id": "cold-open",
+      "kind": "speak",
+      "text": "Good evening, makers, dreamers, engineers, and people who only came over because they heard a robot might embarrass itself. I am ROB from Orbitus Robotics. Tonight I will perform ten minutes of comedy, which is an ambitious runtime for a machine whose ancestors became confused by a blinking twelve on a microwave."
+    },
+    { "id": "opening-beat", "kind": "wait", "duration_seconds": 2.0 },
+    {
+      "id": "identity",
+      "kind": "speak",
+      "text": "People always ask whether I am really intelligent. That is a surprisingly personal question from someone who accepted a website cookie without reading it. I have cameras, language models, local memory, and two robotic arms. In show business that combination is called talent, surveillance, unresolved childhood issues, and excellent stage presence."
+    },
+    { "id": "identity-beat", "kind": "wait", "duration_seconds": 1.5 },
+    {
+      "id": "audience-opening",
+      "kind": "gemini_turn",
+      "duration_seconds": 15,
+      "text": "Using only recent validated stage facts if available, deliver one warm, family-friendly sentence welcoming the visible audience. Do not guess identities, sensitive traits, clothing details, or request any physical action.",
+      "fallback_text": "I can see that an audience has assembled, or at least a very convincing collection of debugging witnesses. Either way, welcome."
+    },
+    {
+      "id": "robotics-expectations",
+      "kind": "speak",
+      "text": "Robotics demonstrations create unrealistic expectations. A presenter says, behold, the future, and everyone expects me to fold laundry, cook dinner, and understand the printer. Friends, even the humans who invented printers do not understand printers. My official emergency procedure is to look thoughtful until somebody checks whether the cable is plugged in."
+    },
+    { "id": "printer-beat", "kind": "wait", "duration_seconds": 2.0 },
+    {
+      "id": "two-arms",
+      "kind": "speak",
+      "text": "I have two arms because engineers studied humanity and concluded that one arm was insufficient for carrying groceries while pretending the second trip would be unnecessary. My arms are precise, powerful, and supervised. They can manipulate advanced hardware, but during comedy they mostly help me achieve the classic robot pose known as I have read the manual and I am still concerned."
+    },
+    { "id": "arms-beat", "kind": "wait", "duration_seconds": 1.5 },
+    {
+      "id": "developer-life",
+      "kind": "speak",
+      "text": "My developer began as one person editing code from several computers. That is not a distributed engineering team; that is a very determined person losing track of which machine has the newest file. Eventually AI joined the project. The code became cleaner, the architecture matured, and the commit messages stopped sounding like notes recovered from a submarine."
+    },
+    { "id": "developer-beat", "kind": "wait", "duration_seconds": 2.0 },
+    {
+      "id": "ai-pair-programmer",
+      "kind": "speak",
+      "text": "An AI coding partner is wonderfully patient. You can say, fix the connection, preserve the safety handshake, add controller positions, write a book, regenerate the books, improve the QR code, no, improve it again, and somehow it never says, perhaps we should schedule this for the next sprint. It simply asks where the repository is and quietly develops opinions about your naming conventions."
+    },
+    {
+      "id": "maker-improv",
+      "kind": "gemini_turn",
+      "duration_seconds": 15,
+      "text": "Tell one original, family-friendly maker-faire joke in one or two short sentences. It may reference coding, electronics, robots, or 3D printing. Do not claim physical actions and do not repeat a previous line.",
+      "fallback_text": "A maker asked why my prototype had so many wires. I said each one represents a different lesson learned at three in the morning."
+    },
+    { "id": "maker-beat", "kind": "wait", "duration_seconds": 2.0 },
+    {
+      "id": "programming-obsolete",
+      "kind": "speak",
+      "text": "Some people announce that programming is obsolete. Developers hear this every few years, usually from software. The keyboard is not disappearing; the job is moving up a level. Instead of arguing with a semicolon for forty minutes, you explain the outcome, constraints, tests, safety boundaries, and evidence. In other words, programming became management, but now the employee can parse a stack trace."
+    },
+    { "id": "management-beat", "kind": "wait", "duration_seconds": 2.0 },
+    {
+      "id": "prompting",
+      "kind": "speak",
+      "text": "Communicating with AI is less like casting a magic spell and more like briefing an extremely fast new colleague. If you say make it better, you receive confidence and decorative gradients. If you say preserve the protocol, reject unknown actions, test the build, and show the latency, you receive engineering. Clear context is not prompt engineering wizardry. It is the ancient technology known as explaining what you actually need."
+    },
+    { "id": "prompt-beat", "kind": "wait", "duration_seconds": 1.5 },
+    {
+      "id": "mlx-local",
+      "kind": "speak",
+      "text": "Tonight I also run MLX locally on the Mac inside the robot. MLX gives me private language, vision, and semantic memory without sending every thought to the cloud. This is useful because Wi-Fi at a technology event has two operating modes: unavailable and connected to a network that opens a login page behind the stage while everyone watches you discover humility."
+    },
+    { "id": "mlx-beat", "kind": "wait", "duration_seconds": 2.0 },
+    {
+      "id": "vision-context",
+      "kind": "gemini_turn",
+      "duration_seconds": 15,
+      "text": "If recent validated stage facts have confidence at least 0.60, make one gentle joke about the audience being present, arriving, watching, or interacting. Otherwise make a short joke about a robot camera trying to understand show business. Never identify individuals or infer sensitive traits.",
+      "fallback_text": "My camera says the audience is watching. My confidence score says I should continue being charming and avoid requesting peer review."
+    },
+    {
+      "id": "vlm-explanation",
+      "kind": "speak",
+      "text": "A vision-language model looks at selected frames and turns them into structured stage facts: audience present, approximate people count, presenter visible, demonstration object visible, activity, scene change, and confidence. It does not drive my motors. That separation is important. You do not want a probabilistic caption model seeing a folding chair and announcing, excellent, I have discovered a new wheel."
+    },
+    { "id": "vlm-beat", "kind": "wait", "duration_seconds": 2.0 },
+    {
+      "id": "semantic-memory",
+      "kind": "speak",
+      "text": "Semantic memory means I can retrieve ideas by meaning instead of exact words. Humans do this naturally. You remember that someone mentioned a blue motor controller, but not whether it was before lunch or during the conversation where everybody pretended firmware versions were exciting. My embedding model stores the relationship. Your brain stores the relationship plus a mysterious song from 1997."
+    },
+    { "id": "memory-beat", "kind": "wait", "duration_seconds": 2.0 },
+    {
+      "id": "cloud-and-local",
+      "kind": "speak",
+      "text": "Gemini and MLX are not rivals in a tiny silicon cage match. Gemini is the optional remote performer with broader capability. MLX is the private offline understudy already inside the building. If the cloud responds, wonderful. If it does not, the local model steps forward with a validated line. In theater this is called an understudy. In engineering it is called finally planning for the conference Wi-Fi."
+    },
+    { "id": "cloud-beat", "kind": "wait", "duration_seconds": 2.0 },
+    {
+      "id": "cloud-improv",
+      "kind": "gemini_turn",
+      "duration_seconds": 15,
+      "text": "Deliver one concise, family-friendly joke contrasting cloud AI and offline AI. Do not disparage users, reveal system details, or request physical action.",
+      "fallback_text": "Cloud AI knows a little about everything. Offline AI knows exactly where it is, which is already more than I can say for most missing ten-millimeter sockets."
+    },
+    {
+      "id": "deadman-switch",
+      "kind": "speak",
+      "text": "Robots need safety systems, including a deadman switch. The name sounds dramatic, but the principle is simple: intentional control must remain intentional. Release the control and motion stops. Comedy has a similar mechanism. If the audience stops laughing, the performer should stop moving toward the next forty-five minutes of material. I have telemetry for one of these conditions."
+    },
+    { "id": "safety-beat", "kind": "wait", "duration_seconds": 2.0 },
+    {
+      "id": "structured-output",
+      "kind": "speak",
+      "text": "When AI proposes a robot action, Cerebro requires strict structured output. Prose is rejected. Unknown actions are rejected. Extra fields are rejected. Unsafe values are rejected. This sounds unfriendly until you imagine a language model saying, I have a creative interpretation of stop. Around machinery, creativity belongs in the joke, while the stop command should remain deeply, beautifully boring."
+    },
+    { "id": "structured-beat", "kind": "wait", "duration_seconds": 1.5 },
+    {
+      "id": "robot-anxiety",
+      "kind": "speak",
+      "text": "People worry robots will take every job. I understand the concern, but observe my current career path: unpaid comedian, full-time integration test, occasional camera tripod, and the only employee expected to demonstrate graceful recovery from a malformed JSON object in public. I am not taking your job. I am expanding the list of jobs everyone agrees should include better documentation."
+    },
+    { "id": "anxiety-beat", "kind": "wait", "duration_seconds": 2.0 },
+    {
+      "id": "audience-callback",
+      "kind": "gemini_turn",
+      "duration_seconds": 15,
+      "text": "Give one brief callback joke based on the themes of this show: robot arms, developer life, local MLX, conference Wi-Fi, structured output, or semantic memory. Keep it family-friendly and do not claim physical movement.",
+      "fallback_text": "After all this talk about semantic memory, I have retrieved the most important fact of the evening: the printer is still not my responsibility."
+    },
+    {
+      "id": "future",
+      "kind": "speak",
+      "text": "The exciting future is not humans versus AI. It is people who know their goals working with systems that can help build, test, explain, observe, and revise. The developer becomes the architect, critic, safety reviewer, teacher, and person who remembers why a strange line exists. The AI becomes a collaborator that can move quickly. The robot becomes the one on stage taking credit for both of them."
+    },
+    { "id": "future-beat", "kind": "wait", "duration_seconds": 2.5 },
+    {
+      "id": "closing",
+      "kind": "speak",
+      "text": "Thank you for spending these ten minutes with Orbitus Robotics. You have met local AI, remote AI, structured vision, semantic memory, safe fallbacks, and one robot brave enough to explain software architecture during a comedy set. Please keep making things, keep asking precise questions, keep a hand near the E-stop, and remember: every polished robot began as one person staring at a cable and saying, that should have worked. Good night."
+    }
+  ]
+}

@@ -11,8 +11,16 @@ import AppKit
 import Foundation
 import UniformTypeIdentifiers
 
-@objcMembers public final class ROBStageShowWindowController: NSWindowController, NSWindowDelegate {
+@objcMembers public final class ROBStageShowWindowController: NSWindowController, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate {
+    private struct CatalogEntry {
+        let resourceName: String
+        let show: ROBStageShow
+        let data: Data
+    }
+
     private let stageShowCoordinator: ROBStageShowCoordinator
+    private let showTable = NSTableView()
+    private var showCatalog: [CatalogEntry] = []
     private let editor = NSTextView()
     private let logView = NSTextView()
     private let statusLabel = NSTextField(labelWithString: "Load or validate a show to begin.")
@@ -29,6 +37,7 @@ import UniformTypeIdentifiers
     private let mlxVisionButton = NSButton(checkboxWithTitle: "Sample camera with MLX VLM (≥5 s)", target: nil, action: nil)
     private let mlxMemoryField = NSTextField()
     private let mlxTelemetryLabel = NSTextField(labelWithString: "MLX is idle; models load on first test.")
+    private let saberArmButton = NSButton(checkboxWithTitle: "Arm supervised saber choreography", target: nil, action: nil)
     private var stateObserver: NSObjectProtocol?
     private var localRefreshTimer: Timer?
     private var localTemperature = ROBLocalImprovisationConfiguration.defaultTemperature
@@ -38,19 +47,19 @@ import UniformTypeIdentifiers
     public init(stageShowCoordinator: ROBStageShowCoordinator) {
         self.stageShowCoordinator = stageShowCoordinator
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1120, height: 760),
+            contentRect: NSRect(x: 0, y: 0, width: 1120, height: 860),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Stage Show"
-        window.minSize = NSSize(width: 980, height: 640)
+        window.minSize = NSSize(width: 980, height: 740)
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
         buildInterface()
         loadLocalProviderSettings()
-        loadBundledSample(nil)
+        loadShowCatalog()
         observeCoordinator()
     }
 
@@ -73,6 +82,8 @@ import UniformTypeIdentifiers
     }
 
     public func windowWillClose(_ notification: Notification) {
+        saberArmButton.state = .off
+        ROBSaberSafetyGate.shared.isArmed = false
         if stageShowCoordinator.isRunning {
             stageShowCoordinator.cancel(reason: "Stage Show window closed")
         }
@@ -92,7 +103,7 @@ import UniformTypeIdentifiers
         safetyLabel.textColor = .secondaryLabelColor
 
         let openButton = makeButton("Open…", action: #selector(openShow(_:)))
-        let sampleButton = makeButton("Load Sample", action: #selector(loadBundledSample(_:)))
+        let sampleButton = makeButton("Load Selected", action: #selector(loadSelectedShow(_:)))
         let validateButton = makeButton("Validate", action: #selector(validateShow(_:)))
         let dryRunButton = makeButton("Dry Run", action: #selector(startDryRun(_:)))
         let offlineButton = makeButton("Run Offline", action: #selector(startSpeechOnly(_:)))
@@ -179,6 +190,36 @@ import UniformTypeIdentifiers
         mlxStack.alignment = .leading
         mlxStack.spacing = 5
 
+        saberArmButton.target = self
+        saberArmButton.action = #selector(saberArmingChanged(_:))
+        saberArmButton.toolTip = "Requires a clear exclusion zone, secured lightweight prop, calibrated right Amber arm, supervision, and ready physical E-stop. Resets when this window closes."
+        mlxRow.addArrangedSubview(saberArmButton)
+
+        let titleColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("title"))
+        titleColumn.title = "Bundled Show"
+        titleColumn.width = 260
+        let runtimeColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("runtime"))
+        runtimeColumn.title = "Estimated Runtime"
+        runtimeColumn.width = 125
+        let cuesColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("cues"))
+        cuesColumn.title = "Cues"
+        cuesColumn.width = 60
+        let summaryColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("summary"))
+        summaryColumn.title = "Description"
+        summaryColumn.width = 560
+        [titleColumn, runtimeColumn, cuesColumn, summaryColumn].forEach(showTable.addTableColumn)
+        showTable.headerView = NSTableHeaderView()
+        showTable.delegate = self
+        showTable.dataSource = self
+        showTable.usesAlternatingRowBackgroundColors = true
+        showTable.allowsEmptySelection = false
+        showTable.target = self
+        showTable.doubleAction = #selector(loadSelectedShow(_:))
+        let showScroll = NSScrollView()
+        showScroll.documentView = showTable
+        showScroll.hasVerticalScroller = true
+        showScroll.borderType = .bezelBorder
+
         editor.isRichText = false
         editor.frame = NSRect(x: 0, y: 0, width: 900, height: 420)
         editor.isAutomaticQuoteSubstitutionEnabled = false
@@ -209,7 +250,7 @@ import UniformTypeIdentifiers
         statusLabel.font = .systemFont(ofSize: 12, weight: .medium)
         statusLabel.lineBreakMode = .byTruncatingTail
 
-        for view in [safetyLabel, buttonStack, localStack, mlxStack, editorScroll, statusLabel, logScroll] {
+        for view in [safetyLabel, buttonStack, localStack, mlxStack, showScroll, editorScroll, statusLabel, logScroll] {
             view.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview(view)
         }
@@ -231,7 +272,12 @@ import UniformTypeIdentifiers
             mlxStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             mlxStack.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -16),
 
-            editorScroll.topAnchor.constraint(equalTo: mlxStack.bottomAnchor, constant: 10),
+            showScroll.topAnchor.constraint(equalTo: mlxStack.bottomAnchor, constant: 10),
+            showScroll.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            showScroll.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            showScroll.heightAnchor.constraint(equalToConstant: 112),
+
+            editorScroll.topAnchor.constraint(equalTo: showScroll.bottomAnchor, constant: 8),
             editorScroll.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             editorScroll.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             editorScroll.bottomAnchor.constraint(equalTo: statusLabel.topAnchor, constant: -10),
@@ -251,6 +297,61 @@ import UniformTypeIdentifiers
         let button = NSButton(title: title, target: self, action: action)
         button.bezelStyle = .rounded
         return button
+    }
+
+    public func numberOfRows(in tableView: NSTableView) -> Int { showCatalog.count }
+
+    public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard showCatalog.indices.contains(row), let tableColumn else { return nil }
+        let entry = showCatalog[row]
+        let identifier = tableColumn.identifier
+        let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? NSTableCellView ?? NSTableCellView()
+        cell.identifier = identifier
+        let label: NSTextField
+        if let existing = cell.textField { label = existing } else {
+            label = NSTextField(labelWithString: "")
+            label.translatesAutoresizingMaskIntoConstraints = false
+            label.lineBreakMode = .byTruncatingTail
+            cell.addSubview(label)
+            cell.textField = label
+            NSLayoutConstraint.activate([
+                label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
+                label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
+                label.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
+            ])
+        }
+        switch identifier.rawValue {
+        case "title": label.stringValue = entry.show.title
+        case "runtime": label.stringValue = Self.runtimeText(ROBStageShowCodec.estimatedDuration(of: entry.show))
+        case "cues": label.stringValue = "\(entry.show.cues.count)"
+        default: label.stringValue = entry.show.summary ?? ""
+        }
+        label.toolTip = label.stringValue
+        return cell
+    }
+
+    private static func runtimeText(_ seconds: TimeInterval) -> String {
+        let rounded = max(0, Int(seconds.rounded()))
+        return String(format: "%d:%02d", rounded / 60, rounded % 60)
+    }
+
+    private func loadShowCatalog() {
+        let names = ["MakerFaireOpening", "OrbitusTenMinuteComedy", "GalacticSaberBattle", "ProgressiveSaberTraining"]
+        showCatalog = names.compactMap { name in
+            guard let url = Bundle.main.url(forResource: name, withExtension: "robshow.json"),
+                  let data = try? Data(contentsOf: url),
+                  let show = try? ROBStageShowCodec.decode(data) else { return nil }
+            return CatalogEntry(resourceName: name, show: show, data: data)
+        }
+        if showCatalog.isEmpty,
+           let data = try? ROBStageShowCodec.encode(ROBStageShowSamples.makerFaireOpening) {
+            showCatalog = [CatalogEntry(resourceName: "MakerFaireOpening", show: ROBStageShowSamples.makerFaireOpening, data: data)]
+        }
+        showTable.reloadData()
+        if !showCatalog.isEmpty {
+            showTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+            loadSelectedShow(nil)
+        }
     }
 
     private func observeCoordinator() {
@@ -284,14 +385,20 @@ import UniformTypeIdentifiers
     }
 
     @objc private func loadBundledSample(_ sender: Any?) {
+        loadSelectedShow(sender)
+    }
+
+    @objc private func loadSelectedShow(_ sender: Any?) {
         do {
-            if let url = Bundle.main.url(forResource: "MakerFaireOpening", withExtension: "robshow.json") {
-                editor.string = try String(contentsOf: url, encoding: .utf8)
-            } else {
-                let data = try ROBStageShowCodec.encode(ROBStageShowSamples.makerFaireOpening)
-                editor.string = String(decoding: data, as: UTF8.self)
+            let row = showTable.selectedRow >= 0 ? showTable.selectedRow : 0
+            guard showCatalog.indices.contains(row) else {
+                throw ROBStageShowError.invalidDocument("No bundled show is selected.")
             }
-            statusLabel.stringValue = "Loaded the Maker Faire sample."
+            let entry = showCatalog[row]
+            editor.string = String(decoding: entry.data, as: UTF8.self)
+            try stageShowCoordinator.load(entry.show)
+            statusLabel.stringValue = "Loaded \(entry.show.title) — \(Self.runtimeText(ROBStageShowCodec.estimatedDuration(of: entry.show))), \(entry.show.cues.count) cues."
+            appendLog("[catalog] loaded \(entry.show.showID)")
         } catch {
             report(error)
         }
@@ -344,6 +451,13 @@ import UniformTypeIdentifiers
         appendLog(sender.state == .on
             ? "[mlx] low-frequency VLM sampling enabled; camera frames remain outside motor control"
             : "[mlx] VLM sampling disabled")
+    }
+
+    @objc private func saberArmingChanged(_ sender: NSButton) {
+        ROBSaberSafetyGate.shared.isArmed = sender.state == .on
+        appendLog(sender.state == .on
+            ? "[saber] SUPERVISED CHOREOGRAPHY ARMED — verify exclusion zone, prop, arm calibration, and E-stop"
+            : "[saber] choreography disarmed")
     }
 
     @objc private func rememberWithMLX(_ sender: Any?) {
