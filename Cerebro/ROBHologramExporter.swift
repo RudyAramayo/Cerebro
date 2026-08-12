@@ -75,9 +75,16 @@ import Darwin
         guard shouldCaptureMovieFrame else { return }
         let points = makePoints(frame: frame, stride: max(2, 6 / movieDetailScale))
         guard !points.isEmpty else { return }
+        let depthData = Data(bytes: frame.millimetersLittleEndian.bytes,
+                             count: frame.millimetersLittleEndian.length)
+        let rgbJPEG = frame.rgbPixelBuffer.flatMap { jpegData(pixelBuffer: $0, quality: 0.88) }
         lock.lock()
         if isMovieRecording {
-            movieFrames.append(MovieFrame(timestamp: Float(now - movieStartedAt), points: points))
+            movieFrames.append(MovieFrame(
+                timestamp: Float(now - movieStartedAt), points: points,
+                width: frame.width, height: frame.height,
+                depth: depthData, rgbJPEG: rgbJPEG
+            ))
         }
         lock.unlock()
     }
@@ -326,19 +333,42 @@ import Darwin
         try Self.localServer.write(to: folder.appendingPathComponent("serve.py"), atomically: true, encoding: .utf8)
         try Self.movieReadme.write(to: folder.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
         let usda = folder.appendingPathComponent("hologram.usda")
-        try animatedUSD(frames: frames, audioName: hasAudio ? audioName : nil, detail: detail)
+        let arFrames = selectedARMovieFrames(frames, detail: detail)
+        var textureURLs: [URL] = []
+        for (index, frame) in arFrames.enumerated() {
+            guard let jpeg = frame.rgbJPEG else { continue }
+            let url = folder.appendingPathComponent(String(format: "movie-rgb-%03d.jpg", index))
+            try jpeg.write(to: url, options: .atomic)
+            textureURLs.append(url)
+        }
+        try animatedUSD(frames: arFrames, audioName: hasAudio ? audioName : nil, detail: detail)
             .write(to: usda, atomically: true, encoding: .utf8)
         try createUSDZ(
             from: usda,
             at: folder.appendingPathComponent("hologram.usdz"),
-            additionalFiles: hasAudio ? [packagedAudioURL] : []
+            additionalFiles: textureURLs + (hasAudio ? [packagedAudioURL] : [])
         )
         try? fileManager.removeItem(at: usda)
     }
 
     private struct Point { let x, y, z: Float; let r, g, b: UInt8 }
-    private struct MovieFrame { let timestamp: Float; let points: [Point] }
+    private struct MovieFrame {
+        let timestamp: Float
+        let points: [Point]
+        let width: Int
+        let height: Int
+        let depth: Data
+        let rgbJPEG: Data?
+    }
     private struct ARMovieFrame { let timestamp: Float; let points: [Point] }
+
+    private func jpegData(pixelBuffer: CVPixelBuffer, quality: CGFloat) -> Data? {
+        let image = CIImage(cvPixelBuffer: pixelBuffer)
+        let context = CIContext(options: [.useSoftwareRenderer: false])
+        guard let cgImage = context.createCGImage(image, from: image.extent) else { return nil }
+        return NSBitmapImageRep(cgImage: cgImage)
+            .representation(using: .jpeg, properties: [.compressionFactor: quality])
+    }
 
     private func makePoints(frame: ROBDepthCloudFrame, stride sampleStride: Int = 3) -> [Point] {
         let width = frame.width, height = frame.height
@@ -631,7 +661,123 @@ import Darwin
         """
     }
 
+    private func selectedARMovieFrames(_ frames: [MovieFrame], detail: Int) -> [MovieFrame] {
+        let interval: Float = detail == 3 ? 0.25 : (detail == 2 ? 0.20 : 0.125)
+        var last: Float = -.infinity
+        return frames.enumerated().compactMap { index, frame in
+            guard frame.rgbJPEG != nil else { return nil }
+            let keep = frame.timestamp - last >= interval || index == frames.count - 1
+            if keep { last = frame.timestamp }
+            return keep ? frame : nil
+        }
+    }
+
     private func animatedUSD(frames: [MovieFrame], audioName: String?, detail: Int) -> String {
+        guard let reference = frames.first else { return "" }
+        let gridStep = [1: 5, 2: 4, 3: 3][detail] ?? 5
+        let columns = Array(stride(from: 0, to: reference.width, by: gridStep))
+        let rows = Array(stride(from: 0, to: reference.height, by: gridStep))
+        let focal = Float(reference.width) / (2 * tan(69 * .pi / 360))
+        let cx = Float(reference.width - 1) / 2, cy = Float(reference.height - 1) / 2
+        func depths(_ frame: MovieFrame) -> [UInt16] {
+            frame.depth.withUnsafeBytes { raw in
+                guard let bytes = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return [] }
+                return rows.flatMap { y in columns.map { x in
+                    let offset = (y * frame.width + x) * 2
+                    return UInt16(bytes[offset]) | UInt16(bytes[offset + 1]) << 8
+                }}
+            }
+        }
+        let allDepths = frames.map(depths)
+        let referenceDepths = allDepths.first ?? []
+        var indices: [String] = [], counts: [String] = []
+        let discontinuity = detail == 3 ? 160 : 210
+        for row in 0..<(rows.count - 1) {
+            for column in 0..<(columns.count - 1) {
+                let a = row * columns.count + column, b = a + 1
+                let d = (row + 1) * columns.count + column, c = d + 1
+                let cell = [a, b, c, d], values = cell.map { Int(referenceDepths[$0]) }
+                guard values.allSatisfy({ $0 >= 200 && $0 <= 8_000 }),
+                      values.max()! - values.min()! <= discontinuity else { continue }
+                indices.append(contentsOf: cell.map(String.init)); counts.append("4")
+            }
+        }
+        let uvs = rows.flatMap { y in columns.map { x in
+            "(\(Float(x) / Float(max(reference.width - 1, 1))), \(1 - Float(y) / Float(max(reference.height - 1, 1))))"
+        }}
+        var pointSamples: [String] = []
+        for (frameIndex, frame) in frames.enumerated() {
+            let frameDepths = allDepths[frameIndex]
+            let points = frameDepths.enumerated().map { index, mm -> String in
+                let x = columns[index % columns.count], y = rows[index / columns.count]
+                let valid = mm >= 200 && mm <= 8_000
+                let fallback = referenceDepths[index]
+                let chosen = valid ? mm : (fallback >= 200 && fallback <= 8_000 ? fallback : 1_000)
+                let meters = Float(chosen) / 1000
+                return "(\((Float(x) - cx) * meters / focal), \(-(Float(y) - cy) * meters / focal), \(-meters))"
+            }
+            pointSamples.append("\(Int((frame.timestamp * 1_000).rounded())): [\(points.joined(separator: ",\n"))]")
+        }
+        let textureSamples = frames.enumerated().map { index, frame in
+            "\(Int((frame.timestamp * 1_000).rounded())): @\(String(format: "movie-rgb-%03d.jpg", index))@"
+        }
+        let endTime = max(1, Int(((frames.last?.timestamp ?? 0) * 1_000).rounded()) + 125)
+        let audio = audioName.map { name in
+            """
+            def SpatialAudio "MessageAudio" {
+                uniform asset filePath = @\(name)@
+                uniform token auralMode = "nonSpatial"
+                uniform token playbackMode = "onceFromStartToEnd"
+                uniform timecode startTime = 0
+                uniform timecode endTime = \(endTime)
+            }
+            """
+        } ?? ""
+        return """
+        #usda 1.0
+        ( defaultPrim = "Hologram" startTimeCode = 0 endTimeCode = \(endTime) timeCodesPerSecond = 1000 metersPerUnit = 1 upAxis = "Y" )
+        def Xform "Hologram" {
+            double3 xformOp:translate = (0, 0.9144, 0)
+            float3 xformOp:scale = (0.45, 0.45, 0.45)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+            def Material "AnimatedRGBSurface" {
+                token outputs:surface.connect = </Hologram/AnimatedRGBSurface/PreviewSurface.outputs:surface>
+                def Shader "UVReader" {
+                    uniform token info:id = "UsdPrimvarReader_float2"
+                    string inputs:varname = "st"
+                    float2 outputs:result
+                }
+                def Shader "RGBTexture" {
+                    uniform token info:id = "UsdUVTexture"
+                    asset inputs:file = @movie-rgb-000.jpg@
+                    asset inputs:file.timeSamples = { \(textureSamples.joined(separator: ",\n")) }
+                    float2 inputs:st.connect = </Hologram/AnimatedRGBSurface/UVReader.outputs:result>
+                    token inputs:sourceColorSpace = "sRGB"
+                    float3 outputs:rgb
+                }
+                def Shader "PreviewSurface" {
+                    uniform token info:id = "UsdPreviewSurface"
+                    color3f inputs:diffuseColor.connect = </Hologram/AnimatedRGBSurface/RGBTexture.outputs:rgb>
+                    float inputs:metallic = 0
+                    float inputs:roughness = 0.9
+                    token outputs:surface
+                }
+            }
+            def Mesh "AnimatedRGBDepthSurface" ( prepend apiSchemas = ["MaterialBindingAPI"] ) {
+                uniform token subdivisionScheme = "none"
+                bool doubleSided = true
+                rel material:binding = </Hologram/AnimatedRGBSurface>
+                int[] faceVertexCounts = [\(counts.joined(separator: ","))]
+                int[] faceVertexIndices = [\(indices.joined(separator: ","))]
+                point3f[] points.timeSamples = { \(pointSamples.joined(separator: ",\n")) }
+                texCoord2f[] primvars:st = [\(uvs.joined(separator: ",\n"))] ( interpolation = "vertex" )
+            }
+            \(audio)
+        }
+        """
+    }
+
+    private func legacyAnimatedVoxelUSD(frames: [MovieFrame], audioName: String?, detail: Int) -> String {
         let maximumPointsPerFrame = movieARPointBudget(for: detail)
         // Spend the mobile USDZ budget on spatial detail instead of repeating
         // nearly identical 8 Hz frames. Quick Look interpolates vertex samples.
@@ -900,7 +1046,7 @@ private extension ROBHologramExporter {
 
     A synchronized RGB-D voxel recording with microphone audio, interactive Three.js playback, and an animated USDZ for Apple AR Quick Look.
 
-    Choose **Development → Hologram Voxel Detail…** before recording to select Standard, High, or Ultra resolution. Apple AR movie exports use up to 4,000, 10,000, or 18,000 animated voxels per frame respectively, with 64 RGB material colors and progressively smaller voxel faces. Ultra favors spatial resolution by using four interpolated geometry samples per second.
+    Choose **Development → Hologram Voxel Detail…** before recording to select Standard, High, or Ultra resolution. Apple AR movies use one connected animated depth surface with synchronized RGB image textures; higher settings use a finer surface grid. Ultra retains four detailed RGB-D geometry samples per second for practical iPhone playback.
 
     Preview locally (camera AR and JavaScript modules require HTTP):
 
@@ -914,7 +1060,7 @@ private extension ROBHologramExporter {
     - Tap **Watch in Apple AR** on iPhone, iPad, or Apple Vision Pro for animated USDZ playback with audio.
     - Non-Apple browsers with immersive WebXR support receive a passthrough AR button.
 
-    The AR copy uses a bounded 64-color RGB palette and detail-dependent geometry sampling to keep mobile playback responsive. The browser copy retains the denser recorded RGB point frames.
+    The Apple AR copy uses an animated connected depth mesh and synchronized full-color JPEG textures to remain recognizable in Quick Look. The browser copy retains the denser recorded RGB point frames.
     """#
 
     static let localServer = #"""
