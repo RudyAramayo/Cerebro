@@ -43,6 +43,7 @@
 @property (nonatomic, assign) BOOL recognizerRestartScheduled;
 @property (nonatomic, assign) BOOL isShuttingDown;
 @property (nonatomic, assign) NSUInteger recognitionGeneration;
+@property (nonatomic, assign) BOOL hologramRecordingOwnsMicrophone;
 
 - (void)beginRecognitionSession;
 - (void)startAudioCapture;
@@ -62,6 +63,14 @@
     self = [super init];
     if (self) {
         NSLog(@"SpeechBox Init");
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(pauseForHologramRecording:)
+                                                     name:@"ROBHologramWillBeginAudioRecording"
+                                                   object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(resumeAfterHologramRecording:)
+                                                     name:@"ROBHologramDidEndAudioRecording"
+                                                   object:nil];
         self.emotion = anger;
         self.commands = [@[@"robbie", @"robot", @"hey robbie", @"hey robot", @"rob",  @"robbie one"] mutableCopy];
         self.robsDefaultVoiceIdentifier = @"com.apple.voice.enhanced.en-GB.Oliver";
@@ -294,7 +303,7 @@
         });
         return;
     }
-    if (self.isShuttingDown || self.recognizerStartInProgress || self.task != nil) {
+    if (self.isShuttingDown || self.hologramRecordingOwnsMicrophone || self.recognizerStartInProgress || self.task != nil) {
         return;
     }
 
@@ -380,7 +389,7 @@
 
 - (void)startAudioCapture
 {
-    if (self.isShuttingDown) {
+    if (self.isShuttingDown || self.hologramRecordingOwnsMicrophone) {
         return;
     }
     if (!self.audioEngine) {
@@ -410,6 +419,25 @@
         if (audioError) {
             NSLog(@"Unable to start microphone capture: %@", audioError.localizedDescription);
         }
+    }
+}
+
+- (void)pauseForHologramRecording:(NSNotification *)notification
+{
+    self.hologramRecordingOwnsMicrophone = YES;
+    self.recognizerRestartScheduled = NO;
+    [self teardownSpeechRecognition];
+    [self teardownAudioCapture];
+}
+
+- (void)resumeAfterHologramRecording:(NSNotification *)notification
+{
+    if (!self.hologramRecordingOwnsMicrophone) {
+        return;
+    }
+    self.hologramRecordingOwnsMicrophone = NO;
+    if (!self.isShuttingDown) {
+        [self setupSpeechRecognition];
     }
 }
 

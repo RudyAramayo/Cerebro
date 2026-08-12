@@ -16,7 +16,7 @@
       "kind" : "wait"
     },
     {
-      "duration_seconds" : 6,
+      "duration_seconds" : 15,
       "fallback_text" : "I asked the cloud for a joke, but the Wi-Fi is still assembling itself.",
       "id" : "live-joke",
       "kind" : "gemini_turn",

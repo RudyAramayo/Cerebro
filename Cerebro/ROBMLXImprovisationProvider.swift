@@ -53,8 +53,9 @@ public final class ROBMLXImprovisationProvider: ROBLocalImprovisationProviding {
             guard let self else { return }
             let result: Result<ROBLocalImprovisationPlan, Error>
             do {
+                let stageContext = await ROBMLXEngine.shared.currentStageContext()
                 let text = try await ROBMLXEngine.shared.generate(
-                    prompt: Self.prompt(for: request),
+                    prompt: Self.prompt(for: request, stageContext: stageContext),
                     modelID: configuration.model,
                     maxTokens: 256,
                     temperature: Float(configuration.temperature)
@@ -136,7 +137,7 @@ public final class ROBMLXImprovisationProvider: ROBLocalImprovisationProviding {
         DispatchQueue.main.async { completion(result) }
     }
 
-    private static func prompt(for request: ROBLocalImprovisationRequest) -> String {
+    private static func prompt(for request: ROBLocalImprovisationRequest, stageContext: String?) -> String {
         """
         You are ROB's private offline stage director. Output exactly one minified JSON object. Start with { and end with }. Do not output Markdown, analysis, or prose outside JSON.
         Use exactly these five keys: schema, version, beat, delivery, offline_line.
@@ -149,6 +150,7 @@ public final class ROBMLXImprovisationProvider: ROBLocalImprovisationProviding {
         Cue: \(request.cueID)
         Scene goal: \(request.sceneGoal)
         Authored fallback: \(request.authoredFallback)
+        \(stageContext ?? "No recent high-confidence local camera facts are available. Do not claim to see the audience.")
         """
     }
 

@@ -368,7 +368,7 @@ public enum ROBStageShowSamples {
                 id: "live-joke",
                 kind: .geminiTurn,
                 text: "Deliver one family-friendly, one-sentence joke about a robot performing at a maker faire. Do not request or claim any physical action.",
-                durationSeconds: 6,
+                durationSeconds: 15,
                 fallbackText: "I asked the cloud for a joke, but the Wi-Fi is still assembling itself."
             ),
             ROBStageCue(id: "beat-two", kind: .wait, durationSeconds: 0.5),

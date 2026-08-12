@@ -16,5 +16,6 @@
 - (IBAction)showHologramCaptureSettings:(id)sender;
 - (IBAction)startHologramMovieRecording:(id)sender;
 - (IBAction)stopHologramMovieRecording:(id)sender;
+- (IBAction)shareLatestHologramViaAirDrop:(id)sender;
 
 @end

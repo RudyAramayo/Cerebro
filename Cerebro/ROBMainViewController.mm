@@ -1880,6 +1880,38 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         return;
     }
 
+    if ([msg isEqualToString:@"ROBOperatorTextV1"])
+    {
+        NSString *version = messageDictionary[@"operator.text.version"];
+        NSString *mode = messageDictionary[@"operator.text.mode"];
+        id rawText = messageDictionary[@"operator.text.value"];
+        NSString *operatorText = [rawText isKindOfClass:NSString.class]
+            ? [(NSString *)rawText stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]
+            : nil;
+        NSCharacterSet *forbiddenControls = [[NSCharacterSet controlCharacterSet] mutableCopy];
+        [(NSMutableCharacterSet *)forbiddenControls removeCharactersInString:@"\n\t"];
+        BOOL valid = [version isEqualToString:@"1"]
+            && [sender isKindOfClass:NSString.class] && sender.length > 0 && sender.length <= 128
+            && operatorText.length > 0 && operatorText.length <= 1024
+            && [operatorText rangeOfCharacterFromSet:forbiddenControls].location == NSNotFound
+            && ([mode isEqualToString:@"command"] || [mode isEqualToString:@"puppetSpeech"]);
+        if (!valid) {
+            NSLog(@"Ignoring malformed Vision Pro operator text");
+            return;
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if ([mode isEqualToString:@"puppetSpeech"]) {
+                [self.speechBox sayIt:operatorText];
+            } else {
+                [self inputText:operatorText];
+            }
+            self.audioInputTaskController.textView.string =
+                [self.audioInputTaskController.textView.string
+                    stringByAppendingString:[NSString stringWithFormat:@"\nVision Pro (%@): %@\n", mode, operatorText]];
+        });
+        return;
+    }
+
     if ([msg isEqualToString:@"ROBWatchDriveSnapshotV1"])
     {
         NSString *version = messageDictionary[@"watch.drive.version"];

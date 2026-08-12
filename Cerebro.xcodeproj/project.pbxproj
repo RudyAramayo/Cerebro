@@ -35,6 +35,7 @@
 		D4E900022F00000100000001 /* ROBLlamaCppImprovisationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E900012F00000100000001 /* ROBLlamaCppImprovisationProvider.swift */; };
 		D4EA00022F00000100000001 /* ROBMLXRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4EA00012F00000100000001 /* ROBMLXRuntime.swift */; };
 		D4EA00042F00000100000001 /* ROBMLXImprovisationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4EA00032F00000100000001 /* ROBMLXImprovisationProvider.swift */; };
+		D4EA00062F00000100000001 /* ROBMLXStageObservation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4EA00052F00000100000001 /* ROBMLXStageObservation.swift */; };
 		D4EA01012F00000100000001 /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = D4EA02012F00000100000001 /* MLX */; };
 		D4EA01022F00000100000001 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = D4EA02022F00000100000001 /* MLXLMCommon */; };
 		D4EA01032F00000100000001 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = D4EA02032F00000100000001 /* MLXLLM */; };
@@ -170,6 +171,7 @@
 		D4E900012F00000100000001 /* ROBLlamaCppImprovisationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBLlamaCppImprovisationProvider.swift; sourceTree = "<group>"; };
 		D4EA00012F00000100000001 /* ROBMLXRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBMLXRuntime.swift; sourceTree = "<group>"; };
 		D4EA00032F00000100000001 /* ROBMLXImprovisationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBMLXImprovisationProvider.swift; sourceTree = "<group>"; };
+		D4EA00052F00000100000001 /* ROBMLXStageObservation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBMLXStageObservation.swift; sourceTree = "<group>"; };
 		D40D36F520B4BA060006EF82 /* Cerebro-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Cerebro-Bridging-Header.h"; sourceTree = "<group>"; };
 		D40D36F820B4BA270006EF82 /* SimpleUserTracker.command */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.sh; path = SimpleUserTracker.command; sourceTree = "<group>"; };
 		D40D36FA20B4BE5F0006EF82 /* SimpleUserTrackerTaskController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SimpleUserTrackerTaskController.h; sourceTree = "<group>"; };
@@ -396,6 +398,7 @@
 				D4E900012F00000100000001 /* ROBLlamaCppImprovisationProvider.swift */,
 				D4EA00012F00000100000001 /* ROBMLXRuntime.swift */,
 				D4EA00032F00000100000001 /* ROBMLXImprovisationProvider.swift */,
+				D4EA00052F00000100000001 /* ROBMLXStageObservation.swift */,
 				D408B1202E15E7E300F6FEB3 /* ROBAI.swift */,
 				C0D5B0012F00000100000001 /* ROBSceneSnapshot.swift */,
 				C0D6B0012F00000100000001 /* ROBVisualCalibration.swift */,
@@ -675,6 +678,7 @@
 				D4E900022F00000100000001 /* ROBLlamaCppImprovisationProvider.swift in Sources */,
 				D4EA00022F00000100000001 /* ROBMLXRuntime.swift in Sources */,
 				D4EA00042F00000100000001 /* ROBMLXImprovisationProvider.swift in Sources */,
+				D4EA00062F00000100000001 /* ROBMLXStageObservation.swift in Sources */,
 				D408B1212E15E7E300F6FEB3 /* ROBAI.swift in Sources */,
 				C0D5A0012F00000100000001 /* ROBSceneSnapshot.swift in Sources */,
 				C0D6A0012F00000100000001 /* ROBVisualCalibration.swift in Sources */,

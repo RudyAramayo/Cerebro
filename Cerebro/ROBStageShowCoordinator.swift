@@ -608,6 +608,8 @@ public extension Notification.Name {
 
     private func scheduleGeminiFallback(after seconds: TimeInterval) {
         let expectedGeneration = generation
+        let totalBudget = currentCue?.durationSeconds ?? seconds
+        let localPlanningSeconds = max(0, totalBudget - seconds)
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak self] _ in
             guard let self,
@@ -616,7 +618,19 @@ public extension Notification.Name {
                   case .gemini = self.awaiting,
                   let cue = self.currentCue else { return }
             self.clearGeminiTurn(cancelRequest: true)
-            self.speakAdaptiveFallback(for: cue, reason: "Gemini timed out after \(seconds) seconds")
+            let reason: String
+            if localPlanningSeconds >= 0.05 {
+                reason = String(
+                    format: "Gemini did not complete within %.1f seconds (%.1f-second cue budget; %.1f seconds used for local planning)",
+                    seconds, totalBudget, localPlanningSeconds
+                )
+            } else {
+                reason = String(
+                    format: "Gemini did not complete within %.1f seconds (%.1f-second cue budget)",
+                    seconds, totalBudget
+                )
+            }
+            self.speakAdaptiveFallback(for: cue, reason: reason)
         }
     }
 

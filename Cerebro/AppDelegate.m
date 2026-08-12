@@ -44,6 +44,7 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
 @property (readwrite, retain) NSMenuItem *hologramSettingsMenuItem;
 @property (readwrite, retain) NSMenuItem *hologramRecordMenuItem;
 @property (readwrite, retain) NSMenuItem *hologramStopMenuItem;
+@property (readwrite, retain) NSMenuItem *hologramAirDropMenuItem;
 - (BOOL)cerebroCheck;
 
 @end
@@ -131,6 +132,12 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
         keyEquivalent:@""];
     self.hologramStopMenuItem.target = self;
     [submenu addItem:self.hologramStopMenuItem];
+    self.hologramAirDropMenuItem = [[NSMenuItem alloc]
+        initWithTitle:@"AirDrop Latest Hologram for 10 Minutes…"
+               action:@selector(shareLatestHologramViaAirDrop:)
+        keyEquivalent:@""];
+    self.hologramAirDropMenuItem.target = self;
+    [submenu addItem:self.hologramAirDropMenuItem];
 
     NSMenuItem *developmentItem = [[NSMenuItem alloc] initWithTitle:@"Development"
                                                              action:nil
@@ -150,6 +157,7 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
     self.hologramSettingsMenuItem.enabled = enabled && !recording;
     self.hologramRecordMenuItem.enabled = enabled && !recording;
     self.hologramStopMenuItem.enabled = enabled && recording;
+    self.hologramAirDropMenuItem.enabled = enabled && !recording;
 }
 
 - (IBAction)toggleDevelopmentMode:(id)sender
@@ -208,6 +216,15 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
     [self updateDevelopmentMenuState];
 }
 
+- (IBAction)shareLatestHologramViaAirDrop:(id)sender
+{
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey]) {
+        NSBeep();
+        return;
+    }
+    [[ROBHologramExporter shared] shareLatestHologramViaAirDrop];
+}
+
 - (void)hologramMovieRecordingStateDidChange:(NSNotification *)notification
 {
     [self updateDevelopmentMenuState];
@@ -218,6 +235,7 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [self.rplidarCheckTimer invalidate];
     [self.utcWebCamCheckTimer invalidate];
+    [[ROBHologramExporter shared] stopAirDropSession];
     [self stopUTCWebCamTask];
 }
 

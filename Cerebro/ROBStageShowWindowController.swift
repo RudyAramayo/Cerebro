@@ -506,6 +506,11 @@ import UniformTypeIdentifiers
             }
             parts.append("VLM frames \(mlx.visionFrameCount)")
             parts.append("memories \(mlx.semanticMemoryCount)")
+            if let observation = mlx.stageObservation {
+                parts.append("audience \(observation.audiencePresent ? observation.estimatedPeople.description : "none")")
+                parts.append(observation.audienceActivity.rawValue)
+                parts.append(String(format: "vision confidence %.2f", observation.confidence))
+            }
             self.mlxTelemetryLabel.stringValue = parts.joined(separator: "  •  ")
             self.mlxTelemetryLabel.toolTip = [mlx.llmModel, mlx.vlmModel, mlx.embeddingModel, mlx.lastVisionObservation, mlx.lastError]
                 .compactMap { $0 }.joined(separator: "\n")
