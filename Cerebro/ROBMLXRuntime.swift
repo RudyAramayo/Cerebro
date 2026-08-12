@@ -35,6 +35,8 @@ public struct ROBMLXDiagnosticsSnapshot: Sendable {
     public let lastVisionLatency: TimeInterval?
     public let lastVisionObservation: String?
     public let semanticMemoryCount: Int
+    public let downloadProgress: Double?
+    public let downloadDetail: String?
     public let lastError: String?
 }
 
@@ -63,9 +65,15 @@ public actor ROBMLXEngine {
     private var lastVisionLatency: TimeInterval?
     private var lastVisionObservation: String?
     private var lastError: String?
+    private var downloadProgress: Double?
+    private var downloadDetail: String?
     private var memories: [(text: String, vector: [Float])] = []
 
     public func setVisionEnabled(_ enabled: Bool) { visionEnabled = enabled }
+
+    public func ensureLLMReady(modelID: String = defaultLLMModel) async throws {
+        _ = try await loadLLM(modelID: modelID)
+    }
 
     public func generate(
         prompt: String,
@@ -146,6 +154,8 @@ public actor ROBMLXEngine {
             lastVisionLatency: lastVisionLatency,
             lastVisionObservation: lastVisionObservation,
             semanticMemoryCount: memories.count,
+            downloadProgress: downloadProgress,
+            downloadDetail: downloadDetail,
             lastError: lastError
         )
     }
@@ -153,16 +163,32 @@ public actor ROBMLXEngine {
     private func loadLLM(modelID: String) async throws -> ModelContainer {
         if let llm, loadedLLMModel == modelID { return llm }
         state = "loading"
+        downloadProgress = 0
+        downloadDetail = "Preparing \(modelID)"
         let start = ProcessInfo.processInfo.systemUptime
         let container = try await LLMModelFactory.shared.loadContainer(
             using: TokenizersLoader(),
-            configuration: ModelConfiguration(id: modelID)
+            configuration: ModelConfiguration(id: modelID),
+            progressHandler: { progress in
+                Task { await ROBMLXEngine.shared.updateDownloadProgress(
+                    progress.fractionCompleted,
+                    detail: progress.localizedDescription ?? "Downloading model files"
+                ) }
+            }
         )
         loadLatency = ProcessInfo.processInfo.systemUptime - start
         loadedLLMModel = modelID
         llm = container
         state = "ready"
+        downloadProgress = 1
+        downloadDetail = "Model loaded"
         return container
+    }
+
+    private func updateDownloadProgress(_ fraction: Double, detail: String) {
+        downloadProgress = min(1, max(0, fraction))
+        downloadDetail = detail
+        state = "downloading"
     }
 
     private func analyzeVisionFrame(_ image: CIImage) async {

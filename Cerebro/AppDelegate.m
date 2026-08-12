@@ -21,6 +21,7 @@ static NSString * const ROBLegacyLuxonisUVCDefaultsKey = @"ROBAllowLuxonisUVCFal
 static NSString * const ROBDevelopmentModeDefaultsKey = @"ROBDevelopmentMode";
 static NSString * const ROBShowControllerInputDiagnosticsNotification = @"ROBShowControllerInputDiagnostics";
 static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopmentModeDidChange";
+static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"ROBHologramMovieRecordingStateDidChange";
 
 @interface AppDelegate ()
 @property (readwrite, retain) NSTimer *rplidarCheckTimer;
@@ -40,6 +41,9 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 @property (readwrite, retain) NSMenuItem *developmentModeMenuItem;
 @property (readwrite, retain) NSMenuItem *controllerDiagnosticsMenuItem;
 @property (readwrite, retain) NSMenuItem *hologramExportMenuItem;
+@property (readwrite, retain) NSMenuItem *hologramSettingsMenuItem;
+@property (readwrite, retain) NSMenuItem *hologramRecordMenuItem;
+@property (readwrite, retain) NSMenuItem *hologramStopMenuItem;
 - (BOOL)cerebroCheck;
 
 @end
@@ -56,6 +60,10 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     }
 
     [self installDevelopmentMenu];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(hologramMovieRecordingStateDidChange:)
+                                                 name:ROBHologramMovieRecordingStateDidChangeNotification
+                                               object:nil];
 
     self.utcWebCamIsOnline = NO;
     self.utcWebCamOutput = [NSMutableString string];
@@ -99,12 +107,30 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         keyEquivalent:@""];
     self.controllerDiagnosticsMenuItem.target = self;
     [submenu addItem:self.controllerDiagnosticsMenuItem];
+    self.hologramSettingsMenuItem = [[NSMenuItem alloc]
+        initWithTitle:@"Hologram Voxel Detail…"
+               action:@selector(showHologramCaptureSettings:)
+        keyEquivalent:@""];
+    self.hologramSettingsMenuItem.target = self;
+    [submenu addItem:self.hologramSettingsMenuItem];
     self.hologramExportMenuItem = [[NSMenuItem alloc]
         initWithTitle:@"Capture Hologram Web Package…"
                action:@selector(exportHologramMessage:)
         keyEquivalent:@""];
     self.hologramExportMenuItem.target = self;
     [submenu addItem:self.hologramExportMenuItem];
+    self.hologramRecordMenuItem = [[NSMenuItem alloc]
+        initWithTitle:@"Start AR Voxel Hologram Recording…"
+               action:@selector(startHologramMovieRecording:)
+        keyEquivalent:@""];
+    self.hologramRecordMenuItem.target = self;
+    [submenu addItem:self.hologramRecordMenuItem];
+    self.hologramStopMenuItem = [[NSMenuItem alloc]
+        initWithTitle:@"Stop and Export AR Voxel Recording…"
+               action:@selector(stopHologramMovieRecording:)
+        keyEquivalent:@""];
+    self.hologramStopMenuItem.target = self;
+    [submenu addItem:self.hologramStopMenuItem];
 
     NSMenuItem *developmentItem = [[NSMenuItem alloc] initWithTitle:@"Development"
                                                              action:nil
@@ -120,6 +146,10 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     self.developmentModeMenuItem.state = enabled ? NSControlStateValueOn : NSControlStateValueOff;
     self.controllerDiagnosticsMenuItem.enabled = enabled;
     self.hologramExportMenuItem.enabled = enabled;
+    BOOL recording = [ROBHologramExporter shared].isMovieRecording;
+    self.hologramSettingsMenuItem.enabled = enabled && !recording;
+    self.hologramRecordMenuItem.enabled = enabled && !recording;
+    self.hologramStopMenuItem.enabled = enabled && recording;
 }
 
 - (IBAction)toggleDevelopmentMode:(id)sender
@@ -151,6 +181,36 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         return;
     }
     [[ROBHologramExporter shared] exportInteractively];
+}
+
+- (IBAction)showHologramCaptureSettings:(id)sender
+{
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey]) {
+        NSBeep();
+        return;
+    }
+    [[ROBHologramExporter shared] showCaptureSettings];
+}
+
+- (IBAction)startHologramMovieRecording:(id)sender
+{
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey]) {
+        NSBeep();
+        return;
+    }
+    [[ROBHologramExporter shared] startMovieRecording];
+    [self updateDevelopmentMenuState];
+}
+
+- (IBAction)stopHologramMovieRecording:(id)sender
+{
+    [[ROBHologramExporter shared] stopMovieRecordingInteractively];
+    [self updateDevelopmentMenuState];
+}
+
+- (void)hologramMovieRecordingStateDidChange:(NSNotification *)notification
+{
+    [self updateDevelopmentMenuState];
 }
 
 - (void)applicationWillTerminate:(NSNotification *)notification

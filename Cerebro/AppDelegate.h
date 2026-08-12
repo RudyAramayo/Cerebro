@@ -13,5 +13,8 @@
 - (IBAction)showPythonSettings:(id)sender;
 - (IBAction)toggleDevelopmentMode:(id)sender;
 - (IBAction)showControllerInputDiagnostics:(id)sender;
+- (IBAction)showHologramCaptureSettings:(id)sender;
+- (IBAction)startHologramMovieRecording:(id)sender;
+- (IBAction)stopHologramMovieRecording:(id)sender;
 
 @end

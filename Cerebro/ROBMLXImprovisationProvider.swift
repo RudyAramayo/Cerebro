@@ -63,7 +63,11 @@ public final class ROBMLXImprovisationProvider: ROBLocalImprovisationProviding {
                 guard let data = text.data(using: .utf8) else {
                     throw ROBLocalImprovisationError.invalidServerResponse
                 }
-                result = .success(try ROBLocalImprovisationPlanCodec.decode(data))
+                do {
+                    result = .success(try ROBLocalImprovisationPlanCodec.decode(data))
+                } catch {
+                    throw Self.schemaFailure(error, output: text)
+                }
             } catch is CancellationError {
                 result = .failure(ROBLocalImprovisationError.cancelled)
             } catch {
@@ -85,12 +89,7 @@ public final class ROBMLXImprovisationProvider: ROBLocalImprovisationProviding {
     public func checkHealth(timeout: TimeInterval, completion: @escaping (Result<String, Error>) -> Void) {
         Task {
             do {
-                _ = try await ROBMLXEngine.shared.generate(
-                    prompt: "Return exactly this JSON and nothing else: {\"schema\":\"com.orbitusrobotics.local-improvisation-plan\",\"version\":1,\"beat\":\"scene_transition\",\"delivery\":\"warm\",\"offline_line\":\"Local intelligence is ready.\"}",
-                    modelID: configuration.model,
-                    maxTokens: 96,
-                    temperature: 0
-                )
+                try await ROBMLXEngine.shared.ensureLLMReady(modelID: configuration.model)
                 DispatchQueue.main.async { completion(.success("MLX is loaded and running privately on this Mac.")) }
             } catch {
                 DispatchQueue.main.async { completion(.failure(error)) }
@@ -139,13 +138,26 @@ public final class ROBMLXImprovisationProvider: ROBLocalImprovisationProviding {
 
     private static func prompt(for request: ROBLocalImprovisationRequest) -> String {
         """
-        You are ROB's private offline stage director. Return exactly one JSON object with no Markdown or prose.
-        Required schema: {"schema":"com.orbitusrobotics.local-improvisation-plan","version":1,"beat":"audience_observation|robot_joke|dramatic_reveal|call_and_response|scene_transition","delivery":"warm|playful|dramatic|deadpan|curious","offline_line":"one concise spoken line"}
+        You are ROB's private offline stage director. Output exactly one minified JSON object. Start with { and end with }. Do not output Markdown, analysis, or prose outside JSON.
+        Use exactly these five keys: schema, version, beat, delivery, offline_line.
+        schema must equal "com.orbitusrobotics.local-improvisation-plan" and version must equal 1.
+        beat must be exactly one of: audience_observation, robot_joke, dramatic_reveal, call_and_response, scene_transition.
+        delivery must be exactly one of: warm, playful, dramatic, deadpan, curious.
+        Example of the required shape: {"schema":"com.orbitusrobotics.local-improvisation-plan","version":1,"beat":"scene_transition","delivery":"warm","offline_line":"Welcome, makers. The next scene is ready."}
         Dialogue only. Do not mention tools, commands, URLs, motors, navigation, gestures, servos, joints, or physical actions.
         Show: \(request.showTitle)
         Cue: \(request.cueID)
         Scene goal: \(request.sceneGoal)
         Authored fallback: \(request.authoredFallback)
         """
+    }
+
+    private static func schemaFailure(_ error: Error, output: String) -> ROBLocalImprovisationError {
+        let compact = output
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let preview = String(compact.prefix(320))
+        return .invalidPlan("\(error.localizedDescription) MLX returned: \(preview.isEmpty ? "<empty>" : preview)")
     }
 }

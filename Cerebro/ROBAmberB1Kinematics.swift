@@ -180,11 +180,23 @@ enum ROBAmberB1Kinematics {
     }
 
     func mount(for arm: String) -> ROBAmberArmMount? {
-        guard let key = Self.key(for: arm),
-              let data = UserDefaults.standard.data(forKey: key),
-              let mount = try? JSONDecoder().decode(ROBAmberArmMount.self, from: data),
-              mount.isValid else { return nil }
-        return mount
+        guard let key = Self.key(for: arm) else { return nil }
+        if let data = UserDefaults.standard.data(forKey: key),
+           let mount = try? JSONDecoder().decode(ROBAmberArmMount.self, from: data),
+           mount.isValid {
+            return mount
+        }
+        let environmentKey = arm.lowercased() == "left"
+            ? "ROB_AMBER_LEFT_MOUNT" : "ROB_AMBER_RIGHT_MOUNT"
+        guard let text = ProcessInfo.processInfo.environment[environmentKey] else { return nil }
+        let values = text.split(separator: ",").compactMap {
+            Double($0.trimmingCharacters(in: .whitespaces))
+        }
+        let mount = ROBAmberArmMount(
+            translationMeters: Array(values.prefix(3)),
+            rotationRPYRadians: Array(values.dropFirst(3).prefix(3))
+        )
+        return values.count == 6 && mount.isValid ? mount : nil
     }
 
     private static func key(for arm: String) -> String? {

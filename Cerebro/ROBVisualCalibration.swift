@@ -144,6 +144,7 @@ final class ROBReverseCameraPoseEstimator {
     private var lastAcceptedTransform: ROBRigidTransform?
     private var lastAcceptedTransformUptime: TimeInterval?
     private var lastArmAngles: [String: [Double]] = [:]
+    private var lastDiagnosticUptime: [String: TimeInterval] = [:]
 
     func process(
         barcodes: [VNBarcodeObservation],
@@ -182,6 +183,10 @@ final class ROBReverseCameraPoseEstimator {
                 rotationQuaternion: [vector.x, vector.y, vector.z, vector.w],
                 residualRMSEMeters: candidate.rms, anchorCount: anchors.count,
                 confidence: confidence
+            ))
+            diagnose("camera", String(
+                format: "camera anchors=%d rms=%.4fm confidence=%.2f",
+                anchors.count, candidate.rms, confidence
             ))
         }
         let transformIsFresh = lastAcceptedTransformUptime.map {
@@ -252,6 +257,12 @@ final class ROBReverseCameraPoseEstimator {
             let confidence = depthConfidence
                 * max(0, 1 - calibrationRMS / 0.05)
                 * max(0, 1 - fit.residualRMSEMeters / 0.06)
+            diagnose(arm, String(
+                format: "%@ arm markers=%d fittedJoints=%d rms=%.4fm confidence=%.2f angles=%@",
+                arm, observations.count, fit.observableJointCount,
+                fit.residualRMSEMeters, confidence,
+                fit.angles.prefix(fit.observableJointCount).map { String(format: "%.3f", $0) }.joined(separator: ",")
+            ))
             return ROBAmberB1Kinematics.joints.enumerated().map { index, definition in
                 ROBArmJointPose(
                     arm: arm,
@@ -262,5 +273,14 @@ final class ROBReverseCameraPoseEstimator {
                 )
             }
         }
+    }
+
+    private func diagnose(_ category: String, _ message: String) {
+        let value = ProcessInfo.processInfo.environment["ROB_VISUAL_CALIBRATION_DIAGNOSTICS"]?.lowercased()
+        guard value == "1" || value == "true" || value == "yes" else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - (lastDiagnosticUptime[category] ?? 0) >= 1 else { return }
+        lastDiagnosticUptime[category] = now
+        NSLog("ROB visual calibration: %@", message)
     }
 }

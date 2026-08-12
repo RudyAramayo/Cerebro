@@ -32,6 +32,7 @@ import UniformTypeIdentifiers
     private var stateObserver: NSObjectProtocol?
     private var localRefreshTimer: Timer?
     private var localTemperature = ROBLocalImprovisationConfiguration.defaultTemperature
+    private var localOperationInProgress = false
 
     @objc(initWithStageShowCoordinator:)
     public init(stageShowCoordinator: ROBStageShowCoordinator) {
@@ -391,8 +392,10 @@ import UniformTypeIdentifiers
             try stageShowCoordinator.applyLocalImprovisationConfiguration(configuration)
             ROBLocalImprovisationSettings.save(configuration)
             localStatusLabel.stringValue = "Testing local provider…"
+            localOperationInProgress = true
             stageShowCoordinator.preflightLocalImprovisationProvider { [weak self] result in
                 guard let self else { return }
+                self.localOperationInProgress = false
                 switch result {
                 case .success(let detail):
                     self.localStatusLabel.stringValue = "Local provider ready: \(detail)"
@@ -498,12 +501,16 @@ import UniformTypeIdentifiers
             var parts = ["MLX \(mlx.state)", "active \(mib(mlx.activeMemoryBytes))", "peak \(mib(mlx.peakMemoryBytes))"]
             if let latency = mlx.generationLatency { parts.append(String(format: "generation %.2f s", latency)) }
             if let rate = mlx.tokensPerSecond { parts.append(String(format: "%.1f tok/s", rate)) }
+            if let progress = mlx.downloadProgress, progress < 1 {
+                parts.append(String(format: "download %.0f%%", progress * 100))
+            }
             parts.append("VLM frames \(mlx.visionFrameCount)")
             parts.append("memories \(mlx.semanticMemoryCount)")
             self.mlxTelemetryLabel.stringValue = parts.joined(separator: "  •  ")
             self.mlxTelemetryLabel.toolTip = [mlx.llmModel, mlx.vlmModel, mlx.embeddingModel, mlx.lastVisionObservation, mlx.lastError]
                 .compactMap { $0 }.joined(separator: "\n")
         }
+        guard !localOperationInProgress else { return }
         guard let snapshot = stageShowCoordinator.localImprovisationDiagnosticsSnapshot() else {
             if localEnabledButton.state != .on {
                 localStatusLabel.stringValue = "Local director disabled. Adaptive mode will use Gemini plus the authored fallback."
