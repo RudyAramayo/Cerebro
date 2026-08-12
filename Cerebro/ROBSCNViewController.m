@@ -19,9 +19,9 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
 @property (readwrite, retain) SCNNode *rightTreadNode;
 @property (readwrite, retain) SCNNode *neckPanNode;
 @property (readwrite, retain) SCNNode *cameraHeadNode;
-@property (readwrite, retain) SCNNode *statusTextNode;
-@property (readwrite, retain) SCNNode *detailTextNode;
-@property (readwrite, retain) SCNNode *irTextNode;
+@property (readwrite, retain) NSTextField *statusLabel;
+@property (readwrite, retain) NSTextField *detailLabel;
+@property (readwrite, retain) NSTextField *irStatusLabel;
 @property (readwrite, retain) NSArray<SCNNode *> *irBeamNodes;
 @property (readwrite, retain) NSArray<NSValue *> *irBeamOrigins;
 @property (readwrite, retain) NSArray<NSValue *> *irBeamDirections;
@@ -111,16 +111,42 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
     return root;
 }
 
-- (SCNNode *)textNodeWithSize:(CGFloat)size position:(SCNVector3)position
+- (NSTextField *)hudLabelWithSize:(CGFloat)size weight:(NSFontWeight)weight
 {
-    SCNText *text = [SCNText textWithString:@"" extrusionDepth:0.002];
-    text.font = [NSFont monospacedSystemFontOfSize:size weight:NSFontWeightSemibold];
-    text.flatness = 0.2;
-    text.firstMaterial = [self materialWithColor:NSColor.whiteColor emission:0.35];
-    SCNNode *node = [SCNNode nodeWithGeometry:text];
-    node.scale = SCNVector3Make(0.01, 0.01, 0.01);
-    node.position = position;
-    return node;
+    NSTextField *label = [NSTextField wrappingLabelWithString:@""];
+    label.font = [NSFont monospacedSystemFontOfSize:size weight:weight];
+    label.textColor = NSColor.whiteColor;
+    label.maximumNumberOfLines = 2;
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    return label;
+}
+
+- (void)installBottomHUD
+{
+    NSVisualEffectView *background = [[NSVisualEffectView alloc] initWithFrame:NSZeroRect];
+    background.material = NSVisualEffectMaterialHUDWindow;
+    background.blendingMode = NSVisualEffectBlendingModeWithinWindow;
+    background.state = NSVisualEffectStateActive;
+    background.translatesAutoresizingMaskIntoConstraints = NO;
+    self.statusLabel = [self hudLabelWithSize:15 weight:NSFontWeightBold];
+    self.detailLabel = [self hudLabelWithSize:11 weight:NSFontWeightMedium];
+    self.irStatusLabel = [self hudLabelWithSize:11 weight:NSFontWeightMedium];
+    NSStackView *stack = [NSStackView stackViewWithViews:@[self.statusLabel, self.detailLabel, self.irStatusLabel]];
+    stack.orientation = NSUserInterfaceLayoutOrientationVertical;
+    stack.alignment = NSLayoutAttributeLeading;
+    stack.spacing = 3;
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    [background addSubview:stack];
+    [self.robo_scnView addSubview:background positioned:NSWindowAbove relativeTo:nil];
+    [NSLayoutConstraint activateConstraints:@[
+        [background.leadingAnchor constraintEqualToAnchor:self.robo_scnView.leadingAnchor],
+        [background.trailingAnchor constraintEqualToAnchor:self.robo_scnView.trailingAnchor],
+        [background.bottomAnchor constraintEqualToAnchor:self.robo_scnView.bottomAnchor],
+        [stack.leadingAnchor constraintEqualToAnchor:background.leadingAnchor constant:14],
+        [stack.trailingAnchor constraintEqualToAnchor:background.trailingAnchor constant:-14],
+        [stack.topAnchor constraintEqualToAnchor:background.topAnchor constant:9],
+        [stack.bottomAnchor constraintEqualToAnchor:background.bottomAnchor constant:-10]
+    ]];
 }
 
 - (SCNNode *)irBeamNodeForLateralDirection:(BOOL)lateral
@@ -188,6 +214,40 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
     bodyNode.position = SCNVector3Make(0, 0.34, 0);
     [self.robotNode addChildNode:bodyNode];
 
+    SCNBox *torso = [SCNBox boxWithWidth:0.68 height:0.62 length:0.52 chamferRadius:0.035];
+    torso.firstMaterial = [self materialWithColor:[NSColor colorWithWhite:0.12 alpha:1] emission:0.04];
+    SCNNode *torsoNode = [SCNNode nodeWithGeometry:torso];
+    torsoNode.position = SCNVector3Make(0, 0.78, 0);
+    [self.robotNode addChildNode:torsoNode];
+
+    NSArray<NSColor *> *ringColors = @[NSColor.systemBlueColor, NSColor.systemCyanColor];
+    for (NSInteger index = 0; index < 2; index++) {
+        CGFloat x = index == 0 ? -0.19 : 0.19;
+        SCNTorus *ring = [SCNTorus torusWithRingRadius:0.115 pipeRadius:0.025];
+        ring.firstMaterial = [self materialWithColor:ringColors[index] emission:0.75];
+        SCNNode *ringNode = [SCNNode nodeWithGeometry:ring];
+        ringNode.position = SCNVector3Make(x, 0.84, -0.275);
+        [self.robotNode addChildNode:ringNode];
+        SCNCylinder *speaker = [SCNCylinder cylinderWithRadius:0.08 height:0.018];
+        speaker.firstMaterial = [self materialWithColor:[NSColor colorWithWhite:0.025 alpha:1] emission:0];
+        SCNNode *speakerNode = [SCNNode nodeWithGeometry:speaker];
+        speakerNode.position = SCNVector3Make(x, 0.84, -0.285);
+        speakerNode.eulerAngles = SCNVector3Make((float)M_PI_2, 0, 0);
+        [self.robotNode addChildNode:speakerNode];
+    }
+    SCNBox *depthCamera = [SCNBox boxWithWidth:0.20 height:0.10 length:0.06 chamferRadius:0.02];
+    depthCamera.firstMaterial = [self materialWithColor:[NSColor colorWithWhite:0.42 alpha:1] emission:0.05];
+    SCNNode *depthCameraNode = [SCNNode nodeWithGeometry:depthCamera];
+    depthCameraNode.position = SCNVector3Make(0, 0.62, -0.29);
+    [self.robotNode addChildNode:depthCameraNode];
+
+    SCNCylinder *frontActuator = [SCNCylinder cylinderWithRadius:0.045 height:0.70];
+    frontActuator.firstMaterial = [self materialWithColor:[NSColor colorWithWhite:0.48 alpha:1] emission:0.05];
+    SCNNode *actuatorNode = [SCNNode nodeWithGeometry:frontActuator];
+    actuatorNode.position = SCNVector3Make(0, 0.30, -0.62);
+    actuatorNode.eulerAngles = SCNVector3Make((float)M_PI_2, 0, 0);
+    [self.robotNode addChildNode:actuatorNode];
+
     SCNBox *tread = [SCNBox boxWithWidth:0.17 height:0.26 length:0.78 chamferRadius:0.06];
     self.leftTreadNode = [SCNNode nodeWithGeometry:[tread copy]];
     self.rightTreadNode = [SCNNode nodeWithGeometry:[tread copy]];
@@ -197,18 +257,40 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
     [self.robotNode addChildNode:self.rightTreadNode];
 
     self.neckPanNode = [SCNNode node];
-    self.neckPanNode.position = SCNVector3Make(0, 0.72, 0);
+    self.neckPanNode.position = SCNVector3Make(0, 1.10, 0);
     [self.robotNode addChildNode:self.neckPanNode];
     SCNCylinder *neck = [SCNCylinder cylinderWithRadius:0.08 height:0.28];
     neck.firstMaterial = [self materialWithColor:NSColor.systemOrangeColor emission:0.25];
     SCNNode *neckBody = [SCNNode nodeWithGeometry:neck];
     neckBody.position = SCNVector3Make(0, 0.14, 0);
     [self.neckPanNode addChildNode:neckBody];
-    SCNBox *cameraHead = [SCNBox boxWithWidth:0.30 height:0.17 length:0.20 chamferRadius:0.04];
-    cameraHead.firstMaterial = [self materialWithColor:NSColor.systemOrangeColor emission:0.45];
+    SCNSphere *cameraHead = [SCNSphere sphereWithRadius:0.20];
+    cameraHead.firstMaterial = [self materialWithColor:[NSColor colorWithWhite:0.06 alpha:1] emission:0.1];
     self.cameraHeadNode = [SCNNode nodeWithGeometry:cameraHead];
-    self.cameraHeadNode.position = SCNVector3Make(0, 0.34, -0.03);
+    self.cameraHeadNode.scale = SCNVector3Make(1, 1, 0.82);
+    self.cameraHeadNode.position = SCNVector3Make(0, 0.38, -0.03);
     [self.neckPanNode addChildNode:self.cameraHeadNode];
+    SCNCylinder *headLens = [SCNCylinder cylinderWithRadius:0.055 height:0.04];
+    headLens.firstMaterial = [self materialWithColor:NSColor.systemGreenColor emission:0.8];
+    SCNNode *headLensNode = [SCNNode nodeWithGeometry:headLens];
+    headLensNode.position = SCNVector3Make(0, 0, -0.18);
+    headLensNode.eulerAngles = SCNVector3Make((float)M_PI_2, 0, 0);
+    [self.cameraHeadNode addChildNode:headLensNode];
+
+    for (NSInteger side = -1; side <= 1; side += 2) {
+        SCNBox *upperArm = [SCNBox boxWithWidth:0.13 height:0.48 length:0.14 chamferRadius:0.025];
+        upperArm.firstMaterial = [self materialWithColor:[NSColor colorWithWhite:0.42 alpha:1] emission:0.03];
+        SCNNode *upperNode = [SCNNode nodeWithGeometry:upperArm];
+        upperNode.position = SCNVector3Make(side * 0.46, 0.83, 0);
+        upperNode.eulerAngles = SCNVector3Make(0, 0, side * -0.22);
+        [self.robotNode addChildNode:upperNode];
+        SCNBox *forearm = [SCNBox boxWithWidth:0.11 height:0.42 length:0.12 chamferRadius:0.02];
+        forearm.firstMaterial = upperArm.firstMaterial;
+        SCNNode *forearmNode = [SCNNode nodeWithGeometry:forearm];
+        forearmNode.position = SCNVector3Make(side * 0.56, 0.42, -0.02);
+        forearmNode.eulerAngles = SCNVector3Make(0, 0, side * 0.13);
+        [self.robotNode addChildNode:forearmNode];
+    }
 
     // Sensor order matches the Base firmware telemetry: FL, FR, L, R, BL, BR.
     self.irBeamOrigins = @[
@@ -242,18 +324,11 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
     [scene.rootNode addChildNode:self.leftControllerNode];
     [scene.rootNode addChildNode:self.rightControllerNode];
 
-    self.statusTextNode = [self textNodeWithSize:30 position:SCNVector3Make(-1.1, 1.48, 0)];
-    self.detailTextNode = [self textNodeWithSize:17 position:SCNVector3Make(-1.1, 1.30, 0)];
-    self.irTextNode = [self textNodeWithSize:17 position:SCNVector3Make(-1.1, 1.10, 0)];
-    self.irTextNode.hidden = YES;
-    [scene.rootNode addChildNode:self.statusTextNode];
-    [scene.rootNode addChildNode:self.detailTextNode];
-    [scene.rootNode addChildNode:self.irTextNode];
-
     self.robo_scnView.scene = scene;
     self.robo_scnView.allowsCameraControl = YES;
     self.robo_scnView.showsStatistics = YES;
     self.robo_scnView.backgroundColor = NSColor.blackColor;
+    [self installBottomHUD];
     [self renderUnavailableState:@"WAITING FOR RECEIVED CONTROLLER DATA"];
     [self renderIRUnavailableState:@"IR SENSORS: WAITING FOR BASE TELEMETRY"];
 }
@@ -268,7 +343,7 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
 
     self.lastIRDistances = [distances copy];
     self.lastIRReceivedUptime = uptime;
-    self.irTextNode.hidden = NO;
+    self.irStatusLabel.hidden = NO;
     [SCNTransaction begin];
     [SCNTransaction setAnimationDuration:0.12];
     for (NSInteger index = 0; index < 6; index++) {
@@ -300,7 +375,7 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
     if (front) { self.lastLegacyIRFrontWarningUptime = uptime; }
     if (back) { self.lastLegacyIRBackWarningUptime = uptime; }
     self.receivedLegacyIRWarning = YES;
-    self.irTextNode.hidden = NO;
+    self.irStatusLabel.hidden = NO;
     [self refreshIRState];
 }
 
@@ -411,10 +486,8 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
         [self renderUnavailableState:self.lastReceivedUptime > 0 ? @"CONTROLLER DATA STALE" : @"NO CONTROLLER DATA RECEIVED"];
         return;
     }
-    SCNText *status = (SCNText *)self.statusTextNode.geometry;
-    status.string = @"RECEIVING VR CONTROLLER INPUT";
-    status.firstMaterial.diffuse.contents = NSColor.systemGreenColor;
-    SCNText *detail = (SCNText *)self.detailTextNode.geometry;
+    self.statusLabel.stringValue = @"RECEIVING VR CONTROLLER INPUT";
+    self.statusLabel.textColor = NSColor.systemGreenColor;
     NSString *driveState = self.treadCommandsAreActive ? @"DRIVE ACTIVE" : @"BRAKED";
     NSString *neckState = self.neckCommandIsActive
         ? [NSString stringWithFormat:@"HEAD %+.2f / %+.2f", self.neckPanDemand, self.neckTiltDemand]
@@ -424,7 +497,7 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
            self.leftGripperClosed ? @"CLOSED" : @"OPEN",
            self.rightGripperClosed ? @"CLOSED" : @"OPEN"]
         : @"GRIP HELD";
-    detail.string = [NSString stringWithFormat:@"%@  •  %.0f ms  •  %@  •  %@  •  %@  •  TREADS %+.2f / %+.2f  •  L:%@  R:%@",
+    self.detailLabel.stringValue = [NSString stringWithFormat:@"%@  •  %.0f ms  •  %@  •  %@  •  %@  •  TREADS %+.2f / %+.2f  •  L:%@  R:%@",
                      self.lastSender, age * 1000.0,
                      driveState, neckState, gripperState, self.leftTreadDemand, self.rightTreadDemand,
                      self.leftPoseValid ? @"POSE" : @"NO POSE",
@@ -454,11 +527,10 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
         anyBlocked |= blocked;
         [readings addObject:[NSString stringWithFormat:@"%@:%ldcm%@", names[index], (long)centimeters, blocked ? @"!" : @""]];
     }
-    SCNText *text = (SCNText *)self.irTextNode.geometry;
-    text.string = [NSString stringWithFormat:@"IR %@  •  %@  •  %.0f ms",
+    self.irStatusLabel.stringValue = [NSString stringWithFormat:@"IR %@  •  %@  •  %.0f ms",
                    anyBlocked ? @"BLOCKED" : @"PATH CLEAR",
                    [readings componentsJoinedByString:@"  "], age * 1000.0];
-    text.firstMaterial.diffuse.contents = anyBlocked ? NSColor.systemRedColor : NSColor.systemGreenColor;
+    self.irStatusLabel.textColor = anyBlocked ? NSColor.systemRedColor : NSColor.systemGreenColor;
 }
 
 - (void)refreshLegacyIRWarningState
@@ -489,22 +561,20 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
             [self materialWithColor:color emission:(frontRecent || backRecent) ? 0.8 : 0.1];
     }
 
-    SCNText *text = (SCNText *)self.irTextNode.geometry;
     if (frontRecent || backRecent) {
         NSString *location = frontRecent && backRecent ? @"FRONT + BACK" : (frontRecent ? @"FRONT" : @"BACK");
-        text.string = [NSString stringWithFormat:@"IR OBSTACLE WARNING: %@  •  ADVISORY ONLY", location];
-        text.firstMaterial.diffuse.contents = NSColor.systemRedColor;
+        self.irStatusLabel.stringValue = [NSString stringWithFormat:@"IR OBSTACLE WARNING: %@  •  ADVISORY ONLY", location];
+        self.irStatusLabel.textColor = NSColor.systemRedColor;
     } else {
-        text.string = @"IR: NO RECENT WARNING  •  CLEARANCE UNKNOWN  •  USE RPLIDAR FOR PATHS";
-        text.firstMaterial.diffuse.contents = NSColor.systemOrangeColor;
+        self.irStatusLabel.stringValue = @"IR: NO RECENT WARNING  •  CLEARANCE UNKNOWN  •  USE RPLIDAR FOR PATHS";
+        self.irStatusLabel.textColor = NSColor.systemOrangeColor;
     }
 }
 
 - (void)renderIRUnavailableState:(NSString *)message
 {
-    SCNText *text = (SCNText *)self.irTextNode.geometry;
-    text.string = message;
-    text.firstMaterial.diffuse.contents = NSColor.systemOrangeColor;
+    self.irStatusLabel.stringValue = message;
+    self.irStatusLabel.textColor = NSColor.systemOrangeColor;
     for (SCNNode *beam in self.irBeamNodes) {
         beam.geometry.firstMaterial = [self materialWithColor:NSColor.systemGrayColor emission:0.1];
     }
@@ -512,11 +582,9 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
 
 - (void)renderUnavailableState:(NSString *)message
 {
-    SCNText *status = (SCNText *)self.statusTextNode.geometry;
-    status.string = message;
-    status.firstMaterial.diffuse.contents = NSColor.systemRedColor;
-    SCNText *detail = (SCNText *)self.detailTextNode.geometry;
-    detail.string = [NSString stringWithFormat:@"%@  •  expected packet interval < 500 ms", self.lastSender];
+    self.statusLabel.stringValue = message;
+    self.statusLabel.textColor = NSColor.systemRedColor;
+    self.detailLabel.stringValue = [NSString stringWithFormat:@"%@  •  expected packet interval < 500 ms", self.lastSender];
     self.leftControllerNode.hidden = YES;
     self.rightControllerNode.hidden = YES;
     self.treadCommandsAreActive = NO;

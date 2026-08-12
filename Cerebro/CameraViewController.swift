@@ -449,9 +449,14 @@ extension CameraViewController: CameraManagerDelegate {
         label.translatesAutoresizingMaskIntoConstraints = false
         depthOpacitySlider.target = self
         depthOpacitySlider.action = #selector(depthOpacityChanged(_:))
+        depthOpacitySlider.isEnabled = true
+        depthOpacitySlider.isContinuous = true
         depthOpacitySlider.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(label, positioned: .above, relativeTo: depthOverlayView)
-        view.addSubview(depthOpacitySlider, positioned: .above, relativeTo: label)
+        // PoseDrawingView covers the entire camera window. Put interactive
+        // depth controls at the absolute top of the sibling stack so that the
+        // transparent pose overlay cannot consume their mouse events.
+        view.addSubview(label, positioned: .above, relativeTo: nil)
+        view.addSubview(depthOpacitySlider, positioned: .above, relativeTo: nil)
         NSLayoutConstraint.activate([
             depthOverlayView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             depthOverlayView.trailingAnchor.constraint(equalTo: view.trailingAnchor),

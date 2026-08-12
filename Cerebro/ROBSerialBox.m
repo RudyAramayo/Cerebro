@@ -47,6 +47,7 @@ OUTPUT: ir sensor array in cm : (fl, fr, l, r, bl, br) from front left to back r
 #import "ROBSystemDependencyManager.h"
 #import "ROBTaskLaunchGuard.h"
 #include <sys/select.h>
+#include <errno.h>
 
 
 #define kRHAPI_BAUDRATE 250000
@@ -54,6 +55,8 @@ OUTPUT: ir sensor array in cm : (fl, fr, l, r, bl, br) from front left to back r
 // their own role names, so Cerebro can identify Base without requiring a show-day flash.
 static NSString * const kROBBaseLegacyStartupIdentity = @"BEGIN BASE STARTUP SEQUENCE";
 static NSTimeInterval const kROBBaseProbeTimeoutSeconds = 15.0;
+static NSTimeInterval const kMaestroReconnectDelaySeconds = 2.0;
+static NSInteger const kPololuUSBVendorID = 0x1ffb;
 
 #define kRHAPI_SERIAL_PORT_HEAD     @"/dev/cu.usbmodem1431301"
 #define kRHAPI_SERIAL_PORT_TORSO    @"/dev/cu.usbmodem144201"
@@ -61,9 +64,6 @@ static NSTimeInterval const kROBBaseProbeTimeoutSeconds = 15.0;
 
 
 #define kRHAPI_MAESTRO_BAUDRATE 9600
-
-#define kRHAPI_SERIAL_PORT_MAESTRO_COM      @"/dev/cu.usbmodem001955201"
-#define kRHAPI_SERIAL_PORT_MAESTRO_TTL      @"/dev/cu.usbmodem001955203"
 
 //*** DON'T FORGET TO UPDATE FIRMWARE OF MOTOR CONTROLLER to 1.04 ***
 #define kRHAPI_SERIAL_PORT_LACT_COM     @"/dev/cu.usbmodem143401"
@@ -114,6 +114,11 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 @property (readwrite, retain) NSMutableData* receivedData_L10_log;
 @property (readwrite, retain) NSMutableData *baseSerialReceiveBuffer;
 @property (readwrite, assign) BOOL baseDetectionInProgress;
+@property (readwrite, assign) BOOL maestroConnectionValid;
+@property (readwrite, assign) BOOL maestroReconnectScheduled;
+@property (readwrite, assign) BOOL maestroReconnectInProgress;
+@property (readwrite, assign) BOOL maestroMissingWasReported;
+@property (readwrite, copy) NSString *maestroDevicePath;
 @property (readwrite, assign) BOOL core_R11_isOnline;
 @property (readwrite, assign) BOOL core_L10_isOnline;
 @property (readwrite, retain) NSTask *sshTask_R11_Core;
@@ -135,6 +140,12 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 
 - (NSString *) openSerialPort: (NSString *)serialPortFile baud: (speed_t)baudRate serialFileDescriptor:(int *)serialFileDescriptor contextInt:(int)context;
 - (NSArray<NSString *> *)usbSerialPortPaths;
+- (NSString *)maestroCommandPortPath;
+- (void)attemptMaestroReconnect;
+- (void)scheduleMaestroReconnectAfterDelay:(NSTimeInterval)delay;
+- (void)markMaestroDisconnectedForErrno:(int)errorNumber;
+- (BOOL)writeMaestroBytes:(const void *)bytes length:(size_t)length;
+- (BOOL)sendMaestroTarget:(unsigned short)target channel:(unsigned char)channel;
 - (void)connectToDetectedBase;
 - (BOOL)probeBaseFirmwareAtPath:(NSString *)path fileDescriptor:(int *)matchedFileDescriptor;
 - (void)consumeBaseSerialBytes:(const void *)bytes length:(NSUInteger)length;
@@ -212,6 +223,7 @@ typedef enum : NSUInteger {
     serialFileDescriptor_torso = -1;
     serialFileDescriptor_base = -1;
     serialFileDescriptor_maestro = -1;
+    self.maestroConnectionValid = NO;
     self.actualSpeedL = 0;
     self.actualSpeedR = 0;
     self.lastVisionNeckPanTarget = 6000;
@@ -220,7 +232,7 @@ typedef enum : NSUInteger {
     readThreadRunning_torso = FALSE;
     readThreadRunning_base = FALSE;
     readThreadRunning_maestro = FALSE;
-    
+
     exitSafeStart = false;
     exitSafeStart_waistRotation = false;
     energize_waistRotation = false;
@@ -232,7 +244,7 @@ typedef enum : NSUInteger {
     [self refreshSerialList_base:@"Detecting Base firmware…"];
     [self refreshSerialList_torso:kRHAPI_SERIAL_PORT_TORSO];
     [self refreshSerialList_head:kRHAPI_SERIAL_PORT_HEAD];
-    [self refreshSerialList_maestro:kRHAPI_SERIAL_PORT_MAESTRO_COM];
+    [self refreshSerialList_maestro:@"Discovering Maestro by USB identity…"];
     self.controlModelDataDictionary = [NSMutableDictionary new];
     // now put the cursor in the text field
     //[serialInputField becomeFirstResponder];
@@ -307,6 +319,78 @@ typedef enum : NSUInteger {
     }
     IOObjectRelease(iterator);
     return [paths sortedArrayUsingSelector:@selector(localizedStandardCompare:)];
+}
+
+static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
+{
+    return IORegistryEntrySearchCFProperty(service,
+                                           kIOServicePlane,
+                                           key,
+                                           kCFAllocatorDefault,
+                                           kIORegistryIterateRecursively | kIORegistryIterateParents);
+}
+
+- (NSString *)maestroCommandPortPath
+{
+    NSMutableArray<NSDictionary<NSString *, id> *> *matches = [NSMutableArray array];
+    io_iterator_t iterator = IO_OBJECT_NULL;
+    kern_return_t result = IOServiceGetMatchingServices(kIOMainPortDefault,
+                                                         IOServiceMatching(kIOSerialBSDServiceValue),
+                                                         &iterator);
+    if (result != KERN_SUCCESS) {
+        return nil;
+    }
+
+    io_object_t service;
+    while ((service = IOIteratorNext(iterator))) {
+        CFTypeRef pathValue = IORegistryEntryCreateCFProperty(service,
+                                                               CFSTR(kIOCalloutDeviceKey),
+                                                               kCFAllocatorDefault,
+                                                               0);
+        CFTypeRef vendorValue = ROBRegistryProperty(service, CFSTR("idVendor"));
+        CFTypeRef productValue = ROBRegistryProperty(service, CFSTR("USB Product Name"));
+        if (productValue == NULL) {
+            productValue = ROBRegistryProperty(service, CFSTR("Product Name"));
+        }
+        CFTypeRef interfaceNameValue = ROBRegistryProperty(service, CFSTR("USB Interface Name"));
+        CFTypeRef interfaceNumberValue = ROBRegistryProperty(service, CFSTR("bInterfaceNumber"));
+
+        NSString *path = (pathValue != NULL && CFGetTypeID(pathValue) == CFStringGetTypeID())
+            ? (__bridge NSString *)pathValue : nil;
+        NSNumber *vendor = (vendorValue != NULL && CFGetTypeID(vendorValue) == CFNumberGetTypeID())
+            ? (__bridge NSNumber *)vendorValue : nil;
+        NSString *product = (productValue != NULL && CFGetTypeID(productValue) == CFStringGetTypeID())
+            ? (__bridge NSString *)productValue : @"";
+        NSString *interfaceName = (interfaceNameValue != NULL && CFGetTypeID(interfaceNameValue) == CFStringGetTypeID())
+            ? (__bridge NSString *)interfaceNameValue : @"";
+        NSNumber *interfaceNumber = (interfaceNumberValue != NULL && CFGetTypeID(interfaceNumberValue) == CFNumberGetTypeID())
+            ? (__bridge NSNumber *)interfaceNumberValue : nil;
+
+        BOOL isPololuMaestro = vendor.integerValue == kPololuUSBVendorID
+            && [product rangeOfString:@"Maestro" options:NSCaseInsensitiveSearch].location != NSNotFound;
+        if (path.length > 0 && isPololuMaestro) {
+            BOOL namedCommandPort = [interfaceName rangeOfString:@"Command" options:NSCaseInsensitiveSearch].location != NSNotFound;
+            BOOL primaryInterface = interfaceNumber != nil && interfaceNumber.integerValue == 0;
+            NSInteger priority = namedCommandPort ? 0 : (primaryInterface ? 1 : 2);
+            [matches addObject:@{ @"path": path, @"priority": @(priority) }];
+        }
+
+        if (pathValue != NULL) CFRelease(pathValue);
+        if (vendorValue != NULL) CFRelease(vendorValue);
+        if (productValue != NULL) CFRelease(productValue);
+        if (interfaceNameValue != NULL) CFRelease(interfaceNameValue);
+        if (interfaceNumberValue != NULL) CFRelease(interfaceNumberValue);
+        IOObjectRelease(service);
+    }
+    IOObjectRelease(iterator);
+
+    [matches sortUsingComparator:^NSComparisonResult(NSDictionary *left, NSDictionary *right) {
+        NSComparisonResult priorityOrder = [left[@"priority"] compare:right[@"priority"]];
+        return priorityOrder != NSOrderedSame
+            ? priorityOrder
+            : [left[@"path"] localizedStandardCompare:right[@"path"]];
+    }];
+    return matches.firstObject[@"path"];
 }
 
 - (void)connectToDetectedBase
@@ -408,64 +492,118 @@ typedef enum : NSUInteger {
 
 - (void) connectMaestro
 {
-    NSString *error = [self openSerialPort:kRHAPI_SERIAL_PORT_MAESTRO_COM baud:kRHAPI_MAESTRO_BAUDRATE serialFileDescriptor:&serialFileDescriptor_maestro contextInt:kMaestroSerialContext];
-    if(error!=nil) {
-        //[self refreshSerialList_head:error];
-        //[self appendToIncomingText_head:error];
-        NSLog(@"%@", error);
-    } else {
-        //[self refreshSerialList_head:[self.serialListPullDown_head titleOfSelectedItem]];
-        //[self performSelectorInBackground:@selector(incomingTextUpdateThread_maestro:) withObject:[NSThread currentThread]];
-    }
+    [self attemptMaestroReconnect];
 }
 
-
-// Gets the position of a Maestro channel.
-// See the "Serial Servo Commands" section of the user's guide.
-int maestroGetPosition(int fd, unsigned char channel)
+- (void)attemptMaestroReconnect
 {
-    unsigned char command[] = {0x90, channel};
-    if(write(fd, command, sizeof(command)) == -1)
-    {
-        perror("error writing");
-        return -1;
+    @synchronized (self) {
+        self.maestroReconnectScheduled = NO;
+        if (self.maestroConnectionValid || self.maestroReconnectInProgress) return;
+        self.maestroReconnectInProgress = YES;
     }
-    
-    unsigned char response[2];
-    if(read(fd,response,2) != 2)
-    {
-        perror("error reading");
-        return -1;
+
+    NSString *path = [self maestroCommandPortPath];
+    NSString *error = nil;
+    if (path.length > 0) {
+        error = [self openSerialPort:path
+                                baud:kRHAPI_MAESTRO_BAUDRATE
+                serialFileDescriptor:&serialFileDescriptor_maestro
+                          contextInt:kMaestroSerialContext];
     }
-    
-    return response[0] + 256*response[1];
+
+    @synchronized (self) {
+        self.maestroReconnectInProgress = NO;
+        self.maestroConnectionValid = path.length > 0 && error == nil && serialFileDescriptor_maestro >= 0;
+        if (self.maestroConnectionValid) {
+            self.maestroDevicePath = path;
+            self.maestroMissingWasReported = NO;
+        }
+    }
+
+    if (self.maestroConnectionValid) {
+        NSLog(@"Maestro connected on %@", path);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self refreshSerialList_maestro:path];
+        });
+        return;
+    }
+
+    @synchronized (self) {
+        if (!self.maestroMissingWasReported) {
+            NSLog(@"Maestro is unavailable; servo output is suppressed while Cerebro reconnects.");
+            self.maestroMissingWasReported = YES;
+        }
+    }
+    [self scheduleMaestroReconnectAfterDelay:kMaestroReconnectDelaySeconds];
 }
 
-// Sets the target of a Maestro channel.
-// See the "Serial Servo Commands" section of the user's guide.
-// The units of 'target' are quarter-microseconds.
-int maestroSetTarget(int fd, unsigned char channel, unsigned short target)
+- (void)scheduleMaestroReconnectAfterDelay:(NSTimeInterval)delay
 {
-    unsigned char command[] = {0x84, channel, target & 0x7F, target >> 7 & 0x7F};
-    if (write(fd, command, sizeof(command)) == -1)
-    {
-        perror("error writing");
-        return -1;
+    @synchronized (self) {
+        if (self.maestroReconnectScheduled || self.maestroConnectionValid) return;
+        self.maestroReconnectScheduled = YES;
     }
-    return 0;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
+                   dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        [self attemptMaestroReconnect];
+    });
 }
 
-
-int maestroGetErrors(int fd)
+- (void)markMaestroDisconnectedForErrno:(int)errorNumber
 {
-    unsigned char command[] = {0xA1};
-    if (write(fd, command, sizeof(command)) == -1)
-    {
-        perror("error writing");
-        return -1;
+    BOOL transitioned = NO;
+    @synchronized (self) {
+        if (self.maestroConnectionValid || serialFileDescriptor_maestro >= 0) {
+            transitioned = YES;
+        }
+        self.maestroConnectionValid = NO;
+        self.maestroDevicePath = nil;
+        if (serialFileDescriptor_maestro >= 0) close(serialFileDescriptor_maestro);
+        serialFileDescriptor_maestro = -1;
     }
-    return 0;
+    if (transitioned) {
+        NSLog(@"Maestro disconnected (%s); servo output paused.", strerror(errorNumber));
+    }
+    [self scheduleMaestroReconnectAfterDelay:kMaestroReconnectDelaySeconds];
 }
+
+- (BOOL)writeMaestroBytes:(const void *)bytes length:(size_t)length
+{
+    int descriptor = -1;
+    @synchronized (self) {
+        if (!self.maestroConnectionValid || serialFileDescriptor_maestro < 0) {
+            [self scheduleMaestroReconnectAfterDelay:kMaestroReconnectDelaySeconds];
+            return NO;
+        }
+        descriptor = serialFileDescriptor_maestro;
+    }
+
+    const uint8_t *cursor = bytes;
+    size_t remaining = length;
+    while (remaining > 0) {
+        ssize_t count = write(descriptor, cursor, remaining);
+        if (count > 0) {
+            cursor += count;
+            remaining -= (size_t)count;
+            continue;
+        }
+        int writeError = count < 0 ? errno : EIO;
+        if (writeError == EINTR) continue;
+        if (writeError == EBADF || writeError == EIO || writeError == ENXIO || writeError == ENODEV) {
+            [self markMaestroDisconnectedForErrno:writeError];
+        }
+        return NO;
+    }
+    return YES;
+}
+
+- (BOOL)sendMaestroTarget:(unsigned short)target channel:(unsigned char)channel
+{
+    unsigned char command[] = { 0x84, channel, target & 0x7F, (target >> 7) & 0x7F };
+    return [self writeMaestroBytes:command length:sizeof(command)];
+}
+
 
 // open the serial port
 //   - nil is returned on success
@@ -1451,33 +1589,31 @@ int maestroGetErrors(int fd)
                                 arm_L_gripper:(NSString *)arm_L_gripper
 
 {
-    //int position = maestroGetPosition(serialFileDescriptor_maestro, 0);
-    //printf("Current position is %d.\n", position);
-    //---
     //NSLog(@"headPan = %d, headTilt = %d, headUpperNeckTilt = %d", [head_pan intValue], [head_tilt intValue], [head_upperNeckTilt intValue]);
     //---
     //7790 max for upperNeckTilt, 4300 min for uppperNeckTilt
     //7675 max for headTilt, 4375 max for the headTilt
-    
-    maestroSetTarget(serialFileDescriptor_maestro, 0, [head_pan intValue]);
-    maestroSetTarget(serialFileDescriptor_maestro, 1, [head_tilt intValue]);
-    maestroSetTarget(serialFileDescriptor_maestro, 2, [head_upperNeckTilt intValue]);
-    
-    maestroSetTarget(serialFileDescriptor_maestro, 4, [arm_L_elbow_pan intValue]);
-    maestroSetTarget(serialFileDescriptor_maestro, 5, [arm_R_elbow_pan intValue]);
-    
-    maestroSetTarget(serialFileDescriptor_maestro, 6, [arm_R_shoulder_pan intValue]);
-    maestroSetTarget(serialFileDescriptor_maestro, 7, [arm_R_shoulder_tilt intValue]);
-    maestroSetTarget(serialFileDescriptor_maestro, 8, [arm_R_elbow_tilt intValue]);
-    maestroSetTarget(serialFileDescriptor_maestro, 9, [arm_R_wrist_pan intValue]);
-    maestroSetTarget(serialFileDescriptor_maestro, 10, [arm_R_wrist_tilt intValue]);
-    maestroSetTarget(serialFileDescriptor_maestro, 11, [arm_R_gripper intValue]);
-    maestroSetTarget(serialFileDescriptor_maestro, 12, [arm_L_shoulder_pan intValue]);
-    maestroSetTarget(serialFileDescriptor_maestro, 13, [arm_L_shoulder_tilt intValue]);
-    maestroSetTarget(serialFileDescriptor_maestro, 14, [arm_L_elbow_tilt intValue]);
-    maestroSetTarget(serialFileDescriptor_maestro, 15, [arm_L_wrist_pan intValue]);
-    maestroSetTarget(serialFileDescriptor_maestro, 16, [arm_L_wrist_tilt intValue]);
-    maestroSetTarget(serialFileDescriptor_maestro, 17, [arm_L_gripper intValue]);
+
+    if (!self.maestroConnectionValid) return;
+    [self sendMaestroTarget:[head_pan intValue] channel:0];
+    [self sendMaestroTarget:[head_tilt intValue] channel:1];
+    [self sendMaestroTarget:[head_upperNeckTilt intValue] channel:2];
+
+    [self sendMaestroTarget:[arm_L_elbow_pan intValue] channel:4];
+    [self sendMaestroTarget:[arm_R_elbow_pan intValue] channel:5];
+
+    [self sendMaestroTarget:[arm_R_shoulder_pan intValue] channel:6];
+    [self sendMaestroTarget:[arm_R_shoulder_tilt intValue] channel:7];
+    [self sendMaestroTarget:[arm_R_elbow_tilt intValue] channel:8];
+    [self sendMaestroTarget:[arm_R_wrist_pan intValue] channel:9];
+    [self sendMaestroTarget:[arm_R_wrist_tilt intValue] channel:10];
+    [self sendMaestroTarget:[arm_R_gripper intValue] channel:11];
+    [self sendMaestroTarget:[arm_L_shoulder_pan intValue] channel:12];
+    [self sendMaestroTarget:[arm_L_shoulder_tilt intValue] channel:13];
+    [self sendMaestroTarget:[arm_L_elbow_tilt intValue] channel:14];
+    [self sendMaestroTarget:[arm_L_wrist_pan intValue] channel:15];
+    [self sendMaestroTarget:[arm_L_wrist_tilt intValue] channel:16];
+    [self sendMaestroTarget:[arm_L_gripper intValue] channel:17];
     
     // Open the Maestro's virtual COM port.
     //"/dev/cu.usbmodem00034567";  // Mac OS X
@@ -1554,7 +1690,7 @@ int maestroGetErrors(int fd)
 
 - (void)applyVisionNeckPan:(float)pan tilt:(float)tilt
 {
-    if (!isfinite(pan) || !isfinite(tilt) || serialFileDescriptor_maestro < 0) {
+    if (!isfinite(pan) || !isfinite(tilt) || !self.maestroConnectionValid) {
         return;
     }
     // Normalized Vision Pro demands are converted only here, behind Cerebro's
@@ -1571,8 +1707,8 @@ int maestroGetErrors(int fd)
     int tiltDelta = MAX(-maximumStep, MIN(maximumStep, requestedTilt - self.lastVisionNeckTiltTarget));
     self.lastVisionNeckPanTarget += panDelta;
     self.lastVisionNeckTiltTarget += tiltDelta;
-    maestroSetTarget(serialFileDescriptor_maestro, 0, self.lastVisionNeckPanTarget);
-    maestroSetTarget(serialFileDescriptor_maestro, 2, self.lastVisionNeckTiltTarget);
+    [self sendMaestroTarget:self.lastVisionNeckPanTarget channel:0];
+    [self sendMaestroTarget:self.lastVisionNeckTiltTarget channel:2];
 }
 
 - (void)applyVisionGrippersActive:(BOOL)active leftClosed:(BOOL)leftClosed rightClosed:(BOOL)rightClosed
@@ -2782,13 +2918,15 @@ int maestroGetErrors(int fd)
 
 - (void) sendMaestroCommand:(NSString *)command
 {
-    [self writeString:command serialFileDescriptor:serialFileDescriptor_maestro];
+    NSData *data = [command dataUsingEncoding:NSUTF8StringEncoding];
+    [self writeMaestroBytes:data.bytes length:data.length];
 }
 
 
 - (void) maestro_getErrors_command
 {
-    maestroGetErrors(serialFileDescriptor_maestro);
+    unsigned char command[] = { 0xA1 };
+    [self writeMaestroBytes:command length:sizeof(command)];
 }
 
 // action from the reset button
