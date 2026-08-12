@@ -497,7 +497,8 @@ extension CameraViewController: CameraManagerDelegate {
     func cameraManager(_ manager: CameraManagerProtocol, didOutput frameSet: CameraFrameSet) {
         let sampleBuffer = frameSet.rgbSampleBuffer
         let sceneUpdateTime = CACurrentMediaTime()
-        if sceneUpdateTime - lastSceneSnapshotUpdate >= 0.2 {
+        let shouldUpdateSceneSnapshot = sceneUpdateTime - lastSceneSnapshotUpdate >= 0.2
+        if shouldUpdateSceneSnapshot {
             lastSceneSnapshotUpdate = sceneUpdateTime
             ROBSceneSnapshotStore.shared.updateCameraFrame(
                 sequence: frameSet.sequence,
@@ -733,18 +734,21 @@ extension CameraViewController: CameraManagerDelegate {
         }
         
         let imageRequestHandler = VNImageRequestHandler(cmSampleBuffer: sampleBuffer, options: [:])
-        try? imageRequestHandler.perform([
+        var requests: [VNRequest] = [
             humanRectanglesRequest,     // √
             humanBodyPoseRequest,       // √
             humanHandPoseRequest,       // √
-            calibrationBarcodeRequest,
             //humanBodyPose3DRequest,     // √ - Leaks a significant amount of memory even without processing
                 //trajectoriesRequest,
                 //animalBodyPoseRequest,
             detectFaceRequest,          // √
             //personInstanceRequest       // √
                 //segmentationRequest       // √
-        ])
+        ]
+        if shouldUpdateSceneSnapshot {
+            requests.append(calibrationBarcodeRequest)
+        }
+        try? imageRequestHandler.perform(requests)
     }
 
     func cameraManager(

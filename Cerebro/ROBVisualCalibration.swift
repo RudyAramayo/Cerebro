@@ -142,6 +142,7 @@ final class ROBReverseCameraPoseEstimator {
     }
 
     private var lastAcceptedTransform: ROBRigidTransform?
+    private var lastAcceptedTransformUptime: TimeInterval?
 
     func process(
         barcodes: [VNBarcodeObservation],
@@ -172,6 +173,7 @@ final class ROBReverseCameraPoseEstimator {
 
         if let candidate = ROBRigidPoseSolver.solve(anchors), candidate.rms <= 0.05 {
             lastAcceptedTransform = candidate
+            lastAcceptedTransformUptime = ProcessInfo.processInfo.systemUptime
             let confidence = min(1, Double(anchors.count) / 6) * max(0, 1 - candidate.rms / 0.05)
             let vector = candidate.rotation.vector
             ROBSceneSnapshotStore.shared.updateCameraPose(ROBCameraPose(
@@ -181,7 +183,14 @@ final class ROBReverseCameraPoseEstimator {
                 confidence: confidence
             ))
         }
-        guard let transform = lastAcceptedTransform else { return }
+        let transformIsFresh = lastAcceptedTransformUptime.map {
+            ProcessInfo.processInfo.systemUptime - $0 <= 0.5
+        } ?? false
+        guard transformIsFresh, let transform = lastAcceptedTransform else {
+            ROBSceneSnapshotStore.shared.updateCameraPose(nil)
+            ROBSceneSnapshotStore.shared.updateArmPose([])
+            return
+        }
         let joints: [JointPoint] = rawJoints.compactMap { marker, cameraPoint, confidence in
             guard case .armJoint(let arm, let joint, let index) = marker else { return nil }
             return JointPoint(
