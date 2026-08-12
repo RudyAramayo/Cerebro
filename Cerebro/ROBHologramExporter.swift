@@ -135,30 +135,63 @@ import AVFoundation
         let centerX = (minimumX + maximumX) / 2
         let centerZ = (minimumZ + maximumZ) / 2
         let halfSize: Float = 0.006
-        var positions: [String] = []
-        var colors: [String] = []
-        var counts: [String] = []
-        var indices: [String] = []
-        positions.reserveCapacity(arPoints.count * 4)
-        colors.reserveCapacity(arPoints.count * 4)
-        counts.reserveCapacity(arPoints.count)
-        indices.reserveCapacity(arPoints.count * 4)
-        for (pointIndex, point) in arPoints.enumerated() {
-            // Quick Look places the asset origin on a detected surface. Put
-            // the lowest observed point just above y=0 and center horizontal
-            // and depth extents around the placement origin.
-            let x = point.x - centerX
-            let y = max(point.y - minimumY, 0) + 0.03
-            let z = point.z - centerZ
-            positions.append("(\(x - halfSize), \(y - halfSize), \(z))")
-            positions.append("(\(x + halfSize), \(y - halfSize), \(z))")
-            positions.append("(\(x + halfSize), \(y + halfSize), \(z))")
-            positions.append("(\(x - halfSize), \(y + halfSize), \(z))")
-            let color = "(\(Float(point.r)/255), \(Float(point.g)/255), \(Float(point.b)/255))"
-            colors.append(contentsOf: repeatElement(color, count: 4))
-            counts.append("4")
-            let base = pointIndex * 4
-            indices.append(contentsOf: ["\(base)", "\(base + 1)", "\(base + 2)", "\(base + 3)"])
+        // RealityKit/Quick Look commonly falls back to beige when a mesh uses
+        // a displayColor primvar. Quantize the RGB samples into 64 small mesh
+        // batches and bind a concrete PreviewSurface material to each batch.
+        // This preserves a useful RGB image while remaining lightweight.
+        let buckets = Dictionary(grouping: arPoints) { point in
+            (Int(point.r >> 6) << 4) | (Int(point.g >> 6) << 2) | Int(point.b >> 6)
+        }
+        var children: [String] = []
+        children.reserveCapacity(buckets.count * 2)
+        for key in buckets.keys.sorted() {
+            guard let bucket = buckets[key], !bucket.isEmpty else { continue }
+            let red = bucket.reduce(0) { $0 + Int($1.r) } / bucket.count
+            let green = bucket.reduce(0) { $0 + Int($1.g) } / bucket.count
+            let blue = bucket.reduce(0) { $0 + Int($1.b) } / bucket.count
+            let color = "(\(Float(red) / 255), \(Float(green) / 255), \(Float(blue) / 255))"
+            let glow = "(\(Float(red) / 2040), \(Float(green) / 2040), \(Float(blue) / 2040))"
+            var positions: [String] = []
+            var counts: [String] = []
+            var indices: [String] = []
+            positions.reserveCapacity(bucket.count * 4)
+            counts.reserveCapacity(bucket.count)
+            indices.reserveCapacity(bucket.count * 4)
+            for (pointIndex, point) in bucket.enumerated() {
+                let x = point.x - centerX
+                let y = max(point.y - minimumY, 0) + 0.03
+                let z = point.z - centerZ
+                positions.append("(\(x - halfSize), \(y - halfSize), \(z))")
+                positions.append("(\(x + halfSize), \(y - halfSize), \(z))")
+                positions.append("(\(x + halfSize), \(y + halfSize), \(z))")
+                positions.append("(\(x - halfSize), \(y + halfSize), \(z))")
+                counts.append("4")
+                let base = pointIndex * 4
+                indices.append(contentsOf: ["\(base)", "\(base + 1)", "\(base + 2)", "\(base + 3)"])
+            }
+            children.append("""
+                def Material "RGBMaterial_\(key)" {
+                    token outputs:surface.connect = </Hologram/RGBMaterial_\(key)/PreviewSurface.outputs:surface>
+                    def Shader "PreviewSurface" {
+                        uniform token info:id = "UsdPreviewSurface"
+                        color3f inputs:diffuseColor = \(color)
+                        color3f inputs:emissiveColor = \(glow)
+                        float inputs:metallic = 0
+                        float inputs:roughness = 1
+                        token outputs:surface
+                    }
+                }
+                def Mesh "RGBPoints_\(key)" (
+                    prepend apiSchemas = ["MaterialBindingAPI"]
+                ) {
+                    uniform token subdivisionScheme = "none"
+                    bool doubleSided = true
+                    rel material:binding = </Hologram/RGBMaterial_\(key)>
+                    int[] faceVertexCounts = [\(counts.joined(separator: ","))]
+                    int[] faceVertexIndices = [\(indices.joined(separator: ","))]
+                    point3f[] points = [\(positions.joined(separator: ",\n"))]
+                }
+            """)
         }
         return """
         #usda 1.0
@@ -168,40 +201,12 @@ import AVFoundation
             upAxis = "Y"
         )
         def Xform "Hologram" {
-            # Keep the first AR placement comfortably inspectable on a phone.
-            # Quick Look still allows the viewer to pinch the message larger.
+            # Preserve the approximate three-foot camera height instead of
+            # pinning the captured scene to the detected floor plane.
+            double3 xformOp:translate = (0, 0.9144, 0)
             float3 xformOp:scale = (0.45, 0.45, 0.45)
-            uniform token[] xformOpOrder = ["xformOp:scale"]
-
-            def Material "RGBPointMaterial" {
-                token outputs:surface.connect = </Hologram/RGBPointMaterial/PreviewSurface.outputs:surface>
-
-                def Shader "DisplayColor" {
-                    uniform token info:id = "UsdPrimvarReader_float3"
-                    token inputs:varname = "displayColor"
-                    float3 outputs:result
-                }
-
-                def Shader "PreviewSurface" {
-                    uniform token info:id = "UsdPreviewSurface"
-                    color3f inputs:diffuseColor.connect = </Hologram/RGBPointMaterial/DisplayColor.outputs:result>
-                    color3f inputs:emissiveColor.connect = </Hologram/RGBPointMaterial/DisplayColor.outputs:result>
-                    float inputs:metallic = 0
-                    float inputs:roughness = 1
-                    token outputs:surface
-                }
-            }
-
-            def Mesh "Message" {
-                uniform token subdivisionScheme = "none"
-                bool doubleSided = true
-                rel material:binding = </Hologram/RGBPointMaterial>
-                int[] faceVertexCounts = [\(counts.joined(separator: ","))]
-                int[] faceVertexIndices = [\(indices.joined(separator: ","))]
-                point3f[] points = [\(positions.joined(separator: ",\n"))]
-                color3f[] primvars:displayColor = [\(colors.joined(separator: ",\n"))]
-                uniform token primvars:displayColor:interpolation = "vertex"
-            }
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        \(children.joined(separator: "\n"))
         }
         """
     }
