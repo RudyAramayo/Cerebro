@@ -70,6 +70,28 @@ import AVFoundation
     }
 
     private func beginMovieRecording(recordAudio: Bool) {
+        var preparedRecorder: AVAudioRecorder?
+        var preparedAudioURL: URL?
+        if recordAudio {
+            do {
+                let url = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("rob-hologram-\(UUID().uuidString).m4a")
+                let recorder = try AVAudioRecorder(url: url, settings: [
+                    AVFormatIDKey: kAudioFormatMPEG4AAC,
+                    AVSampleRateKey: 48_000,
+                    AVNumberOfChannelsKey: 1,
+                    AVEncoderBitRateKey: 128_000,
+                    AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+                ])
+                guard recorder.prepareToRecord() else {
+                    throw ExportError.audio("The selected microphone could not prepare for recording.")
+                }
+                preparedRecorder = recorder
+                preparedAudioURL = url
+            } catch {
+                presentError("Voxel recording will continue without audio: \(error.localizedDescription)")
+            }
+        }
         lock.lock()
         guard !isMovieRecording else { lock.unlock(); return }
         movieFrames.removeAll(keepingCapacity: true)
@@ -78,29 +100,16 @@ import AVFoundation
         movieDetailScale = voxelDetail
         isMovieRecording = true
         lock.unlock()
-        NotificationCenter.default.post(name: .ROBHologramMovieRecordingStateDidChange, object: self)
-        if recordAudio {
-            do {
-                let url = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("rob-hologram-\(UUID().uuidString).m4a")
-                let recorder = try AVAudioRecorder(url: url, settings: [
-                    AVFormatIDKey: kAudioFormatMPEG4AAC,
-                    AVSampleRateKey: 44_100,
-                    AVNumberOfChannelsKey: 1,
-                    AVEncoderBitRateKey: 96_000
-                ])
-                recorder.prepareToRecord()
-                recorder.record(forDuration: 15)
-                movieAudioRecorder = recorder
-                movieAudioURL = url
-            } catch {
-                presentError("Voxel recording started without audio: \(error.localizedDescription)")
-            }
+        movieAudioRecorder = preparedRecorder
+        movieAudioURL = preparedAudioURL
+        if let preparedRecorder, !preparedRecorder.record(forDuration: 15) {
+            movieAudioRecorder = nil
+            movieAudioURL = nil
+            if let preparedAudioURL { try? FileManager.default.removeItem(at: preparedAudioURL) }
+            presentError("Voxel recording started, but the microphone could not begin recording. The export will contain moving voxels without audio.")
         }
-        let alert = NSAlert()
-        alert.messageText = "AR Voxel Recording Started"
-        alert.informativeText = "Speak your message and move naturally. Choose Development → Stop and Export AR Voxel Recording when finished. Recording is limited to 15 seconds."
-        alert.runModal()
+        NotificationCenter.default.post(name: .ROBHologramMovieRecordingStateDidChange, object: self)
+        NSSound.beep()
     }
 
     public func stopMovieRecordingInteractively() {
@@ -185,7 +194,10 @@ import AVFoundation
         try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
         try movieBinary(frames).write(to: folder.appendingPathComponent("hologram-movie.bin"), options: .atomic)
         let duration = frames.last?.timestamp ?? 0
-        let hasAudio = audioURL != nil && fileManager.fileExists(atPath: audioURL!.path)
+        let audioSize = audioURL.flatMap {
+            try? fileManager.attributesOfItem(atPath: $0.path)[.size] as? NSNumber
+        }??.intValue ?? 0
+        let hasAudio = audioURL != nil && audioSize > 1_024
         let audioName = "message.m4a"
         let packagedAudioURL = folder.appendingPathComponent(audioName)
         if hasAudio, let audioURL {
@@ -442,52 +454,62 @@ import AVFoundation
                 }
             """
         }
+        // Quick Look can drop or flash prims when thousands of per-frame
+        // meshes toggle visibility. Keep one fixed-topology mesh per palette
+        // color and animate only its vertex positions instead.
+        let groupedFrames = arFrames.map { Dictionary(grouping: $0.points, by: paletteKey) }
         var meshes: [String] = []
-        for (frameIndex, frame) in arFrames.enumerated() {
-            let start = max(0, Int((frame.timestamp * 1_000).rounded()))
-            let end: Int
-            if frameIndex + 1 < arFrames.count {
-                end = max(start + 1, Int((arFrames[frameIndex + 1].timestamp * 1_000).rounded()))
-            } else {
-                end = start + 125
+        for key in usedKeys {
+            let slotCount = groupedFrames.map { $0[key]?.count ?? 0 }.max() ?? 0
+            guard slotCount > 0 else { continue }
+            let counts = Array(repeating: "4", count: slotCount).joined(separator: ",")
+            var indices: [String] = []
+            indices.reserveCapacity(slotCount * 4)
+            for slot in 0..<slotCount {
+                let base = slot * 4
+                indices.append(contentsOf: ["\(base)", "\(base + 1)", "\(base + 2)", "\(base + 3)"])
             }
-            let groups = Dictionary(grouping: frame.points, by: paletteKey)
-            for key in groups.keys.sorted() {
-                guard let points = groups[key], !points.isEmpty else { continue }
-                var positions: [String] = [], counts: [String] = [], indices: [String] = []
-                positions.reserveCapacity(points.count * 4)
-                counts.reserveCapacity(points.count)
-                indices.reserveCapacity(points.count * 4)
-                for (pointIndex, point) in points.enumerated() {
-                    let x = point.x - centerX
-                    let y = max(point.y - minimumY, 0) + 0.03
-                    let z = point.z - centerZ
-                    positions.append("(\(x - halfSize), \(y - halfSize), \(z))")
-                    positions.append("(\(x + halfSize), \(y - halfSize), \(z))")
-                    positions.append("(\(x + halfSize), \(y + halfSize), \(z))")
-                    positions.append("(\(x - halfSize), \(y + halfSize), \(z))")
-                    counts.append("4")
-                    let base = pointIndex * 4
-                    indices.append(contentsOf: ["\(base)", "\(base + 1)", "\(base + 2)", "\(base + 3)"])
-                }
-                let visibility = start == 0
-                    ? "{ 0: \"inherited\", \(end): \"invisible\" }"
-                    : "{ 0: \"invisible\", \(start): \"inherited\", \(end): \"invisible\" }"
-                meshes.append("""
-                    def Mesh "Frame_\(frameIndex)_RGB_\(key)" (
-                        prepend apiSchemas = ["MaterialBindingAPI"]
-                    ) {
-                        token visibility = "invisible"
-                        token visibility.timeSamples = \(visibility)
-                        uniform token subdivisionScheme = "none"
-                        bool doubleSided = true
-                        rel material:binding = </Hologram/RGBMaterial_\(key)>
-                        int[] faceVertexCounts = [\(counts.joined(separator: ","))]
-                        int[] faceVertexIndices = [\(indices.joined(separator: ","))]
-                        point3f[] points = [\(positions.joined(separator: ",\n"))]
+            var samples: [String] = []
+            var defaultPositions = ""
+            for (frameIndex, frame) in arFrames.enumerated() {
+                let time = max(0, Int((frame.timestamp * 1_000).rounded()))
+                let points = groupedFrames[frameIndex][key] ?? []
+                var positions: [String] = []
+                positions.reserveCapacity(slotCount * 4)
+                for slot in 0..<slotCount {
+                    if slot < points.count {
+                        let point = points[slot]
+                        let x = point.x - centerX
+                        let y = max(point.y - minimumY, 0) + 0.03
+                        let z = point.z - centerZ
+                        positions.append("(\(x - halfSize), \(y - halfSize), \(z))")
+                        positions.append("(\(x + halfSize), \(y - halfSize), \(z))")
+                        positions.append("(\(x + halfSize), \(y + halfSize), \(z))")
+                        positions.append("(\(x - halfSize), \(y + halfSize), \(z))")
+                    } else {
+                        // Degenerate unused slots at the placement origin so
+                        // every animation sample retains identical topology.
+                        positions.append(contentsOf: repeatElement("(0, 0, 0)", count: 4))
                     }
-                """)
+                }
+                if frameIndex == 0 { defaultPositions = positions.joined(separator: ",\n") }
+                samples.append("\(time): [\(positions.joined(separator: ",\n"))]")
             }
+            meshes.append("""
+                def Mesh "RGBVoxels_\(key)" (
+                    prepend apiSchemas = ["MaterialBindingAPI"]
+                ) {
+                    uniform token subdivisionScheme = "none"
+                    bool doubleSided = true
+                    rel material:binding = </Hologram/RGBMaterial_\(key)>
+                    int[] faceVertexCounts = [\(counts)]
+                    int[] faceVertexIndices = [\(indices.joined(separator: ","))]
+                    point3f[] points = [\(defaultPositions)]
+                    point3f[] points.timeSamples = {
+                        \(samples.joined(separator: ",\n"))
+                    }
+                }
+            """)
         }
         let endTime = max(1, Int(((arFrames.last?.timestamp ?? 0) * 1_000).rounded()) + 125)
         let audio = audioName.map { name in
@@ -542,10 +564,11 @@ import AVFoundation
     }
 
     private enum ExportError: LocalizedError {
-        case noDepth, usdz(String)
+        case noDepth, usdz(String), audio(String)
         var errorDescription: String? {
             switch self { case .noDepth: return "The current depth image contains no usable points."
-            case .usdz(let detail): return "Could not create the Apple AR asset: \(detail)" }
+            case .usdz(let detail): return "Could not create the Apple AR asset: \(detail)"
+            case .audio(let detail): return detail }
         }
     }
 }
@@ -602,11 +625,11 @@ private extension ROBHologramExporter {
     const stage=document.querySelector('#stage'),status=document.querySelector('#status'),audio=document.querySelector('#message-audio');
     const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true,powerPreference:'high-performance'});renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.xr.enabled=true;stage.append(renderer.domElement);
     const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera(52,1,.01,50),controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=true;controls.screenSpacePanning=true;
-    const root=new THREE.Group();scene.add(root);let cloud,frames=[],radius=1,homeDistance=2,playing=false,startedAt=0,animationToken=0;
+    const root=new THREE.Group();scene.add(root);let cloud,frames=[],radius=1,homeDistance=2,playing=false,startedAt=0,animationToken=0,maxPointCount=0,workingPositions,workingColors;
     function resetView(){camera.position.set(0,-radius*.1,homeDistance);controls.target.set(0,-radius*.1,0);controls.update()}
-    function showFrame(index){const frame=frames[index];if(!frame)return;const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.BufferAttribute(frame.positions,3));geometry.setAttribute('color',new THREE.BufferAttribute(frame.colors,4,true));geometry.translate(-frame.center.x,-frame.center.y,-frame.center.z);if(cloud){cloud.geometry.dispose();cloud.geometry=geometry}else{cloud=new THREE.Points(geometry,new THREE.PointsMaterial({size:Math.max(.009,radius/100),vertexColors:true,sizeAttenuation:true}));root.add(cloud)}}
-    try{const [metaResponse,dataResponse]=await Promise.all([fetch('hologram-movie.json'),fetch('hologram-movie.bin')]);if(!metaResponse.ok||!dataResponse.ok)throw new Error('recording files unavailable');const meta=await metaResponse.json(),buffer=await dataResponse.arrayBuffer(),view=new DataView(buffer);if(view.getUint32(0,false)!==0x524f424d||view.getUint32(4,true)!==1)throw new Error('invalid movie format');const frameCount=view.getUint32(8,true);let offset=12,all=[];for(let f=0;f<frameCount;f++){const time=view.getFloat32(offset,true),count=view.getUint32(offset+4,true);offset+=8;const positions=new Float32Array(count*3),colors=new Uint8Array(count*4);for(let i=0;i<count;i++){positions[i*3]=view.getFloat32(offset,true);positions[i*3+1]=view.getFloat32(offset+4,true);positions[i*3+2]=view.getFloat32(offset+8,true);colors.set(new Uint8Array(buffer,offset+12,4),i*4);all.push(positions[i*3],positions[i*3+1],positions[i*3+2]);offset+=16}frames.push({time,positions,colors})}if(offset!==buffer.byteLength)throw new Error('trailing movie data');const axes=[[],[],[]];for(let i=0;i<all.length;i++)axes[i%3].push(all[i]);axes.forEach(a=>a.sort((a,b)=>a-b));const q=(a,p)=>a[Math.round((a.length-1)*p)],center=new THREE.Vector3((q(axes[0],.02)+q(axes[0],.98))/2,(q(axes[1],.02)+q(axes[1],.98))/2,(q(axes[2],.02)+q(axes[2],.98))/2);frames.forEach(f=>f.center=center);radius=Math.max((q(axes[0],.98)-q(axes[0],.02))*.55,(q(axes[1],.98)-q(axes[1],.02))*.65,.1);homeDistance=Math.max(.6,radius/Math.tan(THREE.MathUtils.degToRad(camera.fov*.42)));showFrame(0);resetView();if(!meta.hasAudio){audio.removeAttribute('src');audio.load()}status.textContent=`Ready · ${frameCount} moving RGB frames · ${meta.duration.toFixed(1)} seconds`;}catch(error){status.textContent=`Could not load recording: ${error.message}`;console.error(error)}
-    function replay(){if(!frames.length)return;const token=++animationToken;playing=true;startedAt=performance.now();if(audio.getAttribute('src')){audio.currentTime=0;audio.play().catch(()=>{})}function tick(now){if(token!==animationToken)return;const elapsed=(now-startedAt)/1000;let index=frames.length-1;for(let i=1;i<frames.length;i++){if(frames[i].time>elapsed){index=i-1;break}}showFrame(index);if(elapsed<=frames[frames.length-1].time+.15)requestAnimationFrame(tick);else{playing=false;status.textContent='Message complete · tap Play to watch again'}}requestAnimationFrame(tick)}
+    function showFrame(index){const frame=frames[index];if(!frame||!cloud)return;const count=frame.positions.length/3;for(let i=0;i<count;i++){workingPositions[i*3]=frame.positions[i*3]-frame.center.x;workingPositions[i*3+1]=frame.positions[i*3+1]-frame.center.y;workingPositions[i*3+2]=frame.positions[i*3+2]-frame.center.z;workingColors.set(frame.colors.subarray(i*4,i*4+4),i*4)}cloud.geometry.setDrawRange(0,count);cloud.geometry.attributes.position.needsUpdate=true;cloud.geometry.attributes.color.needsUpdate=true}
+    try{const [metaResponse,dataResponse]=await Promise.all([fetch('hologram-movie.json'),fetch('hologram-movie.bin')]);if(!metaResponse.ok||!dataResponse.ok)throw new Error('recording files unavailable');const meta=await metaResponse.json(),buffer=await dataResponse.arrayBuffer(),view=new DataView(buffer);if(view.getUint32(0,false)!==0x524f424d||view.getUint32(4,true)!==1)throw new Error('invalid movie format');const frameCount=view.getUint32(8,true);let offset=12,all=[];for(let f=0;f<frameCount;f++){const time=view.getFloat32(offset,true),count=view.getUint32(offset+4,true);maxPointCount=Math.max(maxPointCount,count);offset+=8;const positions=new Float32Array(count*3),colors=new Uint8Array(count*4);for(let i=0;i<count;i++){positions[i*3]=view.getFloat32(offset,true);positions[i*3+1]=view.getFloat32(offset+4,true);positions[i*3+2]=view.getFloat32(offset+8,true);colors.set(new Uint8Array(buffer,offset+12,4),i*4);all.push(positions[i*3],positions[i*3+1],positions[i*3+2]);offset+=16}frames.push({time,positions,colors})}if(offset!==buffer.byteLength)throw new Error('trailing movie data');const axes=[[],[],[]];for(let i=0;i<all.length;i++)axes[i%3].push(all[i]);axes.forEach(a=>a.sort((a,b)=>a-b));const q=(a,p)=>a[Math.round((a.length-1)*p)],center=new THREE.Vector3((q(axes[0],.02)+q(axes[0],.98))/2,(q(axes[1],.02)+q(axes[1],.98))/2,(q(axes[2],.02)+q(axes[2],.98))/2);frames.forEach(f=>f.center=center);radius=Math.max((q(axes[0],.98)-q(axes[0],.02))*.55,(q(axes[1],.98)-q(axes[1],.02))*.65,.1);homeDistance=Math.max(.6,radius/Math.tan(THREE.MathUtils.degToRad(camera.fov*.42)));workingPositions=new Float32Array(maxPointCount*3);workingColors=new Uint8Array(maxPointCount*4);const geometry=new THREE.BufferGeometry(),positionAttribute=new THREE.BufferAttribute(workingPositions,3),colorAttribute=new THREE.BufferAttribute(workingColors,4,true);positionAttribute.setUsage(THREE.DynamicDrawUsage);colorAttribute.setUsage(THREE.DynamicDrawUsage);geometry.setAttribute('position',positionAttribute);geometry.setAttribute('color',colorAttribute);cloud=new THREE.Points(geometry,new THREE.PointsMaterial({size:Math.max(.009,radius/100),vertexColors:true,sizeAttenuation:true}));root.add(cloud);showFrame(0);resetView();if(!meta.hasAudio){audio.removeAttribute('src');audio.load()}status.textContent=`Ready · ${frameCount} moving RGB frames · ${meta.duration.toFixed(1)} seconds`;}catch(error){status.textContent=`Could not load recording: ${error.message}`;console.error(error)}
+    async function replay(){if(!frames.length)return;const token=++animationToken;playing=true;let useAudio=Boolean(audio.getAttribute('src'));if(useAudio){audio.pause();audio.currentTime=0;try{await audio.play()}catch(error){useAudio=false;console.warn('Audio playback unavailable',error)}}startedAt=performance.now()-(useAudio?audio.currentTime*1000:0);function tick(now){if(token!==animationToken)return;const elapsed=useAudio?audio.currentTime:(now-startedAt)/1000;let index=frames.length-1;for(let i=1;i<frames.length;i++){if(frames[i].time>elapsed){index=i-1;break}}showFrame(index);const audioActive=useAudio&&!audio.ended;const visualActive=elapsed<=frames[frames.length-1].time+.15;if(audioActive||visualActive)requestAnimationFrame(tick);else{playing=false;status.textContent='Message complete · tap Play to watch again'}}requestAnimationFrame(tick)}
     document.querySelector('#replay').onclick=replay;document.querySelector('#reset').onclick=resetView;document.querySelector('#fullscreen').onclick=()=>document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen?.();
     const apple=/AppleWebKit/i.test(navigator.userAgent)&&!/CriOS|FxiOS|EdgiOS/i.test(navigator.userAgent);if(!apple&&navigator.xr){const module=await import('three/addons/webxr/ARButton.js');const ar=module.ARButton.createButton(renderer,{optionalFeatures:['dom-overlay'],domOverlay:{root:document.body}});ar.classList.add('webxr-ar');document.querySelector('nav').prepend(ar)}
     renderer.xr.addEventListener('sessionstart',()=>{controls.enabled=false;root.position.set(0,.9,-1.4);root.scale.setScalar(Math.min(.45,.5/radius));replay()});renderer.xr.addEventListener('sessionend',()=>{controls.enabled=true;root.position.set(0,0,0);root.scale.setScalar(1);resetView()});
