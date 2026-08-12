@@ -207,6 +207,9 @@ final class CameraViewController: NSViewController {
     private let depthOverlayRenderer = ROBDepthOverlayRenderer()
     private let depthOverlayView = NSImageView()
     private let depthOpacitySlider = NSSlider(value: 0.45, minValue: 0, maxValue: 1, target: nil, action: nil)
+    private var latestHumanObservations: [VNHumanObservation] = []
+    private var lastSceneSnapshotUpdate: CFTimeInterval = 0
+    private let reversePoseEstimator = ROBReverseCameraPoseEstimator()
     
     
     override func viewDidLoad() {
@@ -493,6 +496,17 @@ extension CameraViewController: CameraManagerDelegate {
     
     func cameraManager(_ manager: CameraManagerProtocol, didOutput frameSet: CameraFrameSet) {
         let sampleBuffer = frameSet.rgbSampleBuffer
+        let sceneUpdateTime = CACurrentMediaTime()
+        if sceneUpdateTime - lastSceneSnapshotUpdate >= 0.2 {
+            lastSceneSnapshotUpdate = sceneUpdateTime
+            ROBSceneSnapshotStore.shared.updateCameraFrame(
+                sequence: frameSet.sequence,
+                timestampNanoseconds: frameSet.timestampNanoseconds,
+                source: frameSet.source.rawValue,
+                people: latestHumanObservations,
+                depth: frameSet.alignedDepth
+            )
+        }
         if let depth = frameSet.alignedDepth {
             let hologramFrame = ROBDepthCloudFrame(depth: depth, rgbSampleBuffer: sampleBuffer)
             ROBHologramExporter.shared.capture(hologramFrame)
@@ -525,6 +539,7 @@ extension CameraViewController: CameraManagerDelegate {
         let humanRectanglesRequest = VNDetectHumanRectanglesRequest { request, error in
             let observations = (request.results as? [VNHumanObservation]) ?? []
             DispatchQueue.main.async {
+                self.latestHumanObservations = observations
                 self.poseView.humanRect_observations = observations
                 self.poseView.setNeedsDisplay(self.poseView.bounds)
             }
@@ -546,6 +561,15 @@ extension CameraViewController: CameraManagerDelegate {
                 self.poseView.setNeedsDisplay(self.poseView.bounds)
             }
         }
+        let calibrationBarcodeRequest = VNDetectBarcodesRequest { request, error in
+            let observations = (request.results as? [VNBarcodeObservation]) ?? []
+            self.reversePoseEstimator.process(
+                barcodes: observations,
+                depth: frameSet.alignedDepth,
+                intrinsics: frameSet.intrinsics
+            )
+        }
+        calibrationBarcodeRequest.symbologies = [.qr]
         let humanBodyPose3DRequest = VNDetectHumanBodyPose3DRequest { request, error in
             for observation in request.results as! [VNHumanBodyPose3DObservation] {
                 self.process_humanBodyPose3D_Observation(observation)
@@ -713,6 +737,7 @@ extension CameraViewController: CameraManagerDelegate {
             humanRectanglesRequest,     // √
             humanBodyPoseRequest,       // √
             humanHandPoseRequest,       // √
+            calibrationBarcodeRequest,
             //humanBodyPose3DRequest,     // √ - Leaks a significant amount of memory even without processing
                 //trajectoriesRequest,
                 //animalBodyPoseRequest,
@@ -728,6 +753,7 @@ extension CameraViewController: CameraManagerDelegate {
         detail: String?
     ) {
         videoServer?.updateCameraState(state)
+        ROBSceneSnapshotStore.shared.updateCameraState(state.rawValue)
         if state != .streamingRGBD {
             robMainViewController?.clearAlignedDepthFrame()
         }

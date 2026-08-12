@@ -363,7 +363,37 @@ private struct GeminiRoboticsRuntimePolicy {
     public func sendText(_ text: String, speechWordiness: Int) -> Bool {
         // Preserve ROB's wake/address phrase: the system instruction uses it
         // to decide whether a new conversation should receive a response.
-        sendText(GeminiRoboticsPrompt.spokenText(text, speechWordiness: speechWordiness))
+        let spokenPrompt = GeminiRoboticsPrompt.spokenText(text, speechWordiness: speechWordiness)
+        let sceneContext = try? ROBSceneSnapshotStore.shared.snapshot().languageModelContext()
+        return sendText(sceneContext.map { "\(spokenPrompt)\n\n\($0)" } ?? spokenPrompt)
+    }
+
+    /// Produces a safe, typed local intent for callers that explicitly choose
+    /// on-device interpretation. The result is advisory and is never executed.
+    @objc(interpretLatestSceneRequest:completion:)
+    public func interpretLatestSceneRequest(
+        _ request: String,
+        completion: @escaping (NSDictionary?, NSError?) -> Void
+    ) {
+        let snapshot = ROBSceneSnapshotStore.shared.snapshot()
+        Task {
+            do {
+                let intent = try await ROBFoundationSceneInterpreter().interpret(
+                    request: request,
+                    snapshot: snapshot
+                )
+                let result: NSDictionary = [
+                    "action": intent.action.rawValue,
+                    "targetID": intent.targetID ?? NSNull(),
+                    "explanation": intent.explanation,
+                    "requiresHumanConfirmation": intent.requiresHumanConfirmation,
+                    "confidence": intent.confidence
+                ]
+                await MainActor.run { completion(result, nil) }
+            } catch {
+                await MainActor.run { completion(nil, error as NSError) }
+            }
+        }
     }
 
     public func sendToolResponse(

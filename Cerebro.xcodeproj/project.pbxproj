@@ -20,6 +20,8 @@
 		D4066C5C22863009002ACAD1 /* ROBBaseControllerModel.m in Sources */ = {isa = PBXBuildFile; fileRef = D4066C5B22863009002ACAD1 /* ROBBaseControllerModel.m */; };
 		D4066C6022867F44002ACAD1 /* ROBTorsoControlsViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = D4066C5F22867F44002ACAD1 /* ROBTorsoControlsViewController.m */; };
 		D408B1212E15E7E300F6FEB3 /* ROBAI.swift in Sources */ = {isa = PBXBuildFile; fileRef = D408B1202E15E7E300F6FEB3 /* ROBAI.swift */; };
+		C0D5A0012F00000100000001 /* ROBSceneSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D5B0012F00000100000001 /* ROBSceneSnapshot.swift */; };
+		C0D6A0012F00000100000001 /* ROBVisualCalibration.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D6B0012F00000100000001 /* ROBVisualCalibration.swift */; };
 		D4E000022F00000100000001 /* GeminiRoboticsProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E000012F00000100000001 /* GeminiRoboticsProtocol.swift */; };
 		D4E100022F00000100000001 /* ROBRobotActionProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E100012F00000100000001 /* ROBRobotActionProtocol.swift */; };
 		D4E200022F00000100000001 /* ROBAutonomyCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E200012F00000100000001 /* ROBAutonomyCoordinator.swift */; };
@@ -141,6 +143,8 @@
 		D4066C5E22867F44002ACAD1 /* ROBTorsoControlsViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBTorsoControlsViewController.h; sourceTree = "<group>"; };
 		D4066C5F22867F44002ACAD1 /* ROBTorsoControlsViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ROBTorsoControlsViewController.m; sourceTree = "<group>"; };
 		D408B1202E15E7E300F6FEB3 /* ROBAI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAI.swift; sourceTree = "<group>"; };
+		C0D5B0012F00000100000001 /* ROBSceneSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBSceneSnapshot.swift; sourceTree = "<group>"; };
+		C0D6B0012F00000100000001 /* ROBVisualCalibration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBVisualCalibration.swift; sourceTree = "<group>"; };
 		D4E000012F00000100000001 /* GeminiRoboticsProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiRoboticsProtocol.swift; sourceTree = "<group>"; };
 		D4E100012F00000100000001 /* ROBRobotActionProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRobotActionProtocol.swift; sourceTree = "<group>"; };
 		D4E200012F00000100000001 /* ROBAutonomyCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAutonomyCoordinator.swift; sourceTree = "<group>"; };
@@ -367,6 +371,8 @@
 				D4E800012F00000100000001 /* ROBLocalImprovisationProtocol.swift */,
 				D4E900012F00000100000001 /* ROBLlamaCppImprovisationProvider.swift */,
 				D408B1202E15E7E300F6FEB3 /* ROBAI.swift */,
+				C0D5B0012F00000100000001 /* ROBSceneSnapshot.swift */,
+				C0D6B0012F00000100000001 /* ROBVisualCalibration.swift */,
 				D4A38F751FFC8BD300092A46 /* ROBSCNViewController.m */,
 				D4C5252220A65FDD00290BF5 /* ROBConsciousness.h */,
 				D4C5252320A65FDD00290BF5 /* ROBConsciousness.m */,
@@ -622,6 +628,8 @@
 				D4E800022F00000100000001 /* ROBLocalImprovisationProtocol.swift in Sources */,
 				D4E900022F00000100000001 /* ROBLlamaCppImprovisationProvider.swift in Sources */,
 				D408B1212E15E7E300F6FEB3 /* ROBAI.swift in Sources */,
+				C0D5A0012F00000100000001 /* ROBSceneSnapshot.swift in Sources */,
+				C0D6A0012F00000100000001 /* ROBVisualCalibration.swift in Sources */,
 				D4066C5822828DA5002ACAD1 /* AudioInputTaskController.m in Sources */,
 				D4F136752325E39A0084A302 /* VideoEncoder.m in Sources */,
 				D49D755927FFD1AF00142E26 /* AutoNetServer.swift in Sources */,

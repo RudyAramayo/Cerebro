@@ -165,7 +165,7 @@ def timestamp_nanoseconds(frame):
     )
 
 
-def frame_payload(rgb_frame, depth_frame, left_frame, right_frame):
+def frame_payload(rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics):
     rgb_width = int(rgb_frame.getWidth())
     rgb_height = int(rgb_frame.getHeight())
     depth_width = int(depth_frame.getWidth())
@@ -220,6 +220,7 @@ def frame_payload(rgb_frame, depth_frame, left_frame, right_frame):
         "stereo_format": "GRAY8",
         "left_length": len(left_bytes),
         "right_length": len(right_bytes),
+        "rgb_intrinsics": rgb_intrinsics,
     }
     header_bytes = json.dumps(
         header, ensure_ascii=False, separators=(",", ":")
@@ -227,9 +228,9 @@ def frame_payload(rgb_frame, depth_frame, left_frame, right_frame):
     return header_bytes, rgb_bytes, depth_bytes, left_bytes, right_bytes
 
 
-def send_frame(client, rgb_frame, depth_frame, left_frame, right_frame):
+def send_frame(client, rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics):
     header, rgb_bytes, depth_bytes, left_bytes, right_bytes = frame_payload(
-        rgb_frame, depth_frame, left_frame, right_frame
+        rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics
     )
     client.sendall(PROTOCOL_MAGIC + struct.pack(">I", len(header)) + header)
     client.sendall(rgb_bytes)
@@ -252,9 +253,8 @@ def stream_camera(client, stop_event):
         )
 
         with dai.Pipeline(device) as pipeline:
-            rgb_camera = pipeline.create(dai.node.Camera).build(
-                color_camera_socket(device, dai)
-            )
+            rgb_socket = color_camera_socket(device, dai)
+            rgb_camera = pipeline.create(dai.node.Camera).build(rgb_socket)
             rgb_output = rgb_camera.requestOutput(
                 FRAME_SIZE,
                 type=dai.ImgFrame.Type.RGB888i,
@@ -297,6 +297,15 @@ def stream_camera(client, stop_event):
             queue = sync.out.createOutputQueue(maxSize=1, blocking=False)
 
             pipeline.start()
+            calibration = device.readCalibration2()
+            intrinsic_matrix = calibration.getCameraIntrinsics(
+                rgb_socket, FRAME_SIZE[0], FRAME_SIZE[1]
+            )
+            rgb_intrinsics = [
+                float(value) for row in intrinsic_matrix for value in row
+            ]
+            if len(rgb_intrinsics) != 9:
+                raise RuntimeError("DepthAI returned invalid RGB camera intrinsics")
             emit("CEREBRO_DEPTHCAM_STREAMING")
 
             while not stop_event.is_set() and pipeline.isRunning():
@@ -314,7 +323,10 @@ def stream_camera(client, stop_event):
                     depth_frame, dai.ImgFrame
                 ):
                     raise RuntimeError("DepthAI sync group is missing RGB or depth")
-                send_frame(client, rgb_frame, depth_frame, left_frame, right_frame)
+                send_frame(
+                    client, rgb_frame, depth_frame, left_frame, right_frame,
+                    rgb_intrinsics
+                )
 
             if not stop_event.is_set():
                 raise RuntimeError("DepthAI pipeline stopped unexpectedly")

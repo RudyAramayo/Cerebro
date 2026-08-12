@@ -68,6 +68,20 @@ struct CameraDepthFrame {
     }
 }
 
+/// Pinhole calibration for the RGB image to which depth is aligned.
+struct CameraIntrinsics: Sendable {
+    let fx: Double
+    let fy: Double
+    let cx: Double
+    let cy: Double
+
+    func isValid(forWidth width: Int, height: Int) -> Bool {
+        fx.isFinite && fy.isFinite && cx.isFinite && cy.isFinite
+            && fx > 0 && fy > 0 && cx >= 0 && cy >= 0
+            && cx < Double(width) && cy < Double(height)
+    }
+}
+
 /// Rectified grayscale views from the OAK stereo pair. These remain useful
 /// when tuning IR illumination, validating calibration, and debugging depth.
 struct CameraStereoFrame {
@@ -83,6 +97,7 @@ struct CameraFrameSet {
     let timestampNanoseconds: UInt64
     let rgbSampleBuffer: CMSampleBuffer
     let alignedDepth: CameraDepthFrame?
+    var intrinsics: CameraIntrinsics? = nil
     var rectifiedLeft: CameraStereoFrame? = nil
     var rectifiedRight: CameraStereoFrame? = nil
 }
@@ -940,6 +955,14 @@ private final class DepthCameraServiceClient {
                     height: header.depthHeight,
                     millimetersLittleEndian: depthData
                 ),
+                intrinsics: header.rgbIntrinsics.flatMap { values in
+                    guard values.count == 9 else { return nil }
+                    let result = CameraIntrinsics(
+                        fx: values[0], fy: values[4], cx: values[2], cy: values[5]
+                    )
+                    return result.isValid(forWidth: header.rgbWidth, height: header.rgbHeight)
+                        ? result : nil
+                },
                 rectifiedLeft: CameraStereoFrame(width: header.stereoWidth, height: header.stereoHeight, pixels: leftData),
                 rectifiedRight: CameraStereoFrame(width: header.stereoWidth, height: header.stereoHeight, pixels: rightData)
             ), activeRunGeneration)
@@ -1101,6 +1124,7 @@ private struct DepthCameraPacketHeader: Decodable {
     let stereoFormat: String
     let leftLength: Int
     let rightLength: Int
+    let rgbIntrinsics: [Double]?
 
     enum CodingKeys: String, CodingKey {
         case protocolVersion = "protocol_version"
@@ -1120,6 +1144,7 @@ private struct DepthCameraPacketHeader: Decodable {
         case stereoFormat = "stereo_format"
         case leftLength = "left_length"
         case rightLength = "right_length"
+        case rgbIntrinsics = "rgb_intrinsics"
     }
 }
 

@@ -132,6 +132,9 @@ import Foundation
             receivedAtUptime: ProcessInfo.processInfo.systemUptime
         )
         latestLidar = snapshot
+        ROBSceneSnapshotStore.shared.updateLidarFreeSpace(
+            Self.sceneFreeSpace(from: points)
+        )
         if active, zoneOrigin == nil {
             zoneOrigin = (snapshot.x, snapshot.y)
         }
@@ -139,6 +142,26 @@ import Foundation
 
     public func updatePersonVisible(_ visible: Bool) {
         personVisible = visible
+    }
+
+    private static func sceneFreeSpace(from points: [LidarPoint]) -> [ROBFreeSpaceRegion] {
+        let sectors: [(String, Double)] = [("forward", 0), ("left", .pi / 2), ("back", .pi), ("right", -.pi / 2)]
+        return sectors.map { name, center in
+            let distances = points.compactMap { point -> Double? in
+                let delta = atan2(sin(point.angle - center), cos(point.angle - center))
+                return abs(delta) <= .pi / 6 ? point.distance : nil
+            }
+            let minimum = distances.min() ?? 0
+            let clearCount = distances.filter { $0 >= obstacleDistanceMeters }.count
+            let clearFraction = distances.isEmpty ? 0 : Double(clearCount) / Double(distances.count)
+            let confidence = min(1, Double(distances.count) / 12)
+            return ROBFreeSpaceRegion(
+                id: "lidar-\(name)", direction: name,
+                minimumClearanceMeters: minimum, clearFraction: clearFraction,
+                traversable: confidence >= 0.25 && minimum >= obstacleDistanceMeters,
+                confidence: confidence, source: "rplidar"
+            )
+        }
     }
 
     public func stop(reason: String) {
