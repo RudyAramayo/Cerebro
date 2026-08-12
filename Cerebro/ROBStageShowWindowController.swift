@@ -26,6 +26,9 @@ import UniformTypeIdentifiers
     private let localModelField = NSTextField()
     private let localTimeoutField = NSTextField()
     private let localStatusLabel = NSTextField(labelWithString: "Local director disabled.")
+    private let mlxVisionButton = NSButton(checkboxWithTitle: "Sample camera with MLX VLM (≥5 s)", target: nil, action: nil)
+    private let mlxMemoryField = NSTextField()
+    private let mlxTelemetryLabel = NSTextField(labelWithString: "MLX is idle; models load on first test.")
     private var stateObserver: NSObjectProtocol?
     private var localRefreshTimer: Timer?
     private var localTemperature = ROBLocalImprovisationConfiguration.defaultTemperature
@@ -109,7 +112,7 @@ import UniformTypeIdentifiers
         localProviderPopup.addItems(withTitles: ROBLocalImprovisationProviderKind.allCases.map(\.displayName))
         localProviderPopup.target = self
         localProviderPopup.action = #selector(localProviderSelectionChanged(_:))
-        localProviderPopup.toolTip = "llama.cpp works now through a loopback server; MLX Swift uses the same provider contract when its adapter is linked."
+        localProviderPopup.toolTip = "Choose the loopback llama.cpp server or private in-process MLX Swift inference."
 
         localEndpointField.placeholderString = "http://127.0.0.1:8080"
         localEndpointField.toolTip = "Loopback llama.cpp server root, /v1, or /v1/chat/completions"
@@ -154,6 +157,27 @@ import UniformTypeIdentifiers
         localStack.alignment = .leading
         localStack.spacing = 5
 
+        mlxVisionButton.target = self
+        mlxVisionButton.action = #selector(mlxVisionChanged(_:))
+        mlxVisionButton.toolTip = "Examines selected frames on a low-frequency worker. It never runs in the real-time motor-control loop."
+        mlxMemoryField.placeholderString = "Local semantic memory text or retrieval query"
+        mlxMemoryField.font = .systemFont(ofSize: 11)
+        mlxMemoryField.widthAnchor.constraint(equalToConstant: 360).isActive = true
+        let rememberButton = makeButton("Remember", action: #selector(rememberWithMLX(_:)))
+        let retrieveButton = makeButton("Retrieve", action: #selector(retrieveWithMLX(_:)))
+        let mlxRow = NSStackView(views: [mlxVisionButton, mlxMemoryField, rememberButton, retrieveButton])
+        mlxRow.orientation = .horizontal
+        mlxRow.alignment = .centerY
+        mlxRow.spacing = 8
+        mlxTelemetryLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        mlxTelemetryLabel.textColor = .secondaryLabelColor
+        mlxTelemetryLabel.lineBreakMode = .byTruncatingMiddle
+        mlxTelemetryLabel.usesSingleLineMode = true
+        let mlxStack = NSStackView(views: [mlxRow, mlxTelemetryLabel])
+        mlxStack.orientation = .vertical
+        mlxStack.alignment = .leading
+        mlxStack.spacing = 5
+
         editor.isRichText = false
         editor.frame = NSRect(x: 0, y: 0, width: 900, height: 420)
         editor.isAutomaticQuoteSubstitutionEnabled = false
@@ -184,7 +208,7 @@ import UniformTypeIdentifiers
         statusLabel.font = .systemFont(ofSize: 12, weight: .medium)
         statusLabel.lineBreakMode = .byTruncatingTail
 
-        for view in [safetyLabel, buttonStack, localStack, editorScroll, statusLabel, logScroll] {
+        for view in [safetyLabel, buttonStack, localStack, mlxStack, editorScroll, statusLabel, logScroll] {
             view.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview(view)
         }
@@ -202,7 +226,11 @@ import UniformTypeIdentifiers
             localStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             localStack.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -16),
 
-            editorScroll.topAnchor.constraint(equalTo: localStack.bottomAnchor, constant: 10),
+            mlxStack.topAnchor.constraint(equalTo: localStack.bottomAnchor, constant: 8),
+            mlxStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            mlxStack.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -16),
+
+            editorScroll.topAnchor.constraint(equalTo: mlxStack.bottomAnchor, constant: 10),
             editorScroll.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             editorScroll.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             editorScroll.bottomAnchor.constraint(equalTo: statusLabel.topAnchor, constant: -10),
@@ -303,7 +331,39 @@ import UniformTypeIdentifiers
     }
 
     @objc private func localProviderSelectionChanged(_ sender: Any?) {
+        if localProviderPopup.indexOfSelectedItem == 1,
+           localModelField.stringValue == ROBLocalImprovisationConfiguration.defaultModel {
+            localModelField.stringValue = ROBMLXEngine.defaultLLMModel
+        }
         updateLocalFieldAvailability()
+    }
+
+    @objc private func mlxVisionChanged(_ sender: NSButton) {
+        ROBMLXRuntime.shared.setVisionEnabled(sender.state == .on)
+        appendLog(sender.state == .on
+            ? "[mlx] low-frequency VLM sampling enabled; camera frames remain outside motor control"
+            : "[mlx] VLM sampling disabled")
+    }
+
+    @objc private func rememberWithMLX(_ sender: Any?) {
+        let text = mlxMemoryField.stringValue
+        Task { @MainActor [weak self] in
+            do {
+                try await ROBMLXEngine.shared.remember(text)
+                self?.appendLog("[mlx memory] stored locally")
+            } catch { self?.report(error) }
+        }
+    }
+
+    @objc private func retrieveWithMLX(_ sender: Any?) {
+        let query = mlxMemoryField.stringValue
+        Task { @MainActor [weak self] in
+            do {
+                let matches = try await ROBMLXEngine.shared.retrieve(query)
+                let result = matches.map { String(format: "%.3f %@", $0.similarity, $0.text) }.joined(separator: " | ")
+                self?.appendLog("[mlx retrieval] \(result.isEmpty ? "no memories" : result)")
+            } catch { self?.report(error) }
+        }
     }
 
     @objc private func saveLocalProvider(_ sender: Any?) {
@@ -414,6 +474,9 @@ import UniformTypeIdentifiers
     private func updateLocalFieldAvailability() {
         let isLlama = localProviderPopup.indexOfSelectedItem == 0
         localEndpointField.isEnabled = isLlama
+        localEndpointField.toolTip = isLlama
+            ? "Loopback llama.cpp server root, /v1, or /v1/chat/completions"
+            : "Not used by MLX; inference stays in this Cerebro process."
         localModelField.isEnabled = true
         localTimeoutField.isEnabled = true
     }
@@ -428,6 +491,19 @@ import UniformTypeIdentifiers
     }
 
     private func refreshLocalStatus() {
+        Task { @MainActor [weak self] in
+            let mlx = await ROBMLXEngine.shared.diagnostics()
+            guard let self else { return }
+            func mib(_ bytes: Int) -> String { String(format: "%.0f MiB", Double(bytes) / 1_048_576) }
+            var parts = ["MLX \(mlx.state)", "active \(mib(mlx.activeMemoryBytes))", "peak \(mib(mlx.peakMemoryBytes))"]
+            if let latency = mlx.generationLatency { parts.append(String(format: "generation %.2f s", latency)) }
+            if let rate = mlx.tokensPerSecond { parts.append(String(format: "%.1f tok/s", rate)) }
+            parts.append("VLM frames \(mlx.visionFrameCount)")
+            parts.append("memories \(mlx.semanticMemoryCount)")
+            self.mlxTelemetryLabel.stringValue = parts.joined(separator: "  •  ")
+            self.mlxTelemetryLabel.toolTip = [mlx.llmModel, mlx.vlmModel, mlx.embeddingModel, mlx.lastVisionObservation, mlx.lastError]
+                .compactMap { $0 }.joined(separator: "\n")
+        }
         guard let snapshot = stageShowCoordinator.localImprovisationDiagnosticsSnapshot() else {
             if localEnabledButton.state != .on {
                 localStatusLabel.stringValue = "Local director disabled. Adaptive mode will use Gemini plus the authored fallback."

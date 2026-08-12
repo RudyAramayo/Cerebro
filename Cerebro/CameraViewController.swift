@@ -536,6 +536,10 @@ extension CameraViewController: CameraManagerDelegate {
         // encoding on a separate queue, so the capture callback stays cheap.
         robMainViewController?.didCaptureCameraSampleBuffer(sampleBuffer)
 
+        // MLX applies a separate >=3 second sampling gate and performs VLM
+        // inference on its actor. This call never enters the motor loop.
+        ROBMLXRuntime.shared.offerCameraSampleBuffer(sampleBuffer)
+
         //process samplebuffer here
         let humanRectanglesRequest = VNDetectHumanRectanglesRequest { request, error in
             let observations = (request.results as? [VNHumanObservation]) ?? []

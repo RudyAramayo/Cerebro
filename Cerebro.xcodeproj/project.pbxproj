@@ -22,6 +22,7 @@
 		D408B1212E15E7E300F6FEB3 /* ROBAI.swift in Sources */ = {isa = PBXBuildFile; fileRef = D408B1202E15E7E300F6FEB3 /* ROBAI.swift */; };
 		C0D5A0012F00000100000001 /* ROBSceneSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D5B0012F00000100000001 /* ROBSceneSnapshot.swift */; };
 		C0D6A0012F00000100000001 /* ROBVisualCalibration.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D6B0012F00000100000001 /* ROBVisualCalibration.swift */; };
+		C0D7A0012F00000100000001 /* ROBAmberB1Kinematics.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D7B0012F00000100000001 /* ROBAmberB1Kinematics.swift */; };
 		D4E000022F00000100000001 /* GeminiRoboticsProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E000012F00000100000001 /* GeminiRoboticsProtocol.swift */; };
 		D4E100022F00000100000001 /* ROBRobotActionProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E100012F00000100000001 /* ROBRobotActionProtocol.swift */; };
 		D4E200022F00000100000001 /* ROBAutonomyCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E200012F00000100000001 /* ROBAutonomyCoordinator.swift */; };
@@ -32,6 +33,17 @@
 		D4E700022F00000100000001 /* MakerFaireOpening.robshow.json in Resources */ = {isa = PBXBuildFile; fileRef = D4E700012F00000100000001 /* MakerFaireOpening.robshow.json */; };
 		D4E800022F00000100000001 /* ROBLocalImprovisationProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E800012F00000100000001 /* ROBLocalImprovisationProtocol.swift */; };
 		D4E900022F00000100000001 /* ROBLlamaCppImprovisationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E900012F00000100000001 /* ROBLlamaCppImprovisationProvider.swift */; };
+		D4EA00022F00000100000001 /* ROBMLXRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4EA00012F00000100000001 /* ROBMLXRuntime.swift */; };
+		D4EA00042F00000100000001 /* ROBMLXImprovisationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4EA00032F00000100000001 /* ROBMLXImprovisationProvider.swift */; };
+		D4EA01012F00000100000001 /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = D4EA02012F00000100000001 /* MLX */; };
+		D4EA01022F00000100000001 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = D4EA02022F00000100000001 /* MLXLMCommon */; };
+		D4EA01032F00000100000001 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = D4EA02032F00000100000001 /* MLXLLM */; };
+		D4EA01042F00000100000001 /* MLXVLM in Frameworks */ = {isa = PBXBuildFile; productRef = D4EA02042F00000100000001 /* MLXVLM */; };
+		D4EA01052F00000100000001 /* MLXEmbedders in Frameworks */ = {isa = PBXBuildFile; productRef = D4EA02052F00000100000001 /* MLXEmbedders */; };
+		D4EA01062F00000100000001 /* MLXLMTokenizers in Frameworks */ = {isa = PBXBuildFile; productRef = D4EA02062F00000100000001 /* MLXLMTokenizers */; };
+		D4EA01072F00000100000001 /* MLXEmbeddersTokenizers in Frameworks */ = {isa = PBXBuildFile; productRef = D4EA02072F00000100000001 /* MLXEmbeddersTokenizers */; };
+		D4EA01082F00000100000001 /* MLXLMHFAPI in Frameworks */ = {isa = PBXBuildFile; productRef = D4EA02082F00000100000001 /* MLXLMHFAPI */; };
+		D4EA01092F00000100000001 /* MLXEmbeddersHFAPI in Frameworks */ = {isa = PBXBuildFile; productRef = D4EA02092F00000100000001 /* MLXEmbeddersHFAPI */; };
 		D40D36F920B4BA270006EF82 /* SimpleUserTracker.command in Resources */ = {isa = PBXBuildFile; fileRef = D40D36F820B4BA270006EF82 /* SimpleUserTracker.command */; };
 		D40D36FC20B4BE5F0006EF82 /* SimpleUserTrackerTaskController.m in Sources */ = {isa = PBXBuildFile; fileRef = D40D36FB20B4BE5F0006EF82 /* SimpleUserTrackerTaskController.m */; };
 		D45E1CE22801460C002189C0 /* ROBRPLidar.m in Sources */ = {isa = PBXBuildFile; fileRef = D45E1CE12801460C002189C0 /* ROBRPLidar.m */; };
@@ -145,6 +157,7 @@
 		D408B1202E15E7E300F6FEB3 /* ROBAI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAI.swift; sourceTree = "<group>"; };
 		C0D5B0012F00000100000001 /* ROBSceneSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBSceneSnapshot.swift; sourceTree = "<group>"; };
 		C0D6B0012F00000100000001 /* ROBVisualCalibration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBVisualCalibration.swift; sourceTree = "<group>"; };
+		C0D7B0012F00000100000001 /* ROBAmberB1Kinematics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAmberB1Kinematics.swift; sourceTree = "<group>"; };
 		D4E000012F00000100000001 /* GeminiRoboticsProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiRoboticsProtocol.swift; sourceTree = "<group>"; };
 		D4E100012F00000100000001 /* ROBRobotActionProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRobotActionProtocol.swift; sourceTree = "<group>"; };
 		D4E200012F00000100000001 /* ROBAutonomyCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAutonomyCoordinator.swift; sourceTree = "<group>"; };
@@ -155,6 +168,8 @@
 		D4E700012F00000100000001 /* MakerFaireOpening.robshow.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = StageShows/MakerFaireOpening.robshow.json; sourceTree = "<group>"; };
 		D4E800012F00000100000001 /* ROBLocalImprovisationProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBLocalImprovisationProtocol.swift; sourceTree = "<group>"; };
 		D4E900012F00000100000001 /* ROBLlamaCppImprovisationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBLlamaCppImprovisationProvider.swift; sourceTree = "<group>"; };
+		D4EA00012F00000100000001 /* ROBMLXRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBMLXRuntime.swift; sourceTree = "<group>"; };
+		D4EA00032F00000100000001 /* ROBMLXImprovisationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBMLXImprovisationProvider.swift; sourceTree = "<group>"; };
 		D40D36F520B4BA060006EF82 /* Cerebro-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Cerebro-Bridging-Header.h"; sourceTree = "<group>"; };
 		D40D36F820B4BA270006EF82 /* SimpleUserTracker.command */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.sh; path = SimpleUserTracker.command; sourceTree = "<group>"; };
 		D40D36FA20B4BE5F0006EF82 /* SimpleUserTrackerTaskController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SimpleUserTrackerTaskController.h; sourceTree = "<group>"; };
@@ -268,6 +283,15 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D4EA01012F00000100000001 /* MLX in Frameworks */,
+				D4EA01022F00000100000001 /* MLXLMCommon in Frameworks */,
+				D4EA01032F00000100000001 /* MLXLLM in Frameworks */,
+				D4EA01042F00000100000001 /* MLXVLM in Frameworks */,
+				D4EA01052F00000100000001 /* MLXEmbedders in Frameworks */,
+				D4EA01062F00000100000001 /* MLXLMTokenizers in Frameworks */,
+				D4EA01072F00000100000001 /* MLXEmbeddersTokenizers in Frameworks */,
+				D4EA01082F00000100000001 /* MLXLMHFAPI in Frameworks */,
+				D4EA01092F00000100000001 /* MLXEmbeddersHFAPI in Frameworks */,
 				D4CFB7D42287F01100F2403A /* CoreML.framework in Frameworks */,
 				D4A38F6D1FFC0CB400092A46 /* Foundation.framework in Frameworks */,
 				D4A38F6B1FFC0CA600092A46 /* AppKit.framework in Frameworks */,
@@ -370,9 +394,12 @@
 				D4E700012F00000100000001 /* MakerFaireOpening.robshow.json */,
 				D4E800012F00000100000001 /* ROBLocalImprovisationProtocol.swift */,
 				D4E900012F00000100000001 /* ROBLlamaCppImprovisationProvider.swift */,
+				D4EA00012F00000100000001 /* ROBMLXRuntime.swift */,
+				D4EA00032F00000100000001 /* ROBMLXImprovisationProvider.swift */,
 				D408B1202E15E7E300F6FEB3 /* ROBAI.swift */,
 				C0D5B0012F00000100000001 /* ROBSceneSnapshot.swift */,
 				C0D6B0012F00000100000001 /* ROBVisualCalibration.swift */,
+				C0D7B0012F00000100000001 /* ROBAmberB1Kinematics.swift */,
 				D4A38F751FFC8BD300092A46 /* ROBSCNViewController.m */,
 				D4C5252220A65FDD00290BF5 /* ROBConsciousness.h */,
 				D4C5252320A65FDD00290BF5 /* ROBConsciousness.m */,
@@ -501,6 +528,17 @@
 			dependencies = (
 			);
 			name = Cerebro;
+			packageProductDependencies = (
+				D4EA02012F00000100000001 /* MLX */,
+				D4EA02022F00000100000001 /* MLXLMCommon */,
+				D4EA02032F00000100000001 /* MLXLLM */,
+				D4EA02042F00000100000001 /* MLXVLM */,
+				D4EA02052F00000100000001 /* MLXEmbedders */,
+				D4EA02062F00000100000001 /* MLXLMTokenizers */,
+				D4EA02072F00000100000001 /* MLXEmbeddersTokenizers */,
+				D4EA02082F00000100000001 /* MLXLMHFAPI */,
+				D4EA02092F00000100000001 /* MLXEmbeddersHFAPI */,
+			);
 			productName = Cerebro;
 			productReference = D4A38F3C1FFB2AED00092A46 /* Cerebro.app */;
 			productType = "com.apple.product-type.application";
@@ -538,6 +576,14 @@
 				Base,
 			);
 			mainGroup = D4A38F331FFB2AED00092A46;
+			packageReferences = (
+				D4EA03012F00000100000001 /* XCRemoteSwiftPackageReference "mlx-swift" */,
+				D4EA03022F00000100000001 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */,
+				D4EA03032F00000100000001 /* XCRemoteSwiftPackageReference "swift-tokenizers-mlx" */,
+				D4EA03042F00000100000001 /* XCRemoteSwiftPackageReference "swift-hf-api-mlx" */,
+				D4EA03052F00000100000001 /* XCRemoteSwiftPackageReference "swift-tokenizers" */,
+				D4EA03062F00000100000001 /* XCRemoteSwiftPackageReference "swift-hf-api" */,
+			);
 			productRefGroup = D4A38F3D1FFB2AED00092A46 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -627,9 +673,12 @@
 				D4E600022F00000100000001 /* ROBStageShowWindowController.swift in Sources */,
 				D4E800022F00000100000001 /* ROBLocalImprovisationProtocol.swift in Sources */,
 				D4E900022F00000100000001 /* ROBLlamaCppImprovisationProvider.swift in Sources */,
+				D4EA00022F00000100000001 /* ROBMLXRuntime.swift in Sources */,
+				D4EA00042F00000100000001 /* ROBMLXImprovisationProvider.swift in Sources */,
 				D408B1212E15E7E300F6FEB3 /* ROBAI.swift in Sources */,
 				C0D5A0012F00000100000001 /* ROBSceneSnapshot.swift in Sources */,
 				C0D6A0012F00000100000001 /* ROBVisualCalibration.swift in Sources */,
+				C0D7A0012F00000100000001 /* ROBAmberB1Kinematics.swift in Sources */,
 				D4066C5822828DA5002ACAD1 /* AudioInputTaskController.m in Sources */,
 				D4F136752325E39A0084A302 /* VideoEncoder.m in Sources */,
 				D49D755927FFD1AF00142E26 /* AutoNetServer.swift in Sources */,
@@ -881,6 +930,27 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		D4EA03012F00000100000001 /* XCRemoteSwiftPackageReference "mlx-swift" */ = {isa = XCRemoteSwiftPackageReference; repositoryURL = "https://github.com/ml-explore/mlx-swift"; requirement = {kind = exactVersion; version = 0.31.3; }; };
+		D4EA03022F00000100000001 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */ = {isa = XCRemoteSwiftPackageReference; repositoryURL = "https://github.com/ml-explore/mlx-swift-lm"; requirement = {kind = exactVersion; version = 3.31.3; }; };
+		D4EA03032F00000100000001 /* XCRemoteSwiftPackageReference "swift-tokenizers-mlx" */ = {isa = XCRemoteSwiftPackageReference; repositoryURL = "https://github.com/DePasqualeOrg/swift-tokenizers-mlx"; requirement = {kind = exactVersion; version = 0.3.0; }; };
+		D4EA03042F00000100000001 /* XCRemoteSwiftPackageReference "swift-hf-api-mlx" */ = {isa = XCRemoteSwiftPackageReference; repositoryURL = "https://github.com/DePasqualeOrg/swift-hf-api-mlx"; requirement = {kind = exactVersion; version = 0.2.0; }; };
+		D4EA03052F00000100000001 /* XCRemoteSwiftPackageReference "swift-tokenizers" */ = {isa = XCRemoteSwiftPackageReference; repositoryURL = "https://github.com/DePasqualeOrg/swift-tokenizers"; requirement = {kind = exactVersion; version = 0.5.0; }; };
+		D4EA03062F00000100000001 /* XCRemoteSwiftPackageReference "swift-hf-api" */ = {isa = XCRemoteSwiftPackageReference; repositoryURL = "https://github.com/DePasqualeOrg/swift-hf-api"; requirement = {kind = exactVersion; version = 0.3.2; }; };
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		D4EA02012F00000100000001 /* MLX */ = {isa = XCSwiftPackageProductDependency; package = D4EA03012F00000100000001 /* XCRemoteSwiftPackageReference "mlx-swift" */; productName = MLX; };
+		D4EA02022F00000100000001 /* MLXLMCommon */ = {isa = XCSwiftPackageProductDependency; package = D4EA03022F00000100000001 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */; productName = MLXLMCommon; };
+		D4EA02032F00000100000001 /* MLXLLM */ = {isa = XCSwiftPackageProductDependency; package = D4EA03022F00000100000001 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */; productName = MLXLLM; };
+		D4EA02042F00000100000001 /* MLXVLM */ = {isa = XCSwiftPackageProductDependency; package = D4EA03022F00000100000001 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */; productName = MLXVLM; };
+		D4EA02052F00000100000001 /* MLXEmbedders */ = {isa = XCSwiftPackageProductDependency; package = D4EA03022F00000100000001 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */; productName = MLXEmbedders; };
+		D4EA02062F00000100000001 /* MLXLMTokenizers */ = {isa = XCSwiftPackageProductDependency; package = D4EA03032F00000100000001 /* XCRemoteSwiftPackageReference "swift-tokenizers-mlx" */; productName = MLXLMTokenizers; };
+		D4EA02072F00000100000001 /* MLXEmbeddersTokenizers */ = {isa = XCSwiftPackageProductDependency; package = D4EA03032F00000100000001 /* XCRemoteSwiftPackageReference "swift-tokenizers-mlx" */; productName = MLXEmbeddersTokenizers; };
+		D4EA02082F00000100000001 /* MLXLMHFAPI */ = {isa = XCSwiftPackageProductDependency; package = D4EA03042F00000100000001 /* XCRemoteSwiftPackageReference "swift-hf-api-mlx" */; productName = MLXLMHFAPI; };
+		D4EA02092F00000100000001 /* MLXEmbeddersHFAPI */ = {isa = XCSwiftPackageProductDependency; package = D4EA03042F00000100000001 /* XCRemoteSwiftPackageReference "swift-hf-api-mlx" */; productName = MLXEmbeddersHFAPI; };
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = D4A38F341FFB2AED00092A46 /* Project object */;
 }

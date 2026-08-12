@@ -143,6 +143,7 @@ final class ROBReverseCameraPoseEstimator {
 
     private var lastAcceptedTransform: ROBRigidTransform?
     private var lastAcceptedTransformUptime: TimeInterval?
+    private var lastArmAngles: [String: [Double]] = [:]
 
     func process(
         barcodes: [VNBarcodeObservation],
@@ -198,7 +199,9 @@ final class ROBReverseCameraPoseEstimator {
                 position: transform.apply(cameraPoint), depthConfidence: confidence
             )
         }
-        ROBSceneSnapshotStore.shared.updateArmPose(Self.jointAngles(joints, calibrationRMS: transform.rms))
+        ROBSceneSnapshotStore.shared.updateArmPose(
+            modelBasedJointAngles(joints, calibrationRMS: transform.rms)
+        )
     }
 
     private func backProject(
@@ -229,29 +232,33 @@ final class ROBReverseCameraPoseEstimator {
         )
     }
 
-    private static func jointAngles(
+    private func modelBasedJointAngles(
         _ points: [JointPoint],
         calibrationRMS: Double
     ) -> [ROBArmJointPose] {
         Dictionary(grouping: points, by: \.arm).values.flatMap { armPoints -> [ROBArmJointPose] in
-            let sorted = armPoints.sorted { $0.index < $1.index }
-            guard sorted.count >= 3 else { return [] }
-            return (1..<(sorted.count - 1)).compactMap { index in
-                let incoming = sorted[index - 1].position - sorted[index].position
-                let outgoing = sorted[index + 1].position - sorted[index].position
-                let denominator = simd_length(incoming) * simd_length(outgoing)
-                guard denominator > 1e-6 else { return nil }
-                let cosine = max(-1, min(1, simd_dot(incoming, outgoing) / denominator))
-                let markerConfidence = min(
-                    sorted[index - 1].depthConfidence,
-                    sorted[index].depthConfidence,
-                    sorted[index + 1].depthConfidence
-                )
-                return ROBArmJointPose(
-                    arm: sorted[index].arm, joint: sorted[index].name,
-                    angleRadians: acos(cosine),
-                    confidence: markerConfidence * max(0, 1 - calibrationRMS / 0.05),
-                    source: "oak-d-qr-reverse-pose"
+            guard let arm = armPoints.first?.arm,
+                  let mount = ROBAmberMountConfiguration.shared.mount(for: arm) else { return [] }
+            let observations = armPoints.reduce(into: [Int: SIMD3<Double>]()) {
+                $0[$1.index] = $1.position
+            }
+            guard let fit = ROBAmberB1Kinematics.fitJointAngles(
+                observedJointOrigins: observations,
+                mount: mount,
+                initialAngles: lastArmAngles[arm]
+            ), fit.residualRMSEMeters <= 0.06 else { return [] }
+            lastArmAngles[arm] = fit.angles
+            let depthConfidence = armPoints.map(\.depthConfidence).min() ?? 0
+            let confidence = depthConfidence
+                * max(0, 1 - calibrationRMS / 0.05)
+                * max(0, 1 - fit.residualRMSEMeters / 0.06)
+            return ROBAmberB1Kinematics.joints.enumerated().map { index, definition in
+                ROBArmJointPose(
+                    arm: arm,
+                    joint: definition.name,
+                    angleRadians: index < fit.observableJointCount ? fit.angles[index] : nil,
+                    confidence: index < fit.observableJointCount ? confidence : 0,
+                    source: "amber-b1-urdf-oak-d-reverse-pose"
                 )
             }
         }

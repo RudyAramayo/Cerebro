@@ -8,6 +8,70 @@
 
 import Foundation
 
+/// Strict decoder for model-proposed actions. This accepts one complete JSON
+/// object and deliberately does not attempt to recover JSON from prose or a
+/// Markdown fence. A decoded proposal is still only a pending protocol
+/// message; normal authorization and execution checks remain downstream.
+public enum ROBRobotActionProposalCodec {
+    public static let maximumDocumentBytes = 16_384
+    private static let allowedKeys: Set<String> = ["action", "arguments"]
+
+    public static func decode(
+        _ data: Data,
+        senderID: String = "cerebro.mlx",
+        recipientID: String? = nil,
+        expiresAfter: TimeInterval = 10
+    ) throws -> ROBRobotActionMessage {
+        guard !data.isEmpty, data.count <= maximumDocumentBytes else {
+            throw ROBRobotActionProtocolError.invalidMessage("proposal is empty or too large")
+        }
+        guard expiresAfter.isFinite, (1 ... 30).contains(expiresAfter) else {
+            throw ROBRobotActionProtocolError.invalidMessage("proposal deadline must be 1 through 30 seconds")
+        }
+
+        let value: Any
+        do {
+            value = try JSONSerialization.jsonObject(with: data, options: [])
+        } catch {
+            throw ROBRobotActionProtocolError.invalidMessage("proposal must be one JSON object without prose")
+        }
+        guard let object = value as? [String: Any],
+              Set(object.keys).subtracting(allowedKeys).isEmpty,
+              Set(object.keys) == allowedKeys,
+              let action = object["action"] as? String,
+              ROBRobotActionMessage.supportedActions.contains(action),
+              let arguments = object["arguments"] as? NSDictionary,
+              JSONSerialization.isValidJSONObject(arguments) else {
+            throw ROBRobotActionProtocolError.invalidMessage("proposal contains unknown fields or an unsupported action")
+        }
+
+        let message = ROBRobotActionMessage.actionRequest(
+            callID: UUID().uuidString,
+            action: action,
+            arguments: arguments,
+            senderID: senderID,
+            recipientID: recipientID,
+            expiresAt: Date().addingTimeInterval(expiresAfter)
+        )
+        if let validationError = message.validationError {
+            throw ROBRobotActionProtocolError.invalidMessage(validationError)
+        }
+        return message
+    }
+
+    public static var jsonSchema: [String: Any] {
+        [
+            "type": "object",
+            "properties": [
+                "action": ["type": "string", "enum": ROBRobotActionMessage.supportedActions],
+                "arguments": ["type": "object"]
+            ],
+            "required": ["action", "arguments"],
+            "additionalProperties": false
+        ]
+    }
+}
+
 @objc public enum ROBRobotActionMessageKind: Int {
     case controllerHello
     case actionRequest

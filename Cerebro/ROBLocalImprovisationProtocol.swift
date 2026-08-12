@@ -16,7 +16,7 @@ public enum ROBLocalImprovisationProviderKind: String, CaseIterable {
     public var displayName: String {
         switch self {
         case .llamaCpp: return "llama.cpp server"
-        case .mlxSwift: return "MLX Swift (adapter)"
+        case .mlxSwift: return "MLX Swift (private/offline)"
         }
     }
 }
@@ -446,20 +446,7 @@ public enum ROBLocalImprovisationProviderFactory {
         case .llamaCpp:
             return ROBLlamaCppImprovisationProvider(configuration: configuration)
         case .mlxSwift:
-            guard let factory = ROBLocalImprovisationProviderRegistry.registeredMLXFactory() else {
-                return ROBUnavailableLocalImprovisationProvider(
-                    name: ROBLocalImprovisationProviderKind.mlxSwift.displayName,
-                    detail: "The MLX Swift adapter is not linked in this build."
-                )
-            }
-            do {
-                return try factory(configuration)
-            } catch {
-                return ROBUnavailableLocalImprovisationProvider(
-                    name: ROBLocalImprovisationProviderKind.mlxSwift.displayName,
-                    detail: "The MLX Swift adapter could not initialize."
-                )
-            }
+            return ROBMLXImprovisationProvider(configuration: configuration)
         }
     }
 }

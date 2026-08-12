@@ -168,9 +168,34 @@ import AVFoundation
             upAxis = "Y"
         )
         def Xform "Hologram" {
+            # Keep the first AR placement comfortably inspectable on a phone.
+            # Quick Look still allows the viewer to pinch the message larger.
+            float3 xformOp:scale = (0.45, 0.45, 0.45)
+            uniform token[] xformOpOrder = ["xformOp:scale"]
+
+            def Material "RGBPointMaterial" {
+                token outputs:surface.connect = </Hologram/RGBPointMaterial/PreviewSurface.outputs:surface>
+
+                def Shader "DisplayColor" {
+                    uniform token info:id = "UsdPrimvarReader_float3"
+                    token inputs:varname = "displayColor"
+                    float3 outputs:result
+                }
+
+                def Shader "PreviewSurface" {
+                    uniform token info:id = "UsdPreviewSurface"
+                    color3f inputs:diffuseColor.connect = </Hologram/RGBPointMaterial/DisplayColor.outputs:result>
+                    color3f inputs:emissiveColor.connect = </Hologram/RGBPointMaterial/DisplayColor.outputs:result>
+                    float inputs:metallic = 0
+                    float inputs:roughness = 1
+                    token outputs:surface
+                }
+            }
+
             def Mesh "Message" {
                 uniform token subdivisionScheme = "none"
                 bool doubleSided = true
+                rel material:binding = </Hologram/RGBPointMaterial>
                 int[] faceVertexCounts = [\(counts.joined(separator: ","))]
                 int[] faceVertexIndices = [\(indices.joined(separator: ","))]
                 point3f[] points = [\(positions.joined(separator: ",\n"))]
