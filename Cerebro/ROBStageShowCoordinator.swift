@@ -380,7 +380,7 @@ public extension Notification.Name {
                 timeout: timeout
             )
 
-        case .geminiTurn:
+        case .geminiTurn, .modelTurn:
             if mode == .speechOnly {
                 speakFallback(for: cue, reason: "Speech-only mode")
                 return

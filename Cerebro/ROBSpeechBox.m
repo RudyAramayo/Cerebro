@@ -51,6 +51,7 @@
 - (void)teardownSpeechRecognition;
 - (void)teardownAudioCapture;
 - (void)finishSpeechEventForSynthesizer:(AVSpeechSynthesizer *)synthesizer;
+- (AVSpeechSynthesisVoice *)resolveROBVoice;
 @end
 
 
@@ -74,7 +75,7 @@
         self.emotion = anger;
         self.commands = [@[@"robbie", @"robot", @"hey robbie", @"hey robot", @"rob",  @"robbie one"] mutableCopy];
         self.robsDefaultVoiceIdentifier = @"com.apple.voice.enhanced.en-GB.Oliver";
-        self.robsDefaultVoice = [AVSpeechSynthesisVoice voiceWithIdentifier:self.robsDefaultVoiceIdentifier];
+        self.robsDefaultVoice = [self resolveROBVoice];
         [self setupSpeechSynthesizer];
         
         self.localeArray = @[
@@ -184,6 +185,27 @@
         [self sayIt:@"Orbitus Robot Online"];
     }
     return self;
+}
+
+- (AVSpeechSynthesisVoice *)resolveROBVoice
+{
+    AVSpeechSynthesisVoice *oliver =
+        [AVSpeechSynthesisVoice voiceWithIdentifier:self.robsDefaultVoiceIdentifier];
+    if (oliver != nil) {
+        NSLog(@"ROB voice: %@ (%@)", oliver.name, oliver.identifier);
+        return oliver;
+    }
+
+    for (AVSpeechSynthesisVoice *voice in AVSpeechSynthesisVoice.speechVoices) {
+        if ([voice.name caseInsensitiveCompare:@"Oliver"] == NSOrderedSame
+            && voice.quality == AVSpeechSynthesisVoiceQualityEnhanced) {
+            NSLog(@"ROB voice: resolved Oliver Enhanced as %@", voice.identifier);
+            return voice;
+        }
+    }
+
+    NSLog(@"Oliver Enhanced is not installed; using the best available en-GB voice.");
+    return [AVSpeechSynthesisVoice voiceWithLanguage:@"en-GB"];
 }
 
 - (void) resume_listening
@@ -799,8 +821,8 @@
     NSLog(@"language = %@", language);
     AVSpeechSynthesisVoice *newVoice = [AVSpeechSynthesisVoice voiceWithLanguage:language];
     if (newVoice != nil) {
-        if ([language isEqualToString:@"en-GB"]) {
-            self.robsDefaultVoice = [AVSpeechSynthesisVoice voiceWithIdentifier:self.robsDefaultVoiceIdentifier];
+        if ([language hasPrefix:@"en-"]) {
+            self.robsDefaultVoice = [self resolveROBVoice];
         } else {
             self.robsDefaultVoice = [AVSpeechSynthesisVoice voiceWithLanguage:language];
         }

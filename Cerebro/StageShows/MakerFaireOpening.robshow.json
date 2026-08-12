@@ -19,7 +19,7 @@
       "duration_seconds" : 15,
       "fallback_text" : "I asked the cloud for a joke, but the Wi-Fi is still assembling itself.",
       "id" : "live-joke",
-      "kind" : "gemini_turn",
+      "kind" : "model_turn",
       "text" : "Deliver one family-friendly, one-sentence joke about a robot performing at a maker faire. Do not request or claim any physical action."
     },
     {
@@ -42,7 +42,7 @@
   ],
   "schema" : "com.orbitusrobotics.stage-show",
   "show_id" : "maker-faire-opening",
-  "summary" : "A connection-tolerant opening with local/Gemini improvisation, an authored fallback, and an optional named gesture.",
+  "summary" : "A connection-tolerant opening with provider-neutral local/cloud improvisation, an authored fallback, and an optional named gesture.",
   "title" : "Maker Faire Opening",
   "version" : 1
 }

@@ -14,6 +14,9 @@ public enum ROBStageCueKind: String, Codable, CaseIterable {
     case wait
     case playGesture = "play_gesture"
     case geminiTurn = "gemini_turn"
+    /// Provider-neutral adaptive dialogue. The coordinator may use MLX Swift,
+    /// llama.cpp, Gemini, or the authored fallback according to its run mode.
+    case modelTurn = "model_turn"
     case checkpoint
 }
 
@@ -209,7 +212,7 @@ public enum ROBStageShowCodec {
             switch cue.kind {
             case .speak:
                 estimatedDuration += Double(cue.text?.count ?? 0) / 8.0
-            case .wait, .playGesture, .geminiTurn:
+            case .wait, .playGesture, .geminiTurn, .modelTurn:
                 estimatedDuration += cue.durationSeconds ?? 0
             case .checkpoint:
                 break
@@ -228,7 +231,7 @@ public enum ROBStageShowCodec {
         show.cues.reduce(0) { total, cue in
             switch cue.kind {
             case .speak: return total + Double(cue.text?.count ?? 0) / 13.0
-            case .wait, .playGesture, .geminiTurn: return total + (cue.durationSeconds ?? 0)
+            case .wait, .playGesture, .geminiTurn, .modelTurn: return total + (cue.durationSeconds ?? 0)
             case .checkpoint: return total
             }
         }
@@ -257,7 +260,7 @@ public enum ROBStageShowCodec {
             try requireAbsent(cue.text, field: "text", cueID: cue.id)
             try requireAbsent(cue.fallbackText, field: "fallback_text", cueID: cue.id)
 
-        case .geminiTurn:
+        case .geminiTurn, .modelTurn:
             try requireText(cue.text, field: "text", maximum: 2_000, cueID: cue.id)
             try requireText(cue.fallbackText, field: "fallback_text", maximum: 2_000, cueID: cue.id)
             try validateDuration(cue.durationSeconds, range: 1 ... 15, cueID: cue.id)
@@ -365,7 +368,7 @@ public enum ROBStageShowSamples {
     public static let makerFaireOpening = ROBStageShow(
         showID: "maker-faire-opening",
         title: "Maker Faire Opening",
-        summary: "A connection-tolerant opening with local/Gemini improvisation, an authored fallback, and an optional named gesture.",
+        summary: "A connection-tolerant opening with provider-neutral local/cloud improvisation, an authored fallback, and an optional named gesture.",
         cues: [
             ROBStageCue(
                 id: "safety-check",
@@ -380,7 +383,7 @@ public enum ROBStageShowSamples {
             ROBStageCue(id: "beat-one", kind: .wait, durationSeconds: 0.7),
             ROBStageCue(
                 id: "live-joke",
-                kind: .geminiTurn,
+                kind: .modelTurn,
                 text: "Deliver one family-friendly, one-sentence joke about a robot performing at a maker faire. Do not request or claim any physical action.",
                 durationSeconds: 15,
                 fallbackText: "I asked the cloud for a joke, but the Wi-Fi is still assembling itself."
