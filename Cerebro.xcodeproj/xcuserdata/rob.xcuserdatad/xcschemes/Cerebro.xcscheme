@@ -49,6 +49,42 @@
       debugDocumentVersioning = "YES"
       debugServiceExtension = "internal"
       allowLocationSimulation = "YES">
+      <PreActions>
+         <ExecutionAction
+            ActionType = "Xcode.IDEStandardExecutionActionsCore.ExecutionActionType.ShellScriptAction">
+            <ActionContent
+               title = "Hand production Cerebro to debugger"
+               scriptText = "&quot;${PROJECT_DIR}/Scripts/cerebro-debug-handoff.sh&quot; begin">
+               <EnvironmentBuildable>
+                  <BuildableReference
+                     BuildableIdentifier = "primary"
+                     BlueprintIdentifier = "D4A38F3B1FFB2AED00092A46"
+                     BuildableName = "Cerebro.app"
+                     BlueprintName = "Cerebro"
+                     ReferencedContainer = "container:Cerebro.xcodeproj">
+                  </BuildableReference>
+               </EnvironmentBuildable>
+            </ActionContent>
+         </ExecutionAction>
+      </PreActions>
+      <PostActions>
+         <ExecutionAction
+            ActionType = "Xcode.IDEStandardExecutionActionsCore.ExecutionActionType.ShellScriptAction">
+            <ActionContent
+               title = "Restore production Cerebro"
+               scriptText = "&quot;${PROJECT_DIR}/Scripts/cerebro-debug-handoff.sh&quot; end">
+               <EnvironmentBuildable>
+                  <BuildableReference
+                     BuildableIdentifier = "primary"
+                     BlueprintIdentifier = "D4A38F3B1FFB2AED00092A46"
+                     BuildableName = "Cerebro.app"
+                     BlueprintName = "Cerebro"
+                     ReferencedContainer = "container:Cerebro.xcodeproj">
+                  </BuildableReference>
+               </EnvironmentBuildable>
+            </ActionContent>
+         </ExecutionAction>
+      </PostActions>
       <BuildableProductRunnable
          runnableDebuggingMode = "0">
          <BuildableReference
@@ -60,11 +96,6 @@
          </BuildableReference>
       </BuildableProductRunnable>
       <EnvironmentVariables>
-         <EnvironmentVariable
-            key = "GEMINI_API_KEY"
-            value = ""
-            isEnabled = "YES">
-         </EnvironmentVariable>
          <EnvironmentVariable
             key = "GEMINI_ROBOTICS_ENABLED"
             value = "true"

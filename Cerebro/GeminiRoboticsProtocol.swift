@@ -6,6 +6,29 @@
 //
 
 import Foundation
+import Security
+
+enum GeminiRoboticsCredentialStore {
+    static let service = "com.orbitusrobotics.Cerebro.gemini"
+    static let apiKeyAccount = "api-key"
+
+    static func apiKey() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: apiKeyAccount,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data,
+              let value = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else { return nil }
+        return value
+    }
+}
 
 enum GeminiRoboticsCredential {
     case apiKey(String)
@@ -52,7 +75,7 @@ struct GeminiRoboticsConfiguration {
         let credential: GeminiRoboticsCredential
         if let token = environment.nonemptyValue(for: "GEMINI_EPHEMERAL_TOKEN") {
             credential = .ephemeralToken(token)
-        } else if let apiKey = environment.nonemptyValue(for: "GEMINI_API_KEY") {
+        } else if let apiKey = environment.nonemptyValue(for: "GEMINI_API_KEY") ?? GeminiRoboticsCredentialStore.apiKey() {
             credential = .apiKey(apiKey)
         } else {
             return nil

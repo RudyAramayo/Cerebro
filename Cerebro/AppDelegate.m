@@ -45,7 +45,7 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
 @property (readwrite, retain) NSMenuItem *hologramRecordMenuItem;
 @property (readwrite, retain) NSMenuItem *hologramStopMenuItem;
 @property (readwrite, retain) NSMenuItem *hologramAirDropMenuItem;
-- (BOOL)cerebroCheck;
+- (void)workspaceDidWake:(NSNotification *)notification;
 
 @end
 
@@ -56,11 +56,12 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
 
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification
 {
-    if ([self cerebroCheck]) {
-        return;
-    }
-
     [self installDevelopmentMenu];
+    [[[NSWorkspace sharedWorkspace] notificationCenter]
+        addObserver:self
+           selector:@selector(workspaceDidWake:)
+               name:NSWorkspaceDidWakeNotification
+             object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(hologramMovieRecordingStateDidChange:)
                                                  name:ROBHologramMovieRecordingStateDidChangeNotification
@@ -233,10 +234,31 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
 - (void)applicationWillTerminate:(NSNotification *)notification
 {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [[[NSWorkspace sharedWorkspace] notificationCenter] removeObserver:self];
     [self.rplidarCheckTimer invalidate];
     [self.utcWebCamCheckTimer invalidate];
     [[ROBHologramExporter shared] stopAirDropSession];
     [self stopUTCWebCamTask];
+}
+
+- (void)workspaceDidWake:(NSNotification *)notification
+{
+    NSLog(@"Cerebro is recovering hardware and service health after system wake");
+
+    ROBSystemDependencyManager *dependencyManager = [ROBSystemDependencyManager sharedManager];
+    [dependencyManager refreshSSHpassAvailability];
+
+    [self.rplidarCheckTimer invalidate];
+    self.rplidarCheckTimer = nil;
+    [self rpLidarCheck];
+
+    [self.utcWebCamCheckTimer invalidate];
+    self.utcWebCamCheckTimer = nil;
+    self.utcWebCamPreflightRunning = NO;
+    if (!self.utcWebCamTask.isRunning) {
+        self.utcWebCamIsOnline = NO;
+    }
+    [self utcWebCamCheck];
 }
 
 - (IBAction)showPythonSettings:(id)sender
@@ -276,53 +298,6 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
 }
 
 
-- (BOOL)cerebroCheck
-{
-    NSString *bundleIdentifier = NSBundle.mainBundle.bundleIdentifier;
-    if (bundleIdentifier.length == 0) {
-        NSLog(@"Cerebro could not determine its bundle identifier; skipping the duplicate-instance check");
-        return NO;
-    }
-
-    NSRunningApplication *currentApplication = NSRunningApplication.currentApplication;
-    NSRunningApplication *winner = nil;
-    for (NSRunningApplication *candidate in
-         [NSRunningApplication runningApplicationsWithBundleIdentifier:bundleIdentifier]) {
-        if (candidate.isTerminated || candidate.processIdentifier <= 0) {
-            continue;
-        }
-
-        if (winner == nil) {
-            winner = candidate;
-            continue;
-        }
-
-        NSDate *candidateLaunchDate = candidate.launchDate ?: NSDate.distantFuture;
-        NSDate *winnerLaunchDate = winner.launchDate ?: NSDate.distantFuture;
-        NSComparisonResult launchOrder = [candidateLaunchDate compare:winnerLaunchDate];
-        if (launchOrder == NSOrderedAscending ||
-            (launchOrder == NSOrderedSame &&
-             candidate.processIdentifier < winner.processIdentifier)) {
-            winner = candidate;
-        }
-    }
-
-    if (winner == nil || winner.processIdentifier == currentApplication.processIdentifier) {
-        return NO;
-    }
-
-    BOOL activationRequested =
-        [winner activateWithOptions:NSApplicationActivateAllWindows];
-    if (!activationRequested && winner.isTerminated) {
-        return NO;
-    }
-
-    NSLog(@"Cerebro process %d is already running; closing duplicate process %d",
-          winner.processIdentifier,
-          currentApplication.processIdentifier);
-    [NSApp terminate:nil];
-    return YES;
-}
 - (void) rpLidarCheck {
     
     self.rplidarCheckTimer = [NSTimer scheduledTimerWithTimeInterval:5 repeats:YES block:^(NSTimer * _Nonnull timer) {

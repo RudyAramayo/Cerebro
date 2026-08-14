@@ -54,17 +54,23 @@ never submitted as a duplicate request.
 ## Authentication
 
 No Gemini credential should be committed to source code, the application
-bundle, or a shared Xcode scheme. A developer-local scheme variable is suitable
-only when that scheme is excluded from Git; production credentials belong in a
-backend-issued ephemeral-token flow or another secret store.
+bundle, or an Xcode scheme. Cerebro reads a long-lived development key from the
+macOS login Keychain when no credential environment override is present.
 
-For local development, add this environment variable to the Cerebro scheme in
-Xcode under **Run > Arguments > Environment Variables**:
+Install the local key using the secure hidden-input helper:
+
+```sh
+./Scripts/set-gemini-api-key.sh
+```
+
+Keep only the enablement flag in the Xcode scheme:
 
 ```text
-GEMINI_API_KEY=<development key>
 GEMINI_ROBOTICS_ENABLED=true
 ```
+
+`GEMINI_API_KEY` remains supported as an explicit environment override for CI
+or isolated development, but it must not be saved in a tracked scheme.
 
 For a deployed robot, prefer a backend-issued, model- and configuration-bound
 ephemeral token:

@@ -1,5 +1,25 @@
 # Cerebro
 
+## Always-on macOS operation
+
+Cerebro takes an atomic per-user process lock before AppKit starts, so an
+installed copy and an Xcode Debug copy cannot initialize robot hardware or
+network listeners at the same time. It also performs an immediate camera,
+dependency, and lidar health pass after macOS wakes.
+
+After copying a signed Release build to `/Applications/Cerebro.app`, enable the
+user LaunchAgent once:
+
+```sh
+./Scripts/install-cerebro-launch-agent.sh
+```
+
+The agent starts Cerebro at login and restores it after an unexpected exit.
+The local Xcode scheme automatically unloads the production agent before a
+Debug run and restores it afterward. A detached watchdog also restores the
+production agent if Xcode or the debugged process crashes before the scheme's
+post-action runs.
+
 Cerebro is the macOS controller and operator interface for the R.O.B. droid.
 
 <img width="2393" height="1063" alt="Screenshot 2025-08-05 at 3 58 58 PM" src="https://github.com/user-attachments/assets/951fcac3-bdcf-470d-927f-fce3f94018d1" />
@@ -158,8 +178,10 @@ For supervised action-protocol testing, set all of:
 ```text
 GEMINI_ROBOTICS_ENABLED=true
 GEMINI_ROBOT_ACTION_TOOL_ENABLED=true
-GEMINI_API_KEY=<development key>
 ```
+
+Store the API key in the login Keychain with
+`./Scripts/set-gemini-api-key.sh`; never place it in the Xcode scheme.
 
 `GEMINI_EPHEMERAL_TOKEN` may replace the API key. Enabling the tool does not
 enable motors: ROBController must also advertise that it accepts the requested
