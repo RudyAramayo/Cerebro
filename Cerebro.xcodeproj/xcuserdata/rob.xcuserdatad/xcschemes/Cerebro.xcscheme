@@ -97,6 +97,11 @@
       </BuildableProductRunnable>
       <EnvironmentVariables>
          <EnvironmentVariable
+            key = "CEREBRO_XCODE_DEBUG_SESSION"
+            value = "true"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
             key = "GEMINI_ROBOTICS_ENABLED"
             value = "true"
             isEnabled = "YES">

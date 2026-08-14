@@ -12,6 +12,7 @@
 @interface ROBMainWindowController ()
 @property (nonatomic, strong) NSButton *pythonSettingsButton;
 @property (nonatomic, strong) NSButton *geminiDiagnosticsButton;
+@property (nonatomic, strong) NSButton *insta360DiagnosticsButton;
 @property (nonatomic, strong) NSButton *stageShowButton;
 @property (nonatomic, strong) NSTitlebarAccessoryViewController *settingsAccessoryController;
 @property (nonatomic, assign) BOOL pythonRuntimeNeedsAttention;
@@ -38,17 +39,25 @@
     self.geminiDiagnosticsButton.bezelStyle = NSBezelStyleTexturedRounded;
     self.geminiDiagnosticsButton.toolTip = @"Connect or disconnect Gemini and control microphone/camera streaming";
 
+    self.insta360DiagnosticsButton = [NSButton buttonWithTitle:@"360°…"
+                                                        target:self
+                                                        action:@selector(openInsta360Diagnostics:)];
+    self.insta360DiagnosticsButton.bezelStyle = NSBezelStyleTexturedRounded;
+    self.insta360DiagnosticsButton.toolTip = @"Open the opt-in Insta360 RTSP/RTMP developer monitor";
+
     self.stageShowButton = [NSButton buttonWithTitle:@"Show…"
                                               target:self
                                               action:@selector(openStageShow:)];
     self.stageShowButton.bezelStyle = NSBezelStyleTexturedRounded;
     self.stageShowButton.toolTip = @"Validate, dry-run, and rehearse a connection-tolerant stage show";
 
-    NSView *accessoryView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 384, 30)];
+    NSView *accessoryView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 468, 30)];
     self.stageShowButton.frame = NSMakeRect(4, 1, 98, 28);
-    self.geminiDiagnosticsButton.frame = NSMakeRect(108, 1, 112, 28);
-    self.pythonSettingsButton.frame = NSMakeRect(226, 1, 148, 28);
+    self.insta360DiagnosticsButton.frame = NSMakeRect(108, 1, 78, 28);
+    self.geminiDiagnosticsButton.frame = NSMakeRect(192, 1, 112, 28);
+    self.pythonSettingsButton.frame = NSMakeRect(310, 1, 148, 28);
     [accessoryView addSubview:self.stageShowButton];
+    [accessoryView addSubview:self.insta360DiagnosticsButton];
     [accessoryView addSubview:self.geminiDiagnosticsButton];
     [accessoryView addSubview:self.pythonSettingsButton];
 
@@ -74,6 +83,14 @@
     self.systemDependenciesNeedAttention = dependencyManager.sshpassPath.length == 0;
     self.systemDependencyInstallInProgress = dependencyManager.isInstallingSSHpass;
     [self updatePythonSettingsButton];
+}
+
+- (void)openInsta360Diagnostics:(id)sender
+{
+    ROBMainViewController *mainViewController = (ROBMainViewController *)self.contentViewController;
+    if ([mainViewController respondsToSelector:@selector(showInsta360Diagnostics:)]) {
+        [mainViewController showInsta360Diagnostics:sender];
+    }
 }
 
 - (void)dealloc

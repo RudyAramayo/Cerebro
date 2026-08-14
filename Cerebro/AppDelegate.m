@@ -54,6 +54,16 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
 // How to set ROB's wake/sleep schedule:
 //   sudo pmset repeat shutdown MTWRFSU 23:50:00 wakeorpoweron MTWRFSU 07:00:00
 
+- (BOOL)applicationShouldSaveApplicationState:(NSApplication *)application
+{
+    return NO;
+}
+
+- (BOOL)applicationShouldRestoreApplicationState:(NSApplication *)application
+{
+    return NO;
+}
+
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification
 {
     [self installDevelopmentMenu];
@@ -86,6 +96,7 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
         NSLog(@"Cerebro system dependency needs attention: choose Homebrew or MacPorts in Settings to install sshpass");
     }
     [self utcWebCamCheck];
+    [[ROBInsta360CameraService shared] start];
     //Give RPLidar 10 seconds to warm up as the macmini is booting quite fast
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self rpLidarCheck];
@@ -238,6 +249,7 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
     [self.rplidarCheckTimer invalidate];
     [self.utcWebCamCheckTimer invalidate];
     [[ROBHologramExporter shared] stopAirDropSession];
+    [[ROBInsta360CameraService shared] stop];
     [self stopUTCWebCamTask];
 }
 
@@ -259,6 +271,7 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
         self.utcWebCamIsOnline = NO;
     }
     [self utcWebCamCheck];
+    [[ROBInsta360CameraService shared] recoverAfterWake];
 }
 
 - (IBAction)showPythonSettings:(id)sender

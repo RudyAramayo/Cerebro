@@ -7,9 +7,15 @@ readonly agent_label="com.orbitusrobotics.Cerebro.keepalive"
 readonly domain="gui/$(id -u)"
 readonly production_executable="/Applications/Cerebro.app/Contents/MacOS/Cerebro"
 readonly watchdog_directory="${TMPDIR:-/tmp}/com.orbitusrobotics.Cerebro.debug-watchdog"
+readonly restore_marker="${TMPDIR:-/tmp}/com.orbitusrobotics.Cerebro.restore-after-debug"
 
 case "${mode}" in
   begin)
+    if launchctl print "${domain}/${agent_label}" >/dev/null 2>&1; then
+      : > "${restore_marker}"
+    else
+      rm -f "${restore_marker}"
+    fi
     launchctl bootout "${domain}/${agent_label}" 2>/dev/null || true
     while IFS= read -r process_id; do
       [[ -n "${process_id}" ]] && kill -TERM "${process_id}" 2>/dev/null || true
@@ -27,7 +33,8 @@ case "${mode}" in
     exit 1
     ;;
   end)
-    if [[ -x "${production_executable}" ]]; then
+    if [[ -f "${restore_marker}" && -x "${production_executable}" ]]; then
+      rm -f "${restore_marker}"
       "${project_directory}/Scripts/install-cerebro-launch-agent.sh"
     fi
     ;;
@@ -38,8 +45,10 @@ case "${mode}" in
     while pgrep -f '/Library/Developer/Xcode/DerivedData/.*/Cerebro.app/Contents/MacOS/Cerebro$' >/dev/null; do
       sleep 5
     done
-    if ! launchctl print "${domain}/${agent_label}" >/dev/null 2>&1 &&
+    if [[ -f "${restore_marker}" ]] &&
+       ! launchctl print "${domain}/${agent_label}" >/dev/null 2>&1 &&
        [[ -x "${production_executable}" ]]; then
+      rm -f "${restore_marker}"
       "${project_directory}/Scripts/install-cerebro-launch-agent.sh"
     fi
     ;;

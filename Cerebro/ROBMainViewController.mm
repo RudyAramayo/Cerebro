@@ -112,6 +112,7 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 @property (readwrite, retain) AutoNetServer *autoNetServer;
 @property (readwrite, retain) ROBAI *robAI;
 @property (readwrite, retain) ROBGeminiDiagnosticsWindowController *geminiDiagnosticsWindowController;
+@property (readwrite, retain) ROBInsta360DiagnosticsWindowController *insta360DiagnosticsWindowController;
 @property (readwrite, retain) ROBStageShowWindowController *stageShowWindowController;
 @property (readwrite, retain) ROBStageShowCoordinator *stageShowCoordinator;
 @property (readwrite, retain) ROBAutonomyCoordinator *autonomyCoordinator;
@@ -2390,6 +2391,15 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         self.geminiDiagnosticsWindowController.controlDelegate = self;
     }
     [self.geminiDiagnosticsWindowController showWindow:sender];
+}
+
+- (IBAction)showInsta360Diagnostics:(id)sender
+{
+    if (self.insta360DiagnosticsWindowController == nil) {
+        self.insta360DiagnosticsWindowController =
+            [[ROBInsta360DiagnosticsWindowController alloc] init];
+    }
+    [self.insta360DiagnosticsWindowController showWindow:sender];
 }
 
 - (IBAction)showStageShow:(id)sender

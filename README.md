@@ -14,7 +14,13 @@ user LaunchAgent once:
 ./Scripts/install-cerebro-launch-agent.sh
 ```
 
-The agent starts Cerebro at login and restores it after an unexpected exit.
+The agent starts a show-availability supervisor at login. After a crash it
+relaunches Cerebro in two seconds. The tenth consecutive crash opens the
+circuit and stops automatic restarts until the agent is explicitly started
+again or the user logs in again. A run lasting at least five minutes resets the
+crash count. Intentional exits never trigger a restart. Cerebro also does not
+restore AppKit window state, because hardware startup must not be blocked by a
+stale-window crash dialog.
 The local Xcode scheme automatically unloads the production agent before a
 Debug run and restores it afterward. A detached watchdog also restores the
 production agent if Xcode or the debugged process crashes before the scheme's

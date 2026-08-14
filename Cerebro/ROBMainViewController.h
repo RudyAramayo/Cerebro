@@ -59,6 +59,7 @@
 - (IBAction)showSerialDebug:(id)sender;
 - (IBAction)showMainNavigation:(id)sender;
 - (IBAction)showGeminiDiagnostics:(id)sender;
+- (IBAction)showInsta360Diagnostics:(id)sender;
 - (IBAction)showStageShow:(id)sender;
 
 - (IBAction) joinSupaRobonet_WIFI:(id)sender;
