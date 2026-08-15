@@ -18,8 +18,6 @@
 #import "ROBConsciousness.h"
 //#import "ROBLeap.h"
 #import "SimpleUserTrackerTaskController.h"
-#import "ReSpeakerTaskController.h"
-#import "RealSenseTaskController.h"
 #import "AudioInputTaskController.h"
 #import "JoinWifiTaskController.h"
 
@@ -120,8 +118,6 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 
 @property (readwrite, retain) IBOutlet NSTextView *serialOutputArea_base;
 @property (readwrite, retain) IBOutlet NSTextField *serialInputField_base;
-@property (readwrite, retain) IBOutlet NSTextView *serialOutputArea_maestro;
-@property (readwrite, retain) IBOutlet NSTextField *serialInputField_maestro;
 
 @property (readwrite, retain) IBOutlet NSPopUpButton *serialListPullDown_base;
 @property (readwrite, retain) IBOutlet NSPopUpButton *serialListPullDown_maestro;
@@ -145,7 +141,6 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 @property (readwrite, retain) NSTimer *speechResponseAttentionTimer;
 
 - (IBAction)sendText_base:(id)sender;
-- (IBAction)LACT_exitSafeStart:(id)sender;
 - (IBAction)serialPortSelected_base: (id) cntrl;
 - (IBAction)serialPortSelected_maestro: (id) cntrl;
 
@@ -181,14 +176,10 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 @property (readwrite, retain) NSTimer *robotActionBridgeTimer;
 
 @property (readwrite, retain) SimpleUserTrackerTaskController *simpleUserTrackerTaskController;
-@property (readwrite, retain) ReSpeakerTaskController *reSpeakerTaskController;
-@property (readwrite, retain) RealSenseTaskController *realSenseTaskController;
 @property (readwrite, retain) AudioInputTaskController *audioInputTaskController;
 @property (readwrite, retain) JoinWifiTaskController *joinWifiTaskController;
 
 @property (readwrite, retain) IBOutlet NSTextView *simpleUserTrackerTaskTextView;
-@property (readwrite, retain) IBOutlet NSTextView *reSpeakerTaskTextView;
-@property (readwrite, retain) IBOutlet NSTextView *realSense_t265_TaskTextView;
 
 @property (readwrite, assign) bool followingMode;
 @property (readwrite, assign) BOOL isNeckLifted;
@@ -264,7 +255,9 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     self.speechTextView.textColor = NSColor.labelColor;
     self.speechTextView.backgroundColor = NSColor.textBackgroundColor;
     self.speechTextView.insertionPointColor = NSColor.controlAccentColor;
-    self.speechTextView.textContainerInset = NSMakeSize(9, 8);
+    // Give typed chat text a little breathing room below the top edge. The
+    // previous inset made the first baseline look unnaturally high.
+    self.speechTextView.textContainerInset = NSMakeSize(9, 11);
     self.speechTextView.automaticQuoteSubstitutionEnabled = NO;
     self.speechTextView.automaticDashSubstitutionEnabled = NO;
 }
@@ -328,8 +321,20 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     ROBConversationMessage *message = self.conversationMessages[row];
     view.fromUser = message.fromUser;
     view.senderLabel.stringValue = message.fromUser ? @"YOU" : @"ROB AI";
-    view.bubbleLabel.stringValue = [NSString stringWithFormat:@"  %@  ", message.text];
-    view.bubbleLabel.textColor = message.fromUser ? NSColor.whiteColor : NSColor.labelColor;
+    NSColor *textColor = message.fromUser ? NSColor.whiteColor : NSColor.labelColor;
+    NSMutableParagraphStyle *bubbleStyle = [[NSMutableParagraphStyle alloc] init];
+    bubbleStyle.firstLineHeadIndent = 10;
+    bubbleStyle.headIndent = 10;
+    bubbleStyle.tailIndent = -10;
+    view.bubbleLabel.attributedStringValue = [[NSAttributedString alloc]
+        initWithString:message.text
+           attributes:@{
+               NSFontAttributeName: [NSFont systemFontOfSize:14],
+               NSForegroundColorAttributeName: textColor,
+               NSParagraphStyleAttributeName: bubbleStyle,
+               NSBaselineOffsetAttributeName: @(-2.0)
+           }];
+    view.bubbleLabel.textColor = textColor;
     view.bubbleLabel.backgroundColor = message.fromUser
         ? NSColor.systemBlueColor
         : [NSColor.systemPurpleColor colorWithAlphaComponent:0.24];
@@ -853,7 +858,6 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 - (void) didFinishProcessingSpeech
 {
     NSLog(@"didFinishProcessingSpeech ROBMainViewController");
-    [self.stageShowCoordinator speechDidFinish];
     //TODO: should we reset after so we can keep a conversation going?!?
     [self resetSpeechResponseAttentionTimer];
 }
@@ -1069,10 +1073,8 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     self.serialBox.serialListPullDown_maestro = self.serialListPullDown_maestro;
     
     self.serialBox.serialOutputArea_base = self.serialOutputArea_base;
-    self.serialBox.serialOutputArea_maestro = self.serialOutputArea_maestro;
     
     self.serialBox.serialInputField_base = self.serialInputField_base;
-    self.serialBox.serialInputField_maestro = self.serialInputField_maestro;
     
     self.serialBox.delegate = self;
     [self.serialBox initialize_connection];
@@ -1227,7 +1229,16 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
                        speak:(NSString *)text
                        cueID:(NSString *)cueID
 {
-    [self.speechBox sayIt:text];
+    __weak ROBStageShowCoordinator *weakCoordinator = coordinator;
+    [self.speechBox sayIt:text completion:^(BOOL finished) {
+        ROBStageShowCoordinator *strongCoordinator = weakCoordinator;
+        if (strongCoordinator == nil) {
+            return;
+        }
+        // A cancellation is still a terminal synthesizer event. If the show
+        // itself was stopped, speechDidFinish safely ignores this callback.
+        [strongCoordinator speechDidFinish];
+    }];
 }
 
 - (void)stageShowCoordinator:(ROBStageShowCoordinator *)coordinator
@@ -1636,12 +1647,6 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     }
 }
 
-- (IBAction)reconnectMaestroLink:(id)sender
-{
-    [self.serialBox maestro_getErrors_command];
-    [self.serialBox connectMaestro];
-}
-
 #pragma mark - HumanTrackingDelegate
 
 - (void) heartbeat_NiTE
@@ -1770,11 +1775,6 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 }
 
 
-- (IBAction) maestro_getErrors_command:(id)sender
-{
-    [self.serialBox maestro_getErrors_command];
-}
-
 
 - (void) joinWifi:(NSString *)wifiCredentials
 {
@@ -1787,10 +1787,6 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     // Join Network Example
     // @"/usr/sbin/networksetup -setairportnetwork en0 Internet"
     
-    // Working join wifi network command
-    //@"/usr/sbin/networksetup -setairportnetwork en1 ATT9m78y5D 24+h592n4?x2"
-    //@"/usr/sbin/networksetup -setairportnetwork en4 "SUPA ROBONET" 7!G3R&@7M"
-    
     NSArray *wifiElements = [wifiCredentials componentsSeparatedByString:@":"];
     
     NSString *ssid = wifiElements[0];
@@ -1802,23 +1798,6 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     self.joinWifiTaskController = [JoinWifiTaskController new];
     self.joinWifiTaskController.delegate = self;
     [self.joinWifiTaskController startTask:self withDevice:@"en1" ssid:ssid password:password];
-}
-
-- (IBAction) joinSupaRobonet_WIFI:(id)sender
-{
-     //@"/usr/sbin/networksetup -setairportnetwork en4 "SUPA ROBONET" 7!G3R&@7M"
-    self.joinWifiTaskController = [JoinWifiTaskController new];
-    self.joinWifiTaskController.delegate = self;
-    [self.joinWifiTaskController startTask:self withDevice:@"en1" ssid:@"SUPA ROBONET" password:@"7!G3R&@7M"];
-}
-
-
-- (IBAction) joinATT9m78y5D:(id)sender
-{
-    //@"/usr/sbin/networksetup -setairportnetwork en4 "SUPA ROBONET" 7!G3R&@7M"
-    self.joinWifiTaskController = [JoinWifiTaskController new];
-    self.joinWifiTaskController.delegate = self;
-    [self.joinWifiTaskController startTask:self withDevice:@"en1" ssid:@"ATT9m78y5D" password:@"24+h592n4?x2"];
 }
 
 - (NSString *)pairingDeviceNameWithDefault:(NSString *)defaultName
@@ -2470,11 +2449,6 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     [self.serialBox sendBaseCommand:[self.serialInputField_base stringValue]];
 }
 
-- (IBAction)sendText_maestro:(id)sender
-{
-    [self.serialBox sendMaestroCommand:[self.serialInputField_maestro stringValue]];
-}
-
 
 - (IBAction)serialPortSelected_base: (id) cntrl
 {
@@ -2498,16 +2472,6 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 }
 
 
-- (void) didOutputSerialResponse_Maestro:(NSString *)response
-{
-    //NSLog(@"MAESTRO: %@", response);
-}
-
-
-- (IBAction)LACT_exitSafeStart:(id)sender
-{
-    [self.serialBox LACT_exitSafeStart];
-}
 
 
 - (IBAction)showControls:(id)sender

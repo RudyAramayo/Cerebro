@@ -33,8 +33,6 @@
 
 @property (readwrite, retain) NSTextView *serialOutputArea_base;
 @property (readwrite, retain) NSTextField *serialInputField_base;
-@property (readwrite, retain) NSTextView *serialOutputArea_maestro;
-@property (readwrite, retain) NSTextField *serialInputField_maestro;
 
 
 @property (readwrite, retain) NSPopUpButton *serialListPullDown_base;
@@ -99,10 +97,7 @@
 - (void) serialPortSelected_maestro;
 
 - (void) sendBaseCommand:(NSString *)command;
-- (void) sendMaestroCommand:(NSString *)command;
-- (void) maestro_getErrors_command;
 
-- (void) LACT_exitSafeStart;
 - (void) initialize_connection;
 - (void) connectMaestro;
 

@@ -4,6 +4,7 @@
 //
 
 #import "ROBPythonSettingsWindowController.h"
+#import "ROBMainViewController.h"
 #import "ROBPythonRuntime.h"
 #import "ROBSystemDependencyManager.h"
 
@@ -25,13 +26,14 @@
 - (ROBSystemPackageManager)selectedSystemPackageManager;
 - (void)updateSSHpassActionAccessibility;
 - (void)validateAfterInstallForGeneration:(NSUInteger)generation pipOutput:(NSString *)pipOutput;
+- (ROBMainViewController *)mainViewControllerInViewController:(NSViewController *)viewController;
 @end
 
 @implementation ROBPythonSettingsWindowController
 
 - (instancetype)init
 {
-    NSRect frame = NSMakeRect(0, 0, 680, 580);
+    NSRect frame = NSMakeRect(0, 0, 720, 640);
     NSWindow *window = [[NSWindow alloc]
         initWithContentRect:frame
                   styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
@@ -85,7 +87,43 @@
 
 - (void)buildInterface
 {
-    NSView *contentView = self.window.contentView;
+    NSView *windowContentView = self.window.contentView;
+    NSTabView *tabView = [[NSTabView alloc] initWithFrame:NSInsetRect(windowContentView.bounds, 12.0, 12.0)];
+    tabView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [windowContentView addSubview:tabView];
+
+    NSTabViewItem *runtimeTab = [NSTabViewItem tabViewItemWithViewController:[[NSViewController alloc] init]];
+    runtimeTab.label = @"Runtime";
+    NSView *contentView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 680, 580)];
+    runtimeTab.view = contentView;
+    [tabView addTabViewItem:runtimeTab];
+
+    NSTabViewItem *controllersTab = [NSTabViewItem tabViewItemWithViewController:[[NSViewController alloc] init]];
+    controllersTab.label = @"Controllers";
+    NSView *controllersView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 680, 580)];
+    controllersTab.view = controllersView;
+    [tabView addTabViewItem:controllersTab];
+
+    NSTextField *controllersHeading = [self labelWithString:@"Paired Control Devices"
+                                                       frame:NSMakeRect(24, 530, 632, 28)];
+    controllersHeading.font = [NSFont boldSystemFontOfSize:20.0];
+    [controllersView addSubview:controllersHeading];
+
+    NSTextField *controllersExplanation = [self labelWithString:
+        @"Manage the devices authorized to send remote control commands to ROB. Pair a new controller, review active pairings, or revoke a device that should no longer have access."
+        frame:NSMakeRect(24, 470, 632, 48)];
+    controllersExplanation.textColor = [NSColor secondaryLabelColor];
+    [controllersView addSubview:controllersExplanation];
+
+    NSBox *pairingBox = [[NSBox alloc] initWithFrame:NSMakeRect(24, 350, 632, 100)];
+    pairingBox.title = @"Controller Pairing";
+    [controllersView addSubview:pairingBox];
+
+    NSButton *managePairingButton = [self buttonWithTitle:@"Manage Paired Devices…"
+                                                    frame:NSMakeRect(18, 36, 220, 34)
+                                                   action:@selector(managePairedDevices:)];
+    managePairingButton.accessibilityHelp = @"Open pairing codes and manage controllers authorized to control ROB.";
+    [pairingBox.contentView addSubview:managePairingButton];
 
     NSTextField *heading = [self labelWithString:@"Python Environment" frame:NSMakeRect(24, 530, 632, 28)];
     heading.font = [NSFont boldSystemFontOfSize:20.0];
@@ -199,6 +237,39 @@
                            installButton, checkButton, self.installSSHpassButton];
     [self refreshFromRuntimeAndValidate:NO];
     [self refreshSystemDependencyStatus];
+}
+
+- (ROBMainViewController *)mainViewControllerInViewController:(NSViewController *)viewController
+{
+    if ([viewController isKindOfClass:[ROBMainViewController class]]) {
+        return (ROBMainViewController *)viewController;
+    }
+    for (NSViewController *childViewController in viewController.childViewControllers) {
+        ROBMainViewController *mainViewController =
+            [self mainViewControllerInViewController:childViewController];
+        if (mainViewController != nil) {
+            return mainViewController;
+        }
+    }
+    return nil;
+}
+
+- (IBAction)managePairedDevices:(id)sender
+{
+    for (NSWindow *window in NSApp.windows) {
+        ROBMainViewController *mainViewController =
+            [self mainViewControllerInViewController:window.contentViewController];
+        if (mainViewController != nil) {
+            [mainViewController showControlPairingCode:sender];
+            return;
+        }
+    }
+
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = @"Controller pairing is unavailable";
+    alert.informativeText = @"Open Cerebro's main robot window, then try managing paired devices again.";
+    [alert addButtonWithTitle:@"OK"];
+    [alert beginSheetModalForWindow:self.window completionHandler:nil];
 }
 
 - (void)showWindow:(id)sender

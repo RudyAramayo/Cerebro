@@ -62,9 +62,6 @@
 - (IBAction)showInsta360Diagnostics:(id)sender;
 - (IBAction)showStageShow:(id)sender;
 
-- (IBAction) joinSupaRobonet_WIFI:(id)sender;
-- (IBAction) joinATT9m78y5D:(id)sender;
-- (IBAction) maestro_getErrors_command:(id)sender;
 - (IBAction)showControlPairingCode:(id)sender;
 
 //Speech
@@ -90,7 +87,6 @@
 - (void) didFinishProcessingSpeech;
 - (void) willStartProcessingSpeech;
 - (void) didOutputSerialResponse_Base:(NSString *)response;
-- (void) didOutputSerialResponse_Maestro:(NSString *)response;
 - (void) resetSpeechResponseAttentionTimer;
 - (void) setHeadTracking:(BOOL)headTrackingEnabled;
 

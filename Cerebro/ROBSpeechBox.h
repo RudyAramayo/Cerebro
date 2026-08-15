@@ -42,6 +42,7 @@
 - (void) didSeeNewPerson:(NSString *)userID;
 - (void) lostSightOfPerson:(NSString*)userID;
 - (void) sayIt:(NSString *)stringToSpeak;
+- (void)sayIt:(NSString *)stringToSpeak completion:(void (^ _Nullable)(BOOL finished))completion;
 - (void) stopIt:(id)sender;
 - (void) setOutputLanguage:(NSString *)language;
 - (void) startRecognizer;

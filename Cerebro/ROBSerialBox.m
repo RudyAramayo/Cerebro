@@ -63,9 +63,6 @@ static NSInteger const kPololuUSBVendorID = 0x1ffb;
 
 #define kRHAPI_MAESTRO_BAUDRATE 9600
 
-//*** DON'T FORGET TO UPDATE FIRMWARE OF MOTOR CONTROLLER to 1.04 ***
-#define kRHAPI_SERIAL_PORT_LACT_COM     @"/dev/cu.usbmodem143401"
-
 #define kMaxTurnSpeed 100
 #define kMaxMovementSpeed 255
 
@@ -83,7 +80,6 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 
 @interface ROBSerialBox()
 {
-    bool exitSafeStart;
     bool exitSafeStart_waistRotation;
     bool energize_waistRotation;
 }
@@ -148,11 +144,9 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 - (void)handleBaseSerialLine:(NSString *)line;
 
 - (void)appendToIncomingText_base: (id) text;
-- (void)appendToIncomingText_maestro: (id) text;
 
 
 - (void)incomingTextUpdateThread_base: (NSThread *) parentThread;
-- (void)incomingTextUpdateThread_maestro: (NSThread *) parentThread;
 
 - (void) refreshSerialList_base: (NSString *) selectedText;
 - (void) refreshSerialList_maestro: (NSString *) selectedText;
@@ -219,7 +213,6 @@ typedef enum : NSUInteger {
     readThreadRunning_base = FALSE;
     readThreadRunning_maestro = FALSE;
 
-    exitSafeStart = false;
     exitSafeStart_waistRotation = false;
     energize_waistRotation = false;
     
@@ -696,26 +689,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     });
 }
 
-- (void)appendToIncomingText_maestro: (id) text
-{
-    // add the text to the textarea
-    NSAttributedString* attrString = [[NSMutableAttributedString alloc] initWithString: text];
-    //TODO: DISPATCH GET MAIN THREAD HERE FOR USING TEXTSTORAGE
-    dispatch_async(dispatch_get_main_queue(), ^(){
-        NSTextStorage *textStorage = [self.serialOutputArea_maestro textStorage];
-        [self.delegate didOutputSerialResponse_Maestro:attrString.string];
-        [textStorage beginEditing];
-        [textStorage appendAttributedString:attrString];
-        [textStorage endEditing];
-        
-        // scroll to the bottom
-        NSRange myRange;
-        myRange.length = 1;
-        myRange.location = [textStorage length];
-        [self.serialOutputArea_maestro scrollRangeToVisible:myRange];
-    });
-}
-
 - (void)incomingTextUpdateThread_base: (NSThread *) parentThread{
     
     // create a pool so we can use regular Cocoa stuff
@@ -831,57 +804,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     });
 }
 
-
-- (void)incomingTextUpdateThread_maestro: (NSThread *) parentThread{
-    
-    // create a pool so we can use regular Cocoa stuff
-    //   child threads can't re-use the parent's autorelease pool
-    //NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    
-    // mark that the thread is running
-    readThreadRunning_maestro = TRUE;
-    
-    const int BUFFER_SIZE = 100;
-    char byte_buffer[BUFFER_SIZE]; // buffer for holding incoming data
-    long numBytes=0; // number of bytes read during read
-    NSString *text; // incoming text from the serial port
-    
-    // assign a high priority to this thread
-    [NSThread setThreadPriority:1.0];
-    
-    // this will loop unitl the serial port closes
-    while(TRUE) {
-        // read() blocks until some data is available or the port is closed
-        numBytes = read(serialFileDescriptor_maestro, byte_buffer, BUFFER_SIZE); // read up to the size of the buffer
-        if(numBytes>0) {
-            // create an NSString from the incoming bytes (the bytes aren't null terminated)
-            //DEPRICATION:
-            text = [NSString stringWithCString:byte_buffer length:numBytes];
-            //text = [NSString stringWithCString:byte_buffer encoding:NSUTF8StringEncoding];
-            
-            // this text can't be directly sent to the text area from this thread
-            //  BUT, we can call a selctor on the main thread.
-            
-            [self performSelectorOnMainThread:@selector(appendToIncomingText_maestro:)
-                                   withObject:text
-                                waitUntilDone:YES];
-        } else {
-            break; // Stop the thread if there is an error
-        }
-    }
-    
-    // make sure the serial port is closed
-    if (serialFileDescriptor_maestro != -1) {
-        close(serialFileDescriptor_maestro);
-        serialFileDescriptor_maestro = -1;
-    }
-    
-    // mark that the thread has quit
-    readThreadRunning_maestro = FALSE;
-    
-    // give back the pool
-    //[pool release];
-}
 
 
 - (void) refreshSerialList_base: (NSString *) selectedText {
@@ -1029,28 +951,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     //[serialInputField setTitleWithMnemonic:@""];
 }
 
-
-
-- (IBAction) LACT_exitSafeStart
-{
-    exitSafeStart = true;
-    /*
-     uint8_t val = 170;    //0xAA = 170
-     [self writeByte:&val];
-     
-     val = 13;            //0xD = 13
-     [self writeByte:&val];
-     
-     val = 3;            //0x3 = 3
-     [self writeByte:&val];
-     */
-    
-    
-    //This is not sending this crap to a listener, is it???
-    //uint8_t val = 131;    //0x83 =
-    //[self writeByte:&val serialFileDescriptor:serialFileDescriptor_base];
-    
-}
 
 
 /*
@@ -1268,8 +1168,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     
     NSString *lactDirection = (lact1) ? @"-" : @"+";
     NSString *lactSpeed = (lact1 || lact3) ? @"3200" : @"0000";
-    if (exitSafeStart)
-        lactSpeed = (lact1 || lact3) ? @"3201" : @"0000";
     //self.flipper_FORWARD_isDown, self.flipper_RELAX_isDown, self.flipper_BACKWARD_isDown, self.flipper_BRAKELOCK,
     //self.lact_BACK_isDown, self.lact_GRAVITY_toggle, self.lact_FRONT_isDown,
     
@@ -2561,19 +2459,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     [self writeString:command serialFileDescriptor:serialFileDescriptor_base];
 }
 
-
-- (void) sendMaestroCommand:(NSString *)command
-{
-    NSData *data = [command dataUsingEncoding:NSUTF8StringEncoding];
-    [self writeMaestroBytes:data.bytes length:data.length];
-}
-
-
-- (void) maestro_getErrors_command
-{
-    unsigned char command[] = { 0xA1 };
-    [self writeMaestroBytes:command length:sizeof(command)];
-}
 
 // action from the reset button
 - (void) resetButton: (NSButton *) btn{

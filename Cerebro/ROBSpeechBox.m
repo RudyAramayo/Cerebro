@@ -22,6 +22,7 @@
 @interface ROBSpeechBox() <AVSpeechSynthesizerDelegate, SFSpeechRecognizerDelegate, SFSpeechRecognitionTaskDelegate, AVCaptureAudioDataOutputSampleBufferDelegate>
 
 @property (nonatomic, strong) AVSpeechSynthesizer *avSpeechSynthesizer;
+@property (nonatomic, strong) NSMapTable<AVSpeechUtterance *, id> *utteranceCompletions;
 
 //new properties
 @property (nonatomic, strong) AVCaptureSession *capture;
@@ -50,7 +51,9 @@
 - (void)scheduleRecognizerRestart;
 - (void)teardownSpeechRecognition;
 - (void)teardownAudioCapture;
-- (void)finishSpeechEventForSynthesizer:(AVSpeechSynthesizer *)synthesizer;
+- (void)finishSpeechEventForSynthesizer:(AVSpeechSynthesizer *)synthesizer
+                              utterance:(AVSpeechUtterance *)utterance
+                                finished:(BOOL)finished;
 - (AVSpeechSynthesisVoice *)resolveROBVoice;
 @end
 
@@ -76,6 +79,7 @@
         self.commands = [@[@"robbie", @"robot", @"hey robbie", @"hey robot", @"rob",  @"robbie one"] mutableCopy];
         self.robsDefaultVoiceIdentifier = @"com.apple.voice.enhanced.en-GB.Oliver";
         self.robsDefaultVoice = [self resolveROBVoice];
+        self.utteranceCompletions = [NSMapTable strongToStrongObjectsMapTable];
         [self setupSpeechSynthesizer];
         
         self.localeArray = @[
@@ -266,7 +270,7 @@
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didFinishSpeechUtterance:(AVSpeechUtterance *)utterance
 {
     NSLog(@"didFinishSpeechUtterance");
-    [self finishSpeechEventForSynthesizer:synthesizer];
+    [self finishSpeechEventForSynthesizer:synthesizer utterance:utterance finished:YES];
 }
 
 
@@ -285,11 +289,18 @@
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didCancelSpeechUtterance:(AVSpeechUtterance *)utterance
 {
     NSLog(@"didCancelSpeechUtterance");
-    [self finishSpeechEventForSynthesizer:synthesizer];
+    [self finishSpeechEventForSynthesizer:synthesizer utterance:utterance finished:NO];
 }
 
 - (void)finishSpeechEventForSynthesizer:(AVSpeechSynthesizer *)synthesizer
+                              utterance:(AVSpeechUtterance *)utterance
+                                finished:(BOOL)finished
 {
+    void (^completion)(BOOL) = [self.utteranceCompletions objectForKey:utterance];
+    if (completion != nil) {
+        [self.utteranceCompletions removeObjectForKey:utterance];
+        completion(finished);
+    }
     // Let AVSpeechSynthesizer advance to its next queued utterance before
     // reopening microphone capture. This also avoids a cancel/new-utterance
     // race when a local stop acknowledgement replaces current speech.
@@ -724,11 +735,19 @@
 
 - (void)sayIt:(NSString *)stringToSpeak
 {
+    [self sayIt:stringToSpeak completion:nil];
+}
+
+- (void)sayIt:(NSString *)stringToSpeak completion:(void (^)(BOOL finished))completion
+{
     dispatch_async(dispatch_get_main_queue(), ^(){
         // Is the string zero-length?
         if ([stringToSpeak length] == 0) {
             NSLog(@"string is of zero-length");
             self.isSpeaking = false;
+            if (completion != nil) {
+                completion(NO);
+            }
             return;
         }
         self.isSpeaking = true;
@@ -747,6 +766,9 @@
         //AVSpeechSynthesisVoice *voice = [AVSpeechSynthesisVoice voiceWithLanguage:@"ru_RU"];
         
         AVSpeechUtterance *utterance = [AVSpeechUtterance speechUtteranceWithString:stringToSpeak];
+        if (completion != nil) {
+            [self.utteranceCompletions setObject:[completion copy] forKey:utterance];
+        }
         utterance.voice = self.robsDefaultVoice;
         //possible parameters to specify in the future
         //utterance.volume

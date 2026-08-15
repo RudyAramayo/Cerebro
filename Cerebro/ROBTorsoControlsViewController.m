@@ -16,7 +16,6 @@
 @interface ROBTorsoControlsViewController () <NSTextFieldDelegate, NSTableViewDelegate, NSTableViewDataSource>
 
 @property (readwrite, retain) NSTimer *renderServoControlsTimer;
-@property (readwrite, retain) NSTimer *maestroGetErrorsTimer;
 @property (readwrite, assign) BOOL is_in_position_mode_R11;
 @property (readwrite, assign) BOOL is_in_current_mode_R11;
 @property (readwrite, assign) BOOL is_in_speed_mode_R11;
@@ -37,12 +36,6 @@
                                                                    selector:@selector(renderServoCommands)
                                                                    userInfo:nil
                                                                     repeats:YES];
-    self.maestroGetErrorsTimer = [NSTimer scheduledTimerWithTimeInterval:10.0
-                                                                  target:self
-                                                                selector:@selector(maestro_getErrors_command)
-                                                                userInfo:nil
-                                                                 repeats:YES];
-    
     self.amberHostIP_TextField.delegate = self;
     
     KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
@@ -489,12 +482,6 @@
 }
 
 #pragma mark - Servo Commands
-
-- (void) maestro_getErrors_command
-{
-    [self.robMainViewController.serialBox maestro_getErrors_command];
-}
-
 
 - (IBAction) reconnectMaestro:(id)sender;
 {
