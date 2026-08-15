@@ -86,6 +86,7 @@
 		D4E300022F00000100000001 /* ROBGeminiDiagnosticsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E300012F00000100000001 /* ROBGeminiDiagnosticsWindowController.swift */; };
 		C03600022F36000100000001 /* ROBInsta360DiagnosticsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03600012F36000100000001 /* ROBInsta360DiagnosticsWindowController.swift */; };
 		C03600122F36000100000001 /* ROBInsta360CameraService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03600112F36000100000001 /* ROBInsta360CameraService.swift */; };
+		C03600222F36000100000001 /* ROBInsta360PerceptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03600212F36000100000001 /* ROBInsta360PerceptionService.swift */; };
 		D4E400022F00000100000001 /* ROBStageShowProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E400012F00000100000001 /* ROBStageShowProtocol.swift */; };
 		D4E500022F00000100000001 /* ROBStageShowCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E500012F00000100000001 /* ROBStageShowCoordinator.swift */; };
 		D4E600022F00000100000001 /* ROBStageShowWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E600012F00000100000001 /* ROBStageShowWindowController.swift */; };
@@ -243,6 +244,7 @@
 		D4E300012F00000100000001 /* ROBGeminiDiagnosticsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBGeminiDiagnosticsWindowController.swift; sourceTree = "<group>"; };
 		C03600012F36000100000001 /* ROBInsta360DiagnosticsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBInsta360DiagnosticsWindowController.swift; sourceTree = "<group>"; };
 		C03600112F36000100000001 /* ROBInsta360CameraService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBInsta360CameraService.swift; sourceTree = "<group>"; };
+		C03600212F36000100000001 /* ROBInsta360PerceptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBInsta360PerceptionService.swift; sourceTree = "<group>"; };
 		D4E400012F00000100000001 /* ROBStageShowProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBStageShowProtocol.swift; sourceTree = "<group>"; };
 		D4E500012F00000100000001 /* ROBStageShowCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBStageShowCoordinator.swift; sourceTree = "<group>"; };
 		D4E600012F00000100000001 /* ROBStageShowWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBStageShowWindowController.swift; sourceTree = "<group>"; };
@@ -406,6 +408,7 @@
 				D4E300012F00000100000001 /* ROBGeminiDiagnosticsWindowController.swift */,
 				C03600012F36000100000001 /* ROBInsta360DiagnosticsWindowController.swift */,
 				C03600112F36000100000001 /* ROBInsta360CameraService.swift */,
+				C03600212F36000100000001 /* ROBInsta360PerceptionService.swift */,
 				D4E400012F00000100000001 /* ROBStageShowProtocol.swift */,
 				D4E500012F00000100000001 /* ROBStageShowCoordinator.swift */,
 				D4E600012F00000100000001 /* ROBStageShowWindowController.swift */,
@@ -697,6 +700,7 @@
 				D4E300022F00000100000001 /* ROBGeminiDiagnosticsWindowController.swift in Sources */,
 				C03600022F36000100000001 /* ROBInsta360DiagnosticsWindowController.swift in Sources */,
 				C03600122F36000100000001 /* ROBInsta360CameraService.swift in Sources */,
+				C03600222F36000100000001 /* ROBInsta360PerceptionService.swift in Sources */,
 				D4E400022F00000100000001 /* ROBStageShowProtocol.swift in Sources */,
 				D4E500022F00000100000001 /* ROBStageShowCoordinator.swift in Sources */,
 				D4E600022F00000100000001 /* ROBStageShowWindowController.swift in Sources */,

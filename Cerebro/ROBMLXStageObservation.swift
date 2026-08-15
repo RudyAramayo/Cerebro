@@ -21,6 +21,7 @@ public struct ROBMLXStageObservation: Codable, Equatable, Sendable {
     public let estimatedPeople: Int
     public let presenterVisible: Bool
     public let demonstrationObjectVisible: Bool
+    public let visibleItems: [String]
     public let audienceActivity: ROBStageAudienceActivity
     public let sceneChange: String
     public let confidence: Double
@@ -30,6 +31,7 @@ public struct ROBMLXStageObservation: Codable, Equatable, Sendable {
         case estimatedPeople = "estimated_people"
         case presenterVisible = "presenter_visible"
         case demonstrationObjectVisible = "demonstration_object_visible"
+        case visibleItems = "visible_items"
         case audienceActivity = "audience_activity"
         case sceneChange = "scene_change"
         case confidence
@@ -40,7 +42,7 @@ public enum ROBMLXStageObservationCodec {
     public static let maximumDocumentBytes = 8_192
     private static let allowedKeys: Set<String> = [
         "audience_present", "estimated_people", "presenter_visible",
-        "demonstration_object_visible", "audience_activity", "scene_change", "confidence"
+        "demonstration_object_visible", "visible_items", "audience_activity", "scene_change", "confidence"
     ]
 
     public static func decode(_ data: Data) throws -> ROBMLXStageObservation {
@@ -58,6 +60,8 @@ public enum ROBMLXStageObservationCodec {
         catch { throw ROBMLXStageObservationError.invalid("Observation value types are invalid.") }
         guard (0 ... 50).contains(observation.estimatedPeople),
               observation.audiencePresent || observation.estimatedPeople == 0,
+              observation.visibleItems.count <= 12,
+              observation.visibleItems.allSatisfy({ !$0.isEmpty && $0.count <= 60 && $0.rangeOfCharacter(from: .newlines) == nil }),
               observation.confidence.isFinite, (0 ... 1).contains(observation.confidence) else {
             throw ROBMLXStageObservationError.invalid("Observation values are inconsistent or out of range.")
         }

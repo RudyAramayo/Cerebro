@@ -40,6 +40,7 @@ extension Notification.Name {
     public private(set) var decodedBytes: UInt64 = 0
     public private(set) var framesPerSecond: Double = 0
     public private(set) var lastError: String?
+    public private(set) var previewSettingsPending = false
 
     /// Stabilization is opt-out: a new install always requests the camera's
     /// gyro-stabilized panorama unless a developer explicitly disables it.
@@ -51,7 +52,10 @@ extension Notification.Name {
         }
         set {
             UserDefaults.standard.set(newValue, forKey: Self.gyroStabilizationDefaultsKey)
-            reconfigurePreview()
+            DispatchQueue.main.async {
+                self.previewSettingsPending = true
+                NotificationCenter.default.post(name: .robInsta360CameraServiceDidChange, object: self)
+            }
         }
     }
 
@@ -90,6 +94,10 @@ extension Notification.Name {
     public func restart() {
         queue.async {
             self.desiredRunning = true
+            if self.fingerprint != nil {
+                self.reconfigurePreviewOnQueue()
+                return
+            }
             self.generation &+= 1
             let relinquishingOwnedSession = self.fingerprint != nil
             self.stopOwnedPreview(generation: self.generation)
@@ -107,24 +115,22 @@ extension Notification.Name {
     /// Applies preview-only options without relinquishing the Pro 2's
     /// single-client fingerprint. Heartbeats continue throughout.
     private func reconfigurePreview() {
-        queue.async {
-            guard self.desiredRunning else { return }
-            guard let fingerprint = self.fingerprint else {
-                // A pending connection will read the newly persisted option.
-                return
-            }
-            let activeGeneration = self.generation
-            self.stopDecoder()
-            self.publish(state: "Applying preview settings…", error: nil)
-            self.executeCommand(
-                ["name": "camera._stopPreview"],
-                fingerprint: fingerprint,
-                generation: activeGeneration
-            ) { _ in
-                // The same fingerprint and heartbeat remain active, so the
-                // camera never sees a competing client during this change.
-                self.startPreview(existingURL: self.streamURL, generation: activeGeneration)
-            }
+        queue.async { self.reconfigurePreviewOnQueue() }
+    }
+
+    private func reconfigurePreviewOnQueue() {
+        guard desiredRunning, let fingerprint else { return }
+        let activeGeneration = generation
+        stopDecoder()
+        publish(state: "Applying preview settings…", error: nil)
+        executeCommand(
+            ["name": "camera._stopPreview"],
+            fingerprint: fingerprint,
+            generation: activeGeneration
+        ) { _ in
+            // The same fingerprint and heartbeat remain active, so the
+            // camera never sees a competing client during this change.
+            self.startPreview(existingURL: self.streamURL, generation: activeGeneration)
         }
     }
 
@@ -199,6 +205,7 @@ extension Notification.Name {
             let url = self.normalizedPreviewURL(advertisedURL)
             self.retryAttempt = 0
             self.heartbeatFailures = 0
+            DispatchQueue.main.async { self.previewSettingsPending = false }
             self.publishStreamURL(url)
             self.startDecoder(url: url, generation: generation)
         }
@@ -334,6 +341,7 @@ extension Notification.Name {
             framesPerSecond = Double(framesReceived) / max(Date().timeIntervalSince(startedAt ?? Date()), 0.001)
             DispatchQueue.main.async {
                 self.latestFrame = image
+                ROBInsta360PerceptionService.shared.offer(image, capturedAt: Date())
                 NotificationCenter.default.post(name: .robInsta360CameraServiceDidChange, object: self)
             }
         }

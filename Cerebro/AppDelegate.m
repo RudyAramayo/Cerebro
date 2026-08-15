@@ -97,6 +97,7 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
     }
     [self utcWebCamCheck];
     [[ROBInsta360CameraService shared] start];
+    [[ROBMLXRuntime shared] prepareVisionModel];
     //Give RPLidar 10 seconds to warm up as the macmini is booting quite fast
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self rpLidarCheck];
