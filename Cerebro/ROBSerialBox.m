@@ -58,8 +58,6 @@ static NSTimeInterval const kROBBaseProbeTimeoutSeconds = 15.0;
 static NSTimeInterval const kMaestroReconnectDelaySeconds = 2.0;
 static NSInteger const kPololuUSBVendorID = 0x1ffb;
 
-#define kRHAPI_SERIAL_PORT_HEAD     @"/dev/cu.usbmodem1431301"
-#define kRHAPI_SERIAL_PORT_TORSO    @"/dev/cu.usbmodem144201"
 #define kRHAPI_SERIAL_PORT_BASE     @"/dev/cu.usbmodem21201"
 
 
@@ -80,8 +78,6 @@ static NSTimeInterval const kControllerSnapshotFreshnessSeconds = 0.6;
 static int const kROBTicWaistFullTurnPositionUnits = 36800;
 static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 
-#define kHeadSerialContext 0
-#define kTorsoSerialContext 1
 #define kBaseSerialContext 2
 #define kMaestroSerialContext 3
 
@@ -151,19 +147,13 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 - (void)consumeBaseSerialBytes:(const void *)bytes length:(NSUInteger)length;
 - (void)handleBaseSerialLine:(NSString *)line;
 
-- (void)appendToIncomingText_head: (id) text;
-- (void)appendToIncomingText_torso: (id) text;
 - (void)appendToIncomingText_base: (id) text;
 - (void)appendToIncomingText_maestro: (id) text;
 
 
-- (void)incomingTextUpdateThread_head: (NSThread *) parentThread;
-- (void)incomingTextUpdateThread_torso: (NSThread *) parentThread;
 - (void)incomingTextUpdateThread_base: (NSThread *) parentThread;
 - (void)incomingTextUpdateThread_maestro: (NSThread *) parentThread;
 
-- (void) refreshSerialList_head: (NSString *) selectedText;
-- (void) refreshSerialList_torso: (NSString *) selectedText;
 - (void) refreshSerialList_base: (NSString *) selectedText;
 - (void) refreshSerialList_maestro: (NSString *) selectedText;
 
@@ -219,8 +209,6 @@ typedef enum : NSUInteger {
 - (void)initialize_connection {
     // we don't have a serial port open yet
     self.amberHostIP = @"10.0.0.11";
-    serialFileDescriptor_head = -1;
-    serialFileDescriptor_torso = -1;
     serialFileDescriptor_base = -1;
     serialFileDescriptor_maestro = -1;
     self.maestroConnectionValid = NO;
@@ -228,8 +216,6 @@ typedef enum : NSUInteger {
     self.actualSpeedR = 0;
     self.lastVisionNeckPanTarget = 6000;
     self.lastVisionNeckTiltTarget = 6045;
-    readThreadRunning_head = FALSE;
-    readThreadRunning_torso = FALSE;
     readThreadRunning_base = FALSE;
     readThreadRunning_maestro = FALSE;
 
@@ -239,11 +225,8 @@ typedef enum : NSUInteger {
     
     self.currentIncommingVerbalMessage = @"";
     self.baseSerialReceiveBuffer = [NSMutableData data];
-    // Base is the only Arduino role presently installed. Head and Torso lists remain visible as
-    // legacy UI until the planned interface cleanup, but Cerebro no longer attempts to open them.
+    // Base is the only Arduino role presently installed.
     [self refreshSerialList_base:@"Detecting Base firmware…"];
-    [self refreshSerialList_torso:kRHAPI_SERIAL_PORT_TORSO];
-    [self refreshSerialList_head:kRHAPI_SERIAL_PORT_HEAD];
     [self refreshSerialList_maestro:@"Discovering Maestro by USB identity…"];
     self.controlModelDataDictionary = [NSMutableDictionary new];
     // now put the cursor in the text field
@@ -251,28 +234,6 @@ typedef enum : NSUInteger {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         [self connectToDetectedBase];
     });
-    /*
-     error = [self openSerialPort:kRHAPI_SERIAL_PORT_TORSO baud:kRHAPI_BAUDRATE serialFileDescriptor:&serialFileDescriptor_torso contextInt:kTorsoSerialContext];
-     
-     if(error!=nil) {
-     [self refreshSerialList_torso:error];
-     [self appendToIncomingText_torso:error];
-     } else {
-     [self refreshSerialList_torso:[self.serialListPullDown_torso titleOfSelectedItem]];
-     [self performSelectorInBackground:@selector(incomingTextUpdateThread_torso:) withObject:[NSThread currentThread]];
-     }
-     
-     
-     error = [self openSerialPort:kRHAPI_SERIAL_PORT_HEAD baud:kRHAPI_BAUDRATE serialFileDescriptor:&serialFileDescriptor_head contextInt:kHeadSerialContext];
-     
-     if(error!=nil) {
-     [self refreshSerialList_head:error];
-     [self appendToIncomingText_head:error];
-     } else {
-     [self refreshSerialList_head:[self.serialListPullDown_head titleOfSelectedItem]];
-     [self performSelectorInBackground:@selector(incomingTextUpdateThread_head:) withObject:[NSThread currentThread]];
-     }
-     */
     [self connectMaestro];
     
     self.controllerTimer = [NSTimer scheduledTimerWithTimeInterval:0.1 target:self selector:@selector(renderController) userInfo:nil repeats:YES];
@@ -617,12 +578,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         (*serialFileDescriptor) = -1;
         
         switch (contextInt) {
-            case 0:
-                while(readThreadRunning_head);
-                break;
-            case 1:
-                while(readThreadRunning_torso);
-                break;
             case 2:
                 while(readThreadRunning_base);
                 break;
@@ -722,26 +677,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
 }
 
 // updates the textarea for incoming text by appending text
-- (void)appendToIncomingText_head: (id) text{
-    // add the text to the textarea
-    NSAttributedString* attrString = [[NSMutableAttributedString alloc] initWithString: text];
-    //TODO: DISPATCH GET MAIN THREAD HERE FOR USING TEXTSTORAGE
-    dispatch_async(dispatch_get_main_queue(), ^(){
-        NSTextStorage *textStorage = [self.serialOutputArea_head textStorage];
-        [self.delegate didOutputSerialResponse_Head:attrString.string];
-        [textStorage beginEditing];
-        [textStorage appendAttributedString:attrString];
-        [textStorage endEditing];
-        
-        // scroll to the bottom
-        NSRange myRange;
-        myRange.length = 1;
-        myRange.location = [textStorage length];
-        [self.serialOutputArea_head scrollRangeToVisible:myRange];
-    });
-}
-
-// updates the textarea for incoming text by appending text
 - (void)appendToIncomingText_base: (id) text{
     // add the text to the textarea
     NSAttributedString* attrString = [[NSMutableAttributedString alloc] initWithString: text];
@@ -758,26 +693,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         myRange.length = 1;
         myRange.location = [textStorage length];
         [self.serialOutputArea_base scrollRangeToVisible:myRange];
-    });
-}
-
-// updates the textarea for incoming text by appending text
-- (void)appendToIncomingText_torso: (id) text{
-    // add the text to the textarea
-    NSAttributedString* attrString = [[NSMutableAttributedString alloc] initWithString: text];
-    //TODO: DISPATCH GET MAIN THREAD HERE FOR USING TEXTSTORAGE
-    dispatch_async(dispatch_get_main_queue(), ^(){
-        NSTextStorage *textStorage = [self.serialOutputArea_torso textStorage];
-        [self.delegate didOutputSerialResponse_Torso:attrString.string];
-        [textStorage beginEditing];
-        [textStorage appendAttributedString:attrString];
-        [textStorage endEditing];
-        
-        // scroll to the bottom
-        NSRange myRange;
-        myRange.length = 1;
-        myRange.location = [textStorage length];
-        [self.serialOutputArea_torso scrollRangeToVisible:myRange];
     });
 }
 
@@ -800,112 +715,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         [self.serialOutputArea_maestro scrollRangeToVisible:myRange];
     });
 }
-
-// This selector/function will be called as another thread...
-//  this thread will read from the serial port and exits when the port is closed
-- (void)incomingTextUpdateThread_head: (NSThread *) parentThread{
-    
-    // create a pool so we can use regular Cocoa stuff
-    //   child threads can't re-use the parent's autorelease pool
-    //NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    
-    // mark that the thread is running
-    readThreadRunning_head = TRUE;
-    
-    const int BUFFER_SIZE = 100;
-    char byte_buffer[BUFFER_SIZE]; // buffer for holding incoming data
-    long numBytes=0; // number of bytes read during read
-    NSString *text; // incoming text from the serial port
-    
-    // assign a high priority to this thread
-    [NSThread setThreadPriority:1.0];
-    
-    // this will loop unitl the serial port closes
-    while(TRUE) {
-        // read() blocks until some data is available or the port is closed
-        numBytes = read(serialFileDescriptor_head, byte_buffer, BUFFER_SIZE); // read up to the size of the buffer
-        if(numBytes>0) {
-            // create an NSString from the incoming bytes (the bytes aren't null terminated)
-            //DEPRICATION:
-            text = [NSString stringWithCString:byte_buffer length:numBytes];
-            //text = [NSString stringWithCString:byte_buffer encoding:NSUTF8StringEncoding];
-            
-            // this text can't be directly sent to the text area from this thread
-            //  BUT, we can call a selctor on the main thread.
-            
-            [self performSelectorOnMainThread:@selector(appendToIncomingText_head:)
-                                   withObject:text
-                                waitUntilDone:YES];
-        } else {
-            break; // Stop the thread if there is an error
-        }
-    }
-    
-    // make sure the serial port is closed
-    if (serialFileDescriptor_head != -1) {
-        close(serialFileDescriptor_head);
-        serialFileDescriptor_head = -1;
-    }
-    
-    // mark that the thread has quit
-    readThreadRunning_head = FALSE;
-    
-    // give back the pool
-    //[pool release];
-}
-
-
-- (void)incomingTextUpdateThread_torso: (NSThread *) parentThread{
-    
-    // create a pool so we can use regular Cocoa stuff
-    //   child threads can't re-use the parent's autorelease pool
-    //NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    
-    // mark that the thread is running
-    readThreadRunning_torso = TRUE;
-    
-    const int BUFFER_SIZE = 100;
-    char byte_buffer[BUFFER_SIZE]; // buffer for holding incoming data
-    long numBytes=0; // number of bytes read during read
-    NSString *text; // incoming text from the serial port
-    
-    // assign a high priority to this thread
-    [NSThread setThreadPriority:1.0];
-    
-    // this will loop unitl the serial port closes
-    while(TRUE) {
-        // read() blocks until some data is available or the port is closed
-        numBytes = read(serialFileDescriptor_torso, byte_buffer, BUFFER_SIZE); // read up to the size of the buffer
-        if(numBytes>0) {
-            // create an NSString from the incoming bytes (the bytes aren't null terminated)
-            //DEPRICATION:
-            text = [NSString stringWithCString:byte_buffer length:numBytes];
-            //text = [NSString stringWithCString:byte_buffer encoding:NSUTF8StringEncoding];
-            
-            // this text can't be directly sent to the text area from this thread
-            //  BUT, we can call a selctor on the main thread.
-            
-            [self performSelectorOnMainThread:@selector(appendToIncomingText_torso:)
-                                   withObject:text
-                                waitUntilDone:YES];
-        } else {
-            break; // Stop the thread if there is an error
-        }
-    }
-    
-    // make sure the serial port is closed
-    if (serialFileDescriptor_torso != -1) {
-        close(serialFileDescriptor_torso);
-        serialFileDescriptor_torso = -1;
-    }
-    
-    // mark that the thread has quit
-    readThreadRunning_torso = FALSE;
-    
-    // give back the pool
-    //[pool release];
-}
-
 
 - (void)incomingTextUpdateThread_base: (NSThread *) parentThread{
     
@@ -978,6 +787,10 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
 
 - (void)handleBaseSerialLine:(NSString *)line
 {
+    if (line.length > 0) {
+        [self appendToIncomingText_base:[line stringByAppendingString:@"\n"]];
+    }
+
     BOOL frontWarning = [line containsString:@"WARNING! FRONT"] ||
         [line containsString:@"OBSTACLE IS BLOCKING FRONT"];
     BOOL backWarning = [line containsString:@"WARNING! BACK"] ||
@@ -1071,58 +884,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
 }
 
 
-- (void) refreshSerialList_head: (NSString *) selectedText {
-    io_object_t serialPort;
-    io_iterator_t serialPortIterator;
-    
-    // remove everything from the pull down list
-    [self.serialListPullDown_head removeAllItems];
-    
-    // ask for all the serial ports
-    IOServiceGetMatchingServices(kIOMasterPortDefault, IOServiceMatching(kIOSerialBSDServiceValue), &serialPortIterator);
-    
-    // loop through all the serial ports and add them to the array
-    while ((serialPort = IOIteratorNext(serialPortIterator))) {
-        [self.serialListPullDown_head addItemWithTitle:
-         //CheckHere for ARC Stuff related to the CFSTR string ownership
-         (__bridge NSString*)IORegistryEntryCreateCFProperty(serialPort, CFSTR(kIOCalloutDeviceKey),  kCFAllocatorDefault, 0)];
-        IOObjectRelease(serialPort);
-    }
-    
-    // add the selected text to the top
-    [self.serialListPullDown_head insertItemWithTitle:selectedText atIndex:0];
-    [self.serialListPullDown_head selectItemAtIndex:0];
-    
-    IOObjectRelease(serialPortIterator);
-}
-
-
-- (void) refreshSerialList_torso: (NSString *) selectedText {
-    io_object_t serialPort;
-    io_iterator_t serialPortIterator;
-    
-    // remove everything from the pull down list
-    [self.serialListPullDown_torso removeAllItems];
-    
-    // ask for all the serial ports
-    IOServiceGetMatchingServices(kIOMasterPortDefault, IOServiceMatching(kIOSerialBSDServiceValue), &serialPortIterator);
-    
-    // loop through all the serial ports and add them to the array
-    while ((serialPort = IOIteratorNext(serialPortIterator))) {
-        [self.serialListPullDown_torso addItemWithTitle:
-         //CheckHere for ARC Stuff related to the CFSTR string ownership
-         (__bridge NSString*)IORegistryEntryCreateCFProperty(serialPort, CFSTR(kIOCalloutDeviceKey),  kCFAllocatorDefault, 0)];
-        IOObjectRelease(serialPort);
-    }
-    
-    // add the selected text to the top
-    [self.serialListPullDown_torso insertItemWithTitle:selectedText atIndex:0];
-    [self.serialListPullDown_torso selectItemAtIndex:0];
-    
-    IOObjectRelease(serialPortIterator);
-}
-
-
 - (void) refreshSerialList_base: (NSString *) selectedText {
     io_object_t serialPort;
     io_iterator_t serialPortIterator;
@@ -1179,7 +940,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         write(serialFileDescriptor, [str cStringUsingEncoding:NSUTF8StringEncoding], [str length]);
     } else {
         // make sure the user knows they should select a serial port
-        [self appendToIncomingText_head:@"\n ERROR:  Select a Serial Port from the pull-down menu\n"];
+        [self appendToIncomingText_base:@"\n ERROR: Base Arduino is not connected\n"];
     }
 }
 
@@ -1189,39 +950,8 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         write(serialFileDescriptor, val, 1);
     } else {
         // make sure the user knows they should select a serial port
-        [self appendToIncomingText_head:@"\n ERROR:  Select a Serial Port from the pull-down menu\n"];
+        [self appendToIncomingText_base:@"\n ERROR: Base Arduino is not connected\n"];
     }
-}
-
-// action sent when serial port selected
-- (void) serialPortSelected_head
-{
-    /*
-     // open the serial port
-     NSString *error = [self openSerialPort:[self.serialListPullDown_head titleOfSelectedItem] baud:kRHAPI_BAUDRATE serialFileDescriptor:&serialFileDescriptor_head contextInt:kHeadSerialContext];
-     
-     if(error!=nil) {
-     [self refreshSerialList_head:error];
-     [self appendToIncomingText_head:error];
-     } else {
-     [self refreshSerialList_head:[self.serialListPullDown_head titleOfSelectedItem]];
-     [self performSelectorInBackground:@selector(incomingTextUpdateThread_head:) withObject:[NSThread currentThread]];
-     }*/
-}
-
-- (void) serialPortSelected_torso
-{
-    /*
-     // open the serial port
-     NSString *error = [self openSerialPort:[self.serialListPullDown_torso titleOfSelectedItem] baud:kRHAPI_BAUDRATE serialFileDescriptor:&serialFileDescriptor_torso contextInt:kTorsoSerialContext];
-     
-     if(error!=nil) {
-     [self refreshSerialList_torso:error];
-     [self appendToIncomingText_torso:error];
-     } else {
-     [self refreshSerialList_torso:[self.serialListPullDown_torso titleOfSelectedItem]];
-     [self performSelectorInBackground:@selector(incomingTextUpdateThread_torso:) withObject:[NSThread currentThread]];
-     }*/
 }
 
 - (void) serialPortSelected_base
@@ -1265,7 +995,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
  //   this will also deselect the current serial port
  if(ioctl(serialFileDescriptor, IOSSIOSPEED, &baudRate)==-1) {
  [self refreshSerialList:@"Error: Baud Rate out of bounds"];
- [self appendToIncomingText_head:@"Error: Baud Rate out of bounds"];
+ [self appendToIncomingText_base:@"Error: Baud Rate out of bounds"];
  }
  }
  }
@@ -1273,19 +1003,9 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
 
 // action from refresh button
 - (IBAction) refreshAction: (id) cntrl {
-    [self refreshSerialList_head:@"Select a Serial Port"];
-    [self refreshSerialList_torso:@"Select a Serial Port"];
     [self refreshSerialList_base:@"Select a Serial Port"];
     [self refreshSerialList_maestro:@"Select a Serial Port"];
     // close serial port if open
-    if (serialFileDescriptor_head != -1) {
-        close(serialFileDescriptor_head);
-        serialFileDescriptor_head = -1;
-    }
-    if (serialFileDescriptor_torso != -1) {
-        close(serialFileDescriptor_torso);
-        serialFileDescriptor_torso = -1;
-    }
     if (serialFileDescriptor_base != -1) {
         close(serialFileDescriptor_base);
         serialFileDescriptor_base = -1;
@@ -1565,7 +1285,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     //******
     //Shows me i need to keep pulsing the data
     //Only worked with old wiring system which is now severed
-    //[self debugTorsoCommandStrings];
     //******
 }
 
@@ -1648,44 +1367,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     
     
     
-    //Track something!!! move this to affect SimpleUserTracker data
-    //4000-8000
-    /*
-     NSString *head_pan = @"5875"; //6000-left 5800-right 5875-center
-     NSString *head_tilt = @"5000";
-     
-     NSString *arm_R_shoulder_pan = @"7000"; //5000 points downward 7000 up
-     NSString *arm_R_shoulder_tilt = @"6000";
-     NSString *arm_R_elbow = @"6000";
-     NSString *arm_R_wrist_pan = @"6000";
-     NSString *arm_R_wrist_tilt = @"8000";
-     NSString *arm_R_gripper = @"6000";
-     
-     NSString *arm_L_shoulder_pan = @"8000"; //4000 rotate 6000 neutral up backward 7000 points down
-     NSString *arm_L_shoulder_tilt = @"6000";
-     NSString *arm_L_elbow = @"6000";
-     NSString *arm_L_wrist_pan = @"4000";
-     NSString *arm_L_wrist_tilt = @"6000";
-     NSString *arm_L_gripper = @"6000";
-     */
-    /*
-     NSString *torso_command = [NSString stringWithFormat:@"~%@,%@,%@,%@,%@,%@,%@,%@,%@,%@,%@,%@,%@,%@",
-     head_pan,
-     head_tilt,
-     arm_R_shoulder_pan,
-     arm_R_shoulder_tilt,
-     arm_R_elbow,
-     arm_R_wrist_pan,
-     arm_R_wrist_tilt,
-     arm_R_gripper,
-     arm_L_shoulder_pan,
-     arm_L_shoulder_tilt,
-     arm_L_elbow,
-     arm_L_wrist_pan,
-     arm_L_wrist_tilt,
-     arm_L_gripper];
-     
-     [self writeString:torso_command serialFileDescriptor:serialFileDescriptor_torso];*/
 }
 
 - (void)applyVisionNeckPan:(float)pan tilt:(float)tilt
@@ -1785,47 +1466,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     [self runTiccmdArguments:@[
         @"--exit-safe-start", @"--energize", @"-p", [NSString stringWithFormat:@"%d", target]
     ]];
-}
-
-- (void) debugTorsoCommandStrings
-{
-    //~5875,5000,7000,6000,6000,6000,8000,6000,8000,6000,6000,4000,6000,6000
-    
-    NSString *head_pan = @"5875"; //6000-left 5800-right 5875-center
-    NSString *head_tilt = @"5000";
-    
-    NSString *arm_R_shoulder_pan = @"7000"; //5000 points downward 7000 up
-    NSString *arm_R_shoulder_tilt = @"6000";
-    NSString *arm_R_elbow = @"6000";
-    NSString *arm_R_wrist_pan = @"6000";
-    NSString *arm_R_wrist_tilt = @"8000";
-    NSString *arm_R_gripper = @"6000";
-    
-    NSString *arm_L_shoulder_pan = @"8000"; //4000 rotate 6000 neutral up backward 7000 points down
-    NSString *arm_L_shoulder_tilt = @"6000";
-    NSString *arm_L_elbow = @"6000";
-    NSString *arm_L_wrist_pan = @"4000";
-    NSString *arm_L_wrist_tilt = @"6000";
-    NSString *arm_L_gripper = @"6000";
-    
-    
-    NSString *torso_command = [NSString stringWithFormat:@"~%@,%@,%@,%@,%@,%@,%@,%@,%@,%@,%@,%@,%@,%@",
-                               head_pan,
-                               head_tilt,
-                               arm_R_shoulder_pan,
-                               arm_R_shoulder_tilt,
-                               arm_R_elbow,
-                               arm_R_wrist_pan,
-                               arm_R_wrist_tilt,
-                               arm_R_gripper,
-                               arm_L_shoulder_pan,
-                               arm_L_shoulder_tilt,
-                               arm_L_elbow,
-                               arm_L_wrist_pan,
-                               arm_L_wrist_tilt,
-                               arm_L_gripper];
-    
-    [self writeString:torso_command serialFileDescriptor:serialFileDescriptor_torso];
 }
 
 - (IBAction)forward:(id)sender
@@ -2916,18 +2556,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
 
 #pragma mark -
 
-- (void) sendHeadCommand:(NSString *)command
-{
-    [self writeString:command serialFileDescriptor:serialFileDescriptor_head];
-}
-
-
-- (void) sendTorsoCommand:(NSString *)command
-{
-    [self writeString:command serialFileDescriptor:serialFileDescriptor_torso];
-}
-
-
 - (void) sendBaseCommand:(NSString *)command
 {
     [self writeString:command serialFileDescriptor:serialFileDescriptor_base];
@@ -2951,16 +2579,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
 - (void) resetButton: (NSButton *) btn{
     // set and clear DTR to reset an arduino
     struct timespec interval = {0,100000000}, remainder;
-    if(serialFileDescriptor_head!=-1) {
-        ioctl(serialFileDescriptor_head, TIOCSDTR);
-        nanosleep(&interval, &remainder); // wait 0.1 seconds
-        ioctl(serialFileDescriptor_head, TIOCCDTR);
-    }
-    if(serialFileDescriptor_torso!=-1) {
-        ioctl(serialFileDescriptor_torso, TIOCSDTR);
-        nanosleep(&interval, &remainder); // wait 0.1 seconds
-        ioctl(serialFileDescriptor_torso, TIOCCDTR);
-    }
     if(serialFileDescriptor_base!=-1) {
         ioctl(serialFileDescriptor_base, TIOCSDTR);
         nanosleep(&interval, &remainder); // wait 0.1 seconds

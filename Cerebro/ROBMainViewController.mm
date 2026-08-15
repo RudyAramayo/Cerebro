@@ -63,21 +63,66 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 
 @end
 
-@interface ROBMainViewController () <HumanTrackingDelegate, TrackingDelegate, AutoNetServerDataDelegate, NSTextViewDelegate, ROBAIDelegate, ROBAutonomyCoordinatorDelegate, ROBStageShowCoordinatorDelegate, ROBGeminiRuntimeControlDelegate>
+@interface ROBConversationMessage : NSObject
+@property (nonatomic, copy) NSString *text;
+@property (nonatomic, assign) BOOL fromUser;
+@property (nonatomic, strong) NSDate *date;
+@end
 
-//--- Head , Torso, Base SerialBox bindings
+@implementation ROBConversationMessage
+@end
 
-@property (readwrite, retain) IBOutlet NSTextView *serialOutputArea_head;
-@property (readwrite, retain) IBOutlet NSTextField *serialInputField_head;
-@property (readwrite, retain) IBOutlet NSTextView *serialOutputArea_torso;
-@property (readwrite, retain) IBOutlet NSTextField *serialInputField_torso;
+@interface ROBConversationBubbleView : NSTableCellView
+@property (nonatomic, strong) NSTextField *senderLabel;
+@property (nonatomic, strong) NSTextField *bubbleLabel;
+@property (nonatomic, assign) BOOL fromUser;
+@end
+
+@implementation ROBConversationBubbleView
+
+- (instancetype)initWithFrame:(NSRect)frameRect
+{
+    self = [super initWithFrame:frameRect];
+    if (self) {
+        self.senderLabel = [NSTextField labelWithString:@""];
+        self.senderLabel.font = [NSFont systemFontOfSize:11 weight:NSFontWeightSemibold];
+        self.senderLabel.textColor = NSColor.secondaryLabelColor;
+        self.bubbleLabel = [NSTextField wrappingLabelWithString:@""];
+        self.bubbleLabel.font = [NSFont systemFontOfSize:14];
+        self.bubbleLabel.selectable = YES;
+        self.bubbleLabel.drawsBackground = YES;
+        self.bubbleLabel.wantsLayer = YES;
+        self.bubbleLabel.layer.cornerRadius = 14;
+        self.bubbleLabel.layer.masksToBounds = YES;
+        [self addSubview:self.senderLabel];
+        [self addSubview:self.bubbleLabel];
+    }
+    return self;
+}
+
+- (void)layout
+{
+    [super layout];
+    CGFloat availableWidth = MAX(180, NSWidth(self.bounds) - 28);
+    CGFloat bubbleWidth = MIN(availableWidth * 0.78, 430);
+    CGFloat x = self.fromUser ? NSWidth(self.bounds) - bubbleWidth - 14 : 14;
+    self.senderLabel.alignment = self.fromUser ? NSTextAlignmentRight : NSTextAlignmentLeft;
+    self.senderLabel.frame = NSMakeRect(x + 4, NSHeight(self.bounds) - 21, bubbleWidth - 8, 16);
+    self.bubbleLabel.frame = NSMakeRect(x, 6, bubbleWidth, MAX(34, NSHeight(self.bounds) - 29));
+}
+
+@end
+
+
+@interface ROBMainViewController () <HumanTrackingDelegate, TrackingDelegate, AutoNetServerDataDelegate, NSTextViewDelegate, NSTableViewDataSource, NSTableViewDelegate, ROBAIDelegate, ROBAutonomyCoordinatorDelegate, ROBStageShowCoordinatorDelegate, ROBGeminiRuntimeControlDelegate>
+
+//--- Base and Maestro SerialBox bindings
+
 @property (readwrite, retain) IBOutlet NSTextView *serialOutputArea_base;
 @property (readwrite, retain) IBOutlet NSTextField *serialInputField_base;
 @property (readwrite, retain) IBOutlet NSTextView *serialOutputArea_maestro;
 @property (readwrite, retain) IBOutlet NSTextField *serialInputField_maestro;
 
-@property (readwrite, retain) IBOutlet NSPopUpButton *serialListPullDown_head;
-@property (readwrite, retain) IBOutlet NSPopUpButton *serialListPullDown_torso;
 @property (readwrite, retain) IBOutlet NSPopUpButton *serialListPullDown_base;
 @property (readwrite, retain) IBOutlet NSPopUpButton *serialListPullDown_maestro;
 //-----
@@ -99,12 +144,8 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 @property (readwrite, retain) NSWindowController *tastsWindowController;
 @property (readwrite, retain) NSTimer *speechResponseAttentionTimer;
 
-- (IBAction)sendText_head:(id)sender;
-- (IBAction)sendText_torso:(id)sender;
 - (IBAction)sendText_base:(id)sender;
 - (IBAction)LACT_exitSafeStart:(id)sender;
-- (IBAction)serialPortSelected_head: (id) cntrl;
-- (IBAction)serialPortSelected_torso: (id) cntrl;
 - (IBAction)serialPortSelected_base: (id) cntrl;
 - (IBAction)serialPortSelected_maestro: (id) cntrl;
 
@@ -172,6 +213,10 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 @property (readwrite, assign) BOOL runtimeIsShuttingDown;
 
 @property (readwrite, retain) NSTimer *liftNeckAnimationTimer;
+@property (readwrite, retain) NSTableView *conversationTableView;
+@property (readwrite, retain) NSMutableArray<ROBConversationMessage *> *conversationMessages;
+@property (readwrite, copy) NSString *lastConversationUserText;
+@property (readwrite, retain) NSDate *lastConversationUserDate;
 - (void)applicationWillTerminate:(NSNotification *)notification;
 - (void)shutdownCerebroRuntime;
 - (BOOL)sendRobotActionMessage:(ROBRobotActionMessage *)message;
@@ -181,9 +226,119 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 - (BOOL)robotActionMessageIsAddressedToCerebro:(ROBRobotActionMessage *)message;
 - (void)cancelPendingGeminiRobotActionsWithReason:(NSString *)reason;
 - (void)updateGeminiCameraDemand;
+- (void)configureConversationTranscript;
+- (void)appendConversationText:(NSString *)text fromUser:(BOOL)fromUser;
+- (IBAction)sendROBChatText:(id)sender;
 @end
 
 @implementation ROBMainViewController
+
+- (void)configureConversationTranscript
+{
+    self.conversationMessages = [NSMutableArray array];
+    NSScrollView *scrollView = self.speechTranscriptTextView.enclosingScrollView;
+    if (scrollView == nil) { return; }
+
+    NSTableView *tableView = [[NSTableView alloc] initWithFrame:scrollView.contentView.bounds];
+    NSTableColumn *column = [[NSTableColumn alloc] initWithIdentifier:@"Conversation"];
+    column.resizingMask = NSTableColumnAutoresizingMask;
+    column.width = scrollView.contentSize.width;
+    [tableView addTableColumn:column];
+    tableView.headerView = nil;
+    tableView.backgroundColor = [NSColor colorWithCalibratedWhite:0.075 alpha:1.0];
+    tableView.gridStyleMask = NSTableViewGridNone;
+    tableView.intercellSpacing = NSMakeSize(0, 4);
+    tableView.selectionHighlightStyle = NSTableViewSelectionHighlightStyleNone;
+    tableView.usesAlternatingRowBackgroundColors = NO;
+    tableView.dataSource = self;
+    tableView.delegate = self;
+    tableView.columnAutoresizingStyle = NSTableViewUniformColumnAutoresizingStyle;
+    tableView.autoresizingMask = NSViewWidthSizable;
+    scrollView.documentView = tableView;
+    scrollView.drawsBackground = YES;
+    scrollView.backgroundColor = tableView.backgroundColor;
+    scrollView.hasVerticalScroller = YES;
+    self.conversationTableView = tableView;
+
+    self.speechTextView.font = [NSFont systemFontOfSize:15];
+    self.speechTextView.textColor = NSColor.labelColor;
+    self.speechTextView.backgroundColor = NSColor.textBackgroundColor;
+    self.speechTextView.insertionPointColor = NSColor.controlAccentColor;
+    self.speechTextView.textContainerInset = NSMakeSize(9, 8);
+    self.speechTextView.automaticQuoteSubstitutionEnabled = NO;
+    self.speechTextView.automaticDashSubstitutionEnabled = NO;
+}
+
+- (void)appendConversationText:(NSString *)text fromUser:(BOOL)fromUser
+{
+    void (^appendBlock)(void) = ^{
+        NSString *cleanText = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if (cleanText.length == 0) { return; }
+
+        NSDate *now = [NSDate date];
+        if (fromUser && self.lastConversationUserDate != nil &&
+            [now timeIntervalSinceDate:self.lastConversationUserDate] < 4.0 &&
+            [cleanText caseInsensitiveCompare:self.lastConversationUserText] == NSOrderedSame) {
+            return;
+        }
+
+        ROBConversationMessage *message = [ROBConversationMessage new];
+        message.text = cleanText;
+        message.fromUser = fromUser;
+        message.date = now;
+        [self.conversationMessages addObject:message];
+        if (fromUser) {
+            self.lastConversationUserText = cleanText;
+            self.lastConversationUserDate = now;
+        }
+        [self.conversationTableView reloadData];
+        NSInteger finalRow = self.conversationMessages.count - 1;
+        if (finalRow >= 0) {
+            [self.conversationTableView scrollRowToVisible:finalRow];
+        }
+    };
+    if (NSThread.isMainThread) appendBlock();
+    else dispatch_async(dispatch_get_main_queue(), appendBlock);
+}
+
+- (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView
+{
+    return self.conversationMessages.count;
+}
+
+- (CGFloat)tableView:(NSTableView *)tableView heightOfRow:(NSInteger)row
+{
+    ROBConversationMessage *message = self.conversationMessages[row];
+    CGFloat bubbleWidth = MIN(MAX(180, tableView.bounds.size.width - 28) * 0.78, 430) - 20;
+    NSRect textBounds = [message.text boundingRectWithSize:NSMakeSize(bubbleWidth, CGFLOAT_MAX)
+                                                   options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
+                                                attributes:@{ NSFontAttributeName: [NSFont systemFontOfSize:14] }];
+    return MAX(68, ceil(NSHeight(textBounds)) + 47);
+}
+
+- (NSView *)tableView:(NSTableView *)tableView
+    viewForTableColumn:(NSTableColumn *)tableColumn
+                   row:(NSInteger)row
+{
+    ROBConversationBubbleView *view = [tableView makeViewWithIdentifier:@"ConversationBubble" owner:self];
+    if (view == nil) {
+        view = [[ROBConversationBubbleView alloc] initWithFrame:NSMakeRect(0, 0, tableView.bounds.size.width, 68)];
+        view.identifier = @"ConversationBubble";
+    }
+    ROBConversationMessage *message = self.conversationMessages[row];
+    view.fromUser = message.fromUser;
+    view.senderLabel.stringValue = message.fromUser ? @"YOU" : @"ROB AI";
+    view.bubbleLabel.stringValue = [NSString stringWithFormat:@"  %@  ", message.text];
+    view.bubbleLabel.textColor = message.fromUser ? NSColor.whiteColor : NSColor.labelColor;
+    view.bubbleLabel.backgroundColor = message.fromUser
+        ? NSColor.systemBlueColor
+        : [NSColor.systemPurpleColor colorWithAlphaComponent:0.24];
+    view.toolTip = [NSDateFormatter localizedStringFromDate:message.date
+                                                  dateStyle:NSDateFormatterNoStyle
+                                                  timeStyle:NSDateFormatterShortStyle];
+    view.needsLayout = YES;
+    return view;
+}
 
 - (void) didRespond: (NSString *) responseText {
     [self.speechBox sayIt:responseText];
@@ -194,6 +349,7 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 - (void)robAI:(ROBAI *)robAI didReceiveResponseText:(NSString *)text
 {
     NSLog(@"Gemini Robotics response: %@", text);
+    [self appendConversationText:text fromUser:NO];
     if (self.audioInputTaskController.textView != nil) {
         self.audioInputTaskController.textView.string =
             [self.audioInputTaskController.textView.string
@@ -212,6 +368,7 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         (void)[self.stageShowCoordinator acceptGeminiResponse:text requestID:contextID];
         return;
     }
+    [self appendConversationText:text fromUser:NO];
     [self didRespond:text];
 }
 
@@ -220,6 +377,7 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     // This is server-originated confirmation of what Gemini understood, not
     // the separate on-device Apple speech-recognition transcript.
     NSLog(@"Gemini Robotics heard: %@", text);
+    [self appendConversationText:text fromUser:YES];
 }
 
 - (void)robAI:(ROBAI *)robAI didFailRequestWithDetail:(NSString *)detail
@@ -713,7 +871,7 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 
 - (void) inputText:(NSString *)textInput
 {
-    textInput = [textInput lowercaseString];
+    textInput = [[textInput stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
     // Only suppress duplicate local transcript turns while the raw-audio Live
     // session is actually ready. During reconnects, realtime text remains a
     // useful bounded fallback and is queued by ROBAI until setup completes.
@@ -795,6 +953,9 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
             NSLog(@"textInput = %@", textInput);
             NSInteger speechWordiness = self.torsoControlsViewController.speechWordinessChoice.selectedSegment;
             BOOL accepted = [self.robAI sendText:textInput speechWordiness:speechWordiness];
+            if (accepted) {
+                [self appendConversationText:textInput fromUser:YES];
+            }
             if (accepted && pendingThinkingAcknowledgement.length > 0) {
                 [self.speechBox sayIt:pendingThinkingAcknowledgement];
             }
@@ -830,6 +991,7 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 - (void)viewDidLoad
 {
     [super viewDidLoad];
+    [self configureConversationTranscript];
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(applicationWillTerminate:)
                                                  name:NSApplicationWillTerminateNotification
@@ -903,18 +1065,12 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     self.robAI.delegate = self;
     
     self.serialBox = [ROBSerialBox new];
-    self.serialBox.serialListPullDown_head = self.serialListPullDown_head;
-    self.serialBox.serialListPullDown_torso = self.serialListPullDown_torso;
     self.serialBox.serialListPullDown_base = self.serialListPullDown_base;
     self.serialBox.serialListPullDown_maestro = self.serialListPullDown_maestro;
     
-    self.serialBox.serialOutputArea_head = self.serialOutputArea_head;
-    self.serialBox.serialOutputArea_torso = self.serialOutputArea_torso;
     self.serialBox.serialOutputArea_base = self.serialOutputArea_base;
     self.serialBox.serialOutputArea_maestro = self.serialOutputArea_maestro;
     
-    self.serialBox.serialInputField_head = self.serialInputField_head;
-    self.serialBox.serialInputField_torso = self.serialInputField_torso;
     self.serialBox.serialInputField_base = self.serialInputField_base;
     self.serialBox.serialInputField_maestro = self.serialInputField_maestro;
     
@@ -1546,17 +1702,40 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 
 - (IBAction)resetTranscript:(id)sender
 {
-    //NSLog(@"%@", self.audioInputTaskController);
-    
+    [self.conversationMessages removeAllObjects];
+    self.lastConversationUserText = nil;
+    self.lastConversationUserDate = nil;
+    [self.conversationTableView reloadData];
     [self.audioInputTaskController resetTranscript];
     
 }
 
+- (IBAction)sendROBChatText:(id)sender
+{
+    NSString *text = [self.speechTextView.string
+        stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (text.length == 0) {
+        NSBeep();
+        return;
+    }
+    if (!self.robAI.isGeminiConnectionEnabled) {
+        [self.speechBox sayIt:@"Gemini is turned off. Use the Gemini controls to connect."];
+        return;
+    }
+
+    NSInteger wordiness = self.torsoControlsViewController.speechWordinessChoice.selectedSegment;
+    if ([self.robAI sendText:text speechWordiness:wordiness]) {
+        [self appendConversationText:text fromUser:YES];
+        self.speechTextView.string = @"";
+        [self.view.window makeFirstResponder:self.speechTextView];
+    } else {
+        NSBeep();
+    }
+}
+
 - (void)textDidChange:(NSNotification *)notification {
-    NSTextView *textView = [notification object];
-    NSLog(@"text = %@", textView.string);
-    
-    [self.audioInputTaskController queryTextInput: textView.string];
+    // The lower editor is a message composer. Text is submitted only by the
+    // Send button so partial keystrokes never become separate ROB AI turns.
 }
 
 #pragma mark -
@@ -1924,7 +2103,9 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
             // discard it; ROBAI responses still speak through SpeechBox.
             [self startListeningAgain];
             NSInteger wordiness = self.torsoControlsViewController.speechWordinessChoice.selectedSegment;
-            [self.robAI sendText:watchText speechWordiness:wordiness];
+            if ([self.robAI sendText:watchText speechWordiness:wordiness]) {
+                [self appendConversationText:watchText fromUser:YES];
+            }
             self.audioInputTaskController.textView.string =
                 [self.audioInputTaskController.textView.string
                     stringByAppendingString:[NSString stringWithFormat:@"\n%@\n", watchText]];
@@ -2284,18 +2465,6 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     [(ROBKeyboardControlsViewController *)self.controlsWindowController.contentViewController setRobMainViewController:self];
 }
 
-- (IBAction)sendText_head:(id)sender
-{
-    [self.serialBox sendHeadCommand:[self.serialInputField_head stringValue]];
-}
-
-
-- (IBAction)sendText_torso:(id)sender
-{
-    [self.serialBox sendTorsoCommand:[self.serialInputField_torso stringValue]];
-}
-
-
 - (IBAction)sendText_base:(id)sender
 {
     [self.serialBox sendBaseCommand:[self.serialInputField_base stringValue]];
@@ -2304,18 +2473,6 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 - (IBAction)sendText_maestro:(id)sender
 {
     [self.serialBox sendMaestroCommand:[self.serialInputField_maestro stringValue]];
-}
-
-
-- (IBAction)serialPortSelected_head: (id) cntrl
-{
-    [self.serialBox serialPortSelected_head];
-}
-
-
-- (IBAction)serialPortSelected_torso: (id) cntrl
-{
-    [self.serialBox serialPortSelected_torso];
 }
 
 
@@ -2333,22 +2490,6 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 - (void) shutdownAudioInput
 {
     //[self.audioInputTaskController beginToIgnore];
-}
-
-- (void) didOutputSerialResponse_Head:(NSString *)response
-{
-    //NSLog(@"HEAD: %@", response);
-    if ([response containsString:@"MOTION DETECTED"] && !self.audioInputTaskController.isListening)
-    {
-        //THis will say 1000 times endlessly... need to say it once only when timer is bored
-        //[self.speechBox sayIt:@"Hey"];
-        //[self.audioInputTaskController startTask:self withLanguage:self.inputLanguage];
-    }
-}
-
-- (void) didOutputSerialResponse_Torso:(NSString *)response
-{
-    //NSLog(@"TORSO: %@", response);
 }
 
 - (void) didOutputSerialResponse_Base:(NSString *)response

@@ -89,8 +89,6 @@
 - (void) shutdownAudioInput;
 - (void) didFinishProcessingSpeech;
 - (void) willStartProcessingSpeech;
-- (void) didOutputSerialResponse_Head:(NSString *)response;
-- (void) didOutputSerialResponse_Torso:(NSString *)response;
 - (void) didOutputSerialResponse_Base:(NSString *)response;
 - (void) didOutputSerialResponse_Maestro:(NSString *)response;
 - (void) resetSpeechResponseAttentionTimer;

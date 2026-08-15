@@ -21,32 +21,22 @@
 
 @interface ROBSerialBox : NSObject
 {
-    int serialFileDescriptor_head; // file handle to the serial port
-    int serialFileDescriptor_torso; // file handle to the serial port
     int serialFileDescriptor_base; // file handle to the serial port
     int serialFileDescriptor_maestro;
     
     struct termios gOriginalTTYAttrs; // Hold the original termios attributes so we can reset them on quit ( best practice )
-    bool readThreadRunning_head;
-    bool readThreadRunning_torso;
     bool readThreadRunning_base;
     bool readThreadRunning_maestro;
     NSTextStorage *storage;
 }
 @property (readwrite, retain) NSString *currentIncommingVerbalMessage;
 
-@property (readwrite, retain) NSTextView *serialOutputArea_head;
-@property (readwrite, retain) NSTextField *serialInputField_head;
-@property (readwrite, retain) NSTextView *serialOutputArea_torso;
-@property (readwrite, retain) NSTextField *serialInputField_torso;
 @property (readwrite, retain) NSTextView *serialOutputArea_base;
 @property (readwrite, retain) NSTextField *serialInputField_base;
 @property (readwrite, retain) NSTextView *serialOutputArea_maestro;
 @property (readwrite, retain) NSTextField *serialInputField_maestro;
 
 
-@property (readwrite, retain) NSPopUpButton *serialListPullDown_head;
-@property (readwrite, retain) NSPopUpButton *serialListPullDown_torso;
 @property (readwrite, retain) NSPopUpButton *serialListPullDown_base;
 @property (readwrite, retain) NSPopUpButton *serialListPullDown_maestro;
 
@@ -105,13 +95,9 @@
 @property (readwrite, retain) NSTextView *amberMasterCoreOutput_R11;
 @property (readwrite, retain) NSTextView *amberMasterCoreOutput_L10;
 
-- (void) serialPortSelected_head;
-- (void) serialPortSelected_torso;
 - (void) serialPortSelected_base;
 - (void) serialPortSelected_maestro;
 
-- (void) sendHeadCommand:(NSString *)command;
-- (void) sendTorsoCommand:(NSString *)command;
 - (void) sendBaseCommand:(NSString *)command;
 - (void) sendMaestroCommand:(NSString *)command;
 - (void) maestro_getErrors_command;
