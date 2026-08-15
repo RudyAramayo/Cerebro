@@ -18,10 +18,11 @@ import Vision
     private override init() { super.init() }
 
     public func offer(_ image: NSImage, capturedAt: Date) {
+        guard ROBMLXRuntime.shared.insta360DetectionEnabled else { return }
         // MLX has its own enable switch, actor isolation, and >=5 second gate.
         // Offering a frame never blocks this caller or forces a model download.
         if let ciImage = Self.ciImage(from: image) {
-            Task { await ROBMLXEngine.shared.offerVisionFrame(ciImage, minimumInterval: 8) }
+            Task { await ROBMLXEngine.shared.offerVisionFrame(ciImage, source: "insta360-preview", minimumInterval: 8) }
         }
 
         queue.async {

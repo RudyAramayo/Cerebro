@@ -342,6 +342,7 @@ extension Notification.Name {
             DispatchQueue.main.async {
                 self.latestFrame = image
                 ROBInsta360PerceptionService.shared.offer(image, capturedAt: Date())
+                ROBDynamicDetectorRegistry.shared.offer(image, source: .insta360)
                 NotificationCenter.default.post(name: .robInsta360CameraServiceDidChange, object: self)
             }
         }

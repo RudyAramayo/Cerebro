@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
 
 @objcMembers public final class ROBInsta360DiagnosticsWindowController: NSWindowController, NSWindowDelegate {
     private let service = ROBInsta360CameraService.shared
@@ -10,7 +11,18 @@ import Foundation
     private let restartButton = NSButton(title: "Apply Preview Settings", target: nil, action: nil)
     private let stabilizationToggle = NSButton(checkboxWithTitle: "Gyro stabilization", target: nil, action: nil)
     private let modelProgress = NSProgressIndicator()
-    private let modelStatusLabel = NSTextField(labelWithString: "Preparing local vision model…")
+    private let modelStatusLabel = NSTextField(labelWithString: "MLX model: preparing…")
+    private let mainCameraDetectionToggle = NSButton(checkboxWithTitle: "Analyze main live-feed camera", target: nil, action: nil)
+    private let insta360DetectionToggle = NSButton(checkboxWithTitle: "Analyze Insta360 preview", target: nil, action: nil)
+    private let showInferenceToggle = NSButton(checkboxWithTitle: "Show MLX inference output", target: nil, action: nil)
+    private let inferenceOutput = NSTextView()
+    private let inferenceScroll = NSScrollView()
+    private let detectionOverlay = ROBDetectionOverlayView()
+    private let mainPoseToggle = NSButton(checkboxWithTitle: "Main pose", target: nil, action: nil)
+    private let instaPoseToggle = NSButton(checkboxWithTitle: "360° pose overlay", target: nil, action: nil)
+    private let mainObjectsToggle = NSButton(checkboxWithTitle: "Main object labels", target: nil, action: nil)
+    private let instaObjectsToggle = NSButton(checkboxWithTitle: "360° object labels", target: nil, action: nil)
+    private let addModelButton = NSButton(title: "Add Core ML Model…", target: nil, action: nil)
 
     public init() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 980, height: 650),
@@ -26,6 +38,8 @@ import Foundation
                                                name: .robInsta360CameraServiceDidChange, object: service)
         NotificationCenter.default.addObserver(self, selector: #selector(mlxChanged(_:)),
                                                name: .robMLXRuntimeDidChange, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(detectorOutputChanged(_:)),
+                                               name: .robDetectorOutputDidChange, object: nil)
         refresh()
     }
 
@@ -59,6 +73,23 @@ import Foundation
         let modelRow = NSStackView(views: [modelStatusLabel, modelProgress])
         modelRow.orientation = .horizontal
         modelRow.spacing = 8
+        mainCameraDetectionToggle.target = self
+        mainCameraDetectionToggle.action = #selector(detectionSettingChanged(_:))
+        insta360DetectionToggle.target = self
+        insta360DetectionToggle.action = #selector(detectionSettingChanged(_:))
+        showInferenceToggle.target = self
+        showInferenceToggle.action = #selector(detectionSettingChanged(_:))
+        let detectionRow = NSStackView(views: [mainCameraDetectionToggle, insta360DetectionToggle, showInferenceToggle])
+        detectionRow.orientation = .horizontal
+        detectionRow.spacing = 16
+        inferenceOutput.isEditable = false
+        inferenceOutput.isSelectable = true
+        inferenceOutput.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        inferenceOutput.backgroundColor = .textBackgroundColor
+        inferenceOutput.string = "Waiting for the first MLX vision inference…"
+        inferenceScroll.documentView = inferenceOutput
+        inferenceScroll.hasVerticalScroller = true
+        inferenceScroll.borderType = .bezelBorder
         restartButton.target = self
         restartButton.action = #selector(restart(_:))
         stabilizationToggle.target = self
@@ -73,9 +104,23 @@ import Foundation
         imageView.setContentHuggingPriority(.defaultLow, for: .horizontal)
         imageView.setContentHuggingPriority(.defaultLow, for: .vertical)
         imageView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        detectionOverlay.translatesAutoresizingMaskIntoConstraints = false
+        imageView.addSubview(detectionOverlay)
+        NSLayoutConstraint.activate([
+            detectionOverlay.leadingAnchor.constraint(equalTo: imageView.leadingAnchor),
+            detectionOverlay.trailingAnchor.constraint(equalTo: imageView.trailingAnchor),
+            detectionOverlay.topAnchor.constraint(equalTo: imageView.topAnchor),
+            detectionOverlay.bottomAnchor.constraint(equalTo: imageView.bottomAnchor)
+        ])
+        for toggle in [mainPoseToggle, instaPoseToggle, mainObjectsToggle, instaObjectsToggle] {
+            toggle.target = self; toggle.action = #selector(detectorSettingChanged(_:))
+        }
+        addModelButton.target = self; addModelButton.action = #selector(addCoreMLModel(_:))
+        let detectorRow = NSStackView(views: [mainPoseToggle, instaPoseToggle, mainObjectsToggle, instaObjectsToggle, addModelButton])
+        detectorRow.orientation = .horizontal; detectorRow.spacing = 12
         let status = NSStackView(views: [stateLabel, NSView(), stabilizationToggle, restartButton])
         status.orientation = .horizontal
-        let stack = NSStackView(views: [heading, help, status, urlLabel, imageView, metricsLabel, modelRow])
+        let stack = NSStackView(views: [heading, help, status, urlLabel, imageView, metricsLabel, modelRow, detectionRow, detectorRow, inferenceScroll])
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -92,7 +137,11 @@ import Foundation
             imageView.widthAnchor.constraint(equalTo: stack.widthAnchor),
             imageView.heightAnchor.constraint(greaterThanOrEqualToConstant: 300),
             modelRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            modelProgress.widthAnchor.constraint(greaterThanOrEqualToConstant: 220)
+            modelProgress.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
+            detectionRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            detectorRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            inferenceScroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            inferenceScroll.heightAnchor.constraint(equalToConstant: 100)
         ])
     }
 
@@ -102,6 +151,34 @@ import Foundation
     }
     @objc private func serviceChanged(_ notification: Notification) { refresh() }
     @objc private func mlxChanged(_ notification: Notification) { refreshMLX() }
+    @objc private func detectionSettingChanged(_ sender: NSButton) {
+        let runtime = ROBMLXRuntime.shared
+        runtime.mainCameraDetectionEnabled = mainCameraDetectionToggle.state == .on
+        runtime.insta360DetectionEnabled = insta360DetectionToggle.state == .on
+        runtime.showInferenceOutput = showInferenceToggle.state == .on
+        refreshMLX()
+    }
+    @objc private func detectorSettingChanged(_ sender: NSButton) {
+        let registry = ROBDynamicDetectorRegistry.shared
+        registry.setEnabled(mainPoseToggle.state == .on, detector: "body-pose", source: .mainCamera)
+        registry.setEnabled(instaPoseToggle.state == .on, detector: "body-pose", source: .insta360)
+        registry.setEnabled(mainObjectsToggle.state == .on, detector: "generic-objects", source: .mainCamera)
+        registry.setEnabled(instaObjectsToggle.state == .on, detector: "generic-objects", source: .insta360)
+        if instaPoseToggle.state == .off && instaObjectsToggle.state == .off { detectionOverlay.output = nil }
+    }
+    @objc private func detectorOutputChanged(_ notification: Notification) {
+        guard let output = notification.userInfo?["output"] as? ROBDetectorOutput,
+              output.source == .insta360 else { return }
+        detectionOverlay.output = output
+    }
+    @objc private func addCoreMLModel(_ sender: Any?) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.init(filenameExtension: "mlmodel")!, .init(filenameExtension: "mlmodelc")!]
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do { try ROBDynamicDetectorRegistry.shared.registerCoreMLModel(at: url) }
+        catch { presentError(error) }
+    }
 
     private func refresh() {
         stateLabel.stringValue = service.lastError.map { "\(service.state) — \($0)" } ?? service.state
@@ -134,8 +211,25 @@ import Foundation
                     self.modelProgress.doubleValue = progress ?? 0
                 }
                 let percent = progress.map { " \(Int($0 * 100))%" } ?? ""
-                self.modelStatusLabel.stringValue = (diagnostics.downloadDetail ?? "MLX vision: \(diagnostics.state)") + percent
+                self.modelStatusLabel.stringValue = "MLX model: " + (diagnostics.downloadDetail ?? diagnostics.state) + percent
                 self.modelProgress.isHidden = progress == 1 && diagnostics.state == "ready"
+                let runtime = ROBMLXRuntime.shared
+                self.mainCameraDetectionToggle.state = runtime.mainCameraDetectionEnabled ? .on : .off
+                self.insta360DetectionToggle.state = runtime.insta360DetectionEnabled ? .on : .off
+                self.showInferenceToggle.state = runtime.showInferenceOutput ? .on : .off
+                let registry = ROBDynamicDetectorRegistry.shared
+                self.mainPoseToggle.state = registry.enabled("body-pose", source: .mainCamera) ? .on : .off
+                self.instaPoseToggle.state = registry.enabled("body-pose", source: .insta360) ? .on : .off
+                self.mainObjectsToggle.state = registry.enabled("generic-objects", source: .mainCamera) ? .on : .off
+                self.instaObjectsToggle.state = registry.enabled("generic-objects", source: .insta360) ? .on : .off
+                self.inferenceScroll.isHidden = !runtime.showInferenceOutput
+                if let output = diagnostics.lastVisionObservation, !output.isEmpty {
+                    self.inferenceOutput.string = "Source: \(diagnostics.lastVisionSource ?? "unknown")\n\(output)"
+                } else if let error = diagnostics.lastError, !error.isEmpty {
+                    self.inferenceOutput.string = "MLX error: \(error)"
+                } else {
+                    self.inferenceOutput.string = "Waiting for the first MLX vision inference…"
+                }
             }
         }
     }

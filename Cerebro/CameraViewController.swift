@@ -539,6 +539,7 @@ extension CameraViewController: CameraManagerDelegate {
         // MLX applies a separate >=3 second sampling gate and performs VLM
         // inference on its actor. This call never enters the motor loop.
         ROBMLXRuntime.shared.offerCameraSampleBuffer(sampleBuffer)
+        ROBDynamicDetectorRegistry.shared.offer(sampleBuffer, source: .mainCamera)
 
         //process samplebuffer here
         let humanRectanglesRequest = VNDetectHumanRectanglesRequest { request, error in
@@ -740,7 +741,6 @@ extension CameraViewController: CameraManagerDelegate {
         let imageRequestHandler = VNImageRequestHandler(cmSampleBuffer: sampleBuffer, options: [:])
         var requests: [VNRequest] = [
             humanRectanglesRequest,     // √
-            humanBodyPoseRequest,       // √
             humanHandPoseRequest,       // √
             //humanBodyPose3DRequest,     // √ - Leaks a significant amount of memory even without processing
                 //trajectoriesRequest,
@@ -749,6 +749,9 @@ extension CameraViewController: CameraManagerDelegate {
             //personInstanceRequest       // √
                 //segmentationRequest       // √
         ]
+        if ROBDynamicDetectorRegistry.shared.enabled("body-pose", source: .mainCamera) {
+            requests.append(humanBodyPoseRequest)
+        }
         if shouldUpdateSceneSnapshot {
             requests.append(calibrationBarcodeRequest)
         }
@@ -898,6 +901,31 @@ class PoseDrawingView: NSView {
     var bodyPose_observations: [VNHumanBodyPoseObservation] = []
     var clearScreenTimer: Timer = Timer()
     var kClearScreenTimeInterval = 1.0
+    var dynamicDetectorOutput: ROBDetectorOutput?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        observeDynamicDetectors()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        observeDynamicDetectors()
+    }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
+
+    private func observeDynamicDetectors() {
+        NotificationCenter.default.addObserver(self, selector: #selector(dynamicDetectorChanged(_:)),
+                                               name: .robDetectorOutputDidChange, object: nil)
+    }
+
+    @objc private func dynamicDetectorChanged(_ notification: Notification) {
+        guard let output = notification.userInfo?["output"] as? ROBDetectorOutput,
+              output.source == .mainCamera else { return }
+        dynamicDetectorOutput = output
+        needsDisplay = true
+    }
     
     @objc func clearScreen() {
         //print("clearing screen") //This is called every few seconds... not efficient when screen is blank
@@ -1018,6 +1046,26 @@ class PoseDrawingView: NSView {
                 let fixed_point = point.translateFromCoreImageToUIKitCoordinateSpace(using: bounds.height)
                 let rect = NSRect(x: fixed_point.x - 5, y: fixed_point.y - 5, width: 10, height: 10)
                 context.fillEllipse(in: rect)
+            }
+        }
+
+        if let output = dynamicDetectorOutput {
+            context.setStrokeColor(NSColor.systemGreen.cgColor)
+            context.setLineWidth(2)
+            for line in output.lines {
+                context.move(to: CGPoint(x: line.x1 * bounds.width, y: line.y1 * bounds.height))
+                context.addLine(to: CGPoint(x: line.x2 * bounds.width, y: line.y2 * bounds.height))
+                context.strokePath()
+            }
+            for point in output.points {
+                let p = CGPoint(x: point.x * bounds.width, y: point.y * bounds.height)
+                context.setFillColor(NSColor.systemOrange.cgColor)
+                context.fillEllipse(in: CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8))
+                ("\(point.label) \(Int(point.confidence * 100))%" as NSString).draw(
+                    at: CGPoint(x: p.x + 6, y: p.y + 5),
+                    withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold),
+                                     .foregroundColor: NSColor.white,
+                                     .backgroundColor: NSColor.black.withAlphaComponent(0.65)])
             }
         }
     }

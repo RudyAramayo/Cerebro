@@ -38,6 +38,7 @@ public struct ROBMLXDiagnosticsSnapshot: Sendable {
     public let visionFrameCount: UInt64
     public let lastVisionLatency: TimeInterval?
     public let lastVisionObservation: String?
+    public let lastVisionSource: String?
     public let stageObservation: ROBMLXStageObservation?
     public let semanticMemoryCount: Int
     public let downloadProgress: Double?
@@ -70,6 +71,7 @@ public actor ROBMLXEngine {
     private var visionFrameCount: UInt64 = 0
     private var lastVisionLatency: TimeInterval?
     private var lastVisionObservation: String?
+    private var lastVisionSource: String?
     private var stageObservation: ROBMLXStageObservation?
     private var stageObservationDate: Date?
     private var lastError: String?
@@ -123,12 +125,12 @@ public actor ROBMLXEngine {
 
     /// Accepts at most one selected frame per interval. The caller returns
     /// immediately; inference remains fully outside capture and control paths.
-    public func offerVisionFrame(_ image: CIImage, minimumInterval: TimeInterval = 5) {
+    public func offerVisionFrame(_ image: CIImage, source: String = "main-camera", minimumInterval: TimeInterval = 5) {
         guard visionEnabled else { return }
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastVisionStart >= max(3, minimumInterval) else { return }
         lastVisionStart = now
-        Task { await analyzeVisionFrame(image) }
+        Task { await analyzeVisionFrame(image, source: source) }
     }
 
     public func remember(_ text: String) async throws {
@@ -174,6 +176,7 @@ public actor ROBMLXEngine {
             visionFrameCount: visionFrameCount,
             lastVisionLatency: lastVisionLatency,
             lastVisionObservation: lastVisionObservation,
+            lastVisionSource: lastVisionSource,
             stageObservation: stageObservation,
             semanticMemoryCount: memories.count,
             downloadProgress: downloadProgress,
@@ -261,7 +264,7 @@ public actor ROBMLXEngine {
         }
     }
 
-    private func analyzeVisionFrame(_ image: CIImage) async {
+    private func analyzeVisionFrame(_ image: CIImage, source: String) async {
         let start = ProcessInfo.processInfo.systemUptime
         do {
             let container = try await loadVLM()
@@ -297,14 +300,17 @@ public actor ROBMLXEngine {
             stageObservation = validated
             stageObservationDate = Date()
             lastVisionObservation = try String(decoding: ROBMLXStageObservationCodec.encode(validated), as: UTF8.self)
+            lastVisionSource = source
             lastVisionLatency = ProcessInfo.processInfo.systemUptime - start
             visionFrameCount += 1
             if validated.confidence >= 0.6, !validated.sceneChange.lowercased().contains("no change") {
                 try? await remember("Stage observation: \(lastVisionObservation ?? validated.sceneChange)")
             }
+            notifyDiagnosticsChanged()
         } catch {
             lastVisionLatency = ProcessInfo.processInfo.systemUptime - start
             lastError = "VLM: \(error)"
+            notifyDiagnosticsChanged()
         }
     }
 
@@ -339,11 +345,30 @@ public actor ROBMLXEngine {
 @objcMembers
 public final class ROBMLXRuntime: NSObject {
     public static let shared = ROBMLXRuntime()
+    private static let mainCameraDetectionKey = "ROBMLXMainCameraDetectionEnabled"
+    private static let insta360DetectionKey = "ROBMLXInsta360DetectionEnabled"
+    private static let showInferenceOutputKey = "ROBMLXShowInferenceOutput"
+
+    public var mainCameraDetectionEnabled: Bool {
+        get { Self.defaultOn(Self.mainCameraDetectionKey) }
+        set { set(newValue, for: Self.mainCameraDetectionKey) }
+    }
+
+    public var insta360DetectionEnabled: Bool {
+        get { Self.defaultOn(Self.insta360DetectionKey) }
+        set { set(newValue, for: Self.insta360DetectionKey) }
+    }
+
+    public var showInferenceOutput: Bool {
+        get { Self.defaultOn(Self.showInferenceOutputKey) }
+        set { set(newValue, for: Self.showInferenceOutputKey) }
+    }
 
     public func offerCameraSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+        guard mainCameraDetectionEnabled else { return }
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let image = CIImage(cvPixelBuffer: pixelBuffer)
-        Task { await ROBMLXEngine.shared.offerVisionFrame(image) }
+        Task { await ROBMLXEngine.shared.offerVisionFrame(image, source: "main-live-feed") }
     }
 
     public func setVisionEnabled(_ enabled: Bool) {
@@ -356,5 +381,15 @@ public final class ROBMLXRuntime: NSObject {
             do { try await ROBMLXEngine.shared.ensureVLMReady() }
             catch { NSLog("MLX vision model startup preparation failed: %@", String(describing: error)) }
         }
+    }
+
+    private static func defaultOn(_ key: String) -> Bool {
+        let defaults = UserDefaults.standard
+        return defaults.object(forKey: key) == nil || defaults.bool(forKey: key)
+    }
+
+    private func set(_ enabled: Bool, for key: String) {
+        UserDefaults.standard.set(enabled, forKey: key)
+        NotificationCenter.default.post(name: .robMLXRuntimeDidChange, object: self)
     }
 }
