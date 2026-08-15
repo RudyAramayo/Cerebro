@@ -8,14 +8,35 @@
 import Foundation
 import Security
 
-enum GeminiRoboticsCredentialStore {
-    static let service = "com.orbitusrobotics.Cerebro.gemini"
+enum ROBRealtimeProvider: String, CaseIterable {
+    case gemini
+    case openAI = "openai"
+
+    var displayName: String {
+        switch self {
+        case .gemini: return "Gemini Live"
+        case .openAI: return "OpenAI Realtime"
+        }
+    }
+
+    var keychainService: String {
+        "com.orbitusrobotics.Cerebro.\(rawValue)"
+    }
+
+    /// Continuous camera frames are currently a Gemini capability. OpenAI's
+    /// Realtime API accepts image inputs rather than a native video stream, so
+    /// a future OpenAI adapter must sample frames without changing this claim.
+    var supportsContinuousVideo: Bool { self == .gemini }
+    var supportsRealtimeAudio: Bool { true }
+}
+
+enum ROBProviderCredentialStore {
     static let apiKeyAccount = "api-key"
 
-    static func apiKey() -> String? {
+    static func apiKey(for provider: ROBRealtimeProvider) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
+            kSecAttrService as String: provider.keychainService,
             kSecAttrAccount as String: apiKeyAccount,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
@@ -27,6 +48,66 @@ enum GeminiRoboticsCredentialStore {
                 .trimmingCharacters(in: .whitespacesAndNewlines),
               !value.isEmpty else { return nil }
         return value
+    }
+
+    static func saveAPIKey(_ apiKey: String, for provider: ROBRealtimeProvider) throws {
+        let value = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, let data = value.data(using: .utf8) else {
+            throw ROBProviderCredentialStoreError.emptyKey
+        }
+        let identity: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: provider.keychainService,
+            kSecAttrAccount as String: apiKeyAccount
+        ]
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        ]
+        let updateStatus = SecItemUpdate(identity as CFDictionary, attributes as CFDictionary)
+        if updateStatus == errSecSuccess { return }
+        guard updateStatus == errSecItemNotFound else {
+            throw ROBProviderCredentialStoreError.keychain(updateStatus)
+        }
+        var item = identity
+        attributes.forEach { item[$0.key] = $0.value }
+        let addStatus = SecItemAdd(item as CFDictionary, nil)
+        guard addStatus == errSecSuccess else {
+            throw ROBProviderCredentialStoreError.keychain(addStatus)
+        }
+    }
+
+    static func removeAPIKey(for provider: ROBRealtimeProvider) throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: provider.keychainService,
+            kSecAttrAccount as String: apiKeyAccount
+        ]
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw ROBProviderCredentialStoreError.keychain(status)
+        }
+    }
+}
+
+enum ROBProviderCredentialStoreError: LocalizedError {
+    case emptyKey
+    case keychain(OSStatus)
+
+    var errorDescription: String? {
+        switch self {
+        case .emptyKey:
+            return "Enter an API key before saving."
+        case .keychain(let status):
+            return SecCopyErrorMessageString(status, nil) as String? ??
+                "Keychain returned error \(status)."
+        }
+    }
+}
+
+enum GeminiRoboticsCredentialStore {
+    static func apiKey() -> String? {
+        ROBProviderCredentialStore.apiKey(for: .gemini)
     }
 }
 
@@ -68,17 +149,31 @@ struct GeminiRoboticsConfiguration {
     let responseModality: String
 
     static func fromEnvironment(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> GeminiRoboticsConfiguration? {
-        guard environment.booleanValue(for: "GEMINI_ROBOTICS_ENABLED", default: false) else {
-            return nil
-        }
-
+        let environmentToken = environment.nonemptyValue(for: "GEMINI_EPHEMERAL_TOKEN")
+        let environmentAPIKey = environment.nonemptyValue(for: "GEMINI_API_KEY")
+        let keychainAPIKey = GeminiRoboticsCredentialStore.apiKey()
         let credential: GeminiRoboticsCredential
-        if let token = environment.nonemptyValue(for: "GEMINI_EPHEMERAL_TOKEN") {
+        if let token = environmentToken {
             credential = .ephemeralToken(token)
-        } else if let apiKey = environment.nonemptyValue(for: "GEMINI_API_KEY") ?? GeminiRoboticsCredentialStore.apiKey() {
+        } else if let apiKey = environmentAPIKey ?? keychainAPIKey {
             credential = .apiKey(apiKey)
         } else {
             return nil
+        }
+
+        // An explicit environment switch remains authoritative for managed
+        // deployments. Personal installations need no launch script: a key
+        // deliberately saved in Keychain opts Gemini in automatically.
+        if environment["GEMINI_ROBOTICS_ENABLED"] != nil {
+            guard environment.booleanValue(for: "GEMINI_ROBOTICS_ENABLED", default: false) else {
+                return nil
+            }
+        } else {
+            guard environmentToken == nil,
+                  environmentAPIKey == nil,
+                  keychainAPIKey != nil else {
+                return nil
+            }
         }
 
         let configuredModel = environment.nonemptyValue(for: "GEMINI_ROBOTICS_MODEL") ?? defaultModel

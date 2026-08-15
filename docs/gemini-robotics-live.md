@@ -57,13 +57,20 @@ No Gemini credential should be committed to source code, the application
 bundle, or an Xcode scheme. Cerebro reads a long-lived development key from the
 macOS login Keychain when no credential environment override is present.
 
+For a personal installation, open **AI Provider Control & Diagnostics**, paste
+the Gemini key into the secure field, and choose **Save in Keychain**. Relaunch
+Cerebro once so `ROBAI` can create the live session. A key installed through
+this explicit in-app action enables Gemini without an Xcode scheme or launch
+script. The UI never reads the secret back into a visible field.
+
 Install the local key using the secure hidden-input helper:
 
 ```sh
 ./Scripts/set-gemini-api-key.sh
 ```
 
-Keep only the enablement flag in the Xcode scheme:
+Managed and development deployments may keep an explicit enablement flag in
+the Xcode scheme:
 
 ```text
 GEMINI_ROBOTICS_ENABLED=true
@@ -90,14 +97,16 @@ production deployment therefore needs a backend token provider and an in-app
 refresh/reconnect path before relying on short-lived tokens continuously; the
 current development path requires restarting Cerebro with a fresh token.
 
-If explicit enablement or a credential is missing, the application continues
-running with Gemini disabled and logs the missing configuration.
+An environment credential still requires explicit enablement. An explicit
+`GEMINI_ROBOTICS_ENABLED=false` also overrides a personal Keychain key. If the
+required opt-in or credential is missing, the application continues running
+with Gemini disabled and logs the missing configuration.
 
 ## Configuration
 
 | Environment variable | Default | Purpose |
 | --- | --- | --- |
-| `GEMINI_ROBOTICS_ENABLED` | `false` | Must be set to `true` before any camera or microphone data is transmitted. |
+| `GEMINI_ROBOTICS_ENABLED` | Personal Keychain opt-in, otherwise `false` | Required for environment credentials. If explicitly set to `false`, it also disables a saved personal key. |
 | `GEMINI_ROBOTICS_MODEL` | `gemini-robotics-er-2-streaming-preview` | Model override. The `models/` prefix is added automatically. |
 | `GEMINI_ROBOTICS_RESPONSE_MODALITY` | `TEXT` | Setup response modality. The configured ER2 preview was live-validated with `TEXT`; set `AUDIO` only for a model whose Live contract requires it. Both paths use output transcription for ROBSpeech. |
 | `GEMINI_ROBOTICS_STREAM_AUDIO` | `true` | First-run default for microphone streaming. The in-app switch becomes authoritative after the operator changes it. When off, local Apple transcripts use `realtimeInput.text` while Gemini is connected. |

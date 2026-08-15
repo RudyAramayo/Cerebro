@@ -57,6 +57,8 @@ import Foundation
     private var connectionToggle: NSButton!
     private var microphoneToggle: NSButton!
     private var cameraToggle: NSButton!
+    private var apiKeyField: NSSecureTextField!
+    private var credentialStatusLabel: NSTextField!
     private var valueLabels: [Row: NSTextField] = [:]
     private var refreshTimer: Timer?
     private let dateFormatter: DateFormatter = {
@@ -69,14 +71,14 @@ import Foundation
     public init(robAI: ROBAI) {
         self.robAI = robAI
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 700),
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 830),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
         super.init(window: window)
 
-        window.title = "Gemini Control & Diagnostics"
+        window.title = "AI Provider Control & Diagnostics"
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()
@@ -112,10 +114,33 @@ import Foundation
         heading.font = .boldSystemFont(ofSize: 17)
 
         let explanation = wrappingLabel(
-            "These switches update the requested policy immediately and are remembered for the next launch. Turning the connection off closes the Gemini Live session and blocks new text, microphone, and camera input."
+            "Gemini remains Cerebro's active live provider, including direct microphone audio and sampled camera frames. Install a personal key below; it is stored only in this Mac's Keychain and is never written to the project."
         )
         explanation.textColor = .secondaryLabelColor
         explanation.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let credentialHeading = NSTextField(labelWithString: "Gemini Live personal API key")
+        credentialHeading.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        apiKeyField = NSSecureTextField(string: "")
+        apiKeyField.placeholderString = "Paste API key"
+        apiKeyField.setAccessibilityLabel("Gemini Live API key")
+        let saveKeyButton = NSButton(title: "Save in Keychain", target: self, action: #selector(saveAPIKey(_:)))
+        let removeKeyButton = NSButton(title: "Remove Key", target: self, action: #selector(removeAPIKey(_:)))
+        let credentialButtons = NSStackView(views: [saveKeyButton, removeKeyButton])
+        credentialButtons.orientation = .horizontal
+        credentialButtons.spacing = 8
+        credentialStatusLabel = wrappingLabel("")
+        credentialStatusLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        credentialStatusLabel.textColor = .secondaryLabelColor
+        let credentialControls = NSStackView(views: [
+            credentialHeading,
+            apiKeyField,
+            credentialButtons,
+            credentialStatusLabel
+        ])
+        credentialControls.orientation = .vertical
+        credentialControls.alignment = .leading
+        credentialControls.spacing = 6
 
         connectionToggle = NSButton(
             checkboxWithTitle: "Connect to Gemini",
@@ -209,7 +234,7 @@ import Foundation
         note.textColor = .secondaryLabelColor
         note.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let stack = NSStackView(views: [heading, explanation, controls, separator, grid, note])
+        let stack = NSStackView(views: [heading, explanation, credentialControls, controls, separator, grid, note])
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -226,6 +251,9 @@ import Foundation
             stack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -20),
             grid.widthAnchor.constraint(equalTo: stack.widthAnchor),
             controls.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            credentialControls.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            apiKeyField.widthAnchor.constraint(equalTo: credentialControls.widthAnchor),
+            credentialStatusLabel.widthAnchor.constraint(equalTo: credentialControls.widthAnchor),
             microphoneHelp.widthAnchor.constraint(equalTo: controls.widthAnchor),
             cameraHelp.widthAnchor.constraint(equalTo: controls.widthAnchor),
             separator.widthAnchor.constraint(equalTo: stack.widthAnchor),
@@ -264,7 +292,40 @@ import Foundation
         refresh()
     }
 
+    @objc private func saveAPIKey(_ sender: Any?) {
+        do {
+            try ROBProviderCredentialStore.saveAPIKey(apiKeyField.stringValue, for: .gemini)
+            apiKeyField.stringValue = ""
+            credentialStatusLabel.textColor = .systemGreen
+            credentialStatusLabel.stringValue = robAI?.isConfigured == true
+                ? "Key updated securely. Reconnect to use the current launch configuration."
+                : "Key saved securely. Relaunch Cerebro once to initialize Gemini Live."
+        } catch {
+            credentialStatusLabel.textColor = .systemRed
+            credentialStatusLabel.stringValue = error.localizedDescription
+        }
+        refresh()
+    }
+
+    @objc private func removeAPIKey(_ sender: Any?) {
+        do {
+            try ROBProviderCredentialStore.removeAPIKey(for: .gemini)
+            apiKeyField.stringValue = ""
+            credentialStatusLabel.textColor = .secondaryLabelColor
+            credentialStatusLabel.stringValue = "Personal key removed. An environment credential, if configured, remains independent."
+        } catch {
+            credentialStatusLabel.textColor = .systemRed
+            credentialStatusLabel.stringValue = error.localizedDescription
+        }
+        refresh()
+    }
+
     private func refresh() {
+        if credentialStatusLabel?.stringValue.isEmpty == true {
+            credentialStatusLabel.stringValue = ROBProviderCredentialStore.apiKey(for: .gemini) == nil
+                ? "No personal Gemini key is installed."
+                : "A personal Gemini key is installed in Keychain."
+        }
         guard let snapshot = robAI?.diagnosticsSnapshot() else {
             valueLabels[.configured]?.stringValue = "false"
             valueLabels[.connection]?.stringValue = "unavailable"

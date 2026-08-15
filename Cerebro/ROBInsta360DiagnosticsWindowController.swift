@@ -26,7 +26,7 @@ import UniformTypeIdentifiers
     private let analysisGeometryPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let mainFPSPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let instaFPSPopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let processingRates: [Double] = [0, 0.25, 0.5, 1, 2, 5, 10]
+    private let processingRates: [Double] = [0, 0.25, 0.5, 1, 2, 5, 10, 15, 30]
 
     public init() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 980, height: 650),
@@ -133,7 +133,7 @@ import UniformTypeIdentifiers
         let geometryRow = NSStackView(views: [geometryLabel, analysisGeometryPopup, geometryNote])
         geometryRow.orientation = .horizontal; geometryRow.spacing = 8
         for popup in [mainFPSPopup, instaFPSPopup] {
-            popup.addItems(withTitles: ["Off", "0.25 FPS", "0.5 FPS", "1 FPS", "2 FPS", "5 FPS", "10 FPS"])
+            popup.addItems(withTitles: ["Off", "0.25 FPS", "0.5 FPS", "1 FPS", "2 FPS", "5 FPS", "10 FPS", "15 FPS", "30 FPS"])
             popup.target = self; popup.action = #selector(processingFPSChanged(_:))
         }
         let rateNote = NSTextField(labelWithString: "Ceiling; slow MLX requests never overlap")
@@ -152,29 +152,27 @@ import UniformTypeIdentifiers
         statusFooter.alignment = .centerY
         statusFooter.spacing = 12
 
-        let analysisOptions = NSStackView(views: [detectionRow, rateRow, geometryRow, detectorRow])
-        analysisOptions.translatesAutoresizingMaskIntoConstraints = false
-        analysisOptions.orientation = .vertical
-        analysisOptions.alignment = .leading
-        analysisOptions.spacing = 8
-        let analysisBox = NSBox()
-        analysisBox.title = "Analysis Options"
-        analysisBox.boxType = .primary
-        analysisBox.contentView = analysisOptions
-
-        let mlxOptions = NSStackView(views: [modelRow, inferenceScroll])
-        mlxOptions.translatesAutoresizingMaskIntoConstraints = false
-        mlxOptions.orientation = .vertical
-        mlxOptions.alignment = .leading
-        mlxOptions.spacing = 8
-        let mlxBox = NSBox()
-        mlxBox.title = "MLX Status and Output"
-        mlxBox.boxType = .primary
-        mlxBox.contentView = mlxOptions
+        let analysisHeading = NSTextField(labelWithString: "Analysis Options")
+        analysisHeading.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        let mlxHeading = NSTextField(labelWithString: "MLX Status and Output")
+        mlxHeading.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        let options = NSStackView(views: [analysisHeading, detectionRow, rateRow, geometryRow,
+                                          detectorRow, NSGridView(), mlxHeading, modelRow, inferenceScroll])
+        options.translatesAutoresizingMaskIntoConstraints = false
+        options.orientation = .vertical
+        options.alignment = .leading
+        options.spacing = 8
+        options.edgeInsets = NSEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
+        let optionsScroll = NSScrollView()
+        optionsScroll.documentView = options
+        optionsScroll.hasVerticalScroller = true
+        optionsScroll.hasHorizontalScroller = false
+        optionsScroll.autohidesScrollers = true
+        optionsScroll.borderType = .bezelBorder
 
         // The video is intentionally first and touches the top content margin.
         // Status and configuration no longer reduce its upper viewing area.
-        let stack = NSStackView(views: [imageView, metricsLabel, analysisBox, mlxBox, statusFooter])
+        let stack = NSStackView(views: [imageView, metricsLabel, optionsScroll, statusFooter])
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -190,15 +188,16 @@ import UniformTypeIdentifiers
             imageView.heightAnchor.constraint(greaterThanOrEqualToConstant: 300),
             statusFooter.widthAnchor.constraint(equalTo: stack.widthAnchor),
             previewStatus.widthAnchor.constraint(greaterThanOrEqualToConstant: 360),
-            analysisBox.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            mlxBox.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            optionsScroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            optionsScroll.heightAnchor.constraint(equalToConstant: 225),
+            options.widthAnchor.constraint(equalTo: optionsScroll.contentView.widthAnchor),
             modelProgress.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
-            detectionRow.widthAnchor.constraint(equalTo: analysisOptions.widthAnchor),
-            rateRow.widthAnchor.constraint(equalTo: analysisOptions.widthAnchor),
-            geometryRow.widthAnchor.constraint(equalTo: analysisOptions.widthAnchor),
-            detectorRow.widthAnchor.constraint(equalTo: analysisOptions.widthAnchor),
-            modelRow.widthAnchor.constraint(equalTo: mlxOptions.widthAnchor),
-            inferenceScroll.widthAnchor.constraint(equalTo: mlxOptions.widthAnchor),
+            detectionRow.widthAnchor.constraint(equalTo: options.widthAnchor, constant: -20),
+            rateRow.widthAnchor.constraint(equalTo: options.widthAnchor, constant: -20),
+            geometryRow.widthAnchor.constraint(equalTo: options.widthAnchor, constant: -20),
+            detectorRow.widthAnchor.constraint(equalTo: options.widthAnchor, constant: -20),
+            modelRow.widthAnchor.constraint(equalTo: options.widthAnchor, constant: -20),
+            inferenceScroll.widthAnchor.constraint(equalTo: options.widthAnchor, constant: -20),
             inferenceScroll.heightAnchor.constraint(equalToConstant: 82)
         ])
     }

@@ -210,10 +210,32 @@ final class CameraViewController: NSViewController {
     private var latestHumanObservations: [VNHumanObservation] = []
     private var lastSceneSnapshotUpdate: CFTimeInterval = 0
     private var lastVisionProcessingUpdate: CFTimeInterval = 0
-    private let visionAnalysisQueue = DispatchQueue(label: "com.orbitusrobotics.cerebro.legacy-vision", qos: .utility)
+    private var last3DPoseProcessingUpdate: CFTimeInterval = 0
+    private let visionAnalysisQueue = DispatchQueue(label: "com.orbitusrobotics.cerebro.realtime-pose", qos: .userInitiated)
     private let visionAdmissionLock = NSLock()
     private var visionAnalysisInFlight = false
     private let reversePoseEstimator = ROBReverseCameraPoseEstimator()
+    private static let pose3DEnabledKey = "ROBCameraPose3DEnabled"
+    private static let pose3DFPSKey = "ROBCameraPose3DFPS"
+    private let pose3DRates: [Double] = [0.1, 0.25, 0.5, 1, 2]
+    private let pose3DToggle = NSButton(checkboxWithTitle: "Render 3D pose", target: nil, action: nil)
+    private let pose3DFPSPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private lazy var humanBodyPose3DRequest: VNDetectHumanBodyPose3DRequest = {
+        VNDetectHumanBodyPose3DRequest { [weak self] request, error in
+            guard error == nil, let observation = (request.results as? [VNHumanBodyPose3DObservation])?.first else { return }
+            DispatchQueue.main.async { self?.process_humanBodyPose3D_Observation(observation) }
+        }
+    }()
+
+    private var pose3DEnabled: Bool {
+        let defaults = UserDefaults.standard
+        return defaults.object(forKey: Self.pose3DEnabledKey) == nil || defaults.bool(forKey: Self.pose3DEnabledKey)
+    }
+
+    private var pose3DFPS: Double {
+        let defaults = UserDefaults.standard
+        return defaults.object(forKey: Self.pose3DFPSKey) == nil ? 0.5 : max(0.1, min(2, defaults.double(forKey: Self.pose3DFPSKey)))
+    }
     
     
     override func viewDidLoad() {
@@ -247,6 +269,7 @@ final class CameraViewController: NSViewController {
         
         setupSceneKitView()
         setupDepthOverlay()
+        setup3DPoseControls()
     }
     
     @IBAction func toggleCamera(_ sender: Any?) {
@@ -344,13 +367,14 @@ final class CameraViewController: NSViewController {
 extension CameraViewController: CameraManagerDelegate {
     
     func process_humanBodyPose3D_Observation(_ observation: VNHumanBodyPose3DObservation) {
+        guard pose3DEnabled else { return }
         if !sceneCreated {
             self.skeletonView.scene = createScene(observation: observation)
-            //sceneCreated = true
+            sceneCreated = true
         } else {
-            //This is not working as expected
             updateScene(observation: observation)
         }
+        skeletonView.isHidden = false
     }
     
     func updateScene(observation: VNHumanBodyPose3DObservation) {
@@ -440,6 +464,45 @@ extension CameraViewController: CameraManagerDelegate {
     
     func setupSceneKitView() {
         self.skeletonView.isHidden = true
+    }
+
+    private func setup3DPoseControls() {
+        pose3DToggle.state = pose3DEnabled ? .on : .off
+        pose3DToggle.target = self
+        pose3DToggle.action = #selector(pose3DSettingChanged(_:))
+        pose3DToggle.translatesAutoresizingMaskIntoConstraints = false
+        pose3DFPSPopup.addItems(withTitles: ["0.1 FPS", "0.25 FPS", "0.5 FPS", "1 FPS", "2 FPS"])
+        let selected = pose3DRates.enumerated().min(by: { abs($0.element - pose3DFPS) < abs($1.element - pose3DFPS) })?.offset ?? 2
+        pose3DFPSPopup.selectItem(at: selected)
+        pose3DFPSPopup.target = self
+        pose3DFPSPopup.action = #selector(pose3DSettingChanged(_:))
+        pose3DFPSPopup.translatesAutoresizingMaskIntoConstraints = false
+        pose3DFPSPopup.isEnabled = pose3DEnabled
+        pose3DToggle.toolTip = "Uses Apple's 3D body-pose model on the serialized main-camera analysis queue."
+        pose3DFPSPopup.toolTip = "Independent conservative ceiling; also limited by the main-camera analysis rate."
+        view.addSubview(pose3DToggle, positioned: .above, relativeTo: nil)
+        view.addSubview(pose3DFPSPopup, positioned: .above, relativeTo: nil)
+        NSLayoutConstraint.activate([
+            pose3DToggle.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 18),
+            pose3DToggle.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -52),
+            pose3DFPSPopup.leadingAnchor.constraint(equalTo: pose3DToggle.trailingAnchor, constant: 10),
+            pose3DFPSPopup.centerYAnchor.constraint(equalTo: pose3DToggle.centerYAnchor)
+        ])
+    }
+
+    @objc private func pose3DSettingChanged(_ sender: Any?) {
+        if sender as AnyObject === pose3DToggle {
+            let enabled = pose3DToggle.state == .on
+            UserDefaults.standard.set(enabled, forKey: Self.pose3DEnabledKey)
+            pose3DFPSPopup.isEnabled = enabled
+            if !enabled {
+                skeletonView.isHidden = true
+                skeletonView.scene = nil
+                sceneCreated = false
+            }
+        } else if pose3DRates.indices.contains(pose3DFPSPopup.indexOfSelectedItem) {
+            UserDefaults.standard.set(pose3DRates[pose3DFPSPopup.indexOfSelectedItem], forKey: Self.pose3DFPSKey)
+        }
     }
 
     private func setupDepthOverlay() {
@@ -603,11 +666,6 @@ extension CameraViewController: CameraManagerDelegate {
             )
         }
         calibrationBarcodeRequest.symbologies = [.qr]
-        let humanBodyPose3DRequest = VNDetectHumanBodyPose3DRequest { request, error in
-            for observation in request.results as! [VNHumanBodyPose3DObservation] {
-                self.process_humanBodyPose3D_Observation(observation)
-            }
-        }
         let trajectoriesRequest = VNDetectTrajectoriesRequest(frameAnalysisSpacing: CMTime(value: 1, timescale: 60), trajectoryLength: 1, completionHandler: { request, error in
             for observation in request.results as! [VNTrajectoryObservation] {
                 print("trajectoriesRequest = \(observation)")
@@ -766,21 +824,20 @@ extension CameraViewController: CameraManagerDelegate {
         }
         
         let imageRequestHandler = VNImageRequestHandler(cmSampleBuffer: sampleBuffer, options: [:])
-        var requests: [VNRequest] = [
-            humanRectanglesRequest,     // √
-            humanHandPoseRequest,       // √
-            //humanBodyPose3DRequest,     // √ - Leaks a significant amount of memory even without processing
-                //trajectoriesRequest,
-                //animalBodyPoseRequest,
-            detectFaceRequest,          // √
-            //personInstanceRequest       // √
-                //segmentationRequest       // √
-        ]
+        // Keep the real-time path deliberately narrow. Rectangles, hands,
+        // faces, saliency, and semantic models run through lower-rate services.
+        var requests: [VNRequest] = []
         if ROBDynamicDetectorRegistry.shared.enabled("body-pose", source: .mainCamera) {
             requests.append(humanBodyPoseRequest)
         }
         if shouldUpdateSceneSnapshot {
             requests.append(calibrationBarcodeRequest)
+        }
+        let pose3DTime = CACurrentMediaTime()
+        if self.pose3DEnabled,
+           pose3DTime - self.last3DPoseProcessingUpdate >= 1 / self.pose3DFPS {
+            self.last3DPoseProcessingUpdate = pose3DTime
+            requests.append(self.humanBodyPose3DRequest)
         }
         try? imageRequestHandler.perform(requests)
         }

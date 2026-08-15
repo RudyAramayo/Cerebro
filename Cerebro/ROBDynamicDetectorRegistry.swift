@@ -35,11 +35,11 @@ public struct ROBDetectorOutput: Sendable {
         let key = "ROBDetector.processingFPS.\(source.rawValue)"
         let defaults = UserDefaults.standard
         if defaults.object(forKey: key) == nil { return source == .mainCamera ? 2 : 1 }
-        return max(0, min(10, defaults.double(forKey: key)))
+        return max(0, min(30, defaults.double(forKey: key)))
     }
 
     public func setProcessingFramesPerSecond(_ fps: Double, for source: ROBDetectorSource) {
-        UserDefaults.standard.set(max(0, min(10, fps)), forKey: "ROBDetector.processingFPS.\(source.rawValue)")
+        UserDefaults.standard.set(max(0, min(30, fps)), forKey: "ROBDetector.processingFPS.\(source.rawValue)")
         NotificationCenter.default.post(name: .robDetectorSettingsDidChange, object: self,
             userInfo: ["source": source, "processingFPSChanged": true])
     }
@@ -106,7 +106,9 @@ public struct ROBDetectorOutput: Sendable {
 
     private func process(_ image: CGImage, source: ROBDetectorSource, capturedAt: Date) {
             let geometry = source == .insta360 ? self.insta360AnalysisGeometry : .stitchedPanorama
-            let poseOn = self.enabled("body-pose", source: source)
+            // Main-camera pose has a low-latency dedicated Vision path. Running
+            // it again here halves throughput and adds no additional result.
+            let poseOn = source != .mainCamera && self.enabled("body-pose", source: source)
             let objectsOn = self.enabled("generic-objects", source: source)
             let models = self.customModels
             guard poseOn || objectsOn || !models.isEmpty else { return }
