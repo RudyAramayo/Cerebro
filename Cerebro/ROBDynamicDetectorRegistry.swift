@@ -6,9 +6,11 @@ import Vision
 
 extension Notification.Name {
     static let robDetectorOutputDidChange = Notification.Name("ROBDetectorOutputDidChange")
+    static let robDetectorSettingsDidChange = Notification.Name("ROBDetectorSettingsDidChange")
 }
 
 public enum ROBDetectorSource: String, CaseIterable, Sendable { case mainCamera, insta360 }
+public enum ROBInsta360AnalysisGeometry: Int, Sendable { case stitchedPanorama, sixSectors }
 public struct ROBOverlayPoint: Sendable { public let x, y: Double; public let label: String; public let confidence: Double }
 public struct ROBOverlayLine: Sendable { public let x1, y1, x2, y2: Double }
 public struct ROBDetectorOutput: Sendable {
@@ -27,6 +29,15 @@ public struct ROBDetectorOutput: Sendable {
     private var lastRun: [ROBDetectorSource: TimeInterval] = [:]
     private var customModels: [(name: String, model: VNCoreMLModel)] = []
 
+    public var insta360AnalysisGeometry: ROBInsta360AnalysisGeometry {
+        get { ROBInsta360AnalysisGeometry(rawValue: UserDefaults.standard.integer(forKey: "ROBDetector.insta360AnalysisGeometry")) ?? .stitchedPanorama }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: "ROBDetector.insta360AnalysisGeometry")
+            NotificationCenter.default.post(name: .robDetectorSettingsDidChange, object: self,
+                userInfo: ["source": ROBDetectorSource.insta360, "geometryChanged": true])
+        }
+    }
+
     public func enabled(_ detector: String, source: ROBDetectorSource) -> Bool {
         let key = "ROBDetector.\(detector).\(source.rawValue)"
         let defaults = UserDefaults.standard
@@ -35,6 +46,8 @@ public struct ROBDetectorOutput: Sendable {
 
     public func setEnabled(_ enabled: Bool, detector: String, source: ROBDetectorSource) {
         UserDefaults.standard.set(enabled, forKey: "ROBDetector.\(detector).\(source.rawValue)")
+        NotificationCenter.default.post(name: .robDetectorSettingsDidChange, object: self,
+            userInfo: ["detector": detector, "source": source, "enabled": enabled])
     }
 
     public func registerCoreMLModel(at url: URL) throws {
@@ -60,7 +73,11 @@ public struct ROBDetectorOutput: Sendable {
     private func offer(_ image: CGImage, source: ROBDetectorSource, capturedAt: Date) {
         queue.async {
             let now = ProcessInfo.processInfo.systemUptime
-            guard now - (self.lastRun[source] ?? 0) >= 0.5 else { return }
+            let geometry = source == .insta360 ? self.insta360AnalysisGeometry : .stitchedPanorama
+            // Six Vision passes are deliberately sampled more slowly so this
+            // diagnostic mode cannot starve robot control or stream decoding.
+            let minimumInterval = geometry == .sixSectors ? 1.0 : 0.5
+            guard now - (self.lastRun[source] ?? 0) >= minimumInterval else { return }
             self.lastRun[source] = now
             let poseOn = self.enabled("body-pose", source: source)
             let objectsOn = self.enabled("generic-objects", source: source)
@@ -68,41 +85,62 @@ public struct ROBDetectorOutput: Sendable {
             guard poseOn || objectsOn || !models.isEmpty else { return }
             var points: [ROBOverlayPoint] = []
             var lines: [ROBOverlayLine] = []
-            var requests: [VNRequest] = []
+            let inputs: [(image: CGImage, xOffset: Double, xScale: Double)]
+            if geometry == .sixSectors {
+                let width = image.width / 6
+                inputs = (0..<6).compactMap { index in
+                    let x = index * width
+                    let cropWidth = index == 5 ? image.width - x : width
+                    return image.cropping(to: CGRect(x: x, y: 0, width: cropWidth, height: image.height)).map {
+                        ($0, Double(x) / Double(image.width), Double(cropWidth) / Double(image.width))
+                    }
+                }
+            } else {
+                inputs = [(image, 0, 1)]
+            }
 
-            if poseOn {
+            do {
+              for input in inputs {
+                var requests: [VNRequest] = []
+                let mapPoint: (CGPoint) -> CGPoint = { point in
+                    CGPoint(x: input.xOffset + Double(point.x) * input.xScale, y: point.y)
+                }
+
+                if poseOn {
                 requests.append(VNDetectHumanBodyPoseRequest { request, _ in
                     for observation in (request.results as? [VNHumanBodyPoseObservation]) ?? [] {
                         guard let recognized = try? observation.recognizedPoints(.all) else { continue }
                         for (name, point) in recognized where point.confidence >= 0.2 {
-                            points.append(ROBOverlayPoint(x: point.location.x, y: point.location.y,
+                            let mapped = mapPoint(point.location)
+                            points.append(ROBOverlayPoint(x: mapped.x, y: mapped.y,
                                 label: name.rawValue.rawValue, confidence: Double(point.confidence)))
                         }
                         for (a, b) in BodyJoints.links {
                             if let p1 = recognized[a], let p2 = recognized[b], p1.confidence >= 0.2, p2.confidence >= 0.2 {
-                                lines.append(ROBOverlayLine(x1: p1.location.x, y1: p1.location.y, x2: p2.location.x, y2: p2.location.y))
+                                let m1 = mapPoint(p1.location), m2 = mapPoint(p2.location)
+                                lines.append(ROBOverlayLine(x1: m1.x, y1: m1.y, x2: m2.x, y2: m2.y))
                             }
                         }
                     }
                 })
             }
-            if objectsOn {
+                if objectsOn {
                 let classify = VNClassifyImageRequest()
                 let saliency = VNGenerateObjectnessBasedSaliencyImageRequest()
                 requests += [classify, saliency]
                 // Results are joined after the handler completes below.
             }
-            for entry in models {
+                for entry in models {
                 requests.append(VNCoreMLRequest(model: entry.model) { request, _ in
                     for object in (request.results as? [VNRecognizedObjectObservation]) ?? [] {
                         guard let label = object.labels.first else { continue }
-                        points.append(ROBOverlayPoint(x: object.boundingBox.midX, y: object.boundingBox.midY,
+                        let mapped = mapPoint(CGPoint(x: object.boundingBox.midX, y: object.boundingBox.midY))
+                        points.append(ROBOverlayPoint(x: mapped.x, y: mapped.y,
                             label: label.identifier, confidence: Double(label.confidence)))
                     }
                 })
             }
-            do {
-                try VNImageRequestHandler(cgImage: image).perform(requests)
+                try VNImageRequestHandler(cgImage: input.image).perform(requests)
                 if objectsOn,
                    let classify = requests.compactMap({ $0 as? VNClassifyImageRequest }).first,
                    let saliency = requests.compactMap({ $0 as? VNGenerateObjectnessBasedSaliencyImageRequest }).first {
@@ -112,10 +150,12 @@ public struct ROBDetectorOutput: Sendable {
                         let center = index < regions.count
                             ? CGPoint(x: regions[index].boundingBox.midX, y: regions[index].boundingBox.midY)
                             : CGPoint(x: 0.08 + Double(index) * 0.14, y: 0.94)
-                        points.append(ROBOverlayPoint(x: center.x, y: center.y,
+                        let mapped = mapPoint(center)
+                        points.append(ROBOverlayPoint(x: mapped.x, y: mapped.y,
                             label: "candidate: \(label.identifier)", confidence: Double(label.confidence)))
                     }
                 }
+              }
                 let output = ROBDetectorOutput(source: source, capturedAt: capturedAt, points: points, lines: lines)
                 DispatchQueue.main.async {
                     NotificationCenter.default.post(name: .robDetectorOutputDidChange, object: self,

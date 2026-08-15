@@ -918,12 +918,25 @@ class PoseDrawingView: NSView {
     private func observeDynamicDetectors() {
         NotificationCenter.default.addObserver(self, selector: #selector(dynamicDetectorChanged(_:)),
                                                name: .robDetectorOutputDidChange, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(dynamicDetectorSettingChanged(_:)),
+                                               name: .robDetectorSettingsDidChange, object: nil)
     }
 
     @objc private func dynamicDetectorChanged(_ notification: Notification) {
         guard let output = notification.userInfo?["output"] as? ROBDetectorOutput,
               output.source == .mainCamera else { return }
         dynamicDetectorOutput = output
+        needsDisplay = true
+    }
+
+    @objc private func dynamicDetectorSettingChanged(_ notification: Notification) {
+        guard let source = notification.userInfo?["source"] as? ROBDetectorSource,
+              source == .mainCamera,
+              notification.userInfo?["enabled"] as? Bool == false else { return }
+        if notification.userInfo?["detector"] as? String == "body-pose" {
+            bodyPose_observations = []
+        }
+        dynamicDetectorOutput = nil
         needsDisplay = true
     }
     

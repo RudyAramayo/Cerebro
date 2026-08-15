@@ -23,6 +23,7 @@ import UniformTypeIdentifiers
     private let mainObjectsToggle = NSButton(checkboxWithTitle: "Main object labels", target: nil, action: nil)
     private let instaObjectsToggle = NSButton(checkboxWithTitle: "360° object labels", target: nil, action: nil)
     private let addModelButton = NSButton(title: "Add Core ML Model…", target: nil, action: nil)
+    private let analysisGeometryPopup = NSPopUpButton(frame: .zero, pullsDown: false)
 
     public init() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 980, height: 650),
@@ -40,6 +41,8 @@ import UniformTypeIdentifiers
                                                name: .robMLXRuntimeDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(detectorOutputChanged(_:)),
                                                name: .robDetectorOutputDidChange, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(detectorSettingNotification(_:)),
+                                               name: .robDetectorSettingsDidChange, object: nil)
         refresh()
     }
 
@@ -116,11 +119,20 @@ import UniformTypeIdentifiers
             toggle.target = self; toggle.action = #selector(detectorSettingChanged(_:))
         }
         addModelButton.target = self; addModelButton.action = #selector(addCoreMLModel(_:))
+        analysisGeometryPopup.addItems(withTitles: ["Full stitched panorama", "Six detector sectors"])
+        analysisGeometryPopup.target = self
+        analysisGeometryPopup.action = #selector(analysisGeometryChanged(_:))
+        analysisGeometryPopup.toolTip = "Six sectors are derived locally from the stitched stream; this is not six native Pro II sensor streams."
+        let geometryLabel = NSTextField(labelWithString: "360° analysis:")
+        let geometryNote = NSTextField(labelWithString: "Network: one stitched RTMP feed")
+        geometryNote.textColor = .secondaryLabelColor
+        let geometryRow = NSStackView(views: [geometryLabel, analysisGeometryPopup, geometryNote])
+        geometryRow.orientation = .horizontal; geometryRow.spacing = 8
         let detectorRow = NSStackView(views: [mainPoseToggle, instaPoseToggle, mainObjectsToggle, instaObjectsToggle, addModelButton])
         detectorRow.orientation = .horizontal; detectorRow.spacing = 12
         let status = NSStackView(views: [stateLabel, NSView(), stabilizationToggle, restartButton])
         status.orientation = .horizontal
-        let stack = NSStackView(views: [heading, help, status, urlLabel, imageView, metricsLabel, modelRow, detectionRow, detectorRow, inferenceScroll])
+        let stack = NSStackView(views: [heading, help, status, urlLabel, imageView, metricsLabel, modelRow, detectionRow, geometryRow, detectorRow, inferenceScroll])
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -139,6 +151,7 @@ import UniformTypeIdentifiers
             modelRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             modelProgress.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
             detectionRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            geometryRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             detectorRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             inferenceScroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
             inferenceScroll.heightAnchor.constraint(equalToConstant: 100)
@@ -160,16 +173,31 @@ import UniformTypeIdentifiers
     }
     @objc private func detectorSettingChanged(_ sender: NSButton) {
         let registry = ROBDynamicDetectorRegistry.shared
-        registry.setEnabled(mainPoseToggle.state == .on, detector: "body-pose", source: .mainCamera)
-        registry.setEnabled(instaPoseToggle.state == .on, detector: "body-pose", source: .insta360)
-        registry.setEnabled(mainObjectsToggle.state == .on, detector: "generic-objects", source: .mainCamera)
-        registry.setEnabled(instaObjectsToggle.state == .on, detector: "generic-objects", source: .insta360)
-        if instaPoseToggle.state == .off && instaObjectsToggle.state == .off { detectionOverlay.output = nil }
+        if sender === mainPoseToggle {
+            registry.setEnabled(sender.state == .on, detector: "body-pose", source: .mainCamera)
+        } else if sender === instaPoseToggle {
+            registry.setEnabled(sender.state == .on, detector: "body-pose", source: .insta360)
+        } else if sender === mainObjectsToggle {
+            registry.setEnabled(sender.state == .on, detector: "generic-objects", source: .mainCamera)
+        } else if sender === instaObjectsToggle {
+            registry.setEnabled(sender.state == .on, detector: "generic-objects", source: .insta360)
+        }
+    }
+    @objc private func analysisGeometryChanged(_ sender: NSPopUpButton) {
+        ROBDynamicDetectorRegistry.shared.insta360AnalysisGeometry =
+            sender.indexOfSelectedItem == 1 ? .sixSectors : .stitchedPanorama
+        detectionOverlay.output = nil
     }
     @objc private func detectorOutputChanged(_ notification: Notification) {
         guard let output = notification.userInfo?["output"] as? ROBDetectorOutput,
               output.source == .insta360 else { return }
         detectionOverlay.output = output
+    }
+    @objc private func detectorSettingNotification(_ notification: Notification) {
+        guard let source = notification.userInfo?["source"] as? ROBDetectorSource,
+              source == .insta360,
+              notification.userInfo?["enabled"] as? Bool == false else { return }
+        detectionOverlay.output = nil
     }
     @objc private func addCoreMLModel(_ sender: Any?) {
         let panel = NSOpenPanel()
@@ -218,6 +246,7 @@ import UniformTypeIdentifiers
                 self.insta360DetectionToggle.state = runtime.insta360DetectionEnabled ? .on : .off
                 self.showInferenceToggle.state = runtime.showInferenceOutput ? .on : .off
                 let registry = ROBDynamicDetectorRegistry.shared
+                self.analysisGeometryPopup.selectItem(at: registry.insta360AnalysisGeometry.rawValue)
                 self.mainPoseToggle.state = registry.enabled("body-pose", source: .mainCamera) ? .on : .off
                 self.instaPoseToggle.state = registry.enabled("body-pose", source: .insta360) ? .on : .off
                 self.mainObjectsToggle.state = registry.enabled("generic-objects", source: .mainCamera) ? .on : .off
@@ -226,7 +255,8 @@ import UniformTypeIdentifiers
                 if let output = diagnostics.lastVisionObservation, !output.isEmpty {
                     self.inferenceOutput.string = "Source: \(diagnostics.lastVisionSource ?? "unknown")\n\(output)"
                 } else if let error = diagnostics.lastError, !error.isEmpty {
-                    self.inferenceOutput.string = "MLX error: \(error)"
+                    self.inferenceOutput.string = "MLX error: \(error)" +
+                        (diagnostics.lastVisionRawFailure.map { "\nSanitized model response: \($0)" } ?? "")
                 } else {
                     self.inferenceOutput.string = "Waiting for the first MLX vision inference…"
                 }

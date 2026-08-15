@@ -45,6 +45,36 @@ public enum ROBMLXStageObservationCodec {
         "demonstration_object_visible", "visible_items", "audience_activity", "scene_change", "confidence"
     ]
 
+    /// Extracts the first complete JSON object from a model response. Braces
+    /// inside quoted JSON strings do not affect balancing. Schema and value
+    /// validation still happen in `decode`; this only removes harmless model
+    /// wrappers such as Markdown fences or a short introductory sentence.
+    public static func extractJSONObject(from response: String) throws -> Data {
+        let bytes = Array(response.utf8)
+        guard let start = bytes.firstIndex(of: 0x7b) else {
+            throw ROBMLXStageObservationError.invalid("VLM output did not contain a JSON object.")
+        }
+        var depth = 0
+        var inString = false
+        var escaped = false
+        for index in start..<bytes.count {
+            let byte = bytes[index]
+            if inString {
+                if escaped { escaped = false }
+                else if byte == 0x5c { escaped = true }
+                else if byte == 0x22 { inString = false }
+                continue
+            }
+            if byte == 0x22 { inString = true }
+            else if byte == 0x7b { depth += 1 }
+            else if byte == 0x7d {
+                depth -= 1
+                if depth == 0 { return Data(bytes[start...index]) }
+            }
+        }
+        throw ROBMLXStageObservationError.invalid("VLM JSON object was incomplete.")
+    }
+
     public static func decode(_ data: Data) throws -> ROBMLXStageObservation {
         guard !data.isEmpty, data.count <= maximumDocumentBytes else {
             throw ROBMLXStageObservationError.invalid("Observation is empty or too large.")

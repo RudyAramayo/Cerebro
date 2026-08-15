@@ -626,7 +626,7 @@ import UniformTypeIdentifiers
                 parts.append(String(format: "vision confidence %.2f", observation.confidence))
             }
             self.mlxTelemetryLabel.stringValue = parts.joined(separator: "  •  ")
-            self.mlxTelemetryLabel.toolTip = [mlx.llmModel, mlx.vlmModel, mlx.embeddingModel, mlx.lastVisionObservation, mlx.lastError]
+            self.mlxTelemetryLabel.toolTip = [mlx.llmModel, mlx.vlmModel, mlx.embeddingModel, mlx.lastVisionObservation, mlx.lastError, mlx.lastVisionRawFailure]
                 .compactMap { $0 }.joined(separator: "\n")
         }
         guard !localOperationInProgress else { return }

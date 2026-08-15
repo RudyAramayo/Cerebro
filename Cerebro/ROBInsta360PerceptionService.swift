@@ -26,6 +26,7 @@ import Vision
         }
 
         queue.async {
+            guard ROBDynamicDetectorRegistry.shared.enabled("generic-objects", source: .insta360) else { return }
             let now = ProcessInfo.processInfo.systemUptime
             guard !self.classificationInFlight, now - self.lastClassificationUptime >= 2 else { return }
             self.classificationInFlight = true

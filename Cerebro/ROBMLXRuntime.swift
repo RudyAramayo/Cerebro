@@ -38,6 +38,7 @@ public struct ROBMLXDiagnosticsSnapshot: Sendable {
     public let visionFrameCount: UInt64
     public let lastVisionLatency: TimeInterval?
     public let lastVisionObservation: String?
+    public let lastVisionRawFailure: String?
     public let lastVisionSource: String?
     public let stageObservation: ROBMLXStageObservation?
     public let semanticMemoryCount: Int
@@ -71,6 +72,7 @@ public actor ROBMLXEngine {
     private var visionFrameCount: UInt64 = 0
     private var lastVisionLatency: TimeInterval?
     private var lastVisionObservation: String?
+    private var lastVisionRawFailure: String?
     private var lastVisionSource: String?
     private var stageObservation: ROBMLXStageObservation?
     private var stageObservationDate: Date?
@@ -176,6 +178,7 @@ public actor ROBMLXEngine {
             visionFrameCount: visionFrameCount,
             lastVisionLatency: lastVisionLatency,
             lastVisionObservation: lastVisionObservation,
+            lastVisionRawFailure: lastVisionRawFailure,
             lastVisionSource: lastVisionSource,
             stageObservation: stageObservation,
             semanticMemoryCount: memories.count,
@@ -266,6 +269,7 @@ public actor ROBMLXEngine {
 
     private func analyzeVisionFrame(_ image: CIImage, source: String) async {
         let start = ProcessInfo.processInfo.systemUptime
+        var rawResponse = ""
         do {
             let container = try await loadVLM()
             let previous: String
@@ -286,20 +290,18 @@ public actor ROBMLXEngine {
             let input = try await container.prepare(input: UserInput(prompt: prompt, images: [.ciImage(image)]))
             let stream = try await container.generate(
                 input: input,
-                parameters: GenerateParameters(maxTokens: 96, temperature: 0.1)
+                parameters: GenerateParameters(maxTokens: 256, temperature: 0.05)
             )
-            var observation = ""
             for await event in stream {
-                if case .chunk(let chunk) = event { observation += chunk }
+                if case .chunk(let chunk) = event { rawResponse += chunk }
             }
-            let raw = observation.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let data = raw.data(using: .utf8) else {
-                throw ROBMLXStageObservationError.invalid("VLM output was not UTF-8.")
-            }
+            let raw = rawResponse.trimmingCharacters(in: .whitespacesAndNewlines)
+            let data = try ROBMLXStageObservationCodec.extractJSONObject(from: raw)
             let validated = try ROBMLXStageObservationCodec.decode(data)
             stageObservation = validated
             stageObservationDate = Date()
             lastVisionObservation = try String(decoding: ROBMLXStageObservationCodec.encode(validated), as: UTF8.self)
+            lastVisionRawFailure = nil
             lastVisionSource = source
             lastVisionLatency = ProcessInfo.processInfo.systemUptime - start
             visionFrameCount += 1
@@ -309,9 +311,22 @@ public actor ROBMLXEngine {
             notifyDiagnosticsChanged()
         } catch {
             lastVisionLatency = ProcessInfo.processInfo.systemUptime - start
+            // Store a bounded, single-line diagnostic sample. Control
+            // characters are removed so model text cannot forge log lines or
+            // UI structure. This is diagnostic context, never executable input.
+            lastVisionRawFailure = Self.sanitizedVisionFailure(rawResponse)
             lastError = "VLM: \(error)"
             notifyDiagnosticsChanged()
         }
+    }
+
+    private static func sanitizedVisionFailure(_ raw: String) -> String? {
+        let cleanedScalars = raw.unicodeScalars.map { scalar -> Character in
+            CharacterSet.controlCharacters.contains(scalar) ? " " : Character(String(scalar))
+        }
+        let singleLine = String(cleanedScalars).split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        guard !singleLine.isEmpty else { return nil }
+        return String(singleLine.prefix(512)) + (singleLine.count > 512 ? "…" : "")
     }
 
     private func embedding(for text: String) async throws -> [Float] {
