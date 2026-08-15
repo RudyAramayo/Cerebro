@@ -235,9 +235,8 @@ private final class ROBSwordTracker {
     }
 
     private func bestTrack(in observation: VNContoursObservation, wrists: [CGPoint]) -> ROBSwordTrack? {
-        guard !wrists.isEmpty else { return nil }
         var best: (track: ROBSwordTrack, score: CGFloat)?
-        for contour in observation.topLevelContours {
+        for contour in Self.flattenedContours(observation.topLevelContours) {
             let points = Self.points(in: contour.normalizedPath)
             guard points.count >= 5, let axis = Self.principalAxis(points) else { continue }
             let length = Self.distance(axis.0, axis.1)
@@ -254,13 +253,17 @@ private final class ROBSwordTracker {
             // previous grip can carry fast motion between slower body-pose
             // updates without letting unrelated scene edges take over.
             let continuityDistance = previous.map { min(Self.distance($0.grip, axis.0), Self.distance($0.grip, axis.1)) } ?? 1
-            guard wristDistance <= 0.22 || continuityDistance <= 0.14 else { continue }
+            let hasBodyAnchor = !wrists.isEmpty
+            let canAcquireGeometrically = !hasBodyAnchor && previous == nil && length >= 0.16 && elongation >= 7
+            guard wristDistance <= 0.22 || continuityDistance <= 0.14 || canAcquireGeometrically else { continue }
             var score = min(1, (elongation - 3) / 12) * 0.35 + min(1, length / 0.45) * 0.35
             score += max(0, 1 - wristDistance / 0.22) * 0.30
             if let previous {
                 let direct = Self.distance(previous.grip, grip) + Self.distance(previous.tip, tip)
                 score += max(0, 1 - direct / 0.5) * 0.25
                 score += max(0, 1 - continuityDistance / 0.14) * 0.20
+            } else if !hasBodyAnchor {
+                score = min(score, 0.48)
             }
             let candidate = ROBSwordTrack(grip: grip, tip: tip, confidence: Double(min(0.99, score)))
             if best == nil || score > best!.score { best = (candidate, score) }
@@ -276,6 +279,16 @@ private final class ROBSwordTracker {
                 confidence: track.confidence)
         }
         return track
+    }
+
+    private static func flattenedContours(_ roots: [VNContour]) -> [VNContour] {
+        var result: [VNContour] = []
+        var pending = roots
+        while let contour = pending.popLast() {
+            result.append(contour)
+            pending.append(contentsOf: contour.childContours)
+        }
+        return result
     }
 
     private static func points(in path: CGPath) -> [CGPoint] {
@@ -664,6 +677,7 @@ extension CameraViewController: CameraManagerDelegate {
         swordTrackerFPSPopup.action = #selector(swordTrackerSettingChanged(_:))
         swordTrackerFPSPopup.translatesAutoresizingMaskIntoConstraints = false
         swordTrackerFPSPopup.isEnabled = swordTrackerEnabled
+        poseView.swordTrackingStatus = swordTrackerEnabled ? "Sword: waiting for camera frames" : nil
         swordTrackerToggle.toolTip = "Tracks elongated high-contrast training implements near detected wrists."
         swordTrackerFPSPopup.toolTip = "Maximum admission rate; actual speed is limited by camera FPS and contour processing time."
         view.addSubview(swordTrackerToggle, positioned: .above, relativeTo: nil)
@@ -684,6 +698,7 @@ extension CameraViewController: CameraManagerDelegate {
             if !enabled {
                 swordTracker.reset()
                 poseView.swordTrack = nil
+                poseView.swordTrackingStatus = nil
                 poseView.needsDisplay = true
             }
         } else if swordTrackerRates.indices.contains(swordTrackerFPSPopup.indexOfSelectedItem) {
@@ -797,6 +812,9 @@ extension CameraViewController: CameraManagerDelegate {
             swordWristLock.lock(); let wrists = swordWristAnchors; swordWristLock.unlock()
             swordTracker.offer(sampleBuffer, wrists: wrists, maximumFPS: swordTrackerFPS) { [weak self] track in
                 self?.poseView.swordTrack = track
+                self?.poseView.swordTrackingStatus = track == nil
+                    ? (wrists.isEmpty ? "Sword: searching (no wrist lock)" : "Sword: searching near wrist")
+                    : "Sword: locked"
                 self?.poseView.needsDisplay = true
             }
         }
@@ -1030,6 +1048,7 @@ extension CameraViewController: CameraManagerDelegate {
         var requests: [VNRequest] = []
         if ROBDynamicDetectorRegistry.shared.enabled("body-pose", source: .mainCamera) {
             requests.append(humanBodyPoseRequest)
+            requests.append(humanHandPoseRequest)
         }
         if shouldUpdateSceneSnapshot {
             requests.append(calibrationBarcodeRequest)
@@ -1189,6 +1208,7 @@ class PoseDrawingView: NSView {
     var kClearScreenTimeInterval = 1.0
     var dynamicDetectorOutput: ROBDetectorOutput?
     fileprivate var swordTrack: ROBSwordTrack?
+    fileprivate var swordTrackingStatus: String?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1222,6 +1242,7 @@ class PoseDrawingView: NSView {
               notification.userInfo?["enabled"] as? Bool == false else { return }
         if notification.userInfo?["detector"] as? String == "body-pose" {
             bodyPose_observations = []
+            humanHandPose_observations = []
         }
         dynamicDetectorOutput = nil
         needsDisplay = true
@@ -1369,6 +1390,13 @@ class PoseDrawingView: NSView {
                 withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .bold),
                                  .foregroundColor: NSColor.systemCyan,
                                  .backgroundColor: NSColor.black.withAlphaComponent(0.7)])
+        }
+        if let swordTrackingStatus {
+            (swordTrackingStatus as NSString).draw(
+                at: CGPoint(x: 18, y: bounds.height - 28),
+                withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold),
+                                 .foregroundColor: swordTrack == nil ? NSColor.systemYellow : NSColor.systemGreen,
+                                 .backgroundColor: NSColor.black.withAlphaComponent(0.72)])
         }
 
         if let output = dynamicDetectorOutput {
