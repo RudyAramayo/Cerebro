@@ -209,6 +209,7 @@ final class CameraViewController: NSViewController {
     private let depthOpacitySlider = NSSlider(value: 0.45, minValue: 0, maxValue: 1, target: nil, action: nil)
     private var latestHumanObservations: [VNHumanObservation] = []
     private var lastSceneSnapshotUpdate: CFTimeInterval = 0
+    private var lastVisionProcessingUpdate: CFTimeInterval = 0
     private let reversePoseEstimator = ROBReverseCameraPoseEstimator()
     
     
@@ -540,6 +541,14 @@ extension CameraViewController: CameraManagerDelegate {
         // inference on its actor. This call never enters the motor loop.
         ROBMLXRuntime.shared.offerCameraSampleBuffer(sampleBuffer)
         ROBDynamicDetectorRegistry.shared.offer(sampleBuffer, source: .mainCamera)
+
+        // Keep the legacy Vision requests under the same user-selected
+        // analysis ceiling as MLX and the dynamic detector registry.
+        let processingFPS = ROBDynamicDetectorRegistry.shared.processingFramesPerSecond(for: .mainCamera)
+        guard processingFPS > 0 else { return }
+        let visionProcessingTime = CACurrentMediaTime()
+        guard visionProcessingTime - lastVisionProcessingUpdate >= 1 / processingFPS else { return }
+        lastVisionProcessingUpdate = visionProcessingTime
 
         //process samplebuffer here
         let humanRectanglesRequest = VNDetectHumanRectanglesRequest { request, error in

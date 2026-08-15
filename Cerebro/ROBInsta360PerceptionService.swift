@@ -19,16 +19,18 @@ import Vision
 
     public func offer(_ image: NSImage, capturedAt: Date) {
         guard ROBMLXRuntime.shared.insta360DetectionEnabled else { return }
-        // MLX has its own enable switch, actor isolation, and >=5 second gate.
+        let fps = ROBDynamicDetectorRegistry.shared.processingFramesPerSecond(for: .insta360)
+        guard fps > 0 else { return }
+        // MLX has its own enable switch, actor isolation, and in-flight gate.
         // Offering a frame never blocks this caller or forces a model download.
         if let ciImage = Self.ciImage(from: image) {
-            Task { await ROBMLXEngine.shared.offerVisionFrame(ciImage, source: "insta360-preview", minimumInterval: 8) }
+            Task { await ROBMLXEngine.shared.offerVisionFrame(ciImage, source: "insta360-preview", minimumInterval: 1 / fps) }
         }
 
         queue.async {
             guard ROBDynamicDetectorRegistry.shared.enabled("generic-objects", source: .insta360) else { return }
             let now = ProcessInfo.processInfo.systemUptime
-            guard !self.classificationInFlight, now - self.lastClassificationUptime >= 2 else { return }
+            guard !self.classificationInFlight, now - self.lastClassificationUptime >= 1 / fps else { return }
             self.classificationInFlight = true
             self.lastClassificationUptime = now
             guard let cgImage = Self.cgImage(from: image) else {

@@ -29,6 +29,19 @@ public struct ROBDetectorOutput: Sendable {
     private var lastRun: [ROBDetectorSource: TimeInterval] = [:]
     private var customModels: [(name: String, model: VNCoreMLModel)] = []
 
+    public func processingFramesPerSecond(for source: ROBDetectorSource) -> Double {
+        let key = "ROBDetector.processingFPS.\(source.rawValue)"
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: key) == nil { return source == .mainCamera ? 2 : 1 }
+        return max(0, min(10, defaults.double(forKey: key)))
+    }
+
+    public func setProcessingFramesPerSecond(_ fps: Double, for source: ROBDetectorSource) {
+        UserDefaults.standard.set(max(0, min(10, fps)), forKey: "ROBDetector.processingFPS.\(source.rawValue)")
+        NotificationCenter.default.post(name: .robDetectorSettingsDidChange, object: self,
+            userInfo: ["source": source, "processingFPSChanged": true])
+    }
+
     public var insta360AnalysisGeometry: ROBInsta360AnalysisGeometry {
         get { ROBInsta360AnalysisGeometry(rawValue: UserDefaults.standard.integer(forKey: "ROBDetector.insta360AnalysisGeometry")) ?? .stitchedPanorama }
         set {
@@ -74,9 +87,9 @@ public struct ROBDetectorOutput: Sendable {
         queue.async {
             let now = ProcessInfo.processInfo.systemUptime
             let geometry = source == .insta360 ? self.insta360AnalysisGeometry : .stitchedPanorama
-            // Six Vision passes are deliberately sampled more slowly so this
-            // diagnostic mode cannot starve robot control or stream decoding.
-            let minimumInterval = geometry == .sixSectors ? 1.0 : 0.5
+            let fps = self.processingFramesPerSecond(for: source)
+            guard fps > 0 else { return }
+            let minimumInterval = 1.0 / fps
             guard now - (self.lastRun[source] ?? 0) >= minimumInterval else { return }
             self.lastRun[source] = now
             let poseOn = self.enabled("body-pose", source: source)

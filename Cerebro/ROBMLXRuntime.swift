@@ -68,7 +68,8 @@ public actor ROBMLXEngine {
     private var generationLatency: TimeInterval?
     private var tokensPerSecond: Double?
     private var visionEnabled = false
-    private var lastVisionStart: TimeInterval = 0
+    private var lastVisionStart: [String: TimeInterval] = [:]
+    private var visionInFlight: Set<String> = []
     private var visionFrameCount: UInt64 = 0
     private var lastVisionLatency: TimeInterval?
     private var lastVisionObservation: String?
@@ -130,9 +131,13 @@ public actor ROBMLXEngine {
     public func offerVisionFrame(_ image: CIImage, source: String = "main-camera", minimumInterval: TimeInterval = 5) {
         guard visionEnabled else { return }
         let now = ProcessInfo.processInfo.systemUptime
-        guard now - lastVisionStart >= max(3, minimumInterval) else { return }
-        lastVisionStart = now
-        Task { await analyzeVisionFrame(image, source: source) }
+        guard !visionInFlight.contains(source), now - (lastVisionStart[source] ?? 0) >= minimumInterval else { return }
+        lastVisionStart[source] = now
+        visionInFlight.insert(source)
+        Task {
+            await analyzeVisionFrame(image, source: source)
+            visionInFlight.remove(source)
+        }
     }
 
     public func remember(_ text: String) async throws {
@@ -381,9 +386,11 @@ public final class ROBMLXRuntime: NSObject {
 
     public func offerCameraSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
         guard mainCameraDetectionEnabled else { return }
+        let fps = ROBDynamicDetectorRegistry.shared.processingFramesPerSecond(for: .mainCamera)
+        guard fps > 0 else { return }
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let image = CIImage(cvPixelBuffer: pixelBuffer)
-        Task { await ROBMLXEngine.shared.offerVisionFrame(image, source: "main-live-feed") }
+        Task { await ROBMLXEngine.shared.offerVisionFrame(image, source: "main-live-feed", minimumInterval: 1 / fps) }
     }
 
     public func setVisionEnabled(_ enabled: Bool) {

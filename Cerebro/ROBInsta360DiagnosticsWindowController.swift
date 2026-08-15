@@ -24,6 +24,9 @@ import UniformTypeIdentifiers
     private let instaObjectsToggle = NSButton(checkboxWithTitle: "360° object labels", target: nil, action: nil)
     private let addModelButton = NSButton(title: "Add Core ML Model…", target: nil, action: nil)
     private let analysisGeometryPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let mainFPSPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let instaFPSPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let processingRates: [Double] = [0, 0.25, 0.5, 1, 2, 5, 10]
 
     public init() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 980, height: 650),
@@ -128,11 +131,20 @@ import UniformTypeIdentifiers
         geometryNote.textColor = .secondaryLabelColor
         let geometryRow = NSStackView(views: [geometryLabel, analysisGeometryPopup, geometryNote])
         geometryRow.orientation = .horizontal; geometryRow.spacing = 8
+        for popup in [mainFPSPopup, instaFPSPopup] {
+            popup.addItems(withTitles: ["Off", "0.25 FPS", "0.5 FPS", "1 FPS", "2 FPS", "5 FPS", "10 FPS"])
+            popup.target = self; popup.action = #selector(processingFPSChanged(_:))
+        }
+        let rateNote = NSTextField(labelWithString: "Ceiling; slow MLX requests never overlap")
+        rateNote.textColor = .secondaryLabelColor
+        let rateRow = NSStackView(views: [NSTextField(labelWithString: "Main analysis:"), mainFPSPopup,
+                                          NSTextField(labelWithString: "Insta360 analysis:"), instaFPSPopup, rateNote])
+        rateRow.orientation = .horizontal; rateRow.spacing = 8
         let detectorRow = NSStackView(views: [mainPoseToggle, instaPoseToggle, mainObjectsToggle, instaObjectsToggle, addModelButton])
         detectorRow.orientation = .horizontal; detectorRow.spacing = 12
         let status = NSStackView(views: [stateLabel, NSView(), stabilizationToggle, restartButton])
         status.orientation = .horizontal
-        let stack = NSStackView(views: [heading, help, status, urlLabel, imageView, metricsLabel, modelRow, detectionRow, geometryRow, detectorRow, inferenceScroll])
+        let stack = NSStackView(views: [heading, help, status, urlLabel, imageView, metricsLabel, modelRow, detectionRow, rateRow, geometryRow, detectorRow, inferenceScroll])
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -151,6 +163,7 @@ import UniformTypeIdentifiers
             modelRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             modelProgress.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
             detectionRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            rateRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             geometryRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             detectorRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             inferenceScroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
@@ -187,6 +200,15 @@ import UniformTypeIdentifiers
         ROBDynamicDetectorRegistry.shared.insta360AnalysisGeometry =
             sender.indexOfSelectedItem == 1 ? .sixSectors : .stitchedPanorama
         detectionOverlay.output = nil
+    }
+    @objc private func processingFPSChanged(_ sender: NSPopUpButton) {
+        guard processingRates.indices.contains(sender.indexOfSelectedItem) else { return }
+        let source: ROBDetectorSource = sender === mainFPSPopup ? .mainCamera : .insta360
+        ROBDynamicDetectorRegistry.shared.setProcessingFramesPerSecond(
+            processingRates[sender.indexOfSelectedItem], for: source)
+        if processingRates[sender.indexOfSelectedItem] == 0, source == .insta360 {
+            detectionOverlay.output = nil
+        }
     }
     @objc private func detectorOutputChanged(_ notification: Notification) {
         guard let output = notification.userInfo?["output"] as? ROBDetectorOutput,
@@ -246,6 +268,8 @@ import UniformTypeIdentifiers
                 self.insta360DetectionToggle.state = runtime.insta360DetectionEnabled ? .on : .off
                 self.showInferenceToggle.state = runtime.showInferenceOutput ? .on : .off
                 let registry = ROBDynamicDetectorRegistry.shared
+                self.mainFPSPopup.selectItem(at: self.rateIndex(registry.processingFramesPerSecond(for: .mainCamera)))
+                self.instaFPSPopup.selectItem(at: self.rateIndex(registry.processingFramesPerSecond(for: .insta360)))
                 self.analysisGeometryPopup.selectItem(at: registry.insta360AnalysisGeometry.rawValue)
                 self.mainPoseToggle.state = registry.enabled("body-pose", source: .mainCamera) ? .on : .off
                 self.instaPoseToggle.state = registry.enabled("body-pose", source: .insta360) ? .on : .off
@@ -262,5 +286,9 @@ import UniformTypeIdentifiers
                 }
             }
         }
+    }
+
+    private func rateIndex(_ fps: Double) -> Int {
+        processingRates.enumerated().min(by: { abs($0.element - fps) < abs($1.element - fps) })?.offset ?? 0
     }
 }
