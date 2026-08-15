@@ -336,12 +336,43 @@ import UniformTypeIdentifiers
     }
 
     private func loadShowCatalog() {
-        let names = ["MakerFaireOpening", "OrbitusTenMinuteComedy", "GalacticSaberBattle", "ProgressiveSaberTraining"]
+        let names = ["MakerFaireOpening", "OrbitusTenMinuteComedy", "ROBJuniorMakerFaireComedy", "GalacticSaberBattle", "ProgressiveSaberTraining"]
         showCatalog = names.compactMap { name in
             guard let url = Bundle.main.url(forResource: name, withExtension: "robshow.json"),
                   let data = try? Data(contentsOf: url),
                   let show = try? ROBStageShowCodec.decode(data) else { return nil }
             return CatalogEntry(resourceName: name, show: show, data: data)
+        }
+        if let tenMinute = bundledShow(named: "OrbitusTenMinuteComedy"),
+           let actTwo = bundledShow(named: "OrbitusComedyActTwo"),
+           let actThree = bundledShow(named: "OrbitusComedyActThree") {
+            // The ten-minute closing is replaced by the extended-act endings.
+            // Keeping the acts as strict standalone resources makes them easy
+            // to validate while avoiding three drifting copies of act one.
+            let actOneCues = Array(tenMinute.cues.dropLast())
+            let twentyMinute = ROBStageShow(
+                showID: "orbitus-twenty-minute-comedy",
+                title: "ROB's Twenty-Minute Humans-in-the-Loop Comedy Show",
+                summary: "A family-friendly extended ROB set about robotics, makers, smart homes, modern technology, and humanity, with offline-safe authored punchlines.",
+                cues: actOneCues + actTwo.cues
+            )
+            let thirtyMinute = ROBStageShow(
+                showID: "orbitus-thirty-minute-ai-comedy",
+                title: "ROB's Thirty-Minute AI and Humanity Comedy Spectacular",
+                summary: "Three family-friendly acts parodying robotics, daily technology, rapid AI advancement, and humanity's ingenious contradictions.",
+                cues: actOneCues + actTwo.cues + actThree.cues
+            )
+            for (resourceName, show) in [
+                ("OrbitusTwentyMinuteComedy", twentyMinute),
+                ("OrbitusThirtyMinuteAIComedy", thirtyMinute)
+            ] {
+                if let data = try? ROBStageShowCodec.encode(show) {
+                    showCatalog.insert(
+                        CatalogEntry(resourceName: resourceName, show: show, data: data),
+                        at: min(showCatalog.count, resourceName.contains("Twenty") ? 2 : 3)
+                    )
+                }
+            }
         }
         if showCatalog.isEmpty,
            let data = try? ROBStageShowCodec.encode(ROBStageShowSamples.makerFaireOpening) {
@@ -352,6 +383,14 @@ import UniformTypeIdentifiers
             showTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
             loadSelectedShow(nil)
         }
+    }
+
+    private func bundledShow(named name: String) -> ROBStageShow? {
+        guard let url = Bundle.main.url(forResource: name, withExtension: "robshow.json"),
+              let data = try? Data(contentsOf: url) else {
+            return nil
+        }
+        return try? ROBStageShowCodec.decode(data)
     }
 
     private func observeCoordinator() {

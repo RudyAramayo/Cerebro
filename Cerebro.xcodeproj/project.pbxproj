@@ -95,6 +95,9 @@
 		D4E700042F00000100000001 /* StageShows/OrbitusTenMinuteComedy.robshow.json in Resources */ = {isa = PBXBuildFile; fileRef = D4E700032F00000100000001 /* StageShows/OrbitusTenMinuteComedy.robshow.json */; };
 		D4E700062F00000100000001 /* StageShows/GalacticSaberBattle.robshow.json in Resources */ = {isa = PBXBuildFile; fileRef = D4E700052F00000100000001 /* StageShows/GalacticSaberBattle.robshow.json */; };
 		D4E700082F00000100000001 /* StageShows/ProgressiveSaberTraining.robshow.json in Resources */ = {isa = PBXBuildFile; fileRef = D4E700072F00000100000001 /* StageShows/ProgressiveSaberTraining.robshow.json */; };
+		D4E7000A2F00000100000001 /* StageShows/OrbitusComedyActTwo.robshow.json in Resources */ = {isa = PBXBuildFile; fileRef = D4E700092F00000100000001 /* StageShows/OrbitusComedyActTwo.robshow.json */; };
+		D4E7000C2F00000100000001 /* StageShows/OrbitusComedyActThree.robshow.json in Resources */ = {isa = PBXBuildFile; fileRef = D4E7000B2F00000100000001 /* StageShows/OrbitusComedyActThree.robshow.json */; };
+		D4E7000E2F00000100000001 /* StageShows/ROBJuniorMakerFaireComedy.robshow.json in Resources */ = {isa = PBXBuildFile; fileRef = D4E7000D2F00000100000001 /* StageShows/ROBJuniorMakerFaireComedy.robshow.json */; };
 		D4E800022F00000100000001 /* ROBLocalImprovisationProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E800012F00000100000001 /* ROBLocalImprovisationProtocol.swift */; };
 		D4E900022F00000100000001 /* ROBLlamaCppImprovisationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E900012F00000100000001 /* ROBLlamaCppImprovisationProvider.swift */; };
 		D4EA00022F00000100000001 /* ROBMLXRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4EA00012F00000100000001 /* ROBMLXRuntime.swift */; };
@@ -254,6 +257,9 @@
 		D4E700032F00000100000001 /* StageShows/OrbitusTenMinuteComedy.robshow.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = StageShows/OrbitusTenMinuteComedy.robshow.json; sourceTree = "<group>"; };
 		D4E700052F00000100000001 /* StageShows/GalacticSaberBattle.robshow.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = StageShows/GalacticSaberBattle.robshow.json; sourceTree = "<group>"; };
 		D4E700072F00000100000001 /* StageShows/ProgressiveSaberTraining.robshow.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = StageShows/ProgressiveSaberTraining.robshow.json; sourceTree = "<group>"; };
+		D4E700092F00000100000001 /* StageShows/OrbitusComedyActTwo.robshow.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = StageShows/OrbitusComedyActTwo.robshow.json; sourceTree = "<group>"; };
+		D4E7000B2F00000100000001 /* StageShows/OrbitusComedyActThree.robshow.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = StageShows/OrbitusComedyActThree.robshow.json; sourceTree = "<group>"; };
+		D4E7000D2F00000100000001 /* StageShows/ROBJuniorMakerFaireComedy.robshow.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = StageShows/ROBJuniorMakerFaireComedy.robshow.json; sourceTree = "<group>"; };
 		D4E800012F00000100000001 /* ROBLocalImprovisationProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBLocalImprovisationProtocol.swift; sourceTree = "<group>"; };
 		D4E900012F00000100000001 /* ROBLlamaCppImprovisationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBLlamaCppImprovisationProvider.swift; sourceTree = "<group>"; };
 		D4EA00012F00000100000001 /* ROBMLXRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBMLXRuntime.swift; sourceTree = "<group>"; };
@@ -419,6 +425,9 @@
 				D4E700032F00000100000001 /* StageShows/OrbitusTenMinuteComedy.robshow.json */,
 				D4E700052F00000100000001 /* StageShows/GalacticSaberBattle.robshow.json */,
 				D4E700072F00000100000001 /* StageShows/ProgressiveSaberTraining.robshow.json */,
+				D4E700092F00000100000001 /* StageShows/OrbitusComedyActTwo.robshow.json */,
+				D4E7000B2F00000100000001 /* StageShows/OrbitusComedyActThree.robshow.json */,
+				D4E7000D2F00000100000001 /* StageShows/ROBJuniorMakerFaireComedy.robshow.json */,
 				D4EB00012F00000100000001 /* ROBSaberChoreography.swift */,
 				D4EC00012F00000100000001 /* ROBAmberGatewayClient.swift */,
 				D4E800012F00000100000001 /* ROBLocalImprovisationProtocol.swift */,
@@ -633,6 +642,9 @@
 				D4E700042F00000100000001 /* StageShows/OrbitusTenMinuteComedy.robshow.json in Resources */,
 				D4E700062F00000100000001 /* StageShows/GalacticSaberBattle.robshow.json in Resources */,
 				D4E700082F00000100000001 /* StageShows/ProgressiveSaberTraining.robshow.json in Resources */,
+				D4E7000A2F00000100000001 /* StageShows/OrbitusComedyActTwo.robshow.json in Resources */,
+				D4E7000C2F00000100000001 /* StageShows/OrbitusComedyActThree.robshow.json in Resources */,
+				D4E7000E2F00000100000001 /* StageShows/ROBJuniorMakerFaireComedy.robshow.json in Resources */,
 				D4AA3D7A2AC9F4AB007DC656 /* StartTextInput.scpt in Resources */,
 				D4B83AD72E754ACA006B2863 /* lcm.py in Resources */,
 				D4A38F601FFC06CF00092A46 /* dictation_start.scpt in Resources */,

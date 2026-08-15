@@ -1230,7 +1230,7 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
                        cueID:(NSString *)cueID
 {
     __weak ROBStageShowCoordinator *weakCoordinator = coordinator;
-    [self.speechBox sayIt:text completion:^(BOOL finished) {
+    [self.speechBox sayStageShowText:text completion:^(BOOL finished) {
         ROBStageShowCoordinator *strongCoordinator = weakCoordinator;
         if (strongCoordinator == nil) {
             return;

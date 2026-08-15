@@ -43,6 +43,9 @@
 - (void) lostSightOfPerson:(NSString*)userID;
 - (void) sayIt:(NSString *)stringToSpeak;
 - (void)sayIt:(NSString *)stringToSpeak completion:(void (^ _Nullable)(BOOL finished))completion;
+/// Stage delivery keeps normal ROB speech responsive while adding a small
+/// punctuation-aware pause between sentences and before the next show cue.
+- (void)sayStageShowText:(NSString *)stringToSpeak completion:(void (^ _Nullable)(BOOL finished))completion;
 - (void) stopIt:(id)sender;
 - (void) setOutputLanguage:(NSString *)language;
 - (void) startRecognizer;

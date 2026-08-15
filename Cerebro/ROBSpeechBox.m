@@ -786,6 +786,47 @@
         NSLog(@"Have started to say: %@", stringToSpeak);
     });
 }
+
+- (void)sayStageShowText:(NSString *)stringToSpeak completion:(void (^)(BOOL finished))completion
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSString *trimmed = [stringToSpeak stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if (trimmed.length == 0) {
+            self.isSpeaking = false;
+            if (completion != nil) {
+                completion(NO);
+            }
+            return;
+        }
+
+        NSMutableArray<NSString *> *sentences = [NSMutableArray array];
+        [trimmed enumerateSubstringsInRange:NSMakeRange(0, trimmed.length)
+                                   options:NSStringEnumerationBySentences
+                                usingBlock:^(NSString *substring, NSRange substringRange, NSRange enclosingRange, BOOL *stop) {
+            NSString *sentence = [substring stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+            if (sentence.length > 0) {
+                [sentences addObject:sentence];
+            }
+        }];
+        if (sentences.count == 0) {
+            [sentences addObject:trimmed];
+        }
+
+        self.isSpeaking = true;
+        [sentences enumerateObjectsUsingBlock:^(NSString *sentence, NSUInteger index, BOOL *stop) {
+            AVSpeechUtterance *utterance = [AVSpeechUtterance speechUtteranceWithString:sentence];
+            utterance.voice = self.robsDefaultVoice;
+            // A third of a second is perceptible enough for a punchline or
+            // explanation to land without making a live show feel sluggish.
+            utterance.postUtteranceDelay = index + 1 == sentences.count ? 0.18 : 0.34;
+            if (index + 1 == sentences.count && completion != nil) {
+                [self.utteranceCompletions setObject:[completion copy] forKey:utterance];
+            }
+            [self.avSpeechSynthesizer speakUtterance:utterance];
+        }];
+        NSLog(@"Queued %lu paced stage-show sentence(s)", (unsigned long)sentences.count);
+    });
+}
 - (void)handlePersonalVoiceAccess {
     AVSpeechSynthesisPersonalVoiceAuthorizationStatus status = [AVSpeechSynthesizer personalVoiceAuthorizationStatus];
 
