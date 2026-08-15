@@ -186,6 +186,134 @@ private final class ROBDepthPointCloudRenderer {
     }
 }
 
+private struct ROBSwordTrack {
+    let grip: CGPoint
+    let tip: CGPoint
+    let confidence: Double
+}
+
+/// A low-latency geometric tracker for elongated training implements. It uses
+/// the latest 2D wrist locations to reject unrelated edges, then smooths the
+/// blade axis over time. Only one contour request may be in flight.
+private final class ROBSwordTracker {
+    private let queue = DispatchQueue(label: "com.orbitusrobotics.cerebro.sword-tracker", qos: .userInteractive)
+    private let lock = NSLock()
+    private var inFlight = false
+    private var lastAdmission: CFTimeInterval = 0
+    private var previous: ROBSwordTrack?
+
+    func offer(_ sampleBuffer: CMSampleBuffer, wrists: [CGPoint], maximumFPS: Double,
+               completion: @escaping (ROBSwordTrack?) -> Void) {
+        let now = CACurrentMediaTime()
+        lock.lock()
+        guard !inFlight, maximumFPS > 0, now - lastAdmission >= 1 / maximumFPS else {
+            lock.unlock(); return
+        }
+        inFlight = true; lastAdmission = now; lock.unlock()
+        queue.async { [weak self] in
+            guard let self else { return }
+            defer { self.lock.lock(); self.inFlight = false; self.lock.unlock() }
+            autoreleasepool {
+                let request = VNDetectContoursRequest()
+                request.contrastAdjustment = 1.5
+                request.detectsDarkOnLight = true
+                request.maximumImageDimension = 320
+                do {
+                    try VNImageRequestHandler(cmSampleBuffer: sampleBuffer, options: [:]).perform([request])
+                    let track = request.results?.first.flatMap { self.bestTrack(in: $0, wrists: wrists) }
+                    self.previous = track
+                    DispatchQueue.main.async { completion(track) }
+                } catch {
+                    DispatchQueue.main.async { completion(nil) }
+                }
+            }
+        }
+    }
+
+    func reset() {
+        queue.async { self.previous = nil }
+    }
+
+    private func bestTrack(in observation: VNContoursObservation, wrists: [CGPoint]) -> ROBSwordTrack? {
+        guard !wrists.isEmpty else { return nil }
+        var best: (track: ROBSwordTrack, score: CGFloat)?
+        for contour in observation.topLevelContours {
+            let points = Self.points(in: contour.normalizedPath)
+            guard points.count >= 5, let axis = Self.principalAxis(points) else { continue }
+            let length = Self.distance(axis.0, axis.1)
+            let bounds = contour.normalizedPath.boundingBox
+            let thickness = max(0.002, min(bounds.width, bounds.height))
+            let elongation = length / thickness
+            guard length >= 0.10, length <= 0.85, elongation >= 4 else { continue }
+            let d0 = wrists.map { Self.distance($0, axis.0) }.min() ?? 1
+            let d1 = wrists.map { Self.distance($0, axis.1) }.min() ?? 1
+            let grip = d0 <= d1 ? axis.0 : axis.1
+            let tip = d0 <= d1 ? axis.1 : axis.0
+            let wristDistance = min(d0, d1)
+            // Wrist pose initializes/reacquires the track. Once locked, the
+            // previous grip can carry fast motion between slower body-pose
+            // updates without letting unrelated scene edges take over.
+            let continuityDistance = previous.map { min(Self.distance($0.grip, axis.0), Self.distance($0.grip, axis.1)) } ?? 1
+            guard wristDistance <= 0.22 || continuityDistance <= 0.14 else { continue }
+            var score = min(1, (elongation - 3) / 12) * 0.35 + min(1, length / 0.45) * 0.35
+            score += max(0, 1 - wristDistance / 0.22) * 0.30
+            if let previous {
+                let direct = Self.distance(previous.grip, grip) + Self.distance(previous.tip, tip)
+                score += max(0, 1 - direct / 0.5) * 0.25
+                score += max(0, 1 - continuityDistance / 0.14) * 0.20
+            }
+            let candidate = ROBSwordTrack(grip: grip, tip: tip, confidence: Double(min(0.99, score)))
+            if best == nil || score > best!.score { best = (candidate, score) }
+        }
+        guard var track = best?.track else { return nil }
+        if let previous {
+            let alpha: CGFloat = 0.62
+            track = ROBSwordTrack(
+                grip: CGPoint(x: previous.grip.x * (1 - alpha) + track.grip.x * alpha,
+                              y: previous.grip.y * (1 - alpha) + track.grip.y * alpha),
+                tip: CGPoint(x: previous.tip.x * (1 - alpha) + track.tip.x * alpha,
+                             y: previous.tip.y * (1 - alpha) + track.tip.y * alpha),
+                confidence: track.confidence)
+        }
+        return track
+    }
+
+    private static func points(in path: CGPath) -> [CGPoint] {
+        var result: [CGPoint] = []
+        path.applyWithBlock { element in
+            let count: Int
+            switch element.pointee.type {
+            case .moveToPoint, .addLineToPoint: count = 1
+            case .addQuadCurveToPoint: count = 2
+            case .addCurveToPoint: count = 3
+            case .closeSubpath: count = 0
+            @unknown default: count = 0
+            }
+            for index in 0..<count { result.append(element.pointee.points[index]) }
+        }
+        return result
+    }
+
+    private static func principalAxis(_ points: [CGPoint]) -> (CGPoint, CGPoint)? {
+        let count = CGFloat(points.count)
+        let center = CGPoint(x: points.reduce(0) { $0 + $1.x } / count,
+                             y: points.reduce(0) { $0 + $1.y } / count)
+        var xx: CGFloat = 0, xy: CGFloat = 0, yy: CGFloat = 0
+        for point in points {
+            let x = point.x - center.x, y = point.y - center.y
+            xx += x * x; xy += x * y; yy += y * y
+        }
+        let angle = 0.5 * atan2(2 * xy, xx - yy)
+        let direction = CGPoint(x: cos(angle), y: sin(angle))
+        let projections = points.map { ($0.x - center.x) * direction.x + ($0.y - center.y) * direction.y }
+        guard let low = projections.min(), let high = projections.max(), high > low else { return nil }
+        return (CGPoint(x: center.x + low * direction.x, y: center.y + low * direction.y),
+                CGPoint(x: center.x + high * direction.x, y: center.y + high * direction.y))
+    }
+
+    private static func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat { hypot(a.x - b.x, a.y - b.y) }
+}
+
 final class CameraViewController: NSViewController {
     private var cameraManager: CameraManagerProtocol?
     private var videoServer: ROBVideoServer?
@@ -220,6 +348,14 @@ final class CameraViewController: NSViewController {
     private let pose3DRates: [Double] = [0.1, 0.25, 0.5, 1, 2]
     private let pose3DToggle = NSButton(checkboxWithTitle: "Render 3D pose", target: nil, action: nil)
     private let pose3DFPSPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private static let swordTrackerEnabledKey = "ROBCameraSwordTrackerEnabled"
+    private static let swordTrackerFPSKey = "ROBCameraSwordTrackerFPS"
+    private let swordTrackerRates: [Double] = [5, 10, 15, 30, 60]
+    private let swordTrackerToggle = NSButton(checkboxWithTitle: "Track training sword", target: nil, action: nil)
+    private let swordTrackerFPSPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let swordTracker = ROBSwordTracker()
+    private let swordWristLock = NSLock()
+    private var swordWristAnchors: [CGPoint] = []
     private lazy var humanBodyPose3DRequest: VNDetectHumanBodyPose3DRequest = {
         VNDetectHumanBodyPose3DRequest { [weak self] request, error in
             guard error == nil, let observation = (request.results as? [VNHumanBodyPose3DObservation])?.first else { return }
@@ -235,6 +371,16 @@ final class CameraViewController: NSViewController {
     private var pose3DFPS: Double {
         let defaults = UserDefaults.standard
         return defaults.object(forKey: Self.pose3DFPSKey) == nil ? 0.5 : max(0.1, min(2, defaults.double(forKey: Self.pose3DFPSKey)))
+    }
+
+    private var swordTrackerEnabled: Bool {
+        let defaults = UserDefaults.standard
+        return defaults.object(forKey: Self.swordTrackerEnabledKey) == nil || defaults.bool(forKey: Self.swordTrackerEnabledKey)
+    }
+
+    private var swordTrackerFPS: Double {
+        let defaults = UserDefaults.standard
+        return defaults.object(forKey: Self.swordTrackerFPSKey) == nil ? 30 : max(5, min(60, defaults.double(forKey: Self.swordTrackerFPSKey)))
     }
     
     
@@ -270,6 +416,7 @@ final class CameraViewController: NSViewController {
         setupSceneKitView()
         setupDepthOverlay()
         setup3DPoseControls()
+        setupSwordTrackerControls()
     }
     
     @IBAction func toggleCamera(_ sender: Any?) {
@@ -505,6 +652,45 @@ extension CameraViewController: CameraManagerDelegate {
         }
     }
 
+    private func setupSwordTrackerControls() {
+        swordTrackerToggle.state = swordTrackerEnabled ? .on : .off
+        swordTrackerToggle.target = self
+        swordTrackerToggle.action = #selector(swordTrackerSettingChanged(_:))
+        swordTrackerToggle.translatesAutoresizingMaskIntoConstraints = false
+        swordTrackerFPSPopup.addItems(withTitles: ["5 FPS", "10 FPS", "15 FPS", "30 FPS", "60 FPS"])
+        let selected = swordTrackerRates.enumerated().min(by: { abs($0.element - swordTrackerFPS) < abs($1.element - swordTrackerFPS) })?.offset ?? 3
+        swordTrackerFPSPopup.selectItem(at: selected)
+        swordTrackerFPSPopup.target = self
+        swordTrackerFPSPopup.action = #selector(swordTrackerSettingChanged(_:))
+        swordTrackerFPSPopup.translatesAutoresizingMaskIntoConstraints = false
+        swordTrackerFPSPopup.isEnabled = swordTrackerEnabled
+        swordTrackerToggle.toolTip = "Tracks elongated high-contrast training implements near detected wrists."
+        swordTrackerFPSPopup.toolTip = "Maximum admission rate; actual speed is limited by camera FPS and contour processing time."
+        view.addSubview(swordTrackerToggle, positioned: .above, relativeTo: nil)
+        view.addSubview(swordTrackerFPSPopup, positioned: .above, relativeTo: nil)
+        NSLayoutConstraint.activate([
+            swordTrackerToggle.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 18),
+            swordTrackerToggle.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -84),
+            swordTrackerFPSPopup.leadingAnchor.constraint(equalTo: swordTrackerToggle.trailingAnchor, constant: 10),
+            swordTrackerFPSPopup.centerYAnchor.constraint(equalTo: swordTrackerToggle.centerYAnchor)
+        ])
+    }
+
+    @objc private func swordTrackerSettingChanged(_ sender: Any?) {
+        if sender as AnyObject === swordTrackerToggle {
+            let enabled = swordTrackerToggle.state == .on
+            UserDefaults.standard.set(enabled, forKey: Self.swordTrackerEnabledKey)
+            swordTrackerFPSPopup.isEnabled = enabled
+            if !enabled {
+                swordTracker.reset()
+                poseView.swordTrack = nil
+                poseView.needsDisplay = true
+            }
+        } else if swordTrackerRates.indices.contains(swordTrackerFPSPopup.indexOfSelectedItem) {
+            UserDefaults.standard.set(swordTrackerRates[swordTrackerFPSPopup.indexOfSelectedItem], forKey: Self.swordTrackerFPSKey)
+        }
+    }
+
     private func setupDepthOverlay() {
         depthOverlayView.imageScaling = .scaleProportionallyUpOrDown
         depthOverlayView.alphaValue = depthOpacitySlider.doubleValue
@@ -607,6 +793,13 @@ extension CameraViewController: CameraManagerDelegate {
         // inference on its actor. This call never enters the motor loop.
         ROBMLXRuntime.shared.offerCameraSampleBuffer(sampleBuffer)
         ROBDynamicDetectorRegistry.shared.offer(sampleBuffer, source: .mainCamera)
+        if swordTrackerEnabled {
+            swordWristLock.lock(); let wrists = swordWristAnchors; swordWristLock.unlock()
+            swordTracker.offer(sampleBuffer, wrists: wrists, maximumFPS: swordTrackerFPS) { [weak self] track in
+                self?.poseView.swordTrack = track
+                self?.poseView.needsDisplay = true
+            }
+        }
 
         // Keep the legacy Vision requests under the same user-selected
         // analysis ceiling as MLX and the dynamic detector registry.
@@ -645,6 +838,14 @@ extension CameraViewController: CameraManagerDelegate {
         
         let humanBodyPoseRequest = VNDetectHumanBodyPoseRequest { request, error in
             let observations = (request.results as? [VNHumanBodyPoseObservation]) ?? []
+            let wrists = observations.flatMap { observation -> [CGPoint] in
+                [VNHumanBodyPoseObservation.JointName.leftWrist,
+                 VNHumanBodyPoseObservation.JointName.rightWrist].compactMap { name in
+                    guard let point = try? observation.recognizedPoint(name), point.confidence >= 0.25 else { return nil }
+                    return point.location
+                }
+            }
+            self.swordWristLock.lock(); self.swordWristAnchors = wrists; self.swordWristLock.unlock()
             DispatchQueue.main.async {
                 self.poseView.bodyPose_observations = observations
                 self.poseView.setNeedsDisplay(self.poseView.bounds)
@@ -987,6 +1188,7 @@ class PoseDrawingView: NSView {
     var clearScreenTimer: Timer = Timer()
     var kClearScreenTimeInterval = 1.0
     var dynamicDetectorOutput: ROBDetectorOutput?
+    fileprivate var swordTrack: ROBSwordTrack?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1030,6 +1232,7 @@ class PoseDrawingView: NSView {
         self.humanHandPose_observations = []
         self.humanRect_observations = []
         self.bodyPose_observations = []
+        self.swordTrack = nil
         self.setNeedsDisplay(self.bounds)
     }
     
@@ -1145,6 +1348,27 @@ class PoseDrawingView: NSView {
                 let rect = NSRect(x: fixed_point.x - 5, y: fixed_point.y - 5, width: 10, height: 10)
                 context.fillEllipse(in: rect)
             }
+        }
+
+        if let swordTrack {
+            let grip = CGPoint(x: swordTrack.grip.x * bounds.width, y: swordTrack.grip.y * bounds.height)
+            let tip = CGPoint(x: swordTrack.tip.x * bounds.width, y: swordTrack.tip.y * bounds.height)
+            context.saveGState()
+            context.setShadow(offset: .zero, blur: 5, color: NSColor.black.cgColor)
+            context.setStrokeColor(NSColor.systemCyan.cgColor)
+            context.setLineWidth(7)
+            context.setLineCap(.round)
+            context.move(to: grip); context.addLine(to: tip); context.strokePath()
+            context.setFillColor(NSColor.systemOrange.cgColor)
+            context.fillEllipse(in: CGRect(x: grip.x - 7, y: grip.y - 7, width: 14, height: 14))
+            context.setFillColor(NSColor.systemCyan.cgColor)
+            context.fillEllipse(in: CGRect(x: tip.x - 5, y: tip.y - 5, width: 10, height: 10))
+            context.restoreGState()
+            ("sword \(Int(swordTrack.confidence * 100))%" as NSString).draw(
+                at: CGPoint(x: tip.x + 8, y: tip.y + 8),
+                withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .bold),
+                                 .foregroundColor: NSColor.systemCyan,
+                                 .backgroundColor: NSColor.black.withAlphaComponent(0.7)])
         }
 
         if let output = dynamicDetectorOutput {
