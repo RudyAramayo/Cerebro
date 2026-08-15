@@ -11,6 +11,7 @@ import Vision
     private let queue = DispatchQueue(label: "com.orbitusrobotics.cerebro.insta360-perception", qos: .utility)
     private var lastClassificationUptime: TimeInterval = 0
     private var classificationInFlight = false
+    private var lastOfferUptime: TimeInterval = 0
     public private(set) var lastObservationDate: Date?
     public private(set) var lastLabels: [String] = []
     public private(set) var lastError: String?
@@ -21,22 +22,21 @@ import Vision
         guard ROBMLXRuntime.shared.insta360DetectionEnabled else { return }
         let fps = ROBDynamicDetectorRegistry.shared.processingFramesPerSecond(for: .insta360)
         guard fps > 0 else { return }
-        // MLX has its own enable switch, actor isolation, and in-flight gate.
-        // Offering a frame never blocks this caller or forces a model download.
-        if let ciImage = Self.ciImage(from: image) {
-            Task { await ROBMLXEngine.shared.offerVisionFrame(ciImage, source: "insta360-preview", minimumInterval: 1 / fps) }
-        }
-
         queue.async {
-            guard ROBDynamicDetectorRegistry.shared.enabled("generic-objects", source: .insta360) else { return }
             let now = ProcessInfo.processInfo.systemUptime
-            guard !self.classificationInFlight, now - self.lastClassificationUptime >= 1 / fps else { return }
+            guard now - self.lastOfferUptime >= 1 / fps else { return }
+            self.lastOfferUptime = now
+            guard let cgImage = Self.cgImage(from: image) else { return }
+            // Conversion occurs only for an admitted frame and never on AppKit's
+            // main thread. MLX retains its own actor/in-flight protection.
+            Task { await ROBMLXEngine.shared.offerVisionFrame(
+                CIImage(cgImage: cgImage), source: "insta360-preview", minimumInterval: 1 / fps) }
+
+            guard ROBDynamicDetectorRegistry.shared.enabled("generic-objects", source: .insta360),
+                  !self.classificationInFlight,
+                  now - self.lastClassificationUptime >= 1 / fps else { return }
             self.classificationInFlight = true
             self.lastClassificationUptime = now
-            guard let cgImage = Self.cgImage(from: image) else {
-                self.classificationInFlight = false
-                return
-            }
             let request = VNClassifyImageRequest()
             do {
                 try VNImageRequestHandler(cgImage: cgImage, orientation: .up).perform([request])

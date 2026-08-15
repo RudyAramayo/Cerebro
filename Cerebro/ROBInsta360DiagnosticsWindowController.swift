@@ -54,17 +54,18 @@ import UniformTypeIdentifiers
 
     public override func showWindow(_ sender: Any?) {
         super.showWindow(sender)
+        service.setDiagnosticsPreviewVisible(true)
         window?.makeKeyAndOrderFront(sender)
         refresh()
+    }
+
+    public func windowWillClose(_ notification: Notification) {
+        service.setDiagnosticsPreviewVisible(false)
     }
 
     private func configure(_ window: NSWindow) {
         let content = NSView()
         window.contentView = content
-        let heading = NSTextField(labelWithString: "Background camera service")
-        heading.font = .boldSystemFont(ofSize: 17)
-        let help = NSTextField(wrappingLabelWithString: "Cerebro owns the Pro 2 and receives this stream without the Insta360 Pro app. This window only observes the already-running background service; closing it does not interrupt robot vision.")
-        help.textColor = .secondaryLabelColor
         stateLabel.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .medium)
         urlLabel.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
         urlLabel.textColor = .secondaryLabelColor
@@ -142,9 +143,38 @@ import UniformTypeIdentifiers
         rateRow.orientation = .horizontal; rateRow.spacing = 8
         let detectorRow = NSStackView(views: [mainPoseToggle, instaPoseToggle, mainObjectsToggle, instaObjectsToggle, addModelButton])
         detectorRow.orientation = .horizontal; detectorRow.spacing = 12
-        let status = NSStackView(views: [stateLabel, NSView(), stabilizationToggle, restartButton])
-        status.orientation = .horizontal
-        let stack = NSStackView(views: [heading, help, status, urlLabel, imageView, metricsLabel, modelRow, detectionRow, rateRow, geometryRow, detectorRow, inferenceScroll])
+        let previewStatus = NSStackView(views: [stateLabel, urlLabel])
+        previewStatus.orientation = .vertical
+        previewStatus.alignment = .leading
+        previewStatus.spacing = 3
+        let statusFooter = NSStackView(views: [previewStatus, NSView(), stabilizationToggle, restartButton])
+        statusFooter.orientation = .horizontal
+        statusFooter.alignment = .centerY
+        statusFooter.spacing = 12
+
+        let analysisOptions = NSStackView(views: [detectionRow, rateRow, geometryRow, detectorRow])
+        analysisOptions.translatesAutoresizingMaskIntoConstraints = false
+        analysisOptions.orientation = .vertical
+        analysisOptions.alignment = .leading
+        analysisOptions.spacing = 8
+        let analysisBox = NSBox()
+        analysisBox.title = "Analysis Options"
+        analysisBox.boxType = .primary
+        analysisBox.contentView = analysisOptions
+
+        let mlxOptions = NSStackView(views: [modelRow, inferenceScroll])
+        mlxOptions.translatesAutoresizingMaskIntoConstraints = false
+        mlxOptions.orientation = .vertical
+        mlxOptions.alignment = .leading
+        mlxOptions.spacing = 8
+        let mlxBox = NSBox()
+        mlxBox.title = "MLX Status and Output"
+        mlxBox.boxType = .primary
+        mlxBox.contentView = mlxOptions
+
+        // The video is intentionally first and touches the top content margin.
+        // Status and configuration no longer reduce its upper viewing area.
+        let stack = NSStackView(views: [imageView, metricsLabel, analysisBox, mlxBox, statusFooter])
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -156,18 +186,20 @@ import UniformTypeIdentifiers
             stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
             stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),
             stack.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -14),
-            status.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            urlLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             imageView.widthAnchor.constraint(equalTo: stack.widthAnchor),
             imageView.heightAnchor.constraint(greaterThanOrEqualToConstant: 300),
-            modelRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            statusFooter.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            previewStatus.widthAnchor.constraint(greaterThanOrEqualToConstant: 360),
+            analysisBox.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            mlxBox.widthAnchor.constraint(equalTo: stack.widthAnchor),
             modelProgress.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
-            detectionRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            rateRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            geometryRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            detectorRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            inferenceScroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            inferenceScroll.heightAnchor.constraint(equalToConstant: 100)
+            detectionRow.widthAnchor.constraint(equalTo: analysisOptions.widthAnchor),
+            rateRow.widthAnchor.constraint(equalTo: analysisOptions.widthAnchor),
+            geometryRow.widthAnchor.constraint(equalTo: analysisOptions.widthAnchor),
+            detectorRow.widthAnchor.constraint(equalTo: analysisOptions.widthAnchor),
+            modelRow.widthAnchor.constraint(equalTo: mlxOptions.widthAnchor),
+            inferenceScroll.widthAnchor.constraint(equalTo: mlxOptions.widthAnchor),
+            inferenceScroll.heightAnchor.constraint(equalToConstant: 82)
         ])
     }
 
@@ -182,6 +214,7 @@ import UniformTypeIdentifiers
         runtime.mainCameraDetectionEnabled = mainCameraDetectionToggle.state == .on
         runtime.insta360DetectionEnabled = insta360DetectionToggle.state == .on
         runtime.showInferenceOutput = showInferenceToggle.state == .on
+        service.refreshDecoderDemand()
         refreshMLX()
     }
     @objc private func detectorSettingChanged(_ sender: NSButton) {
@@ -195,6 +228,7 @@ import UniformTypeIdentifiers
         } else if sender === instaObjectsToggle {
             registry.setEnabled(sender.state == .on, detector: "generic-objects", source: .insta360)
         }
+        service.refreshDecoderDemand()
     }
     @objc private func analysisGeometryChanged(_ sender: NSPopUpButton) {
         ROBDynamicDetectorRegistry.shared.insta360AnalysisGeometry =
@@ -206,6 +240,7 @@ import UniformTypeIdentifiers
         let source: ROBDetectorSource = sender === mainFPSPopup ? .mainCamera : .insta360
         ROBDynamicDetectorRegistry.shared.setProcessingFramesPerSecond(
             processingRates[sender.indexOfSelectedItem], for: source)
+        if source == .insta360 { service.refreshDecoderDemand() }
         if processingRates[sender.indexOfSelectedItem] == 0, source == .insta360 {
             detectionOverlay.output = nil
         }

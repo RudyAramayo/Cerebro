@@ -210,6 +210,9 @@ final class CameraViewController: NSViewController {
     private var latestHumanObservations: [VNHumanObservation] = []
     private var lastSceneSnapshotUpdate: CFTimeInterval = 0
     private var lastVisionProcessingUpdate: CFTimeInterval = 0
+    private let visionAnalysisQueue = DispatchQueue(label: "com.orbitusrobotics.cerebro.legacy-vision", qos: .utility)
+    private let visionAdmissionLock = NSLock()
+    private var visionAnalysisInFlight = false
     private let reversePoseEstimator = ROBReverseCameraPoseEstimator()
     
     
@@ -550,6 +553,21 @@ extension CameraViewController: CameraManagerDelegate {
         guard visionProcessingTime - lastVisionProcessingUpdate >= 1 / processingFPS else { return }
         lastVisionProcessingUpdate = visionProcessingTime
 
+        visionAdmissionLock.lock()
+        guard !visionAnalysisInFlight else { visionAdmissionLock.unlock(); return }
+        visionAnalysisInFlight = true
+        visionAdmissionLock.unlock()
+
+        // Vision can take longer than the requested sampling interval. Never
+        // execute it on the camera callback or queue more than one analysis.
+        visionAnalysisQueue.async { [weak self] in
+            guard let self else { return }
+            defer {
+                self.visionAdmissionLock.lock()
+                self.visionAnalysisInFlight = false
+                self.visionAdmissionLock.unlock()
+            }
+
         //process samplebuffer here
         let humanRectanglesRequest = VNDetectHumanRectanglesRequest { request, error in
             let observations = (request.results as? [VNHumanObservation]) ?? []
@@ -765,6 +783,7 @@ extension CameraViewController: CameraManagerDelegate {
             requests.append(calibrationBarcodeRequest)
         }
         try? imageRequestHandler.perform(requests)
+        }
     }
 
     func cameraManager(

@@ -27,6 +27,8 @@ public struct ROBDetectorOutput: Sendable {
     public static let shared = ROBDynamicDetectorRegistry()
     private let queue = DispatchQueue(label: "com.orbitusrobotics.cerebro.detectors", qos: .utility)
     private var lastRun: [ROBDetectorSource: TimeInterval] = [:]
+    private let admissionLock = NSLock()
+    private var lastAdmission: [ROBDetectorSource: TimeInterval] = [:]
     private var customModels: [(name: String, model: VNCoreMLModel)] = []
 
     public func processingFramesPerSecond(for source: ROBDetectorSource) -> Double {
@@ -71,27 +73,39 @@ public struct ROBDetectorOutput: Sendable {
     }
 
     public func offer(_ image: NSImage, source: ROBDetectorSource, capturedAt: Date = Date()) {
-        guard let cgImage = Self.cgImage(image) else { return }
-        offer(cgImage, source: source, capturedAt: capturedAt)
+        guard reserveFrame(for: source) else { return }
+        queue.async {
+            guard let cgImage = Self.cgImage(image) else { return }
+            self.process(cgImage, source: source, capturedAt: capturedAt)
+        }
     }
 
     public func offer(_ sampleBuffer: CMSampleBuffer, source: ROBDetectorSource, capturedAt: Date = Date()) {
-        guard let pixel = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        let context = CIContext()
-        let ci = CIImage(cvPixelBuffer: pixel)
-        guard let cg = context.createCGImage(ci, from: ci.extent) else { return }
-        offer(cg, source: source, capturedAt: capturedAt)
+        guard reserveFrame(for: source) else { return }
+        queue.async {
+            guard let pixel = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+            let ci = CIImage(cvPixelBuffer: pixel)
+            guard let cg = Self.imageContext.createCGImage(ci, from: ci.extent) else { return }
+            self.process(cg, source: source, capturedAt: capturedAt)
+        }
     }
 
-    private func offer(_ image: CGImage, source: ROBDetectorSource, capturedAt: Date) {
-        queue.async {
-            let now = ProcessInfo.processInfo.systemUptime
+    private static let imageContext = CIContext(options: [.cacheIntermediates: false])
+
+    /// Reserves only frames that can actually be analyzed. This intentionally
+    /// runs before any NSImage/CIImage conversion on camera callback threads.
+    private func reserveFrame(for source: ROBDetectorSource) -> Bool {
+        let fps = processingFramesPerSecond(for: source)
+        guard fps > 0 else { return false }
+        let now = ProcessInfo.processInfo.systemUptime
+        admissionLock.lock(); defer { admissionLock.unlock() }
+        guard now - (lastAdmission[source] ?? 0) >= 1 / fps else { return false }
+        lastAdmission[source] = now
+        return true
+    }
+
+    private func process(_ image: CGImage, source: ROBDetectorSource, capturedAt: Date) {
             let geometry = source == .insta360 ? self.insta360AnalysisGeometry : .stitchedPanorama
-            let fps = self.processingFramesPerSecond(for: source)
-            guard fps > 0 else { return }
-            let minimumInterval = 1.0 / fps
-            guard now - (self.lastRun[source] ?? 0) >= minimumInterval else { return }
-            self.lastRun[source] = now
             let poseOn = self.enabled("body-pose", source: source)
             let objectsOn = self.enabled("generic-objects", source: source)
             let models = self.customModels
@@ -175,7 +189,6 @@ public struct ROBDetectorOutput: Sendable {
                         userInfo: ["output": output])
                 }
             } catch { NSLog("Dynamic detector request failed: %@", String(describing: error)) }
-        }
     }
 
     private static func cgImage(_ image: NSImage) -> CGImage? {

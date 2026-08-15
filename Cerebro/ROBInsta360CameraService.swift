@@ -32,6 +32,10 @@ extension Notification.Name {
     private var jpegBuffer = Data()
     private var decoderErrorTail = Data()
     private var startedAt: Date?
+    private var pendingDisplayFrame: NSImage?
+    private var displayDeliveryScheduled = false
+    private var diagnosticsPreviewVisible = false
+    private var activeDecoderURL: String?
 
     public private(set) var state = "Stopped"
     public private(set) var streamURL = "rtmp://10.0.0.18:1935/live/preview"
@@ -109,6 +113,35 @@ extension Notification.Name {
             let work = DispatchWorkItem { [weak self] in self?.connect(generation: restartGeneration) }
             self.retryWorkItem = work
             self.queue.asyncAfter(deadline: .now() + delay, execute: work)
+        }
+    }
+
+    public func setDiagnosticsPreviewVisible(_ visible: Bool) {
+        queue.async {
+            self.diagnosticsPreviewVisible = visible
+            self.reevaluateDecoderDemand()
+        }
+    }
+
+    public func refreshDecoderDemand() {
+        queue.async { self.reevaluateDecoderDemand() }
+    }
+
+    private var analysisNeedsFrames: Bool {
+        let registry = ROBDynamicDetectorRegistry.shared
+        guard registry.processingFramesPerSecond(for: .insta360) > 0 else { return false }
+        return ROBMLXRuntime.shared.insta360DetectionEnabled
+            || registry.enabled("body-pose", source: .insta360)
+            || registry.enabled("generic-objects", source: .insta360)
+    }
+
+    private func reevaluateDecoderDemand() {
+        guard desiredRunning, let url = activeDecoderURL else { return }
+        if diagnosticsPreviewVisible || analysisNeedsFrames {
+            if decoder == nil { startDecoder(url: url, generation: generation) }
+        } else if decoder != nil {
+            stopDecoder()
+            publish(state: "Preview suspended — no active consumers", error: nil)
         }
     }
 
@@ -272,6 +305,11 @@ extension Notification.Name {
 
     private func startDecoder(url: String, generation: UInt64) {
         stopDecoder()
+        activeDecoderURL = url
+        guard diagnosticsPreviewVisible || analysisNeedsFrames else {
+            publish(state: "Preview suspended — no active consumers", error: nil)
+            return
+        }
         guard let executable = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/opt/local/bin/ffmpeg"]
             .first(where: FileManager.default.isExecutableFile(atPath:)) else {
             failAndRetry("ffmpeg is unavailable", generation: generation)
@@ -339,14 +377,36 @@ extension Notification.Name {
             guard let image = NSImage(data: jpeg) else { continue }
             framesReceived &+= 1
             framesPerSecond = Double(framesReceived) / max(Date().timeIntervalSince(startedAt ?? Date()), 0.001)
-            DispatchQueue.main.async {
-                self.latestFrame = image
-                ROBInsta360PerceptionService.shared.offer(image, capturedAt: Date())
-                ROBDynamicDetectorRegistry.shared.offer(image, source: .insta360)
-                NotificationCenter.default.post(name: .robInsta360CameraServiceDidChange, object: self)
-            }
+            pendingDisplayFrame = image
+            scheduleLatestFrameDelivery()
         }
         if jpegBuffer.count > 32_000_000 { jpegBuffer.removeAll(keepingCapacity: true) }
+    }
+
+    /// Keeps at most one main-thread delivery outstanding. If decoding is
+    /// faster than AppKit can draw, intermediate frames are replaced by the
+    /// newest one instead of building an ever-older playback queue.
+    private func scheduleLatestFrameDelivery() {
+        guard !displayDeliveryScheduled else { return }
+        displayDeliveryScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.queue.async {
+                let image = self.pendingDisplayFrame
+                self.pendingDisplayFrame = nil
+                self.displayDeliveryScheduled = false
+                guard let image else { return }
+                DispatchQueue.main.async {
+                    self.latestFrame = image
+                    ROBInsta360PerceptionService.shared.offer(image, capturedAt: Date())
+                    ROBDynamicDetectorRegistry.shared.offer(image, source: .insta360)
+                    NotificationCenter.default.post(name: .robInsta360CameraServiceDidChange, object: self)
+                    self.queue.async {
+                        if self.pendingDisplayFrame != nil { self.scheduleLatestFrameDelivery() }
+                    }
+                }
+            }
+        }
     }
 
     private func consumeDecoderError(_ data: Data) {
@@ -410,6 +470,7 @@ extension Notification.Name {
         heartbeatFailures = 0
         heartbeatInFlight = false
         stopDecoder()
+        activeDecoderURL = nil
     }
 
     private func stopDecoder() {
@@ -419,6 +480,7 @@ extension Notification.Name {
         decoderError = nil
         let task = decoder
         decoder = nil
+        pendingDisplayFrame = nil
         if task?.isRunning == true { task?.terminate() }
     }
 
