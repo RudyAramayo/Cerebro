@@ -192,6 +192,12 @@ private struct ROBSwordTrack {
     let confidence: Double
 }
 
+private struct ROBProjectedPose3D {
+    let points: [CGPoint]
+    let lines: [(CGPoint, CGPoint)]
+    let confidence: Double
+}
+
 /// A low-latency geometric tracker for elongated training implements. It uses
 /// the latest 2D wrist locations to reject unrelated edges, then smooths the
 /// blade axis over time. Only one contour request may be in flight.
@@ -528,13 +534,24 @@ extension CameraViewController: CameraManagerDelegate {
     
     func process_humanBodyPose3D_Observation(_ observation: VNHumanBodyPose3DObservation) {
         guard pose3DEnabled else { return }
-        if !sceneCreated {
-            self.skeletonView.scene = createScene(observation: observation)
-            sceneCreated = true
-        } else {
-            updateScene(observation: observation)
+        var projected: [VNHumanBodyPose3DObservation.JointName: CGPoint] = [:]
+        for joint in observation.availableJointNames {
+            guard let point = try? observation.pointInImage(joint) else { continue }
+            projected[joint] = CGPoint(x: CGFloat(point.x), y: CGFloat(point.y))
         }
-        skeletonView.isHidden = false
+        var lines: [(CGPoint, CGPoint)] = []
+        for joint in observation.availableJointNames {
+            guard let parent = observation.parentJointName(joint) else { continue }
+            if parent != joint, let childPoint = projected[joint], let parentPoint = projected[parent] {
+                lines.append((childPoint, parentPoint))
+            }
+        }
+        poseView.projectedPose3D = ROBProjectedPose3D(
+            points: Array(projected.values), lines: lines, confidence: Double(observation.confidence))
+        poseView.needsDisplay = true
+        // The old SceneKit camera was centered in an unrelated coordinate
+        // system. The live overlay uses Vision's calibrated image projection.
+        skeletonView.isHidden = true
     }
     
     func updateScene(observation: VNHumanBodyPose3DObservation) {
@@ -659,6 +676,8 @@ extension CameraViewController: CameraManagerDelegate {
                 skeletonView.isHidden = true
                 skeletonView.scene = nil
                 sceneCreated = false
+                poseView.projectedPose3D = nil
+                poseView.needsDisplay = true
             }
         } else if pose3DRates.indices.contains(pose3DFPSPopup.indexOfSelectedItem) {
             UserDefaults.standard.set(pose3DRates[pose3DFPSPopup.indexOfSelectedItem], forKey: Self.pose3DFPSKey)
@@ -1209,6 +1228,7 @@ class PoseDrawingView: NSView {
     var dynamicDetectorOutput: ROBDetectorOutput?
     fileprivate var swordTrack: ROBSwordTrack?
     fileprivate var swordTrackingStatus: String?
+    fileprivate var projectedPose3D: ROBProjectedPose3D?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1397,6 +1417,28 @@ class PoseDrawingView: NSView {
                 withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold),
                                  .foregroundColor: swordTrack == nil ? NSColor.systemYellow : NSColor.systemGreen,
                                  .backgroundColor: NSColor.black.withAlphaComponent(0.72)])
+        }
+        if let projectedPose3D {
+            context.saveGState()
+            context.setStrokeColor(NSColor.systemBlue.withAlphaComponent(0.9).cgColor)
+            context.setLineWidth(3)
+            for line in projectedPose3D.lines {
+                context.move(to: CGPoint(x: line.0.x * bounds.width, y: line.0.y * bounds.height))
+                context.addLine(to: CGPoint(x: line.1.x * bounds.width, y: line.1.y * bounds.height))
+                context.strokePath()
+            }
+            context.setFillColor(NSColor.systemBlue.cgColor)
+            for point in projectedPose3D.points {
+                context.fillEllipse(in: CGRect(x: point.x * bounds.width - 4,
+                                               y: point.y * bounds.height - 4,
+                                               width: 8, height: 8))
+            }
+            context.restoreGState()
+            ("3D projected \(Int(projectedPose3D.confidence * 100))%" as NSString).draw(
+                at: CGPoint(x: 18, y: bounds.height - 48),
+                withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold),
+                                 .foregroundColor: NSColor.systemBlue,
+                                 .backgroundColor: NSColor.black.withAlphaComponent(0.7)])
         }
 
         if let output = dynamicDetectorOutput {
