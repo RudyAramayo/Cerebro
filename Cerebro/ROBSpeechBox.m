@@ -55,6 +55,7 @@
                               utterance:(AVSpeechUtterance *)utterance
                                 finished:(BOOL)finished;
 - (AVSpeechSynthesisVoice *)resolveROBVoice;
+- (AVSpeechSynthesisVoice *)voiceForText:(NSString *)text;
 @end
 
 
@@ -210,6 +211,33 @@
 
     NSLog(@"Oliver Enhanced is not installed; using the best available en-GB voice.");
     return [AVSpeechSynthesisVoice voiceWithLanguage:@"en-GB"];
+}
+
+- (AVSpeechSynthesisVoice *)voiceForText:(NSString *)text
+{
+    // Japanese kana are unambiguous even when the response also contains
+    // Latin names, numbers, or punctuation. CJK ideographs alone cannot be
+    // reliably distinguished from Chinese without additional context.
+    static NSCharacterSet *japaneseKanaCharacterSet;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSMutableCharacterSet *characterSet = [NSMutableCharacterSet characterSetWithRange:NSMakeRange(0x3040, 0x60)];
+        [characterSet addCharactersInRange:NSMakeRange(0x30A0, 0x60)];
+        [characterSet addCharactersInRange:NSMakeRange(0x31F0, 0x10)];
+        [characterSet addCharactersInRange:NSMakeRange(0xFF66, 0x38)];
+        japaneseKanaCharacterSet = [characterSet copy];
+    });
+
+    if ([text rangeOfCharacterFromSet:japaneseKanaCharacterSet].location != NSNotFound) {
+        AVSpeechSynthesisVoice *japaneseVoice = [AVSpeechSynthesisVoice voiceWithLanguage:@"ja-JP"];
+        if (japaneseVoice != nil) {
+            NSLog(@"Using Japanese voice %@ for this utterance", japaneseVoice.name);
+            return japaneseVoice;
+        }
+        NSLog(@"A Japanese response was received, but no ja-JP voice is installed");
+    }
+
+    return self.robsDefaultVoice;
 }
 
 - (void) resume_listening
@@ -769,7 +797,7 @@
         if (completion != nil) {
             [self.utteranceCompletions setObject:[completion copy] forKey:utterance];
         }
-        utterance.voice = self.robsDefaultVoice;
+        utterance.voice = [self voiceForText:stringToSpeak];
         //possible parameters to specify in the future
         //utterance.volume
         //utterance.rate
@@ -815,7 +843,7 @@
         self.isSpeaking = true;
         [sentences enumerateObjectsUsingBlock:^(NSString *sentence, NSUInteger index, BOOL *stop) {
             AVSpeechUtterance *utterance = [AVSpeechUtterance speechUtteranceWithString:sentence];
-            utterance.voice = self.robsDefaultVoice;
+            utterance.voice = [self voiceForText:sentence];
             // A third of a second is perceptible enough for a punchline or
             // explanation to land without making a live show feel sluggish.
             utterance.postUtteranceDelay = index + 1 == sentences.count ? 0.18 : 0.34;
