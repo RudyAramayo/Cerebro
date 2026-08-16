@@ -126,7 +126,10 @@ wire contract and the remaining Vision Pro adapter work.
 
 Development mode now includes **Amber Arm Diagnostics…** for authenticated
 telemetry, modes, bounded arm actions, per-session gripper calibration/control,
-plots, and controller-stack recovery. Vision Pro can operate either gripper
+plots, and controller-stack recovery. The diagnostics window keeps explicit
+**Calibrate Left…** and **Calibrate Right…** controls visible together and shows
+left/right position, velocity, current, and sample-age graphs simultaneously.
+Vision Pro can operate either gripper
 only after its calibration command has been accepted locally in Cerebro; force
 is shown as a conservative vendor intensity, not measured newtons.
 

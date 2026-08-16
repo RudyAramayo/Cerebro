@@ -63,11 +63,11 @@ private struct ROBAmberDiagnosticsGripperControls {
     let queryButton: NSButton
     let calibrateButton: NSButton
     let releaseButton: NSButton
-    let gripButton: NSButton
+    let holdButton: NSButton
     let stopButton: NSButton
 
     var commandButtons: [NSButton] {
-        [queryButton, calibrateButton, releaseButton, gripButton, stopButton]
+        [queryButton, calibrateButton, releaseButton, holdButton, stopButton]
     }
 }
 
@@ -114,7 +114,7 @@ private final class ROBAmberTelemetryPlotView: NSView {
 
         var title: String {
             switch self {
-            case .position: return "Position — actual solid / last target dashed"
+            case .position: return "Position"
             case .velocity: return "Velocity"
             case .current: return "Motor current"
             case .sampleAge: return "Gateway sample age"
@@ -308,17 +308,41 @@ private final class ROBAmberTelemetryPlotView: NSView {
 
     private func drawLegend() {
         guard metric != .sampleAge else { return }
+        let titleAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+        ]
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 8, weight: .medium),
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 7.5, weight: .medium),
             .foregroundColor: NSColor.secondaryLabelColor,
         ]
-        var x = max(180, bounds.maxX - 210)
+        // Each arm now owns a half-width dashboard. Keep all seven joint keys
+        // visible without colliding with the compact metric title.
+        let title = "\(metric.title) (\(metric.unit))" as NSString
+        let minimumX = title.size(withAttributes: titleAttributes).width + 18
+        let lastLabelX = bounds.maxX - 18
+        let availableWidth = max(0, lastLabelX - minimumX)
+        let spacing = max(17, min(26, availableWidth / 6))
+        var x = max(minimumX, lastLabelX - spacing * 6)
         for index in 0..<7 {
             Self.seriesColors[index].setFill()
             NSBezierPath(ovalIn: NSRect(x: x, y: bounds.maxY - 17, width: 5, height: 5)).fill()
             ("J\(index + 1)" as NSString).draw(at: NSPoint(x: x + 7, y: bounds.maxY - 20), withAttributes: attributes)
-            x += 29
+            x += spacing
         }
+    }
+}
+
+private struct ROBAmberDiagnosticsPlotSet {
+    let position = ROBAmberTelemetryPlotView(metric: .position)
+    let velocity = ROBAmberTelemetryPlotView(metric: .velocity)
+    let current = ROBAmberTelemetryPlotView(metric: .current)
+    let sampleAge = ROBAmberTelemetryPlotView(metric: .sampleAge)
+
+    func update(samples: [ROBAmberDiagnosticsSample]) {
+        position.samples = samples
+        velocity.samples = samples
+        current.samples = samples
+        sampleAge.samples = samples
     }
 }
 
@@ -557,16 +581,14 @@ private final class ROBAmberArmSchematicView: NSView {
     )
     private var armCommandButtons: [NSButton] = []
     private let pauseButton = NSButton(checkboxWithTitle: "Pause display", target: nil, action: nil)
-    private let graphArmSelector = NSSegmentedControl(labels: ["Left arm", "Right arm"], trackingMode: .selectOne,
-                                                       target: nil, action: nil)
     private let leftTable = NSTableView()
     private let rightTable = NSTableView()
     private let leftSummary = NSTextField(labelWithString: "Waiting for left-arm telemetry")
     private let rightSummary = NSTextField(labelWithString: "Waiting for right-arm telemetry")
-    private let positionPlot = ROBAmberTelemetryPlotView(metric: .position)
-    private let velocityPlot = ROBAmberTelemetryPlotView(metric: .velocity)
-    private let currentPlot = ROBAmberTelemetryPlotView(metric: .current)
-    private let sampleAgePlot = ROBAmberTelemetryPlotView(metric: .sampleAge)
+    private let armPlots: [ROBAmberDiagnosticsArm: ROBAmberDiagnosticsPlotSet] = [
+        .left: ROBAmberDiagnosticsPlotSet(),
+        .right: ROBAmberDiagnosticsPlotSet(),
+    ]
     private let schematicView = ROBAmberArmSchematicView()
     private let eventLogView = NSTextView()
     private let dateFormatter: DateFormatter = {
@@ -577,13 +599,13 @@ private final class ROBAmberArmSchematicView: NSView {
 
     public init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1_380, height: 980),
+            contentRect: NSRect(x: 0, y: 0, width: 1_380, height: 1_020),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Amber Arm Diagnostics"
-        window.minSize = NSSize(width: 1_200, height: 930)
+        window.minSize = NSSize(width: 1_200, height: 980)
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
@@ -817,18 +839,17 @@ private final class ROBAmberArmSchematicView: NSView {
         tableRow.distribution = .fillEqually
         tableRow.spacing = 10
 
-        graphArmSelector.selectedSegment = 0
-        graphArmSelector.target = self
-        graphArmSelector.action = #selector(graphArmChanged(_:))
         pauseButton.target = self
         pauseButton.action = #selector(pauseDisplayChanged(_:))
         pauseButton.toolTip = "Freezes tables and plots while Cerebro continues buffering gateway telemetry."
         let clearButton = makeButton("Clear history", action: #selector(clearHistory(_:)))
         let exportButton = makeButton("Export CSV…", action: #selector(exportCSV(_:)))
         let graphControls = NSStackView(views: [
-            NSTextField(labelWithString: "Graphs"), graphArmSelector, pauseButton,
+            NSTextField(labelWithString: "Graphs — left and right live"), pauseButton,
             clearButton, exportButton, NSView(),
-            NSTextField(labelWithString: "60-second display • bounded to 2,400 samples per arm"),
+            NSTextField(
+                labelWithString: "60 seconds per arm • position: measured solid / target dashed • 2,400-sample bound"
+            ),
         ])
         graphControls.orientation = .horizontal
         graphControls.alignment = .centerY
@@ -838,18 +859,16 @@ private final class ROBAmberArmSchematicView: NSView {
             note.textColor = .secondaryLabelColor
         }
 
-        let plotTopRow = NSStackView(views: [positionPlot, velocityPlot])
-        plotTopRow.orientation = .horizontal
-        plotTopRow.distribution = .fillEqually
-        plotTopRow.spacing = 10
-        let plotBottomRow = NSStackView(views: [currentPlot, sampleAgePlot])
-        plotBottomRow.orientation = .horizontal
-        plotBottomRow.distribution = .fillEqually
-        plotBottomRow.spacing = 10
-        let plots = NSStackView(views: [plotTopRow, plotBottomRow])
-        plots.orientation = .vertical
+        let plotPanels = ROBAmberDiagnosticsArm.allCases.compactMap { arm in
+            armPlots[arm].map { makeArmPlotPanel(arm, plots: $0) }
+        }
+        let plots = NSStackView(views: plotPanels)
+        plots.orientation = .horizontal
         plots.distribution = .fillEqually
         plots.spacing = 10
+        for panel in plotPanels {
+            panel.heightAnchor.constraint(equalTo: plots.heightAnchor).isActive = true
+        }
 
         eventLogView.isEditable = false
         eventLogView.isSelectable = true
@@ -928,8 +947,7 @@ private final class ROBAmberArmSchematicView: NSView {
             plots.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
             plots.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
             plots.bottomAnchor.constraint(equalTo: bottomRow.topAnchor, constant: -10),
-            positionPlot.heightAnchor.constraint(greaterThanOrEqualToConstant: 88),
-            currentPlot.heightAnchor.constraint(greaterThanOrEqualToConstant: 88),
+            plots.heightAnchor.constraint(greaterThanOrEqualToConstant: 220),
 
             bottomRow.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
             bottomRow.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
@@ -999,6 +1017,50 @@ private final class ROBAmberArmSchematicView: NSView {
         return button
     }
 
+    private func makeArmPlotPanel(
+        _ arm: ROBAmberDiagnosticsArm,
+        plots: ROBAmberDiagnosticsPlotSet
+    ) -> NSView {
+        let topRow = NSStackView(views: [plots.position, plots.velocity])
+        topRow.orientation = .horizontal
+        topRow.distribution = .fillEqually
+        topRow.spacing = 7
+        let bottomRow = NSStackView(views: [plots.current, plots.sampleAge])
+        bottomRow.orientation = .horizontal
+        bottomRow.distribution = .fillEqually
+        bottomRow.spacing = 7
+        let plotGrid = NSStackView(views: [topRow, bottomRow])
+        plotGrid.orientation = .vertical
+        plotGrid.distribution = .fillEqually
+        plotGrid.spacing = 7
+        plotGrid.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            plots.position.heightAnchor.constraint(equalTo: topRow.heightAnchor),
+            plots.velocity.heightAnchor.constraint(equalTo: topRow.heightAnchor),
+            plots.current.heightAnchor.constraint(equalTo: bottomRow.heightAnchor),
+            plots.sampleAge.heightAnchor.constraint(equalTo: bottomRow.heightAnchor),
+            plots.position.heightAnchor.constraint(greaterThanOrEqualToConstant: 88),
+            plots.velocity.heightAnchor.constraint(greaterThanOrEqualToConstant: 88),
+            plots.current.heightAnchor.constraint(greaterThanOrEqualToConstant: 88),
+            plots.sampleAge.heightAnchor.constraint(greaterThanOrEqualToConstant: 88),
+        ])
+
+        let box = NSBox()
+        box.title = "\(arm.title) arm telemetry"
+        box.titlePosition = .atTop
+        box.boxType = .primary
+        box.setAccessibilityLabel("\(arm.title) Amber arm telemetry graphs")
+        guard let contentView = box.contentView else { return box }
+        contentView.addSubview(plotGrid)
+        NSLayoutConstraint.activate([
+            plotGrid.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6),
+            plotGrid.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -6),
+            plotGrid.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 2),
+            plotGrid.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -6),
+        ])
+        return box
+    }
+
     private func makeGripperPanel(_ arm: ROBAmberDiagnosticsArm) -> NSView {
         let stateLabel = NSTextField(labelWithString: "State unknown")
         stateLabel.font = .monospacedSystemFont(ofSize: 11, weight: .semibold)
@@ -1032,15 +1094,19 @@ private final class ROBAmberArmSchematicView: NSView {
         }
         let queryButton = actionButton("Refresh", action: #selector(queryGripperState(_:)))
         queryButton.toolTip = "Queries the authenticated gateway's per-session calibration state. This does not move the gripper."
-        let calibrateButton = actionButton("Calibrate…", action: #selector(calibrateGripper(_:)))
+        let calibrateButton = actionButton(
+            "Calibrate \(arm.title)…",
+            action: #selector(calibrateGripper(_:))
+        )
         calibrateButton.contentTintColor = .systemOrange
         calibrateButton.toolTip = "Calibration can move this gripper through its travel and requires a critical confirmation."
+        calibrateButton.setAccessibilityLabel("Calibrate \(arm.rawValue) gripper")
         let releaseButton = actionButton("Release…", action: #selector(releaseGripper(_:)))
         releaseButton.contentTintColor = .systemOrange
-        releaseButton.toolTip = "Commands this gripper to open at the bounded raw intensity after confirmation."
-        let gripButton = actionButton("Grip…", action: #selector(gripGripper(_:)))
-        gripButton.contentTintColor = .systemOrange
-        gripButton.toolTip = "Commands this gripper to close at the bounded raw intensity after confirmation."
+        releaseButton.toolTip = "Requests Amber's bounded release action after confirmation; jaw position and force are not measured."
+        let holdButton = actionButton("Hold…", action: #selector(holdGripper(_:)))
+        holdButton.contentTintColor = .systemOrange
+        holdButton.toolTip = "Requests Amber's bounded hold action after confirmation; jaw position and force are not measured."
         let stopButton = actionButton("Stop N/A", action: #selector(stopGripperUnavailable(_:)))
         stopButton.isEnabled = false
         stopButton.toolTip = "Amber exposes release, hold, and calibration only. It has no verified stop primitive; release would itself cause motion and may drop an object."
@@ -1051,7 +1117,7 @@ private final class ROBAmberArmSchematicView: NSView {
         statusRow.spacing = 8
         let commandRow = NSStackView(views: [
             forceLabel, forceSlider, queryButton, calibrateButton,
-            releaseButton, gripButton, stopButton,
+            releaseButton, holdButton, stopButton,
         ])
         commandRow.orientation = .horizontal
         commandRow.alignment = .centerY
@@ -1066,6 +1132,7 @@ private final class ROBAmberArmSchematicView: NSView {
         box.title = "\(arm.title) gripper"
         box.titlePosition = .atTop
         box.boxType = .primary
+        box.setAccessibilityLabel("\(arm.title) gripper calibration and control")
         guard let contentView = box.contentView else { return box }
         contentView.addSubview(contentStack)
         NSLayoutConstraint.activate([
@@ -1083,7 +1150,7 @@ private final class ROBAmberArmSchematicView: NSView {
             queryButton: queryButton,
             calibrateButton: calibrateButton,
             releaseButton: releaseButton,
-            gripButton: gripButton,
+            holdButton: holdButton,
             stopButton: stopButton
         )
         return box
@@ -1379,12 +1446,10 @@ private final class ROBAmberArmSchematicView: NSView {
         rightTable.reloadData()
         refreshSummary(.left, label: leftSummary)
         refreshSummary(.right, label: rightSummary)
-        let selected: ROBAmberDiagnosticsArm = graphArmSelector.selectedSegment == 1 ? .right : .left
-        let samples = histories[selected]?.recent(seconds: 60) ?? []
-        positionPlot.samples = samples
-        velocityPlot.samples = samples
-        currentPlot.samples = samples
-        sampleAgePlot.samples = samples
+        for arm in ROBAmberDiagnosticsArm.allCases {
+            let samples = histories[arm]?.recent(seconds: 60) ?? []
+            armPlots[arm]?.update(samples: samples)
+        }
         schematicView.leftSample = histories[.left]?.latest
         schematicView.rightSample = histories[.right]?.latest
         schematicView.leftTarget = histories[.left]?.currentTarget
@@ -1474,25 +1539,25 @@ private final class ROBAmberArmSchematicView: NSView {
             let stateText: String
             let stateColor: NSColor
             if pending?.operation == "gripper_calibrate" {
-                stateText = "Calibrating — awaiting dispatch acknowledgement"
+                stateText = "Calibration request pending — awaiting dispatch acknowledgement"
                 stateColor = .systemOrange
             } else if let operation = pending?.operation {
                 let name: String
                 switch operation {
                 case "gripper_state": name = "Refreshing state"
                 case "gripper_release": name = "Release command pending"
-                case "gripper_hold": name = "Grip command pending"
+                case "gripper_hold": name = "Hold request pending"
                 default: name = "Gripper command pending"
                 }
                 stateText = name
                 stateColor = .systemOrange
             } else if snapshot.commandInFlight {
                 stateText = snapshot.detail.localizedCaseInsensitiveContains("calibration")
-                    ? "Calibrating — awaiting dispatch acknowledgement"
+                    ? "Calibration request pending — awaiting dispatch acknowledgement"
                     : "Gripper command in flight"
                 stateColor = .systemOrange
-            } else if snapshot.calibrationState == "fault" {
-                stateText = "Fault"
+            } else if snapshot.detail.localizedCaseInsensitiveContains("rejected") {
+                stateText = "Command rejected — calibration required"
                 stateColor = .systemRed
             } else if snapshot.calibrationVerified {
                 stateText = "Ready — calibration verified"
@@ -1542,10 +1607,10 @@ private final class ROBAmberArmSchematicView: NSView {
             controls.releaseButton.isEnabled = sharedInterlocksPass
                 && !snapshot.commandInFlight
                 && calibrationAccepted
-            controls.gripButton.isEnabled = sharedInterlocksPass
+            controls.holdButton.isEnabled = sharedInterlocksPass
                 && !snapshot.commandInFlight
                 && calibrationAccepted
-            controls.forceSlider.isEnabled = controls.gripButton.isEnabled
+            controls.forceSlider.isEnabled = controls.holdButton.isEnabled
             controls.stopButton.isEnabled = false
         }
     }
@@ -1946,8 +2011,8 @@ private final class ROBAmberArmSchematicView: NSView {
         submitGripperControl(sender, action: "release", displayName: "release")
     }
 
-    @objc private func gripGripper(_ sender: NSControl) {
-        submitGripperControl(sender, action: "hold", displayName: "grip")
+    @objc private func holdGripper(_ sender: NSControl) {
+        submitGripperControl(sender, action: "hold", displayName: "hold")
     }
 
     @objc private func stopGripperUnavailable(_ sender: NSControl) {
@@ -1971,9 +2036,9 @@ private final class ROBAmberArmSchematicView: NSView {
         let alert = NSAlert()
         alert.messageText = "\(displayName.capitalized) with the \(arm.rawValue) gripper?"
         if action == "hold" {
-            alert.informativeText = "This closes the physical gripper at bounded raw intensity \(force) (GUI limit 2–20). Clear the pinch/crush zone, verify the intended object can tolerate the grip, and keep the physical E-stop ready. Amber does not report measured jaw opening, force, or completion."
+            alert.informativeText = "This requests Amber's physical hold action at bounded raw intensity \(force) (GUI limit 2–20), which may close the jaws. Clear the pinch/crush zone, verify the intended object can tolerate the request, and keep the physical E-stop ready. Amber does not report measured jaw opening, force, or completion."
         } else {
-            alert.informativeText = "This opens the physical gripper at bounded raw intensity \(force) (GUI limit 2–20). Support anything being held because it may drop, clear the gripper travel, and keep the physical E-stop ready. Amber does not report measured jaw opening, force, or completion."
+            alert.informativeText = "This requests Amber's physical release action at bounded raw intensity \(force) (GUI limit 2–20), which may open the jaws. Support anything being held because it may drop, clear the gripper travel, and keep the physical E-stop ready. Amber does not report measured jaw opening, force, or completion."
         }
         alert.alertStyle = .critical
         alert.addButton(withTitle: "\(displayName.capitalized) \(arm.title) Gripper")
@@ -2050,10 +2115,6 @@ private final class ROBAmberArmSchematicView: NSView {
         }
         pendingGripperCommands[commandID] = (arm, operation)
         gripperSnapshots[arm]?.commandInFlight = true
-        if operation == "gripper_calibrate" {
-            gripperSnapshots[arm]?.calibrationState = "calibrating"
-            gripperSnapshots[arm]?.calibrationVerified = false
-        }
         gripperSnapshots[arm]?.detail = "Awaiting gateway acknowledgement for command \(commandID)"
         appendEvent("Submitted \(arm.rawValue) \(operation) command \(commandID)")
         refreshDisplay()
@@ -2209,7 +2270,7 @@ private final class ROBAmberArmSchematicView: NSView {
                 if submittedOperation == "gripper_release" || acknowledgedAction == "release" {
                     action = "Release"
                 } else if submittedOperation == "gripper_hold" || acknowledgedAction == "hold" {
-                    action = "Grip"
+                    action = "Hold"
                 } else {
                     action = "Gripper command"
                 }
@@ -2224,7 +2285,6 @@ private final class ROBAmberArmSchematicView: NSView {
                 snapshot.detail = "Gateway accepted \(submittedOperation)"
             }
         } else {
-            snapshot.calibrationState = "fault"
             snapshot.calibrationVerified = false
             snapshot.detail = error.isEmpty
                 ? "Gateway rejected \(submittedOperation)"
@@ -2435,10 +2495,6 @@ private final class ROBAmberArmSchematicView: NSView {
         if gestureNameField.stringValue == name { gestureNameField.stringValue = "" }
         refreshGestureCatalog()
         appendEvent("Revoked Gemini gesture “\(name)”")
-    }
-
-    @objc private func graphArmChanged(_ sender: Any?) {
-        refreshDisplay()
     }
 
     @objc private func pauseDisplayChanged(_ sender: NSButton) {

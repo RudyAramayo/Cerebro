@@ -19,6 +19,8 @@
 @property (nonatomic, strong) NSButton *installSSHpassButton;
 @property (nonatomic, strong) NSPopUpButton *englishVoicePopup;
 @property (nonatomic, strong) NSPopUpButton *japaneseVoicePopup;
+@property (nonatomic, strong) NSPopUpButton *spanishVoicePopup;
+@property (nonatomic, strong) NSPopUpButton *chineseVoicePopup;
 @property (nonatomic, strong) NSArray<NSButton *> *actionButtons;
 @property (nonatomic, assign) NSUInteger operationGeneration;
 @property (nonatomic, assign) BOOL operationInProgress;
@@ -60,6 +62,10 @@
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(applicationDidBecomeActive:)
                                                      name:NSApplicationDidBecomeActiveNotification
+                                                   object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(speechVoicesDidChange:)
+                                                     name:AVSpeechSynthesisAvailableVoicesDidChangeNotification
                                                    object:nil];
     }
     return self;
@@ -120,32 +126,50 @@
     [speechView addSubview:speechHeading];
 
     NSTextField *speechExplanation = [self labelWithString:
-        @"Choose an installed macOS voice for English and Japanese responses. Changes apply immediately and remain selected after Cerebro or the Mac restarts."
-        frame:NSMakeRect(24, 470, 632, 48)];
+        @"Cerebro detects English, Spanish, Japanese, and Chinese replies automatically. Choose the exact installed voice ROB should use for each language; changes apply immediately and persist across restarts."
+        frame:NSMakeRect(24, 476, 632, 48)];
     speechExplanation.textColor = [NSColor secondaryLabelColor];
     [speechView addSubview:speechExplanation];
 
     [speechView addSubview:[self labelWithString:@"English voice:"
-                                             frame:NSMakeRect(24, 424, 632, 20)]];
-    self.englishVoicePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 384, 500, 32)
+                                             frame:NSMakeRect(24, 446, 632, 20)]];
+    self.englishVoicePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 410, 500, 32)
                                                         pullsDown:NO];
     self.englishVoicePopup.target = self;
     self.englishVoicePopup.action = @selector(voiceSelectionChanged:);
     self.englishVoicePopup.accessibilityLabel = @"English speech voice";
     [speechView addSubview:self.englishVoicePopup];
 
+    [speechView addSubview:[self labelWithString:@"Spanish voice:"
+                                             frame:NSMakeRect(24, 366, 632, 20)]];
+    self.spanishVoicePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 330, 500, 32)
+                                                        pullsDown:NO];
+    self.spanishVoicePopup.target = self;
+    self.spanishVoicePopup.action = @selector(voiceSelectionChanged:);
+    self.spanishVoicePopup.accessibilityLabel = @"Spanish speech voice";
+    [speechView addSubview:self.spanishVoicePopup];
+
     [speechView addSubview:[self labelWithString:@"Japanese voice:"
-                                             frame:NSMakeRect(24, 330, 632, 20)]];
-    self.japaneseVoicePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 290, 500, 32)
+                                             frame:NSMakeRect(24, 286, 632, 20)]];
+    self.japaneseVoicePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 250, 500, 32)
                                                          pullsDown:NO];
     self.japaneseVoicePopup.target = self;
     self.japaneseVoicePopup.action = @selector(voiceSelectionChanged:);
     self.japaneseVoicePopup.accessibilityLabel = @"Japanese speech voice";
     [speechView addSubview:self.japaneseVoicePopup];
 
+    [speechView addSubview:[self labelWithString:@"Chinese voice (Mandarin or Cantonese):"
+                                             frame:NSMakeRect(24, 206, 632, 20)]];
+    self.chineseVoicePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 170, 500, 32)
+                                                        pullsDown:NO];
+    self.chineseVoicePopup.target = self;
+    self.chineseVoicePopup.action = @selector(voiceSelectionChanged:);
+    self.chineseVoicePopup.accessibilityLabel = @"Chinese speech voice";
+    [speechView addSubview:self.chineseVoicePopup];
+
     NSTextField *downloadHelp = [self labelWithString:
-        @"Enhanced and Premium voices appear here after they are downloaded in System Settings → Accessibility → Spoken Content → System Voice."
-        frame:NSMakeRect(24, 224, 632, 44)];
+        @"Premium and Enhanced voices are listed first after you download them in System Settings → Accessibility → Spoken Content → System Voice. Cerebro preserves your exact installed choice and falls back safely if that voice is later removed."
+        frame:NSMakeRect(24, 96, 632, 54)];
     downloadHelp.textColor = [NSColor secondaryLabelColor];
     [speechView addSubview:downloadHelp];
     [self refreshVoicePopups];
@@ -335,26 +359,48 @@
     return @"Default";
 }
 
-- (NSArray<AVSpeechSynthesisVoice *> *)voicesWithLanguagePrefix:(NSString *)prefix
+- (AVSpeechSynthesisVoice *)bestInstalledVoiceForLanguage:(NSString *)language
+{
+    AVSpeechSynthesisVoice *bestVoice = [AVSpeechSynthesisVoice voiceWithLanguage:language];
+    if (![bestVoice.language isEqualToString:language]) {
+        bestVoice = nil;
+    }
+    for (AVSpeechSynthesisVoice *voice in AVSpeechSynthesisVoice.speechVoices) {
+        if (![voice.language isEqualToString:language]) { continue; }
+        if (bestVoice == nil || voice.quality > bestVoice.quality) {
+            bestVoice = voice;
+        }
+    }
+    return bestVoice;
+}
+
+- (NSArray<AVSpeechSynthesisVoice *> *)voicesWithLanguagePrefixes:(NSArray<NSString *> *)prefixes
 {
     NSPredicate *predicate = [NSPredicate predicateWithBlock:^BOOL(AVSpeechSynthesisVoice *voice, NSDictionary *bindings) {
-        return [voice.language hasPrefix:prefix];
+        for (NSString *prefix in prefixes) {
+            if ([voice.language hasPrefix:prefix]) { return YES; }
+        }
+        return NO;
     }];
     NSArray<AVSpeechSynthesisVoice *> *voices = [AVSpeechSynthesisVoice.speechVoices filteredArrayUsingPredicate:predicate];
     return [voices sortedArrayUsingComparator:^NSComparisonResult(AVSpeechSynthesisVoice *left, AVSpeechSynthesisVoice *right) {
         if (left.quality != right.quality) {
             return left.quality > right.quality ? NSOrderedAscending : NSOrderedDescending;
         }
+        NSComparisonResult languageOrder =
+            [left.language localizedCaseInsensitiveCompare:right.language];
+        if (languageOrder != NSOrderedSame) { return languageOrder; }
         return [left.name localizedCaseInsensitiveCompare:right.name];
     }];
 }
 
 - (void)populateVoicePopup:(NSPopUpButton *)popup
-            languagePrefix:(NSString *)prefix
+          languagePrefixes:(NSArray<NSString *> *)prefixes
+          preferredLanguage:(NSString *)preferredLanguage
                defaultsKey:(NSString *)defaultsKey
 {
     [popup removeAllItems];
-    NSArray<AVSpeechSynthesisVoice *> *voices = [self voicesWithLanguagePrefix:prefix];
+    NSArray<AVSpeechSynthesisVoice *> *voices = [self voicesWithLanguagePrefixes:prefixes];
     for (AVSpeechSynthesisVoice *voice in voices) {
         NSString *title = [NSString stringWithFormat:@"%@ — %@ (%@)",
                            voice.name, [self qualityNameForVoice:voice], voice.language];
@@ -369,8 +415,13 @@
 
     NSString *savedIdentifier = [[NSUserDefaults standardUserDefaults] stringForKey:defaultsKey];
     NSInteger savedIndex = [popup indexOfItemWithRepresentedObject:savedIdentifier];
-    if (savedIndex < 0 && [prefix isEqualToString:@"en-"]) {
+    if (savedIndex < 0 && [defaultsKey isEqualToString:ROBEnglishVoiceIdentifierDefaultsKey]) {
         savedIndex = [popup indexOfItemWithRepresentedObject:@"com.apple.voice.enhanced.en-GB.Oliver"];
+    }
+    if (savedIndex < 0) {
+        AVSpeechSynthesisVoice *preferredVoice =
+            [self bestInstalledVoiceForLanguage:preferredLanguage];
+        savedIndex = [popup indexOfItemWithRepresentedObject:preferredVoice.identifier];
     }
     [popup selectItemAtIndex:savedIndex >= 0 ? savedIndex : 0];
 }
@@ -378,18 +429,33 @@
 - (void)refreshVoicePopups
 {
     [self populateVoicePopup:self.englishVoicePopup
-              languagePrefix:@"en-"
+            languagePrefixes:@[@"en-"]
+            preferredLanguage:@"en-GB"
                  defaultsKey:ROBEnglishVoiceIdentifierDefaultsKey];
+    [self populateVoicePopup:self.spanishVoicePopup
+            languagePrefixes:@[@"es-"]
+            preferredLanguage:@"es-ES"
+                 defaultsKey:ROBSpanishVoiceIdentifierDefaultsKey];
     [self populateVoicePopup:self.japaneseVoicePopup
-              languagePrefix:@"ja-JP"
+            languagePrefixes:@[@"ja-"]
+            preferredLanguage:@"ja-JP"
                  defaultsKey:ROBJapaneseVoiceIdentifierDefaultsKey];
+    [self populateVoicePopup:self.chineseVoicePopup
+            languagePrefixes:@[@"zh-", @"yue-"]
+            preferredLanguage:@"zh-CN"
+                 defaultsKey:ROBChineseVoiceIdentifierDefaultsKey];
 }
 
 - (void)voiceSelectionChanged:(NSPopUpButton *)sender
 {
-    NSString *defaultsKey = sender == self.japaneseVoicePopup
-        ? ROBJapaneseVoiceIdentifierDefaultsKey
-        : ROBEnglishVoiceIdentifierDefaultsKey;
+    NSString *defaultsKey = ROBEnglishVoiceIdentifierDefaultsKey;
+    if (sender == self.spanishVoicePopup) {
+        defaultsKey = ROBSpanishVoiceIdentifierDefaultsKey;
+    } else if (sender == self.japaneseVoicePopup) {
+        defaultsKey = ROBJapaneseVoiceIdentifierDefaultsKey;
+    } else if (sender == self.chineseVoicePopup) {
+        defaultsKey = ROBChineseVoiceIdentifierDefaultsKey;
+    }
     NSString *identifier = sender.selectedItem.representedObject;
     if (identifier.length == 0) { return; }
     [[NSUserDefaults standardUserDefaults] setObject:identifier forKey:defaultsKey];
@@ -880,6 +946,13 @@
     [[ROBSystemDependencyManager sharedManager] refreshSSHpassAvailability];
     [self refreshSystemDependencyStatus];
     [self refreshVoicePopups];
+}
+
+- (void)speechVoicesDidChange:(NSNotification *)notification
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self refreshVoicePopups];
+    });
 }
 
 @end

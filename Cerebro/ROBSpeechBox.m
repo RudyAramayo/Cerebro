@@ -8,6 +8,7 @@
 
 #import "ROBSpeechBox.h"
 #import "ROBMainViewController.h"
+#import "ROBSpeechLanguageDetector.h"
 
 //Emotions: 'anger', 'joy', 'neutral', 'sadness', 'fear'
 #define anger @"anger"
@@ -21,6 +22,8 @@
 
 NSString * const ROBEnglishVoiceIdentifierDefaultsKey = @"ROBEnglishVoiceIdentifier";
 NSString * const ROBJapaneseVoiceIdentifierDefaultsKey = @"ROBJapaneseVoiceIdentifier";
+NSString * const ROBSpanishVoiceIdentifierDefaultsKey = @"ROBSpanishVoiceIdentifier";
+NSString * const ROBChineseVoiceIdentifierDefaultsKey = @"ROBChineseVoiceIdentifier";
 NSString * const ROBSpeechVoicePreferencesDidChangeNotification = @"ROBSpeechVoicePreferencesDidChange";
 
 @interface ROBSpeechBox() <AVSpeechSynthesizerDelegate, SFSpeechRecognizerDelegate, SFSpeechRecognitionTaskDelegate, AVCaptureAudioDataOutputSampleBufferDelegate>
@@ -45,6 +48,8 @@ NSString * const ROBSpeechVoicePreferencesDidChangeNotification = @"ROBSpeechVoi
 @property (readwrite, retain) NSString *robsDefaultVoiceIdentifier;
 @property (readwrite, retain) AVSpeechSynthesisVoice *robsDefaultVoice;
 @property (readwrite, retain) AVSpeechSynthesisVoice *japaneseVoice;
+@property (readwrite, retain) AVSpeechSynthesisVoice *spanishVoice;
+@property (readwrite, retain) AVSpeechSynthesisVoice *chineseVoice;
 // This must not be named outputLanguage: that property's generated setter
 // would collide with the public -setOutputLanguage: method below.
 @property (readwrite, copy) NSString *currentOutputLanguage;
@@ -70,6 +75,8 @@ NSString * const ROBSpeechVoicePreferencesDidChangeNotification = @"ROBSpeechVoi
 - (void)cancelPendingSpeech;
 - (AVSpeechSynthesisVoice *)resolveROBVoice;
 - (AVSpeechSynthesisVoice *)bestInstalledVoiceForLanguage:(NSString *)language;
+- (AVSpeechSynthesisVoice *)bestInstalledVoiceForLanguagePrefixes:(NSArray<NSString *> *)languagePrefixes
+                                                  preferredLanguage:(NSString *)preferredLanguage;
 - (AVSpeechSynthesisVoice *)voiceForText:(NSString *)text;
 @end
 
@@ -94,6 +101,10 @@ NSString * const ROBSpeechVoicePreferencesDidChangeNotification = @"ROBSpeechVoi
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(voicePreferencesDidChange:)
                                                      name:ROBSpeechVoicePreferencesDidChangeNotification
+                                                   object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(availableSpeechVoicesDidChange:)
+                                                     name:AVSpeechSynthesisAvailableVoicesDidChangeNotification
                                                    object:nil];
         self.emotion = anger;
         self.commands = [@[@"robbie", @"robot", @"hey robbie", @"hey robot", @"rob",  @"robbie one"] mutableCopy];
@@ -237,6 +248,9 @@ NSString * const ROBSpeechVoicePreferencesDidChangeNotification = @"ROBSpeechVoi
 - (AVSpeechSynthesisVoice *)bestInstalledVoiceForLanguage:(NSString *)language
 {
     AVSpeechSynthesisVoice *bestVoice = [AVSpeechSynthesisVoice voiceWithLanguage:language];
+    if (![bestVoice.language isEqualToString:language]) {
+        bestVoice = nil;
+    }
     for (AVSpeechSynthesisVoice *voice in AVSpeechSynthesisVoice.speechVoices) {
         if (![voice.language isEqualToString:language]) { continue; }
         if (bestVoice == nil || voice.quality > bestVoice.quality) {
@@ -246,66 +260,148 @@ NSString * const ROBSpeechVoicePreferencesDidChangeNotification = @"ROBSpeechVoi
     return bestVoice;
 }
 
+- (BOOL)voice:(AVSpeechSynthesisVoice *)voice
+matchesLanguagePrefixes:(NSArray<NSString *> *)languagePrefixes
+{
+    for (NSString *prefix in languagePrefixes) {
+        if ([voice.language hasPrefix:prefix]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+- (AVSpeechSynthesisVoice *)bestInstalledVoiceForLanguagePrefixes:(NSArray<NSString *> *)languagePrefixes
+                                                  preferredLanguage:(NSString *)preferredLanguage
+{
+    // Keep the expected accent/script unless that locale is unavailable. The
+    // settings UI can deliberately select any other compatible installed
+    // voice, including a Premium regional voice.
+    AVSpeechSynthesisVoice *bestVoice =
+        [self bestInstalledVoiceForLanguage:preferredLanguage];
+    if (bestVoice != nil) {
+        return bestVoice;
+    }
+    for (AVSpeechSynthesisVoice *voice in AVSpeechSynthesisVoice.speechVoices) {
+        if (![self voice:voice matchesLanguagePrefixes:languagePrefixes]) { continue; }
+        if (bestVoice == nil || voice.quality > bestVoice.quality) {
+            bestVoice = voice;
+        }
+    }
+    return bestVoice;
+}
+
 - (AVSpeechSynthesisVoice *)preferredVoiceForDefaultsKey:(NSString *)defaultsKey
-                                                language:(NSString *)language
+                                        languagePrefixes:(NSArray<NSString *> *)languagePrefixes
+                                       preferredLanguage:(NSString *)preferredLanguage
 {
     NSString *identifier = [[NSUserDefaults standardUserDefaults] stringForKey:defaultsKey];
     AVSpeechSynthesisVoice *voice = identifier.length > 0
         ? [AVSpeechSynthesisVoice voiceWithIdentifier:identifier]
         : nil;
-    if (voice != nil && [voice.language hasPrefix:language]) {
+    if (voice != nil && [self voice:voice matchesLanguagePrefixes:languagePrefixes]) {
         return voice;
     }
-    return [self bestInstalledVoiceForLanguage:language];
+    return [self bestInstalledVoiceForLanguagePrefixes:languagePrefixes
+                                           preferredLanguage:preferredLanguage];
+}
+
+- (NSString *)qualityNameForVoice:(AVSpeechSynthesisVoice *)voice
+{
+    if (voice == nil) { return @"Unavailable"; }
+    if (voice.quality == AVSpeechSynthesisVoiceQualityPremium) { return @"Premium"; }
+    if (voice.quality == AVSpeechSynthesisVoiceQualityEnhanced) { return @"Enhanced"; }
+    return @"Default";
 }
 
 - (void)reloadVoicePreferences
 {
-    AVSpeechSynthesisVoice *englishVoice = [self preferredVoiceForDefaultsKey:ROBEnglishVoiceIdentifierDefaultsKey
-                                                                     language:@"en-"];
-    if (englishVoice == nil) {
-        englishVoice = [self resolveROBVoice];
+    NSString *savedEnglishIdentifier = [[NSUserDefaults standardUserDefaults]
+        stringForKey:ROBEnglishVoiceIdentifierDefaultsKey];
+    AVSpeechSynthesisVoice *englishVoice = nil;
+    if (savedEnglishIdentifier.length > 0) {
+        englishVoice = [self preferredVoiceForDefaultsKey:ROBEnglishVoiceIdentifierDefaultsKey
+                                         languagePrefixes:@[@"en-"]
+                                        preferredLanguage:@"en-GB"];
     }
-    self.japaneseVoice = [self preferredVoiceForDefaultsKey:ROBJapaneseVoiceIdentifierDefaultsKey
-                                                    language:@"ja-JP"];
+    englishVoice = englishVoice ?: [self resolveROBVoice];
+    self.japaneseVoice =
+        [self preferredVoiceForDefaultsKey:ROBJapaneseVoiceIdentifierDefaultsKey
+                          languagePrefixes:@[@"ja-"]
+                         preferredLanguage:@"ja-JP"];
+    self.spanishVoice =
+        [self preferredVoiceForDefaultsKey:ROBSpanishVoiceIdentifierDefaultsKey
+                          languagePrefixes:@[@"es-"]
+                         preferredLanguage:@"es-ES"];
+    self.chineseVoice =
+        [self preferredVoiceForDefaultsKey:ROBChineseVoiceIdentifierDefaultsKey
+                          languagePrefixes:@[@"zh-", @"yue-"]
+                         preferredLanguage:@"zh-CN"];
     if (self.currentOutputLanguage.length == 0 || [self.currentOutputLanguage hasPrefix:@"en-"]) {
         self.robsDefaultVoice = englishVoice;
+    } else if ([self.currentOutputLanguage hasPrefix:@"es-"]) {
+        self.robsDefaultVoice = self.spanishVoice ?: englishVoice;
+    } else if ([self.currentOutputLanguage hasPrefix:@"ja-"]) {
+        self.robsDefaultVoice = self.japaneseVoice ?: englishVoice;
+    } else if ([self.currentOutputLanguage hasPrefix:@"zh-"] ||
+               [self.currentOutputLanguage hasPrefix:@"yue-"]) {
+        self.robsDefaultVoice = self.chineseVoice ?: englishVoice;
     }
-    NSLog(@"Speech preferences loaded: English=%@, Japanese=%@",
-          englishVoice.name ?: @"unavailable", self.japaneseVoice.name ?: @"unavailable");
+    NSLog(@"Speech preferences loaded: English=%@ (%@), Spanish=%@ (%@), Japanese=%@ (%@), Chinese=%@ (%@)",
+          englishVoice.name ?: @"unavailable", [self qualityNameForVoice:englishVoice],
+          self.spanishVoice.name ?: @"unavailable", [self qualityNameForVoice:self.spanishVoice],
+          self.japaneseVoice.name ?: @"unavailable", [self qualityNameForVoice:self.japaneseVoice],
+          self.chineseVoice.name ?: @"unavailable", [self qualityNameForVoice:self.chineseVoice]);
 }
 
 - (void)voicePreferencesDidChange:(NSNotification *)notification
 {
-    [self reloadVoicePreferences];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self reloadVoicePreferences];
+    });
+}
+
+- (void)availableSpeechVoicesDidChange:(NSNotification *)notification
+{
+    // A newly downloaded Enhanced/Premium asset becomes eligible without a
+    // Cerebro restart. A persisted exact choice still wins.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self reloadVoicePreferences];
+    });
 }
 
 - (AVSpeechSynthesisVoice *)voiceForText:(NSString *)text
 {
-    // Japanese kana are unambiguous even when the response also contains
-    // Latin names, numbers, or punctuation. CJK ideographs alone cannot be
-    // reliably distinguished from Chinese without additional context.
-    static NSCharacterSet *japaneseKanaCharacterSet;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        NSMutableCharacterSet *characterSet = [NSMutableCharacterSet characterSetWithRange:NSMakeRange(0x3040, 0x60)];
-        [characterSet addCharactersInRange:NSMakeRange(0x30A0, 0x60)];
-        [characterSet addCharactersInRange:NSMakeRange(0x31F0, 0x10)];
-        [characterSet addCharactersInRange:NSMakeRange(0xFF66, 0x38)];
-        japaneseKanaCharacterSet = [characterSet copy];
-    });
-
-    if ([text rangeOfCharacterFromSet:japaneseKanaCharacterSet].location != NSNotFound) {
-        AVSpeechSynthesisVoice *japaneseVoice = self.japaneseVoice ?: [self bestInstalledVoiceForLanguage:@"ja-JP"];
-        if (japaneseVoice != nil) {
-            NSString *quality = japaneseVoice.quality == AVSpeechSynthesisVoiceQualityPremium
-                ? @"Premium"
-                : (japaneseVoice.quality == AVSpeechSynthesisVoiceQualityEnhanced ? @"Enhanced" : @"Default");
-            NSLog(@"Using Japanese voice %@ (%@, %@) for this utterance",
-                  japaneseVoice.name, quality, japaneseVoice.identifier);
-            return japaneseVoice;
-        }
-        NSLog(@"A Japanese response was received, but no ja-JP voice is installed");
+    ROBSpeechDetectedLanguage detectedLanguage =
+        [ROBSpeechLanguageDetector detectedLanguageForText:text];
+    AVSpeechSynthesisVoice *voice = nil;
+    NSString *languageName = nil;
+    switch (detectedLanguage) {
+        case ROBSpeechDetectedLanguageSpanish:
+            voice = self.spanishVoice;
+            languageName = @"Spanish";
+            break;
+        case ROBSpeechDetectedLanguageJapanese:
+            voice = self.japaneseVoice;
+            languageName = @"Japanese";
+            break;
+        case ROBSpeechDetectedLanguageChinese:
+            voice = self.chineseVoice;
+            languageName = @"Chinese";
+            break;
+        case ROBSpeechDetectedLanguageEnglish:
+        case ROBSpeechDetectedLanguageUnknown:
+            break;
+    }
+    if (voice != nil) {
+        NSLog(@"Using %@ voice %@ (%@, %@, %@) for this utterance",
+              languageName, voice.name, [self qualityNameForVoice:voice],
+              voice.language, voice.identifier);
+        return voice;
+    }
+    if (languageName != nil) {
+        NSLog(@"A %@ response was detected, but no compatible voice is installed",
+              languageName);
     }
 
     return self.robsDefaultVoice;
@@ -1088,13 +1184,35 @@ NSString * const ROBSpeechVoicePreferencesDidChangeNotification = @"ROBSpeechVoi
 {
     NSLog(@"language = %@", language);
     self.currentOutputLanguage = [language copy];
-    AVSpeechSynthesisVoice *newVoice = [AVSpeechSynthesisVoice voiceWithLanguage:language];
-    if (newVoice != nil) {
-        if ([language hasPrefix:@"en-"]) {
-            [self reloadVoicePreferences];
-        } else {
-            self.robsDefaultVoice = [AVSpeechSynthesisVoice voiceWithLanguage:language];
+    [self reloadVoicePreferences];
+    AVSpeechSynthesisVoice *newVoice = nil;
+    if ([language hasPrefix:@"en-"]) {
+        newVoice = [self preferredVoiceForDefaultsKey:ROBEnglishVoiceIdentifierDefaultsKey
+                                     languagePrefixes:@[@"en-"]
+                                    preferredLanguage:language];
+    } else if ([language hasPrefix:@"es-"]) {
+        newVoice = [self preferredVoiceForDefaultsKey:ROBSpanishVoiceIdentifierDefaultsKey
+                                     languagePrefixes:@[@"es-"]
+                                    preferredLanguage:language];
+    } else if ([language hasPrefix:@"ja-"]) {
+        newVoice = [self preferredVoiceForDefaultsKey:ROBJapaneseVoiceIdentifierDefaultsKey
+                                     languagePrefixes:@[@"ja-"]
+                                    preferredLanguage:@"ja-JP"];
+    } else if ([language hasPrefix:@"zh-"] || [language hasPrefix:@"yue-"]) {
+        NSString *preferredChineseLanguage = @"zh-CN";
+        if ([language hasPrefix:@"zh-TW"] || [language hasPrefix:@"zh-Hant"]) {
+            preferredChineseLanguage = @"zh-TW";
+        } else if ([language hasPrefix:@"zh-HK"] || [language hasPrefix:@"yue-"]) {
+            preferredChineseLanguage = @"yue-HK";
         }
+        newVoice = [self preferredVoiceForDefaultsKey:ROBChineseVoiceIdentifierDefaultsKey
+                                     languagePrefixes:@[@"zh-", @"yue-"]
+                                    preferredLanguage:preferredChineseLanguage];
+    } else {
+        newVoice = [self bestInstalledVoiceForLanguage:language];
+    }
+    if (newVoice != nil) {
+        self.robsDefaultVoice = newVoice;
     }
     [self sayIt:[NSString stringWithFormat:@"Language set to %@", language]];
     //*** Choose a language that matches the language code ***

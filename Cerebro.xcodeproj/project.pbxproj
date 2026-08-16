@@ -23,6 +23,7 @@
 		C0AD01022F49000100000001 /* ROBAmberDiagnosticsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0AD01012F49000100000001 /* ROBAmberDiagnosticsWindowController.swift */; };
 		C0B001022F4C000100000001 /* ROBWakeUpCalibrationWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B001012F4C000100000001 /* ROBWakeUpCalibrationWindowController.swift */; };
 		C0B002022F4C000200000001 /* ROBSceneProducerFreshness.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B002012F4C000200000001 /* ROBSceneProducerFreshness.swift */; };
+		C0B003032F4C000300000001 /* ROBSpeechLanguageDetector.m in Sources */ = {isa = PBXBuildFile; fileRef = C0B003022F4C000300000001 /* ROBSpeechLanguageDetector.m */; };
 		C0AE01032F4A000100000001 /* ROBAmberStackMaintenanceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0AE01012F4A000100000001 /* ROBAmberStackMaintenanceProtocol.swift */; };
 		C0AE01042F4A000100000001 /* ROBAmberStackMaintenanceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0AE01022F4A000100000001 /* ROBAmberStackMaintenanceController.swift */; };
 		C0AF01032F4B000100000001 /* ROBGripperControlProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0AF01012F4B000100000001 /* ROBGripperControlProtocol.swift */; };
@@ -204,6 +205,8 @@
 		D4A38F4F1FFB2AEE00092A46 /* Cerebro.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Cerebro.entitlements; sourceTree = "<group>"; };
 		D4A38F551FFBFD9900092A46 /* ROBSpeechBox.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBSpeechBox.h; sourceTree = "<group>"; };
 		D4A38F561FFBFD9900092A46 /* ROBSpeechBox.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ROBSpeechBox.m; sourceTree = "<group>"; };
+		C0B003012F4C000300000001 /* ROBSpeechLanguageDetector.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBSpeechLanguageDetector.h; sourceTree = "<group>"; };
+		C0B003022F4C000300000001 /* ROBSpeechLanguageDetector.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ROBSpeechLanguageDetector.m; sourceTree = "<group>"; };
 		D4A38F591FFC007E00092A46 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
 		D4A38F5B1FFC008B00092A46 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
 		D4A38F5D1FFC009300092A46 /* AudioUnit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioUnit.framework; path = System/Library/Frameworks/AudioUnit.framework; sourceTree = SDKROOT; };
@@ -484,6 +487,8 @@
 				D4066C5B22863009002ACAD1 /* ROBBaseControllerModel.m */,
 				D4A38F551FFBFD9900092A46 /* ROBSpeechBox.h */,
 				D4A38F561FFBFD9900092A46 /* ROBSpeechBox.m */,
+				C0B003012F4C000300000001 /* ROBSpeechLanguageDetector.h */,
+				C0B003022F4C000300000001 /* ROBSpeechLanguageDetector.m */,
 				D49F14332E456EE3001C1824 /* Webcam_color.py */,
 				D4A38F451FFB2AED00092A46 /* art.scnassets */,
 				D4A38F471FFB2AED00092A46 /* Assets.xcassets */,
@@ -771,6 +776,7 @@
 				D4F136752325E39A0084A302 /* VideoEncoder.m in Sources */,
 				D49D755927FFD1AF00142E26 /* AutoNetServer.swift in Sources */,
 				D4A38F571FFBFD9900092A46 /* ROBSpeechBox.m in Sources */,
+				C0B003032F4C000300000001 /* ROBSpeechLanguageDetector.m in Sources */,
 				D4CFB7D22287C81300F2403A /* JoinWifiTaskController.m in Sources */,
 				D4F136772325E39A0084A302 /* RTSPServer.m in Sources */,
 				D4A38F731FFC77CB00092A46 /* ROBKeyboardControlsViewController.m in Sources */,

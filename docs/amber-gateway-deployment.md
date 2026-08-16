@@ -190,7 +190,9 @@ Diagnostics…**:
 3. Choose **Connect Tunnel**. Cerebro creates the loopback-only SSH forwarding
    session and then authenticates `ROBAmberGatewayClient` to the gateway.
 4. Confirm that the window reports **Ready · exclusive controller** and that
-   both arms receive fresh telemetry before using any mode control.
+   both arms receive fresh telemetry before using any mode control. The left
+   and right position, velocity, current, and sample-age plot groups remain
+   visible together; neither arm requires a graph-selector switch.
 
 The tunnel and gateway connection are deliberately operator-initiated; launching
 Cerebro does not activate either arm or issue a mode command.
@@ -337,6 +339,12 @@ accepted vendor command 7 for dispatch. The snapshot therefore remains
 are acknowledged commands, not measured jaw state or force. A zero command ID
 means local validation rejected the request.
 
+Cerebro serializes calibration against every left/right gripper request,
+including Vision-originated hold/release commands. A gripper acknowledgement
+has a three-second monotonic deadline, checked by the one-second heartbeat;
+expiry disconnects the gateway session and invalidates both calibration
+snapshots. Cerebro never retries an ambiguous physical request.
+
 `gripperSnapshot(forArm:)` and `.ROBAmberGatewayGripperDidUpdate` use the same
 camel-case fields: `arm`, `calibrationState`, `calibrationVerified`,
 `feedbackAvailable`, `commandInFlight`, `lastAction`, `lastForce`, `forceMin`,
@@ -352,9 +360,10 @@ Calibration can move the gripper through its travel. Clear hands and objects
 from the jaw, keep the physical E-stop available, and test only one gripper at
 a time:
 
-1. Connect in **Amber Arm Diagnostics…** and choose **Query** for the selected
+1. Connect in **Amber Arm Diagnostics…** and choose **Refresh** for the selected
    gripper. This query performs no Amber UDP or physical I/O.
-2. Choose **Calibrate…** and accept the critical confirmation. Require an
+2. Choose **Calibrate Left…** or **Calibrate Right…** and accept the critical
+   confirmation. Require an
    accepted `gripper_calibrate_ack`; the UI must still say that completion is
    unverified, never that calibration was measured or complete.
 3. Start with the diagnostics range 2–20 vendor intensity units. Issue one
@@ -362,8 +371,12 @@ a time:
 4. Observe the mechanism directly. The current arm telemetry does not report
    gripper opening, applied force, endpoint, object detection, or calibration
    completion.
-5. After a gateway reconnect, heartbeat expiry, restart, or power cycle, query
-   again and recalibrate deliberately before another control command.
+5. After a gateway reconnect, heartbeat expiry, restart, or known arm-core
+   power cycle, query again and recalibrate deliberately before another control
+   command. A detected telemetry outage clears that arm's acceptance and fresh
+   feedback does not restore it. The vendor status has no boot-generation
+   signal, so an extremely fast restart with no observable telemetry gap cannot
+   be detected automatically.
 
 Amber documents raw intensity 1–300, but the diagnostics and Vision paths use
 the smaller 2–20 envelope exercised by the vendor dashboard. The units are not

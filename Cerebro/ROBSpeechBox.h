@@ -13,6 +13,8 @@
 
 FOUNDATION_EXPORT NSString * _Nonnull const ROBEnglishVoiceIdentifierDefaultsKey;
 FOUNDATION_EXPORT NSString * _Nonnull const ROBJapaneseVoiceIdentifierDefaultsKey;
+FOUNDATION_EXPORT NSString * _Nonnull const ROBSpanishVoiceIdentifierDefaultsKey;
+FOUNDATION_EXPORT NSString * _Nonnull const ROBChineseVoiceIdentifierDefaultsKey;
 FOUNDATION_EXPORT NSString * _Nonnull const ROBSpeechVoicePreferencesDidChangeNotification;
 
 @protocol ROBSpeechDelegate <NSObject>

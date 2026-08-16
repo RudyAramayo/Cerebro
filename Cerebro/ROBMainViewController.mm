@@ -72,13 +72,15 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 
 static const NSUInteger ROBConversationLogMaximumMessages = 300;
 static const NSTimeInterval ROBConversationLogRetentionInterval = 7 * 24 * 60 * 60;
-// AppKit's wrapping-label cell draws its first baseline slightly high inside
-// the rounded bubble. A negative baseline offset lowers only the glyphs while
-// leaving the bubble frame, background, selection, and horizontal insets fixed.
-static const CGFloat ROBConversationBubbleTextBaselineOffset = -3.0;
+static const CGFloat ROBConversationBubbleHorizontalTextInset = 16.0;
+// The old -3pt baseline adjustment moved glyphs without moving selection.
+// Moving the whole label down 8pt preserves selection geometry and places
+// the text another 5pt lower while leaving the rounded bubble fixed.
+static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 @interface ROBConversationBubbleView : NSTableCellView
 @property (nonatomic, strong) NSTextField *senderLabel;
+@property (nonatomic, strong) NSView *bubbleBackgroundView;
 @property (nonatomic, strong) NSTextField *bubbleLabel;
 @property (nonatomic, assign) BOOL fromUser;
 @end
@@ -92,6 +94,11 @@ static const CGFloat ROBConversationBubbleTextBaselineOffset = -3.0;
         self.senderLabel = [NSTextField labelWithString:@""];
         self.senderLabel.font = [NSFont systemFontOfSize:11 weight:NSFontWeightSemibold];
         self.senderLabel.textColor = NSColor.secondaryLabelColor;
+        self.bubbleBackgroundView = [[NSView alloc] initWithFrame:NSZeroRect];
+        self.bubbleBackgroundView.wantsLayer = YES;
+        self.bubbleBackgroundView.layer.cornerRadius = 14;
+        self.bubbleBackgroundView.layer.masksToBounds = YES;
+        [self.bubbleBackgroundView setAccessibilityElement:NO];
         self.bubbleLabel = [NSTextField wrappingLabelWithString:@""];
         self.bubbleLabel.font = [NSFont systemFontOfSize:14];
         self.bubbleLabel.selectable = YES;
@@ -99,12 +106,10 @@ static const CGFloat ROBConversationBubbleTextBaselineOffset = -3.0;
         self.bubbleLabel.lineBreakMode = NSLineBreakByWordWrapping;
         self.bubbleLabel.cell.wraps = YES;
         self.bubbleLabel.cell.scrollable = NO;
-        self.bubbleLabel.drawsBackground = YES;
-        self.bubbleLabel.wantsLayer = YES;
-        self.bubbleLabel.layer.cornerRadius = 14;
-        self.bubbleLabel.layer.masksToBounds = YES;
+        self.bubbleLabel.drawsBackground = NO;
+        [self addSubview:self.bubbleBackgroundView];
         [self addSubview:self.senderLabel];
-        [self addSubview:self.bubbleLabel];
+        [self.bubbleBackgroundView addSubview:self.bubbleLabel];
     }
     return self;
 }
@@ -117,7 +122,15 @@ static const CGFloat ROBConversationBubbleTextBaselineOffset = -3.0;
     CGFloat x = self.fromUser ? NSWidth(self.bounds) - bubbleWidth - 14 : 14;
     self.senderLabel.alignment = self.fromUser ? NSTextAlignmentRight : NSTextAlignmentLeft;
     self.senderLabel.frame = NSMakeRect(x + 4, NSHeight(self.bounds) - 21, bubbleWidth - 8, 16);
-    self.bubbleLabel.frame = NSMakeRect(x, 6, bubbleWidth, MAX(34, NSHeight(self.bounds) - 29));
+    NSRect bubbleFrame = NSMakeRect(x, 6, bubbleWidth, MAX(34, NSHeight(self.bounds) - 29));
+    self.bubbleBackgroundView.frame = bubbleFrame;
+    NSRect textFrame = NSInsetRect(self.bubbleBackgroundView.bounds,
+                                   ROBConversationBubbleHorizontalTextInset,
+                                   0);
+    textFrame.origin.y += self.bubbleBackgroundView.isFlipped
+        ? ROBConversationBubbleTextDownshift
+        : -ROBConversationBubbleTextDownshift;
+    self.bubbleLabel.frame = textFrame;
 }
 
 @end
@@ -429,14 +442,11 @@ static const CGFloat ROBConversationBubbleTextBaselineOffset = -3.0;
 - (CGFloat)tableView:(NSTableView *)tableView heightOfRow:(NSInteger)row
 {
     ROBConversationMessage *message = self.conversationMessages[row];
-    CGFloat horizontalTextInset = message.fromUser ? 10 : 16;
-    CGFloat textWidth = MIN(MAX(180, tableView.bounds.size.width - 28) * 0.78, 430) - (horizontalTextInset * 2);
+    CGFloat textWidth = MIN(MAX(180, tableView.bounds.size.width - 28) * 0.78, 430)
+        - (ROBConversationBubbleHorizontalTextInset * 2);
     NSRect textBounds = [message.text boundingRectWithSize:NSMakeSize(textWidth, CGFLOAT_MAX)
                                                    options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
-                                                attributes:@{
-                                                    NSFontAttributeName: [NSFont systemFontOfSize:14],
-                                                    NSBaselineOffsetAttributeName: @(ROBConversationBubbleTextBaselineOffset)
-                                                }];
+                                                attributes:@{ NSFontAttributeName: [NSFont systemFontOfSize:14] }];
     return MAX(68, ceil(NSHeight(textBounds)) + 47);
 }
 
@@ -457,23 +467,17 @@ static const CGFloat ROBConversationBubbleTextBaselineOffset = -3.0;
                                                          timeStyle:NSDateFormatterShortStyle];
     view.senderLabel.stringValue = [NSString stringWithFormat:@"%@  •  %@", senderName, timestamp];
     NSColor *textColor = message.fromUser ? NSColor.whiteColor : NSColor.labelColor;
-    CGFloat horizontalTextInset = message.fromUser ? 10 : 16;
-    NSMutableParagraphStyle *bubbleStyle = [[NSMutableParagraphStyle alloc] init];
-    bubbleStyle.firstLineHeadIndent = horizontalTextInset;
-    bubbleStyle.headIndent = horizontalTextInset;
-    bubbleStyle.tailIndent = -horizontalTextInset;
     view.bubbleLabel.attributedStringValue = [[NSAttributedString alloc]
         initWithString:message.text
            attributes:@{
                NSFontAttributeName: [NSFont systemFontOfSize:14],
-               NSForegroundColorAttributeName: textColor,
-               NSBaselineOffsetAttributeName: @(ROBConversationBubbleTextBaselineOffset),
-               NSParagraphStyleAttributeName: bubbleStyle
+               NSForegroundColorAttributeName: textColor
            }];
     view.bubbleLabel.textColor = textColor;
-    view.bubbleLabel.backgroundColor = message.fromUser
+    NSColor *bubbleColor = message.fromUser
         ? NSColor.systemBlueColor
         : [NSColor.systemPurpleColor colorWithAlphaComponent:0.24];
+    view.bubbleBackgroundView.layer.backgroundColor = bubbleColor.CGColor;
     view.toolTip = [NSDateFormatter localizedStringFromDate:message.date
                                                   dateStyle:NSDateFormatterNoStyle
                                                   timeStyle:NSDateFormatterShortStyle];

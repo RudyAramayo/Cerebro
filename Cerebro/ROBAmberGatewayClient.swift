@@ -386,6 +386,7 @@ private struct ROBAmberGatewayPendingGripperCommand {
     let arm: String
     let action: String?
     let force: Int?
+    let acknowledgementDeadline: DispatchTime
 }
 
 private struct ROBAmberGatewayGripperAcknowledgementResult {
@@ -412,6 +413,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
     private static let protocolName = "rob-amber-gateway/1"
     private static let maximumLineBytes = 16_384
     private static let heartbeatInterval: TimeInterval = 1
+    private static let gripperAcknowledgementTimeout: TimeInterval = 3
     private static let gripperCalibrationRequired = "required"
     private static let gripperCalibrationAcceptedUnverified = "command_accepted_unverified"
     private static let gripperForceRange = 1 ... 300
@@ -827,6 +829,17 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                   !current.commandInFlight,
                   nextCommandID <= UInt64(UInt32.max) else { return 0 }
 
+            // Calibration can sweep a jaw through its full travel. Serialize
+            // it against every other gripper request across both arms so a
+            // local calibration cannot overlap a Vision-originated command.
+            let calibrationIsPending = pendingGripperCommands.values.contains {
+                $0.operation == "gripper_calibrate"
+            }
+            guard !calibrationIsPending,
+                  type != "gripper_calibrate" || pendingGripperCommands.isEmpty else {
+                return 0
+            }
+
             switch type {
             case "gripper_state", "gripper_calibrate":
                 guard action == nil, force == nil else { return 0 }
@@ -844,7 +857,13 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
             let commandID = nextCommandID
             nextCommandID &+= 1
             pendingGripperCommands[commandID] = ROBAmberGatewayPendingGripperCommand(
-                operation: type, arm: arm, action: action, force: force
+                operation: type,
+                arm: arm,
+                action: action,
+                force: force,
+                acknowledgementDeadline: .now() + .milliseconds(
+                    Int(Self.gripperAcknowledgementTimeout * 1_000)
+                )
             )
 
             var updated = current
@@ -1096,9 +1115,23 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         heartbeatTimer?.cancel()
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now(), repeating: Self.heartbeatInterval)
-        timer.setEventHandler { [weak self] in self?.send(ROBAmberGatewayMessage(type: "heartbeat")) }
+        timer.setEventHandler { [weak self] in self?.heartbeatTick() }
         heartbeatTimer = timer
         timer.resume()
+    }
+
+    private func heartbeatTick() {
+        let now = DispatchTime.now().uptimeNanoseconds
+        if let expired = pendingGripperCommands.first(where: {
+            $0.value.acknowledgementDeadline.uptimeNanoseconds <= now
+        }) {
+            disconnectOnQueue(
+                detail: "Gripper acknowledgement timed out for command \(expired.key); calibration state invalidated",
+                failed: true
+            )
+            return
+        }
+        send(ROBAmberGatewayMessage(type: "heartbeat"))
     }
 
     private func send(_ message: ROBAmberGatewayMessage) {

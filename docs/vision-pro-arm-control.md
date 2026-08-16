@@ -153,8 +153,11 @@ Gripper messages use the separate strict `rob-gripper-control/1` protocol on
 the same authenticated operator session. Calibration is deliberately performed
 locally in **Amber Arm Diagnostics…**, one gripper at a time, because it can
 move through full travel. Vision cannot request calibration. A reconnect,
-heartbeat expiry, gateway restart, or power cycle clears the session-local
-calibration acceptance.
+heartbeat expiry, gateway restart, or detected same-arm telemetry outage clears
+the session-local calibration acceptance. Fresh feedback does not restore it.
+Operators must also recalibrate after every known arm-core power cycle: the
+vendor status has no explicit boot-generation signal, so an extremely fast
+restart with no observable telemetry gap cannot be detected automatically.
 
 After calibration dispatch is accepted, the Vision arm panel and the matching
 PSVR Sense index trigger can request `hold` or `release` at 2–20 raw vendor
