@@ -91,6 +91,10 @@ static const NSTimeInterval ROBConversationLogRetentionInterval = 7 * 24 * 60 * 
         self.bubbleLabel = [NSTextField wrappingLabelWithString:@""];
         self.bubbleLabel.font = [NSFont systemFontOfSize:14];
         self.bubbleLabel.selectable = YES;
+        self.bubbleLabel.maximumNumberOfLines = 0;
+        self.bubbleLabel.lineBreakMode = NSLineBreakByWordWrapping;
+        self.bubbleLabel.cell.wraps = YES;
+        self.bubbleLabel.cell.scrollable = NO;
         self.bubbleLabel.drawsBackground = YES;
         self.bubbleLabel.wantsLayer = YES;
         self.bubbleLabel.layer.cornerRadius = 14;
@@ -447,7 +451,6 @@ static const NSTimeInterval ROBConversationLogRetentionInterval = 7 * 24 * 60 * 
     view.senderLabel.stringValue = [NSString stringWithFormat:@"%@  •  %@", senderName, timestamp];
     NSColor *textColor = message.fromUser ? NSColor.whiteColor : NSColor.labelColor;
     CGFloat horizontalTextInset = message.fromUser ? 10 : 16;
-    CGFloat baselineOffset = message.fromUser ? -4 : -6;
     NSMutableParagraphStyle *bubbleStyle = [[NSMutableParagraphStyle alloc] init];
     bubbleStyle.firstLineHeadIndent = horizontalTextInset;
     bubbleStyle.headIndent = horizontalTextInset;
@@ -457,10 +460,7 @@ static const NSTimeInterval ROBConversationLogRetentionInterval = 7 * 24 * 60 * 
            attributes:@{
                NSFontAttributeName: [NSFont systemFontOfSize:14],
                NSForegroundColorAttributeName: textColor,
-               NSParagraphStyleAttributeName: bubbleStyle,
-               // Lower the glyph baseline inside the rounded bubble without
-               // moving or resizing the bubble itself.
-               NSBaselineOffsetAttributeName: @(baselineOffset)
+               NSParagraphStyleAttributeName: bubbleStyle
            }];
     view.bubbleLabel.textColor = textColor;
     view.bubbleLabel.backgroundColor = message.fromUser
@@ -471,6 +471,16 @@ static const NSTimeInterval ROBConversationLogRetentionInterval = 7 * 24 * 60 * 
                                                   timeStyle:NSDateFormatterShortStyle];
     view.needsLayout = YES;
     return view;
+}
+
+- (void)tableViewColumnDidResize:(NSNotification *)notification
+{
+    if (notification.object != self.conversationTableView || self.conversationMessages.count == 0) {
+        return;
+    }
+    NSIndexSet *allRows = [NSIndexSet indexSetWithIndexesInRange:
+        NSMakeRange(0, self.conversationMessages.count)];
+    [self.conversationTableView noteHeightOfRowsWithIndexesChanged:allRows];
 }
 
 - (void) didRespond: (NSString *) responseText {
