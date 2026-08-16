@@ -72,6 +72,10 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 
 static const NSUInteger ROBConversationLogMaximumMessages = 300;
 static const NSTimeInterval ROBConversationLogRetentionInterval = 7 * 24 * 60 * 60;
+// AppKit's wrapping-label cell draws its first baseline slightly high inside
+// the rounded bubble. A negative baseline offset lowers only the glyphs while
+// leaving the bubble frame, background, selection, and horizontal insets fixed.
+static const CGFloat ROBConversationBubbleTextBaselineOffset = -3.0;
 
 @interface ROBConversationBubbleView : NSTableCellView
 @property (nonatomic, strong) NSTextField *senderLabel;
@@ -429,7 +433,10 @@ static const NSTimeInterval ROBConversationLogRetentionInterval = 7 * 24 * 60 * 
     CGFloat textWidth = MIN(MAX(180, tableView.bounds.size.width - 28) * 0.78, 430) - (horizontalTextInset * 2);
     NSRect textBounds = [message.text boundingRectWithSize:NSMakeSize(textWidth, CGFLOAT_MAX)
                                                    options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
-                                                attributes:@{ NSFontAttributeName: [NSFont systemFontOfSize:14] }];
+                                                attributes:@{
+                                                    NSFontAttributeName: [NSFont systemFontOfSize:14],
+                                                    NSBaselineOffsetAttributeName: @(ROBConversationBubbleTextBaselineOffset)
+                                                }];
     return MAX(68, ceil(NSHeight(textBounds)) + 47);
 }
 
@@ -460,6 +467,7 @@ static const NSTimeInterval ROBConversationLogRetentionInterval = 7 * 24 * 60 * 
            attributes:@{
                NSFontAttributeName: [NSFont systemFontOfSize:14],
                NSForegroundColorAttributeName: textColor,
+               NSBaselineOffsetAttributeName: @(ROBConversationBubbleTextBaselineOffset),
                NSParagraphStyleAttributeName: bubbleStyle
            }];
     view.bubbleLabel.textColor = textColor;

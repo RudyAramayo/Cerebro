@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static regression fixture for complete multi-line conversation bubbles."""
+"""Static regression fixture for aligned, complete conversation bubbles."""
 
 from pathlib import Path
 
@@ -29,6 +29,7 @@ def main():
     bubble_initializer = objective_c_method(
         source, "- (instancetype)initWithFrame:", bubble_class_start
     )
+    row_height = objective_c_method(source, "heightOfRow:")
     row_renderer = objective_c_method(source, "viewForTableColumn:")
     resize_handler = objective_c_method(source, "- (void)tableViewColumnDidResize:")
 
@@ -37,14 +38,20 @@ def main():
     assert ".cell.wraps = YES;" in bubble_initializer
     assert ".cell.scrollable = NO;" in bubble_initializer
 
-    # A per-line baseline offset changes AppKit's line-fragment height. The
-    # table measures plain 14-point text, so such an offset clips the final
-    # wrapped lines when the bubble masks its contents to rounded corners.
-    assert "NSBaselineOffsetAttributeName" not in row_renderer
+    # Lower the glyphs without moving the bubble. The same attributed-text
+    # geometry must be used for row measurement so wrapped final lines retain
+    # enough height inside the rounded mask.
+    assert "ROBConversationBubbleTextBaselineOffset = -3.0;" in source
+    baseline_attribute = (
+        "NSBaselineOffsetAttributeName: "
+        "@(ROBConversationBubbleTextBaselineOffset)"
+    )
+    assert baseline_attribute in row_height
+    assert baseline_attribute in row_renderer
 
     # Width changes alter wrapping and must invalidate every cached row height.
     assert "noteHeightOfRowsWithIndexesChanged" in resize_handler
-    print("Conversation bubbles preserve complete wrapped response text")
+    print("Conversation bubbles lower text without clipping wrapped responses")
 
 
 if __name__ == "__main__":
