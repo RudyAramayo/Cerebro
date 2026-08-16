@@ -403,6 +403,9 @@ public final class ROBRobotActionMessage: NSObject {
     }
 
     private static func validateArguments(_ arguments: NSDictionary, for action: String) -> String? {
+        guard hasExactArgumentKeys(arguments, for: action) else {
+            return "\(action) contains unknown or missing arguments"
+        }
         switch action {
         case "look_at", "request_pick":
             guard let targetID = arguments["target_id"] as? String,
@@ -439,6 +442,27 @@ public final class ROBRobotActionMessage: NSObject {
             return "action is unsupported"
         }
         return nil
+    }
+
+    private static func hasExactArgumentKeys(
+        _ arguments: NSDictionary,
+        for action: String
+    ) -> Bool {
+        let stringKeys = arguments.allKeys.compactMap { $0 as? String }
+        guard stringKeys.count == arguments.count else { return false }
+        let keys = Set(stringKeys)
+        switch action {
+        case "look_at", "request_pick":
+            return keys == ["target_id"]
+        case "play_gesture":
+            return keys == ["gesture"]
+        case "navigate_relative":
+            return keys == ["distance_m", "yaw_rad", "speed_scale"]
+        case "stop_motion":
+            return keys.isEmpty
+        default:
+            return false
+        }
     }
 
     private static func finiteDouble(_ value: Any?) -> Double? {

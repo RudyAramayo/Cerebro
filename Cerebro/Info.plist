@@ -24,6 +24,8 @@
 	<string>Cerebro uses the microphone for on-device speech recognition and, when Gemini Robotics is enabled, streams audio to Google Gemini.</string>
 	<key>NSBonjourServices</key>
 	<array>
+		<string>_ssh._tcp</string>
+		<string>_workstation._tcp</string>
 		<string>_robctl._udp</string>
 		<string>_robvideo._udp</string>
 		<string>_roboNet._tcp</string>

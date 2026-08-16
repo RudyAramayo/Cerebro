@@ -12,8 +12,13 @@
 #import "ROBSerialBox.h"
 #import "ROBSpeechBox.h"
 #import "Cerebro-Swift.h"
+#import <netdb.h>
+#import <arpa/inet.h>
+#import <sys/socket.h>
 
-@interface ROBTorsoControlsViewController () <NSTextFieldDelegate, NSTableViewDelegate, NSTableViewDataSource>
+static NSString * const ROBAmberHostIPDefaultsKey = @"ROBAmberHostIP";
+
+@interface ROBTorsoControlsViewController () <NSTextFieldDelegate, NSTableViewDelegate, NSTableViewDataSource, NSNetServiceBrowserDelegate, NSNetServiceDelegate>
 
 @property (readwrite, retain) NSTimer *renderServoControlsTimer;
 @property (readwrite, assign) BOOL is_in_position_mode_R11;
@@ -25,6 +30,10 @@
 @property (readwrite, assign) BOOL is_in_current_mode_L10;
 @property (readwrite, assign) BOOL is_in_speed_mode_L10;
 @property (readwrite, assign) BOOL is_in_activated_mode_L10;
+@property (nonatomic, strong) NSMutableArray<NSNetServiceBrowser *> *amberServiceBrowsers;
+@property (nonatomic, strong) NSMutableSet<NSNetService *> *resolvingAmberServices;
+- (void)startAmberHostDiscovery;
+- (void)applyDiscoveredAmberHost:(NSString *)host source:(NSString *)source;
 @end
 
 @implementation ROBTorsoControlsViewController
@@ -37,6 +46,11 @@
                                                                    userInfo:nil
                                                                     repeats:YES];
     self.amberHostIP_TextField.delegate = self;
+    NSString *savedAmberHost = [[NSUserDefaults standardUserDefaults] stringForKey:ROBAmberHostIPDefaultsKey];
+    if (savedAmberHost.length > 0) {
+        self.amberHostIP_TextField.stringValue = savedAmberHost;
+    }
+    [self startAmberHostDiscovery];
     
     KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
     //TODO: show this in a selectable tableView list
@@ -177,7 +191,119 @@
     if (textField == self.amberHostIP_TextField) {
         NSLog(@"setting amberHostIP to %@", textField.stringValue);
         self.robMainViewController.serialBox.amberHostIP = textField.stringValue;
+        [[NSUserDefaults standardUserDefaults] setObject:textField.stringValue
+                                                  forKey:ROBAmberHostIPDefaultsKey];
     }
+}
+
+#pragma mark - Amber Ubuntu host discovery
+
+- (void)startAmberHostDiscovery
+{
+    self.resolvingAmberServices = [NSMutableSet set];
+    self.amberServiceBrowsers = [NSMutableArray array];
+
+    // Ubuntu normally publishes its .local hostname through Avahi even when it
+    // does not have a custom Amber service installed. ROB's controller reports
+    // amber-master as its static hostname; retain amber.local as a legacy alias.
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        for (NSString *hostName in @[@"amber-master.local", @"amber.local"]) {
+            struct addrinfo hints = {0};
+            hints.ai_family = AF_INET;
+            hints.ai_socktype = SOCK_STREAM;
+            struct addrinfo *results = NULL;
+            int status = getaddrinfo(hostName.UTF8String, NULL, &hints, &results);
+            BOOL found = NO;
+            if (status == 0) {
+                for (struct addrinfo *result = results; result != NULL; result = result->ai_next) {
+                    struct sockaddr_in *address = (struct sockaddr_in *)result->ai_addr;
+                    char buffer[INET_ADDRSTRLEN] = {0};
+                    if (inet_ntop(AF_INET, &address->sin_addr, buffer, sizeof(buffer)) != NULL) {
+                        NSString *host = [NSString stringWithUTF8String:buffer];
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            [self applyDiscoveredAmberHost:host source:hostName];
+                        });
+                        found = YES;
+                        break;
+                    }
+                }
+            }
+            if (results != NULL) { freeaddrinfo(results); }
+            if (found) { break; }
+        }
+    });
+
+    // This controller has been verified on ROB's LAN. Probe SSH before using
+    // it so an offline/stale address does not replace a working saved value.
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        int descriptor = socket(AF_INET, SOCK_STREAM, 0);
+        if (descriptor < 0) { return; }
+        struct timeval timeout = {.tv_sec = 1, .tv_usec = 0};
+        setsockopt(descriptor, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+        struct sockaddr_in address = {0};
+        address.sin_family = AF_INET;
+        address.sin_port = htons(22);
+        inet_pton(AF_INET, "10.0.0.26", &address.sin_addr);
+        BOOL reachable = connect(descriptor, (struct sockaddr *)&address, sizeof(address)) == 0;
+        close(descriptor);
+        if (reachable) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self applyDiscoveredAmberHost:@"10.0.0.26" source:@"verified SSH controller"];
+            });
+        }
+    });
+
+    for (NSString *serviceType in @[@"_ssh._tcp.", @"_workstation._tcp."]) {
+        NSNetServiceBrowser *browser = [[NSNetServiceBrowser alloc] init];
+        browser.delegate = self;
+        [self.amberServiceBrowsers addObject:browser];
+        [browser searchForServicesOfType:serviceType inDomain:@"local."];
+    }
+    NSLog(@"Searching the local network for the Amber Ubuntu controller");
+}
+
+- (void)netServiceBrowser:(NSNetServiceBrowser *)browser
+           didFindService:(NSNetService *)service
+               moreComing:(BOOL)moreComing
+{
+    NSString *identity = [NSString stringWithFormat:@"%@ %@", service.name, service.hostName ?: @""];
+    if ([identity rangeOfString:@"amber" options:NSCaseInsensitiveSearch].location == NSNotFound) {
+        return;
+    }
+    service.delegate = self;
+    [self.resolvingAmberServices addObject:service];
+    [service resolveWithTimeout:5.0];
+}
+
+- (void)netServiceDidResolveAddress:(NSNetService *)service
+{
+    for (NSData *addressData in service.addresses) {
+        const struct sockaddr *socketAddress = addressData.bytes;
+        if (socketAddress == NULL || socketAddress->sa_family != AF_INET) { continue; }
+        const struct sockaddr_in *ipv4 = (const struct sockaddr_in *)socketAddress;
+        char buffer[INET_ADDRSTRLEN] = {0};
+        if (inet_ntop(AF_INET, &ipv4->sin_addr, buffer, sizeof(buffer)) != NULL) {
+            [self applyDiscoveredAmberHost:[NSString stringWithUTF8String:buffer]
+                                   source:service.name];
+            break;
+        }
+    }
+    [self.resolvingAmberServices removeObject:service];
+}
+
+- (void)netService:(NSNetService *)service didNotResolve:(NSDictionary<NSString *, NSNumber *> *)errorDict
+{
+    NSLog(@"Could not resolve Amber service %@: %@", service.name, errorDict);
+    [self.resolvingAmberServices removeObject:service];
+}
+
+- (void)applyDiscoveredAmberHost:(NSString *)host source:(NSString *)source
+{
+    if (host.length == 0) { return; }
+    self.amberHostIP_TextField.stringValue = host;
+    self.robMainViewController.serialBox.amberHostIP = host;
+    [[NSUserDefaults standardUserDefaults] setObject:host forKey:ROBAmberHostIPDefaultsKey];
+    NSLog(@"Discovered Amber controller at %@ via %@", host, source);
 }
 
 - (void)controlTextDidEndEditing:(NSNotification *)obj {

@@ -25,6 +25,9 @@ struct GeminiRoboticsProtocolFixtureTests {
         try testTranscriptionAggregation()
         try testMicrophoneTurnAssociationOrdering()
         try testTurnDeadlineTracking()
+        try testFailureCircuitBreakerThresholdAndCooldownBoundary()
+        try testFailureCircuitBreakerRollingWindow()
+        try testFailureCircuitBreakerSuccessReset()
         try testToolAndSessionParsing()
         try testPriorityStopPolicy()
         print("Gemini Robotics protocol fixtures passed")
@@ -64,6 +67,14 @@ struct GeminiRoboticsProtocolFixtureTests {
     }
 
     private static func testPromptPreservesWakePhrase() throws {
+        try expect(
+            GeminiRoboticsConfiguration.defaultSystemInstruction.contains("Google Search is already authorized by Cerebro"),
+            "The system instruction must not send informational requests to ROBController"
+        )
+        try expect(
+            GeminiRoboticsConfiguration.defaultSystemInstruction.contains("never complete a recognized user turn silently"),
+            "The default Live instruction must require a spoken acknowledgement"
+        )
         let prompt = GeminiRoboticsPrompt.spokenText("Hey Rob, look at this", speechWordiness: 0)
         try expect(prompt.contains("Hey Rob"), "Text fallback must preserve ROB's wake phrase")
         try expect(prompt.hasPrefix("Answer in one concise spoken sentence:"), "Wordiness guidance is missing")
@@ -88,13 +99,74 @@ struct GeminiRoboticsProtocolFixtureTests {
                 "GEMINI_API_KEY": "fixture-key",
                 "GEMINI_ROBOTICS_STREAM_AUDIO": "flase",
                 "GEMINI_ROBOTICS_STREAM_VIDEO": "certainly",
-                "GEMINI_ROBOT_ACTION_TOOL_ENABLED": "enabled"
+                "GEMINI_ROBOT_ACTION_TOOL_ENABLED": "enabled",
+                "GEMINI_GOOGLE_SEARCH_ENABLED": "dangerously"
             ]),
             "Malformed optional flags should not invalidate an otherwise usable configuration"
         )
         try expect(!malformedMediaConfiguration.streamsAudio, "Malformed audio flag must fail closed")
         try expect(!malformedMediaConfiguration.streamsVideo, "Malformed video flag must fail closed")
         try expect(!malformedMediaConfiguration.exposesRobotActionTool, "Malformed action-tool flag must fail closed")
+        try expect(!malformedMediaConfiguration.enablesGoogleSearch, "Malformed Search flag must fail closed")
+
+        let defaultToolConfiguration = try require(
+            GeminiRoboticsConfiguration.fromEnvironment([
+                "GEMINI_ROBOTICS_ENABLED": "true",
+                "GEMINI_API_KEY": "fixture-key"
+            ]),
+            "Default-tool fixture configuration should load"
+        )
+        try expect(defaultToolConfiguration.exposesRobotActionTool, "Robot action tool should be exposed by default")
+        try expect(defaultToolConfiguration.enablesGoogleSearch, "Google Search should be enabled by default")
+        let defaultSetup = GeminiRoboticsProtocol.setupMessage(
+            configuration: defaultToolConfiguration,
+            resumptionHandle: nil
+        )
+        let defaultSetupBody = try require(
+            defaultSetup["setup"] as? [String: Any],
+            "Default-tool setup envelope is missing"
+        )
+        let defaultTools = try require(
+            defaultSetupBody["tools"] as? [[String: Any]],
+            "Default setup did not expose tools"
+        )
+        try expect(
+            defaultTools.contains {
+                ($0["googleSearch"] as? [String: Any])?.isEmpty == true
+            },
+            "Default setup did not declare Google Search"
+        )
+        let defaultFunctionNames = defaultTools.flatMap {
+            ($0["functionDeclarations"] as? [[String: Any]]) ?? []
+        }.compactMap { $0["name"] as? String }
+        try expect(
+            defaultFunctionNames.contains("robot_action"),
+            "Default setup did not declare robot_action"
+        )
+
+        let explicitlyDisabledTools = try require(
+            GeminiRoboticsConfiguration.fromEnvironment([
+                "GEMINI_ROBOTICS_ENABLED": "true",
+                "GEMINI_API_KEY": "fixture-key",
+                "GEMINI_ROBOT_ACTION_TOOL_ENABLED": "false",
+                "GEMINI_GOOGLE_SEARCH_ENABLED": "false"
+            ]),
+            "Explicitly disabled tool fixture configuration should load"
+        )
+        try expect(!explicitlyDisabledTools.exposesRobotActionTool, "Explicit robot-action disable was ignored")
+        try expect(!explicitlyDisabledTools.enablesGoogleSearch, "Explicit Google Search disable was ignored")
+        let disabledSetup = GeminiRoboticsProtocol.setupMessage(
+            configuration: explicitlyDisabledTools,
+            resumptionHandle: nil
+        )
+        let disabledSetupBody = try require(
+            disabledSetup["setup"] as? [String: Any],
+            "Disabled-tool setup envelope is missing"
+        )
+        try expect(
+            disabledSetupBody["tools"] == nil,
+            "Explicitly disabling both tools should omit the setup tools array"
+        )
     }
 
     private static func testRuntimeSettingsDefaultsAndOverrides() throws {
@@ -140,7 +212,8 @@ struct GeminiRoboticsProtocolFixtureTests {
             "GEMINI_ROBOTICS_ENABLED": "true",
             "GEMINI_API_KEY": "fixture-key",
             "GEMINI_ROBOTICS_MODEL": "gemini-robotics-er-2-streaming-preview",
-            "GEMINI_ROBOT_ACTION_TOOL_ENABLED": "true"
+            "GEMINI_ROBOT_ACTION_TOOL_ENABLED": "true",
+            "GEMINI_GOOGLE_SEARCH_ENABLED": "true"
         ]
         let configuration = try require(
             GeminiRoboticsConfiguration.fromEnvironment(environment),
@@ -187,8 +260,12 @@ struct GeminiRoboticsProtocolFixtureTests {
         try expect(resumption["handle"] == "resume-123", "Resumption handle was not serialized")
 
         let tools = try require(setupBody["tools"] as? [[String: Any]], "Missing enabled tool declarations")
+        try expect(
+            (tools.first?["googleSearch"] as? [String: Any])?.isEmpty == true,
+            "Google Search was not declared as a server-side Live tool"
+        )
         let declarations = try require(
-            tools.first?["functionDeclarations"] as? [[String: Any]],
+            tools.dropFirst().first?["functionDeclarations"] as? [[String: Any]],
             "Missing function declarations"
         )
         try expect(declarations.first?["name"] as? String == "robot_action", "Wrong tool name")
@@ -373,6 +450,65 @@ struct GeminiRoboticsProtocolFixtureTests {
             try expect(!summary.contains(privateValue), "Diagnostics leaked \(privateValue)")
         }
 
+        let failureDate = Date(timeIntervalSince1970: 1_700_000_020)
+        store.noteRequestFailure(
+            "Gemini's request queue is full. private-provider-detail",
+            at: failureDate
+        )
+        let failureSnapshot = store.snapshot()
+        try expect(
+            failureSnapshot.lastRequestFailureCategory == "queue_full",
+            "Request failure did not retain its redacted category"
+        )
+        try expect(
+            failureSnapshot.lastRequestFailureDate == failureDate,
+            "Request failure date was not retained"
+        )
+        try expect(
+            !String(describing: failureSnapshot).contains("private-provider-detail"),
+            "Request diagnostics retained raw provider failure detail"
+        )
+
+        store.noteRequestFailure(
+            "Gemini did not start a response to the microphone input within 6 seconds.",
+            at: failureDate
+        )
+        try expect(
+            store.snapshot().lastRequestFailureCategory == "raw_response_start_timeout",
+            "Raw microphone silence was not classified separately"
+        )
+
+        let transcriptionDate = Date(timeIntervalSince1970: 1_700_000_025)
+        store.noteServerInputTranscription(characterCount: 18, at: transcriptionDate)
+        store.noteRawTurnTimeout(kind: "response_start", at: transcriptionDate)
+        let audioSnapshot = store.snapshot()
+        try expect(
+            audioSnapshot.serverInputTranscriptionEventCount == 1 &&
+                audioSnapshot.lastServerInputTranscriptionCharacterCount == 18 &&
+                audioSnapshot.lastServerInputTranscriptionDate == transcriptionDate,
+            "Redacted server input-transcription telemetry changed"
+        )
+        try expect(
+            audioSnapshot.rawTurnTimeoutCount == 1 &&
+                audioSnapshot.lastRawTurnTimeoutKind == "response_start" &&
+                audioSnapshot.lastRawTurnTimeoutDate == transcriptionDate,
+            "Raw microphone timeout telemetry changed"
+        )
+
+        let fallbackDate = Date(timeIntervalSince1970: 1_700_000_030)
+        store.noteLocalFallback(provider: "Swift MLX", at: fallbackDate)
+        store.noteLocalFallback(provider: "Apple Foundation Models", at: fallbackDate)
+        let fallbackSnapshot = store.snapshot()
+        try expect(fallbackSnapshot.localFallbackCount == 2, "Local fallback count changed")
+        try expect(
+            fallbackSnapshot.lastLocalFallbackProvider == "Apple Foundation Models",
+            "Latest local fallback provider was not retained"
+        )
+        try expect(
+            fallbackSnapshot.lastLocalFallbackDate == fallbackDate,
+            "Local fallback date was not retained"
+        )
+
         let disabledStore = GeminiRoboticsDiagnosticsStore(configuration: nil)
         let disabledSnapshot = disabledStore.snapshot()
         try expect(!disabledSnapshot.isConfigured, "Missing configuration should remain disabled")
@@ -436,6 +572,66 @@ struct GeminiRoboticsProtocolFixtureTests {
         tracker.complete(turnID: 41)
         try expect(tracker.activeTurnID == nil, "Turn completion did not clear the deadline")
         try expect(tracker.expiration(turnID: 41, now: 200) == nil, "Completed turn remained armed")
+    }
+
+    private static func testFailureCircuitBreakerThresholdAndCooldownBoundary() throws {
+        var breaker = GeminiFailureCircuitBreaker()
+        try expect(breaker.failureThreshold == 2, "Gemini failure threshold changed")
+        try expect(breaker.failureWindow == 60, "Gemini failure window changed")
+        try expect(breaker.cooldown == 90, "Gemini cooldown changed")
+        try expect(!breaker.isOpen(now: 100), "A fresh Gemini circuit started open")
+        try expect(!breaker.recordFailure(now: 100), "One Gemini failure opened the circuit")
+        try expect(
+            breaker.recordFailure(now: 160),
+            "Two Gemini failures at the inclusive 60-second boundary did not open the circuit"
+        )
+        try expect(breaker.openUntil == 250, "Gemini circuit did not open for exactly 90 seconds")
+        try expect(breaker.isOpen(now: 249.999), "Gemini circuit closed before its cooldown elapsed")
+        try expect(
+            breaker.recordFailure(now: 200),
+            "A failure observed during cooldown did not report an open circuit"
+        )
+        try expect(breaker.openUntil == 250, "A failure during cooldown extended the open interval")
+        try expect(!breaker.isOpen(now: 250), "Gemini circuit stayed open at the cooldown boundary")
+        try expect(breaker.openUntil == nil, "Expired Gemini cooldown state was not cleared")
+        try expect(
+            breaker.remainingCooldown(now: 250) == nil,
+            "Expired Gemini circuit reported a remaining cooldown"
+        )
+    }
+
+    private static func testFailureCircuitBreakerRollingWindow() throws {
+        var breaker = GeminiFailureCircuitBreaker()
+        try expect(!breaker.recordFailure(now: 0), "The first rolling-window failure opened the circuit")
+        try expect(
+            !breaker.recordFailure(now: 61),
+            "Failures more than 60 seconds apart opened the Gemini circuit"
+        )
+        try expect(
+            breaker.recordFailure(now: 121),
+            "The retained failure at the inclusive rolling-window boundary did not open the circuit"
+        )
+        try expect(breaker.openUntil == 211, "Rolling-window failure opened with the wrong cooldown")
+    }
+
+    private static func testFailureCircuitBreakerSuccessReset() throws {
+        var breaker = GeminiFailureCircuitBreaker()
+        try expect(!breaker.recordFailure(now: 10), "The first pre-success failure opened the circuit")
+        breaker.recordSuccess()
+        try expect(
+            !breaker.recordFailure(now: 20),
+            "A Gemini success did not clear the prior failure count"
+        )
+        try expect(breaker.recordFailure(now: 30), "Two post-reset failures did not open the circuit")
+        try expect(breaker.isOpen(now: 30), "Gemini circuit was not open after reaching its threshold")
+
+        breaker.recordSuccess()
+        try expect(!breaker.isOpen(now: 30), "A Gemini success did not close an open circuit")
+        try expect(breaker.openUntil == nil, "A Gemini success retained the open-until deadline")
+        try expect(
+            !breaker.recordFailure(now: 31),
+            "The first failure after an open-circuit success reset reopened the circuit"
+        )
     }
 
     private static func testTranscriptionAggregation() throws {

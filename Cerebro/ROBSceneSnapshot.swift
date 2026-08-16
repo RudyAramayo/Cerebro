@@ -109,6 +109,14 @@ public struct SceneSnapshot: Codable, Sendable {
     }
 }
 
+/// A lock-consistent view used by deterministic visual-calibration readiness.
+/// Producer ages remain operational metadata and are intentionally not added
+/// to the serialized SceneSnapshot schema or language-model context.
+public struct ROBSceneVisualCalibrationSnapshot: Sendable {
+    public let scene: SceneSnapshot
+    public let producerFreshness: ROBSceneProducerFreshness
+}
+
 public enum ROBAssistantAction: String, Codable, Sendable {
     case answer
     case askForClarification
@@ -141,6 +149,9 @@ public final class ROBSceneSnapshotStore: @unchecked Sendable {
     private var depthFreeSpace: [ROBFreeSpaceRegion] = []
     private var lidarFreeSpace: [ROBFreeSpaceRegion] = []
     private var lidarUpdateUptime: TimeInterval?
+    private var cameraFrameUpdateUptime: TimeInterval?
+    private var cameraPoseUpdateUptime: TimeInterval?
+    private var armPoseUpdateUptime: TimeInterval?
     private var armPose: [ROBArmJointPose] = []
     private var cameraPose: ROBCameraPose?
     private var cameraQuality = ROBCameraQuality(
@@ -166,9 +177,11 @@ public final class ROBSceneSnapshotStore: @unchecked Sendable {
             )
         }
         let depthSummary = Self.depthSummary(depth)
+        let updateUptime = ProcessInfo.processInfo.systemUptime
         lock.lock()
         sequence &+= 1
         cameraTimestampNanoseconds = timestampNanoseconds
+        cameraFrameUpdateUptime = updateUptime
         people = mappedPeople
         depthFreeSpace = depthSummary.regions
         cameraQuality = ROBCameraQuality(
@@ -213,18 +226,50 @@ public final class ROBSceneSnapshotStore: @unchecked Sendable {
     }
 
     public func updateArmPose(_ observations: [ROBArmJointPose]) {
-        lock.lock(); sequence &+= 1; armPose = observations; lock.unlock()
+        let updateUptime = ProcessInfo.processInfo.systemUptime
+        lock.lock()
+        sequence &+= 1
+        armPose = observations
+        armPoseUpdateUptime = updateUptime
+        lock.unlock()
     }
 
     public func updateCameraPose(_ pose: ROBCameraPose?) {
-        lock.lock(); sequence &+= 1; cameraPose = pose; lock.unlock()
+        let updateUptime = ProcessInfo.processInfo.systemUptime
+        lock.lock()
+        sequence &+= 1
+        cameraPose = pose
+        cameraPoseUpdateUptime = updateUptime
+        lock.unlock()
     }
 
     public func snapshot() -> SceneSnapshot {
         lock.lock()
         defer { lock.unlock() }
+        return makeSnapshotLocked(nowUptime: ProcessInfo.processInfo.systemUptime)
+    }
+
+    /// Returns scene facts and all three producer ages from one lock hold so a
+    /// readiness consumer cannot pair old observations with newer timestamps.
+    public func visualCalibrationSnapshot() -> ROBSceneVisualCalibrationSnapshot {
+        lock.lock()
+        defer { lock.unlock() }
+        let nowUptime = ProcessInfo.processInfo.systemUptime
+        return ROBSceneVisualCalibrationSnapshot(
+            scene: makeSnapshotLocked(nowUptime: nowUptime),
+            producerFreshness: producerFreshnessLocked(nowUptime: nowUptime)
+        )
+    }
+
+    public func visualCalibrationFreshness() -> ROBSceneProducerFreshness {
+        lock.lock()
+        defer { lock.unlock() }
+        return producerFreshnessLocked(nowUptime: ProcessInfo.processInfo.systemUptime)
+    }
+
+    private func makeSnapshotLocked(nowUptime: TimeInterval) -> SceneSnapshot {
         let lidarIsFresh = lidarUpdateUptime.map {
-            ProcessInfo.processInfo.systemUptime - $0 <= 1.5
+            nowUptime - $0 <= 1.5
         } ?? false
         let currentLidarFreeSpace = lidarIsFresh ? lidarFreeSpace : []
         let allConfidences = people.map(\.confidence)
@@ -243,6 +288,17 @@ public final class ROBSceneSnapshotStore: @unchecked Sendable {
             freeSpace: currentLidarFreeSpace + depthFreeSpace, armPose: armPose,
             cameraPose: cameraPose,
             cameraQuality: cameraQuality, confidence: confidence
+        )
+    }
+
+    private func producerFreshnessLocked(
+        nowUptime: TimeInterval
+    ) -> ROBSceneProducerFreshness {
+        ROBSceneProducerFreshness(
+            cameraFrameUpdateUptime: cameraFrameUpdateUptime,
+            cameraPoseUpdateUptime: cameraPoseUpdateUptime,
+            armPoseUpdateUptime: armPoseUpdateUptime,
+            nowUptime: nowUptime
         )
     }
 

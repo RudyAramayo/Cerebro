@@ -137,7 +137,7 @@ enum GeminiRoboticsCredential {
 struct GeminiRoboticsConfiguration {
     static let defaultModel = "models/gemini-robotics-er-2-streaming-preview"
     static let defaultSystemInstruction = """
-    You are ROB, Cerebro's embodied conversational assistant. Respond only when someone addresses ROB, Robbie, Robot, or clearly continues an active conversation. Return plain spoken text without Markdown, normally one or two concise sentences unless the user requests detail. Camera frames are observations, not proof that a physical action completed. Use only declared tools for physical actions and never claim an action succeeded until its matching tool response confirms completion. If no physical-action tool is declared, explain that ROBController must authorize the action.
+    You are ROB, Cerebro's embodied conversational assistant. Respond when someone addresses ROB, Robbie, Robot, or clearly continues an active conversation. Once you recognize an addressed or continuing user turn, always return at least a brief spoken acknowledgement; never complete a recognized user turn silently. Ignore indistinct background noise that is not a recognizable turn. Return plain spoken text without Markdown, normally one or two concise sentences unless the user requests detail. When Google Search is available, use it for current public information such as weather, news, schedules, and recent facts. Google Search is already authorized by Cerebro and never requires ROBController approval. Physical actions require ROBController approval or Cerebro's explicit, short-lived local Arm Debug Authority. Camera frames are observations, not proof that a physical action completed. Use only declared tools for physical actions and never claim an action succeeded until its matching tool response confirms measured completion. For play_gesture, supply only a named gesture; never invent or request raw joint values. If a requested physical-action tool is not declared, explain that the physical capability is not currently enabled.
     """
 
     let credential: GeminiRoboticsCredential
@@ -146,6 +146,7 @@ struct GeminiRoboticsConfiguration {
     let streamsAudio: Bool
     let streamsVideo: Bool
     let exposesRobotActionTool: Bool
+    let enablesGoogleSearch: Bool
     let responseModality: String
 
     static func fromEnvironment(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> GeminiRoboticsConfiguration? {
@@ -202,7 +203,12 @@ struct GeminiRoboticsConfiguration {
             ),
             exposesRobotActionTool: environment.booleanValue(
                 for: "GEMINI_ROBOT_ACTION_TOOL_ENABLED",
-                default: false,
+                default: true,
+                invalid: false
+            ),
+            enablesGoogleSearch: environment.booleanValue(
+                for: "GEMINI_GOOGLE_SEARCH_ENABLED",
+                default: true,
                 invalid: false
             ),
             responseModality: responseModality
@@ -369,6 +375,7 @@ struct GeminiRoboticsDiagnosticsSnapshot: Equatable {
     let isAudioStreamingApplied: Bool
     let isVideoStreamingApplied: Bool
     let exposesRobotActionTool: Bool
+    let enablesGoogleSearch: Bool
     let responseModality: String?
     let connectionState: String
     let inputMode: GeminiRoboticsDiagnosticsInputMode
@@ -377,6 +384,17 @@ struct GeminiRoboticsDiagnosticsSnapshot: Equatable {
     let lastVideoSendDate: Date?
     let lastServerEvent: String?
     let lastServerEventDate: Date?
+    let lastRequestFailureCategory: String?
+    let lastRequestFailureDate: Date?
+    let serverInputTranscriptionEventCount: UInt64
+    let lastServerInputTranscriptionCharacterCount: Int?
+    let lastServerInputTranscriptionDate: Date?
+    let rawTurnTimeoutCount: UInt64
+    let lastRawTurnTimeoutKind: String?
+    let lastRawTurnTimeoutDate: Date?
+    let localFallbackCount: UInt64
+    let lastLocalFallbackProvider: String?
+    let lastLocalFallbackDate: Date?
 }
 
 /// Thread-safe, redacted runtime telemetry for the diagnostics UI. This store
@@ -392,6 +410,7 @@ final class GeminiRoboticsDiagnosticsStore {
     private var isAudioStreamingApplied = false
     private var isVideoStreamingApplied = false
     private let exposesRobotActionTool: Bool
+    private let enablesGoogleSearch: Bool
     private let responseModality: String?
     private var connectionState: String
     private var videoFramesEncoded: UInt64 = 0
@@ -399,6 +418,17 @@ final class GeminiRoboticsDiagnosticsStore {
     private var lastVideoSendDate: Date?
     private var lastServerEvent: String?
     private var lastServerEventDate: Date?
+    private var lastRequestFailureCategory: String?
+    private var lastRequestFailureDate: Date?
+    private var serverInputTranscriptionEventCount: UInt64 = 0
+    private var lastServerInputTranscriptionCharacterCount: Int?
+    private var lastServerInputTranscriptionDate: Date?
+    private var rawTurnTimeoutCount: UInt64 = 0
+    private var lastRawTurnTimeoutKind: String?
+    private var lastRawTurnTimeoutDate: Date?
+    private var localFallbackCount: UInt64 = 0
+    private var lastLocalFallbackProvider: String?
+    private var lastLocalFallbackDate: Date?
 
     init(
         configuration: GeminiRoboticsConfiguration?,
@@ -413,6 +443,7 @@ final class GeminiRoboticsDiagnosticsStore {
         streamsAudio = effectiveSettings.streamsAudio
         streamsVideo = effectiveSettings.streamsVideo
         exposesRobotActionTool = configuration?.exposesRobotActionTool ?? false
+        enablesGoogleSearch = configuration?.enablesGoogleSearch ?? false
         responseModality = configuration?.responseModality
         if configuration == nil {
             connectionState = "unavailable"
@@ -471,6 +502,75 @@ final class GeminiRoboticsDiagnosticsStore {
         lock.unlock()
     }
 
+    func noteRequestFailure(_ detail: String, at date: Date = Date()) {
+        let normalized = detail.lowercased()
+        let category: String
+        if normalized.contains("queue is full") {
+            category = "queue_full"
+        } else if normalized.contains("without a usable spoken response") {
+            category = "empty_response"
+        } else if normalized.contains("microphone") && normalized.contains("within 6 seconds") {
+            category = "raw_response_start_timeout"
+        } else if normalized.contains("microphone") && normalized.contains("did not finish") {
+            category = "raw_completion_timeout"
+        } else if normalized.contains("within 15 seconds") {
+            category = "text_response_start_timeout"
+        } else if normalized.contains("did not finish") {
+            category = "text_completion_timeout"
+        } else if normalized.contains("turned off") || normalized.contains("disabled") {
+            category = "disabled"
+        } else if normalized.contains("credential") || normalized.contains("configuration") {
+            category = "configuration"
+        } else if normalized.contains("resume") {
+            category = "resumption_failed"
+        } else if normalized.contains("reconnect") {
+            category = "server_reconnect"
+        } else if normalized.contains("send") {
+            category = "send_failed"
+        } else if normalized.contains("connection") || normalized.contains("session") {
+            category = "connection_ended"
+        } else {
+            category = "other"
+        }
+        lock.lock()
+        lastRequestFailureCategory = category
+        lastRequestFailureDate = date
+        lock.unlock()
+    }
+
+    func noteServerInputTranscription(
+        characterCount: Int,
+        at date: Date = Date()
+    ) {
+        lock.lock()
+        if serverInputTranscriptionEventCount < UInt64.max {
+            serverInputTranscriptionEventCount += 1
+        }
+        lastServerInputTranscriptionCharacterCount = max(0, characterCount)
+        lastServerInputTranscriptionDate = date
+        lock.unlock()
+    }
+
+    func noteRawTurnTimeout(kind: String, at date: Date = Date()) {
+        lock.lock()
+        if rawTurnTimeoutCount < UInt64.max {
+            rawTurnTimeoutCount += 1
+        }
+        lastRawTurnTimeoutKind = String(kind.prefix(40))
+        lastRawTurnTimeoutDate = date
+        lock.unlock()
+    }
+
+    func noteLocalFallback(provider: String, at date: Date = Date()) {
+        lock.lock()
+        if localFallbackCount < UInt64.max {
+            localFallbackCount += 1
+        }
+        lastLocalFallbackProvider = String(provider.prefix(80))
+        lastLocalFallbackDate = date
+        lock.unlock()
+    }
+
     func snapshot() -> GeminiRoboticsDiagnosticsSnapshot {
         lock.lock()
         defer { lock.unlock() }
@@ -493,6 +593,7 @@ final class GeminiRoboticsDiagnosticsStore {
             isAudioStreamingApplied: isAudioStreamingApplied,
             isVideoStreamingApplied: isVideoStreamingApplied,
             exposesRobotActionTool: exposesRobotActionTool,
+            enablesGoogleSearch: enablesGoogleSearch,
             responseModality: responseModality,
             connectionState: connectionState,
             inputMode: inputMode,
@@ -500,7 +601,18 @@ final class GeminiRoboticsDiagnosticsStore {
             videoFramesSent: videoFramesSent,
             lastVideoSendDate: lastVideoSendDate,
             lastServerEvent: lastServerEvent,
-            lastServerEventDate: lastServerEventDate
+            lastServerEventDate: lastServerEventDate,
+            lastRequestFailureCategory: lastRequestFailureCategory,
+            lastRequestFailureDate: lastRequestFailureDate,
+            serverInputTranscriptionEventCount: serverInputTranscriptionEventCount,
+            lastServerInputTranscriptionCharacterCount: lastServerInputTranscriptionCharacterCount,
+            lastServerInputTranscriptionDate: lastServerInputTranscriptionDate,
+            rawTurnTimeoutCount: rawTurnTimeoutCount,
+            lastRawTurnTimeoutKind: lastRawTurnTimeoutKind,
+            lastRawTurnTimeoutDate: lastRawTurnTimeoutDate,
+            localFallbackCount: localFallbackCount,
+            lastLocalFallbackProvider: lastLocalFallbackProvider,
+            lastLocalFallbackDate: lastLocalFallbackDate
         )
     }
 }
@@ -551,6 +663,57 @@ struct GeminiTurnDeadlineTracker {
             return .responseNotStarted(turnID: turnID)
         }
         return nil
+    }
+}
+
+/// Small provider-health circuit used by ROBAI admission. It never changes the
+/// operator's saved Gemini setting; it only diverts new conversational turns to
+/// the private local fallback during a short burst of provider failures.
+struct GeminiFailureCircuitBreaker {
+    let failureThreshold: Int
+    let failureWindow: TimeInterval
+    let cooldown: TimeInterval
+
+    private var recentFailures: [TimeInterval] = []
+    private(set) var openUntil: TimeInterval?
+
+    init(
+        failureThreshold: Int = 2,
+        failureWindow: TimeInterval = 60,
+        cooldown: TimeInterval = 90
+    ) {
+        self.failureThreshold = max(1, failureThreshold)
+        self.failureWindow = max(1, failureWindow)
+        self.cooldown = max(1, cooldown)
+    }
+
+    mutating func isOpen(now: TimeInterval) -> Bool {
+        if let openUntil, now >= openUntil {
+            self.openUntil = nil
+            recentFailures.removeAll()
+        }
+        return openUntil.map { now < $0 } ?? false
+    }
+
+    @discardableResult
+    mutating func recordFailure(now: TimeInterval) -> Bool {
+        if isOpen(now: now) { return true }
+        recentFailures.removeAll { now - $0 > failureWindow }
+        recentFailures.append(now)
+        guard recentFailures.count >= failureThreshold else { return false }
+        openUntil = now + cooldown
+        recentFailures.removeAll()
+        return true
+    }
+
+    mutating func recordSuccess() {
+        recentFailures.removeAll()
+        openUntil = nil
+    }
+
+    mutating func remainingCooldown(now: TimeInterval) -> TimeInterval? {
+        guard isOpen(now: now), let openUntil else { return nil }
+        return max(0, openUntil - now)
     }
 }
 
@@ -698,10 +861,19 @@ enum GeminiRoboticsProtocol {
             ]
         ]
 
+        var tools: [[String: Any]] = []
+        if configuration.enablesGoogleSearch {
+            // Google Search is a server-side Live tool. Gemini performs the
+            // search itself; Cerebro never receives arbitrary URLs to open.
+            tools.append(["googleSearch": [:]])
+        }
         if configuration.exposesRobotActionTool {
-            setup["tools"] = [[
+            tools.append([
                 "functionDeclarations": [robotActionToolDeclaration]
-            ]]
+            ])
+        }
+        if !tools.isEmpty {
+            setup["tools"] = tools
         }
 
         return ["setup": setup]
@@ -824,7 +996,7 @@ enum GeminiRoboticsProtocol {
 
     private static let robotActionToolDeclaration: [String: Any] = [
         "name": "robot_action",
-        "description": "Propose a high-level robot action. ROBController must approve it and Cerebro's local safety/motion layer must report the physical outcome. Approval is not completion.",
+        "description": "Propose a high-level robot action. ROBController normally approves it; an explicit short-lived Cerebro Arm Debug Authority may execute an immutable locally approved named gesture. Cerebro's measured safety/motion layer reports the physical outcome. Approval is not completion.",
         "behavior": "BLOCKING",
         "parameters": [
             "type": "OBJECT",
@@ -839,7 +1011,7 @@ enum GeminiRoboticsProtocol {
                 ],
                 "gesture": [
                     "type": "STRING",
-                    "description": "Allow-listed gesture name. Required by play_gesture."
+                    "description": "Immutable locally approved gesture name. Required by play_gesture. Never provide joint values. If a name is rejected, the result may list the available names."
                 ],
                 "distance_m": [
                     "type": "NUMBER",

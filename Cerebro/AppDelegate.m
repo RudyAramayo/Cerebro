@@ -40,6 +40,8 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
 @property (readwrite, assign) BOOL reportedMissingRPLidarApplication;
 @property (readwrite, retain) NSMenuItem *developmentModeMenuItem;
 @property (readwrite, retain) NSMenuItem *controllerDiagnosticsMenuItem;
+@property (readwrite, retain) NSMenuItem *amberDiagnosticsMenuItem;
+@property (readwrite, retain) NSMenuItem *wakeUpCalibrationMenuItem;
 @property (readwrite, retain) NSMenuItem *hologramExportMenuItem;
 @property (readwrite, retain) NSMenuItem *hologramSettingsMenuItem;
 @property (readwrite, retain) NSMenuItem *hologramRecordMenuItem;
@@ -121,6 +123,18 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
         keyEquivalent:@""];
     self.controllerDiagnosticsMenuItem.target = self;
     [submenu addItem:self.controllerDiagnosticsMenuItem];
+    self.amberDiagnosticsMenuItem = [[NSMenuItem alloc]
+        initWithTitle:@"Amber Arm Diagnostics…"
+               action:@selector(showAmberArmDiagnostics:)
+        keyEquivalent:@""];
+    self.amberDiagnosticsMenuItem.target = self;
+    [submenu addItem:self.amberDiagnosticsMenuItem];
+    self.wakeUpCalibrationMenuItem = [[NSMenuItem alloc]
+        initWithTitle:@"ROB Wake-Up Calibration (Dry Run)…"
+               action:@selector(showWakeUpCalibration:)
+        keyEquivalent:@""];
+    self.wakeUpCalibrationMenuItem.target = self;
+    [submenu addItem:self.wakeUpCalibrationMenuItem];
     self.hologramSettingsMenuItem = [[NSMenuItem alloc]
         initWithTitle:@"Hologram Voxel Detail…"
                action:@selector(showHologramCaptureSettings:)
@@ -165,6 +179,8 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
     BOOL enabled = [[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey];
     self.developmentModeMenuItem.state = enabled ? NSControlStateValueOn : NSControlStateValueOff;
     self.controllerDiagnosticsMenuItem.enabled = enabled;
+    self.amberDiagnosticsMenuItem.enabled = enabled;
+    self.wakeUpCalibrationMenuItem.enabled = enabled;
     self.hologramExportMenuItem.enabled = enabled;
     BOOL recording = [ROBHologramExporter shared].isMovieRecording;
     self.hologramSettingsMenuItem.enabled = enabled && !recording;
@@ -193,6 +209,24 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
     [[NSNotificationCenter defaultCenter]
         postNotificationName:ROBShowControllerInputDiagnosticsNotification
                       object:self];
+}
+
+- (IBAction)showAmberArmDiagnostics:(id)sender
+{
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey]) {
+        NSBeep();
+        return;
+    }
+    [[ROBAmberDiagnosticsWindowController shared] showWindow:sender];
+}
+
+- (IBAction)showWakeUpCalibration:(id)sender
+{
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey]) {
+        NSBeep();
+        return;
+    }
+    [[ROBWakeUpCalibrationWindowController shared] showWindow:sender];
 }
 
 - (IBAction)exportHologramMessage:(id)sender

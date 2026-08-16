@@ -1505,11 +1505,11 @@ enum ROBControlAuthenticator {
 }
 
 extension UUID {
-  fileprivate var robControlBytes: Data {
+  var robControlBytes: Data {
     var value = uuid
     return withUnsafeBytes(of: &value) { Data($0) }
   }
-  fileprivate init?(robControlBytes data: Data) {
+  init?(robControlBytes data: Data) {
     guard data.count == 16 else { return nil }
     var value: uuid_t = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
     _ = withUnsafeMutableBytes(of: &value) { data.copyBytes(to: $0) }

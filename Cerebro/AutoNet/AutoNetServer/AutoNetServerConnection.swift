@@ -52,6 +52,9 @@ public final class AutoNetServerConnection {
     var didStopCallback: ((Error?) -> Void)?
 
     var authenticatedDeviceID: UUID? { authenticatedControllerID }
+    var authenticatedSessionUUID: UUID? {
+        authenticatedSessionID.flatMap(UUID.init(robControlBytes:))
+    }
 
     func start() {
         connection.stateUpdateHandler = { [weak self] state in
@@ -84,6 +87,7 @@ public final class AutoNetServerConnection {
                         return
                     }
                     isReady = true
+                    serverDelegate?.authenticatedConnectionDidBecomeReady(self)
                     print("ROBControl connection \(id) recovered its authenticated QUIC path")
                 case .awaitingHello, .awaitingProof, .sendingAccepted, .stopped:
                     break
@@ -273,6 +277,7 @@ public final class AutoNetServerConnection {
                 sessionID: challenge.sessionID,
                 role: peer.role
             )
+            self.serverDelegate?.authenticatedConnectionDidBecomeReady(self)
             print(
                 "ROBControl connection \(self.id) paired as \(peer.role.rawValue) "
                     + "device \(proof.controllerID.uuidString.lowercased())"

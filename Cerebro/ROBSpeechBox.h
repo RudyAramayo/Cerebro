@@ -11,6 +11,10 @@
 #import <Cocoa/Cocoa.h>
 #import <AVFoundation/AVFoundation.h>
 
+FOUNDATION_EXPORT NSString * _Nonnull const ROBEnglishVoiceIdentifierDefaultsKey;
+FOUNDATION_EXPORT NSString * _Nonnull const ROBJapaneseVoiceIdentifierDefaultsKey;
+FOUNDATION_EXPORT NSString * _Nonnull const ROBSpeechVoicePreferencesDidChangeNotification;
+
 @protocol ROBSpeechDelegate <NSObject>
 
 - (void)willStartProcessingSpeech;
@@ -42,6 +46,7 @@
 - (void) didSeeNewPerson:(NSString *)userID;
 - (void) lostSightOfPerson:(NSString*)userID;
 - (void) sayIt:(NSString *)stringToSpeak;
+- (void) sayItIfNotQueued:(NSString *)stringToSpeak;
 - (void)sayIt:(NSString *)stringToSpeak completion:(void (^ _Nullable)(BOOL finished))completion;
 /// Stage delivery keeps normal ROB speech responsive while adding a small
 /// punctuation-aware pause between sentences and before the next show cue.
@@ -49,6 +54,7 @@
 - (void) stopIt:(id)sender;
 - (void) setOutputLanguage:(NSString *)language;
 - (void) startRecognizer;
+- (void) reloadVoicePreferences;
 - (void) shutdown;
 
 - (void) switchMood_anger;

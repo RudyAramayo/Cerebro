@@ -19,10 +19,15 @@
 @import Speech;
 @import AVFoundation;
 
+NSString * const ROBEnglishVoiceIdentifierDefaultsKey = @"ROBEnglishVoiceIdentifier";
+NSString * const ROBJapaneseVoiceIdentifierDefaultsKey = @"ROBJapaneseVoiceIdentifier";
+NSString * const ROBSpeechVoicePreferencesDidChangeNotification = @"ROBSpeechVoicePreferencesDidChange";
+
 @interface ROBSpeechBox() <AVSpeechSynthesizerDelegate, SFSpeechRecognizerDelegate, SFSpeechRecognitionTaskDelegate, AVCaptureAudioDataOutputSampleBufferDelegate>
 
 @property (nonatomic, strong) AVSpeechSynthesizer *avSpeechSynthesizer;
 @property (nonatomic, strong) NSMapTable<AVSpeechUtterance *, id> *utteranceCompletions;
+@property (nonatomic, strong) NSMutableArray<AVSpeechUtterance *> *pendingSpeechUtterances;
 
 //new properties
 @property (nonatomic, strong) AVCaptureSession *capture;
@@ -39,9 +44,15 @@
 @property (readwrite, retain) NSString *robsPersonalVoice;
 @property (readwrite, retain) NSString *robsDefaultVoiceIdentifier;
 @property (readwrite, retain) AVSpeechSynthesisVoice *robsDefaultVoice;
+@property (readwrite, retain) AVSpeechSynthesisVoice *japaneseVoice;
+// This must not be named outputLanguage: that property's generated setter
+// would collide with the public -setOutputLanguage: method below.
+@property (readwrite, copy) NSString *currentOutputLanguage;
 @property (nonatomic, assign) BOOL microphoneTapInstalled;
 @property (nonatomic, assign) BOOL recognizerStartInProgress;
 @property (nonatomic, assign) BOOL recognizerRestartScheduled;
+@property (nonatomic, assign) BOOL localRecognitionUnavailable;
+@property (nonatomic, assign) BOOL speechQueueCancellationInProgress;
 @property (nonatomic, assign) BOOL isShuttingDown;
 @property (nonatomic, assign) NSUInteger recognitionGeneration;
 @property (nonatomic, assign) BOOL hologramRecordingOwnsMicrophone;
@@ -54,7 +65,11 @@
 - (void)finishSpeechEventForSynthesizer:(AVSpeechSynthesizer *)synthesizer
                               utterance:(AVSpeechUtterance *)utterance
                                 finished:(BOOL)finished;
+- (void)enqueueSpeechUtterance:(AVSpeechUtterance *)utterance;
+- (void)finishSpeechQueueIfIdle;
+- (void)cancelPendingSpeech;
 - (AVSpeechSynthesisVoice *)resolveROBVoice;
+- (AVSpeechSynthesisVoice *)bestInstalledVoiceForLanguage:(NSString *)language;
 - (AVSpeechSynthesisVoice *)voiceForText:(NSString *)text;
 @end
 
@@ -76,11 +91,17 @@
                                                  selector:@selector(resumeAfterHologramRecording:)
                                                      name:@"ROBHologramDidEndAudioRecording"
                                                    object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(voicePreferencesDidChange:)
+                                                     name:ROBSpeechVoicePreferencesDidChangeNotification
+                                                   object:nil];
         self.emotion = anger;
         self.commands = [@[@"robbie", @"robot", @"hey robbie", @"hey robot", @"rob",  @"robbie one"] mutableCopy];
         self.robsDefaultVoiceIdentifier = @"com.apple.voice.enhanced.en-GB.Oliver";
-        self.robsDefaultVoice = [self resolveROBVoice];
+        self.currentOutputLanguage = @"en-US";
+        [self reloadVoicePreferences];
         self.utteranceCompletions = [NSMapTable strongToStrongObjectsMapTable];
+        self.pendingSpeechUtterances = [NSMutableArray array];
         [self setupSpeechSynthesizer];
         
         self.localeArray = @[
@@ -213,6 +234,52 @@
     return [AVSpeechSynthesisVoice voiceWithLanguage:@"en-GB"];
 }
 
+- (AVSpeechSynthesisVoice *)bestInstalledVoiceForLanguage:(NSString *)language
+{
+    AVSpeechSynthesisVoice *bestVoice = [AVSpeechSynthesisVoice voiceWithLanguage:language];
+    for (AVSpeechSynthesisVoice *voice in AVSpeechSynthesisVoice.speechVoices) {
+        if (![voice.language isEqualToString:language]) { continue; }
+        if (bestVoice == nil || voice.quality > bestVoice.quality) {
+            bestVoice = voice;
+        }
+    }
+    return bestVoice;
+}
+
+- (AVSpeechSynthesisVoice *)preferredVoiceForDefaultsKey:(NSString *)defaultsKey
+                                                language:(NSString *)language
+{
+    NSString *identifier = [[NSUserDefaults standardUserDefaults] stringForKey:defaultsKey];
+    AVSpeechSynthesisVoice *voice = identifier.length > 0
+        ? [AVSpeechSynthesisVoice voiceWithIdentifier:identifier]
+        : nil;
+    if (voice != nil && [voice.language hasPrefix:language]) {
+        return voice;
+    }
+    return [self bestInstalledVoiceForLanguage:language];
+}
+
+- (void)reloadVoicePreferences
+{
+    AVSpeechSynthesisVoice *englishVoice = [self preferredVoiceForDefaultsKey:ROBEnglishVoiceIdentifierDefaultsKey
+                                                                     language:@"en-"];
+    if (englishVoice == nil) {
+        englishVoice = [self resolveROBVoice];
+    }
+    self.japaneseVoice = [self preferredVoiceForDefaultsKey:ROBJapaneseVoiceIdentifierDefaultsKey
+                                                    language:@"ja-JP"];
+    if (self.currentOutputLanguage.length == 0 || [self.currentOutputLanguage hasPrefix:@"en-"]) {
+        self.robsDefaultVoice = englishVoice;
+    }
+    NSLog(@"Speech preferences loaded: English=%@, Japanese=%@",
+          englishVoice.name ?: @"unavailable", self.japaneseVoice.name ?: @"unavailable");
+}
+
+- (void)voicePreferencesDidChange:(NSNotification *)notification
+{
+    [self reloadVoicePreferences];
+}
+
 - (AVSpeechSynthesisVoice *)voiceForText:(NSString *)text
 {
     // Japanese kana are unambiguous even when the response also contains
@@ -229,9 +296,13 @@
     });
 
     if ([text rangeOfCharacterFromSet:japaneseKanaCharacterSet].location != NSNotFound) {
-        AVSpeechSynthesisVoice *japaneseVoice = [AVSpeechSynthesisVoice voiceWithLanguage:@"ja-JP"];
+        AVSpeechSynthesisVoice *japaneseVoice = self.japaneseVoice ?: [self bestInstalledVoiceForLanguage:@"ja-JP"];
         if (japaneseVoice != nil) {
-            NSLog(@"Using Japanese voice %@ for this utterance", japaneseVoice.name);
+            NSString *quality = japaneseVoice.quality == AVSpeechSynthesisVoiceQualityPremium
+                ? @"Premium"
+                : (japaneseVoice.quality == AVSpeechSynthesisVoiceQualityEnhanced ? @"Enhanced" : @"Default");
+            NSLog(@"Using Japanese voice %@ (%@, %@) for this utterance",
+                  japaneseVoice.name, quality, japaneseVoice.identifier);
             return japaneseVoice;
         }
         NSLog(@"A Japanese response was received, but no ja-JP voice is installed");
@@ -244,16 +315,16 @@
 {
     [[NSApplication sharedApplication] becomeFirstResponder];
 
-    if (!self.audioEngine || !self.audioEngine.isRunning) {
-        [self setupSpeechRecognition];
-    }
+    // Audio capture and Apple Speech recognition have separate lifecycles. The
+    // microphone can remain active for Gemini after the local recognition task
+    // has ended, so always ask startRecognizer to ensure a task exists.
+    [self setupSpeechRecognition];
     NSLog(@"Listening");
 }
 
 
 - (void) setupSpeechRecognition
 {
-    self.isSpeaking = false;
     self.isShuttingDown = NO;
     if (!self.audioEngine) {
         self.audioEngine = [[AVAudioEngine alloc] init];
@@ -324,24 +395,81 @@
                               utterance:(AVSpeechUtterance *)utterance
                                 finished:(BOOL)finished
 {
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self finishSpeechEventForSynthesizer:synthesizer utterance:utterance finished:finished];
+        });
+        return;
+    }
+
     void (^completion)(BOOL) = [self.utteranceCompletions objectForKey:utterance];
     if (completion != nil) {
         [self.utteranceCompletions removeObjectForKey:utterance];
+    }
+    [self.pendingSpeechUtterances removeObjectIdenticalTo:utterance];
+    if (completion != nil) {
         completion(finished);
     }
-    // Let AVSpeechSynthesizer advance to its next queued utterance before
-    // reopening microphone capture. This also avoids a cancel/new-utterance
-    // race when a local stop acknowledgement replaces current speech.
+
+    if (self.speechQueueCancellationInProgress) {
+        return;
+    }
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.isShuttingDown) {
-            self.isSpeaking = false;
-            return;
-        }
-        self.isSpeaking = synthesizer.isSpeaking;
-        if (!self.isSpeaking) {
-            [self.delegate didFinishProcessingSpeech];
-        }
+        [self finishSpeechQueueIfIdle];
     });
+}
+
+- (void)enqueueSpeechUtterance:(AVSpeechUtterance *)utterance
+{
+    NSAssert(NSThread.isMainThread, @"Speech utterances must be queued on the main thread");
+    [self.pendingSpeechUtterances addObject:utterance];
+    self.isSpeaking = true;
+    [self.avSpeechSynthesizer speakUtterance:utterance];
+}
+
+- (void)finishSpeechQueueIfIdle
+{
+    // AVSpeechSynthesizer can still report isSpeaking after its final
+    // didFinish callback. Waiting for that flag left isSpeaking stuck forever
+    // at startup and caused the shared microphone tap to discard every buffer.
+    // Our own queue is authoritative and also accounts for paced stage speech.
+    if (self.isShuttingDown) {
+        self.isSpeaking = false;
+        return;
+    }
+    if (self.pendingSpeechUtterances.count == 0 && self.isSpeaking) {
+        self.isSpeaking = false;
+        NSLog(@"Speech queue drained; microphone input resumed");
+        [self.delegate didFinishProcessingSpeech];
+    }
+}
+
+- (void)cancelPendingSpeech
+{
+    NSArray<AVSpeechUtterance *> *utterances = [self.pendingSpeechUtterances copy];
+    BOOL hadPendingSpeech = self.isSpeaking || utterances.count > 0;
+    NSMutableArray *cancelledCompletions = [NSMutableArray array];
+    [self.pendingSpeechUtterances removeAllObjects];
+    for (AVSpeechUtterance *utterance in utterances) {
+        void (^completion)(BOOL) = [self.utteranceCompletions objectForKey:utterance];
+        if (completion != nil) {
+            [self.utteranceCompletions removeObjectForKey:utterance];
+            [cancelledCompletions addObject:[completion copy]];
+        }
+    }
+    self.speechQueueCancellationInProgress = YES;
+    [self.avSpeechSynthesizer stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
+    self.speechQueueCancellationInProgress = NO;
+
+    for (id completionObject in cancelledCompletions) {
+        void (^completion)(BOOL) = completionObject;
+        completion(NO);
+    }
+    if (hadPendingSpeech) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self finishSpeechQueueIfIdle];
+        });
+    }
 }
 
 
@@ -364,10 +492,20 @@
         });
         return;
     }
-    if (self.isShuttingDown || self.hologramRecordingOwnsMicrophone || self.recognizerStartInProgress || self.task != nil) {
+    if (self.isShuttingDown || self.hologramRecordingOwnsMicrophone) {
         return;
     }
 
+    // This method is also Cerebro's public "listen again" entry point. Restore
+    // the shared microphone engine first even when Apple Dictation is disabled;
+    // Gemini Live consumes the raw buffers from this same tap.
+    [self startAudioCapture];
+
+    if (self.localRecognitionUnavailable || self.recognizerStartInProgress || self.task != nil) {
+        return;
+    }
+
+    NSLog(@"Attempting to start Apple Speech recognizer");
     self.recognizerStartInProgress = YES;
     SFSpeechRecognizerAuthorizationStatus status = [SFSpeechRecognizer authorizationStatus];
     if (status == SFSpeechRecognizerAuthorizationStatusAuthorized) {
@@ -439,6 +577,21 @@
             if (error || isFinal) {
                 if (error) {
                     NSLog(@"Speech recognition error: %@", error.localizedDescription);
+                    BOOL dictationIsDisabled =
+                        ([error.domain isEqualToString:@"kLSRErrorDomain"] && error.code == 201) ||
+                        [error.localizedDescription localizedCaseInsensitiveContainsString:@"Dictation are disabled"] ||
+                        [error.localizedDescription localizedCaseInsensitiveContainsString:@"Dictation is disabled"] ||
+                        [error.localizedDescription localizedCaseInsensitiveContainsString:@"Siri and Dictation are disabled"];
+                    if (dictationIsDisabled) {
+                        // This is a persistent system preference, not a
+                        // transient recognition failure. Keep the shared audio
+                        // tap alive for Gemini, but stop hammering Apple Speech
+                        // until Cerebro is relaunched after Dictation is enabled.
+                        self.localRecognitionUnavailable = YES;
+                        [self teardownSpeechRecognition];
+                        NSLog(@"Local Apple speech recognition disabled; Gemini raw microphone capture remains active");
+                        return;
+                    }
                 }
                 [self scheduleRecognizerRestart];
             }
@@ -476,10 +629,14 @@
     if (!self.audioEngine.isRunning) {
         NSError *audioError = nil;
         [self.audioEngine prepare];
-        [self.audioEngine startAndReturnError:&audioError];
-        if (audioError) {
+        BOOL started = [self.audioEngine startAndReturnError:&audioError];
+        if (!started || audioError) {
             NSLog(@"Unable to start microphone capture: %@", audioError.localizedDescription);
+        } else {
+            NSLog(@"Microphone capture started; Gemini and Apple Speech audio tap is active");
         }
+    } else {
+        NSLog(@"Microphone capture already running; shared audio tap is active");
     }
 }
 
@@ -766,20 +923,42 @@
     [self sayIt:stringToSpeak completion:nil];
 }
 
+- (void)sayItIfNotQueued:(NSString *)stringToSpeak
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if ([stringToSpeak length] == 0) {
+            NSLog(@"string is of zero-length");
+            return;
+        }
+
+        for (AVSpeechUtterance *pendingUtterance in self.pendingSpeechUtterances) {
+            if ([pendingUtterance.speechString isEqualToString:stringToSpeak]) {
+                NSLog(@"Speech is already queued; suppressing duplicate: %@", stringToSpeak);
+                return;
+            }
+        }
+
+        AVSpeechUtterance *utterance = [AVSpeechUtterance speechUtteranceWithString:stringToSpeak];
+        utterance.voice = [self voiceForText:stringToSpeak];
+        if (![self.robsPersonalVoice isEqualToString:@""]) {
+            NSLog(@"language = %@", utterance.voice.language);
+        }
+        [self enqueueSpeechUtterance:utterance];
+        NSLog(@"Have started to say: %@", stringToSpeak);
+    });
+}
+
 - (void)sayIt:(NSString *)stringToSpeak completion:(void (^)(BOOL finished))completion
 {
     dispatch_async(dispatch_get_main_queue(), ^(){
         // Is the string zero-length?
         if ([stringToSpeak length] == 0) {
             NSLog(@"string is of zero-length");
-            self.isSpeaking = false;
             if (completion != nil) {
                 completion(NO);
             }
             return;
         }
-        self.isSpeaking = true;
-        
         //To Allow for pauses in the google gemini responses
         // Use the below algorithm and try to break up the speech and queue up each element instead, once didFinishSpeaking is reached try to continue with the next element
 //        NSArray *speechComponentCategories = [stringToSpeak componentsSeparatedByString:@"\n**"];
@@ -810,7 +989,7 @@
         }
         //NSLog(@"voice = %@", voice.identifier);w
         
-        [self.avSpeechSynthesizer speakUtterance:utterance];
+        [self enqueueSpeechUtterance:utterance];
         NSLog(@"Have started to say: %@", stringToSpeak);
     });
 }
@@ -820,7 +999,6 @@
     dispatch_async(dispatch_get_main_queue(), ^{
         NSString *trimmed = [stringToSpeak stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
         if (trimmed.length == 0) {
-            self.isSpeaking = false;
             if (completion != nil) {
                 completion(NO);
             }
@@ -840,7 +1018,6 @@
             [sentences addObject:trimmed];
         }
 
-        self.isSpeaking = true;
         [sentences enumerateObjectsUsingBlock:^(NSString *sentence, NSUInteger index, BOOL *stop) {
             AVSpeechUtterance *utterance = [AVSpeechUtterance speechUtteranceWithString:sentence];
             utterance.voice = [self voiceForText:sentence];
@@ -850,7 +1027,7 @@
             if (index + 1 == sentences.count && completion != nil) {
                 [self.utteranceCompletions setObject:[completion copy] forKey:utterance];
             }
-            [self.avSpeechSynthesizer speakUtterance:utterance];
+            [self enqueueSpeechUtterance:utterance];
         }];
         NSLog(@"Queued %lu paced stage-show sentence(s)", (unsigned long)sentences.count);
     });
@@ -910,10 +1087,11 @@
 - (void) setOutputLanguage:(NSString *)language
 {
     NSLog(@"language = %@", language);
+    self.currentOutputLanguage = [language copy];
     AVSpeechSynthesisVoice *newVoice = [AVSpeechSynthesisVoice voiceWithLanguage:language];
     if (newVoice != nil) {
         if ([language hasPrefix:@"en-"]) {
-            self.robsDefaultVoice = [self resolveROBVoice];
+            [self reloadVoicePreferences];
         } else {
             self.robsDefaultVoice = [AVSpeechSynthesisVoice voiceWithLanguage:language];
         }
@@ -1083,13 +1261,17 @@
 
 
 - (void)stopIt:(id)sender {
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self stopIt:sender];
+        });
+        return;
+    }
     NSLog(@"stopping");
     //[self.speechSynth stopSpeaking];
-    BOOL wasSpeaking = self.avSpeechSynthesizer.isSpeaking;
-    [self.avSpeechSynthesizer stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
-    if (!wasSpeaking) {
-        self.isSpeaking = false;
-    }
+    // stopSpeaking clears AVSpeechSynthesizer's whole queue, but queued
+    // utterances are not guaranteed to each produce a delegate callback.
+    [self cancelPendingSpeech];
 }
 
 - (void)shutdown {
@@ -1108,8 +1290,12 @@
     self.debounceSpeechInputTimer = nil;
     [self teardownSpeechRecognition];
     [self teardownAudioCapture];
-    [self.avSpeechSynthesizer stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
+    [self.pendingSpeechUtterances removeAllObjects];
+    [self.utteranceCompletions removeAllObjects];
     self.isSpeaking = false;
+    self.speechQueueCancellationInProgress = YES;
+    [self.avSpeechSynthesizer stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
+    self.speechQueueCancellationInProgress = NO;
 }
 
 

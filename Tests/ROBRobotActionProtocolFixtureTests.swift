@@ -1,5 +1,23 @@
 import Foundation
 
+// The standalone fixture deliberately avoids loading Vision/camera code. These
+// two no-op scene types satisfy ROBAutonomyCoordinator's diagnostic publishing
+// seam while the tests exercise only its bounded Lidar/session decisions.
+struct ROBFreeSpaceRegion {
+    let id: String
+    let direction: String
+    let minimumClearanceMeters: Double
+    let clearFraction: Double
+    let traversable: Bool
+    let confidence: Double
+    let source: String
+}
+
+final class ROBSceneSnapshotStore {
+    static let shared = ROBSceneSnapshotStore()
+    func updateLidarFreeSpace(_ regions: [ROBFreeSpaceRegion]) {}
+}
+
 private enum FixtureFailure: Error, CustomStringConvertible {
     case failed(String)
 
@@ -17,6 +35,7 @@ struct ROBRobotActionProtocolFixtureTests {
         try testRequestRoundTrip()
         try testStatusAndCancellationRoundTrip()
         try testInvalidAndExpiredRequests()
+        try testActionArgumentKeysAreExact()
         try testOversizedPayloadsAreRejected()
         try testEnvelopeSenderBinding()
         try testStrictModelActionProposals()
@@ -70,6 +89,37 @@ struct ROBRobotActionProtocolFixtureTests {
         )
         let acceptedDecoded = try roundTrip(accepted)
         try expect(!acceptedDecoded.isTerminal, "Accepted must be an intermediate state")
+
+        let cerebroExecuting = ROBRobotActionMessage.actionStatus(
+            callID: "gemini-call-gesture",
+            state: .executing,
+            detail: "Cerebro owns supervised gesture execution",
+            result: ["authorization": "controller_approved_one_shot"],
+            senderID: "cerebro-1",
+            recipientID: "controller-1"
+        )
+        let cerebroExecutingDecoded = try roundTrip(cerebroExecuting)
+        try expect(!cerebroExecutingDecoded.isTerminal, "Executing must remain intermediate")
+        try expect(
+            cerebroExecutingDecoded.senderID == "cerebro-1"
+                && cerebroExecutingDecoded.recipientID == "controller-1",
+            "Cerebro-owned execution status lost its controller routing"
+        )
+
+        let measuredCompletion = ROBRobotActionMessage.actionStatus(
+            callID: "gemini-call-gesture",
+            state: .completed,
+            detail: "Measured joints settled",
+            result: ["measured": true, "maximum_tracking_error_rad": 0.02],
+            senderID: "cerebro-1",
+            recipientID: "controller-1"
+        )
+        let measuredCompletionDecoded = try roundTrip(measuredCompletion)
+        try expect(measuredCompletionDecoded.isTerminal, "Measured completion must be terminal")
+        try expect(
+            measuredCompletionDecoded.result["measured"] as? Bool == true,
+            "Measured completion evidence changed"
+        )
 
         let completed = ROBRobotActionMessage.actionStatus(
             callID: "gemini-call-2",
@@ -155,6 +205,44 @@ struct ROBRobotActionProtocolFixtureTests {
         try expect(excessiveLifetime.validationError != nil, "Excessive request lifetime was accepted")
     }
 
+    private static func testActionArgumentKeysAreExact() throws {
+        let rawJointGesture = ROBRobotActionMessage.actionRequest(
+            callID: "gemini-call-raw-joints",
+            action: "play_gesture",
+            arguments: [
+                "gesture": "approved-wave",
+                "positions_rad": [0.0, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0],
+            ],
+            senderID: "cerebro-1",
+            recipientID: "controller-1",
+            expiresAt: Date(timeIntervalSinceNow: 30)
+        )
+        try expect(
+            rawJointGesture.validationError != nil,
+            "play_gesture accepted model-supplied raw joint data"
+        )
+        try expect(
+            ROBRobotActionWireCodec.archive(
+                rawJointGesture,
+                legacySender: rawJointGesture.senderID
+            ) == nil,
+            "A play_gesture request with raw joint data was serialized"
+        )
+
+        let stopWithUnknownKey = ROBRobotActionMessage.actionRequest(
+            callID: "gemini-call-stop-extra",
+            action: "stop_motion",
+            arguments: ["surprise": true],
+            senderID: "cerebro-1",
+            recipientID: "controller-1",
+            expiresAt: Date(timeIntervalSinceNow: 30)
+        )
+        try expect(
+            stopWithUnknownKey.validationError != nil,
+            "stop_motion accepted an unknown argument"
+        )
+    }
+
     private static func testOversizedPayloadsAreRejected() throws {
         let oversizedDetail = ROBRobotActionMessage.actionStatus(
             callID: "gemini-call-oversized-detail",
@@ -213,12 +301,16 @@ struct ROBRobotActionProtocolFixtureTests {
             #"{"action":"navigate_relative","arguments":{"distance_m":8,"yaw_rad":0,"speed_scale":1}}"#
         ]
         for document in rejected {
+            var wasRejected = false
             do {
                 _ = try ROBRobotActionProposalCodec.decode(Data(document.utf8))
-                throw FixtureFailure.failed("Unsafe or non-JSON-only model proposal was accepted: \(document)")
-            } catch is ROBRobotActionProtocolError {
-                // Expected: no prose recovery and no unknown/out-of-range actions.
+            } catch {
+                wasRejected = true
             }
+            try expect(
+                wasRejected,
+                "Unsafe or non-JSON-only model proposal was accepted: \(document)"
+            )
         }
     }
 

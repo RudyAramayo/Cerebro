@@ -7,6 +7,7 @@
 #import "ROBMainViewController.h"
 #import "ROBPythonRuntime.h"
 #import "ROBSystemDependencyManager.h"
+#import "ROBSpeechBox.h"
 
 @interface ROBPythonSettingsWindowController ()
 @property (nonatomic, strong) NSTextField *pythonPathField;
@@ -16,6 +17,8 @@
 @property (nonatomic, strong) NSTextField *systemDependencyLabel;
 @property (nonatomic, strong) NSPopUpButton *systemPackageManagerPopup;
 @property (nonatomic, strong) NSButton *installSSHpassButton;
+@property (nonatomic, strong) NSPopUpButton *englishVoicePopup;
+@property (nonatomic, strong) NSPopUpButton *japaneseVoicePopup;
 @property (nonatomic, strong) NSArray<NSButton *> *actionButtons;
 @property (nonatomic, assign) NSUInteger operationGeneration;
 @property (nonatomic, assign) BOOL operationInProgress;
@@ -27,6 +30,7 @@
 - (void)updateSSHpassActionAccessibility;
 - (void)validateAfterInstallForGeneration:(NSUInteger)generation pipOutput:(NSString *)pipOutput;
 - (ROBMainViewController *)mainViewControllerInViewController:(NSViewController *)viewController;
+- (void)refreshVoicePopups;
 @end
 
 @implementation ROBPythonSettingsWindowController
@@ -103,6 +107,48 @@
     NSView *controllersView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 680, 580)];
     controllersTab.view = controllersView;
     [tabView addTabViewItem:controllersTab];
+
+    NSTabViewItem *speechTab = [NSTabViewItem tabViewItemWithViewController:[[NSViewController alloc] init]];
+    speechTab.label = @"Speech";
+    NSView *speechView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 680, 580)];
+    speechTab.view = speechView;
+    [tabView addTabViewItem:speechTab];
+
+    NSTextField *speechHeading = [self labelWithString:@"ROB Voice Preferences"
+                                                  frame:NSMakeRect(24, 530, 632, 28)];
+    speechHeading.font = [NSFont boldSystemFontOfSize:20.0];
+    [speechView addSubview:speechHeading];
+
+    NSTextField *speechExplanation = [self labelWithString:
+        @"Choose an installed macOS voice for English and Japanese responses. Changes apply immediately and remain selected after Cerebro or the Mac restarts."
+        frame:NSMakeRect(24, 470, 632, 48)];
+    speechExplanation.textColor = [NSColor secondaryLabelColor];
+    [speechView addSubview:speechExplanation];
+
+    [speechView addSubview:[self labelWithString:@"English voice:"
+                                             frame:NSMakeRect(24, 424, 632, 20)]];
+    self.englishVoicePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 384, 500, 32)
+                                                        pullsDown:NO];
+    self.englishVoicePopup.target = self;
+    self.englishVoicePopup.action = @selector(voiceSelectionChanged:);
+    self.englishVoicePopup.accessibilityLabel = @"English speech voice";
+    [speechView addSubview:self.englishVoicePopup];
+
+    [speechView addSubview:[self labelWithString:@"Japanese voice:"
+                                             frame:NSMakeRect(24, 330, 632, 20)]];
+    self.japaneseVoicePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 290, 500, 32)
+                                                         pullsDown:NO];
+    self.japaneseVoicePopup.target = self;
+    self.japaneseVoicePopup.action = @selector(voiceSelectionChanged:);
+    self.japaneseVoicePopup.accessibilityLabel = @"Japanese speech voice";
+    [speechView addSubview:self.japaneseVoicePopup];
+
+    NSTextField *downloadHelp = [self labelWithString:
+        @"Enhanced and Premium voices appear here after they are downloaded in System Settings → Accessibility → Spoken Content → System Voice."
+        frame:NSMakeRect(24, 224, 632, 44)];
+    downloadHelp.textColor = [NSColor secondaryLabelColor];
+    [speechView addSubview:downloadHelp];
+    [self refreshVoicePopups];
 
     NSTextField *controllersHeading = [self labelWithString:@"Paired Control Devices"
                                                        frame:NSMakeRect(24, 530, 632, 28)];
@@ -279,6 +325,76 @@
     [[ROBSystemDependencyManager sharedManager] refreshSSHpassAvailability];
     [self refreshSystemDependencyStatus];
     [self refreshFromRuntimeAndValidate:!self.operationInProgress];
+    [self refreshVoicePopups];
+}
+
+- (NSString *)qualityNameForVoice:(AVSpeechSynthesisVoice *)voice
+{
+    if (voice.quality == AVSpeechSynthesisVoiceQualityPremium) { return @"Premium"; }
+    if (voice.quality == AVSpeechSynthesisVoiceQualityEnhanced) { return @"Enhanced"; }
+    return @"Default";
+}
+
+- (NSArray<AVSpeechSynthesisVoice *> *)voicesWithLanguagePrefix:(NSString *)prefix
+{
+    NSPredicate *predicate = [NSPredicate predicateWithBlock:^BOOL(AVSpeechSynthesisVoice *voice, NSDictionary *bindings) {
+        return [voice.language hasPrefix:prefix];
+    }];
+    NSArray<AVSpeechSynthesisVoice *> *voices = [AVSpeechSynthesisVoice.speechVoices filteredArrayUsingPredicate:predicate];
+    return [voices sortedArrayUsingComparator:^NSComparisonResult(AVSpeechSynthesisVoice *left, AVSpeechSynthesisVoice *right) {
+        if (left.quality != right.quality) {
+            return left.quality > right.quality ? NSOrderedAscending : NSOrderedDescending;
+        }
+        return [left.name localizedCaseInsensitiveCompare:right.name];
+    }];
+}
+
+- (void)populateVoicePopup:(NSPopUpButton *)popup
+            languagePrefix:(NSString *)prefix
+               defaultsKey:(NSString *)defaultsKey
+{
+    [popup removeAllItems];
+    NSArray<AVSpeechSynthesisVoice *> *voices = [self voicesWithLanguagePrefix:prefix];
+    for (AVSpeechSynthesisVoice *voice in voices) {
+        NSString *title = [NSString stringWithFormat:@"%@ — %@ (%@)",
+                           voice.name, [self qualityNameForVoice:voice], voice.language];
+        [popup addItemWithTitle:title];
+        popup.lastItem.representedObject = voice.identifier;
+    }
+    popup.enabled = voices.count > 0;
+    if (voices.count == 0) {
+        [popup addItemWithTitle:@"No installed voice available"];
+        return;
+    }
+
+    NSString *savedIdentifier = [[NSUserDefaults standardUserDefaults] stringForKey:defaultsKey];
+    NSInteger savedIndex = [popup indexOfItemWithRepresentedObject:savedIdentifier];
+    if (savedIndex < 0 && [prefix isEqualToString:@"en-"]) {
+        savedIndex = [popup indexOfItemWithRepresentedObject:@"com.apple.voice.enhanced.en-GB.Oliver"];
+    }
+    [popup selectItemAtIndex:savedIndex >= 0 ? savedIndex : 0];
+}
+
+- (void)refreshVoicePopups
+{
+    [self populateVoicePopup:self.englishVoicePopup
+              languagePrefix:@"en-"
+                 defaultsKey:ROBEnglishVoiceIdentifierDefaultsKey];
+    [self populateVoicePopup:self.japaneseVoicePopup
+              languagePrefix:@"ja-JP"
+                 defaultsKey:ROBJapaneseVoiceIdentifierDefaultsKey];
+}
+
+- (void)voiceSelectionChanged:(NSPopUpButton *)sender
+{
+    NSString *defaultsKey = sender == self.japaneseVoicePopup
+        ? ROBJapaneseVoiceIdentifierDefaultsKey
+        : ROBEnglishVoiceIdentifierDefaultsKey;
+    NSString *identifier = sender.selectedItem.representedObject;
+    if (identifier.length == 0) { return; }
+    [[NSUserDefaults standardUserDefaults] setObject:identifier forKey:defaultsKey];
+    [[NSNotificationCenter defaultCenter] postNotificationName:ROBSpeechVoicePreferencesDidChangeNotification
+                                                        object:self];
 }
 
 - (NSUInteger)beginOperationWithStatus:(NSString *)status
@@ -763,6 +879,7 @@
 {
     [[ROBSystemDependencyManager sharedManager] refreshSSHpassAvailability];
     [self refreshSystemDependencyStatus];
+    [self refreshVoicePopups];
 }
 
 @end

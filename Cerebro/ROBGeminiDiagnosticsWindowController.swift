@@ -25,12 +25,17 @@ import Foundation
         case videoStreaming
         case inputMode
         case responseModality
+        case googleSearch
         case robotActionTool
         case videoFramesEncoded
         case videoFramesSent
         case lastVideoSend
         case lastServerEvent
         case lastServerEventTime
+        case lastRequestFailure
+        case serverInputTranscription
+        case rawTurnTimeouts
+        case localFallback
 
         var title: String {
             switch self {
@@ -42,12 +47,17 @@ import Foundation
             case .videoStreaming: return "Camera streaming requested"
             case .inputMode: return "Active input path"
             case .responseModality: return "Response modality"
+            case .googleSearch: return "Google Search enabled"
             case .robotActionTool: return "Robot action tool exposed"
             case .videoFramesEncoded: return "Video frames encoded"
             case .videoFramesSent: return "Video frames sent"
             case .lastVideoSend: return "Last video send"
             case .lastServerEvent: return "Last server event"
             case .lastServerEventTime: return "Last server event time"
+            case .lastRequestFailure: return "Last request failure"
+            case .serverInputTranscription: return "Server input transcription"
+            case .rawTurnTimeouts: return "Raw turn timeouts"
+            case .localFallback: return "On-device fallback"
             }
         }
     }
@@ -71,7 +81,7 @@ import Foundation
     public init(robAI: ROBAI) {
         self.robAI = robAI
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 830),
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 920),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -114,7 +124,7 @@ import Foundation
         heading.font = .boldSystemFont(ofSize: 17)
 
         let explanation = wrappingLabel(
-            "Gemini remains Cerebro's active live provider, including direct microphone audio and sampled camera frames. Install a personal key below; it is stored only in this Mac's Keychain and is never written to the project."
+            "Gemini is Cerebro's preferred live provider for direct microphone audio and sampled camera frames. Ordinary conversation automatically falls back to Apple Foundation Models, then Swift MLX, when Live cannot answer. Install a personal key below; it is stored only in this Mac's Keychain."
         )
         explanation.textColor = .secondaryLabelColor
         explanation.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -228,7 +238,7 @@ import Foundation
         separator.boxType = .separator
 
         let note = wrappingLabel(
-            "Counters cover the lifetime of this ROBAI instance. A sent frame completed the local WebSocket send; Gemini does not acknowledge individual video frames. Diagnostics never retain credentials, media, transcript text, tool arguments, or raw server messages."
+            "Counters cover the lifetime of this ROBAI instance. A sent frame completed the local WebSocket send; Gemini does not acknowledge individual video frames. Local fallbacks are dialogue-only and never receive motion tools. Diagnostics never retain credentials, media, transcript text, tool arguments, or raw server messages."
         )
         note.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         note.textColor = .secondaryLabelColor
@@ -298,7 +308,7 @@ import Foundation
             apiKeyField.stringValue = ""
             credentialStatusLabel.textColor = .systemGreen
             credentialStatusLabel.stringValue = robAI?.isConfigured == true
-                ? "Key updated securely. Reconnect to use the current launch configuration."
+                ? "Key updated securely. Relaunch Cerebro to load the new credential."
                 : "Key saved securely. Relaunch Cerebro once to initialize Gemini Live."
         } catch {
             credentialStatusLabel.textColor = .systemRed
@@ -312,7 +322,9 @@ import Foundation
             try ROBProviderCredentialStore.removeAPIKey(for: .gemini)
             apiKeyField.stringValue = ""
             credentialStatusLabel.textColor = .secondaryLabelColor
-            credentialStatusLabel.stringValue = "Personal key removed. An environment credential, if configured, remains independent."
+            credentialStatusLabel.stringValue = robAI?.isConfigured == true
+                ? "Personal key removed. Relaunch Cerebro to discard the loaded credential; an environment credential remains independent."
+                : "Personal key removed. An environment credential, if configured, remains independent."
         } catch {
             credentialStatusLabel.textColor = .systemRed
             credentialStatusLabel.stringValue = error.localizedDescription
@@ -370,6 +382,7 @@ import Foundation
         )
         valueLabels[.inputMode]?.stringValue = snapshot.inputMode.displayName
         valueLabels[.responseModality]?.stringValue = snapshot.responseModality ?? "-"
+        valueLabels[.googleSearch]?.stringValue = booleanString(snapshot.enablesGoogleSearch)
         valueLabels[.robotActionTool]?.stringValue = booleanString(snapshot.exposesRobotActionTool)
         valueLabels[.videoFramesEncoded]?.stringValue = String(snapshot.videoFramesEncoded)
         valueLabels[.videoFramesSent]?.stringValue = String(snapshot.videoFramesSent)
@@ -378,6 +391,23 @@ import Foundation
         valueLabels[.lastServerEvent]?.stringValue = lastServerEvent
         valueLabels[.lastServerEvent]?.toolTip = lastServerEvent
         valueLabels[.lastServerEventTime]?.stringValue = dateDescription(snapshot.lastServerEventDate)
+        let failureCategory = snapshot.lastRequestFailureCategory ?? "None"
+        valueLabels[.lastRequestFailure]?.stringValue = snapshot.lastRequestFailureDate == nil
+            ? failureCategory
+            : "\(failureCategory) • \(dateDescription(snapshot.lastRequestFailureDate))"
+        let inputCharacterCount = snapshot.lastServerInputTranscriptionCharacterCount
+            .map { "\($0) chars" } ?? "none"
+        valueLabels[.serverInputTranscription]?.stringValue = snapshot.lastServerInputTranscriptionDate == nil
+            ? "0 events • \(inputCharacterCount)"
+            : "\(snapshot.serverInputTranscriptionEventCount) events • \(inputCharacterCount) • \(dateDescription(snapshot.lastServerInputTranscriptionDate))"
+        let rawTimeoutKind = snapshot.lastRawTurnTimeoutKind ?? "none"
+        valueLabels[.rawTurnTimeouts]?.stringValue = snapshot.lastRawTurnTimeoutDate == nil
+            ? "0 • \(rawTimeoutKind)"
+            : "\(snapshot.rawTurnTimeoutCount) • \(rawTimeoutKind) • \(dateDescription(snapshot.lastRawTurnTimeoutDate))"
+        let localProvider = snapshot.lastLocalFallbackProvider ?? "None"
+        valueLabels[.localFallback]?.stringValue = snapshot.lastLocalFallbackDate == nil
+            ? "0 • \(localProvider)"
+            : "\(snapshot.localFallbackCount) • \(localProvider) • \(dateDescription(snapshot.lastLocalFallbackDate))"
     }
 
     private func booleanString(_ value: Bool) -> String {

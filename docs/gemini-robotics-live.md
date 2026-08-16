@@ -44,12 +44,22 @@ The ER2 streaming preview returns spoken output through
 `TEXT`. Cerebro coalesces that transcription, waits for `turnComplete`, and
 passes the completed reply to `ROBSpeechBox`. This preserves ROB's configured
 system voice and existing half-duplex echo suppression. A missing response no
-longer blocks every later request: text and locally detected raw-microphone turns
-have a 15-second response-start deadline and a 120-second absolute completion
-deadline, after which Cerebro speaks a failure notice and reconnects without
-automatically replaying a potentially tool-bearing request. The on-device
-transcript is used only to arm and debounce the raw-audio deadline; its text is
-never submitted as a duplicate request.
+longer blocks every later request. Text turns retain a 15-second response-start
+deadline and a 120-second absolute completion deadline. A locally recognized
+raw-microphone turn is acknowledged immediately, sends an explicit audio-stream
+boundary, and uses a six-second response-start deadline with a 45-second
+absolute deadline. Cerebro retains that on-device transcript only long enough
+to answer locally if Live times out or completes silently; it is never
+submitted to Gemini as duplicate input.
+
+Ordinary dialogue falls back in this order: Apple Foundation Models, native
+Swift MLX, then a deterministic spoken recovery response. Local providers have
+no robot-action tools and cannot enter a tread, servo, arm, or controller path.
+Stage-show turns keep their existing authored/local cue fallback, and any turn
+that produced a Gemini tool call is never replayed through a dialogue model.
+Two provider failures inside 60 seconds temporarily divert new conversation to
+local models for 90 seconds; a successful Gemini response or an operator
+reconnect resets the circuit.
 
 ## Authentication
 
@@ -112,9 +122,10 @@ with Gemini disabled and logs the missing configuration.
 | `GEMINI_ROBOTICS_STREAM_AUDIO` | `true` | First-run default for microphone streaming. The in-app switch becomes authoritative after the operator changes it. When off, local Apple transcripts use `realtimeInput.text` while Gemini is connected. |
 | `GEMINI_ROBOTICS_STREAM_VIDEO` | `true` | First-run default for sampled JPEG camera input. The in-app switch becomes authoritative after the operator changes it. |
 | `GEMINI_ROBOTICS_SYSTEM_INSTRUCTION` | Built-in ROB instruction | Overrides wake-name, response-style, and physical-action guidance. |
-| `GEMINI_ROBOT_ACTION_TOOL_ENABLED` | `false` | Declares the blocking `robot_action` tool and enables the Cerebro-to-ROBController action bridge. Keep disabled except during supervised protocol testing. |
+| `GEMINI_GOOGLE_SEARCH_ENABLED` | `true` | Grants the Live model server-side Google Search grounding for current web information. Set explicitly to `false` to disable it. Model support is required; an unsupported model may reject session setup. |
+| `GEMINI_ROBOT_ACTION_TOOL_ENABLED` | `true` | Declares the blocking `robot_action` tool and enables the Cerebro-to-ROBController action bridge. Set explicitly to `false` to hide it. Tool exposure does not grant motor authority. |
 
-Unrecognized values for the microphone, camera, or robot-action flags fail
+Unrecognized values for the microphone, camera, Search, or robot-action flags fail
 closed. Connection states are logged as `off`, `connecting`, `ready`,
 `reconnecting`, `failed`, or `disconnected`. The session keeps the latest resumable handle,
 enables sliding-window context compression, reconnects after `goAway`, and uses
@@ -141,8 +152,22 @@ redacted control and diagnostics panel. It provides three independent switches:
 
 The three choices are saved in `UserDefaults`. On the first launch with no saved
 choice, the explicit launch configuration supplies the defaults. Credentials,
-model, response modality, system instruction, and physical-action tool exposure
+model, response modality, system instruction, Google Search, and physical-action tool exposure
 remain launch-time configuration and are never written to `UserDefaults`.
+
+### Google Search grounding
+
+Google Search is enabled by default. To disable it for a launch, relaunch Cerebro with:
+
+```text
+GEMINI_GOOGLE_SEARCH_ENABLED=false
+```
+
+The **Gemini…** diagnostics panel reports the launch-time setting. Search does
+not grant shell, filesystem, local-network, or robot-motion access; Gemini
+chooses queries and retrieves public web results on Google's servers. The
+configured Live model must support Google Search. If setup is rejected, disable
+the flag or select a Search-capable Live model with `GEMINI_ROBOTICS_MODEL`.
 
 The active path is **Raw microphone audio** only after the Live-session actor
 has applied the requested raw-audio policy and the session is ready. It changes
@@ -154,11 +179,15 @@ until the actor acknowledges the transition, then `true (effective)`. Static
 environment or credential changes still require a full Cerebro relaunch.
 
 The panel also reports JPEG frames encoded, frames whose local WebSocket send
-completed, the last-send time, and a redacted category summary of the last
-server event. A sent count is not a per-frame receipt or semantic-vision
-acknowledgement from Gemini. Counters reset when the `ROBAI` instance is
-recreated. The diagnostics state never retains credentials, media, transcript
-text, tool arguments, raw server JSON, or session-resumption handles.
+completed, the last-send time, a redacted category summary of the last server
+event, the last request-failure category, and the count/provider/time of local
+dialogue fallbacks. It also shows server input-transcription activity as only a
+fragment character count and timestamp, plus raw response-start/completion
+timeout counts; it never stores the words. A sent count is not a per-frame
+receipt or semantic-vision acknowledgement from Gemini. Counters reset when
+the `ROBAI` instance is recreated. The diagnostics state never retains
+credentials, media, transcript text, tool arguments, raw server JSON, or
+session-resumption handles.
 
 The off switches guarantee that Cerebro stops admitting and sending the
 corresponding inputs after the runtime transition. Provider-side usage and
@@ -167,9 +196,8 @@ token accounting.
 
 ## ROBController action bridge
 
-The optional action bridge is implemented, but the `robot_action` tool remains
-off by default. To expose it during supervised development, start Cerebro with
-a Gemini credential and both enable flags:
+The optional action bridge is implemented, and the `robot_action` declaration is
+exposed by default. A custom launch can still state both settings explicitly:
 
 ```text
 GEMINI_ROBOTICS_ENABLED=true
@@ -178,9 +206,13 @@ GEMINI_API_KEY=<development key>
 ```
 
 `GEMINI_EPHEMERAL_TOKEN` may replace `GEMINI_API_KEY` and takes precedence when
-both are present. Enabling the tool does not enable motors: a recently seen
-ROBController must separately advertise `accepts_actions=true` and list the
-requested action in its capabilities.
+both are present. Declaring the tool does not enable motors. Normal actions
+still require a recent ROBController that advertises `accepts_actions=true`
+and the requested capability. An explicit ROBController acceptance of a fresh
+`play_gesture` request authorizes Cerebro to execute that one immutable named
+gesture locally. The sole path that does not require a controller acceptance is
+the explicit, non-persisted, 15-minute **Gemini hand-movement tools** grant in
+**Development → Amber Arm Diagnostics…**.
 
 The roles are intentionally separated:
 
@@ -188,6 +220,8 @@ The roles are intentionally separated:
 - ROBController is the operator approval and action-status console.
 - Cerebro remains the hardware coordinator and the only component that may
   connect an approved action to deterministic motion and safety code.
+- Local Gemini arm debug accepts only immutable named snapshots explicitly
+  copied from the current keyframe. Gemini never supplies joint numbers.
 - A separate controller-authorized autonomy session lets Cerebro's local
   RPLidar coordinator roam and converse without per-tick approvals. It does not
   add inverse kinematics, arm trajectories, collision models, or grasp planning.
@@ -202,8 +236,34 @@ The v1 action validator accepts:
 | `navigate_relative` | `distance_m` from -1 to 1, `yaw_rad` from -pi to pi, and `speed_scale` from 0 to 0.35 |
 | `stop_motion` | No action arguments |
 
-No action is translated directly into Maestro pulses, arm joint arrays, tread
-speeds, servo positions, or Arduino heartbeat output.
+No model-provided value is translated directly into Maestro pulses, tread
+speeds, servo positions, or Arduino heartbeat output. An approved Amber gesture
+is resolved locally, requires fresh telemetry and seven verified position-mode
+joints, is limited to a 0.35-radian per-joint step and 0.25 rad/s average, and
+reports completion only after measured position and velocity settle for three
+samples. Revoking authority, cancelling the call, turning Gemini off, or
+`stop_motion` requests a fresh measured-pose hold for arms already in position
+mode; none of those paths activates an inactive arm.
+
+### Supervised Amber gesture workflow
+
+1. Enable **Development → Development Mode**, open **Amber Arm Diagnostics…**,
+   and connect the Keychain-backed SSH tunnel to `amber-master.local`.
+2. Use **Query Mode**, then the explicitly confirmed **Activate…** and
+   **Position + Hold…** controls for one arm. The vendor warns that mode changes
+   momentarily remove actuator power, so support the arm and keep the physical
+   E-stop ready.
+3. Capture measured arm values into the current keyframe, make only a small
+   intended change, and keep its duration slow.
+4. Enter a human-readable name and choose **Approve Current Keyframe**. Approval
+   stores an immutable copy; later keyframe edits do not alter it.
+5. Select **Gemini hand-movement tools** and enable the 15-minute grant.
+6. Use **Run Selected Gesture…** once for a deterministic GUI test of the same
+   executor, limits, and measured-completion path that Gemini will use.
+7. Ask ROB to perform that exact named gesture. The tool response lists approved
+   names if the requested name is unavailable.
+8. Use **Revoke now**, `stop_motion`, or the physical E-stop at any time. The
+   software hold is best effort; the physical E-stop remains authoritative.
 
 ### Wire format
 
@@ -249,9 +309,10 @@ The action states have these meanings:
   disposition.
 - `accepted`: ROBController approved the proposal. Approval is not execution or
   physical completion.
-- `executing`: the deterministic coordinator reports that execution is in
-  progress. The current branch has no automatic coordinator that can produce
-  this transition by itself.
+- `executing`: for controller-approved `play_gesture`, Cerebro has admitted the
+  immutable named gesture to its supervised Amber executor and reports this
+  state back to the approving controller. Other actions keep their existing
+  controller-owned manual status lifecycle.
 - `completed`, `rejected`, `cancelled`, `failed`, and `expired`: terminal
   outcomes. Only a terminal status is returned to Gemini as the tool result.
 
@@ -260,25 +321,26 @@ completed response follows the existing path through `ROBMainViewController`
 and `[ROBSpeechBox sayIt:]`, so conversational replies and post-action replies
 use the same SpeechBox voice.
 
-Gemini cancellation produces an `action_cancel` with the same call ID. If the
-action was accepted or executing, Cerebro keeps the blocking tool slot occupied
-until ROBController reports a terminal cancellation; sending a cancel message
-is not proof that motion stopped. An accepted or executing action that exceeds
-its deadline follows the same stop-or-hold handshake before Cerebro reports it
-as expired. A controller-originated `action_cancel` is likewise never treated
-as a physical acknowledgement; Cerebro requires an explicit terminal
-`action_status`. Cerebro uses that terminal handshake even when its last
-observed state was only pending, or when approval arrives after its deadline,
-because a lost or delayed acceptance packet must not let it assume that nothing
-moved.
+Gemini cancellation produces an `action_cancel` with the same call ID. For a
+controller-approved `play_gesture`, Cerebro owns execution, requests the Amber
+hold locally, and emits the terminal status itself. For other actions, Cerebro
+keeps the blocking tool slot occupied until ROBController reports a terminal
+cancellation; sending a cancel message is not proof that motion stopped. An
+accepted or executing action that exceeds its deadline follows the same
+stop-or-hold handshake before Cerebro reports it as expired. A controller-originated
+`action_cancel` is likewise never itself treated as a physical acknowledgement.
+Cerebro uses the terminal handshake even when its last observed state was only
+pending, or when approval arrives after its deadline, because a lost or delayed
+acceptance packet must not let it assume that nothing moved.
 
 `stop_motion` is dispatched ahead of ordinary blocking tool work. Gemini stop,
 local spoken stop, stage-show cancellation, autonomy stop, and shutdown converge
 on a local software-stop path that stops speech/local coordinators, writes one
 neutral/braked base frame, drops the heartbeat, and returns base authority to
-`Brain`. The tool result reports Amber arm disposition as unverified because no
-feedback-capable arm hold API exists. This is not a physical E-stop or an arm
-stop acknowledgement.
+`Brain`. For Amber arms already verified in position mode, the priority arm lane
+also captures fresh measured telemetry and requests that pose as a hold. The
+tool result distinguishes `hold_requested` from an unavailable/non-position-mode
+arm; gateway acceptance is not the same as a physical E-stop acknowledgement.
 
 ### Safety boundary and transport
 
@@ -287,21 +349,25 @@ The bridge is coordination plumbing, not a replacement for hardware stops:
 - The production control plane is paired TLS 1.3 over QUIC/UDP and advertises
   `_robctl._udp`. `_roboNet._tcp` plaintext UDP is disabled and confined to the
   explicit legacy adapter; there is no automatic downgrade.
-- There is no servo or joint-position telemetry in `ROBRobotActionProtocol` v1.
+- `ROBRobotActionProtocol` v1 itself contains no raw servo telemetry. The
+  separate authenticated Amber gateway and `rob-arm-control/2` stream carry
+  measured positions, velocities, currents, statuses, and modes plus
+  session-bound supervised joint authority, targets, and holds.
 - The bridge does not replace, emit, renew, or validate the Arduino tread
   heartbeat. The Arduino deadman remains an independent final tread interlock.
 - `ROBSerialBox` expires remote snapshots after 600 ms, writes one
   neutral/braked frame, then stops USB writes so stale traffic cannot keep the
   Arduino deadman alive.
 - `ROBAutonomyCoordinator` connects fresh RPLidar to bounded, low-speed tread
-  roaming. There is still no kinematic executor for the rotating plate, arms,
-  grippers, or general neck commands.
+  roaming. Amber supports immutable named joint-space gestures and supervised
+  Vision joint-space segments; neither path is Cartesian, IK-driven, or
+  collision-aware.
 
-Before arm or grasp actions can move hardware, Cerebro still needs actuator
-telemetry; calibrated transforms; joint, velocity, acceleration, collision, and
-workspace limits; a cancellable IK/trajectory executor; and hardware-in-loop
-proof. Operator emergency stop and the Arduino deadman remain authoritative
-regardless of model or bridge state.
+Before arbitrary spatial-controller or grasp actions can move hardware, Cerebro
+still needs calibrated transforms, collision/workspace models, a cancellable
+IK/planning layer, and hardware-in-loop proof. Current Vision joint motion is
+dead-man-held and protected by both intent and gateway leases. The operator's
+physical E-stop remains authoritative; the Arduino deadman is tread-only.
 
 ### Next motion-integration milestones
 
@@ -320,27 +386,29 @@ state also needs intrinsics plus timestamped transforms from camera to upper
 neck, torso, and base. Gemini may receive a compact semantic snapshot, while
 the full-rate state and transforms remain inside the local planner.
 
-Build motion upward in independently testable layers:
+Current progress and remaining layers:
 
 1. Add fresh manual-command leases and make loss of controller traffic force a
    neutral/braked state without relying only on process liveness.
 2. Add a local safety supervisor and actuator-specific stop/hold behavior for
    treads, rotating plate, both arms, and both neck stages.
-3. Add read-only joint and camera-transform telemetry, calibration IDs, and a
-   simulator/digital twin. Do not enable actuation from telemetry alone.
-4. Convert the existing keyframe animation data into named, versioned gesture
-   assets. Interpolate locally with velocity and acceleration limits; Gemini
-   selects a gesture name rather than generating joint values.
+3. **Implemented for Amber joints:** fresh position, velocity, current, status,
+   modes, target/error graphs, bounded history, FK schematic, Vision telemetry,
+   session-bound authority, hold-to-move segments, gateway lease backstops, and
+   measured completion. Camera-transform calibration and a full digital twin remain.
+4. **Implemented for supervised debug:** immutable named keyframe snapshots,
+   local delta/speed limits, cancellation holds, and measured completion.
+   Multi-keyframe interpolation and acceleration profiling remain future work.
 5. Implement `look_at` with a bounded gaze controller, then low-speed relative
-   navigation, before attempting arm motion.
+   navigation, before adding Cartesian/spatial arm or grasp motion.
 6. For `request_pick`, bind `target_id` to a timestamped perception observation
    containing an image point, depth or 3D pose, confidence, and the transform
    revision used to project it. Run local inverse kinematics, collision and
    reachability checks, and an approach/grasp/retreat state machine. Report
    completion only from observed gripper/object feedback.
-7. Add simulation, packet-loss/replay, cancellation-race, and hardware-in-loop
-   fault tests before changing `GEMINI_ROBOT_ACTION_TOOL_ENABLED` from its
-   default-off posture.
+7. Mocked gateway, protocol bounds/replay, controller-session, cancellation,
+   lease-expiry, and simulator tests are in place. Add hardware-in-loop fault
+   tests before treating the supervised path as production-ready.
 
 This keeps animation expressive while ensuring that the model chooses bounded
 intent and the robot's local deterministic code owns every trajectory.
@@ -374,8 +442,8 @@ model runtime is linked in this target.
 
 Every non-stop Gemini physical-action tool call originating from a stage context
 is rejected, even after that cue or show has timed out or completed.
-Named gesture requests also fail closed until an immutable calibrated gesture
-catalog and feedback-capable executor are installed.
+The installed Amber named-gesture executor is therefore available only to a
+normal non-stage Gemini turn with an active local debug grant.
 
 The full implementation sequence is documented in
 [Gemini robotics, stage-show, and local action plan](gemini-robotics-stage-action-plan.md).
@@ -438,9 +506,10 @@ swiftc \
 ```
 
 These fixtures cover controller hello, request/status/cancellation round trips,
-terminal-state classification, action bounds and expiry, malformed archives,
-autonomy start/stop/session bounds, coordinator Lidar activation, and binding
-the outer envelope sender to the versioned inner message. They do not start the
+Cerebro-owned executing/measured-terminal status routing, terminal-state
+classification, action bounds and expiry, malformed archives, autonomy
+start/stop/session bounds, coordinator Lidar activation, and binding the outer
+envelope sender to the versioned inner message. They do not start the
 network listener or operate hardware.
 
 Run the Foundation-only stage-show fixtures:
@@ -519,11 +588,11 @@ responses, and response-size bounds without starting a server.
   but this acknowledgement is a local egress boundary rather than a provider
   billing receipt.
 - The diagnostics counters cover video frames, not provider token usage.
-- The raw-microphone response-start watchdog uses Apple's on-device transcript
-  as its non-resending turn signal. If on-device recognition is unavailable for
-  the selected locale, successful Gemini audio turns still work and server
-  transcription is still logged, but a silent turn does not get that local
-  15-second watchdog.
+- The raw-microphone response-start watchdog accepts either Apple's on-device
+  transcript or Gemini's server input transcription as its non-resending turn
+  signal. If neither recognizer yields text for an utterance, Cerebro has no
+  trustworthy words to give a local dialogue model; wake-only handling and
+  safety stop phrases remain local.
 - The synthetic PCM round trip validates Gemini and the wire protocol, not the
   physical microphone or `AVAudioEngine` conversion on a particular Mac.
 - Camera input is semantic context at one FPS. It is not a visual-servoing or
@@ -534,14 +603,15 @@ responses, and response-size bounds without starting a server.
 - The real-time microphone tap uses non-blocking state checks but still copies
   each accepted buffer before off-thread conversion. Replace that copy path
   with a preallocated ring if hardware profiling shows render-thread underruns.
-- The robot-action tool remains default-off and must be explicitly enabled for
-  supervised protocol testing.
+- The robot-action tool is exposed by default, while the non-persisted local arm
+  authority remains off on every launch. Tool exposure alone cannot move the
+  robot.
 - `ROBRobotActionProtocol` v1 coordinates operator approval, status, terminal
-  results, deadlines, and cancellation, but no automatic action executor or
-  kinematic/grasp planner is implemented. Controller-activated social roaming
-  is a separate local RPLidar behavior.
-- The action protocol has no servo telemetry and does not replace or control the
-  Arduino heartbeat.
+  results, deadlines, and cancellation. Only locally approved Amber named
+  gestures have a feedback-capable direct debug executor; general
+  kinematic/grasp planning is not implemented. Controller-activated social
+  roaming is a separate local RPLidar behavior.
+- The action protocol does not replace or control the Arduino heartbeat.
 - V2 provisions a unique Keychain-backed credential for each device. Cerebro's
   registry assigns either `operatorController` or `lidarPublisher`, treats that
   server-side role as authoritative, and keeps persistent revocation

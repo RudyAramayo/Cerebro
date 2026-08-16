@@ -70,6 +70,9 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 @implementation ROBConversationMessage
 @end
 
+static const NSUInteger ROBConversationLogMaximumMessages = 300;
+static const NSTimeInterval ROBConversationLogRetentionInterval = 7 * 24 * 60 * 60;
+
 @interface ROBConversationBubbleView : NSTableCellView
 @property (nonatomic, strong) NSTextField *senderLabel;
 @property (nonatomic, strong) NSTextField *bubbleLabel;
@@ -158,10 +161,11 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
                     generation:(NSUInteger)generation
                    coordinator:(ROBStageShowCoordinator *)coordinator;
 
-// Gemini proposes high-level actions; this bridge only coordinates approval,
-// cancellation, and operator-confirmed results with ROBController. A future
-// deterministic Cerebro motion/safety coordinator must own actual execution;
-// this bridge never translates a model request into actuator output.
+// Gemini proposes high-level actions. Normal actions continue through
+// ROBController approval. An accepted play_gesture is executed once by
+// Cerebro's deterministic Amber executor; the short-lived local arm-debug
+// grant remains a separate no-controller development path. Both accept only
+// immutable operator-approved named poses.
 @property (readwrite, copy) NSString *robotActionSenderID;
 @property (readwrite, copy) NSString *robotActionControllerID;
 @property (readwrite, retain) NSDate *robotActionControllerLastSeen;
@@ -174,6 +178,9 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 @property (readwrite, retain) NSMutableSet<NSString *> *geminiCancellingRobotToolCallIDs;
 @property (readwrite, retain) NSMutableSet<NSString *> *timedOutRobotToolCallIDs;
 @property (readwrite, retain) NSTimer *robotActionBridgeTimer;
+@property (readwrite, copy) NSString *localAmberGestureCallID;
+@property (readwrite, copy) NSString *controllerApprovedAmberGestureCallID;
+@property (readwrite, retain) ROBRobotActionMessage *controllerApprovedAmberGestureExecutingStatus;
 
 @property (readwrite, retain) SimpleUserTrackerTaskController *simpleUserTrackerTaskController;
 @property (readwrite, retain) AudioInputTaskController *audioInputTaskController;
@@ -216,9 +223,21 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 - (NSString *)robotActionStateString:(ROBRobotActionState)state;
 - (BOOL)robotActionMessageIsAddressedToCerebro:(ROBRobotActionMessage *)message;
 - (void)cancelPendingGeminiRobotActionsWithReason:(NSString *)reason;
+- (BOOL)robotActionControllerIsFreshForRequest:(ROBRobotActionMessage *)request;
+- (void)startControllerApprovedAmberGestureForRequest:(ROBRobotActionMessage *)request
+                                                 call:(ROBAIRobotToolCall *)call;
+- (void)cancelControllerApprovedAmberGestureCallID:(NSString *)callID
+                                             reason:(NSString *)reason
+                                           timedOut:(BOOL)timedOut;
+- (void)finishControllerApprovedAmberGestureCallID:(NSString *)callID
+                                             result:(NSDictionary *)result;
 - (void)updateGeminiCameraDemand;
 - (void)configureConversationTranscript;
 - (void)appendConversationText:(NSString *)text fromUser:(BOOL)fromUser;
+- (void)loadConversationLog;
+- (void)saveConversationLog;
+- (void)pruneConversationLog;
+- (NSURL *)conversationLogURL;
 - (IBAction)sendROBChatText:(id)sender;
 @end
 
@@ -260,6 +279,104 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     self.speechTextView.textContainerInset = NSMakeSize(9, 11);
     self.speechTextView.automaticQuoteSubstitutionEnabled = NO;
     self.speechTextView.automaticDashSubstitutionEnabled = NO;
+
+    [self loadConversationLog];
+}
+
+- (NSURL *)conversationLogURL
+{
+    NSURL *applicationSupportURL = [[NSFileManager defaultManager]
+        URLForDirectory:NSApplicationSupportDirectory
+               inDomain:NSUserDomainMask
+      appropriateForURL:nil
+                 create:YES
+                  error:nil];
+    if (applicationSupportURL == nil) { return nil; }
+
+    NSURL *cerebroDirectory = [applicationSupportURL URLByAppendingPathComponent:@"Cerebro" isDirectory:YES];
+    NSError *directoryError = nil;
+    if (![[NSFileManager defaultManager] createDirectoryAtURL:cerebroDirectory
+                                  withIntermediateDirectories:YES
+                                                   attributes:nil
+                                                        error:&directoryError]) {
+        NSLog(@"Unable to create conversation log directory: %@", directoryError.localizedDescription);
+        return nil;
+    }
+    return [cerebroDirectory URLByAppendingPathComponent:@"ConversationLog.json"];
+}
+
+- (void)pruneConversationLog
+{
+    NSDate *cutoff = [NSDate dateWithTimeIntervalSinceNow:-ROBConversationLogRetentionInterval];
+    NSIndexSet *expiredIndexes = [self.conversationMessages indexesOfObjectsPassingTest:
+        ^BOOL(ROBConversationMessage *message, NSUInteger index, BOOL *stop) {
+            return message.date == nil || [message.date compare:cutoff] == NSOrderedAscending;
+        }];
+    if (expiredIndexes.count > 0) {
+        [self.conversationMessages removeObjectsAtIndexes:expiredIndexes];
+    }
+    if (self.conversationMessages.count > ROBConversationLogMaximumMessages) {
+        NSUInteger overflow = self.conversationMessages.count - ROBConversationLogMaximumMessages;
+        [self.conversationMessages removeObjectsInRange:NSMakeRange(0, overflow)];
+    }
+}
+
+- (void)loadConversationLog
+{
+    NSURL *logURL = [self conversationLogURL];
+    NSData *data = logURL != nil ? [NSData dataWithContentsOfURL:logURL] : nil;
+    if (data.length == 0) { return; }
+
+    NSError *jsonError = nil;
+    id jsonObject = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
+    NSDictionary *document = [jsonObject isKindOfClass:[NSDictionary class]] ? jsonObject : nil;
+    NSArray *storedMessages = [document[@"messages"] isKindOfClass:[NSArray class]] ? document[@"messages"] : nil;
+    if (storedMessages == nil) {
+        NSLog(@"Unable to read conversation log: %@", jsonError.localizedDescription ?: @"invalid format");
+        return;
+    }
+
+    for (NSDictionary *storedMessage in storedMessages) {
+        if (![storedMessage isKindOfClass:[NSDictionary class]]) { continue; }
+        NSString *text = [storedMessage[@"text"] isKindOfClass:[NSString class]] ? storedMessage[@"text"] : nil;
+        NSNumber *timestamp = [storedMessage[@"timestamp"] isKindOfClass:[NSNumber class]] ? storedMessage[@"timestamp"] : nil;
+        NSNumber *fromUser = [storedMessage[@"from_user"] isKindOfClass:[NSNumber class]] ? storedMessage[@"from_user"] : nil;
+        if (text.length == 0 || timestamp == nil || fromUser == nil) { continue; }
+
+        ROBConversationMessage *message = [ROBConversationMessage new];
+        message.text = text;
+        message.fromUser = fromUser.boolValue;
+        message.date = [NSDate dateWithTimeIntervalSince1970:timestamp.doubleValue];
+        [self.conversationMessages addObject:message];
+    }
+    [self pruneConversationLog];
+    [self.conversationTableView reloadData];
+    if (self.conversationMessages.count > 0) {
+        [self.conversationTableView scrollRowToVisible:self.conversationMessages.count - 1];
+    }
+    [self saveConversationLog];
+}
+
+- (void)saveConversationLog
+{
+    [self pruneConversationLog];
+    NSMutableArray<NSDictionary *> *storedMessages = [NSMutableArray arrayWithCapacity:self.conversationMessages.count];
+    for (ROBConversationMessage *message in self.conversationMessages) {
+        if (message.text.length == 0 || message.date == nil) { continue; }
+        [storedMessages addObject:@{
+            @"text": message.text,
+            @"from_user": @(message.fromUser),
+            @"timestamp": @([message.date timeIntervalSince1970])
+        }];
+    }
+
+    NSDictionary *document = @{ @"version": @1, @"messages": storedMessages };
+    NSError *jsonError = nil;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:document options:0 error:&jsonError];
+    NSURL *logURL = [self conversationLogURL];
+    if (data == nil || logURL == nil || ![data writeToURL:logURL options:NSDataWritingAtomic error:&jsonError]) {
+        NSLog(@"Unable to save conversation log: %@", jsonError.localizedDescription ?: @"unknown error");
+    }
 }
 
 - (void)appendConversationText:(NSString *)text fromUser:(BOOL)fromUser
@@ -280,6 +397,7 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         message.fromUser = fromUser;
         message.date = now;
         [self.conversationMessages addObject:message];
+        [self pruneConversationLog];
         if (fromUser) {
             self.lastConversationUserText = cleanText;
             self.lastConversationUserDate = now;
@@ -289,6 +407,7 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         if (finalRow >= 0) {
             [self.conversationTableView scrollRowToVisible:finalRow];
         }
+        [self saveConversationLog];
     };
     if (NSThread.isMainThread) appendBlock();
     else dispatch_async(dispatch_get_main_queue(), appendBlock);
@@ -302,8 +421,9 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 - (CGFloat)tableView:(NSTableView *)tableView heightOfRow:(NSInteger)row
 {
     ROBConversationMessage *message = self.conversationMessages[row];
-    CGFloat bubbleWidth = MIN(MAX(180, tableView.bounds.size.width - 28) * 0.78, 430) - 20;
-    NSRect textBounds = [message.text boundingRectWithSize:NSMakeSize(bubbleWidth, CGFLOAT_MAX)
+    CGFloat horizontalTextInset = message.fromUser ? 10 : 16;
+    CGFloat textWidth = MIN(MAX(180, tableView.bounds.size.width - 28) * 0.78, 430) - (horizontalTextInset * 2);
+    NSRect textBounds = [message.text boundingRectWithSize:NSMakeSize(textWidth, CGFLOAT_MAX)
                                                    options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
                                                 attributes:@{ NSFontAttributeName: [NSFont systemFontOfSize:14] }];
     return MAX(68, ceil(NSHeight(textBounds)) + 47);
@@ -320,19 +440,27 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     }
     ROBConversationMessage *message = self.conversationMessages[row];
     view.fromUser = message.fromUser;
-    view.senderLabel.stringValue = message.fromUser ? @"YOU" : @"ROB AI";
+    NSString *senderName = message.fromUser ? @"YOU" : @"ROB AI";
+    NSString *timestamp = [NSDateFormatter localizedStringFromDate:message.date
+                                                         dateStyle:NSDateFormatterShortStyle
+                                                         timeStyle:NSDateFormatterShortStyle];
+    view.senderLabel.stringValue = [NSString stringWithFormat:@"%@  •  %@", senderName, timestamp];
     NSColor *textColor = message.fromUser ? NSColor.whiteColor : NSColor.labelColor;
+    CGFloat horizontalTextInset = message.fromUser ? 10 : 16;
+    CGFloat baselineOffset = message.fromUser ? -4 : -6;
     NSMutableParagraphStyle *bubbleStyle = [[NSMutableParagraphStyle alloc] init];
-    bubbleStyle.firstLineHeadIndent = 10;
-    bubbleStyle.headIndent = 10;
-    bubbleStyle.tailIndent = -10;
+    bubbleStyle.firstLineHeadIndent = horizontalTextInset;
+    bubbleStyle.headIndent = horizontalTextInset;
+    bubbleStyle.tailIndent = -horizontalTextInset;
     view.bubbleLabel.attributedStringValue = [[NSAttributedString alloc]
         initWithString:message.text
            attributes:@{
                NSFontAttributeName: [NSFont systemFontOfSize:14],
                NSForegroundColorAttributeName: textColor,
                NSParagraphStyleAttributeName: bubbleStyle,
-               NSBaselineOffsetAttributeName: @(-2.0)
+               // Lower the glyph baseline inside the rounded bubble without
+               // moving or resizing the bubble itself.
+               NSBaselineOffsetAttributeName: @(baselineOffset)
            }];
     view.bubbleLabel.textColor = textColor;
     view.bubbleLabel.backgroundColor = message.fromUser
@@ -383,6 +511,9 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     // the separate on-device Apple speech-recognition transcript.
     NSLog(@"Gemini Robotics heard: %@", text);
     [self appendConversationText:text fromUser:YES];
+    if (!self.speechBox.isSpeaking) {
+        [self.speechBox sayItIfNotQueued:@"I hear you."];
+    }
 }
 
 - (void)robAI:(ROBAI *)robAI didFailRequestWithDetail:(NSString *)detail
@@ -391,13 +522,14 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     if ([detail containsString:@"turned off"]) {
         return;
     }
-    [self.speechBox sayIt:@"I couldn't get a response from Gemini. Please try again."];
+    [self.speechBox sayItIfNotQueued:@"I'm still here, but that online request did not finish. Please say ROB and try again."];
 }
 
 - (void)robAI:(ROBAI *)robAI
         didFailRequestWithDetail:(NSString *)detail
                        contextID:(NSString *)contextID
 {
+    NSLog(@"Gemini Robotics request failed for %@: %@", contextID, detail);
     if ([contextID hasPrefix:@"stage:"]) {
         (void)[self.stageShowCoordinator failGeminiTurn:detail requestID:contextID];
         return;
@@ -405,7 +537,7 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     if ([detail containsString:@"turned off"]) {
         return;
     }
-    [self.speechBox sayIt:@"I couldn't get a response from Gemini. Please try again."];
+    [self.speechBox sayItIfNotQueued:@"I'm still here, but that online request did not finish. Please say ROB and try again."];
 }
 
 - (void)robAI:(ROBAI *)robAI didChangeConnectionState:(NSString *)state detail:(NSString *)detail
@@ -449,13 +581,17 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 - (void)cancelPendingGeminiRobotActionsWithReason:(NSString *)reason
 {
     NSArray<NSString *> *callIDs = [self.pendingRobotActionRequests.allKeys copy];
-    if (callIDs.count == 0) {
+    BOOL hasLocalAmberGesture = self.localAmberGestureCallID.length > 0;
+    if (callIDs.count == 0 && !hasLocalAmberGesture) {
         return;
     }
 
     // Apply the deterministic local stop before any best-effort network
     // cancellation so turning Gemini off cannot leave motion waiting on I/O.
     [self applyPrioritySoftwareStopWithReason:reason];
+    if (hasLocalAmberGesture) {
+        (void)[[ROBAmberGestureExecutor shared] cancelCurrentGestureWithReason:reason];
+    }
 
     for (NSString *callID in callIDs) {
         ROBRobotActionMessage *request = self.pendingRobotActionRequests[callID];
@@ -472,6 +608,11 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         }
         [self.geminiCancellingRobotToolCallIDs addObject:callID];
         [self sendRobotActionMessage:cancellation];
+        if ([self.controllerApprovedAmberGestureCallID isEqualToString:callID]) {
+            [self cancelControllerApprovedAmberGestureCallID:callID
+                                                       reason:reason
+                                                     timedOut:NO];
+        }
     }
 }
 
@@ -513,21 +654,36 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     }
 
     if ([action isEqualToString:@"stop_motion"]) {
-        // Stop is a preemptive local safety lane. It must not wait behind the
-        // controller approval ledger or imply that the uninstrumented Amber
-        // arms have reached a verified hold.
+        // Stop is a preemptive local safety lane. It does not wait behind the
+        // controller ledger. The Amber executor only asks arms already in
+        // verified position mode to hold their fresh measured pose; it never
+        // activates an arm from this path.
+        NSSet *stopArgumentKeys = [NSSet setWithArray:call.arguments.allKeys];
+        BOOL stopHasOnlyAction = stopArgumentKeys.count == 1 &&
+            [stopArgumentKeys containsObject:@"action"];
         if (self.stageShowCoordinator.isRunning) {
             [self.stageShowCoordinator cancelWithReason:@"Gemini requested stop_motion"];
         } else {
             [self applyPrioritySoftwareStopWithReason:@"Gemini requested stop_motion"];
         }
+        (void)[[ROBAmberGestureExecutor shared]
+            cancelCurrentGestureWithReason:@"Gemini requested stop_motion"];
+        NSDictionary *armResult = [[ROBAmberGestureExecutor shared] requestPriorityHold];
+        NSString *armStatus = armResult[@"arm_status"];
+        if (armStatus == nil) {
+            armStatus = @"unavailable";
+        }
+        NSString *stopDetail = stopHasOnlyAction
+            ? @"Cerebro stopped local coordinators and requested a measured-pose hold for each Amber arm already verified in position mode."
+            : @"Cerebro stopped local coordinators and requested a measured-pose hold for each Amber arm already verified in position mode. Unexpected stop_motion arguments were ignored and could not suppress the stop.";
         [robAI sendToolResponseWithCallID:call.callID
                                      name:call.name
                                    result:@{
                                        @"status": @"partial",
                                        @"base_status": @"software_stopped",
-                                       @"arm_status": @"unverified",
-                                       @"detail": @"Cerebro stopped local coordinators, emitted one neutral braked base frame, and dropped the base heartbeat. Amber arm hold cannot yet be observed."
+                                       @"arm_status": armStatus,
+                                       @"arm_result": armResult,
+                                       @"detail": stopDetail
                                    }];
         return;
     }
@@ -555,6 +711,65 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
                                        @"status": @"rejected",
                                        @"reason": @"Physical-action tools are disabled while a stage show is running"
                                    }];
+        return;
+    }
+
+    // This is the only direct Gemini-to-arm path. The local grant expires and
+    // is never persisted; the executor resolves the name to an immutable
+    // operator-approved pose, limits the measured delta, and waits for fresh
+    // position/velocity feedback before returning physical completion.
+    if ([action isEqualToString:@"play_gesture"] &&
+        [[ROBAmberDebugAuthority shared] authorizesGemini]) {
+        NSSet *playGestureArgumentKeys = [NSSet setWithArray:call.arguments.allKeys];
+        NSSet *expectedPlayGestureArgumentKeys = [NSSet setWithObjects:@"action", @"gesture", nil];
+        if (![playGestureArgumentKeys isEqualToSet:expectedPlayGestureArgumentKeys]) {
+            [robAI sendToolResponseWithCallID:call.callID
+                                         name:call.name
+                                       result:@{
+                                           @"status": @"rejected",
+                                           @"reason": @"play_gesture accepts only action and an approved gesture name; raw joint or unknown arguments are forbidden"
+                                       }];
+            return;
+        }
+        NSString *gesture = [call.arguments[@"gesture"] isKindOfClass:[NSString class]]
+            ? call.arguments[@"gesture"] : nil;
+        if (gesture.length == 0) {
+            [robAI sendToolResponseWithCallID:call.callID
+                                         name:call.name
+                                       result:@{
+                                           @"status": @"rejected",
+                                           @"reason": @"play_gesture requires an approved gesture name"
+                                       }];
+            return;
+        }
+        if ([self.localAmberGestureCallID isEqualToString:call.callID]) {
+            return;
+        }
+        if (self.localAmberGestureCallID.length > 0 ||
+            self.pendingRobotActionRequests.count > 0) {
+            [robAI sendToolResponseWithCallID:call.callID
+                                         name:call.name
+                                       result:@{
+                                           @"status": @"rejected",
+                                           @"reason": @"Another physical robot action is still active"
+                                       }];
+            return;
+        }
+        self.localAmberGestureCallID = call.callID;
+        __weak ROBMainViewController *weakSelf = self;
+        [[ROBAmberGestureExecutor shared]
+            executeApprovedGesture:gesture
+            completion:^(NSDictionary *result) {
+                ROBMainViewController *strongSelf = weakSelf;
+                if (strongSelf == nil ||
+                    ![strongSelf.localAmberGestureCallID isEqualToString:call.callID]) {
+                    return;
+                }
+                strongSelf.localAmberGestureCallID = nil;
+                [robAI sendToolResponseWithCallID:call.callID
+                                             name:call.name
+                                           result:result];
+            }];
         return;
     }
 
@@ -648,6 +863,13 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 - (void)robAI:(ROBAI *)robAI didCancelToolCallIDs:(NSArray<NSString *> *)callIDs
 {
     for (NSString *callID in callIDs) {
+        if ([self.localAmberGestureCallID isEqualToString:callID]) {
+            self.localAmberGestureCallID = nil;
+            (void)[[ROBAmberGestureExecutor shared]
+                cancelCurrentGestureWithReason:@"Gemini cancelled the Amber gesture"];
+            [robAI confirmToolCallCancellation:callID];
+            continue;
+        }
         ROBRobotActionMessage *request = self.pendingRobotActionRequests[callID];
         if (request == nil) {
             [robAI confirmToolCallCancellation:callID];
@@ -662,6 +884,11 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
                                               recipientID:request.recipientID];
         self.pendingRobotActionCancellations[callID] = cancellation;
         [self sendRobotActionMessage:cancellation];
+        if ([self.controllerApprovedAmberGestureCallID isEqualToString:callID]) {
+            [self cancelControllerApprovedAmberGestureCallID:callID
+                                                       reason:@"Gemini cancelled the controller-approved Amber gesture; stop or hold safely"
+                                                     timedOut:NO];
+        }
     }
     NSLog(@"Forwarded Gemini robot-action cancellations: %@", callIDs);
 }
@@ -695,6 +922,217 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         return NO;
     }
     return [self.autoNetServer sendMessage:archive];
+}
+
+- (BOOL)robotActionControllerIsFreshForRequest:(ROBRobotActionMessage *)request
+{
+    if (request.recipientID.length == 0 ||
+        ![request.recipientID isEqualToString:self.robotActionControllerID] ||
+        !self.robotActionControllerAcceptsActions ||
+        ![self.robotActionControllerCapabilities containsObject:@"play_gesture"] ||
+        self.robotActionControllerLastSeen == nil) {
+        return NO;
+    }
+    return [[NSDate date] timeIntervalSinceDate:self.robotActionControllerLastSeen] <
+        kRobotActionControllerFreshnessSeconds;
+}
+
+- (void)finishControllerApprovedAmberGestureCallID:(NSString *)callID
+                                             result:(NSDictionary *)result
+{
+    ROBRobotActionMessage *request = self.pendingRobotActionRequests[callID];
+    ROBAIRobotToolCall *call = self.pendingRobotToolCalls[callID];
+    if (request == nil || ![request.action isEqualToString:@"play_gesture"]) {
+        return;
+    }
+    if (self.controllerApprovedAmberGestureCallID.length > 0 &&
+        ![self.controllerApprovedAmberGestureCallID isEqualToString:callID]) {
+        return;
+    }
+
+    BOOL wasLocallyExecuting =
+        [self.controllerApprovedAmberGestureCallID isEqualToString:callID];
+    BOOL timedOut = wasLocallyExecuting &&
+        [self.timedOutRobotToolCallIDs containsObject:callID];
+    BOOL geminiCancelled = [self.geminiCancellingRobotToolCallIDs containsObject:callID];
+    NSMutableDictionary *finalResult = [NSMutableDictionary dictionaryWithDictionary:result ?: @{}];
+    NSString *reportedStatus = [finalResult[@"status"] isKindOfClass:[NSString class]]
+        ? finalResult[@"status"] : @"failed";
+    ROBRobotActionState terminalState = ROBRobotActionStateFailed;
+    if (timedOut) {
+        finalResult[@"detail"] = @"The controller-approved Amber gesture exceeded its execution deadline and a measured-pose hold was requested.";
+        terminalState = ROBRobotActionStateExpired;
+    } else if ([reportedStatus isEqualToString:@"completed"]) {
+        terminalState = ROBRobotActionStateCompleted;
+    } else if ([reportedStatus isEqualToString:@"rejected"]) {
+        terminalState = ROBRobotActionStateRejected;
+    } else if ([reportedStatus isEqualToString:@"cancelled"]) {
+        terminalState = ROBRobotActionStateCancelled;
+    } else if ([reportedStatus isEqualToString:@"expired"]) {
+        terminalState = ROBRobotActionStateExpired;
+    }
+    finalResult[@"status"] = [self robotActionStateString:terminalState];
+    finalResult[@"execution_owner"] = @"Cerebro";
+    finalResult[@"authorization"] = @"controller_approved_one_shot";
+    NSString *detail = [finalResult[@"detail"] isKindOfClass:[NSString class]]
+        ? finalResult[@"detail"] : @"Cerebro's supervised Amber gesture executor reached a terminal state.";
+
+    // Clear every local ownership record before sending callbacks. A duplicate
+    // executor callback or replayed controller packet then has no request to
+    // complete and cannot produce a second physical operation or tool result.
+    if ([self.controllerApprovedAmberGestureCallID isEqualToString:callID]) {
+        self.controllerApprovedAmberGestureCallID = nil;
+        self.controllerApprovedAmberGestureExecutingStatus = nil;
+    }
+    [self.pendingRobotToolCalls removeObjectForKey:callID];
+    [self.pendingRobotActionRequests removeObjectForKey:callID];
+    [self.pendingRobotActionCancellations removeObjectForKey:callID];
+    [self.robotActionExecutionDeadlines removeObjectForKey:callID];
+    [self.timedOutRobotToolCallIDs removeObject:callID];
+    [self.geminiCancellingRobotToolCallIDs removeObject:callID];
+
+    ROBRobotActionMessage *terminal = [ROBRobotActionMessage
+        actionStatusWithCallID:callID
+                        state:terminalState
+                       detail:detail
+                       result:finalResult
+                     senderID:self.robotActionSenderID
+                  recipientID:request.recipientID];
+    [self sendRobotActionMessage:terminal];
+
+    if (call == nil) {
+        NSLog(@"Controller-approved Amber gesture %@ finished after its Gemini call was released", callID);
+    } else if (geminiCancelled) {
+        [self.robAI confirmToolCallCancellation:callID];
+    } else {
+        [self.robAI sendToolResponseWithCallID:callID name:call.name result:finalResult];
+    }
+}
+
+- (void)cancelControllerApprovedAmberGestureCallID:(NSString *)callID
+                                             reason:(NSString *)reason
+                                           timedOut:(BOOL)timedOut
+{
+    if (![self.controllerApprovedAmberGestureCallID isEqualToString:callID]) {
+        return;
+    }
+    ROBRobotActionMessage *request = self.pendingRobotActionRequests[callID];
+    if (request == nil) {
+        return;
+    }
+    if (timedOut) {
+        [self.timedOutRobotToolCallIDs addObject:callID];
+    }
+    ROBRobotActionMessage *cancellation = self.pendingRobotActionCancellations[callID];
+    if (cancellation == nil) {
+        cancellation = [ROBRobotActionMessage actionCancelWithCallID:callID
+                                                               reason:reason
+                                                             senderID:self.robotActionSenderID
+                                                          recipientID:request.recipientID];
+        self.pendingRobotActionCancellations[callID] = cancellation;
+    }
+    [self sendRobotActionMessage:cancellation];
+
+    NSDictionary *holdResult = [[ROBAmberGestureExecutor shared]
+        cancelCurrentGestureWithReason:reason];
+    if ([self.controllerApprovedAmberGestureCallID isEqualToString:callID]) {
+        // Defensive fallback for an inconsistent executor state. The normal
+        // cancellation path invokes the run completion synchronously.
+        [self finishControllerApprovedAmberGestureCallID:callID
+                                                   result:@{
+                                                       @"status": timedOut ? @"expired" : @"cancelled",
+                                                       @"detail": reason,
+                                                       @"arm_result": holdResult ?: @{}
+                                                   }];
+    }
+}
+
+- (void)startControllerApprovedAmberGestureForRequest:(ROBRobotActionMessage *)request
+                                                 call:(ROBAIRobotToolCall *)call
+{
+    NSString *callID = request.callID;
+    if (callID.length == 0 || call == nil ||
+        self.pendingRobotActionRequests[callID] != request ||
+        self.pendingRobotToolCalls[callID] != call) {
+        return;
+    }
+    if (request.isExpired) {
+        [self finishControllerApprovedAmberGestureCallID:callID
+                                                   result:@{
+                                                       @"status": @"expired",
+                                                       @"detail": @"ROBController approval arrived after the play_gesture deadline; no arm trajectory was submitted."
+                                                   }];
+        return;
+    }
+    if (self.pendingRobotActionCancellations[callID] != nil) {
+        [self finishControllerApprovedAmberGestureCallID:callID
+                                                   result:@{
+                                                       @"status": @"cancelled",
+                                                       @"detail": @"The play_gesture call was cancelled before Cerebro could submit an arm trajectory."
+                                                   }];
+        return;
+    }
+    if (![self robotActionControllerIsFreshForRequest:request]) {
+        [self finishControllerApprovedAmberGestureCallID:callID
+                                                   result:@{
+                                                       @"status": @"rejected",
+                                                       @"detail": @"The accepting ROBController is no longer the fresh, current action console; no arm trajectory was submitted."
+                                                   }];
+        return;
+    }
+    if (self.controllerApprovedAmberGestureCallID.length > 0) {
+        [self finishControllerApprovedAmberGestureCallID:callID
+                                                   result:@{
+                                                       @"status": @"failed",
+                                                       @"detail": @"Another controller-approved Amber gesture still owns the executor."
+                                                   }];
+        return;
+    }
+    NSString *gesture = [request.arguments[@"gesture"] isKindOfClass:[NSString class]]
+        ? request.arguments[@"gesture"] : nil;
+    if (gesture.length == 0) {
+        [self finishControllerApprovedAmberGestureCallID:callID
+                                                   result:@{
+                                                       @"status": @"rejected",
+                                                       @"detail": @"The approved action did not contain a valid immutable gesture name."
+                                                   }];
+        return;
+    }
+
+    self.robotActionExecutionDeadlines[callID] =
+        [NSDate dateWithTimeIntervalSinceNow:kRobotActionExecutionLifetimeSeconds];
+    self.controllerApprovedAmberGestureCallID = callID;
+    self.controllerApprovedAmberGestureExecutingStatus = [ROBRobotActionMessage
+        actionStatusWithCallID:callID
+                        state:ROBRobotActionStateExecuting
+                       detail:@"Cerebro is executing the controller-approved immutable Amber gesture and awaiting measured completion."
+                       result:@{
+                           @"gesture": gesture,
+                           @"execution_owner": @"Cerebro",
+                           @"authorization": @"controller_approved_one_shot"
+                       }
+                     senderID:self.robotActionSenderID
+                  recipientID:request.recipientID];
+
+    __weak ROBMainViewController *weakSelf = self;
+    [[ROBAmberGestureExecutor shared]
+        executeControllerApprovedGesture:gesture
+        completion:^(NSDictionary *result) {
+            ROBMainViewController *strongSelf = weakSelf;
+            if (strongSelf == nil) {
+                return;
+            }
+            [strongSelf finishControllerApprovedAmberGestureCallID:callID result:result];
+        }];
+
+    if (![self.controllerApprovedAmberGestureCallID isEqualToString:callID]) {
+        return;
+    }
+    if (![self sendRobotActionMessage:self.controllerApprovedAmberGestureExecutingStatus]) {
+        [self cancelControllerApprovedAmberGestureCallID:callID
+                                                   reason:@"The accepting ROBController disconnected before Cerebro could report execution; hold safely."
+                                                 timedOut:NO];
+    }
 }
 
 - (void)handleRobotActionMessage:(ROBRobotActionMessage *)message
@@ -733,6 +1171,66 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         [message.senderID isEqualToString:request.recipientID];
     if (request == nil || call == nil || !senderMatchesRequest) {
         return;
+    }
+
+    BOOL isControllerExecutableGesture = [request.action isEqualToString:@"play_gesture"];
+    BOOL isLocallyExecutingGesture = isControllerExecutableGesture &&
+        [self.controllerApprovedAmberGestureCallID isEqualToString:message.callID];
+    if (isLocallyExecutingGesture) {
+        if (message.kind == ROBRobotActionMessageKindActionCancel) {
+            [self cancelControllerApprovedAmberGestureCallID:message.callID
+                                                       reason:message.detail.length > 0
+                                                           ? message.detail
+                                                           : @"ROBController cancelled the approved Amber gesture; stop or hold safely"
+                                                     timedOut:NO];
+            return;
+        }
+        if (message.kind != ROBRobotActionMessageKindActionStatus) {
+            return;
+        }
+        if (message.state == ROBRobotActionStateAccepted) {
+            // An immutable approval may be replayed after packet loss. Report
+            // the existing execution; never enter the executor a second time.
+            if (self.controllerApprovedAmberGestureExecutingStatus != nil) {
+                [self sendRobotActionMessage:self.controllerApprovedAmberGestureExecutingStatus];
+            }
+            return;
+        }
+        if (message.isTerminal) {
+            // Once accepted, Cerebro owns physical completion. A controller
+            // terminal packet is treated as a stop request, never as evidence
+            // that the measured arm target or hold was reached.
+            NSString *reason = [NSString stringWithFormat:
+                @"ROBController reported %@ while Cerebro owned Amber execution; stop or hold safely",
+                [self robotActionStateString:message.state]];
+            [self cancelControllerApprovedAmberGestureCallID:message.callID
+                                                       reason:reason
+                                                     timedOut:NO];
+            return;
+        }
+        NSLog(@"Ignored controller-owned %@ status for locally executing play_gesture %@",
+              [self robotActionStateString:message.state], message.callID);
+        return;
+    }
+
+    if (isControllerExecutableGesture &&
+        message.kind == ROBRobotActionMessageKindActionStatus) {
+        if (message.state == ROBRobotActionStateAccepted) {
+            [self startControllerApprovedAmberGestureForRequest:request call:call];
+            return;
+        }
+        if (message.state == ROBRobotActionStateExecuting ||
+            message.state == ROBRobotActionStateCompleted) {
+            // ROBController approves this action but does not execute it. Do not
+            // let a premature remote lifecycle status stand in for Cerebro's
+            // gateway ACK and measured completion checks.
+            [self finishControllerApprovedAmberGestureCallID:message.callID
+                                                       result:@{
+                                                           @"status": @"failed",
+                                                           @"detail": @"ROBController must explicitly accept play_gesture and let Cerebro own execution and measured completion. No arm trajectory was submitted."
+                                                       }];
+            return;
+        }
     }
 
     // Only an explicit terminal status can acknowledge physical disposition.
@@ -809,6 +1307,37 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         }
 
         ROBRobotActionMessage *existingCancellation = self.pendingRobotActionCancellations[callID];
+        NSDate *executionDeadline = self.robotActionExecutionDeadlines[callID];
+        BOOL deadlineExpired = executionDeadline != nil
+            ? [now compare:executionDeadline] != NSOrderedAscending
+            : request.isExpired;
+        if ([self.controllerApprovedAmberGestureCallID isEqualToString:callID]) {
+            if (existingCancellation != nil) {
+                [self cancelControllerApprovedAmberGestureCallID:callID
+                                                           reason:existingCancellation.detail.length > 0
+                                                               ? existingCancellation.detail
+                                                               : @"The controller-approved Amber gesture was cancelled; stop or hold safely"
+                                                         timedOut:[self.timedOutRobotToolCallIDs containsObject:callID]];
+                continue;
+            }
+            if (deadlineExpired) {
+                [self cancelControllerApprovedAmberGestureCallID:callID
+                                                           reason:@"Cerebro's controller-approved Amber gesture deadline expired; stop or hold safely"
+                                                         timedOut:YES];
+                continue;
+            }
+            if (![self robotActionControllerIsFreshForRequest:request]) {
+                [self cancelControllerApprovedAmberGestureCallID:callID
+                                                           reason:@"The approving ROBController is no longer fresh or current; stop or hold safely"
+                                                         timedOut:NO];
+                continue;
+            }
+            if (self.controllerApprovedAmberGestureExecutingStatus != nil) {
+                [self sendRobotActionMessage:self.controllerApprovedAmberGestureExecutingStatus];
+            }
+            continue;
+        }
+
         if (existingCancellation != nil) {
             // Retransmit the exact same immutable cancellation ID after
             // reconnects until a terminal result arrives.
@@ -816,10 +1345,6 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
             continue;
         }
 
-        NSDate *executionDeadline = self.robotActionExecutionDeadlines[callID];
-        BOOL deadlineExpired = executionDeadline != nil
-            ? [now compare:executionDeadline] != NSOrderedAscending
-            : request.isExpired;
         if (!deadlineExpired) {
             // Reusing both message_id and call_id makes loss recovery
             // idempotent. ROBController replays its latest status/result.
@@ -858,8 +1383,10 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 - (void) didFinishProcessingSpeech
 {
     NSLog(@"didFinishProcessingSpeech ROBMainViewController");
-    //TODO: should we reset after so we can keep a conversation going?!?
-    [self resetSpeechResponseAttentionTimer];
+    // Every ROB response suppresses microphone buffers to avoid
+    // feeding the speaker output back to Gemini. Explicitly restore capture
+    // after the final queued utterance instead of only resetting the text gate.
+    [self startListeningAgain];
 }
 
 - (void) willSpeakWord:(NSRange)characterRange ofString:(NSString *)string {
@@ -880,7 +1407,6 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     // session is actually ready. During reconnects, realtime text remains a
     // useful bounded fallback and is queued by ROBAI until setup completes.
     BOOL geminiOwnsMicrophone = self.robAI.isLiveSessionReady && self.robAI.streamsMicrophoneAudio;
-    BOOL geminiConnectionEnabled = self.robAI.isGeminiConnectionEnabled;
     NSArray<NSString *> *addressTokens = [textInput componentsSeparatedByCharactersInSet:
         [[NSCharacterSet alphanumericCharacterSet] invertedSet]];
     BOOL addressesROB = [addressTokens containsObject:@"robbie"] ||
@@ -897,7 +1423,15 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         } else {
             [self applyPrioritySoftwareStopWithReason:@"Local spoken stop"];
         }
-        [self.speechBox sayIt:@"Base motion stopped. Arm hold is not yet verified."];
+        (void)[[ROBAmberGestureExecutor shared]
+            cancelCurrentGestureWithReason:@"Local spoken stop"];
+        NSDictionary *armResult = [[ROBAmberGestureExecutor shared] requestPriorityHold];
+        NSString *armStatus = [armResult[@"arm_status"] isKindOfClass:[NSString class]]
+            ? armResult[@"arm_status"] : @"unavailable";
+        NSString *stopResponse = [armStatus isEqualToString:@"hold_requested"]
+            ? @"Base motion stopped. I requested an arm hold; use the physical emergency stop if needed."
+            : @"Base motion stopped. No verified position-mode arm hold was available.";
+        [self.speechBox sayIt:stopResponse];
         return;
     }
 
@@ -907,7 +1441,7 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         NSLog(@"Listening for spoken input");
         [self resetSpeechResponseAttentionTimer];
         
-        NSArray *thinking_acknowledgements = @[@"let me think", @"I'm thinking", @"hmmmmm, lets see", @"proessing..."];
+        NSArray *thinking_acknowledgements = @[@"Let me think.", @"I'm thinking.", @"I hear you."];
         NSString *thinking_acknowledgement = [thinking_acknowledgements objectAtIndex:arc4random_uniform((uint32_t)thinking_acknowledgements.count)];
         
         NSArray *greeting_acknowledgements = @[@"Hey there", @"How are you", @"What's up!", @"Greetings"];
@@ -916,20 +1450,11 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         
         if ([textInput isEqualToString:@"robbie"] || [textInput isEqualToString:@"hey rob"] || [textInput isEqualToString:@"rob"] || [textInput isEqualToString:@"robot"])
         {
-            if (!geminiConnectionEnabled) {
-                [self.speechBox sayIt:@"Gemini is turned off. Use the Gemini controls to connect."];
-            } else if (geminiOwnsMicrophone) {
-                if (!self.speechBox.isSpeaking) {
-                    [self.robAI noteMicrophoneTurnAwaitingResponse];
-                }
-            } else {
-                [self.speechBox sayIt:greeting_acknowledgement];
-            }
+            // A wake-only utterance is acknowledged locally and immediately;
+            // it must never wait on provider VAD or a network round trip.
+            [self.speechBox sayIt:greeting_acknowledgement];
             return;
-        } else if (!geminiConnectionEnabled) {
-            [self.speechBox sayIt:@"Gemini is turned off. Use the Gemini controls to connect."];
-            return;
-        } else if (!geminiOwnsMicrophone) {
+        } else {
             pendingThinkingAcknowledgement = thinking_acknowledgement;
         }
     }
@@ -943,15 +1468,12 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         return;
     }
     if (!self.ignoreText) {
-        if (!geminiConnectionEnabled) {
-            NSLog(@"Gemini is off; retaining the local transcript without submitting it");
-            return;
-        }
         if (geminiOwnsMicrophone) {
             // Do not resend the transcript. It is only a local signal that a
             // raw-audio turn should receive a bounded Gemini response.
             if (!self.speechBox.isSpeaking) {
-                [self.robAI noteMicrophoneTurnAwaitingResponse];
+                [self.robAI noteMicrophoneTurnAwaitingResponseForTranscript:textInput];
+                [self.speechBox sayItIfNotQueued:@"I hear you."];
             }
         } else {
             NSLog(@"textInput = %@", textInput);
@@ -1089,8 +1611,12 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     
     self.speechBox = [ROBSpeechBox new];
     self.speechBox.delegate = self;
-    
-    [self startListeningAgain];
+
+    // Start capture in wake-word mode. A recognized ROB/Robbie/Robot address
+    // opens the bounded continuation window; unrelated room speech at launch
+    // must not be treated as a failed Gemini turn.
+    self.ignoreText = YES;
+    [self.speechBox startRecognizer];
     
     self.outputLanguage = [[NSUserDefaults standardUserDefaults] valueForKey:@"outputLanguage"];
     [self.speechBox setOutputLanguage:self.outputLanguage];
@@ -1200,6 +1726,12 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
                                               recipientID:request.recipientID];
         [self sendRobotActionMessage:cancellation];
     }
+    self.localAmberGestureCallID = nil;
+    (void)[[ROBAmberGestureExecutor shared]
+        cancelCurrentGestureWithReason:@"Cerebro is shutting down"];
+    (void)[[ROBAmberGestureExecutor shared] requestPriorityHold];
+    [[ROBAmberDebugAuthority shared] revoke];
+    [[ROBAmberGatewayTunnel shared] disconnect];
     [self.robAI disconnect];
     if (self.stageShowCoordinator.isRunning) {
         [self.stageShowCoordinator cancelWithReason:@"Cerebro is shutting down"];
@@ -1220,7 +1752,7 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     }
     [self.serialBox stopBaseMotionAndDropHeartbeat];
     [self.serialBox switchToMasterControllerID:@"Brain"];
-    NSLog(@"Priority software stop applied: %@. Amber arm disposition is unverified.", reason);
+    NSLog(@"Priority software stop applied: %@. Amber hold is handled by the explicit arm stop lane.", reason);
 }
 
 #pragma mark - Stage show coordinator
@@ -1384,6 +1916,7 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 - (void) startListeningAgain
 {
     self.ignoreText = NO;
+    [self.speechBox startRecognizer];
     [self resetSpeechResponseAttentionTimer];
 }
 
@@ -1711,6 +2244,7 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     self.lastConversationUserText = nil;
     self.lastConversationUserDate = nil;
     [self.conversationTableView reloadData];
+    [self saveConversationLog];
     [self.audioInputTaskController resetTranscript];
     
 }
@@ -1905,6 +2439,11 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         self.robotActionControllerLastSeen = nil;
         self.robotActionControllerID = nil;
         self.robotActionControllerCapabilities = @[];
+        if (self.controllerApprovedAmberGestureCallID.length > 0) {
+            [self cancelControllerApprovedAmberGestureCallID:self.controllerApprovedAmberGestureCallID
+                                                       reason:@"The approving operator credential was revoked; stop or hold safely"
+                                                     timedOut:NO];
+        }
     } else if (self.autonomyCoordinator.active) {
         // A manual controller remains usable, but autonomous motion must not
         // continue after its obstacle source is revoked.

@@ -18,6 +18,15 @@
 		C0D5A0012F00000100000001 /* ROBSceneSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D5B0012F00000100000001 /* ROBSceneSnapshot.swift */; };
 		C0D6A0012F00000100000001 /* ROBVisualCalibration.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D6B0012F00000100000001 /* ROBVisualCalibration.swift */; };
 		C0D7A0012F00000100000001 /* ROBAmberB1Kinematics.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D7B0012F00000100000001 /* ROBAmberB1Kinematics.swift */; };
+		C0A8A0012F48000100000001 /* ROBArmControlProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A8B0012F48000100000001 /* ROBArmControlProtocol.swift */; };
+		C0A8A0022F48000100000001 /* ROBArmControllerBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A8B0022F48000100000001 /* ROBArmControllerBridge.swift */; };
+		C0AD01022F49000100000001 /* ROBAmberDiagnosticsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0AD01012F49000100000001 /* ROBAmberDiagnosticsWindowController.swift */; };
+		C0B001022F4C000100000001 /* ROBWakeUpCalibrationWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B001012F4C000100000001 /* ROBWakeUpCalibrationWindowController.swift */; };
+		C0B002022F4C000200000001 /* ROBSceneProducerFreshness.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B002012F4C000200000001 /* ROBSceneProducerFreshness.swift */; };
+		C0AE01032F4A000100000001 /* ROBAmberStackMaintenanceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0AE01012F4A000100000001 /* ROBAmberStackMaintenanceProtocol.swift */; };
+		C0AE01042F4A000100000001 /* ROBAmberStackMaintenanceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0AE01022F4A000100000001 /* ROBAmberStackMaintenanceController.swift */; };
+		C0AF01032F4B000100000001 /* ROBGripperControlProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0AF01012F4B000100000001 /* ROBGripperControlProtocol.swift */; };
+		C0AF01042F4B000100000001 /* ROBGripperControllerBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0AF01022F4B000100000001 /* ROBGripperControllerBridge.swift */; };
 		D4066C5822828DA5002ACAD1 /* AudioInputTaskController.m in Sources */ = {isa = PBXBuildFile; fileRef = D4066C5722828DA5002ACAD1 /* AudioInputTaskController.m */; };
 		D4066C5A22828E5F002ACAD1 /* AudioInputTaskController.command in Resources */ = {isa = PBXBuildFile; fileRef = D4066C5922828E5F002ACAD1 /* AudioInputTaskController.command */; };
 		D4066C5C22863009002ACAD1 /* ROBBaseControllerModel.m in Sources */ = {isa = PBXBuildFile; fileRef = D4066C5B22863009002ACAD1 /* ROBBaseControllerModel.m */; };
@@ -267,6 +276,15 @@
 		D4EA00052F00000100000001 /* ROBMLXStageObservation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBMLXStageObservation.swift; sourceTree = "<group>"; };
 		D4EB00012F00000100000001 /* ROBSaberChoreography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBSaberChoreography.swift; sourceTree = "<group>"; };
 		D4EC00012F00000100000001 /* ROBAmberGatewayClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAmberGatewayClient.swift; sourceTree = "<group>"; };
+		C0AD01012F49000100000001 /* ROBAmberDiagnosticsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAmberDiagnosticsWindowController.swift; sourceTree = "<group>"; };
+		C0B001012F4C000100000001 /* ROBWakeUpCalibrationWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBWakeUpCalibrationWindowController.swift; sourceTree = "<group>"; };
+		C0B002012F4C000200000001 /* ROBSceneProducerFreshness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBSceneProducerFreshness.swift; sourceTree = "<group>"; };
+		C0AE01012F4A000100000001 /* ROBAmberStackMaintenanceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAmberStackMaintenanceProtocol.swift; sourceTree = "<group>"; };
+		C0AE01022F4A000100000001 /* ROBAmberStackMaintenanceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAmberStackMaintenanceController.swift; sourceTree = "<group>"; };
+		C0AF01012F4B000100000001 /* ROBGripperControlProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBGripperControlProtocol.swift; sourceTree = "<group>"; };
+		C0AF01022F4B000100000001 /* ROBGripperControllerBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBGripperControllerBridge.swift; sourceTree = "<group>"; };
+		C0A8B0012F48000100000001 /* ROBArmControlProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBArmControlProtocol.swift; sourceTree = "<group>"; };
+		C0A8B0022F48000100000001 /* ROBArmControllerBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBArmControllerBridge.swift; sourceTree = "<group>"; };
 		D4F136632325E3990084A302 /* RTSPClientConnection.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = RTSPClientConnection.mm; sourceTree = "<group>"; };
 		D4F136642325E3990084A302 /* NALUnit.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = NALUnit.cpp; sourceTree = "<group>"; };
 		D4F136652325E3990084A302 /* RTSPServer.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = RTSPServer.h; sourceTree = "<group>"; };
@@ -430,6 +448,15 @@
 				D4E7000D2F00000100000001 /* StageShows/ROBJuniorMakerFaireComedy.robshow.json */,
 				D4EB00012F00000100000001 /* ROBSaberChoreography.swift */,
 				D4EC00012F00000100000001 /* ROBAmberGatewayClient.swift */,
+				C0AD01012F49000100000001 /* ROBAmberDiagnosticsWindowController.swift */,
+				C0B001012F4C000100000001 /* ROBWakeUpCalibrationWindowController.swift */,
+				C0B002012F4C000200000001 /* ROBSceneProducerFreshness.swift */,
+				C0AE01012F4A000100000001 /* ROBAmberStackMaintenanceProtocol.swift */,
+				C0AE01022F4A000100000001 /* ROBAmberStackMaintenanceController.swift */,
+				C0AF01012F4B000100000001 /* ROBGripperControlProtocol.swift */,
+				C0AF01022F4B000100000001 /* ROBGripperControllerBridge.swift */,
+				C0A8B0012F48000100000001 /* ROBArmControlProtocol.swift */,
+				C0A8B0022F48000100000001 /* ROBArmControllerBridge.swift */,
 				D4E800012F00000100000001 /* ROBLocalImprovisationProtocol.swift */,
 				D4E900012F00000100000001 /* ROBLlamaCppImprovisationProvider.swift */,
 				D4EA00012F00000100000001 /* ROBMLXRuntime.swift */,
@@ -727,6 +754,15 @@
 				D4EA00062F00000100000001 /* ROBMLXStageObservation.swift in Sources */,
 				D4EB00022F00000100000001 /* ROBSaberChoreography.swift in Sources */,
 				D4EC00022F00000100000001 /* ROBAmberGatewayClient.swift in Sources */,
+				C0AD01022F49000100000001 /* ROBAmberDiagnosticsWindowController.swift in Sources */,
+				C0B001022F4C000100000001 /* ROBWakeUpCalibrationWindowController.swift in Sources */,
+				C0B002022F4C000200000001 /* ROBSceneProducerFreshness.swift in Sources */,
+				C0AE01032F4A000100000001 /* ROBAmberStackMaintenanceProtocol.swift in Sources */,
+				C0AE01042F4A000100000001 /* ROBAmberStackMaintenanceController.swift in Sources */,
+				C0AF01032F4B000100000001 /* ROBGripperControlProtocol.swift in Sources */,
+				C0AF01042F4B000100000001 /* ROBGripperControllerBridge.swift in Sources */,
+				C0A8A0012F48000100000001 /* ROBArmControlProtocol.swift in Sources */,
+				C0A8A0022F48000100000001 /* ROBArmControllerBridge.swift in Sources */,
 				D408B1212E15E7E300F6FEB3 /* ROBAI.swift in Sources */,
 				C0D5A0012F00000100000001 /* ROBSceneSnapshot.swift in Sources */,
 				C0D6A0012F00000100000001 /* ROBVisualCalibration.swift in Sources */,

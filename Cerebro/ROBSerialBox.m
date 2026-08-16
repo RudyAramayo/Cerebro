@@ -46,6 +46,7 @@ OUTPUT: ir sensor array in cm : (fl, fr, l, r, bl, br) from front left to back r
 #import "ROBPythonRuntime.h"
 #import "ROBSystemDependencyManager.h"
 #import "ROBTaskLaunchGuard.h"
+#import "Cerebro-Swift.h"
 #include <sys/select.h>
 #include <errno.h>
 
@@ -129,6 +130,7 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 - (void)startSSHIntoAmberMasterAndRunTail_L10;
 - (void)startSSHIntoAmberMasterAndRunCore_L10;
 - (void)startShutdown_L10_core;
+- (void)presentSupervisedAmberGripperControls;
 
 - (NSString *) openSerialPort: (NSString *)serialPortFile baud: (speed_t)baudRate serialFileDescriptor:(int *)serialFileDescriptor contextInt:(int)context;
 - (NSArray<NSString *> *)usbSerialPortPaths;
@@ -202,7 +204,7 @@ typedef enum : NSUInteger {
 // executes after everything in the xib/nib is initiallized
 - (void)initialize_connection {
     // we don't have a serial port open yet
-    self.amberHostIP = @"10.0.0.11";
+    self.amberHostIP = [[NSUserDefaults standardUserDefaults] stringForKey:@"ROBAmberHostIP"] ?: @"10.0.0.26";
     serialFileDescriptor_base = -1;
     serialFileDescriptor_maestro = -1;
     self.maestroConnectionValid = NO;
@@ -1293,8 +1295,8 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
 - (void)applyVisionGrippersActive:(BOOL)active leftClosed:(BOOL)leftClosed rightClosed:(BOOL)rightClosed
 {
     if (!active) {
-        // Force a fresh edge after the operator reacquires the dead-man hold;
-        // releasing safety authority never opens or closes a gripper by itself.
+        // Preserve the legacy controller-view edge semantics. This compatibility
+        // route is render-only and never owns or commands a physical gripper.
         self.visionGripperStateIsKnown = NO;
         return;
     }
@@ -1306,11 +1308,14 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     self.lastVisionLeftGripperClosed = leftClosed;
     self.lastVisionRightGripperClosed = rightClosed;
 
-    if (updateLeft) {
-        leftClosed ? [self closeGripper_L10:nil] : [self openGripper_L10:nil];
-    }
-    if (updateRight) {
-        rightClosed ? [self closeGripper_R11:nil] : [self openGripper_R11:nil];
+    // Legacy snapshots remain available to the renderer for visual
+    // compatibility only. Physical gripper control is exclusively owned by
+    // the typed rob-gripper-control/1 path, which enforces its session,
+    // sequence, lease, and dead-man requirements before reaching the gateway.
+    if (updateLeft || updateRight) {
+        NSLog(@"Legacy Vision gripper compatibility state updated (left=%@, right=%@); no actuator command was sent.",
+              leftClosed ? @"closed" : @"open",
+              rightClosed ? @"closed" : @"open");
     }
 }
 
@@ -1738,16 +1743,26 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     [self zeroPosition:sender port:26002];
 }
 
+- (void)presentSupervisedAmberGripperControls
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        ROBAmberDiagnosticsWindowController *controller = [ROBAmberDiagnosticsWindowController shared];
+        [controller showWindow:nil];
+        [controller.window makeKeyAndOrderFront:nil];
+        NSLog(@"Legacy Amber gripper control was redirected to the supervised diagnostics panel.");
+    });
+}
+
 - (IBAction)calibrateGripper_R11:(id)sender {
-    [self calibrateGripper:sender port:26002];
+    [self presentSupervisedAmberGripperControls];
 }
 
 - (IBAction)openGripper_R11:(id)sender {
-    [self openGripper:sender port:26002 force:[NSString stringWithFormat:@"%i",[self.arm_R11_force intValue]]];
+    [self presentSupervisedAmberGripperControls];
 }
 
 - (IBAction)closeGripper_R11:(id)sender {
-    [self closeGripper:sender port:26002 force:[NSString stringWithFormat:@"%i",[self.arm_R11_force intValue]]];
+    [self presentSupervisedAmberGripperControls];
 }
 
 - (IBAction) watch_position_out_R11:(id)sender {
@@ -2005,15 +2020,15 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
 }
 
 - (IBAction)calibrateGripper_L10:(id)sender {
-    [self calibrateGripper:sender port:26001];
+    [self presentSupervisedAmberGripperControls];
 }
 
 - (IBAction)openGripper_L10:(id)sender {
-    [self openGripper:sender port:26001 force:[NSString stringWithFormat:@"%i",[self.arm_L10_force intValue]]];
+    [self presentSupervisedAmberGripperControls];
 }
 
 - (IBAction)closeGripper_L10:(id)sender {
-    [self closeGripper:sender port:26001 force:[NSString stringWithFormat:@"%i",[self.arm_L10_force intValue]]];
+    [self presentSupervisedAmberGripperControls];
 }
 
 - (IBAction) watch_position_out_L10:(id)sender {
@@ -2190,79 +2205,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         NSLog(@"args = %@", arguments);
         
         [self runPythonArguments:arguments operation:@"zero_position_mode_v2"];
-    });
-}
-
-- (void) calibrateGripper:(id)sender port:(int)port {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-        
-        NSMutableArray *arguments = @[].mutableCopy;
-        
-        NSString *calibrateGripper_v2 = [[NSBundle mainBundle] pathForResource:@"calibrate_gripper_v2" ofType:@"py"];
-        //calibrate_gripper_v2.py --ip 10.0.0.5 --port 26002
-        
-        [arguments addObject:calibrateGripper_v2];
-        
-        [arguments addObject:@"--ip"];
-        [arguments addObject:self.amberHostIP];
-        
-        [arguments addObject:@"--port"];
-        [arguments addObject:[NSString stringWithFormat:@"%i", port]];
-        
-        NSLog(@"args = %@", arguments);
-        
-        [self runPythonArguments:arguments operation:@"calibrateGripper_v2"];
-    });
-
-}
-
-- (void) openGripper:(id)sender port:(int)port force:(NSString *)force {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-        
-        NSMutableArray *arguments = @[].mutableCopy;
-        
-        NSString *open_gripper_v2 = [[NSBundle mainBundle] pathForResource:@"open_gripper_v2" ofType:@"py"];
-        //open_gripper_v2.py --ip 10.0.0.5 --port 26002
-        
-        [arguments addObject:open_gripper_v2];
-        
-        [arguments addObject:@"--force"];
-        [arguments addObject:force];
-        
-        [arguments addObject:@"--ip"];
-        [arguments addObject:self.amberHostIP];
-        
-        [arguments addObject:@"--port"];
-        [arguments addObject:[NSString stringWithFormat:@"%i", port]];
-        
-        NSLog(@"args = %@", arguments);
-        
-        [self runPythonArguments:arguments operation:@"open_gripper_v2"];
-    });
-}
-
-- (void) closeGripper:(id)sender port:(int)port force:(NSString *)force {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-        
-        NSMutableArray *arguments = @[].mutableCopy;
-        
-        NSString *close_gripper_v2 = [[NSBundle mainBundle] pathForResource:@"close_gripper_v2" ofType:@"py"];
-        //close_gripper_v2.py --ip 10.0.0.5 --port 26002
-        
-        [arguments addObject:close_gripper_v2];
-        
-        [arguments addObject:@"--force"];
-        [arguments addObject:force];
-        
-        [arguments addObject:@"--ip"];
-        [arguments addObject:self.amberHostIP];
-        
-        [arguments addObject:@"--port"];
-        [arguments addObject:[NSString stringWithFormat:@"%i", port]];
-        
-        NSLog(@"args = %@", arguments);
-        
-        [self runPythonArguments:arguments operation:@"close_gripper_v2"];
     });
 }
 
@@ -2509,6 +2451,8 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         if (controllerModelData.neckControlActive) {
             [self applyVisionNeckPan:controllerModelData.neckPan tilt:controllerModelData.neckTilt];
         }
+        // Mirror legacy gripper intent into render compatibility state only;
+        // this method deliberately has no actuator authority.
         [self applyVisionGrippersActive:controllerModelData.gripperControlActive
                              leftClosed:controllerModelData.leftGripperClosed
                             rightClosed:controllerModelData.rightGripperClosed];

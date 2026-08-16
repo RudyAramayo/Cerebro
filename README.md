@@ -122,6 +122,21 @@ building a backlog. Encoder drops and receiver recovery requests force a new
 key frame. See [Vision Pro video transport](docs/vision-pro-video.md) for the
 wire contract and the remaining Vision Pro adapter work.
 
+## Supervised Amber arms, grippers, and wake-up
+
+Development mode now includes **Amber Arm Diagnostics…** for authenticated
+telemetry, modes, bounded arm actions, per-session gripper calibration/control,
+plots, and controller-stack recovery. Vision Pro can operate either gripper
+only after its calibration command has been accepted locally in Cerebro; force
+is shown as a conservative vendor intensity, not measured newtons.
+
+**ROB Wake-Up Calibration (Dry Run)…** previews the ordered WALL-E-like startup
+concept without sending actuator commands. It distinguishes measured B1 arm
+feedback from acknowledgement-only grippers and from legacy mechanisms that do
+not yet have a bounded stop and measured-outcome adapter. See
+[ROB wake-up calibration](docs/rob-wake-up-calibration.md) and
+[Amber gateway deployment](docs/amber-gateway-deployment.md).
+
 ## System tools
 
 At launch, Cerebro also checks for `sshpass`, which is required by the existing
@@ -171,19 +186,21 @@ model turns through the existing `ROBSpeechBox` voice.
 Camera and microphone streaming are disabled unless explicitly enabled with
 `GEMINI_ROBOTICS_ENABLED=true` and a credential.
 
-The optional, default-off `robot_action` tool is integrated with
+The `robot_action` tool declaration is enabled by default and integrated with
 `ROBRobotActionProtocol` v1. Cerebro places its versioned JSON action messages
 inside the robot-control envelope. ROBController is the operator approval and
-status console. Approval currently records operator intent only: neither
-ROBController nor Cerebro starts a physical action after approval.
+status console. Approved named Amber gestures may enter Cerebro's bounded local
+executor; other actions keep their controller-owned status lifecycle.
 Only terminal action results return to Gemini, whose completed response is
 spoken through the same `ROBSpeechBox` path.
 
-For supervised action-protocol testing, set all of:
+Google Search and the robot-action declaration are enabled by default. Managed
+launches can still state the defaults explicitly:
 
 ```text
 GEMINI_ROBOTICS_ENABLED=true
 GEMINI_ROBOT_ACTION_TOOL_ENABLED=true
+GEMINI_GOOGLE_SEARCH_ENABLED=true
 ```
 
 Store the API key in the login Keychain with
@@ -192,6 +209,15 @@ Store the API key in the login Keychain with
 `GEMINI_EPHEMERAL_TOKEN` may replace the API key. Enabling the tool does not
 enable motors: ROBController must also advertise that it accepts the requested
 action.
+
+To disable broad, server-side Google Search grounding for a launch, set:
+
+```text
+GEMINI_GOOGLE_SEARCH_ENABLED=false
+```
+
+This is a separate launch-time setting and does not grant robot-motion authority.
+The selected Live model must support Google Search or session setup may fail.
 
 The main-window **Show…** panel provides a connection-tolerant stage-show
 runner. It validates a strict v1 JSON format, dry-runs without side effects,
