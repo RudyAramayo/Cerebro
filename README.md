@@ -197,13 +197,15 @@ executor; other actions keep their controller-owned status lifecycle.
 Only terminal action results return to Gemini, whose completed response is
 spoken through the same `ROBSpeechBox` path.
 
-Google Search and the robot-action declaration are enabled by default. Managed
+Google Search, a read-only publisher-news function, and the robot-action
+declaration are enabled by default. Managed
 launches can still state the defaults explicitly:
 
 ```text
 GEMINI_ROBOTICS_ENABLED=true
 GEMINI_ROBOT_ACTION_TOOL_ENABLED=true
 GEMINI_GOOGLE_SEARCH_ENABLED=true
+GEMINI_NEWS_SEARCH_ENABLED=true
 ```
 
 Store the API key in the login Keychain with
@@ -221,6 +223,15 @@ GEMINI_GOOGLE_SEARCH_ENABLED=false
 
 This is a separate launch-time setting and does not grant robot-motion authority.
 The selected Live model must support Google Search or session setup may fail.
+
+For current headlines, `search_news` reads only fixed HTTPS RSS feeds for RT,
+BBC, NPR, NBC News, and CBS News. It uses GET without credentials or cookies,
+rejects redirects, caps responses at 2 MiB, and never accepts a model-provided
+URL. The function bypasses the ROBController/motion permission path entirely.
+For example: `ROB, use the news tool to give me the top three RT headlines.`
+The Gemini Live session and ordinary outbound internet connection must still be
+ready because on-device dialogue fallback cannot issue function calls. See
+[Gemini Robotics Live integration](docs/gemini-robotics-live.md#read-only-publisher-news-search).
 
 The main-window **Show…** panel provides a connection-tolerant stage-show
 runner. It validates a strict v1 JSON format, dry-runs without side effects,

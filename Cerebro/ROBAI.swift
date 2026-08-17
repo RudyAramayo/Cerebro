@@ -115,6 +115,7 @@ private struct GeminiRoboticsRuntimePolicy {
     private var audioEventStream: GeminiOrderedAudioEventStream?
     private var audioEncoder: GeminiPCM16Encoder?
     private var videoEncoder: GeminiJPEGEncoder?
+    private let newsSearchService = ROBNewsSearchService()
     private var geminiFailureCircuitBreaker = GeminiFailureCircuitBreaker()
     private var geminiConversationCircuitIsOpen = false
     private var geminiCircuitResetGeneration: UInt64 = 0
@@ -730,17 +731,37 @@ private struct GeminiRoboticsRuntimePolicy {
             }
 
         case .toolCalls(let calls):
-            DispatchQueue.main.async { [weak self] in
-                guard let self, self.isGeminiConnectionEnabled else { return }
-                for attributedCall in calls {
-                    let call = attributedCall.call
-                    let bridgedCall = ROBAIRobotToolCall(
-                        callID: call.id,
-                        name: call.name,
-                        arguments: call.arguments,
-                        originContextID: attributedCall.contextID
-                    )
-                    self.delegate?.robAI?(self, didReceiveToolCall: bridgedCall)
+            guard isGeminiConnectionEnabled else { return }
+            for attributedCall in calls {
+                let call = attributedCall.call
+                switch GeminiRoboticsToolPolicy.dispatchRoute(for: call) {
+                case .localNews:
+                    if configuration?.enablesNewsSearch == true {
+                        handleLocalNewsToolCall(call)
+                    } else {
+                        let session = liveSession
+                        Task {
+                            await session?.sendToolResponse(
+                                callID: call.id,
+                                name: call.name,
+                                result: [
+                                    "status": "rejected",
+                                    "error": "Read-only news search is disabled for this Cerebro launch."
+                                ]
+                            )
+                        }
+                    }
+                case .delegate:
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, self.isGeminiConnectionEnabled else { return }
+                        let bridgedCall = ROBAIRobotToolCall(
+                            callID: call.id,
+                            name: call.name,
+                            arguments: call.arguments,
+                            originContextID: attributedCall.contextID
+                        )
+                        self.delegate?.robAI?(self, didReceiveToolCall: bridgedCall)
+                    }
                 }
             }
 
@@ -749,6 +770,19 @@ private struct GeminiRoboticsRuntimePolicy {
                 guard let self else { return }
                 self.delegate?.robAI?(self, didCancelToolCallIDs: callIDs)
             }
+        }
+    }
+
+    private func handleLocalNewsToolCall(_ call: GeminiRoboticsToolCall) {
+        let service = newsSearchService
+        let session = liveSession
+        Task {
+            let result = await service.execute(arguments: call.arguments)
+            await session?.sendToolResponse(
+                callID: call.id,
+                name: call.name,
+                result: result
+            )
         }
     }
 
@@ -2062,9 +2096,17 @@ private actor GeminiRoboticsLiveSession {
             if activeToolCallID == callID {
                 switch toolCallLedger[callID] {
                 case .pending(let name):
-                    // Keep the blocking slot occupied until Cerebro receives a
-                    // cancellation result from its local action coordinator.
-                    toolCallLedger[callID] = .cancelling(name: name)
+                    if name == "robot_action" {
+                        // Physical cancellation is not complete until the
+                        // local action coordinator confirms a safe stop.
+                        toolCallLedger[callID] = .cancelling(name: name)
+                    } else {
+                        // Read-only local tools own no physical resources and
+                        // can release the blocking slot immediately. A late
+                        // response is ignored by sendToolResponse.
+                        toolCallLedger[callID] = .cancelled
+                        activeToolCallID = nil
+                    }
                 case .cancelling:
                     // A repeated cancellation is an idempotent retransmission.
                     break

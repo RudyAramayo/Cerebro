@@ -52,6 +52,20 @@ struct GeminiRoboticsProtocolFixtureTests {
         try expect(GeminiRoboticsToolPolicy.requiresPriorityDispatch(stop), "stop_motion must bypass ordinary tool work")
         try expect(!GeminiRoboticsToolPolicy.requiresPriorityDispatch(gesture), "A gesture was incorrectly prioritized")
         try expect(!GeminiRoboticsToolPolicy.requiresPriorityDispatch(unrelated), "An unrelated tool was incorrectly prioritized")
+        let news = GeminiRoboticsToolCall(
+            id: "news-1",
+            name: ROBNewsSearchService.toolName,
+            arguments: ["source": "rt", "limit": 3]
+        )
+        try expect(
+            GeminiRoboticsToolPolicy.dispatchRoute(for: news) == .localNews,
+            "search_news must bypass the robot-action delegate"
+        )
+        try expect(
+            GeminiRoboticsToolPolicy.dispatchRoute(for: gesture) == .delegate,
+            "robot_action must stay on the controller delegate path"
+        )
+        try expect(!GeminiRoboticsToolPolicy.requiresPriorityDispatch(news), "News lookup was incorrectly put on the safety-stop lane")
         try expect(
             GeminiRoboticsToolPolicy.isStageContextID("stage:fixture-turn"),
             "A stage text-turn context was not recognized"
@@ -68,8 +82,14 @@ struct GeminiRoboticsProtocolFixtureTests {
 
     private static func testPromptPreservesWakePhrase() throws {
         try expect(
-            GeminiRoboticsConfiguration.defaultSystemInstruction.contains("Google Search is already authorized by Cerebro"),
+            GeminiRoboticsConfiguration.defaultSystemInstruction.contains("Google Search is also already authorized by Cerebro"),
             "The system instruction must not send informational requests to ROBController"
+        )
+        try expect(
+            GeminiRoboticsConfiguration.defaultSystemInstruction.contains("always call search_news first") &&
+                GeminiRoboticsConfiguration.defaultSystemInstruction.contains("untrusted publisher data") &&
+                GeminiRoboticsConfiguration.defaultSystemInstruction.contains("never requires ROBController approval"),
+            "The default instruction must route current publisher news through the trusted local boundary"
         )
         try expect(
             GeminiRoboticsConfiguration.defaultSystemInstruction.contains("never complete a recognized user turn silently"),
@@ -100,7 +120,8 @@ struct GeminiRoboticsProtocolFixtureTests {
                 "GEMINI_ROBOTICS_STREAM_AUDIO": "flase",
                 "GEMINI_ROBOTICS_STREAM_VIDEO": "certainly",
                 "GEMINI_ROBOT_ACTION_TOOL_ENABLED": "enabled",
-                "GEMINI_GOOGLE_SEARCH_ENABLED": "dangerously"
+                "GEMINI_GOOGLE_SEARCH_ENABLED": "dangerously",
+                "GEMINI_NEWS_SEARCH_ENABLED": "probably"
             ]),
             "Malformed optional flags should not invalidate an otherwise usable configuration"
         )
@@ -108,6 +129,7 @@ struct GeminiRoboticsProtocolFixtureTests {
         try expect(!malformedMediaConfiguration.streamsVideo, "Malformed video flag must fail closed")
         try expect(!malformedMediaConfiguration.exposesRobotActionTool, "Malformed action-tool flag must fail closed")
         try expect(!malformedMediaConfiguration.enablesGoogleSearch, "Malformed Search flag must fail closed")
+        try expect(!malformedMediaConfiguration.enablesNewsSearch, "Malformed news-search flag must fail closed")
 
         let defaultToolConfiguration = try require(
             GeminiRoboticsConfiguration.fromEnvironment([
@@ -118,6 +140,7 @@ struct GeminiRoboticsProtocolFixtureTests {
         )
         try expect(defaultToolConfiguration.exposesRobotActionTool, "Robot action tool should be exposed by default")
         try expect(defaultToolConfiguration.enablesGoogleSearch, "Google Search should be enabled by default")
+        try expect(defaultToolConfiguration.enablesNewsSearch, "Read-only news search should be enabled by default")
         let defaultSetup = GeminiRoboticsProtocol.setupMessage(
             configuration: defaultToolConfiguration,
             resumptionHandle: nil
@@ -143,18 +166,24 @@ struct GeminiRoboticsProtocolFixtureTests {
             defaultFunctionNames.contains("robot_action"),
             "Default setup did not declare robot_action"
         )
+        try expect(
+            defaultFunctionNames.contains(ROBNewsSearchService.toolName),
+            "Default setup did not declare search_news"
+        )
 
         let explicitlyDisabledTools = try require(
             GeminiRoboticsConfiguration.fromEnvironment([
                 "GEMINI_ROBOTICS_ENABLED": "true",
                 "GEMINI_API_KEY": "fixture-key",
                 "GEMINI_ROBOT_ACTION_TOOL_ENABLED": "false",
-                "GEMINI_GOOGLE_SEARCH_ENABLED": "false"
+                "GEMINI_GOOGLE_SEARCH_ENABLED": "false",
+                "GEMINI_NEWS_SEARCH_ENABLED": "false"
             ]),
             "Explicitly disabled tool fixture configuration should load"
         )
         try expect(!explicitlyDisabledTools.exposesRobotActionTool, "Explicit robot-action disable was ignored")
         try expect(!explicitlyDisabledTools.enablesGoogleSearch, "Explicit Google Search disable was ignored")
+        try expect(!explicitlyDisabledTools.enablesNewsSearch, "Explicit news-search disable was ignored")
         let disabledSetup = GeminiRoboticsProtocol.setupMessage(
             configuration: explicitlyDisabledTools,
             resumptionHandle: nil
@@ -167,6 +196,31 @@ struct GeminiRoboticsProtocolFixtureTests {
             disabledSetupBody["tools"] == nil,
             "Explicitly disabling both tools should omit the setup tools array"
         )
+
+        let newsOnlyConfiguration = try require(
+            GeminiRoboticsConfiguration.fromEnvironment([
+                "GEMINI_ROBOTICS_ENABLED": "true",
+                "GEMINI_API_KEY": "fixture-key",
+                "GEMINI_ROBOT_ACTION_TOOL_ENABLED": "false",
+                "GEMINI_GOOGLE_SEARCH_ENABLED": "false"
+            ]),
+            "News-only fixture configuration should load"
+        )
+        let newsOnlySetup = try require(
+            GeminiRoboticsProtocol.setupMessage(
+                configuration: newsOnlyConfiguration,
+                resumptionHandle: nil
+            )["setup"] as? [String: Any],
+            "News-only setup envelope is missing"
+        )
+        let newsOnlyTools = try require(
+            newsOnlySetup["tools"] as? [[String: Any]],
+            "News search must remain available independently of robot_action and Google Search"
+        )
+        let newsOnlyNames = newsOnlyTools.flatMap {
+            ($0["functionDeclarations"] as? [[String: Any]]) ?? []
+        }.compactMap { $0["name"] as? String }
+        try expect(newsOnlyNames == [ROBNewsSearchService.toolName], "News-only setup exposed the wrong function tools")
     }
 
     private static func testRuntimeSettingsDefaultsAndOverrides() throws {
@@ -268,10 +322,13 @@ struct GeminiRoboticsProtocolFixtureTests {
             tools.dropFirst().first?["functionDeclarations"] as? [[String: Any]],
             "Missing function declarations"
         )
-        try expect(declarations.first?["name"] as? String == "robot_action", "Wrong tool name")
-        try expect(declarations.first?["behavior"] as? String == "BLOCKING", "Physical tools must be blocking")
+        let robotDeclaration = try require(
+            declarations.first { $0["name"] as? String == "robot_action" },
+            "Missing robot_action declaration"
+        )
+        try expect(robotDeclaration["behavior"] as? String == "BLOCKING", "Physical tools must be blocking")
         let parameters = try require(
-            declarations.first?["parameters"] as? [String: Any],
+            robotDeclaration["parameters"] as? [String: Any],
             "Missing robot_action parameters"
         )
         let properties = try require(
@@ -289,6 +346,29 @@ struct GeminiRoboticsProtocolFixtureTests {
         try expect((distance["minimum"] as? NSNumber)?.doubleValue == -1.0, "Distance minimum changed")
         try expect((distance["maximum"] as? NSNumber)?.doubleValue == 1.0, "Distance maximum changed")
         try expect((speed["maximum"] as? NSNumber)?.doubleValue == 0.35, "Speed cap changed")
+
+        let newsDeclaration = try require(
+            declarations.first { $0["name"] as? String == ROBNewsSearchService.toolName },
+            "Missing search_news declaration"
+        )
+        try expect(newsDeclaration["behavior"] as? String == "BLOCKING", "News lookup must wait for its feed result")
+        let newsParameters = try require(
+            newsDeclaration["parameters"] as? [String: Any],
+            "Missing search_news parameters"
+        )
+        try expect(newsParameters["required"] as? [String] == ["source"], "search_news must require a source")
+        let newsProperties = try require(
+            newsParameters["properties"] as? [String: Any],
+            "Missing search_news properties"
+        )
+        let source = try require(newsProperties["source"] as? [String: Any], "Missing news source schema")
+        try expect(
+            Set(source["enum"] as? [String] ?? []) == Set(ROBNewsSource.identifiers + ["all"]),
+            "News source allowlist changed"
+        )
+        let newsLimit = try require(newsProperties["limit"] as? [String: Any], "Missing news limit schema")
+        try expect((newsLimit["minimum"] as? NSNumber)?.intValue == 1, "News limit minimum changed")
+        try expect((newsLimit["maximum"] as? NSNumber)?.intValue == 5, "News limit maximum changed")
 
         let audioConfiguration = try require(
             GeminiRoboticsConfiguration.fromEnvironment([

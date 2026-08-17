@@ -91,6 +91,7 @@
 		D4CFB7D22287C81300F2403A /* JoinWifiTaskController.m in Sources */ = {isa = PBXBuildFile; fileRef = D4CFB7D02287C81200F2403A /* JoinWifiTaskController.m */; };
 		D4CFB7D42287F01100F2403A /* CoreML.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D4CFB7D32287F01100F2403A /* CoreML.framework */; };
 		D4E000022F00000100000001 /* GeminiRoboticsProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E000012F00000100000001 /* GeminiRoboticsProtocol.swift */; };
+		C0B004022F4C000400000001 /* ROBNewsSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B004012F4C000400000001 /* ROBNewsSearchService.swift */; };
 		D4E100022F00000100000001 /* ROBRobotActionProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E100012F00000100000001 /* ROBRobotActionProtocol.swift */; };
 		D4E200022F00000100000001 /* ROBAutonomyCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E200012F00000100000001 /* ROBAutonomyCoordinator.swift */; };
 		D4E300022F00000100000001 /* ROBGeminiDiagnosticsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E300012F00000100000001 /* ROBGeminiDiagnosticsWindowController.swift */; };
@@ -255,6 +256,7 @@
 		D4CFB7D12287C81200F2403A /* JoinWifiTaskController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = JoinWifiTaskController.h; sourceTree = "<group>"; };
 		D4CFB7D32287F01100F2403A /* CoreML.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreML.framework; path = System/Library/Frameworks/CoreML.framework; sourceTree = SDKROOT; };
 		D4E000012F00000100000001 /* GeminiRoboticsProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiRoboticsProtocol.swift; sourceTree = "<group>"; };
+		C0B004012F4C000400000001 /* ROBNewsSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBNewsSearchService.swift; sourceTree = "<group>"; };
 		D4E100012F00000100000001 /* ROBRobotActionProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRobotActionProtocol.swift; sourceTree = "<group>"; };
 		D4E200012F00000100000001 /* ROBAutonomyCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAutonomyCoordinator.swift; sourceTree = "<group>"; };
 		D4E300012F00000100000001 /* ROBGeminiDiagnosticsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBGeminiDiagnosticsWindowController.swift; sourceTree = "<group>"; };
@@ -432,6 +434,7 @@
 				D49D755627FFD1AE00142E26 /* AutoNetServerConnection.swift */,
 				D4A38F741FFC8BD300092A46 /* ROBSCNViewController.h */,
 				D4E000012F00000100000001 /* GeminiRoboticsProtocol.swift */,
+				C0B004012F4C000400000001 /* ROBNewsSearchService.swift */,
 				D4E100012F00000100000001 /* ROBRobotActionProtocol.swift */,
 				D4E200012F00000100000001 /* ROBAutonomyCoordinator.swift */,
 				D4E300012F00000100000001 /* ROBGeminiDiagnosticsWindowController.swift */,
@@ -742,6 +745,7 @@
 				D4A38F411FFB2AED00092A46 /* AppDelegate.m in Sources */,
 				D49D755B27FFD1BF00142E26 /* AutoNetDataTransferProtocol.swift in Sources */,
 				D4E000022F00000100000001 /* GeminiRoboticsProtocol.swift in Sources */,
+				C0B004022F4C000400000001 /* ROBNewsSearchService.swift in Sources */,
 				D4E100022F00000100000001 /* ROBRobotActionProtocol.swift in Sources */,
 				D4E200022F00000100000001 /* ROBAutonomyCoordinator.swift in Sources */,
 				D4E300022F00000100000001 /* ROBGeminiDiagnosticsWindowController.swift in Sources */,

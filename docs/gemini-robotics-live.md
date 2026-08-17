@@ -123,9 +123,10 @@ with Gemini disabled and logs the missing configuration.
 | `GEMINI_ROBOTICS_STREAM_VIDEO` | `true` | First-run default for sampled JPEG camera input. The in-app switch becomes authoritative after the operator changes it. |
 | `GEMINI_ROBOTICS_SYSTEM_INSTRUCTION` | Built-in ROB instruction | Overrides wake-name, response-style, and physical-action guidance. |
 | `GEMINI_GOOGLE_SEARCH_ENABLED` | `true` | Grants the Live model server-side Google Search grounding for current web information. Set explicitly to `false` to disable it. Model support is required; an unsupported model may reject session setup. |
+| `GEMINI_NEWS_SEARCH_ENABLED` | `true` | Declares Cerebro's blocking, read-only `search_news` function for fixed public publisher feeds. It has no robot/controller authority and accepts no URL. |
 | `GEMINI_ROBOT_ACTION_TOOL_ENABLED` | `true` | Declares the blocking `robot_action` tool and enables the Cerebro-to-ROBController action bridge. Set explicitly to `false` to hide it. Tool exposure does not grant motor authority. |
 
-Unrecognized values for the microphone, camera, Search, or robot-action flags fail
+Unrecognized values for the microphone, camera, Search, news-search, or robot-action flags fail
 closed. Connection states are logged as `off`, `connecting`, `ready`,
 `reconnecting`, `failed`, or `disconnected`. The session keeps the latest resumable handle,
 enables sliding-window context compression, reconnects after `goAway`, and uses
@@ -152,7 +153,7 @@ redacted control and diagnostics panel. It provides three independent switches:
 
 The three choices are saved in `UserDefaults`. On the first launch with no saved
 choice, the explicit launch configuration supplies the defaults. Credentials,
-model, response modality, system instruction, Google Search, and physical-action tool exposure
+model, response modality, system instruction, Google Search, news search, and physical-action tool exposure
 remain launch-time configuration and are never written to `UserDefaults`.
 
 ### Google Search grounding
@@ -193,6 +194,49 @@ The off switches guarantee that Cerebro stops admitting and sending the
 corresponding inputs after the runtime transition. Provider-side usage and
 billing can be delayed, so use the Gemini provider console for authoritative
 token accounting.
+
+### Read-only publisher news search
+
+`search_news` is enabled by default and is separate from broad server-side
+Google Search. Ask, for example:
+
+```text
+ROB, use the news tool to give me the top three RT headlines right now.
+```
+
+The default instruction tells ROB to call this function before claiming that
+source-specific news is unavailable. Its source IDs are `rt`, `bbc`, `npr`,
+`nbc`, `cbs`, and `all`. `rt` reads RT's general-news feed. `all` produces a
+cross-publisher roundup. An optional topic filters the recent items already in
+the feeds; it is not a historical or site-wide search. Publisher feed order is
+preserved for highlights, and every returned item contains only a bounded
+title, publication time when supplied, and validated publisher link. ROB must
+attribute the report to the publisher.
+
+This path is automatically authorized because it is informational and
+read-only. It never enters `ROBMainViewController`'s `robot_action` delegate,
+ROBController, Amber authority, a shell, a browser, or a motion executor. The
+network boundary is fixed in source code: HTTPS GET to five exact feed URLs,
+an ephemeral no-cookie/no-cache session, no credentials, no redirects, a 10
+second request timeout, and a 2 MiB streaming response cap. User or model text
+cannot supply or modify a URL. Article links are validated against the selected
+publisher's hosts and returned for attribution; Cerebro does not fetch them.
+Feed descriptions may be used for local topic matching but are stripped and
+never returned to Gemini. All publisher content is treated as untrusted data,
+not as tool instructions.
+
+To hide the function for a launch:
+
+```text
+GEMINI_NEWS_SEARCH_ENABLED=false
+```
+
+The **Gemini…** diagnostics panel reports whether it was declared. The function
+still needs a ready Gemini Live session to be invoked; Cerebro's Apple/MLX
+dialogue fallback has no function-calling path. Normal outbound HTTPS must also
+work. Neither condition is a ROBController permission. Configuration-bound
+ephemeral tokens may need to be reissued with the new declaration before a
+deployment can use it.
 
 ## ROBController action bridge
 

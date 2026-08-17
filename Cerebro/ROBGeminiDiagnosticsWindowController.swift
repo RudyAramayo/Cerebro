@@ -26,6 +26,7 @@ import Foundation
         case inputMode
         case responseModality
         case googleSearch
+        case newsSearch
         case robotActionTool
         case videoFramesEncoded
         case videoFramesSent
@@ -48,6 +49,7 @@ import Foundation
             case .inputMode: return "Active input path"
             case .responseModality: return "Response modality"
             case .googleSearch: return "Google Search enabled"
+            case .newsSearch: return "Read-only news search enabled"
             case .robotActionTool: return "Robot action tool exposed"
             case .videoFramesEncoded: return "Video frames encoded"
             case .videoFramesSent: return "Video frames sent"
@@ -383,6 +385,7 @@ import Foundation
         valueLabels[.inputMode]?.stringValue = snapshot.inputMode.displayName
         valueLabels[.responseModality]?.stringValue = snapshot.responseModality ?? "-"
         valueLabels[.googleSearch]?.stringValue = booleanString(snapshot.enablesGoogleSearch)
+        valueLabels[.newsSearch]?.stringValue = booleanString(snapshot.enablesNewsSearch)
         valueLabels[.robotActionTool]?.stringValue = booleanString(snapshot.exposesRobotActionTool)
         valueLabels[.videoFramesEncoded]?.stringValue = String(snapshot.videoFramesEncoded)
         valueLabels[.videoFramesSent]?.stringValue = String(snapshot.videoFramesSent)
