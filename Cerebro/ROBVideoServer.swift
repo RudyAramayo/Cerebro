@@ -50,6 +50,22 @@ enum ROBVideoTransportError: LocalizedError {
     }
 }
 
+struct ROBVideoSubscriptionStatusSnapshot: Sendable {
+    let stableID: String
+    let controllerID: String
+    let sessionID: String
+    let profile: String
+}
+
+struct ROBVideoServerStatusSnapshot: Sendable {
+    let listenerState: String
+    let detail: String?
+    let isStarted: Bool
+    let connectionCount: Int
+    let cameraAvailability: String
+    let subscriptions: [ROBVideoSubscriptionStatusSnapshot]
+}
+
 enum ROBVideoMessageType: UInt16 {
     case invalid = 0
     case authenticationChallenge = 1
@@ -499,6 +515,17 @@ final class ROBVideoServer {
     private var lastReportedCameraDemand = false
     private var credentialRevocationObserver: NSObjectProtocol?
     private var controlSessionObserver: NSObjectProtocol?
+    private let statusLock = NSLock()
+    private var cachedStatus = ROBVideoServerStatusSnapshot(
+        listenerState: "stopped",
+        detail: nil,
+        isStarted: false,
+        connectionCount: 0,
+        cameraAvailability: "unknown",
+        subscriptions: []
+    )
+    private var listenerStatus = "stopped"
+    private var listenerStatusDetail: String?
 
     private let offeredSampleLock = NSLock()
     private var latestOfferedSample: CMSampleBuffer?
@@ -574,6 +601,9 @@ final class ROBVideoServer {
         guard let listener else { throw ROBVideoTransportError.listenerUnavailable }
         guard !started else { return }
         started = true
+        listenerStatus = "starting"
+        listenerStatusDetail = nil
+        queue.async { [weak self] in self?.publishStatus() }
         listener.stateUpdateHandler = { [weak self] state in
             self?.listenerStateDidChange(state)
         }
@@ -607,6 +637,7 @@ final class ROBVideoServer {
         queue.async { [weak self] in
             guard let self else { return }
             self.cameraAvailability = availability
+            self.publishStatus()
             guard availability == .unavailable else { return }
             for connection in Array(self.connectionsByID.values) {
                 connection.cameraDidBecomeUnavailable()
@@ -642,6 +673,7 @@ final class ROBVideoServer {
             return false
         }
         reservedControllerIDs.insert(controllerID)
+        publishStatus()
         return true
     }
 
@@ -663,6 +695,7 @@ final class ROBVideoServer {
         guard subscriptionOwners[id] == controllerID else { return }
         readySubscriptionIDs.insert(id)
         updateCameraDemand()
+        publishStatus()
     }
 
     fileprivate func releaseSubscription(id: UUID, controllerID: UUID) {
@@ -670,6 +703,7 @@ final class ROBVideoServer {
         subscriptionOwners.removeValue(forKey: id)
         readySubscriptionIDs.remove(id)
         updateCameraDemand()
+        publishStatus()
     }
 
     fileprivate func connectionDidStop(_ connection: ROBVideoServerConnection) {
@@ -682,6 +716,7 @@ final class ROBVideoServer {
            let controllerID = connection.referencedControllerID {
             releaseSubscription(id: stream.id, controllerID: controllerID)
         }
+        publishStatus()
     }
 
     fileprivate var cameraIsUnavailable: Bool {
@@ -705,20 +740,31 @@ final class ROBVideoServer {
     private func listenerStateDidChange(_ state: NWListener.State) {
         switch state {
         case .ready:
+            listenerStatus = "ready"
+            listenerStatusDetail = "QUIC/TLS media listener"
             print(
                 "ROBVideo server ready on \(ROBVideoTransport.serviceType) "
                     + "using QUIC/TLS and \(ROBVideoTransport.applicationProtocol)"
             )
         case .waiting(let error):
+            listenerStatus = "waiting"
+            listenerStatusDetail = error.localizedDescription
             print("ROBVideo listener waiting: \(error.localizedDescription)")
         case .failed(let error):
+            listenerStatus = "failed"
+            listenerStatusDetail = error.localizedDescription
             print("ROBVideo listener failed: \(error.localizedDescription)")
             stopOnQueue()
         case .cancelled:
             started = false
+            if listenerStatus != "failed" {
+                listenerStatus = "stopped"
+                listenerStatusDetail = nil
+            }
         default:
             break
         }
+        publishStatus()
     }
 
     private func accept(_ nwConnection: NWConnection) {
@@ -732,6 +778,7 @@ final class ROBVideoServer {
             server: self
         )
         connectionsByID[connection.id] = connection
+        publishStatus()
         connection.start()
     }
 
@@ -782,6 +829,10 @@ final class ROBVideoServer {
 
     private func stopOnQueue() {
         started = false
+        if listenerStatus != "failed" {
+            listenerStatus = "stopped"
+            listenerStatusDetail = nil
+        }
         if let credentialRevocationObserver {
             NotificationCenter.default.removeObserver(credentialRevocationObserver)
             self.credentialRevocationObserver = nil
@@ -803,6 +854,47 @@ final class ROBVideoServer {
         subscriptionOwners.removeAll()
         readySubscriptionIDs.removeAll()
         updateCameraDemand()
+        publishStatus()
+    }
+
+    /// Returns cached transport state only; it never starts a listener,
+    /// requests a camera, authenticates a peer, or probes the network.
+    func statusSnapshot() -> ROBVideoServerStatusSnapshot {
+        statusLock.lock()
+        defer { statusLock.unlock() }
+        return cachedStatus
+    }
+
+    private func publishStatus() {
+        dispatchPrecondition(condition: .onQueue(queue))
+        let cameraDescription: String
+        switch cameraAvailability {
+        case .unknown: cameraDescription = "unknown"
+        case .available: cameraDescription = "available"
+        case .unavailable: cameraDescription = "unavailable"
+        }
+        let subscriptions = connectionsByID.values.compactMap { connection -> ROBVideoSubscriptionStatusSnapshot? in
+            guard let controllerID = connection.authenticatedControllerID,
+                  let stream = connection.activeStream,
+                  readySubscriptionIDs.contains(stream.id) else { return nil }
+            return ROBVideoSubscriptionStatusSnapshot(
+                stableID: stream.id.uuidString.lowercased(),
+                controllerID: controllerID.uuidString.lowercased(),
+                sessionID: stream.sessionID.uuidString.lowercased(),
+                profile: "\(stream.width)×\(stream.height) @ \(stream.framesPerSecond) FPS"
+            )
+        }.sorted { $0.stableID < $1.stableID }
+        let snapshot = ROBVideoServerStatusSnapshot(
+            listenerState: listenerStatus,
+            detail: listenerStatusDetail,
+            isStarted: started,
+            connectionCount: connectionsByID.count,
+            cameraAvailability: cameraDescription,
+            subscriptions: subscriptions
+        )
+        statusLock.lock()
+        cachedStatus = snapshot
+        statusLock.unlock()
     }
 }
 

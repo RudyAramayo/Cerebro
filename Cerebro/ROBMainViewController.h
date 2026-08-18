@@ -59,8 +59,12 @@
 - (IBAction)showSerialDebug:(id)sender;
 - (IBAction)showMainNavigation:(id)sender;
 - (IBAction)showGeminiDiagnostics:(id)sender;
+- (IBAction)showMainCameraDiagnostics:(id)sender;
+- (IBAction)showCameraDiagnostics:(id)sender;
 - (IBAction)showInsta360Diagnostics:(id)sender;
+- (IBAction)showSystemStatus:(id)sender;
 - (IBAction)showStageShow:(id)sender;
+- (IBAction)showBaseSerialConsole:(id)sender;
 
 - (IBAction)showControlPairingCode:(id)sender;
 
@@ -70,10 +74,6 @@
 - (void) inputText:(NSString *)textInput;
 - (void) didRespond: (NSString *) responseText;
 //Tracking
-//- (void) didSeeNewPerson:(NSString *)userID;
-//- (void) lostSightOfPerson:(NSString*)userID;
-//- (void) trackingPerson:(NSString *)userID position:(NSString *)position;
-//- (void) leashHandPosition:(SCNVector3)position;
 - (void) didSeeNewPeople:(NSArray<VNFaceObservation*>*)observations;
 - (void) didCaptureCameraSampleBuffer:(CMSampleBufferRef)sampleBuffer;
 - (void)didCaptureAlignedDepthData:(NSData *)depthData

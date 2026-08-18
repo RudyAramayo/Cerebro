@@ -122,6 +122,38 @@ building a backlog. Encoder drops and receiver recovery requests force a new
 key frame. See [Vision Pro video transport](docs/vision-pro-video.md) for the
 wire contract and the remaining Vision Pro adapter work.
 
+## Text-only Apple Messages replies
+
+Cerebro can opt in to new one-to-one Messages received by
+`rob@orbitusrobotics.com`. Open **Settings… → Messages**, enter at least one
+exact approved sender handle, and enable the bridge. Each chat gets an isolated
+Gemini text session: responses return only to the originating Messages chat and
+never enter ROB's speaker, room transcript, camera/audio context, web/news
+tools, or robot-action path. Groups, attachments, reactions, edits, outgoing
+messages, unapproved senders, and pre-enable history are ignored.
+
+macOS does not expose incoming message bodies through the Messages scripting
+API. The bridge therefore needs **Full Disk Access** to read the local Messages
+database in read-only/query-only mode, and **Automation** permission to send a
+reply through Messages. Grant Full Disk Access and restart Cerebro; macOS asks
+for Automation on the first outbound reply. The bridge is disabled by default
+and remains fail-closed when its sender allowlist is empty. Its cached state and
+safe counts appear in the **Services** grid. See
+[Messages AI bridge](docs/messages-ai-bridge.md) for setup, privacy boundaries,
+failure states, and validation.
+
+## Neck command safety
+
+All manual, tracking, and Vision neck targets now pass through one command-space
+gateway with hard bounds, a lower-tilt-dependent pan envelope, and configurable
+upper-camera counter-rotation. Full pan is available for lower-neck targets
+5300…6822 inclusive; every target from 6823 forward—including 7277—limits pan
+to exactly −15.0°…+2.1°. The Head panel also has a persistent **Keep
+upright** toggle for coupled lower/upper camera commands. The torso readouts
+show commands sent, not measured shaft positions; calibration and physical
+supervision are still required. See
+[Neck command safety](docs/neck-command-safety.md).
+
 ## Supervised Amber arms, grippers, and wake-up
 
 Development mode now includes **Amber Arm Diagnostics…** for authenticated
@@ -224,11 +256,15 @@ GEMINI_GOOGLE_SEARCH_ENABLED=false
 This is a separate launch-time setting and does not grant robot-motion authority.
 The selected Live model must support Google Search or session setup may fail.
 
-For current headlines, `search_news` reads only fixed HTTPS RSS feeds for RT,
-BBC, NPR, NBC News, and CBS News. It uses GET without credentials or cookies,
-rejects redirects, caps responses at 2 MiB, and never accepts a model-provided
-URL. The function bypasses the ROBController/motion permission path entirely.
-For example: `ROB, use the news tool to give me the top three RT headlines.`
+For current headlines, `search_news` reads only fixed HTTPS publisher sources
+for RT, BBC, NPR, NBC News, CBS News, and CNN. CNN uses its official news
+sitemap and is described as recent, not editorially ranked. It uses GET without
+credentials or cookies, rejects redirects, bounds every response, and never
+accepts a model-provided URL. The function bypasses the ROBController/motion
+permission path entirely. For example: `ROB, read me the latest RT headlines.`
+or `ROB, play three recent CNN headlines.` In this context, *play* means a
+finite briefing spoken through ROB's normal voice; it does not start a
+continuous television broadcast.
 The Gemini Live session and ordinary outbound internet connection must still be
 ready because on-device dialogue fallback cannot issue function calls. See
 [Gemini Robotics Live integration](docs/gemini-robotics-live.md#read-only-publisher-news-search).

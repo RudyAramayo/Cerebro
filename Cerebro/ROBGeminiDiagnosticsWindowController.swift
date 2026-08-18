@@ -27,6 +27,7 @@ import Foundation
         case responseModality
         case googleSearch
         case newsSearch
+        case appleMusic
         case robotActionTool
         case videoFramesEncoded
         case videoFramesSent
@@ -45,11 +46,12 @@ import Foundation
             case .connection: return "Connection state"
             case .model: return "Model"
             case .audioStreaming: return "Microphone streaming requested"
-            case .videoStreaming: return "Camera streaming requested"
+            case .videoStreaming: return "Camera composite streaming requested"
             case .inputMode: return "Active input path"
             case .responseModality: return "Response modality"
             case .googleSearch: return "Google Search enabled"
             case .newsSearch: return "Read-only news search enabled"
+            case .appleMusic: return "Apple Music tool enabled"
             case .robotActionTool: return "Robot action tool exposed"
             case .videoFramesEncoded: return "Video frames encoded"
             case .videoFramesSent: return "Video frames sent"
@@ -165,7 +167,7 @@ import Foundation
             action: #selector(microphoneToggleChanged(_:))
         )
         cameraToggle = NSButton(
-            checkboxWithTitle: "Send sampled camera frames to Gemini",
+            checkboxWithTitle: "Send sampled camera composite to Gemini",
             target: self,
             action: #selector(cameraToggleChanged(_:))
         )
@@ -187,7 +189,7 @@ import Foundation
         microphoneHelp.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let cameraHelp = wrappingLabel(
-            "This switch controls only Gemini's sampled camera input. It does not disable Cerebro perception or paired ROBController/Vision Pro video subscriptions."
+            "This privacy master controls Gemini's labeled main + Insta360 composite. Choose its camera sources in Settings → Perception. It does not disable local perception or paired ROBController/Vision Pro video subscriptions."
         )
         cameraHelp.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         cameraHelp.textColor = .secondaryLabelColor
@@ -367,7 +369,7 @@ import Foundation
             ? "Enable or disable raw microphone streaming while Gemini is connected"
             : "Launch Cerebro with Gemini enabled and a credential before changing microphone streaming"
         cameraToggle.toolTip = snapshot.isConfigured
-            ? "Enable or disable sampled camera input to Gemini"
+            ? "Enable or disable the sampled, labeled camera composite sent to Gemini"
             : "Launch Cerebro with Gemini enabled and a credential before changing camera streaming"
 
         valueLabels[.configured]?.stringValue = booleanString(snapshot.isConfigured)
@@ -386,6 +388,7 @@ import Foundation
         valueLabels[.responseModality]?.stringValue = snapshot.responseModality ?? "-"
         valueLabels[.googleSearch]?.stringValue = booleanString(snapshot.enablesGoogleSearch)
         valueLabels[.newsSearch]?.stringValue = booleanString(snapshot.enablesNewsSearch)
+        valueLabels[.appleMusic]?.stringValue = booleanString(snapshot.enablesAppleMusic)
         valueLabels[.robotActionTool]?.stringValue = booleanString(snapshot.exposesRobotActionTool)
         valueLabels[.videoFramesEncoded]?.stringValue = String(snapshot.videoFramesEncoded)
         valueLabels[.videoFramesSent]?.stringValue = String(snapshot.videoFramesSent)

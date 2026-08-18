@@ -53,8 +53,6 @@
                 NSLog(@"************* COMPLETED TASK..... SHOULD NOT BE HERE *************");
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                     weakSelf.isListening = NO;
-                    //Unchecking this will make the task loop infinitely
-                    //[weakSelf startTask:nil withLanguage:weakSelf.language];
                 });
             });
         };

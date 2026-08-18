@@ -41,7 +41,6 @@
         if (path.length > 0) {
             self.task.executableURL = [NSURL fileURLWithPath:path];
         }
-        //self.task.arguments = @[@""];
 
         __weak SimpleUserTrackerTaskController *weakSelf = self;
 
@@ -90,37 +89,7 @@
     [[NSNotificationCenter defaultCenter] addObserverForName:NSFileHandleDataAvailableNotification object:self.outputPipe.fileHandleForReading queue:nil usingBlock:^(NSNotification *note){
         NSData *output = self.outputPipe.fileHandleForReading.availableData;
         NSString *outputString = [[NSString alloc] initWithData:output encoding:NSUTF8StringEncoding];
-        
-        //NSLog(@"outputString = %@", outputString);
-        if ([outputString containsString:@"] User #"])
-        {
-            NSArray *components = [[outputString componentsSeparatedByString:@"] User #"][1] componentsSeparatedByString:@":\t"];
-            NSString *userID = components[0];
-            NSString *command = components[1];
-            
-            if ([command containsString:@"New"])
-            {
-                //[self.delegate didSeeNewPerson:userID];
-            }
-            if ([command containsString:@"Calibrating..."]) {}
-            if ([command containsString:@"Out of Scene"]) {
-                //[self.delegate lostSightOfPerson:userID];
-            }
-            //[08475726] User #1:    New
-            //[08509095] User #1:    Calibrating...
-        }
-        if ([outputString containsString:@". ("])
-        {
-            //User Position Data
-            NSString *userID = [outputString componentsSeparatedByString:@". ("][0];
-            NSString *userPosition = [outputString componentsSeparatedByString:@". ("][1];
-            userPosition = [userPosition substringToIndex:userPosition.length-2]; //truncate ending )
-            //NSLog(@"user%@ = %@", userID, userPosition);
-            //[self.delegate trackingPerson:userID position:userPosition];
 
-        }
-            
-            
         dispatch_async(dispatch_get_main_queue(), ^(){
             NSString *previousOutput = self.textView.string;
             NSString *nextOutput = [[previousOutput stringByAppendingString:@"\n"] stringByAppendingString:outputString];

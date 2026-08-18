@@ -140,10 +140,17 @@ public struct AssistantIntent: Codable, Sendable {
 public final class ROBSceneSnapshotStore: @unchecked Sendable {
     public static let shared = ROBSceneSnapshotStore()
 
+    private struct SupplementalPeopleState {
+        let people: [ROBTrackedPerson]
+        let updateUptime: TimeInterval
+        let maximumAge: TimeInterval
+    }
+
     private let lock = NSLock()
     private var sequence: UInt64 = 0
     private var cameraTimestampNanoseconds: UInt64?
-    private var people: [ROBTrackedPerson] = []
+    private var cameraPeople: [ROBTrackedPerson] = []
+    private var supplementalPeopleBySource: [String: SupplementalPeopleState] = [:]
     private var objects: [ROBTrackedObject] = []
     private var gestures: [ROBGestureObservation] = []
     private var depthFreeSpace: [ROBFreeSpaceRegion] = []
@@ -182,7 +189,7 @@ public final class ROBSceneSnapshotStore: @unchecked Sendable {
         sequence &+= 1
         cameraTimestampNanoseconds = timestampNanoseconds
         cameraFrameUpdateUptime = updateUptime
-        people = mappedPeople
+        cameraPeople = mappedPeople
         depthFreeSpace = depthSummary.regions
         cameraQuality = ROBCameraQuality(
             source: source,
@@ -215,6 +222,58 @@ public final class ROBSceneSnapshotStore: @unchecked Sendable {
         lidarFreeSpace = regions
         lidarUpdateUptime = ProcessInfo.processInfo.systemUptime
         lock.unlock()
+    }
+
+    /// Publishes people observed by a perception source other than the main
+    /// RGB/RGB-D camera. Each source owns only its own entry, and every person
+    /// ID is source-scoped before it is exposed in a SceneSnapshot. The
+    /// monotonic update time keeps a stalled producer from leaving a person in
+    /// the robot's language-model context indefinitely.
+    public func updatePeople(
+        _ observations: [ROBTrackedPerson],
+        source: String,
+        maximumAge: TimeInterval = 3
+    ) {
+        let sourceID = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sourceID.isEmpty else { return }
+
+        var allocatedIDs = Set<String>()
+        let scopedPeople = observations.enumerated().map { index, person in
+            let requestedID = "\(sourceID)-\(person.id)"
+            var scopedID = requestedID
+            var suffix = index
+            while allocatedIDs.contains(scopedID) {
+                scopedID = "\(requestedID)-\(suffix)"
+                suffix += 1
+            }
+            allocatedIDs.insert(scopedID)
+            return ROBTrackedPerson(
+                id: scopedID,
+                bounds: person.bounds,
+                distanceMeters: person.distanceMeters,
+                confidence: person.confidence
+            )
+        }
+
+        lock.lock()
+        if scopedPeople.isEmpty {
+            if supplementalPeopleBySource.removeValue(forKey: sourceID) != nil {
+                sequence &+= 1
+            }
+        } else {
+            sequence &+= 1
+            let boundedMaximumAge = maximumAge.isFinite ? max(0.1, maximumAge) : 3
+            supplementalPeopleBySource[sourceID] = SupplementalPeopleState(
+                people: scopedPeople,
+                updateUptime: ProcessInfo.processInfo.systemUptime,
+                maximumAge: boundedMaximumAge
+            )
+        }
+        lock.unlock()
+    }
+
+    public func clearPeople(source: String) {
+        updatePeople([], source: source)
     }
 
     public func updateObjects(_ observations: [ROBTrackedObject]) {
@@ -272,7 +331,23 @@ public final class ROBSceneSnapshotStore: @unchecked Sendable {
             nowUptime - $0 <= 1.5
         } ?? false
         let currentLidarFreeSpace = lidarIsFresh ? lidarFreeSpace : []
-        let allConfidences = people.map(\.confidence)
+        let stalePeopleSources = supplementalPeopleBySource.compactMap { source, state in
+            nowUptime - state.updateUptime > state.maximumAge ? source : nil
+        }
+        if !stalePeopleSources.isEmpty {
+            for source in stalePeopleSources {
+                supplementalPeopleBySource.removeValue(forKey: source)
+            }
+            sequence &+= 1
+        }
+        let supplementalPeople = supplementalPeopleBySource.keys.sorted().flatMap { source in
+            guard let state = supplementalPeopleBySource[source] else {
+                return [ROBTrackedPerson]()
+            }
+            return state.people
+        }
+        let currentPeople = cameraPeople + supplementalPeople
+        let allConfidences = currentPeople.map(\.confidence)
             + objects.map(\.confidence)
             + gestures.map(\.confidence)
             + (depthFreeSpace + currentLidarFreeSpace).map(\.confidence)
@@ -284,7 +359,7 @@ public final class ROBSceneSnapshotStore: @unchecked Sendable {
         return SceneSnapshot(
             schemaVersion: 1, sequence: sequence, capturedAt: Date(),
             cameraTimestampNanoseconds: cameraTimestampNanoseconds,
-            people: people, objects: objects, gestures: gestures,
+            people: currentPeople, objects: objects, gestures: gestures,
             freeSpace: currentLidarFreeSpace + depthFreeSpace, armPose: armPose,
             cameraPose: cameraPose,
             cameraQuality: cameraQuality, confidence: confidence

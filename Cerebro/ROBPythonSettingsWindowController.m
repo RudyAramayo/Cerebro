@@ -5,11 +5,13 @@
 
 #import "ROBPythonSettingsWindowController.h"
 #import "ROBMainViewController.h"
+#import "ROBSerialBox.h"
 #import "ROBPythonRuntime.h"
 #import "ROBSystemDependencyManager.h"
 #import "ROBSpeechBox.h"
+#import "Cerebro-Swift.h"
 
-@interface ROBPythonSettingsWindowController ()
+@interface ROBPythonSettingsWindowController () <NSTextFieldDelegate, NSTextViewDelegate>
 @property (nonatomic, strong) NSTextField *pythonPathField;
 @property (nonatomic, strong) NSTextField *statusLabel;
 @property (nonatomic, strong) NSTextView *logTextView;
@@ -21,7 +23,25 @@
 @property (nonatomic, strong) NSPopUpButton *japaneseVoicePopup;
 @property (nonatomic, strong) NSPopUpButton *spanishVoicePopup;
 @property (nonatomic, strong) NSPopUpButton *chineseVoicePopup;
+@property (nonatomic, strong) NSTextView *acknowledgementPhrasesTextView;
+@property (nonatomic, strong) NSButton *messagesBridgeEnabledToggle;
+@property (nonatomic, strong) NSTextField *messagesReceivingAccountField;
+@property (nonatomic, strong) NSTextView *messagesAllowedSendersTextView;
+@property (nonatomic, strong) NSButton *requestMessagesAutomationPermissionButton;
+@property (nonatomic, strong) NSButton *requestMusicAutomationPermissionButton;
+@property (nonatomic, strong) NSButton *openFullDiskAccessSettingsButton;
+@property (nonatomic, strong) NSButton *openAutomationSettingsButton;
+@property (nonatomic, strong) NSPopUpButton *baseSerialPopup;
+@property (nonatomic, strong) NSPopUpButton *maestroSerialPopup;
+@property (nonatomic, strong) NSTextField *baseSerialStatusLabel;
+@property (nonatomic, strong) NSTextField *maestroSerialStatusLabel;
+@property (nonatomic, strong) NSButton *openBaseConsoleButton;
+@property (nonatomic, strong) NSButton *reconnectMaestroButton;
+@property (nonatomic, weak) ROBSerialBox *boundSerialBox;
 @property (nonatomic, strong) NSArray<NSButton *> *actionButtons;
+@property (nonatomic, strong) NSTabView *settingsTabView;
+@property (nonatomic, strong) NSTabViewItem *insta360SettingsTab;
+@property (nonatomic, strong) ROBInsta360ProcessingSettingsViewController *insta360SettingsViewController;
 @property (nonatomic, assign) NSUInteger operationGeneration;
 @property (nonatomic, assign) BOOL operationInProgress;
 - (BOOL)requireAppliedPythonSelection;
@@ -33,6 +53,18 @@
 - (void)validateAfterInstallForGeneration:(NSUInteger)generation pipOutput:(NSString *)pipOutput;
 - (ROBMainViewController *)mainViewControllerInViewController:(NSViewController *)viewController;
 - (void)refreshVoicePopups;
+- (void)refreshAcknowledgementPhrasesTextView;
+- (void)refreshMessagesSettings;
+- (void)refreshSerialHardwareSettings;
+- (void)updateSerialHardwareStatus;
+- (ROBMainViewController *)activeMainViewController;
+- (void)openPrivacySettings:(NSString *)sectionName;
+- (void)openFullDiskAccessSettings:(id)sender;
+- (void)openAutomationSettings:(id)sender;
+- (void)requestMessagesAutomationPermission:(id)sender;
+- (void)requestMusicAutomationPermission:(id)sender;
+- (void)handleAutomationPermissionRequest:(nullable NSString *)error
+                              forTarget:(NSString *)friendlyName;
 @end
 
 @implementation ROBPythonSettingsWindowController
@@ -66,6 +98,10 @@
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(speechVoicesDidChange:)
                                                      name:AVSpeechSynthesisAvailableVoicesDidChangeNotification
+                                                   object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(serialHardwareDidChange:)
+                                                     name:ROBSerialHardwareDidChangeNotification
                                                    object:nil];
     }
     return self;
@@ -101,6 +137,7 @@
     NSTabView *tabView = [[NSTabView alloc] initWithFrame:NSInsetRect(windowContentView.bounds, 12.0, 12.0)];
     tabView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     [windowContentView addSubview:tabView];
+    self.settingsTabView = tabView;
 
     NSTabViewItem *runtimeTab = [NSTabViewItem tabViewItemWithViewController:[[NSViewController alloc] init]];
     runtimeTab.label = @"Runtime";
@@ -114,11 +151,29 @@
     controllersTab.view = controllersView;
     [tabView addTabViewItem:controllersTab];
 
+    NSTabViewItem *hardwareTab = [NSTabViewItem tabViewItemWithViewController:[[NSViewController alloc] init]];
+    hardwareTab.label = @"Hardware";
+    NSView *hardwareView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 680, 580)];
+    hardwareTab.view = hardwareView;
+    [tabView addTabViewItem:hardwareTab];
+
     NSTabViewItem *speechTab = [NSTabViewItem tabViewItemWithViewController:[[NSViewController alloc] init]];
     speechTab.label = @"Speech";
     NSView *speechView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 680, 580)];
     speechTab.view = speechView;
     [tabView addTabViewItem:speechTab];
+
+    NSTabViewItem *messagesTab = [NSTabViewItem tabViewItemWithViewController:[[NSViewController alloc] init]];
+    messagesTab.label = @"Messages";
+    NSView *messagesView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 680, 580)];
+    messagesTab.view = messagesView;
+    [tabView addTabViewItem:messagesTab];
+
+    self.insta360SettingsViewController = [[ROBInsta360ProcessingSettingsViewController alloc] init];
+    self.insta360SettingsTab = [NSTabViewItem
+        tabViewItemWithViewController:self.insta360SettingsViewController];
+    self.insta360SettingsTab.label = @"Perception";
+    [tabView addTabViewItem:self.insta360SettingsTab];
 
     NSTextField *speechHeading = [self labelWithString:@"ROB Voice Preferences"
                                                   frame:NSMakeRect(24, 530, 632, 28)];
@@ -141,8 +196,8 @@
     [speechView addSubview:self.englishVoicePopup];
 
     [speechView addSubview:[self labelWithString:@"Spanish voice:"
-                                             frame:NSMakeRect(24, 366, 632, 20)]];
-    self.spanishVoicePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 330, 500, 32)
+                                             frame:NSMakeRect(24, 378, 632, 20)]];
+    self.spanishVoicePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 342, 500, 32)
                                                         pullsDown:NO];
     self.spanishVoicePopup.target = self;
     self.spanishVoicePopup.action = @selector(voiceSelectionChanged:);
@@ -150,8 +205,8 @@
     [speechView addSubview:self.spanishVoicePopup];
 
     [speechView addSubview:[self labelWithString:@"Japanese voice:"
-                                             frame:NSMakeRect(24, 286, 632, 20)]];
-    self.japaneseVoicePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 250, 500, 32)
+                                             frame:NSMakeRect(24, 310, 632, 20)]];
+    self.japaneseVoicePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 274, 500, 32)
                                                          pullsDown:NO];
     self.japaneseVoicePopup.target = self;
     self.japaneseVoicePopup.action = @selector(voiceSelectionChanged:);
@@ -159,8 +214,8 @@
     [speechView addSubview:self.japaneseVoicePopup];
 
     [speechView addSubview:[self labelWithString:@"Chinese voice (Mandarin or Cantonese):"
-                                             frame:NSMakeRect(24, 206, 632, 20)]];
-    self.chineseVoicePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 170, 500, 32)
+                                             frame:NSMakeRect(24, 242, 632, 20)]];
+    self.chineseVoicePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 206, 500, 32)
                                                         pullsDown:NO];
     self.chineseVoicePopup.target = self;
     self.chineseVoicePopup.action = @selector(voiceSelectionChanged:);
@@ -169,10 +224,206 @@
 
     NSTextField *downloadHelp = [self labelWithString:
         @"Premium and Enhanced voices are listed first after you download them in System Settings → Accessibility → Spoken Content → System Voice. Cerebro preserves your exact installed choice and falls back safely if that voice is later removed."
-        frame:NSMakeRect(24, 96, 632, 54)];
+        frame:NSMakeRect(24, 142, 632, 52)];
     downloadHelp.textColor = [NSColor secondaryLabelColor];
     [speechView addSubview:downloadHelp];
+
+    [speechView addSubview:[self labelWithString:
+        @"Acknowledgement phrases — one per line; ROB chooses randomly (empty uses “I hear you.”):"
+        frame:NSMakeRect(24, 112, 632, 20)]];
+    NSScrollView *acknowledgementScrollView = [[NSScrollView alloc]
+        initWithFrame:NSMakeRect(24, 20, 632, 84)];
+    acknowledgementScrollView.borderType = NSBezelBorder;
+    acknowledgementScrollView.hasVerticalScroller = YES;
+    acknowledgementScrollView.autohidesScrollers = YES;
+    acknowledgementScrollView.drawsBackground = YES;
+    self.acknowledgementPhrasesTextView = [[NSTextView alloc]
+        initWithFrame:acknowledgementScrollView.contentView.bounds];
+    self.acknowledgementPhrasesTextView.font = [NSFont systemFontOfSize:NSFont.systemFontSize];
+    self.acknowledgementPhrasesTextView.textColor = NSColor.labelColor;
+    self.acknowledgementPhrasesTextView.backgroundColor = NSColor.textBackgroundColor;
+    self.acknowledgementPhrasesTextView.textContainerInset = NSMakeSize(5, 5);
+    self.acknowledgementPhrasesTextView.richText = NO;
+    self.acknowledgementPhrasesTextView.allowsUndo = YES;
+    self.acknowledgementPhrasesTextView.verticallyResizable = YES;
+    self.acknowledgementPhrasesTextView.horizontallyResizable = NO;
+    self.acknowledgementPhrasesTextView.autoresizingMask = NSViewWidthSizable;
+    self.acknowledgementPhrasesTextView.textContainer.widthTracksTextView = YES;
+    self.acknowledgementPhrasesTextView.delegate = self;
+    self.acknowledgementPhrasesTextView.accessibilityLabel = @"ROB acknowledgement phrases";
+    self.acknowledgementPhrasesTextView.accessibilityIdentifier = @"ROB.AcknowledgementPhrases";
+    self.acknowledgementPhrasesTextView.accessibilityHelp =
+        @"Enter one acknowledgement per line. ROB chooses a different phrase at random when possible. Leave every line blank to use I hear you.";
+    acknowledgementScrollView.documentView = self.acknowledgementPhrasesTextView;
+    [speechView addSubview:acknowledgementScrollView];
     [self refreshVoicePopups];
+    [self refreshAcknowledgementPhrasesTextView];
+
+    NSTextField *messagesHeading = [self labelWithString:@"ROB Messages Replies"
+                                                    frame:NSMakeRect(24, 530, 632, 28)];
+    messagesHeading.font = [NSFont boldSystemFontOfSize:20.0];
+    [messagesView addSubview:messagesHeading];
+
+    NSTextField *messagesExplanation = [self labelWithString:
+        @"Approved one-to-one message text is sent to an isolated Gemini session. Replies return only to the originating Messages chat; ROB never speaks them, and camera, search, and robot tools are unavailable."
+        frame:NSMakeRect(24, 472, 632, 50)];
+    messagesExplanation.textColor = [NSColor secondaryLabelColor];
+    [messagesView addSubview:messagesExplanation];
+
+    self.messagesBridgeEnabledToggle = [NSButton
+        checkboxWithTitle:@"Enable replies received by ROB in Messages"
+                   target:self
+                   action:@selector(messagesBridgeEnabledChanged:)];
+    self.messagesBridgeEnabledToggle.frame = NSMakeRect(24, 430, 632, 28);
+    self.messagesBridgeEnabledToggle.accessibilityIdentifier = @"ROB.MessagesBridge.Enabled";
+    self.messagesBridgeEnabledToggle.accessibilityHelp =
+        @"The bridge remains fail-closed until a receiving account and at least one approved sender are configured.";
+    [messagesView addSubview:self.messagesBridgeEnabledToggle];
+
+    [messagesView addSubview:[self labelWithString:@"Receiving Messages account:"
+                                               frame:NSMakeRect(24, 397, 632, 20)]];
+    self.messagesReceivingAccountField = [[NSTextField alloc]
+        initWithFrame:NSMakeRect(24, 361, 500, 28)];
+    self.messagesReceivingAccountField.placeholderString = @"rob@orbitusrobotics.com";
+    self.messagesReceivingAccountField.delegate = self;
+    self.messagesReceivingAccountField.accessibilityLabel = @"ROB receiving Messages account";
+    self.messagesReceivingAccountField.accessibilityIdentifier = @"ROB.MessagesBridge.Account";
+    self.messagesReceivingAccountField.accessibilityHelp =
+        @"Enter the exact Messages account that receives conversations intended for ROB.";
+    [messagesView addSubview:self.messagesReceivingAccountField];
+
+    [messagesView addSubview:[self labelWithString:
+        @"Approved senders — one exact Messages handle (email or phone) per line (required):"
+        frame:NSMakeRect(24, 329, 632, 20)]];
+    NSScrollView *allowedSendersScrollView = [[NSScrollView alloc]
+        initWithFrame:NSMakeRect(24, 203, 632, 118)];
+    allowedSendersScrollView.borderType = NSBezelBorder;
+    allowedSendersScrollView.hasVerticalScroller = YES;
+    allowedSendersScrollView.autohidesScrollers = YES;
+    allowedSendersScrollView.drawsBackground = YES;
+    self.messagesAllowedSendersTextView = [[NSTextView alloc]
+        initWithFrame:allowedSendersScrollView.contentView.bounds];
+    self.messagesAllowedSendersTextView.font = [NSFont monospacedSystemFontOfSize:12.0
+                                                                         weight:NSFontWeightRegular];
+    self.messagesAllowedSendersTextView.textColor = NSColor.labelColor;
+    self.messagesAllowedSendersTextView.backgroundColor = NSColor.textBackgroundColor;
+    self.messagesAllowedSendersTextView.textContainerInset = NSMakeSize(5, 5);
+    self.messagesAllowedSendersTextView.richText = NO;
+    self.messagesAllowedSendersTextView.allowsUndo = YES;
+    self.messagesAllowedSendersTextView.verticallyResizable = YES;
+    self.messagesAllowedSendersTextView.horizontallyResizable = NO;
+    self.messagesAllowedSendersTextView.autoresizingMask = NSViewWidthSizable;
+    self.messagesAllowedSendersTextView.textContainer.widthTracksTextView = YES;
+    self.messagesAllowedSendersTextView.delegate = self;
+    self.messagesAllowedSendersTextView.accessibilityLabel = @"Approved Messages senders";
+    self.messagesAllowedSendersTextView.accessibilityIdentifier = @"ROB.MessagesBridge.AllowedSenders";
+    self.messagesAllowedSendersTextView.accessibilityHelp =
+        @"Enter each sender's exact Messages handle as shown in contact information, one per line. Messages from all other senders and every group chat are ignored.";
+    allowedSendersScrollView.documentView = self.messagesAllowedSendersTextView;
+    [messagesView addSubview:allowedSendersScrollView];
+
+    NSBox *messagesPermissionsBox = [[NSBox alloc] initWithFrame:NSMakeRect(24, 42, 632, 145)];
+    messagesPermissionsBox.title = @"Required macOS Permissions";
+    [messagesView addSubview:messagesPermissionsBox];
+    NSTextField *messagesPermissions = [self labelWithString:
+        @"Inbound: add Cerebro in System Settings → Privacy & Security → Full Disk Access, then restart Cerebro so it can read the local Messages inbox.\n\nOutbound: allow Cerebro to control Messages under Privacy & Security → Automation when macOS prompts on the first reply. The receiving account must also be signed in and enabled in Messages."
+        frame:NSMakeRect(14, 88, 604, 44)];
+    messagesPermissions.textColor = [NSColor secondaryLabelColor];
+    messagesPermissions.selectable = YES;
+    [messagesPermissionsBox.contentView addSubview:messagesPermissions];
+    self.openFullDiskAccessSettingsButton = [self buttonWithTitle:@"Open Full Disk Access Settings"
+                                                          frame:NSMakeRect(14, 54, 250, 28)
+                                                         action:@selector(openFullDiskAccessSettings:)];
+    self.openFullDiskAccessSettingsButton.toolTip = @"Open System Settings → Privacy & Security → Full Disk Access.";
+    self.openAutomationSettingsButton = [self buttonWithTitle:@"Open Automation Settings"
+                                                      frame:NSMakeRect(276, 54, 250, 28)
+                                                     action:@selector(openAutomationSettings:)];
+    self.openAutomationSettingsButton.toolTip = @"Open System Settings → Privacy & Security → Automation.";
+    [messagesPermissionsBox.contentView addSubview:self.openFullDiskAccessSettingsButton];
+    [messagesPermissionsBox.contentView addSubview:self.openAutomationSettingsButton];
+    self.requestMessagesAutomationPermissionButton = [self buttonWithTitle:@"Request Messages Automation Access"
+                                                                   frame:NSMakeRect(14, 19, 250, 28)
+                                                                  action:@selector(requestMessagesAutomationPermission:)];
+    self.requestMessagesAutomationPermissionButton.toolTip =
+        @"Run a lightweight Messages AppleScript call to trigger the local automation permission prompt.";
+    self.requestMusicAutomationPermissionButton = [self buttonWithTitle:@"Request Music Automation Access"
+                                                                frame:NSMakeRect(276, 19, 250, 28)
+                                                               action:@selector(requestMusicAutomationPermission:)];
+    self.requestMusicAutomationPermissionButton.toolTip =
+        @"Run a lightweight Music AppleScript call to trigger the local automation permission prompt.";
+    [messagesPermissionsBox.contentView addSubview:self.requestMessagesAutomationPermissionButton];
+    [messagesPermissionsBox.contentView addSubview:self.requestMusicAutomationPermissionButton];
+    [self refreshMessagesSettings];
+
+    NSTextField *hardwareHeading = [self labelWithString:@"Robot USB Hardware"
+                                                    frame:NSMakeRect(24, 530, 632, 28)];
+    hardwareHeading.font = [NSFont boldSystemFontOfSize:20.0];
+    [hardwareView addSubview:hardwareHeading];
+
+    NSTextField *hardwareExplanation = [self labelWithString:
+        @"Cerebro discovers and reconnects these devices automatically at startup. These controls show the live choices away from the main robot workspace; Base retains a supervised manual USB override for diagnostics."
+        frame:NSMakeRect(24, 474, 632, 48)];
+    hardwareExplanation.textColor = NSColor.secondaryLabelColor;
+    [hardwareView addSubview:hardwareExplanation];
+
+    NSBox *baseBox = [[NSBox alloc] initWithFrame:NSMakeRect(24, 286, 632, 170)];
+    baseBox.title = @"Base Arduino";
+    [hardwareView addSubview:baseBox];
+    [baseBox.contentView addSubview:[self labelWithString:@"Base USB selection:"
+                                                      frame:NSMakeRect(16, 111, 600, 20)]];
+    self.baseSerialPopup = [[NSPopUpButton alloc]
+        initWithFrame:NSMakeRect(14, 74, 470, 30)
+            pullsDown:NO];
+    self.baseSerialPopup.target = self;
+    self.baseSerialPopup.action = @selector(baseSerialSelectionChanged:);
+    self.baseSerialPopup.accessibilityLabel = @"Base USB selection";
+    self.baseSerialPopup.accessibilityIdentifier = @"ROB.Hardware.BaseUSB";
+    self.baseSerialPopup.toolTip = @"Cerebro selects the verified Base automatically. Choosing a USB port here is a supervised diagnostic override.";
+    [baseBox.contentView addSubview:self.baseSerialPopup];
+    self.baseSerialStatusLabel = [self labelWithString:@"Waiting for the robot runtime…"
+                                                  frame:NSMakeRect(16, 49, 600, 18)];
+    self.baseSerialStatusLabel.textColor = NSColor.secondaryLabelColor;
+    self.baseSerialStatusLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
+    [baseBox.contentView addSubview:self.baseSerialStatusLabel];
+    self.openBaseConsoleButton = [self buttonWithTitle:@"Open Base Console…"
+                                                  frame:NSMakeRect(12, 8, 190, 34)
+                                                 action:@selector(openBaseSerialConsole:)];
+    self.openBaseConsoleButton.accessibilityIdentifier = @"ROB.Hardware.OpenBaseConsole";
+    self.openBaseConsoleButton.accessibilityHelp =
+        @"Open optional live Base serial output and command controls in a separate window.";
+    [baseBox.contentView addSubview:self.openBaseConsoleButton];
+
+    NSBox *maestroBox = [[NSBox alloc] initWithFrame:NSMakeRect(24, 105, 632, 160)];
+    maestroBox.title = @"Pololu Maestro";
+    [hardwareView addSubview:maestroBox];
+    [maestroBox.contentView addSubview:[self labelWithString:@"Maestro USB selection (automatic):"
+                                                         frame:NSMakeRect(16, 101, 600, 20)]];
+    self.maestroSerialPopup = [[NSPopUpButton alloc]
+        initWithFrame:NSMakeRect(14, 64, 470, 30)
+            pullsDown:NO];
+    self.maestroSerialPopup.enabled = NO;
+    self.maestroSerialPopup.accessibilityLabel = @"Maestro USB automatic selection";
+    self.maestroSerialPopup.accessibilityIdentifier = @"ROB.Hardware.MaestroUSB";
+    self.maestroSerialPopup.toolTip =
+        @"Cerebro accepts only a USB device verified as a Pololu Maestro command interface.";
+    [maestroBox.contentView addSubview:self.maestroSerialPopup];
+    self.maestroSerialStatusLabel = [self labelWithString:@"Waiting for the robot runtime…"
+                                                     frame:NSMakeRect(16, 39, 600, 18)];
+    self.maestroSerialStatusLabel.textColor = NSColor.secondaryLabelColor;
+    self.maestroSerialStatusLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
+    [maestroBox.contentView addSubview:self.maestroSerialStatusLabel];
+    self.reconnectMaestroButton = [self buttonWithTitle:@"Retry Maestro Discovery"
+                                                   frame:NSMakeRect(12, 0, 190, 34)
+                                                  action:@selector(reconnectMaestro:)];
+    self.reconnectMaestroButton.accessibilityIdentifier = @"ROB.Hardware.RetryMaestro";
+    [maestroBox.contentView addSubview:self.reconnectMaestroButton];
+
+    NSTextField *consoleNote = [self labelWithString:
+        @"The Base console is opt-in: output is rendered only while its window is open. Closing the console never stops telemetry, safety parsing, or automatic USB operation."
+        frame:NSMakeRect(24, 44, 632, 44)];
+    consoleNote.textColor = NSColor.secondaryLabelColor;
+    [hardwareView addSubview:consoleNote];
+    [self refreshSerialHardwareSettings];
 
     NSTextField *controllersHeading = [self labelWithString:@"Paired Control Devices"
                                                        frame:NSMakeRect(24, 530, 632, 28)];
@@ -309,6 +560,13 @@
     [self refreshSystemDependencyStatus];
 }
 
+- (void)showInsta360Settings:(id)sender
+{
+    [self showWindow:sender];
+    [self.insta360SettingsViewController refreshSettings];
+    [self.settingsTabView selectTabViewItem:self.insta360SettingsTab];
+}
+
 - (ROBMainViewController *)mainViewControllerInViewController:(NSViewController *)viewController
 {
     if ([viewController isKindOfClass:[ROBMainViewController class]]) {
@@ -322,6 +580,105 @@
         }
     }
     return nil;
+}
+
+- (ROBMainViewController *)activeMainViewController
+{
+    for (NSWindow *window in NSApp.windows) {
+        ROBMainViewController *mainViewController =
+            [self mainViewControllerInViewController:window.contentViewController];
+        if (mainViewController != nil) {
+            return mainViewController;
+        }
+    }
+    return nil;
+}
+
+- (void)refreshSerialHardwareSettings
+{
+    ROBSerialBox *serialBox = [self activeMainViewController].serialBox;
+    if (self.boundSerialBox != serialBox) {
+        if (self.boundSerialBox.serialListPullDown_base == self.baseSerialPopup) {
+            self.boundSerialBox.serialListPullDown_base = nil;
+        }
+        if (self.boundSerialBox.serialListPullDown_maestro == self.maestroSerialPopup) {
+            self.boundSerialBox.serialListPullDown_maestro = nil;
+        }
+        self.boundSerialBox = serialBox;
+    }
+
+    BOOL available = serialBox != nil;
+    self.baseSerialPopup.enabled = available;
+    self.openBaseConsoleButton.enabled = available;
+    self.reconnectMaestroButton.enabled = available;
+    if (!available) {
+        [self.baseSerialPopup removeAllItems];
+        [self.baseSerialPopup addItemWithTitle:@"Robot runtime unavailable"];
+        [self.maestroSerialPopup removeAllItems];
+        [self.maestroSerialPopup addItemWithTitle:@"Robot runtime unavailable"];
+        self.baseSerialStatusLabel.stringValue = @"Open Cerebro's main robot window to manage Base USB.";
+        self.maestroSerialStatusLabel.stringValue = @"Open Cerebro's main robot window to view Maestro USB.";
+        return;
+    }
+
+    serialBox.serialListPullDown_base = self.baseSerialPopup;
+    serialBox.serialListPullDown_maestro = self.maestroSerialPopup;
+    [serialBox refreshSerialPortControls];
+    [self updateSerialHardwareStatus];
+}
+
+- (void)updateSerialHardwareStatus
+{
+    ROBSerialBox *serialBox = self.boundSerialBox;
+    if (serialBox == nil) {
+        return;
+    }
+    self.baseSerialStatusLabel.stringValue = [NSString stringWithFormat:@"Automatic status: %@",
+        serialBox.baseSerialStatusText ?: @"unknown"];
+    self.maestroSerialStatusLabel.stringValue = [NSString stringWithFormat:@"Verified automatic status: %@",
+        serialBox.maestroSerialStatusText ?: @"unknown"];
+}
+
+- (void)serialHardwareDidChange:(NSNotification *)notification
+{
+    if (notification.object != self.boundSerialBox) {
+        return;
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self updateSerialHardwareStatus];
+    });
+}
+
+- (void)baseSerialSelectionChanged:(NSPopUpButton *)sender
+{
+    if (self.boundSerialBox == nil) {
+        NSBeep();
+        return;
+    }
+    [self.boundSerialBox selectBaseSerialPort:sender.titleOfSelectedItem];
+}
+
+- (void)reconnectMaestro:(id)sender
+{
+    if (self.boundSerialBox == nil) {
+        NSBeep();
+        return;
+    }
+    [self.boundSerialBox connectMaestro];
+}
+
+- (void)openBaseSerialConsole:(id)sender
+{
+    ROBMainViewController *mainViewController = [self activeMainViewController];
+    if (mainViewController == nil || mainViewController.serialBox == nil) {
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.messageText = @"Base console is unavailable";
+        alert.informativeText = @"Open Cerebro's main robot window, then try again.";
+        [alert addButtonWithTitle:@"OK"];
+        [alert beginSheetModalForWindow:self.window completionHandler:nil];
+        return;
+    }
+    [mainViewController showBaseSerialConsole:sender];
 }
 
 - (IBAction)managePairedDevices:(id)sender
@@ -350,6 +707,9 @@
     [self refreshSystemDependencyStatus];
     [self refreshFromRuntimeAndValidate:!self.operationInProgress];
     [self refreshVoicePopups];
+    [self refreshAcknowledgementPhrasesTextView];
+    [self refreshMessagesSettings];
+    [self refreshSerialHardwareSettings];
 }
 
 - (NSString *)qualityNameForVoice:(AVSpeechSynthesisVoice *)voice
@@ -444,6 +804,171 @@
             languagePrefixes:@[@"zh-", @"yue-"]
             preferredLanguage:@"zh-CN"
                  defaultsKey:ROBChineseVoiceIdentifierDefaultsKey];
+}
+
+- (void)refreshAcknowledgementPhrasesTextView
+{
+    self.acknowledgementPhrasesTextView.string =
+        [ROBResolvedSpeechAcknowledgementPhrases() componentsJoinedByString:@"\n"];
+}
+
+- (void)refreshMessagesSettings
+{
+    self.messagesBridgeEnabledToggle.state = [ROBMessagesBridge configuredEnabled]
+        ? NSControlStateValueOn
+        : NSControlStateValueOff;
+    self.messagesReceivingAccountField.stringValue =
+        [ROBMessagesBridge configuredAccountIdentifier] ?: @"rob@orbitusrobotics.com";
+    self.messagesAllowedSendersTextView.string =
+        [ROBMessagesBridge configuredAllowedSendersText] ?: @"";
+}
+
+- (BOOL)messagesAllowlistContainsSender
+{
+    NSString *value = self.messagesAllowedSendersTextView.string ?: @"";
+    NSCharacterSet *separators = [NSCharacterSet characterSetWithCharactersInString:@"\n\r,"];
+    for (NSString *candidate in [value componentsSeparatedByCharactersInSet:separators]) {
+        NSString *trimmed = [candidate
+            stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if (trimmed.length > 0) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+- (void)messagesBridgeEnabledChanged:(NSButton *)sender
+{
+    // Commit an in-progress account or allowlist edit before evaluating the
+    // fail-closed enable requirement. Editing does not repeatedly restart the
+    // bridge on every keystroke.
+    [self.window makeFirstResponder:nil];
+    BOOL shouldEnable = sender.state == NSControlStateValueOn;
+    if (shouldEnable && ![self messagesAllowlistContainsSender]) {
+        sender.state = NSControlStateValueOff;
+        [ROBMessagesBridge setConfiguredEnabled:NO];
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.messageText = @"Add an approved Messages sender first";
+        alert.informativeText =
+            @"ROB will not read or answer Messages until at least one exact sender email address or phone number is listed.";
+        [alert addButtonWithTitle:@"OK"];
+        [alert beginSheetModalForWindow:self.window completionHandler:nil];
+        return;
+    }
+    [ROBMessagesBridge setConfiguredEnabled:shouldEnable];
+    if (shouldEnable) {
+        [self requestMessagesAutomationPermission:self.requestMessagesAutomationPermissionButton];
+    }
+}
+
+- (void)openPrivacySettings:(NSString *)sectionName
+{
+    NSString *urlString = [NSString stringWithFormat:
+        @"x-apple.systempreferences:com.apple.preference.security?%@",
+        sectionName
+    ];
+    NSString *extensionURL = [NSString stringWithFormat:
+        @"x-apple.systempreferences:com.apple.preference.security.extension?%@",
+        sectionName
+    ];
+    NSArray<NSString *> *candidates = @[urlString, extensionURL];
+
+    for (NSString *candidate in candidates) {
+        NSURL *settingsURL = [NSURL URLWithString:candidate];
+        if (settingsURL == nil) {
+            continue;
+        }
+        if ([[NSWorkspace sharedWorkspace] openURL:settingsURL]) {
+            [self setLogText:
+                @"Opening System Settings for privacy permissions. Grant the requested access and return here."];
+            return;
+        }
+    }
+
+    if (urlString.length == 0) {
+        [self setLogText:@"Unable to open the requested System Settings pane."];
+    } else {
+        [self setLogText:@"Unable to open System Settings Privacy & Security pane."];
+    }
+}
+
+- (void)openFullDiskAccessSettings:(id)sender
+{
+    [self openPrivacySettings:@"Privacy_AllFiles"];
+}
+
+- (void)openAutomationSettings:(id)sender
+{
+    [self openPrivacySettings:@"Privacy_Automation"];
+}
+
+- (void)handleAutomationPermissionRequest:(NSString *)error
+                              forTarget:(NSString *)friendlyName
+{
+    if (error.length == 0) {
+        [self setLogText:[NSString stringWithFormat:
+            @"%@ automation permission is currently granted.",
+            friendlyName]];
+        return;
+    }
+    [self setLogText:[NSString stringWithFormat:
+        @"%@ automation permission is not granted yet: %@",
+        friendlyName,
+        error]];
+    [self openAutomationSettings:self];
+}
+
+- (void)requestMessagesAutomationPermission:(id)sender
+{
+    [self handleAutomationPermissionRequest:[ROBMessagesBridge requestMessagesAutomationPermission]
+                                  forTarget:@"Messages"];
+}
+
+- (void)requestMusicAutomationPermission:(id)sender
+{
+    [self handleAutomationPermissionRequest:[ROBAppleMusicPermissions requestAutomationPermission]
+                                  forTarget:@"Music"];
+}
+
+- (void)controlTextDidEndEditing:(NSNotification *)notification
+{
+    if (notification.object == self.messagesReceivingAccountField) {
+        [ROBMessagesBridge setConfiguredAccountIdentifier:
+            self.messagesReceivingAccountField.stringValue ?: @""];
+        self.messagesReceivingAccountField.stringValue =
+            [ROBMessagesBridge configuredAccountIdentifier] ?: @"rob@orbitusrobotics.com";
+    }
+}
+
+- (void)textDidChange:(NSNotification *)notification
+{
+    if (notification.object == self.messagesAllowedSendersTextView) {
+        return;
+    }
+    if (notification.object != self.acknowledgementPhrasesTextView) {
+        return;
+    }
+    NSString *value = self.acknowledgementPhrasesTextView.string ?: @"";
+    NSString *trimmed = [value
+        stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    if (trimmed.length > 0) {
+        [defaults setObject:value forKey:ROBSpeechAcknowledgementPhraseDefaultsKey];
+    } else {
+        [defaults removeObjectForKey:ROBSpeechAcknowledgementPhraseDefaultsKey];
+    }
+}
+
+- (void)textDidEndEditing:(NSNotification *)notification
+{
+    if (notification.object == self.acknowledgementPhrasesTextView) {
+        [self refreshAcknowledgementPhrasesTextView];
+    } else if (notification.object == self.messagesAllowedSendersTextView) {
+        [ROBMessagesBridge setConfiguredAllowedSendersText:
+            self.messagesAllowedSendersTextView.string ?: @""];
+        self.messagesAllowedSendersTextView.string =
+            [ROBMessagesBridge configuredAllowedSendersText] ?: @"";
+    }
 }
 
 - (void)voiceSelectionChanged:(NSPopUpButton *)sender
@@ -946,6 +1471,7 @@
     [[ROBSystemDependencyManager sharedManager] refreshSSHpassAvailability];
     [self refreshSystemDependencyStatus];
     [self refreshVoicePopups];
+    [self refreshSerialHardwareSettings];
 }
 
 - (void)speechVoicesDidChange:(NSNotification *)notification

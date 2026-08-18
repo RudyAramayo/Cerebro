@@ -11,8 +11,11 @@
 @interface AppDelegate : NSObject <NSApplicationDelegate>
 
 - (IBAction)showPythonSettings:(id)sender;
+- (IBAction)showInsta360Settings:(id)sender;
+- (IBAction)showSystemStatus:(id)sender;
 - (IBAction)toggleDevelopmentMode:(id)sender;
 - (IBAction)showControllerInputDiagnostics:(id)sender;
+- (IBAction)showCameraDiagnostics:(id)sender;
 - (IBAction)showAmberArmDiagnostics:(id)sender;
 - (IBAction)showWakeUpCalibration:(id)sender;
 - (IBAction)showHologramCaptureSettings:(id)sender;

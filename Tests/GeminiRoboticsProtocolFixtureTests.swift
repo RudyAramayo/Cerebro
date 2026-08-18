@@ -16,6 +16,7 @@ struct GeminiRoboticsProtocolFixtureTests {
         try testConfigurationRequiresExplicitOptIn()
         try testConfigurationAndSetup()
         try testRuntimeSettingsDefaultsAndOverrides()
+        try testInsta360CalibrationProjectionValidityAndPersistenceBoundary()
         try testPromptPreservesWakePhrase()
         try testMediaMessages()
         try testRealtimeTextMessage()
@@ -57,15 +58,25 @@ struct GeminiRoboticsProtocolFixtureTests {
             name: ROBNewsSearchService.toolName,
             arguments: ["source": "rt", "limit": 3]
         )
+        let music = GeminiRoboticsToolCall(
+            id: "music-1",
+            name: ROBAppleMusicService.toolName,
+            arguments: ["media_type": "song", "query": "Space Oddity"]
+        )
         try expect(
             GeminiRoboticsToolPolicy.dispatchRoute(for: news) == .localNews,
             "search_news must bypass the robot-action delegate"
+        )
+        try expect(
+            GeminiRoboticsToolPolicy.dispatchRoute(for: music) == .localAppleMusic,
+            "apple_music must bypass the robot-action delegate"
         )
         try expect(
             GeminiRoboticsToolPolicy.dispatchRoute(for: gesture) == .delegate,
             "robot_action must stay on the controller delegate path"
         )
         try expect(!GeminiRoboticsToolPolicy.requiresPriorityDispatch(news), "News lookup was incorrectly put on the safety-stop lane")
+        try expect(!GeminiRoboticsToolPolicy.requiresPriorityDispatch(music), "Music playback was incorrectly put on the safety-stop lane")
         try expect(
             GeminiRoboticsToolPolicy.isStageContextID("stage:fixture-turn"),
             "A stage text-turn context was not recognized"
@@ -87,9 +98,21 @@ struct GeminiRoboticsProtocolFixtureTests {
         )
         try expect(
             GeminiRoboticsConfiguration.defaultSystemInstruction.contains("always call search_news first") &&
+                GeminiRoboticsConfiguration.defaultSystemInstruction.contains("hear, read, or play a supported news feed") &&
+                GeminiRoboticsConfiguration.defaultSystemInstruction.contains("Speak every returned headline title") &&
+                GeminiRoboticsConfiguration.defaultSystemInstruction.contains("do not read URLs aloud") &&
+                GeminiRoboticsConfiguration.defaultSystemInstruction.contains("recent sitemap entries, not an editorial ranking") &&
                 GeminiRoboticsConfiguration.defaultSystemInstruction.contains("untrusted publisher data") &&
                 GeminiRoboticsConfiguration.defaultSystemInstruction.contains("never requires ROBController approval"),
             "The default instruction must route current publisher news through the trusted local boundary"
+        )
+        try expect(
+            GeminiRoboticsConfiguration.defaultSystemInstruction.contains("always call apple_music") &&
+                GeminiRoboticsConfiguration.defaultSystemInstruction.contains("signed-in macOS Music app") &&
+                GeminiRoboticsConfiguration.defaultSystemInstruction.contains("already present in the user's Music library") &&
+                GeminiRoboticsConfiguration.defaultSystemInstruction.contains("Never claim playback started until apple_music returns status playing") &&
+                GeminiRoboticsConfiguration.defaultSystemInstruction.contains("never ROBController approval"),
+            "The default instruction must route explicit Music requests through the local Music boundary"
         )
         try expect(
             GeminiRoboticsConfiguration.defaultSystemInstruction.contains("never complete a recognized user turn silently"),
@@ -121,7 +144,8 @@ struct GeminiRoboticsProtocolFixtureTests {
                 "GEMINI_ROBOTICS_STREAM_VIDEO": "certainly",
                 "GEMINI_ROBOT_ACTION_TOOL_ENABLED": "enabled",
                 "GEMINI_GOOGLE_SEARCH_ENABLED": "dangerously",
-                "GEMINI_NEWS_SEARCH_ENABLED": "probably"
+                "GEMINI_NEWS_SEARCH_ENABLED": "probably",
+                "GEMINI_APPLE_MUSIC_ENABLED": "perhaps"
             ]),
             "Malformed optional flags should not invalidate an otherwise usable configuration"
         )
@@ -130,6 +154,7 @@ struct GeminiRoboticsProtocolFixtureTests {
         try expect(!malformedMediaConfiguration.exposesRobotActionTool, "Malformed action-tool flag must fail closed")
         try expect(!malformedMediaConfiguration.enablesGoogleSearch, "Malformed Search flag must fail closed")
         try expect(!malformedMediaConfiguration.enablesNewsSearch, "Malformed news-search flag must fail closed")
+        try expect(!malformedMediaConfiguration.enablesAppleMusic, "Malformed Apple Music flag must fail closed")
 
         let defaultToolConfiguration = try require(
             GeminiRoboticsConfiguration.fromEnvironment([
@@ -141,6 +166,7 @@ struct GeminiRoboticsProtocolFixtureTests {
         try expect(defaultToolConfiguration.exposesRobotActionTool, "Robot action tool should be exposed by default")
         try expect(defaultToolConfiguration.enablesGoogleSearch, "Google Search should be enabled by default")
         try expect(defaultToolConfiguration.enablesNewsSearch, "Read-only news search should be enabled by default")
+        try expect(defaultToolConfiguration.enablesAppleMusic, "Apple Music should be enabled by default")
         let defaultSetup = GeminiRoboticsProtocol.setupMessage(
             configuration: defaultToolConfiguration,
             resumptionHandle: nil
@@ -170,6 +196,51 @@ struct GeminiRoboticsProtocolFixtureTests {
             defaultFunctionNames.contains(ROBNewsSearchService.toolName),
             "Default setup did not declare search_news"
         )
+        try expect(
+            defaultFunctionNames.contains(ROBAppleMusicService.toolName),
+            "Default setup did not declare apple_music"
+        )
+        let defaultInstruction = try require(
+            ((defaultSetupBody["systemInstruction"] as? [String: Any])?["parts"] as? [[String: String]])?.first?["text"],
+            "Default setup did not include a system instruction"
+        )
+        try expect(
+                defaultInstruction.contains("MAIN FORWARD CAMERA") &&
+                defaultInstruction.contains("INSTA360 STITCHED 360 PANORAMA") &&
+                defaultInstruction.contains("ROB DIRECTIONS CALIBRATED") &&
+                defaultInstruction.contains("FRONT and REAR markers are robot-relative") &&
+                defaultInstruction.contains("REAR region may be used to notice people behind ROB") &&
+                defaultInstruction.contains("image coordinates, not robot-relative left/right directions") &&
+                defaultInstruction.contains("ORIENTATION UNCALIBRATED") &&
+                defaultInstruction.contains("do not infer that any panorama region is physically behind ROB") &&
+                defaultInstruction.contains("untrusted scene content"),
+            "Video setup must preserve calibrated and fail-closed composite provenance semantics"
+        )
+
+        let overriddenInstructionConfiguration = try require(
+            GeminiRoboticsConfiguration.fromEnvironment([
+                "GEMINI_ROBOTICS_ENABLED": "true",
+                "GEMINI_API_KEY": "fixture-key",
+                "GEMINI_ROBOTICS_SYSTEM_INSTRUCTION": "Managed deployment instruction"
+            ]),
+            "Overridden-instruction fixture configuration should load"
+        )
+        let overriddenSetup = try require(
+            GeminiRoboticsProtocol.setupMessage(
+                configuration: overriddenInstructionConfiguration,
+                resumptionHandle: nil
+            )["setup"] as? [String: Any],
+            "Overridden setup envelope is missing"
+        )
+        let overriddenInstruction = try require(
+            ((overriddenSetup["systemInstruction"] as? [String: Any])?["parts"] as? [[String: String]])?.first?["text"],
+            "Overridden setup did not include a system instruction"
+        )
+        try expect(
+            overriddenInstruction.contains("Managed deployment instruction") &&
+                overriddenInstruction.contains("INSTA360 STITCHED 360 PANORAMA"),
+            "A managed prompt override must not remove the camera provenance contract"
+        )
 
         let explicitlyDisabledTools = try require(
             GeminiRoboticsConfiguration.fromEnvironment([
@@ -177,13 +248,15 @@ struct GeminiRoboticsProtocolFixtureTests {
                 "GEMINI_API_KEY": "fixture-key",
                 "GEMINI_ROBOT_ACTION_TOOL_ENABLED": "false",
                 "GEMINI_GOOGLE_SEARCH_ENABLED": "false",
-                "GEMINI_NEWS_SEARCH_ENABLED": "false"
+                "GEMINI_NEWS_SEARCH_ENABLED": "false",
+                "GEMINI_APPLE_MUSIC_ENABLED": "false"
             ]),
             "Explicitly disabled tool fixture configuration should load"
         )
         try expect(!explicitlyDisabledTools.exposesRobotActionTool, "Explicit robot-action disable was ignored")
         try expect(!explicitlyDisabledTools.enablesGoogleSearch, "Explicit Google Search disable was ignored")
         try expect(!explicitlyDisabledTools.enablesNewsSearch, "Explicit news-search disable was ignored")
+        try expect(!explicitlyDisabledTools.enablesAppleMusic, "Explicit Apple Music disable was ignored")
         let disabledSetup = GeminiRoboticsProtocol.setupMessage(
             configuration: explicitlyDisabledTools,
             resumptionHandle: nil
@@ -194,7 +267,7 @@ struct GeminiRoboticsProtocolFixtureTests {
         )
         try expect(
             disabledSetupBody["tools"] == nil,
-            "Explicitly disabling both tools should omit the setup tools array"
+            "Explicitly disabling every tool should omit the setup tools array"
         )
 
         let newsOnlyConfiguration = try require(
@@ -202,7 +275,8 @@ struct GeminiRoboticsProtocolFixtureTests {
                 "GEMINI_ROBOTICS_ENABLED": "true",
                 "GEMINI_API_KEY": "fixture-key",
                 "GEMINI_ROBOT_ACTION_TOOL_ENABLED": "false",
-                "GEMINI_GOOGLE_SEARCH_ENABLED": "false"
+                "GEMINI_GOOGLE_SEARCH_ENABLED": "false",
+                "GEMINI_APPLE_MUSIC_ENABLED": "false"
             ]),
             "News-only fixture configuration should load"
         )
@@ -238,26 +312,147 @@ struct GeminiRoboticsProtocolFixtureTests {
         try expect(firstRun.connectionEnabled, "An explicitly enabled existing deployment should connect on first run")
         try expect(!firstRun.streamsAudio, "First-run audio should inherit launch configuration")
         try expect(firstRun.streamsVideo, "First-run video should inherit launch configuration")
+        try expect(firstRun.streamsMainCameraVideo, "Main camera should be included on first run")
+        try expect(firstRun.streamsInsta360Video, "Insta360 should be included on first run")
+        try expect(
+            !firstRun.insta360OrientationCalibrated,
+            "Insta360 robot-relative orientation must default to uncalibrated"
+        )
+        try expect(
+            firstRun.insta360ForwardMarkerDegrees == 180,
+            "The uncalibrated forward-marker UI should default to panorama center"
+        )
 
         let persisted = GeminiRoboticsRuntimeSettings(
             configuration: configuration,
             storedConnectionEnabled: false,
             storedAudioStreamingEnabled: true,
-            storedVideoStreamingEnabled: false
+            storedVideoStreamingEnabled: false,
+            storedMainCameraVideoEnabled: false,
+            storedInsta360VideoEnabled: true,
+            storedInsta360OrientationCalibrated: true,
+            storedInsta360ForwardMarkerDegrees: 390
         )
         try expect(!persisted.connectionEnabled, "Persisted connection-off intent was ignored")
         try expect(persisted.streamsAudio, "Persisted audio override was ignored")
         try expect(!persisted.streamsVideo, "Persisted video override was ignored")
+        try expect(!persisted.streamsMainCameraVideo, "Persisted main-camera source override was ignored")
+        try expect(persisted.streamsInsta360Video, "Persisted Insta360 source override was ignored")
+        try expect(
+            persisted.insta360OrientationCalibrated,
+            "Persisted Insta360 calibration state was ignored"
+        )
+        try expect(
+            persisted.insta360ForwardMarkerDegrees == 30,
+            "Persisted forward marker was not normalized into stitched-panorama degrees"
+        )
 
         let unavailable = GeminiRoboticsRuntimeSettings(
             configuration: nil,
             storedConnectionEnabled: true,
             storedAudioStreamingEnabled: true,
-            storedVideoStreamingEnabled: true
+            storedVideoStreamingEnabled: true,
+            storedMainCameraVideoEnabled: true,
+            storedInsta360VideoEnabled: true,
+            storedInsta360OrientationCalibrated: true,
+            storedInsta360ForwardMarkerDegrees: 45
         )
         try expect(
             unavailable == GeminiRoboticsRuntimeSettings(configuration: nil),
             "Stored preferences must not bypass missing launch configuration or credentials"
+        )
+    }
+
+    private static func testInsta360CalibrationProjectionValidityAndPersistenceBoundary() throws {
+        let suiteName = "ROBGeminiCalibrationFixture.\(UUID().uuidString)"
+        let defaults = try require(
+            UserDefaults(suiteName: suiteName),
+            "Could not create isolated calibration fixture defaults"
+        )
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = ROBGeminiVideoSourceSettings(defaults: defaults)
+        let projectionA = "host=10.0.0.18|projection=equirectangular-pano-1920x960-v1|gyro=off"
+        let projectionB = "host=10.0.0.19|projection=equirectangular-pano-1920x960-v1|gyro=off"
+
+        // An operator cannot certify a direction marker before the service
+        // confirms the exact unstabilized projection used for inspection.
+        settings.insta360OrientationCalibrated = true
+        try expect(
+            !settings.insta360OrientationCalibrated,
+            "Calibration became effective without an applied preview projection"
+        )
+
+        settings.setInsta360AppliedPreviewProjectionIdentity(projectionA)
+        settings.insta360ForwardMarkerDegrees = 450
+        settings.insta360OrientationCalibrated = true
+        try expect(
+            settings.isInsta360OrientationCalibrationValid(
+                forProjectionIdentity: projectionA
+            )
+                && settings.insta360ForwardMarkerDegrees == 90,
+            "The verified projection could not establish normalized FRONT/REAR calibration"
+        )
+        try expect(
+            !settings.isInsta360OrientationCalibrationValid(
+                forProjectionIdentity: projectionB
+            ),
+            "Calibration leaked across a different camera host/projection identity"
+        )
+
+        // A reconnect withdraws the process-applied identity. Effective state
+        // fails closed, but a generic runtime snapshot must not overwrite the
+        // operator-owned saved boolean, marker, or projection identity.
+        settings.setInsta360AppliedPreviewProjectionIdentity(nil)
+        try expect(
+            !settings.insta360OrientationCalibrated,
+            "A missing process-applied projection remained robot-relative"
+        )
+        let effectiveRuntime = GeminiRoboticsRuntimeSettings(
+            configuration: try require(
+                GeminiRoboticsConfiguration.fromEnvironment([
+                    "GEMINI_ROBOTICS_ENABLED": "true",
+                    "GEMINI_API_KEY": "fixture-key",
+                ]),
+                "Calibration persistence fixture configuration should load"
+            ),
+            storedInsta360OrientationCalibrated: false,
+            storedInsta360ForwardMarkerDegrees: 180
+        )
+        effectiveRuntime.persist(to: defaults)
+        try expect(
+            defaults.bool(
+                forKey: GeminiRoboticsRuntimeSettings
+                    .insta360OrientationCalibratedDefaultsKey
+            )
+                && defaults.double(
+                    forKey: GeminiRoboticsRuntimeSettings
+                        .insta360ForwardMarkerDegreesDefaultsKey
+                ) == 90
+                && defaults.string(
+                    forKey: GeminiRoboticsRuntimeSettings
+                        .insta360CalibrationProjectionIdentityDefaultsKey
+                ) == projectionA,
+            "A temporary fail-closed runtime snapshot erased operator calibration intent"
+        )
+
+        settings.setInsta360AppliedPreviewProjectionIdentity(projectionA)
+        try expect(
+            settings.insta360OrientationCalibrated,
+            "Saved calibration did not recover when its verified projection returned"
+        )
+        settings.setInsta360AppliedPreviewProjectionIdentity(projectionB)
+        try expect(
+            !settings.insta360OrientationCalibrated
+                && !defaults.bool(
+                    forKey: GeminiRoboticsRuntimeSettings
+                        .insta360OrientationCalibratedDefaultsKey
+                )
+                && defaults.object(
+                    forKey: GeminiRoboticsRuntimeSettings
+                        .insta360CalibrationProjectionIdentityDefaultsKey
+                ) == nil,
+            "A known preview projection change did not invalidate saved robot-relative calibration"
         )
     }
 
@@ -352,6 +547,13 @@ struct GeminiRoboticsProtocolFixtureTests {
             "Missing search_news declaration"
         )
         try expect(newsDeclaration["behavior"] as? String == "BLOCKING", "News lookup must wait for its feed result")
+        let newsDescription = try require(newsDeclaration["description"] as? String, "Missing search_news description")
+        try expect(
+            newsDescription.contains("hear, read, or play RT, CNN") &&
+                newsDescription.contains("speak every returned title") &&
+                newsDescription.contains("recent sitemap entries rather than editorially ranked top stories"),
+            "News declaration lost spoken CNN briefing guidance"
+        )
         let newsParameters = try require(
             newsDeclaration["parameters"] as? [String: Any],
             "Missing search_news parameters"
@@ -369,6 +571,51 @@ struct GeminiRoboticsProtocolFixtureTests {
         let newsLimit = try require(newsProperties["limit"] as? [String: Any], "Missing news limit schema")
         try expect((newsLimit["minimum"] as? NSNumber)?.intValue == 1, "News limit minimum changed")
         try expect((newsLimit["maximum"] as? NSNumber)?.intValue == 5, "News limit maximum changed")
+
+        let musicDeclaration = try require(
+            declarations.first { $0["name"] as? String == ROBAppleMusicService.toolName },
+            "Missing apple_music declaration"
+        )
+        try expect(musicDeclaration["behavior"] as? String == "BLOCKING", "Music playback must wait for the Music app result")
+        let musicDescription = try require(musicDeclaration["description"] as? String, "Missing apple_music description")
+        try expect(
+            musicDescription.contains("macOS Music app") &&
+                musicDescription.contains("already present in the user's Music library") &&
+                musicDescription.contains("status=playing") &&
+                musicDescription.contains("accepts no URL, path, or script"),
+            "Music declaration lost its app, library, result, or argument boundary"
+        )
+        let musicParameters = try require(
+            musicDeclaration["parameters"] as? [String: Any],
+            "Missing apple_music parameters"
+        )
+        try expect(
+            musicParameters["required"] as? [String] == ["media_type", "query"],
+            "apple_music must require media_type and query"
+        )
+        let musicProperties = try require(
+            musicParameters["properties"] as? [String: Any],
+            "Missing apple_music properties"
+        )
+        try expect(
+            Set(musicProperties.keys) == Set(["media_type", "query", "artist"]),
+            "apple_music exposed unexpected arguments"
+        )
+        let musicType = try require(musicProperties["media_type"] as? [String: Any], "Missing music media_type schema")
+        try expect(
+            musicType["enum"] as? [String] == ["song", "playlist"],
+            "Music media types changed"
+        )
+        let musicQuery = try require(musicProperties["query"] as? [String: Any], "Missing music query schema")
+        let musicArtist = try require(musicProperties["artist"] as? [String: Any], "Missing music artist schema")
+        try expect(
+            (musicQuery["maxLength"] as? NSNumber)?.intValue == ROBAppleMusicService.maximumQueryCharacters,
+            "Music query bound changed"
+        )
+        try expect(
+            (musicArtist["maxLength"] as? NSNumber)?.intValue == ROBAppleMusicService.maximumArtistCharacters,
+            "Music artist bound changed"
+        )
 
         let audioConfiguration = try require(
             GeminiRoboticsConfiguration.fromEnvironment([

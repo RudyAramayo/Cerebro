@@ -6,6 +6,23 @@
 import Foundation
 import Network
 
+struct ROBControlConnectionStatusSnapshot: Sendable {
+    let stableID: String
+    let state: String
+    let role: String
+    let deviceID: String?
+    let deviceName: String?
+    let sessionID: String?
+    let usesLegacyTransport: Bool
+}
+
+struct ROBControlServerStatusSnapshot: Sendable {
+    let listenerState: String
+    let detail: String?
+    let isPaused: Bool
+    let connections: [ROBControlConnectionStatusSnapshot]
+}
+
 @objc public protocol AutoNetServerDataDelegate: AnyObject {
     func didReceiveData(_ data: Data)
     /// Lidar bytes cross this callback only after a frame-7 message has been
@@ -32,6 +49,8 @@ import Network
     private var lastLidarScanUptimeByDeviceID: [UUID: TimeInterval] = [:]
     private var lastLidarMapUptimeByDeviceID: [UUID: TimeInterval] = [:]
     private var credentialRevocationObserver: NSObjectProtocol?
+    private var listenerStatus = "stopped"
+    private var listenerStatusDetail: String?
     private lazy var armControllerBridge = ROBArmControllerBridge(server: self)
     private lazy var gripperControllerBridge = ROBGripperControllerBridge(server: self)
 
@@ -82,6 +101,10 @@ import Network
         }
 
         super.init()
+        if let startupError {
+            listenerStatus = "unavailable"
+            listenerStatusDetail = startupError.localizedDescription
+        }
         credentialRevocationObserver = NotificationCenter.default.addObserver(
             forName: .robControlCredentialWasRevoked,
             object: nil,
@@ -106,6 +129,8 @@ import Network
         }
 
         paused = false
+        listenerStatus = "starting"
+        listenerStatusDetail = nil
         armControllerBridge.start()
         gripperControllerBridge.start()
         listener.stateUpdateHandler = { [weak self] state in
@@ -311,6 +336,10 @@ import Network
     public func stateDidChange(to state: NWListener.State) {
         switch state {
         case .ready:
+            listenerStatus = "ready"
+            listenerStatusDetail = legacyCompatibilityIsActive
+                ? "Legacy plaintext compatibility mode"
+                : "QUIC/TLS listener"
             switch transportMode {
             case .v2:
                 print("ROBControl server ready on \(ROBControlPairing.serviceType) using QUIC/TLS")
@@ -319,11 +348,20 @@ import Network
             case nil:
                 break
             }
+        case .waiting(let error):
+            listenerStatus = "waiting"
+            listenerStatusDetail = error.localizedDescription
         case .failed(let error):
+            listenerStatus = "failed"
+            listenerStatusDetail = error.localizedDescription
             print("ROBControl server failed: \(error.localizedDescription)")
             stop()
         case .cancelled:
             paused = true
+            if listenerStatus != "failed" {
+                listenerStatus = "stopped"
+                listenerStatusDetail = nil
+            }
         default:
             break
         }
@@ -376,6 +414,41 @@ import Network
             .joined(separator: ", ")
     }
 
+    /// Cached, read-only process telemetry for the system-status panel. This
+    /// deliberately performs no health check and never exposes credentials.
+    @nonobjc func statusSnapshot() -> ROBControlServerStatusSnapshot {
+        precondition(Thread.isMainThread, "ROBControl status is owned by the main queue")
+        let connections = connectionsByID.values.map { connection in
+            let usesLegacyTransport: Bool
+            if case .legacy = connection.transportMode {
+                usesLegacyTransport = true
+            } else {
+                usesLegacyTransport = false
+            }
+            return ROBControlConnectionStatusSnapshot(
+                stableID: "robcontrol-\(connection.id)",
+                state: connection.isReady ? "ready" : "connecting",
+                role: connection.authenticatedRole?.rawValue ?? "unpaired",
+                deviceID: connection.authenticatedDeviceID?.uuidString.lowercased(),
+                deviceName: connection.authenticatedDeviceName,
+                sessionID: connection.authenticatedSessionUUID?.uuidString.lowercased(),
+                usesLegacyTransport: usesLegacyTransport
+            )
+        }.sorted {
+            let lhsName = $0.deviceName ?? $0.deviceID ?? $0.stableID
+            let rhsName = $1.deviceName ?? $1.deviceID ?? $1.stableID
+            let order = lhsName.localizedCaseInsensitiveCompare(rhsName)
+            if order == .orderedSame { return $0.stableID < $1.stableID }
+            return order == .orderedAscending
+        }
+        return ROBControlServerStatusSnapshot(
+            listenerState: listenerStatus,
+            detail: listenerStatusDetail,
+            isPaused: paused,
+            connections: connections
+        )
+    }
+
     public func pause() {
         paused = true
     }
@@ -387,6 +460,10 @@ import Network
     public func stop() {
         guard !paused || listener != nil || !connectionsByID.isEmpty else { return }
         paused = true
+        if listenerStatus != "failed" {
+            listenerStatus = "stopped"
+            listenerStatusDetail = nil
+        }
         armControllerBridge.stop()
         gripperControllerBridge.stop()
         listener?.stateUpdateHandler = nil

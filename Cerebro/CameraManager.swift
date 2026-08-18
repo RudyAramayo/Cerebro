@@ -129,6 +129,7 @@ protocol CameraManagerProtocol: AnyObject {
 
     func startSession() throws
     func stopSession() throws
+    func setPreviewVisible(_ visible: Bool)
     func bindCamera() throws
     func bindCameraRebootSession() throws
 }
@@ -158,6 +159,8 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     private var activeSource: CameraSource?
     private var deliveryInFlight = false
     private var previewDeliveryInFlight = false
+    private var previewVisible = false
+    private var previewVisibilityGeneration: UInt64 = 0
     private var lifecycleGeneration: UInt64 = 0
     private var acceptedDeliveryGeneration: UInt64 = 0
     private var fallbackSequence: UInt64 = 0
@@ -242,6 +245,40 @@ final class CameraManager: NSObject, CameraManagerProtocol {
             self.stopFallbackCaptureAndDrainCallbacks()
             self.activeSource = nil
             self.report(.stopped, detail: nil)
+        }
+    }
+
+    /// Controls only the local diagnostic renderer. Capture and frame delivery
+    /// remain owned by the independent perception, Gemini, and media demands.
+    /// Removing the preview layer also removes its AVFoundation connection so
+    /// a hidden window does not consume GPU/display work.
+    func setPreviewVisible(_ visible: Bool) {
+        previewLock.lock()
+        guard previewVisible != visible else {
+            previewLock.unlock()
+            return
+        }
+        previewVisible = visible
+        previewVisibilityGeneration &+= 1
+        let previewGeneration = previewVisibilityGeneration
+        previewLock.unlock()
+
+        sessionQueue.async { [weak self] in
+            guard let self,
+                  self.previewVisibilityIsCurrent(previewGeneration, visible: visible) else {
+                return
+            }
+            if visible {
+                let deliveryGeneration = self.currentDeliveryGeneration()
+                if self.activeSource == .depthAIService {
+                    self.installDepthPreviewLayer(generation: deliveryGeneration)
+                } else if self.activeSource == .avFoundationRGB {
+                    self.installAVFoundationPreviewLayer(generation: deliveryGeneration)
+                }
+            } else {
+                self.previewLayer.session = nil
+                self.removePreviewLayers(previewGeneration: previewGeneration)
+            }
         }
     }
 
@@ -407,16 +444,18 @@ final class CameraManager: NSObject, CameraManagerProtocol {
 
     private func enqueueLatestPreview(_ sampleBuffer: CMSampleBuffer) {
         previewLock.lock()
-        guard !previewDeliveryInFlight else {
+        guard previewVisible, !previewDeliveryInFlight else {
             previewLock.unlock()
             return
         }
         previewDeliveryInFlight = true
+        let previewGeneration = previewVisibilityGeneration
         previewLock.unlock()
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            if let renderer = self.depthPreviewLayer?.sampleBufferRenderer,
+            if self.previewVisibilityIsCurrent(previewGeneration, visible: true),
+               let renderer = self.depthPreviewLayer?.sampleBufferRenderer,
                renderer.isReadyForMoreMediaData {
                 renderer.enqueue(sampleBuffer)
             }
@@ -478,6 +517,21 @@ final class CameraManager: NSObject, CameraManagerProtocol {
         deliveryLock.lock()
         defer { deliveryLock.unlock() }
         return generation == acceptedDeliveryGeneration
+    }
+
+    private func previewVisibilityIsCurrent(
+        _ generation: UInt64,
+        visible: Bool
+    ) -> Bool {
+        previewLock.lock()
+        defer { previewLock.unlock() }
+        return previewVisibilityGeneration == generation && previewVisible == visible
+    }
+
+    private func currentPreviewVisibility() -> (visible: Bool, generation: UInt64) {
+        previewLock.lock()
+        defer { previewLock.unlock() }
+        return (previewVisible, previewVisibilityGeneration)
     }
 
     private func configureAVFoundationFallback() {
@@ -568,9 +622,11 @@ final class CameraManager: NSObject, CameraManagerProtocol {
             }
             videoSession = session
             videoDataOutput = output
-            // Setting this property implicitly creates the preview connection.
-            // It must complete before startRunning() enumerates connections.
-            previewLayer.session = session
+            // The local preview connection is installed only while the
+            // diagnostics window is actually visible.
+            if currentPreviewVisibility().visible {
+                previewLayer.session = session
+            }
         } catch {
             removeAVFoundationFallback(
                 detail: "RGB fallback could not bind: \(error.localizedDescription)"
@@ -639,8 +695,20 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     }
 
     private func installAVFoundationPreviewLayer(generation: UInt64) {
+        let preview = currentPreviewVisibility()
+        guard preview.visible else {
+            previewLayer.session = nil
+            return
+        }
+        // Setting this property implicitly creates the preview connection. It
+        // stays on the session queue with the rest of the capture graph.
+        previewLayer.session = videoSession
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.deliveryGenerationIsCurrent(generation) else { return }
+            guard let self,
+                  self.deliveryGenerationIsCurrent(generation),
+                  self.previewVisibilityIsCurrent(preview.generation, visible: true) else {
+                return
+            }
             self.depthPreviewLayer?.removeFromSuperlayer()
             self.depthPreviewLayer = nil
 
@@ -652,8 +720,15 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     }
 
     private func installDepthPreviewLayer(generation: UInt64) {
+        let preview = currentPreviewVisibility()
+        guard preview.visible else { return }
+        previewLayer.session = nil
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.deliveryGenerationIsCurrent(generation) else { return }
+            guard let self,
+                  self.deliveryGenerationIsCurrent(generation),
+                  self.previewVisibilityIsCurrent(preview.generation, visible: true) else {
+                return
+            }
             self.previewLayer.removeFromSuperlayer()
 
             let layer = AVSampleBufferDisplayLayer()
@@ -662,6 +737,22 @@ final class CameraManager: NSObject, CameraManagerProtocol {
             self.containerView.wantsLayer = true
             self.containerView.layer = layer
             self.depthPreviewLayer = layer
+        }
+    }
+
+    private func removePreviewLayers(previewGeneration: UInt64) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.previewVisibilityIsCurrent(previewGeneration, visible: false) else {
+                return
+            }
+            self.previewLayer.removeFromSuperlayer()
+            self.depthPreviewLayer?.sampleBufferRenderer.flush(
+                removingDisplayedImage: true,
+                completionHandler: nil
+            )
+            self.depthPreviewLayer?.removeFromSuperlayer()
+            self.depthPreviewLayer = nil
         }
     }
 

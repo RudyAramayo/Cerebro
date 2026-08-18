@@ -39,9 +39,6 @@
 - (void) queryTextInput:(NSString *)queryTextInput {
     self.isListening = YES;
     self.ignoreText = NO;
-    //dispatch_async(dispatch_get_main_queue(), ^(){
-    //    self.textView.string = @"";
-    //});
     __block NSString *queryInput = [queryTextInput copy];
     dispatch_queue_t aQueue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0);
 
@@ -57,11 +54,6 @@
                 dispatch_async(dispatch_get_main_queue(), ^(){
                     self.textView.editable = NO;
                 });
-
-                //Disable the textField and it won't recieve any audio
-                //[self.delegate shutdownAudioInput];
-                //[self.delegate inputText:queryInput];
-                //[self.delegate clearInputTextMessage];
                 self.currentIncommingVerbalMessage = queryInput;
                 
                 
@@ -168,13 +160,6 @@
             [self updateTranscriptWithText:textInput];
             
             [self.outputPipe.fileHandleForReading waitForDataInBackgroundAndNotify];
-            //dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                //self.textView.editable = YES;
-                //self.textView.string = @"";
-                //[self.delegate makeTextViewFirstResponder:self.textView];
-                //[self.textView becomeFirstResponder];
-            //});
-            
         }
         
     }];

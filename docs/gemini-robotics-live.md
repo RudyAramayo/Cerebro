@@ -13,10 +13,9 @@ ROBSpeechBox microphone tap
   -> bounded serial conversion to mono PCM16 at 16 kHz
   -> Gemini realtimeInput.audio
 
-CameraManager sample buffer
-  -> latest frame sampled at no more than 1 FPS
-  -> resized to at most 768 pixels on the longest edge
-  -> JPEG
+CameraManager main-camera sample buffer ─┐
+                                         ├─> latest fresh views, fixed labeled 1024x1024 composite
+Insta360 stitched preview JPEG ──────────┘   -> no more than 1 JPEG/second total
   -> Gemini realtimeInput.video
 
 Gemini serverContent model text or outputTranscription
@@ -51,6 +50,23 @@ boundary, and uses a six-second response-start deadline with a 45-second
 absolute deadline. Cerebro retains that on-device transcript only long enough
 to answer locally if Live times out or completes silently; it is never
 submitted to Gemini as duplicate input.
+
+Gemini Live exposes one realtime video blob rather than separately identified
+camera tracks. Cerebro therefore sends one deterministic two-panel observation:
+**MAIN FORWARD CAMERA** on top and **INSTA360 STITCHED 360 PANORAMA** below.
+The labels and each panel's LIVE/WAITING/STALE/DISABLED state are burned into
+the JPEG. Frames older than 2.5 seconds are never reused. The Insta360 decoder
+is a headless service consumer while that source is enabled; opening its debug
+window is not required.
+
+The panorama can reveal people outside the forward camera's view. Its
+robot-relative yaw begins uncalibrated, so Gemini is instructed not to call a
+panorama region "behind" based on image position alone. An operator can set the
+horizontal position of ROB's forward direction in **Settings → Perception**;
+the composite then burns in FRONT and REAR markers. Horizontal handedness is
+not calibrated; the neutral 90° and 270° ruler ticks remain image coordinates. Even after
+calibration, neither camera is a range, clearance, or action-completion sensor.
+Controller approval and local motion-safety systems remain authoritative.
 
 Ordinary dialogue falls back in this order: Apple Foundation Models, native
 Swift MLX, then a deterministic spoken recovery response. Local providers have
@@ -124,10 +140,12 @@ with Gemini disabled and logs the missing configuration.
 | `GEMINI_ROBOTICS_SYSTEM_INSTRUCTION` | Built-in ROB instruction | Overrides wake-name, response-style, and physical-action guidance. |
 | `GEMINI_GOOGLE_SEARCH_ENABLED` | `true` | Grants the Live model server-side Google Search grounding for current web information. Set explicitly to `false` to disable it. Model support is required; an unsupported model may reject session setup. |
 | `GEMINI_NEWS_SEARCH_ENABLED` | `true` | Declares Cerebro's blocking, read-only `search_news` function for fixed public publisher feeds. It has no robot/controller authority and accepts no URL. |
+| `GEMINI_APPLE_MUSIC_ENABLED` | `true` | Declares Cerebro's blocking `apple_music` function for finding and playing a song or playlist through the signed-in macOS Music app. Set explicitly to `false` to hide it. |
 | `GEMINI_ROBOT_ACTION_TOOL_ENABLED` | `true` | Declares the blocking `robot_action` tool and enables the Cerebro-to-ROBController action bridge. Set explicitly to `false` to hide it. Tool exposure does not grant motor authority. |
 
-Unrecognized values for the microphone, camera, Search, news-search, or robot-action flags fail
-closed. Connection states are logged as `off`, `connecting`, `ready`,
+Unrecognized values for the microphone, camera, Search, news-search, Apple
+Music, or robot-action flags fail closed. Connection states are logged as
+`off`, `connecting`, `ready`,
 `reconnecting`, `failed`, or `disconnected`. The session keeps the latest resumable handle,
 enables sliding-window context compression, reconnects after `goAway`, and uses
 bounded exponential backoff after failures. Successful text sends are logged by
@@ -147,14 +165,46 @@ redacted control and diagnostics panel. It provides three independent switches:
   local recognizer remains active and provides text fallback while connected.
   A fallback text turn is held until the actor has completed that audio-off
   transition, so it cannot overtake `audioStreamEnd` on the WebSocket.
-- **Send sampled camera frames to Gemini** gates JPEG encoding and WebSocket
-  forwarding. It does not turn off Cerebro perception or ROBController/Vision
-  Pro video subscriptions, which are separate camera consumers.
+- **Send sampled camera composite to Gemini** gates JPEG encoding and WebSocket
+  forwarding as the privacy master. It does not turn off Cerebro perception or
+  ROBController/Vision Pro video subscriptions, which are separate camera
+  consumers.
 
-The three choices are saved in `UserDefaults`. On the first launch with no saved
-choice, the explicit launch configuration supplies the defaults. Credentials,
-model, response modality, system instruction, Google Search, news search, and physical-action tool exposure
-remain launch-time configuration and are never written to `UserDefaults`.
+Settings → **Perception** → **Gemini Live Camera Context** has independent
+choices for the main forward camera and Insta360 panorama. Both are enabled on
+first run. Changing either choice immediately invalidates queued composites
+from the previous video generation and rechecks authorization immediately
+before each WebSocket write; a write already handed to the network cannot be
+recalled. The Insta360 choice is separate
+from local MLX/Vision analysis controls and keeps decoding active without a
+diagnostics window only while Gemini is ready and the master camera switch is
+effective.
+
+The same section has a **ROB forward in panorama** calibration. Open Insta360
+Diagnostics and use its visible 0°–360° ruler to identify the horizontal
+position that faces the same direction as ROB, then select it in 15° increments.
+**0° is the stitched image's left seam and 180° is its center.** The diagnostics
+preview draws the same FRONT position and its 180°-opposed REAR position so the
+operator can verify the mapping before relying on it.
+
+Gyro stabilization must be turned **off** and **Apply Preview Settings** must
+complete before calibration is enabled. The camera's stabilized panorama can
+change yaw, and Cerebro does not currently receive or apply the gyro yaw needed
+to compensate for that movement. Calibration is tied to the exact camera host
+and fixed equirectangular preview projection. Changing the host, stabilization,
+or projection clears it; reconnecting to the same host and projection does not.
+Leave the choice at **Uncalibrated** whenever the mount or stitch orientation is
+unknown or has changed. Cerebro only adds robot-relative FRONT/REAR markers
+after this explicit, projection-matched calibration, and the Services panel
+reports the current calibration state.
+
+The camera master, source choices, and panorama calibration are saved in
+`UserDefaults`. On the first launch with no saved camera choice, the explicit
+launch configuration supplies the defaults; robot-relative panorama direction
+remains uncalibrated until an operator sets it. Credentials, model, response
+modality, system instruction, Google Search, news search, and physical-action
+tool exposure remain launch-time configuration and are never written to
+`UserDefaults`.
 
 ### Google Search grounding
 
@@ -201,29 +251,40 @@ token accounting.
 Google Search. Ask, for example:
 
 ```text
-ROB, use the news tool to give me the top three RT headlines right now.
+ROB, read me the latest RT headlines.
+ROB, play three recent CNN headlines.
 ```
 
 The default instruction tells ROB to call this function before claiming that
 source-specific news is unavailable. Its source IDs are `rt`, `bbc`, `npr`,
-`nbc`, `cbs`, and `all`. `rt` reads RT's general-news feed. `all` produces a
-cross-publisher roundup. An optional topic filters the recent items already in
-the feeds; it is not a historical or site-wide search. Publisher feed order is
-preserved for highlights, and every returned item contains only a bounded
-title, publication time when supplied, and validated publisher link. ROB must
-attribute the report to the publisher.
+`nbc`, `cbs`, `cnn`, and `all`. `rt` reads RT's general-news feed. `cnn` reads
+CNN's official news sitemap, so those results are recent CNN stories rather
+than an editorial ranking. `all` produces a cross-publisher roundup. An
+optional topic filters the recent items already in the publisher source; it is
+not a historical or site-wide search. Publisher order is preserved for
+highlights, and every returned item contains only a bounded title, publication
+time when supplied, and validated publisher link. ROB attributes the report to
+the publisher and speaks each returned title without reading URLs aloud.
+
+Ordinary requests to *hear*, *read*, or *play* a supported news feed mean a
+finite spoken headline briefing through ROB's existing SpeechBox voice. They do
+not start a continuous RT or CNN television broadcast. This keeps speaker audio
+inside Cerebro's existing microphone-suppression lifecycle instead of feeding a
+24-hour stream back into speech recognition. If the user explicitly asks for a
+live TV channel or broadcast stream, ROB explains that limitation and offers
+the spoken briefing.
 
 This path is automatically authorized because it is informational and
 read-only. It never enters `ROBMainViewController`'s `robot_action` delegate,
 ROBController, Amber authority, a shell, a browser, or a motion executor. The
-network boundary is fixed in source code: HTTPS GET to five exact feed URLs,
-an ephemeral no-cookie/no-cache session, no credentials, no redirects, a 10
-second request timeout, and a 2 MiB streaming response cap. User or model text
-cannot supply or modify a URL. Article links are validated against the selected
-publisher's hosts and returned for attribution; Cerebro does not fetch them.
-Feed descriptions may be used for local topic matching but are stripped and
-never returned to Gemini. All publisher content is treated as untrusted data,
-not as tool instructions.
+network boundary is fixed in source code: HTTPS GET to six exact publisher
+URLs, an ephemeral no-cookie/no-cache session, no credentials, no redirects, a
+10 second request timeout, a 2 MiB streaming cap for RT, and a 512 KiB cap for
+each smaller source. User or model text cannot supply or modify a URL. Article
+links are validated against the selected publisher's hosts and returned for
+attribution; Cerebro does not fetch them. Feed descriptions may be used for
+local topic matching but are stripped and never returned to Gemini. All
+publisher content is treated as untrusted data, not as tool instructions.
 
 To hide the function for a launch:
 
@@ -237,6 +298,46 @@ dialogue fallback has no function-calling path. Normal outbound HTTPS must also
 work. Neither condition is a ROBController permission. Configuration-bound
 ephemeral tokens may need to be reissued with the new declaration before a
 deployment can use it.
+
+### Apple Music playback
+
+`apple_music` is enabled by default and controls the literal macOS `Music.app`
+for an explicit music request. For example:
+
+```text
+ROB, play Purple Rain by Prince.
+ROB, play my Favorites Mix playlist.
+```
+
+The function accepts a required `media_type` of `song` or `playlist`, a bounded
+text `query`, and an optional `artist` only for song searches. A song request
+searches tracks already available in the Music library of the signed-in macOS
+account. A playlist request searches that account's personal playlists and
+subscription playlists that Music exposes in its library, then begins playback
+of the selected match.
+
+On first use, macOS may ask whether Cerebro may control Music. Allow Cerebro
+under **System Settings → Privacy & Security → Automation → Music**; denying or
+later revoking that permission makes the tool return an unavailable result.
+Music playback is a local media action, so it does not enter the
+`robot_action` path and does not require ROBController approval.
+
+The tool schema contains no URL or script field. Model-supplied text is treated
+only as a bounded song, artist, or playlist search term: Cerebro does not open a
+model-supplied URL, run a shell command, or execute model-authored script text.
+Native macOS Music.app scripting does not provide general Apple Music catalog
+search for an item absent from the signed-in library. Cerebro therefore reports
+no match when a requested song or playlist is not already exposed there; add it
+to the Music library first when broader catalog discovery is needed.
+
+To hide the function for a launch:
+
+```text
+GEMINI_APPLE_MUSIC_ENABLED=false
+```
+
+The function requires a ready Gemini Live session to be invoked. Cerebro's
+Apple/MLX dialogue fallback has no function-calling path.
 
 ## ROBController action bridge
 
@@ -514,6 +615,8 @@ Run the standalone JSON protocol fixtures:
 ```bash
 swiftc \
   Cerebro/GeminiRoboticsProtocol.swift \
+  Cerebro/ROBNewsSearchService.swift \
+  Cerebro/ROBAppleMusicService.swift \
   Tests/GeminiRoboticsProtocolFixtureTests.swift \
   -o /tmp/CerebroGeminiProtocolFixtureTests
 
@@ -528,6 +631,22 @@ callback-before-interruption and interruption-before-callback barge-in ordering,
 blocking tool calls, cancellations, session-resumption handles, `goAway`
 handling, effective diagnostics modes and counters, and redaction of diagnostic
 event summaries. They do not make a billable network request.
+
+Run the standalone Apple Music service fixtures:
+
+```bash
+swiftc \
+  Cerebro/ROBAppleMusicService.swift \
+  Tests/ROBAppleMusicServiceFixtureTests.swift \
+  -o /tmp/CerebroAppleMusicServiceFixtureTests
+
+/tmp/CerebroAppleMusicServiceFixtureTests
+```
+
+These fixtures use a fake Music bridge to cover strict argument validation,
+song and playlist matching, deterministic ambiguity handling, playback
+results, and Automation failures. They do not launch Music, play audio, search
+the Apple Music catalog, or contact Gemini.
 
 On 2026-08-01, a sanitized manual round trip compiled against the repository's
 protocol implementation reached `setupComplete`, sent the test request through

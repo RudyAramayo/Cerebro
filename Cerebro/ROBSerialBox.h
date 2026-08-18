@@ -8,6 +8,7 @@
 
 #import <Foundation/Foundation.h>
 #import <Cocoa/Cocoa.h>
+#import "ROBNeckSafetyPolicy.h"
 
 // import IOKit headers
 #include <IOKit/IOKitLib.h>
@@ -18,6 +19,14 @@
 
 @class ROBMainViewController;
 @class ROBBaseControllerModel;
+
+FOUNDATION_EXPORT NSNotificationName const ROBSerialHardwareDidChangeNotification;
+
+typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
+    ROBNeckCommandDispositionRejected = 0,
+    ROBNeckCommandDispositionAppliedCommand = 1,
+    ROBNeckCommandDispositionHeldForSafety = 2,
+};
 
 @interface ROBSerialBox : NSObject
 {
@@ -31,12 +40,15 @@
 }
 @property (readwrite, retain) NSString *currentIncommingVerbalMessage;
 
-@property (readwrite, retain) NSTextView *serialOutputArea_base;
-@property (readwrite, retain) NSTextField *serialInputField_base;
+@property (nonatomic, weak) NSTextView *serialOutputArea_base;
 
+@property (nonatomic, weak) NSPopUpButton *serialListPullDown_base;
+@property (nonatomic, weak) NSPopUpButton *serialListPullDown_maestro;
 
-@property (readwrite, retain) NSPopUpButton *serialListPullDown_base;
-@property (readwrite, retain) NSPopUpButton *serialListPullDown_maestro;
+/// Last automatic-discovery result shown by the optional Settings UI. Serial
+/// discovery and reconnect do not depend on either popup being instantiated.
+@property (atomic, readonly, copy) NSString *baseSerialStatusText;
+@property (atomic, readonly, copy) NSString *maestroSerialStatusText;
 
 @property (readwrite, retain) ROBMainViewController *delegate;
 
@@ -47,6 +59,33 @@
 @property (readwrite, assign) NSButton *energizeWaistRotationButton;
 
 @property (readwrite, retain) NSString *amberHostIP;
+
+// These values are meaningful only while their corresponding `...Known`
+// property is true. They are commanded targets, not measured shaft positions.
+@property (readonly, assign) NSInteger commandedNeckPanTarget;
+@property (readonly, assign) NSInteger commandedLowerNeckTiltTarget;
+@property (readonly, assign) NSInteger commandedUpperNeckTiltTarget;
+@property (readonly, assign, getter=isNeckPanCommandKnown) BOOL neckPanCommandKnown;
+@property (readonly, assign, getter=isLowerNeckTiltCommandKnown) BOOL lowerNeckTiltCommandKnown;
+@property (readonly, assign, getter=isUpperNeckTiltCommandKnown) BOOL upperNeckTiltCommandKnown;
+@property (readonly, assign, getter=isNeckCommandStateKnown) BOOL neckCommandStateKnown;
+@property (readonly, assign) double commandedNeckPanDegrees;
+@property (readonly, assign) double currentNeckPanMinimumDegrees;
+@property (readonly, assign) double currentNeckPanMaximumDegrees;
+@property (readonly, assign, getter=isNeckPanCommandLimited) BOOL neckPanCommandLimited;
+@property (readonly, assign, getter=isUpperNeckCommandCompensated) BOOL upperNeckCommandCompensated;
+@property (readonly, assign, getter=isNeckSafetyCalibrationConfirmed) BOOL neckSafetyCalibrationConfirmed;
+@property (readonly, assign, getter=isNeckCameraLevelingEnabled) BOOL neckCameraLevelingEnabled;
+@property (readonly, copy) NSString *neckCommandSource;
+@property (readonly, copy) NSString *neckCommandSafetyStatus;
+
+- (ROBNeckSafetyConfig)neckSafetyConfiguration;
+- (BOOL)applyNeckSafetyConfiguration:(ROBNeckSafetyConfig)configuration;
+/// Persists the runtime leveling mode and, when all three active commands are
+/// known, reapplies only that neck pose through the shared safety gateway with
+/// the current upper target as the new camera demand. Unknown/OFF poses are
+/// never energized by this toggle.
+- (BOOL)setNeckCameraLevelingEnabled:(BOOL)enabled;
 
 @property (readwrite, retain) NSSlider *arm_R11_force;
 
@@ -95,11 +134,13 @@
 
 - (void) serialPortSelected_base;
 - (void) serialPortSelected_maestro;
+- (void)selectBaseSerialPort:(NSString *)path;
 
 - (void) sendBaseCommand:(NSString *)command;
 
 - (void) initialize_connection;
 - (void) connectMaestro;
+- (void)refreshSerialPortControls;
 
 
 - (IBAction)forward:(id)sender;
@@ -131,6 +172,16 @@
 
 - (void) controllerId:(NSString *)controllerId controllerModelData:(ROBBaseControllerModel *)controllerModelData;
 - (void)applyVisionNeckPan:(float)pan tilt:(float)tilt;
+/// Typed ingress for autonomous neck gestures. Pan is calibrated degrees;
+/// lower/upper are Maestro command targets because those axes do not yet have
+/// verified degree calibration. Acceptance reports a commanded (unverified)
+/// result, never physical arrival. Renew the short lease while a gesture runs.
+- (ROBNeckCommandDisposition)requestNeckGesturePanDegrees:(double)panDegrees
+                                      lowerTiltRawTarget:(NSInteger)lowerTiltRawTarget
+                                     cameraTiltRawTarget:(NSInteger)cameraTiltRawTarget
+                                           leaseDuration:(NSTimeInterval)leaseDuration
+                                                   source:(NSString *)source;
+- (void)cancelNeckGestureAuthority;
 - (void)applyVisionGrippersActive:(BOOL)active leftClosed:(BOOL)leftClosed rightClosed:(BOOL)rightClosed;
 - (void)applyVisionTorsoActive:(BOOL)active rotation:(float)rotation;
 - (void)switchToMasterControllerID:(NSString *)controllerID;
@@ -169,7 +220,9 @@
                              arm_L_elbow_tilt:(NSString *)arm_L_elbow_tilt
                               arm_L_wrist_pan:(NSString *)arm_L_wrist_pan
                              arm_L_wrist_tilt:(NSString *)arm_L_wrist_tilt
-                                arm_L_gripper:(NSString *)arm_L_gripper;
+                                arm_L_gripper:(NSString *)arm_L_gripper
+                            operatorInitiated:(BOOL)operatorInitiated
+                   lowerTiltOperatorInitiated:(BOOL)lowerTiltOperatorInitiated;
 
 - (IBAction) shutdown_R11_core:(id)sender;
 - (IBAction) shutdown_L10_core:(id)sender;

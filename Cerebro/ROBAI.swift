@@ -7,6 +7,7 @@
 
 import AVFoundation
 import CoreImage
+import CoreText
 import Foundation
 import ImageIO
 #if canImport(FoundationModels)
@@ -25,6 +26,162 @@ private struct GeminiRoboticsRuntimePolicy {
     let connectionGeneration: UInt64
     let audioGeneration: UInt64
     let videoGeneration: UInt64
+}
+
+/// A synchronous privacy boundary shared by the UI-facing runtime and the
+/// Live actor. Runtime-policy application is asynchronous; this gate ensures
+/// an older queued frame cannot slip onto the socket while a source-off or
+/// camera-off policy is still waiting to reach the actor.
+private final class GeminiVideoAuthorizationGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var enabled = false
+    private var generation: UInt64 = 0
+    private var revision: UInt64 = 0
+
+    func update(policy: GeminiRoboticsRuntimePolicy) {
+        lock.lock()
+        guard policy.revision > revision else {
+            lock.unlock()
+            return
+        }
+        revision = policy.revision
+        generation = policy.videoGeneration
+        enabled = policy.settings.connectionEnabled &&
+            policy.settings.streamsVideo &&
+            (policy.settings.streamsMainCameraVideo ||
+                policy.settings.streamsInsta360Video)
+        lock.unlock()
+    }
+
+    func revoke() {
+        lock.lock()
+        enabled = false
+        lock.unlock()
+    }
+
+    func allows(generation candidate: UInt64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return enabled && candidate == generation
+    }
+
+    /// Linearizes authorization with the actual WebSocket enqueue call. The
+    /// lock is held only for the synchronous submission, never for network I/O
+    /// or its completion callback.
+    func performIfAllowed(
+        generation candidate: UInt64,
+        _ submit: () -> Void
+    ) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard enabled && candidate == generation else { return false }
+        submit()
+        return true
+    }
+}
+
+/// Tracks state-changing local Music work independently of the Live actor's
+/// response ledger. Reserving before a task starts closes the race where a
+/// cancellation arrives between task creation and registration.
+private final class ROBAppleMusicTaskStartGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isOpen = false
+    private var waiter: CheckedContinuation<Void, Never>?
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if isOpen {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                waiter = continuation
+                lock.unlock()
+            }
+        }
+    }
+
+    func open() {
+        lock.lock()
+        guard !isOpen else {
+            lock.unlock()
+            return
+        }
+        isOpen = true
+        let pendingWaiter = waiter
+        waiter = nil
+        lock.unlock()
+        pendingWaiter?.resume()
+    }
+}
+
+private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
+    private struct Entry {
+        let token: UUID
+        var task: Task<Void, Never>?
+        var isCancelled: Bool
+    }
+
+    private let lock = NSLock()
+    private var entries: [String: Entry] = [:]
+
+    func start(callID: String, operation: @escaping @Sendable () async -> Void) {
+        let token = UUID()
+        let startGate = ROBAppleMusicTaskStartGate()
+        lock.lock()
+        entries[callID]?.task?.cancel()
+        entries[callID] = Entry(token: token, task: nil, isCancelled: false)
+        lock.unlock()
+
+        let task = Task { [weak self] in
+            await startGate.wait()
+            defer { self?.finish(callID: callID, token: token) }
+            guard !Task.isCancelled else { return }
+            await operation()
+        }
+
+        lock.lock()
+        if var entry = entries[callID], entry.token == token {
+            entry.task = task
+            entries[callID] = entry
+            if entry.isCancelled { task.cancel() }
+        } else {
+            task.cancel()
+        }
+        lock.unlock()
+        startGate.open()
+    }
+
+    func cancel(callIDs: [String]) {
+        var tasks: [Task<Void, Never>?] = []
+        lock.lock()
+        for callID in callIDs {
+            guard var entry = entries[callID] else { continue }
+            entry.isCancelled = true
+            tasks.append(entry.task)
+            entries[callID] = entry
+        }
+        lock.unlock()
+        for task in tasks {
+            task?.cancel()
+        }
+    }
+
+    func cancelAll() {
+        lock.lock()
+        let tasks = entries.values.compactMap(\.task)
+        entries.removeAll()
+        lock.unlock()
+        tasks.forEach { $0.cancel() }
+    }
+
+    private func finish(callID: String, token: UUID) {
+        lock.lock()
+        if entries[callID]?.token == token {
+            entries.removeValue(forKey: callID)
+        }
+        lock.unlock()
+    }
 }
 
 @objc public protocol ROBAIDelegate: AnyObject {
@@ -68,7 +225,7 @@ private struct GeminiRoboticsRuntimePolicy {
 }
 
 @available(macOS 10.15, *)
-@objcMembers public final class ROBAI: NSObject {
+@objcMembers public final class ROBAI: NSObject, ROBInsta360VideoFrameConsumer {
     public weak var delegate: ROBAIDelegate?
 
     public var isConfigured: Bool { configuration != nil }
@@ -90,6 +247,32 @@ private struct GeminiRoboticsRuntimePolicy {
         return runtimeSettings.streamsVideo &&
             appliedCameraStreaming &&
             !geminiConversationCircuitIsOpen
+    }
+    public var streamsMainCameraVideo: Bool {
+        statusLock.lock()
+        defer { statusLock.unlock() }
+        return runtimeSettings.streamsVideo &&
+            runtimeSettings.streamsMainCameraVideo &&
+            appliedCameraStreaming &&
+            !geminiConversationCircuitIsOpen
+    }
+    public var streamsInsta360Video: Bool {
+        statusLock.lock()
+        defer { statusLock.unlock() }
+        return runtimeSettings.streamsVideo &&
+            runtimeSettings.streamsInsta360Video &&
+            appliedCameraStreaming &&
+            !geminiConversationCircuitIsOpen
+    }
+    public var mainCameraVideoSourceEnabled: Bool {
+        statusLock.lock()
+        defer { statusLock.unlock() }
+        return runtimeSettings.streamsMainCameraVideo
+    }
+    public var insta360VideoSourceEnabled: Bool {
+        statusLock.lock()
+        defer { statusLock.unlock() }
+        return runtimeSettings.streamsInsta360Video
     }
     public var isLiveSessionReady: Bool {
         statusLock.lock()
@@ -114,19 +297,45 @@ private struct GeminiRoboticsRuntimePolicy {
     private var liveSession: GeminiRoboticsLiveSession?
     private var audioEventStream: GeminiOrderedAudioEventStream?
     private var audioEncoder: GeminiPCM16Encoder?
-    private var videoEncoder: GeminiJPEGEncoder?
+    private var videoEncoder: GeminiMultiCameraJPEGEncoder?
+    private let videoAuthorizationGate = GeminiVideoAuthorizationGate()
     private let newsSearchService = ROBNewsSearchService()
+    private let appleMusicService = ROBAppleMusicService()
+    private let localAppleMusicToolTasks = ROBAppleMusicToolTaskRegistry()
+    private var hasRequestedMusicAutomationPermission = false
     private var geminiFailureCircuitBreaker = GeminiFailureCircuitBreaker()
     private var geminiConversationCircuitIsOpen = false
     private var geminiCircuitResetGeneration: UInt64 = 0
 
-    public override init() {
-        let configuration = GeminiRoboticsConfiguration.fromEnvironment()
-        let userDefaults = UserDefaults.standard
-        let runtimeSettings = GeminiRoboticsRuntimeSettings(
+    public override convenience init() {
+        self.init(
+            configuration: GeminiRoboticsConfiguration.fromEnvironment(),
+            userDefaults: .standard
+        )
+    }
+
+    /// Internal profile initializer used by isolated, non-embodied text
+    /// channels. A separate defaults suite prevents those channels from
+    /// inheriting or mutating microphone/camera runtime preferences.
+    @nonobjc init(
+        configuration: GeminiRoboticsConfiguration?,
+        userDefaults: UserDefaults
+    ) {
+        var runtimeSettings = GeminiRoboticsRuntimeSettings(
             configuration: configuration,
             defaults: userDefaults
         )
+        if configuration?.usesEmbodiedCameraContext == true {
+            let videoSourceSettings = ROBGeminiVideoSourceSettings(defaults: userDefaults)
+            let activeInsta360ProjectionIdentity = ROBInsta360CameraService.shared
+                .calibrationProjectionIdentity
+            runtimeSettings.insta360OrientationCalibrated = videoSourceSettings
+                .isInsta360OrientationCalibrationValid(
+                    forProjectionIdentity: activeInsta360ProjectionIdentity
+                )
+        } else {
+            runtimeSettings.insta360OrientationCalibrated = false
+        }
         self.configuration = configuration
         self.userDefaults = userDefaults
         self.runtimeSettings = runtimeSettings
@@ -148,10 +357,12 @@ private struct GeminiRoboticsRuntimePolicy {
             audioGeneration: audioGeneration,
             videoGeneration: videoGeneration
         )
+        videoAuthorizationGate.update(policy: initialPolicy)
         let session = GeminiRoboticsLiveSession(
             configuration: configuration,
             diagnosticsStore: diagnosticsStore,
-            runtimePolicy: initialPolicy
+            runtimePolicy: initialPolicy,
+            videoAuthorizationGate: videoAuthorizationGate
         ) { [weak self] event in
             self?.handle(event)
         }
@@ -170,7 +381,16 @@ private struct GeminiRoboticsRuntimePolicy {
             }
         )
 
-        videoEncoder = GeminiJPEGEncoder { [weak session, diagnosticsStore] data, generation in
+        videoEncoder = GeminiMultiCameraJPEGEncoder(
+            mainCameraEnabled: runtimeSettings.streamsMainCameraVideo,
+            insta360Enabled: runtimeSettings.streamsInsta360Video,
+            insta360OrientationCalibrated: runtimeSettings.insta360OrientationCalibrated,
+            insta360ForwardMarkerDegrees: runtimeSettings.insta360ForwardMarkerDegrees,
+            generation: initialPolicy.videoGeneration
+        ) { [weak self, weak session, diagnosticsStore] data, generation in
+            guard self?.acceptsEncodedVideo(generation: generation) == true else {
+                return
+            }
             Task {
                 let accepted = await session?.sendVideoJPEG(
                     data,
@@ -184,6 +404,7 @@ private struct GeminiRoboticsRuntimePolicy {
     }
 
     deinit {
+        localAppleMusicToolTasks.cancelAll()
         audioEventStream?.finish()
         let session = liveSession
         Task { await session?.stop(connectionState: .disconnected, failureDetail: nil) }
@@ -194,6 +415,10 @@ private struct GeminiRoboticsRuntimePolicy {
             diagnosticsStore.noteConnectionState("unavailable")
             notifyConnectionState("unavailable", detail: "Set GEMINI_ROBOTICS_ENABLED=true and provide GEMINI_EPHEMERAL_TOKEN or GEMINI_API_KEY to enable streaming.")
             return
+        }
+        if configuration?.enablesAppleMusic == true && !hasRequestedMusicAutomationPermission {
+            hasRequestedMusicAutomationPermission = true
+            _ = ROBAppleMusicService.requestAutomationPermission()
         }
         let policy = runtimePolicySnapshot()
         guard policy.settings.connectionEnabled else {
@@ -207,6 +432,9 @@ private struct GeminiRoboticsRuntimePolicy {
     }
 
     public func disconnect() {
+        localAppleMusicToolTasks.cancelAll()
+        hasRequestedMusicAutomationPermission = false
+        videoAuthorizationGate.revoke()
         statusLock.lock()
         liveSessionReady = false
         statusLock.unlock()
@@ -233,6 +461,7 @@ private struct GeminiRoboticsRuntimePolicy {
         }
 
         if !enabled {
+            localAppleMusicToolTasks.cancelAll()
             statusLock.lock()
             liveSessionReady = false
             statusLock.unlock()
@@ -247,6 +476,7 @@ private struct GeminiRoboticsRuntimePolicy {
             statusLock.unlock()
             diagnosticsStore.noteConnectionState("starting")
         }
+        configureVideoEncoder(for: policy)
         applyRuntimePolicy(policy)
     }
 
@@ -270,7 +500,59 @@ private struct GeminiRoboticsRuntimePolicy {
               ) else {
             return
         }
-        videoEncoder?.reset()
+        configureVideoEncoder(for: policy)
+        applyRuntimePolicy(policy)
+    }
+
+    public func setMainCameraVideoStreamingEnabled(_ enabled: Bool) {
+        ROBGeminiVideoSourceSettings.shared.mainCameraEnabled = enabled
+        synchronizeVideoSourceSettings()
+    }
+
+    public func setInsta360VideoStreamingEnabled(_ enabled: Bool) {
+        ROBGeminiVideoSourceSettings.shared.insta360Enabled = enabled
+        synchronizeVideoSourceSettings()
+    }
+
+    /// Reconciles Settings with the active embodied runtime. Source changes
+    /// are video-generation boundaries so a queued composite containing a
+    /// source that was just disabled is rejected before WebSocket send.
+    public func synchronizeVideoSourceSettings() {
+        let defaults = userDefaults
+        let videoSourceSettings = ROBGeminiVideoSourceSettings(defaults: defaults)
+        let mainEnabled = (defaults.object(
+            forKey: GeminiRoboticsRuntimeSettings.mainCameraVideoDefaultsKey
+        ) as? NSNumber)?.boolValue ?? true
+        let insta360Enabled = (defaults.object(
+            forKey: GeminiRoboticsRuntimeSettings.insta360VideoDefaultsKey
+        ) as? NSNumber)?.boolValue ?? true
+        // Robot-relative FRONT/REAR labels are safe only when the camera has
+        // actually applied the same unstabilized projection that the operator
+        // calibrated. A saved boolean alone must never authorize the labels.
+        let activeInsta360ProjectionIdentity = ROBInsta360CameraService.shared
+            .calibrationProjectionIdentity
+        let orientationCalibrated = configuration?.usesEmbodiedCameraContext == true
+            && videoSourceSettings.isInsta360OrientationCalibrationValid(
+                forProjectionIdentity: activeInsta360ProjectionIdentity
+            )
+        let forwardMarkerDegrees = GeminiRoboticsRuntimeSettings.normalizedDegrees(
+            (defaults.object(
+                forKey: GeminiRoboticsRuntimeSettings.insta360ForwardMarkerDegreesDefaultsKey
+            ) as? NSNumber)?.doubleValue ?? 180
+        )
+        guard configuration != nil,
+              let policy = updateRuntimeSettings(
+                  domain: .video,
+                  mutation: {
+                      $0.streamsMainCameraVideo = mainEnabled
+                      $0.streamsInsta360Video = insta360Enabled
+                      $0.insta360OrientationCalibrated = orientationCalibrated
+                      $0.insta360ForwardMarkerDegrees = forwardMarkerDegrees
+                  }
+              ) else {
+            return
+        }
+        configureVideoEncoder(for: policy)
         applyRuntimePolicy(policy)
     }
 
@@ -330,10 +612,55 @@ private struct GeminiRoboticsRuntimePolicy {
         let policy = runtimePolicySnapshot()
         guard isLiveSessionReady,
               policy.settings.connectionEnabled,
-              policy.settings.streamsVideo else {
+              policy.settings.streamsVideo,
+              policy.settings.streamsMainCameraVideo else {
             return
         }
-        videoEncoder?.enqueue(sampleBuffer, generation: policy.videoGeneration)
+        videoEncoder?.enqueueMainCamera(
+            sampleBuffer,
+            generation: policy.videoGeneration
+        )
+    }
+
+    public func consumeInsta360JPEGFrame(
+        _ jpegData: Data,
+        capturedAt: Date,
+        capturedAtUptime: TimeInterval
+    ) {
+        sendInsta360JPEG(
+            jpegData,
+            capturedAt: capturedAt,
+            capturedAtUptime: capturedAtUptime
+        )
+    }
+
+    @objc(sendInsta360JPEG:capturedAt:)
+    public func sendInsta360JPEG(_ jpegData: Data, capturedAt: Date) {
+        sendInsta360JPEG(
+            jpegData,
+            capturedAt: capturedAt,
+            capturedAtUptime: ProcessInfo.processInfo.systemUptime
+        )
+    }
+
+    private func sendInsta360JPEG(
+        _ jpegData: Data,
+        capturedAt: Date,
+        capturedAtUptime: TimeInterval
+    ) {
+        let policy = runtimePolicySnapshot()
+        guard isLiveSessionReady,
+              policy.settings.connectionEnabled,
+              policy.settings.streamsVideo,
+              policy.settings.streamsInsta360Video else {
+            return
+        }
+        videoEncoder?.enqueueInsta360(
+            jpegData,
+            capturedAt: capturedAt,
+            capturedAtUptime: capturedAtUptime,
+            generation: policy.videoGeneration
+        )
     }
 
     @discardableResult
@@ -581,6 +908,30 @@ private struct GeminiRoboticsRuntimePolicy {
         )
     }
 
+    @nonobjc private func configureVideoEncoder(
+        for policy: GeminiRoboticsRuntimePolicy
+    ) {
+        videoEncoder?.configure(
+            mainCameraEnabled: policy.settings.streamsMainCameraVideo,
+            insta360Enabled: policy.settings.streamsInsta360Video,
+            insta360OrientationCalibrated: policy.settings.insta360OrientationCalibrated,
+            insta360ForwardMarkerDegrees: policy.settings.insta360ForwardMarkerDegrees,
+            generation: policy.videoGeneration
+        )
+    }
+
+    @nonobjc private func acceptsEncodedVideo(generation: UInt64) -> Bool {
+        statusLock.lock()
+        defer { statusLock.unlock() }
+        return generation == videoGeneration &&
+            liveSessionReady &&
+            runtimeSettings.connectionEnabled &&
+            runtimeSettings.streamsVideo &&
+            (runtimeSettings.streamsMainCameraVideo ||
+                runtimeSettings.streamsInsta360Video) &&
+            !geminiConversationCircuitIsOpen
+    }
+
     @nonobjc private func updateRuntimeSettings(
         domain: GeminiRoboticsRuntimeSettingDomain,
         mutation: (inout GeminiRoboticsRuntimeSettings) -> Void
@@ -621,6 +972,7 @@ private struct GeminiRoboticsRuntimePolicy {
             audioGeneration: audioGeneration,
             videoGeneration: videoGeneration
         )
+        videoAuthorizationGate.update(policy: policy)
         statusLock.unlock()
 
         updatedSettings.persist(to: userDefaults)
@@ -751,6 +1103,22 @@ private struct GeminiRoboticsRuntimePolicy {
                             )
                         }
                     }
+                case .localAppleMusic:
+                    if configuration?.enablesAppleMusic == true {
+                        handleLocalAppleMusicToolCall(call)
+                    } else {
+                        let session = liveSession
+                        Task {
+                            await session?.sendToolResponse(
+                                callID: call.id,
+                                name: call.name,
+                                result: [
+                                    "status": "rejected",
+                                    "error": "Apple Music control is disabled for this Cerebro launch."
+                                ]
+                            )
+                        }
+                    }
                 case .delegate:
                     DispatchQueue.main.async { [weak self] in
                         guard let self, self.isGeminiConnectionEnabled else { return }
@@ -766,6 +1134,7 @@ private struct GeminiRoboticsRuntimePolicy {
             }
 
         case .cancelledToolCalls(let callIDs):
+            localAppleMusicToolTasks.cancel(callIDs: callIDs)
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.delegate?.robAI?(self, didCancelToolCallIDs: callIDs)
@@ -778,6 +1147,20 @@ private struct GeminiRoboticsRuntimePolicy {
         let session = liveSession
         Task {
             let result = await service.execute(arguments: call.arguments)
+            await session?.sendToolResponse(
+                callID: call.id,
+                name: call.name,
+                result: result
+            )
+        }
+    }
+
+    private func handleLocalAppleMusicToolCall(_ call: GeminiRoboticsToolCall) {
+        let service = appleMusicService
+        let session = liveSession
+        localAppleMusicToolTasks.start(callID: call.id) {
+            let result = await service.execute(arguments: call.arguments)
+            guard !Task.isCancelled else { return }
             await session?.sendToolResponse(
                 callID: call.id,
                 name: call.name,
@@ -870,6 +1253,7 @@ private actor GeminiRoboticsLiveSession {
 
     private let configuration: GeminiRoboticsConfiguration
     private let diagnosticsStore: GeminiRoboticsDiagnosticsStore
+    private let videoAuthorizationGate: GeminiVideoAuthorizationGate
     private let eventHandler: (Event) -> Void
     private var audioStreamingEnabled: Bool
     private var videoStreamingEnabled: Bool
@@ -938,10 +1322,12 @@ private actor GeminiRoboticsLiveSession {
         configuration: GeminiRoboticsConfiguration,
         diagnosticsStore: GeminiRoboticsDiagnosticsStore,
         runtimePolicy: GeminiRoboticsRuntimePolicy,
+        videoAuthorizationGate: GeminiVideoAuthorizationGate,
         eventHandler: @escaping (Event) -> Void
     ) {
         self.configuration = configuration
         self.diagnosticsStore = diagnosticsStore
+        self.videoAuthorizationGate = videoAuthorizationGate
         audioStreamingEnabled = runtimePolicy.settings.streamsAudio
         videoStreamingEnabled = runtimePolicy.settings.streamsVideo
         runtimePolicyRevision = runtimePolicy.revision
@@ -1154,6 +1540,7 @@ private actor GeminiRoboticsLiveSession {
 
     func sendVideoJPEG(_ data: Data, generation: UInt64) async -> Bool {
         guard generation == videoGeneration,
+              videoAuthorizationGate.allows(generation: generation),
               videoStreamingEnabled,
               shouldRun,
               setupIsComplete,
@@ -2003,20 +2390,32 @@ private actor GeminiRoboticsLiveSession {
                 }
             }
 
+            if let pendingVideoJPEG,
+               !videoAuthorizationGate.allows(
+                   generation: pendingVideoJPEG.generation
+               ) {
+                self.pendingVideoJPEG = nil
+                break
+            }
+
             guard activeVideoDrainID == drainID,
                   setupIsComplete,
                   videoStreamingEnabled,
                   let frame = pendingVideoJPEG,
                   frame.generation == videoGeneration,
+                  videoAuthorizationGate.allows(generation: frame.generation),
                   let socket else {
                 break
             }
             pendingVideoJPEG = nil
             do {
-                try await send(
-                    GeminiRoboticsProtocol.realtimeVideoMessage(frame.data),
+                let submitted = try await sendVideo(
+                    frame,
                     over: socket
                 )
+                guard submitted else {
+                    break
+                }
                 guard activeVideoDrainID == drainID,
                       setupIsComplete,
                       videoStreamingEnabled,
@@ -2031,6 +2430,7 @@ private actor GeminiRoboticsLiveSession {
                 if activeVideoDrainID == drainID,
                    videoStreamingEnabled,
                    frame.generation == videoGeneration,
+                   videoAuthorizationGate.allows(generation: frame.generation),
                    self.socket === socket {
                     pendingVideoJPEG = frame
                 }
@@ -2101,9 +2501,11 @@ private actor GeminiRoboticsLiveSession {
                         // local action coordinator confirms a safe stop.
                         toolCallLedger[callID] = .cancelling(name: name)
                     } else {
-                        // Read-only local tools own no physical resources and
-                        // can release the blocking slot immediately. A late
-                        // response is ignored by sendToolResponse.
+                        // Local non-robot tools own no physical resources and
+                        // can release the blocking slot immediately. Any
+                        // state-changing local executor must also observe the
+                        // cancellation before mutation; a late response is
+                        // ignored by sendToolResponse.
                         toolCallLedger[callID] = .cancelled
                         activeToolCallID = nil
                     }
@@ -2235,6 +2637,35 @@ private actor GeminiRoboticsLiveSession {
     private func send(_ object: [String: Any], over socket: URLSessionWebSocketTask) async throws {
         let json = try GeminiRoboticsProtocol.jsonString(from: object)
         try await socket.send(.string(json))
+    }
+
+    /// Serializes outside the privacy gate, then holds the gate only across
+    /// URLSession's synchronous enqueue. A settings revocation therefore
+    /// linearizes either before submission (blocked) or after submission
+    /// (already in flight and not recallable).
+    private func sendVideo(
+        _ frame: PendingVideoFrame,
+        over socket: URLSessionWebSocketTask
+    ) async throws -> Bool {
+        let json = try GeminiRoboticsProtocol.jsonString(
+            from: GeminiRoboticsProtocol.realtimeVideoMessage(frame.data)
+        )
+        return try await withCheckedThrowingContinuation { continuation in
+            let submitted = videoAuthorizationGate.performIfAllowed(
+                generation: frame.generation
+            ) {
+                socket.send(.string(json)) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume(returning: true)
+                    }
+                }
+            }
+            if !submitted {
+                continuation.resume(returning: false)
+            }
+        }
     }
 }
 
@@ -2448,71 +2879,595 @@ private final class GeminiPCM16Encoder {
     }
 }
 
-private final class GeminiJPEGEncoder {
-    private let queue = DispatchQueue(label: "com.orbitusrobotics.cerebro.gemini.video-encoding")
-    private let throttleLock = NSLock()
+private final class GeminiMultiCameraJPEGEncoder {
+    private struct MainIngress {
+        let pixelBuffer: CVPixelBuffer
+        let receivedAt: TimeInterval
+        let generation: UInt64
+    }
+
+    private struct Insta360Ingress {
+        let jpegData: Data
+        let receivedAt: TimeInterval
+        let generation: UInt64
+    }
+
+    private struct Panel {
+        let label: String
+        let status: String
+        let image: CGImage?
+        let headerColor: CGColor
+        let directionMarkers: [DirectionMarker]
+
+        init(
+            label: String,
+            status: String,
+            image: CGImage?,
+            headerColor: CGColor,
+            directionMarkers: [DirectionMarker] = []
+        ) {
+            self.label = label
+            self.status = status
+            self.image = image
+            self.headerColor = headerColor
+            self.directionMarkers = directionMarkers
+        }
+    }
+
+    private struct DirectionMarker {
+        let label: String
+        let degrees: Double
+        let color: CGColor
+    }
+
+    private let queue = DispatchQueue(
+        label: "com.orbitusrobotics.cerebro.gemini.multi-camera-video"
+    )
+    private let ingressLock = NSLock()
     private let context = CIContext(options: [.cacheIntermediates: false])
     private let didEncode: (Data, UInt64) -> Void
-    private var lastAcceptedFrameTime: TimeInterval = 0
-    private var encodeIsPending = false
     private let minimumFrameInterval: TimeInterval = 1.0
-    private let maximumDimension: CGFloat = 768
+    private let maximumFrameAge: TimeInterval = 2.5
+    private let firstFrameCoalescingDelay: TimeInterval = 0.15
+    private let canvasDimension = 1_024
+    private let maximumInsta360JPEGBytes = 8 * 1_024 * 1_024
+    private let maximumSourceDimension: CGFloat = 8_192
+    private let maximumSourcePixelCount: CGFloat = 32 * 1_024 * 1_024
 
-    init(didEncode: @escaping (Data, UInt64) -> Void) {
+    private var mainCameraEnabled: Bool
+    private var insta360Enabled: Bool
+    private var insta360OrientationCalibrated: Bool
+    private var insta360ForwardMarkerDegrees: Double
+    private var generation: UInt64
+    private var latestMainCamera: CVPixelBuffer?
+    private var latestMainCameraReceipt: TimeInterval?
+    private var latestInsta360JPEG: Data?
+    private var latestInsta360Receipt: TimeInterval?
+    private var mainPanelWasLastSentLive = false
+    private var insta360PanelWasLastSentLive = false
+    private var lastEncodedAt: TimeInterval = 0
+    private var scheduledRender: DispatchWorkItem?
+    private var staleTransitionWork: DispatchWorkItem?
+    private var pendingMainIngress: MainIngress?
+    private var pendingInsta360Ingress: Insta360Ingress?
+    private var ingressDrainScheduled = false
+
+    init(
+        mainCameraEnabled: Bool,
+        insta360Enabled: Bool,
+        insta360OrientationCalibrated: Bool,
+        insta360ForwardMarkerDegrees: Double,
+        generation: UInt64,
+        didEncode: @escaping (Data, UInt64) -> Void
+    ) {
+        self.mainCameraEnabled = mainCameraEnabled
+        self.insta360Enabled = insta360Enabled
+        self.insta360OrientationCalibrated = insta360OrientationCalibrated
+        self.insta360ForwardMarkerDegrees = Self.normalizedDegrees(
+            insta360ForwardMarkerDegrees
+        )
+        self.generation = generation
         self.didEncode = didEncode
     }
 
-    func enqueue(_ sampleBuffer: CMSampleBuffer, generation: UInt64) {
-        let now = ProcessInfo.processInfo.systemUptime
-        throttleLock.lock()
-        guard !encodeIsPending,
-              now - lastAcceptedFrameTime >= minimumFrameInterval else {
-            throttleLock.unlock()
-            return
-        }
-        lastAcceptedFrameTime = now
-        encodeIsPending = true
-        throttleLock.unlock()
-
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
-            finishPendingEncode()
-            return
-        }
-        queue.async { [weak self, pixelBuffer] in
-            guard let self else { return }
-            defer { self.finishPendingEncode() }
-            let sourceImage = CIImage(cvPixelBuffer: pixelBuffer)
-            let largestDimension = max(sourceImage.extent.width, sourceImage.extent.height)
-            let scale = largestDimension > self.maximumDimension
-                ? self.maximumDimension / largestDimension
-                : 1.0
-            let image = sourceImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-            let colorSpace = CGColorSpaceCreateDeviceRGB()
-            let qualityKey = CIImageRepresentationOption(
-                rawValue: kCGImageDestinationLossyCompressionQuality as String
+    func configure(
+        mainCameraEnabled: Bool,
+        insta360Enabled: Bool,
+        insta360OrientationCalibrated: Bool,
+        insta360ForwardMarkerDegrees: Double,
+        generation: UInt64
+    ) {
+        queue.async {
+            self.clearIngress()
+            self.scheduledRender?.cancel()
+            self.scheduledRender = nil
+            self.staleTransitionWork?.cancel()
+            self.staleTransitionWork = nil
+            self.mainCameraEnabled = mainCameraEnabled
+            self.insta360Enabled = insta360Enabled
+            self.insta360OrientationCalibrated = insta360OrientationCalibrated
+            self.insta360ForwardMarkerDegrees = Self.normalizedDegrees(
+                insta360ForwardMarkerDegrees
             )
-            let options: [CIImageRepresentationOption: Any] = [qualityKey: 0.72]
-            guard let jpegData = self.context.jpegRepresentation(
-                of: image,
-                colorSpace: colorSpace,
-                options: options
-            ) else {
-                return
-            }
-            self.didEncode(jpegData, generation)
+            self.generation = generation
+            self.latestMainCamera = nil
+            self.latestMainCameraReceipt = nil
+            self.latestInsta360JPEG = nil
+            self.latestInsta360Receipt = nil
+            self.mainPanelWasLastSentLive = false
+            self.insta360PanelWasLastSentLive = false
+            self.lastEncodedAt = 0
         }
+    }
+
+    func enqueueMainCamera(
+        _ sampleBuffer: CMSampleBuffer,
+        generation: UInt64
+    ) {
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            return
+        }
+        enqueueIngress(main: MainIngress(
+            pixelBuffer: pixelBuffer,
+            receivedAt: ProcessInfo.processInfo.systemUptime,
+            generation: generation
+        ))
+    }
+
+    func enqueueInsta360(
+        _ jpegData: Data,
+        capturedAt: Date,
+        capturedAtUptime: TimeInterval,
+        generation: UInt64
+    ) {
+        guard !jpegData.isEmpty,
+              jpegData.count <= maximumInsta360JPEGBytes else {
+            return
+        }
+        // Freshness is based on the service's monotonic capture time. Camera
+        // wall-clock timestamps can jump during NTP correction, while stamping
+        // this frame after a main-thread delay could incorrectly revive it.
+        _ = capturedAt
+        let now = ProcessInfo.processInfo.systemUptime
+        guard capturedAtUptime.isFinite,
+              capturedAtUptime >= 0,
+              capturedAtUptime <= now + 0.25,
+              now - capturedAtUptime <= maximumFrameAge else {
+            return
+        }
+        enqueueIngress(insta360: Insta360Ingress(
+            jpegData: jpegData,
+            receivedAt: capturedAtUptime,
+            generation: generation
+        ))
     }
 
     func reset() {
-        throttleLock.lock()
-        lastAcceptedFrameTime = 0
-        throttleLock.unlock()
+        queue.async {
+            self.clearIngress()
+            self.scheduledRender?.cancel()
+            self.scheduledRender = nil
+            self.staleTransitionWork?.cancel()
+            self.staleTransitionWork = nil
+            self.latestMainCamera = nil
+            self.latestMainCameraReceipt = nil
+            self.latestInsta360JPEG = nil
+            self.latestInsta360Receipt = nil
+            self.mainPanelWasLastSentLive = false
+            self.insta360PanelWasLastSentLive = false
+            self.lastEncodedAt = 0
+        }
     }
 
-    private func finishPendingEncode() {
-        throttleLock.lock()
-        encodeIsPending = false
-        throttleLock.unlock()
+    private func enqueueIngress(main: MainIngress) {
+        ingressLock.lock()
+        pendingMainIngress = main
+        let shouldSchedule = !ingressDrainScheduled
+        if shouldSchedule { ingressDrainScheduled = true }
+        ingressLock.unlock()
+        guard shouldSchedule else { return }
+        queue.async { [weak self] in self?.drainIngress() }
+    }
+
+    private func enqueueIngress(insta360: Insta360Ingress) {
+        ingressLock.lock()
+        pendingInsta360Ingress = insta360
+        let shouldSchedule = !ingressDrainScheduled
+        if shouldSchedule { ingressDrainScheduled = true }
+        ingressLock.unlock()
+        guard shouldSchedule else { return }
+        queue.async { [weak self] in self?.drainIngress() }
+    }
+
+    private func drainIngress() {
+        ingressLock.lock()
+        let main = pendingMainIngress
+        let insta360 = pendingInsta360Ingress
+        pendingMainIngress = nil
+        pendingInsta360Ingress = nil
+        ingressDrainScheduled = false
+        ingressLock.unlock()
+
+        var acceptedFrame = false
+        var acceptedMainFrame = false
+        if let main,
+           main.generation == generation,
+           mainCameraEnabled {
+            latestMainCamera = main.pixelBuffer
+            latestMainCameraReceipt = main.receivedAt
+            acceptedFrame = true
+            acceptedMainFrame = true
+        }
+        if let insta360,
+           insta360.generation == generation,
+           insta360Enabled {
+            latestInsta360JPEG = insta360.jpegData
+            latestInsta360Receipt = insta360.receivedAt
+            acceptedFrame = true
+        }
+        if acceptedFrame {
+            // Main-camera buffers are already structurally decoded. Insta360
+            // JPEG validity is not known until the rate-limited render; keep
+            // an existing terminal-stale deadline armed until that succeeds.
+            if acceptedMainFrame {
+                staleTransitionWork?.cancel()
+                staleTransitionWork = nil
+            }
+            scheduleRenderIfNeeded()
+        }
+    }
+
+    private func clearIngress() {
+        ingressLock.lock()
+        pendingMainIngress = nil
+        pendingInsta360Ingress = nil
+        ingressDrainScheduled = false
+        ingressLock.unlock()
+    }
+
+    private func scheduleRenderIfNeeded() {
+        guard scheduledRender == nil,
+              mainCameraEnabled || insta360Enabled else {
+            return
+        }
+        let now = ProcessInfo.processInfo.systemUptime
+        let rateDeadline = lastEncodedAt > 0
+            ? lastEncodedAt + minimumFrameInterval
+            : now + firstFrameCoalescingDelay
+        let delay = max(0, rateDeadline - now)
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.scheduledRender = nil
+            self.renderLatestComposite(allowAllPlaceholder: false)
+        }
+        scheduledRender = work
+        queue.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func renderLatestComposite(allowAllPlaceholder: Bool) {
+        let now = ProcessInfo.processInfo.systemUptime
+        let activeGeneration = generation
+        let mainPanel = makeMainPanel(now: now)
+        let insta360Panel = makeInsta360Panel(now: now)
+
+        // Normal frame-driven renders require fresh pixels. The separately
+        // scheduled terminal render is allowed to send one all-placeholder
+        // composite so Gemini does not retain a formerly LIVE image forever.
+        let needsUnavailableTransition =
+            (mainPanelWasLastSentLive && mainPanel.image == nil) ||
+            (insta360PanelWasLastSentLive && insta360Panel.image == nil)
+        guard allowAllPlaceholder ||
+                needsUnavailableTransition ||
+                mainPanel.image != nil ||
+                insta360Panel.image != nil else {
+            return
+        }
+        guard let jpegData = renderJPEG(
+            top: mainPanel,
+            bottom: insta360Panel
+        ) else {
+            return
+        }
+        lastEncodedAt = now
+        didEncode(jpegData, activeGeneration)
+        mainPanelWasLastSentLive = mainPanel.image != nil
+        insta360PanelWasLastSentLive = insta360Panel.image != nil
+        scheduleStaleTransitionIfNeeded(now: now)
+    }
+
+    /// Emits a single transition when the next fresh panel expires. If the
+    /// other panel remains live, that render schedules its later expiration;
+    /// once every enabled source is stale, no repeating heartbeat is created.
+    private func scheduleStaleTransitionIfNeeded(now: TimeInterval) {
+        staleTransitionWork?.cancel()
+        staleTransitionWork = nil
+
+        var expirations: [TimeInterval] = []
+        if mainCameraEnabled,
+           latestMainCamera != nil,
+           let receipt = latestMainCameraReceipt,
+           receipt + maximumFrameAge > now {
+            expirations.append(receipt + maximumFrameAge)
+        }
+        if insta360Enabled,
+           latestInsta360JPEG != nil,
+           let receipt = latestInsta360Receipt,
+           receipt + maximumFrameAge > now {
+            expirations.append(receipt + maximumFrameAge)
+        }
+        guard let nextExpiration = expirations.min() else { return }
+
+        let deadline = max(
+            nextExpiration + 0.01,
+            lastEncodedAt + minimumFrameInterval
+        )
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.staleTransitionWork = nil
+            self.renderLatestComposite(allowAllPlaceholder: true)
+        }
+        staleTransitionWork = work
+        queue.asyncAfter(
+            deadline: .now() + max(0, deadline - now),
+            execute: work
+        )
+    }
+
+    private func makeMainPanel(now: TimeInterval) -> Panel {
+        let color = CGColor(red: 0.08, green: 0.30, blue: 0.56, alpha: 1)
+        guard mainCameraEnabled else {
+            return Panel(label: "MAIN FORWARD CAMERA", status: "DISABLED", image: nil, headerColor: color)
+        }
+        guard let receipt = latestMainCameraReceipt else {
+            return Panel(label: "MAIN FORWARD CAMERA", status: "WAITING", image: nil, headerColor: color)
+        }
+        guard now - receipt <= maximumFrameAge,
+              let pixelBuffer = latestMainCamera else {
+            latestMainCamera = nil
+            return Panel(label: "MAIN FORWARD CAMERA", status: "STALE", image: nil, headerColor: color)
+        }
+        let source = CIImage(cvPixelBuffer: pixelBuffer)
+        guard isSafeSourceExtent(source.extent),
+              let image = context.createCGImage(source, from: source.extent.integral) else {
+            latestMainCamera = nil
+            return Panel(
+                label: "MAIN FORWARD CAMERA",
+                status: "STALE",
+                image: nil,
+                headerColor: color
+            )
+        }
+        return Panel(
+            label: "MAIN FORWARD CAMERA",
+            status: "LIVE",
+            image: image,
+            headerColor: color
+        )
+    }
+
+    private func makeInsta360Panel(now: TimeInterval) -> Panel {
+        let color = CGColor(red: 0.35, green: 0.16, blue: 0.50, alpha: 1)
+        guard insta360Enabled else {
+            return Panel(label: "INSTA360 STITCHED 360 PANORAMA", status: "DISABLED", image: nil, headerColor: color)
+        }
+        guard let receipt = latestInsta360Receipt else {
+            return Panel(label: "INSTA360 STITCHED 360 PANORAMA", status: "WAITING", image: nil, headerColor: color)
+        }
+        guard now - receipt <= maximumFrameAge,
+              let data = latestInsta360JPEG else {
+            latestInsta360JPEG = nil
+            return Panel(label: "INSTA360 STITCHED 360 PANORAMA", status: "STALE", image: nil, headerColor: color)
+        }
+        guard let source = CIImage(
+                  data: data,
+                  options: [.applyOrientationProperty: true]
+              ),
+              source.extent.width.isFinite,
+              source.extent.height.isFinite,
+              source.extent.width > 0,
+              source.extent.height > 0,
+              isSafeSourceExtent(source.extent),
+              let image = context.createCGImage(
+                  source,
+                  from: source.extent.integral
+              ) else {
+            latestInsta360JPEG = nil
+            return Panel(
+                label: "INSTA360 STITCHED 360 PANORAMA",
+                status: "STALE",
+                image: nil,
+                headerColor: color
+            )
+        }
+        return Panel(
+            label: "INSTA360 STITCHED 360 PANORAMA",
+            status: insta360OrientationCalibrated
+                ? "LIVE • ROB DIRECTIONS CALIBRATED"
+                : "LIVE • ORIENTATION UNCALIBRATED",
+            image: image,
+            headerColor: color,
+            directionMarkers: insta360OrientationCalibrated
+                ? makeRobotDirectionMarkers()
+                : []
+        )
+    }
+
+    /// Rejects compressed-image dimension bombs before Core Image allocates a
+    /// decoded surface. Normal Cerebro sources are far below these limits.
+    private func isSafeSourceExtent(_ extent: CGRect) -> Bool {
+        let width = extent.width
+        let height = extent.height
+        return width.isFinite && height.isFinite &&
+            width > 0 && height > 0 &&
+            width <= maximumSourceDimension &&
+            height <= maximumSourceDimension &&
+            width * height <= maximumSourcePixelCount
+    }
+
+    private func makeRobotDirectionMarkers() -> [DirectionMarker] {
+        let forward = insta360ForwardMarkerDegrees
+        return [
+            DirectionMarker(
+                label: "FRONT",
+                degrees: forward,
+                color: CGColor(red: 0.20, green: 0.95, blue: 0.38, alpha: 0.95)
+            ),
+            DirectionMarker(
+                label: "REAR",
+                degrees: Self.normalizedDegrees(forward + 180),
+                color: CGColor(red: 1.0, green: 0.24, blue: 0.24, alpha: 0.95)
+            )
+        ]
+    }
+
+    private static func normalizedDegrees(_ value: Double) -> Double {
+        guard value.isFinite else { return 180 }
+        let wrapped = value.truncatingRemainder(dividingBy: 360)
+        return wrapped >= 0 ? wrapped : wrapped + 360
+    }
+
+    private func renderJPEG(top: Panel, bottom: Panel) -> Data? {
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let bitmap = CGContext(
+            data: nil,
+            width: canvasDimension,
+            height: canvasDimension,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return nil
+        }
+        bitmap.setFillColor(CGColor(gray: 0.045, alpha: 1))
+        bitmap.fill(CGRect(x: 0, y: 0, width: canvasDimension, height: canvasDimension))
+
+        let half = CGFloat(canvasDimension) / 2
+        draw(top, in: CGRect(x: 0, y: half, width: half * 2, height: half), context: bitmap)
+        draw(bottom, in: CGRect(x: 0, y: 0, width: half * 2, height: half), context: bitmap)
+        bitmap.setFillColor(CGColor(gray: 0.85, alpha: 1))
+        bitmap.fill(CGRect(x: 0, y: half - 2, width: half * 2, height: 4))
+
+        guard let image = bitmap.makeImage() else { return nil }
+        let qualityKey = CIImageRepresentationOption(
+            rawValue: kCGImageDestinationLossyCompressionQuality as String
+        )
+        return context.jpegRepresentation(
+            of: CIImage(cgImage: image),
+            colorSpace: colorSpace,
+            options: [qualityKey: 0.72]
+        )
+    }
+
+    private func draw(_ panel: Panel, in bounds: CGRect, context: CGContext) {
+        let headerHeight: CGFloat = 48
+        let header = CGRect(
+            x: bounds.minX,
+            y: bounds.maxY - headerHeight,
+            width: bounds.width,
+            height: headerHeight
+        )
+        let content = CGRect(
+            x: bounds.minX + 8,
+            y: bounds.minY + 8,
+            width: bounds.width - 16,
+            height: bounds.height - headerHeight - 16
+        )
+        context.setFillColor(panel.headerColor)
+        context.fill(header)
+        drawText(
+            "\(panel.label)  •  \(panel.status)",
+            at: CGPoint(x: header.minX + 16, y: header.minY + 13),
+            size: 20,
+            color: CGColor(gray: 1, alpha: 1),
+            context: context
+        )
+
+        guard let image = panel.image else {
+            drawText(
+                panel.status,
+                at: CGPoint(x: content.midX - 58, y: content.midY - 12),
+                size: 27,
+                color: CGColor(gray: 0.68, alpha: 1),
+                context: context
+            )
+            return
+        }
+
+        let scale = min(
+            content.width / CGFloat(image.width),
+            content.height / CGFloat(image.height)
+        )
+        let destination = CGRect(
+            x: content.midX - CGFloat(image.width) * scale / 2,
+            y: content.midY - CGFloat(image.height) * scale / 2,
+            width: CGFloat(image.width) * scale,
+            height: CGFloat(image.height) * scale
+        )
+        context.interpolationQuality = .high
+        context.draw(image, in: destination)
+        drawDirectionMarkers(panel.directionMarkers, in: destination, context: context)
+    }
+
+    private func drawDirectionMarkers(
+        _ markers: [DirectionMarker],
+        in destination: CGRect,
+        context: CGContext
+    ) {
+        guard !markers.isEmpty else { return }
+        context.saveGState()
+        context.clip(to: destination)
+        for marker in markers {
+            let fraction = CGFloat(Self.normalizedDegrees(marker.degrees) / 360)
+            let x = min(destination.maxX - 1, destination.minX + fraction * destination.width)
+            context.setStrokeColor(marker.color)
+            context.setLineWidth(3)
+            context.move(to: CGPoint(x: x, y: destination.minY))
+            context.addLine(to: CGPoint(x: x, y: destination.maxY))
+            context.strokePath()
+
+            let labelWidth: CGFloat = 82
+            let labelX = min(
+                destination.maxX - labelWidth - 2,
+                max(destination.minX + 2, x - labelWidth / 2)
+            )
+            let labelRect = CGRect(
+                x: labelX,
+                y: destination.maxY - 30,
+                width: labelWidth,
+                height: 27
+            )
+            context.setFillColor(CGColor(gray: 0.02, alpha: 0.78))
+            context.fill(labelRect)
+            drawText(
+                marker.label,
+                at: CGPoint(x: labelRect.minX + 7, y: labelRect.minY + 6),
+                size: 15,
+                color: marker.color,
+                context: context
+            )
+        }
+        context.restoreGState()
+    }
+
+    private func drawText(
+        _ text: String,
+        at origin: CGPoint,
+        size: CGFloat,
+        color: CGColor,
+        context: CGContext
+    ) {
+        let font = CTFontCreateWithName("Helvetica-Bold" as CFString, size, nil)
+        let attributes = [
+            kCTFontAttributeName: font,
+            kCTForegroundColorAttributeName: color
+        ] as CFDictionary
+        guard let attributed = CFAttributedStringCreate(nil, text as CFString, attributes) else {
+            return
+        }
+        let line = CTLineCreateWithAttributedString(attributed)
+        context.textPosition = origin
+        CTLineDraw(line, context)
     }
 }
 

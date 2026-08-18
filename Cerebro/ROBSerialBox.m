@@ -49,6 +49,7 @@ OUTPUT: ir sensor array in cm : (fl, fr, l, r, bl, br) from front left to back r
 #import "Cerebro-Swift.h"
 #include <sys/select.h>
 #include <errno.h>
+#include <float.h>
 
 
 #define kRHAPI_BAUDRATE 250000
@@ -58,6 +59,136 @@ static NSString * const kROBBaseLegacyStartupIdentity = @"BEGIN BASE STARTUP SEQ
 static NSTimeInterval const kROBBaseProbeTimeoutSeconds = 15.0;
 static NSTimeInterval const kMaestroReconnectDelaySeconds = 2.0;
 static NSInteger const kPololuUSBVendorID = 0x1ffb;
+static NSString * const kROBNeckSafetyConfigurationDefaultsKey = @"ROBNeckSafetyConfigurationV3";
+static NSString * const kROBNeckSafetyV2ConfigurationDefaultsKey = @"ROBNeckSafetyConfigurationV2";
+static NSString * const kROBNeckSafetyLegacyConfigurationDefaultsKey = @"ROBNeckSafetyConfigurationV1";
+static NSTimeInterval const kROBNeckManualOverrideSeconds = 2.0;
+static NSTimeInterval const kROBNeckVisionAuthoritySeconds = 0.35;
+static NSTimeInterval const kROBNeckPanRecenterSeconds = 1.0;
+static NSTimeInterval const kROBNeckClearanceSettleSeconds = 0.75;
+static NSTimeInterval const kROBNeckSupervisedRecoverySeconds = 5.0;
+static NSUInteger const kROBBaseConsoleMaximumCharacters = 256 * 1024;
+
+static double ROBTargetOverflow(double target, double minimum, double maximum)
+{
+    if (target < minimum) return minimum - target;
+    if (target > maximum) return target - maximum;
+    return 0.0;
+}
+
+static BOOL ROBNeckPanBoundsAreValid(ROBNeckSafetyPanBounds bounds)
+{
+    return isfinite(bounds.minimumDegrees)
+        && isfinite(bounds.maximumDegrees)
+        && bounds.minimumDegrees <= bounds.maximumDegrees;
+}
+
+static BOOL ROBNeckPanBoundsContain(
+    ROBNeckSafetyPanBounds outer,
+    ROBNeckSafetyPanBounds inner
+)
+{
+    return ROBNeckPanBoundsAreValid(outer)
+        && ROBNeckPanBoundsAreValid(inner)
+        && inner.minimumDegrees >= outer.minimumDegrees
+        && inner.maximumDegrees <= outer.maximumDegrees;
+}
+
+static BOOL ROBNeckPanBoundsIntersect(
+    ROBNeckSafetyPanBounds first,
+    ROBNeckSafetyPanBounds second,
+    ROBNeckSafetyPanBounds *intersectionOut
+)
+{
+    if (!ROBNeckPanBoundsAreValid(first)
+        || !ROBNeckPanBoundsAreValid(second)
+        || intersectionOut == NULL) {
+        return NO;
+    }
+    ROBNeckSafetyPanBounds intersection = {
+        .minimumDegrees = fmax(first.minimumDegrees, second.minimumDegrees),
+        .maximumDegrees = fmin(first.maximumDegrees, second.maximumDegrees),
+    };
+    if (!ROBNeckPanBoundsAreValid(intersection)) return NO;
+    *intersectionOut = intersection;
+    return YES;
+}
+
+static BOOL ROBNeckConservativeUnknownPanBounds(
+    const ROBNeckSafetyConfig *configuration,
+    ROBNeckSafetyPanBounds *boundsOut
+)
+{
+    if (configuration == NULL || boundsOut == NULL) return NO;
+    ROBNeckSafetyPanBounds unknownBounds = {0};
+    ROBNeckSafetyPanBounds backwardBounds = {0};
+    ROBNeckSafetyPanBounds forwardBounds = {0};
+    if (!ROBNeckSafetyAllowedPanBounds(
+            configuration,
+            ROBNeckSafetyTargetOff,
+            &unknownBounds
+        )
+        || !ROBNeckSafetyAllowedPanBounds(
+            configuration,
+            configuration->lowerMinimumTarget,
+            &backwardBounds
+        )
+        || !ROBNeckSafetyAllowedPanBounds(
+            configuration,
+            configuration->lowerForwardRestrictedTarget,
+            &forwardBounds
+        )) {
+        return NO;
+    }
+    ROBNeckSafetyPanBounds knownExtremes = {0};
+    if (!ROBNeckPanBoundsIntersect(
+            backwardBounds,
+            forwardBounds,
+            &knownExtremes
+        )) {
+        return NO;
+    }
+    return ROBNeckPanBoundsIntersect(unknownBounds, knownExtremes, boundsOut);
+}
+
+static BOOL ROBNeckClampPanResultToBounds(
+    const ROBNeckSafetyConfig *configuration,
+    ROBNeckSafetyPanBounds bounds,
+    ROBNeckSafetyResult *result
+)
+{
+    if (configuration == NULL
+        || result == NULL
+        || !ROBNeckPanBoundsAreValid(bounds)) {
+        return NO;
+    }
+    result->allowedPanMinimumDegrees = bounds.minimumDegrees;
+    result->allowedPanMaximumDegrees = bounds.maximumDegrees;
+    if (result->panTarget == ROBNeckSafetyTargetOff) return YES;
+
+    double degrees = NAN;
+    if (!ROBNeckSafetyPanTargetToDegrees(configuration, result->panTarget, &degrees)) {
+        return NO;
+    }
+    double boundedDegrees = fmax(
+        bounds.minimumDegrees,
+        fmin(bounds.maximumDegrees, degrees)
+    );
+    int32_t boundedTarget = ROBNeckSafetyTargetOff;
+    if (!ROBNeckSafetyPanDegreesToTarget(
+            configuration,
+            boundedDegrees,
+            &boundedTarget
+        )) {
+        return NO;
+    }
+    if (boundedTarget != result->panTarget) result->panClamped = true;
+    result->panTarget = boundedTarget;
+    return YES;
+}
+
+NSNotificationName const ROBSerialHardwareDidChangeNotification =
+    @"ROBSerialHardwareDidChangeNotification";
 
 #define kRHAPI_SERIAL_PORT_BASE     @"/dev/cu.usbmodem21201"
 
@@ -89,6 +220,39 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 @property (readwrite, assign) BOOL masterControllerInputWasFresh;
 @property (readwrite, assign) int lastVisionNeckPanTarget;
 @property (readwrite, assign) int lastVisionNeckTiltTarget;
+@property (readwrite, assign) NSInteger commandedNeckPanTarget;
+@property (readwrite, assign) NSInteger commandedLowerNeckTiltTarget;
+@property (readwrite, assign) NSInteger commandedUpperNeckTiltTarget;
+@property (readwrite, assign, getter=isNeckPanCommandKnown) BOOL neckPanCommandKnown;
+@property (readwrite, assign, getter=isLowerNeckTiltCommandKnown) BOOL lowerNeckTiltCommandKnown;
+@property (readwrite, assign, getter=isUpperNeckTiltCommandKnown) BOOL upperNeckTiltCommandKnown;
+@property (readwrite, assign) double commandedNeckPanDegrees;
+@property (readwrite, assign) double currentNeckPanMinimumDegrees;
+@property (readwrite, assign) double currentNeckPanMaximumDegrees;
+@property (readwrite, assign, getter=isNeckPanCommandLimited) BOOL neckPanCommandLimited;
+@property (readwrite, assign, getter=isUpperNeckCommandCompensated) BOOL upperNeckCommandCompensated;
+@property (readwrite, assign, getter=isNeckSafetyCalibrationConfirmed) BOOL neckSafetyCalibrationConfirmed;
+@property (readwrite, copy) NSString *neckCommandSource;
+@property (readwrite, copy) NSString *neckCommandSafetyStatus;
+@property (readwrite, assign) ROBNeckSafetyConfig activeNeckSafetyConfiguration;
+@property (readwrite, assign) BOOL neckLevelingReferenceIsValid;
+@property (readwrite, assign) int neckLevelingReferenceLowerTarget;
+@property (readwrite, assign) int panEnvelopeLowerTarget;
+@property (readwrite, assign) BOOL panEnvelopeLowerTargetIsKnown;
+@property (readwrite, assign) int pendingPanEnvelopeLowerTarget;
+@property (readwrite, assign) NSTimeInterval pendingPanEnvelopeReadyAt;
+@property (readwrite, assign) ROBNeckSafetySettleGate panRecenterSettleGate;
+@property (readwrite, assign) NSTimeInterval commandedNeckPanTargetReadyAt;
+@property (readwrite, assign) NSTimeInterval manualNeckOverrideUntil;
+@property (readwrite, assign) NSTimeInterval visionNeckAuthorityUntil;
+@property (readwrite, assign) NSTimeInterval gestureNeckAuthorityUntil;
+@property (readwrite, assign) BOOL torsoNeckAuthorityRequiresOperatorAction;
+@property (readwrite, assign) BOOL lastDesiredUpperNeckTargetIsKnown;
+@property (readwrite, assign) int lastDesiredUpperNeckTarget;
+@property (readwrite, assign) NSTimeInterval supervisedLowerRecoveryUntil;
+@property (readwrite, assign) int supervisedLowerRecoveryPanTarget;
+@property (readwrite, assign) int supervisedLowerRecoveryTarget;
+@property (readwrite, assign) int supervisedLowerRecoveryUpperTarget;
 @property (readwrite, assign) BOOL visionGripperStateIsKnown;
 @property (readwrite, assign) BOOL lastVisionLeftGripperClosed;
 @property (readwrite, assign) BOOL lastVisionRightGripperClosed;
@@ -112,6 +276,8 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 @property (readwrite, assign) BOOL maestroReconnectInProgress;
 @property (readwrite, assign) BOOL maestroMissingWasReported;
 @property (readwrite, copy) NSString *maestroDevicePath;
+@property (atomic, readwrite, copy) NSString *baseSerialStatusText;
+@property (atomic, readwrite, copy) NSString *maestroSerialStatusText;
 @property (readwrite, assign) BOOL core_R11_isOnline;
 @property (readwrite, assign) BOOL core_L10_isOnline;
 @property (readwrite, retain) NSTask *sshTask_R11_Core;
@@ -140,6 +306,18 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 - (void)markMaestroDisconnectedForErrno:(int)errorNumber;
 - (BOOL)writeMaestroBytes:(const void *)bytes length:(size_t)length;
 - (BOOL)sendMaestroTarget:(unsigned short)target channel:(unsigned char)channel;
+- (BOOL)sendMaestroLowerTarget:(unsigned short)lowerTarget
+                   upperTarget:(unsigned short)upperTarget;
+- (ROBNeckCommandDisposition)applySafeNeckPanTarget:(int)panTarget
+              lowerTiltTarget:(int)lowerTiltTarget
+            desiredUpperTarget:(int)desiredUpperTarget
+                  includeLower:(BOOL)includeLower
+ allowSupervisedLowerRecovery:(BOOL)allowSupervisedLowerRecovery
+                        source:(NSString *)source;
+- (void)refreshSettledNeckEnvelopeAtTime:(NSTimeInterval)now;
+- (void)invalidateNeckCommandStateWithStatus:(NSString *)status;
+- (ROBNeckSafetyConfig)loadNeckSafetyConfiguration;
+- (void)persistNeckSafetyConfiguration:(ROBNeckSafetyConfig)configuration;
 - (void)connectToDetectedBase;
 - (BOOL)probeBaseFirmwareAtPath:(NSString *)path fileDescriptor:(int *)matchedFileDescriptor;
 - (void)consumeBaseSerialBytes:(const void *)bytes length:(NSUInteger)length;
@@ -158,7 +336,6 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 - (void) writeByte: (uint8_t *)val serialFileDescriptor:(int)serialFileDescriptor;
 
 
-//- (IBAction) baudAction: (id) cntrl;
 - (IBAction) refreshAction: (id) cntrl;
 - (void) sendText:(id)cntrl serialInputField:(NSTextField *)serialInputField serialFileDescriptor:(int)serialFileDescriptor;
 
@@ -200,6 +377,331 @@ typedef enum : NSUInteger {
     return self;
 }
 
+- (ROBNeckSafetyConfig)loadNeckSafetyConfiguration
+{
+    ROBNeckSafetyConfig configuration = ROBNeckSafetyDefaultConfig();
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSDictionary *saved = [defaults
+        dictionaryForKey:kROBNeckSafetyConfigurationDefaultsKey];
+    NSInteger storedVersion = 3;
+    if (saved == nil) {
+        storedVersion = 2;
+        saved = [defaults
+            dictionaryForKey:kROBNeckSafetyV2ConfigurationDefaultsKey];
+    }
+    if (saved == nil) {
+        storedVersion = 1;
+        saved = [defaults
+            dictionaryForKey:kROBNeckSafetyLegacyConfigurationDefaultsKey];
+    }
+
+    NSNumber *expectedVersion = @(storedVersion);
+    NSArray<NSString *> *requiredCommonNumberKeys = @[
+        @"panMinimumTarget", @"panCenterTarget", @"panMaximumTarget",
+        @"panTargetsPerDegree", @"lowerMinimumTarget",
+        @"lowerFullPanLowTarget", @"lowerFullPanHighTarget",
+        @"lowerMaximumTarget", @"upperMinimumTarget", @"upperMaximumTarget",
+        @"restrictedPanDegrees", @"upperCounterRotationGain"
+    ];
+    if (![saved[@"version"] isEqual:expectedVersion]
+        || ![saved[@"calibrationConfirmed"] isKindOfClass:NSNumber.class]) {
+        self.neckSafetyCalibrationConfirmed = NO;
+        return configuration;
+    }
+    for (NSString *key in requiredCommonNumberKeys) {
+        if (![saved[key] isKindOfClass:NSNumber.class]) {
+            self.neckSafetyCalibrationConfirmed = NO;
+            return configuration;
+        }
+    }
+    if (storedVersion >= 2) {
+        for (NSString *key in @[
+            @"lowerForwardRestrictedTarget",
+            @"forwardPanMinimumDegrees",
+            @"forwardPanMaximumDegrees"
+        ]) {
+            if (![saved[key] isKindOfClass:NSNumber.class]) {
+                self.neckSafetyCalibrationConfirmed = NO;
+                return configuration;
+            }
+        }
+    }
+    if (storedVersion == 3
+        && ![saved[@"cameraLevelingEnabled"] isKindOfClass:NSNumber.class]) {
+        self.neckSafetyCalibrationConfirmed = NO;
+        return configuration;
+    }
+
+    configuration.panMinimumTarget = [saved[@"panMinimumTarget"] intValue];
+    configuration.panCenterTarget = [saved[@"panCenterTarget"] intValue];
+    configuration.panMaximumTarget = [saved[@"panMaximumTarget"] intValue];
+    configuration.panTargetsPerDegree = [saved[@"panTargetsPerDegree"] doubleValue];
+    configuration.lowerMinimumTarget = [saved[@"lowerMinimumTarget"] intValue];
+    configuration.lowerFullPanLowTarget = [saved[@"lowerFullPanLowTarget"] intValue];
+    configuration.lowerFullPanHighTarget = [saved[@"lowerFullPanHighTarget"] intValue];
+    configuration.lowerMaximumTarget = [saved[@"lowerMaximumTarget"] intValue];
+    configuration.upperMinimumTarget = [saved[@"upperMinimumTarget"] intValue];
+    configuration.upperMaximumTarget = [saved[@"upperMaximumTarget"] intValue];
+    configuration.restrictedPanDegrees = [saved[@"restrictedPanDegrees"] doubleValue];
+    if (storedVersion >= 2) {
+        configuration.lowerForwardRestrictedTarget =
+            [saved[@"lowerForwardRestrictedTarget"] intValue];
+        configuration.forwardPanMinimumDegrees =
+            [saved[@"forwardPanMinimumDegrees"] doubleValue];
+        configuration.forwardPanMaximumDegrees =
+            [saved[@"forwardPanMaximumDegrees"] doubleValue];
+    } else {
+        // V1 had no asymmetric forward envelope. Clip the shipped values to
+        // its preserved restricted-pan magnitude.
+        configuration.forwardPanMinimumDegrees =
+            -fmin(15.0, configuration.restrictedPanDegrees);
+        configuration.forwardPanMaximumDegrees =
+            fmin(2.1, configuration.restrictedPanDegrees);
+    }
+    configuration.upperCounterRotationGain = [saved[@"upperCounterRotationGain"] doubleValue];
+    if (storedVersion == 3) {
+        configuration.cameraLevelingEnabled =
+            [saved[@"cameraLevelingEnabled"] boolValue];
+    } else {
+        // V3 widens the verified full-pan band. Adopt it for migrated settings
+        // only when it fits the preserved lower hard stops; otherwise retain
+        // the legacy band and let normal validation decide its safety.
+        const int32_t shippedFullPanLowTarget = 5300;
+        const int32_t shippedFullPanHighTarget = 6822;
+        BOOL shippedFullPanBandFits =
+            shippedFullPanLowTarget > configuration.lowerMinimumTarget
+            && shippedFullPanHighTarget > shippedFullPanLowTarget
+            && shippedFullPanHighTarget < configuration.lowerMaximumTarget;
+        if (shippedFullPanBandFits) {
+            configuration.lowerFullPanLowTarget = shippedFullPanLowTarget;
+            configuration.lowerFullPanHighTarget = shippedFullPanHighTarget;
+        }
+
+        // Any lower target above 6822 must use the tight forward envelope.
+        // Adopt that boundary when it fits the preserved hard stops, or use
+        // the forward hard stop as a final valid transition endpoint.
+        const int32_t shippedForwardAnchor = 6823;
+        configuration.lowerForwardRestrictedTarget =
+            shippedForwardAnchor > configuration.lowerFullPanHighTarget
+                && shippedForwardAnchor <= configuration.lowerMaximumTarget
+            ? shippedForwardAnchor
+            : configuration.lowerMaximumTarget;
+        configuration.cameraLevelingEnabled = true;
+    }
+    if (!ROBNeckSafetyConfigIsValid(&configuration)) {
+        self.neckSafetyCalibrationConfirmed = NO;
+        return ROBNeckSafetyDefaultConfig();
+    }
+    // V1/V2 never confirmed the widened full-pan band or leveling toggle.
+    // Preserve compatible calibration fields, but require V3 confirmation.
+    self.neckSafetyCalibrationConfirmed = storedVersion == 3
+        && [saved[@"calibrationConfirmed"] boolValue];
+    return configuration;
+}
+
+- (void)persistNeckSafetyConfiguration:(ROBNeckSafetyConfig)configuration
+{
+    NSDictionary *saved = @{
+        @"version": @3,
+        @"calibrationConfirmed": @(self.neckSafetyCalibrationConfirmed),
+        @"panMinimumTarget": @(configuration.panMinimumTarget),
+        @"panCenterTarget": @(configuration.panCenterTarget),
+        @"panMaximumTarget": @(configuration.panMaximumTarget),
+        @"panTargetsPerDegree": @(configuration.panTargetsPerDegree),
+        @"lowerMinimumTarget": @(configuration.lowerMinimumTarget),
+        @"lowerFullPanLowTarget": @(configuration.lowerFullPanLowTarget),
+        @"lowerFullPanHighTarget": @(configuration.lowerFullPanHighTarget),
+        @"lowerForwardRestrictedTarget": @(configuration.lowerForwardRestrictedTarget),
+        @"lowerMaximumTarget": @(configuration.lowerMaximumTarget),
+        @"upperMinimumTarget": @(configuration.upperMinimumTarget),
+        @"upperMaximumTarget": @(configuration.upperMaximumTarget),
+        @"restrictedPanDegrees": @(configuration.restrictedPanDegrees),
+        @"forwardPanMinimumDegrees": @(configuration.forwardPanMinimumDegrees),
+        @"forwardPanMaximumDegrees": @(configuration.forwardPanMaximumDegrees),
+        @"cameraLevelingEnabled": @(configuration.cameraLevelingEnabled),
+        @"upperCounterRotationGain": @(configuration.upperCounterRotationGain)
+    };
+    [[NSUserDefaults standardUserDefaults] setObject:saved
+                                              forKey:kROBNeckSafetyConfigurationDefaultsKey];
+}
+
+- (ROBNeckSafetyConfig)neckSafetyConfiguration
+{
+    if (!ROBNeckSafetyConfigIsValid(&_activeNeckSafetyConfiguration)) {
+        self.activeNeckSafetyConfiguration = [self loadNeckSafetyConfiguration];
+    }
+    return self.activeNeckSafetyConfiguration;
+}
+
+- (BOOL)isNeckCameraLevelingEnabled
+{
+    @synchronized (self) {
+        return [self neckSafetyConfiguration].cameraLevelingEnabled;
+    }
+}
+
+- (BOOL)setNeckCameraLevelingEnabled:(BOOL)enabled
+{
+    @synchronized (self) {
+        ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
+        if (configuration.cameraLevelingEnabled == enabled) return YES;
+
+        configuration.cameraLevelingEnabled = enabled;
+        if (!ROBNeckSafetyConfigIsValid(&configuration)) return NO;
+
+        // The toggle owns a short manual lease and prevents passive torso
+        // sliders, Vision, or a gesture from immediately overwriting the
+        // explicitly preserved neck pose.
+        NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+        self.manualNeckOverrideUntil = now + kROBNeckManualOverrideSeconds;
+        self.visionNeckAuthorityUntil = 0;
+        self.gestureNeckAuthorityUntil = 0;
+        self.torsoNeckAuthorityRequiresOperatorAction = YES;
+
+        self.activeNeckSafetyConfiguration = configuration;
+        BOOL activePoseIsKnown = self.neckCommandStateKnown
+            && self.commandedNeckPanTarget != ROBNeckSafetyTargetOff
+            && self.commandedLowerNeckTiltTarget != ROBNeckSafetyTargetOff
+            && self.commandedUpperNeckTiltTarget != ROBNeckSafetyTargetOff;
+        if (enabled && activePoseIsKnown) {
+            self.neckLevelingReferenceLowerTarget =
+                (int)self.commandedLowerNeckTiltTarget;
+            self.neckLevelingReferenceIsValid = YES;
+        } else {
+            self.neckLevelingReferenceIsValid = NO;
+        }
+        if (self.upperNeckTiltCommandKnown
+            && self.commandedUpperNeckTiltTarget != ROBNeckSafetyTargetOff) {
+            self.lastDesiredUpperNeckTarget =
+                (int)self.commandedUpperNeckTiltTarget;
+            self.lastDesiredUpperNeckTargetIsKnown = YES;
+            self.lastVisionNeckTiltTarget =
+                (int)self.commandedUpperNeckTiltTarget;
+        } else {
+            self.lastDesiredUpperNeckTargetIsKnown = NO;
+        }
+        if (self.neckPanCommandKnown
+            && self.commandedNeckPanTarget != ROBNeckSafetyTargetOff) {
+            self.lastVisionNeckPanTarget = (int)self.commandedNeckPanTarget;
+        }
+        self.upperNeckCommandCompensated = NO;
+        [self persistNeckSafetyConfiguration:configuration];
+
+        if (!activePoseIsKnown) {
+            self.neckCommandSafetyStatus = enabled
+                ? @"Camera leveling enabled; no active known pose was moved."
+                : @"Camera leveling disabled; no active known pose was moved.";
+            return YES;
+        }
+
+        // Reapply only the three known neck channels through the shared
+        // gateway. The already-applied upper target becomes the new desired
+        // camera pose, preventing an ON/OFF transition jump without touching
+        // any arm output.
+        ROBNeckCommandDisposition disposition = [self
+            applySafeNeckPanTarget:(int)self.commandedNeckPanTarget
+            lowerTiltTarget:(int)self.commandedLowerNeckTiltTarget
+            desiredUpperTarget:(int)self.commandedUpperNeckTiltTarget
+            includeLower:YES
+            allowSupervisedLowerRecovery:NO
+            source:@"Torso leveling toggle"];
+        self.torsoNeckAuthorityRequiresOperatorAction = YES;
+        return disposition != ROBNeckCommandDispositionRejected;
+    }
+}
+
+- (BOOL)isNeckCommandStateKnown
+{
+    return self.neckPanCommandKnown
+        && self.lowerNeckTiltCommandKnown
+        && self.upperNeckTiltCommandKnown;
+}
+
+- (BOOL)applyNeckSafetyConfiguration:(ROBNeckSafetyConfig)configuration
+{
+    @synchronized (self) {
+    // Live calibration changes can otherwise jump an already compensated
+    // upper target. Require a deliberate all-off state, then re-establish all
+    // command-space references under the new configuration.
+    if (!ROBNeckSafetyConfigIsValid(&configuration)
+        || !self.neckCommandStateKnown
+        || self.commandedNeckPanTarget != ROBNeckSafetyTargetOff
+        || self.commandedLowerNeckTiltTarget != ROBNeckSafetyTargetOff
+        || self.commandedUpperNeckTiltTarget != ROBNeckSafetyTargetOff) {
+        return NO;
+    }
+    self.activeNeckSafetyConfiguration = configuration;
+    self.neckSafetyCalibrationConfirmed = YES;
+    [self persistNeckSafetyConfiguration:configuration];
+
+    // Re-establish both command-space references conservatively. The next
+    // accepted neck request starts without an upper-servo jump, while pan
+    // remains in the tightest conservative window until the lower target has
+    // settled.
+    self.neckLevelingReferenceIsValid = NO;
+    self.panEnvelopeLowerTargetIsKnown = NO;
+    self.pendingPanEnvelopeLowerTarget = ROBNeckSafetyTargetOff;
+    self.pendingPanEnvelopeReadyAt = 0;
+    self.panRecenterSettleGate = (ROBNeckSafetySettleGate){0};
+    self.commandedNeckPanTargetReadyAt = 0;
+    self.supervisedLowerRecoveryUntil = 0;
+    ROBNeckSafetyPanBounds conservativeBounds = {0};
+    if (!ROBNeckConservativeUnknownPanBounds(
+            &configuration,
+            &conservativeBounds
+        )) {
+        return NO;
+    }
+    self.currentNeckPanMinimumDegrees = conservativeBounds.minimumDegrees;
+    self.currentNeckPanMaximumDegrees = conservativeBounds.maximumDegrees;
+    self.neckCommandSafetyStatus = [NSString stringWithFormat:
+        @"Safety configuration saved; lower clearance is unverified, pan held %.1f°…%+.1f°.",
+        conservativeBounds.minimumDegrees,
+        conservativeBounds.maximumDegrees];
+    return YES;
+    }
+}
+
+- (void)invalidateNeckCommandStateWithStatus:(NSString *)status
+{
+    @synchronized (self) {
+    self.commandedNeckPanTarget = ROBNeckSafetyTargetOff;
+    self.commandedLowerNeckTiltTarget = ROBNeckSafetyTargetOff;
+    self.commandedUpperNeckTiltTarget = ROBNeckSafetyTargetOff;
+    self.neckPanCommandKnown = NO;
+    self.lowerNeckTiltCommandKnown = NO;
+    self.upperNeckTiltCommandKnown = NO;
+    self.commandedNeckPanDegrees = NAN;
+    ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
+    ROBNeckSafetyPanBounds conservativeBounds = {0};
+    if (!ROBNeckConservativeUnknownPanBounds(
+            &configuration,
+            &conservativeBounds
+        )) {
+        conservativeBounds.minimumDegrees = 0.0;
+        conservativeBounds.maximumDegrees = 0.0;
+    }
+    self.currentNeckPanMinimumDegrees = conservativeBounds.minimumDegrees;
+    self.currentNeckPanMaximumDegrees = conservativeBounds.maximumDegrees;
+    self.neckPanCommandLimited = NO;
+    self.upperNeckCommandCompensated = NO;
+    self.neckCommandSource = @"Unknown pose";
+    self.neckCommandSafetyStatus = status ?: @"Neck command pose is unknown.";
+    self.neckLevelingReferenceIsValid = NO;
+    self.panEnvelopeLowerTargetIsKnown = NO;
+    self.pendingPanEnvelopeLowerTarget = ROBNeckSafetyTargetOff;
+    self.pendingPanEnvelopeReadyAt = 0;
+    self.panRecenterSettleGate = (ROBNeckSafetySettleGate){0};
+    self.commandedNeckPanTargetReadyAt = 0;
+    self.lastDesiredUpperNeckTargetIsKnown = NO;
+    self.supervisedLowerRecoveryUntil = 0;
+    self.manualNeckOverrideUntil = 0;
+    self.visionNeckAuthorityUntil = 0;
+    self.gestureNeckAuthorityUntil = 0;
+    self.torsoNeckAuthorityRequiresOperatorAction = YES;
+    }
+}
+
 
 // executes after everything in the xib/nib is initiallized
 - (void)initialize_connection {
@@ -212,6 +714,9 @@ typedef enum : NSUInteger {
     self.actualSpeedR = 0;
     self.lastVisionNeckPanTarget = 6000;
     self.lastVisionNeckTiltTarget = 6045;
+    self.activeNeckSafetyConfiguration = [self loadNeckSafetyConfiguration];
+    [self invalidateNeckCommandStateWithStatus:@"No neck target has been sent; physical pose is unknown."];
+    self.neckCommandSource = @"None";
     readThreadRunning_base = FALSE;
     readThreadRunning_maestro = FALSE;
 
@@ -221,11 +726,11 @@ typedef enum : NSUInteger {
     self.currentIncommingVerbalMessage = @"";
     self.baseSerialReceiveBuffer = [NSMutableData data];
     // Base is the only Arduino role presently installed.
+    self.baseSerialStatusText = @"Detecting Base firmware…";
+    self.maestroSerialStatusText = @"Discovering Maestro by USB identity…";
     [self refreshSerialList_base:@"Detecting Base firmware…"];
     [self refreshSerialList_maestro:@"Discovering Maestro by USB identity…"];
     self.controlModelDataDictionary = [NSMutableDictionary new];
-    // now put the cursor in the text field
-    //[serialInputField becomeFirstResponder];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         [self connectToDetectedBase];
     });
@@ -474,6 +979,8 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         if (self.maestroConnectionValid) {
             self.maestroDevicePath = path;
             self.maestroMissingWasReported = NO;
+            [self invalidateNeckCommandStateWithStatus:
+                @"Maestro connected; neck pose must be re-established conservatively."];
         }
     }
 
@@ -491,6 +998,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
             self.maestroMissingWasReported = YES;
         }
     }
+    [self refreshSerialList_maestro:@"Maestro not detected; retrying automatically…"];
     [self scheduleMaestroReconnectAfterDelay:kMaestroReconnectDelaySeconds];
 }
 
@@ -517,10 +1025,13 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         self.maestroDevicePath = nil;
         if (serialFileDescriptor_maestro >= 0) close(serialFileDescriptor_maestro);
         serialFileDescriptor_maestro = -1;
+        [self invalidateNeckCommandStateWithStatus:
+            @"Maestro disconnected; all neck pose assumptions were cleared."];
     }
     if (transitioned) {
         NSLog(@"Maestro disconnected (%s); servo output paused.", strerror(errorNumber));
     }
+    [self refreshSerialList_maestro:@"Maestro disconnected; retrying automatically…"];
     [self scheduleMaestroReconnectAfterDelay:kMaestroReconnectDelaySeconds];
 }
 
@@ -558,6 +1069,644 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
 {
     unsigned char command[] = { 0x84, channel, target & 0x7F, (target >> 7) & 0x7F };
     return [self writeMaestroBytes:command length:sizeof(command)];
+}
+
+- (BOOL)sendMaestroLowerTarget:(unsigned short)lowerTarget
+                   upperTarget:(unsigned short)upperTarget
+{
+    // Mini Maestro compact protocol: update contiguous lower/upper neck
+    // channels with one command so a coupled move is parsed as one unit.
+    unsigned char command[] = {
+        0x9F,
+        2,
+        1,
+        lowerTarget & 0x7F,
+        (lowerTarget >> 7) & 0x7F,
+        upperTarget & 0x7F,
+        (upperTarget >> 7) & 0x7F,
+    };
+    return [self writeMaestroBytes:command length:sizeof(command)];
+}
+
+- (void)refreshSettledNeckEnvelopeAtTime:(NSTimeInterval)now
+{
+    if (self.pendingPanEnvelopeLowerTarget != ROBNeckSafetyTargetOff
+        && now >= self.pendingPanEnvelopeReadyAt
+        && self.lowerNeckTiltCommandKnown
+        && self.commandedLowerNeckTiltTarget == self.pendingPanEnvelopeLowerTarget) {
+        ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
+        ROBNeckSafetyPanBounds settledBounds = {0};
+        if (!ROBNeckSafetyAllowedPanBounds(
+                &configuration,
+                self.pendingPanEnvelopeLowerTarget,
+                &settledBounds
+            )) {
+            return;
+        }
+        self.panEnvelopeLowerTarget = self.pendingPanEnvelopeLowerTarget;
+        self.panEnvelopeLowerTargetIsKnown = YES;
+        self.currentNeckPanMinimumDegrees = settledBounds.minimumDegrees;
+        self.currentNeckPanMaximumDegrees = settledBounds.maximumDegrees;
+        self.pendingPanEnvelopeLowerTarget = ROBNeckSafetyTargetOff;
+        self.pendingPanEnvelopeReadyAt = 0;
+    }
+}
+
+- (ROBNeckCommandDisposition)applySafeNeckPanTarget:(int)panTarget
+              lowerTiltTarget:(int)lowerTiltTarget
+            desiredUpperTarget:(int)desiredUpperTarget
+                  includeLower:(BOOL)includeLower
+ allowSupervisedLowerRecovery:(BOOL)allowSupervisedLowerRecovery
+                        source:(NSString *)source
+{
+    @synchronized (self) {
+    ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
+    BOOL calibrationConfirmed = self.neckSafetyCalibrationConfirmed;
+    ROBNeckSafetyConfig effectiveConfiguration = configuration;
+    if (!calibrationConfirmed) {
+        // Unknown counter-rotation polarity must never be energized by a
+        // guessed default. Pan remains in the conservative restricted band
+        // until the operator validates and saves the calibration.
+        effectiveConfiguration.upperCounterRotationGain = 0.0;
+    }
+
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    [self refreshSettledNeckEnvelopeAtTime:now];
+
+    ROBNeckSafetyResult boundedJoints = {0};
+    int requestedLower = includeLower
+        ? lowerTiltTarget
+        : (int)self.commandedLowerNeckTiltTarget;
+    if (!ROBNeckSafetyApply(
+            &effectiveConfiguration,
+            ROBNeckSafetyTargetOff,
+            requestedLower,
+            ROBNeckSafetyTargetOff,
+            &boundedJoints
+        )) {
+        self.neckCommandSafetyStatus = @"Neck command rejected: invalid safety configuration.";
+        return ROBNeckCommandDispositionRejected;
+    }
+    int boundedLower = boundedJoints.lowerTarget;
+
+    BOOL supervisedManualCommand = [source isEqualToString:@"Torso manual"];
+    BOOL torsoCommand = [source hasPrefix:@"Torso "];
+    BOOL directSupervisedLowerRecovery = supervisedManualCommand
+        && allowSupervisedLowerRecovery
+        && includeLower
+        && boundedLower != ROBNeckSafetyTargetOff;
+    if (directSupervisedLowerRecovery) {
+        // A lower-axis action authorizes only this exact composite demand. The
+        // short latch survives the pan staging interval and passive renderer
+        // ticks, but cannot be reused for a different tracking/slider target.
+        self.supervisedLowerRecoveryPanTarget = panTarget;
+        self.supervisedLowerRecoveryTarget = boundedLower;
+        self.supervisedLowerRecoveryUpperTarget = desiredUpperTarget;
+        self.supervisedLowerRecoveryUntil = now
+            + kROBNeckSupervisedRecoverySeconds;
+    } else if (allowSupervisedLowerRecovery
+               && boundedLower == ROBNeckSafetyTargetOff) {
+        self.supervisedLowerRecoveryUntil = 0;
+    }
+    BOOL supervisedLowerRecovery = torsoCommand
+        && includeLower
+        && now <= self.supervisedLowerRecoveryUntil
+        && panTarget == self.supervisedLowerRecoveryPanTarget
+        && boundedLower == self.supervisedLowerRecoveryTarget
+        && desiredUpperTarget == self.supervisedLowerRecoveryUpperTarget;
+    if (torsoCommand
+        && includeLower
+        && self.supervisedLowerRecoveryUntil > 0
+        && !supervisedLowerRecovery) {
+        self.supervisedLowerRecoveryUntil = 0;
+    }
+    BOOL lowerChangeRequested = includeLower
+        && (!self.lowerNeckTiltCommandKnown
+            || boundedLower != self.commandedLowerNeckTiltTarget);
+    BOOL knownLowerIsActive = self.lowerNeckTiltCommandKnown
+        && self.commandedLowerNeckTiltTarget != ROBNeckSafetyTargetOff;
+    BOOL lowerTurningOff = knownLowerIsActive
+        && boundedLower == ROBNeckSafetyTargetOff;
+    BOOL allNeckOffRequested = includeLower
+        && panTarget == ROBNeckSafetyTargetOff
+        && boundedLower == ROBNeckSafetyTargetOff
+        && desiredUpperTarget == ROBNeckSafetyTargetOff;
+
+    int effectivePanTarget = panTarget;
+    int effectiveDesiredUpperTarget = desiredUpperTarget;
+    BOOL panOffHeldForActiveLower = knownLowerIsActive
+        && !lowerTurningOff
+        && effectivePanTarget == ROBNeckSafetyTargetOff;
+    BOOL upperOffHeldForActiveLower = knownLowerIsActive
+        && !lowerTurningOff
+        && effectiveDesiredUpperTarget == ROBNeckSafetyTargetOff;
+    if (panOffHeldForActiveLower) {
+        effectivePanTarget = self.neckPanCommandKnown
+            && self.commandedNeckPanTarget != ROBNeckSafetyTargetOff
+            ? (int)self.commandedNeckPanTarget
+            : effectiveConfiguration.panCenterTarget;
+    } else if (lowerTurningOff
+               && effectivePanTarget == ROBNeckSafetyTargetOff) {
+        // Recenter before releasing lower torque; a later render can send pan
+        // OFF after the lower channel is confirmed OFF.
+        effectivePanTarget = effectiveConfiguration.panCenterTarget;
+    }
+    if (upperOffHeldForActiveLower) {
+        if (self.upperNeckTiltCommandKnown
+            && self.commandedUpperNeckTiltTarget == ROBNeckSafetyTargetOff) {
+            // This is possible only in the explicitly supervised,
+            // uncompensated calibration path. Keeping OFF must not invent and
+            // energize an upper target.
+            effectiveDesiredUpperTarget = ROBNeckSafetyTargetOff;
+        } else if (self.lastDesiredUpperNeckTargetIsKnown) {
+            // Preserve the uncompensated camera demand. Feeding the already
+            // compensated applied output back through the policy would apply
+            // the lower-neck adjustment again on every render.
+            effectiveDesiredUpperTarget = self.lastDesiredUpperNeckTarget;
+        } else {
+            self.neckCommandSafetyStatus =
+                @"UPPER OFF HELD: prior uncompensated camera demand is unknown.";
+            return ROBNeckCommandDispositionHeldForSafety;
+        }
+    }
+
+    BOOL levelingRequired = effectiveConfiguration.cameraLevelingEnabled
+        && fabs(effectiveConfiguration.upperCounterRotationGain) > DBL_EPSILON;
+    BOOL lowerHeldForDisabledUpper = lowerChangeRequested
+        && boundedLower != ROBNeckSafetyTargetOff
+        && levelingRequired
+        && effectiveDesiredUpperTarget == ROBNeckSafetyTargetOff;
+    BOOL lowerHeldForCalibration = lowerChangeRequested
+        && boundedLower != ROBNeckSafetyTargetOff
+        && !calibrationConfirmed
+        && !supervisedLowerRecovery;
+    BOOL lowerHeldForRecovery = lowerChangeRequested
+        && boundedLower != ROBNeckSafetyTargetOff
+        && (!self.lowerNeckTiltCommandKnown
+            || self.commandedLowerNeckTiltTarget == ROBNeckSafetyTargetOff)
+        && !supervisedLowerRecovery;
+    BOOL supervisedLowerReferenceRecovery = lowerChangeRequested
+        && boundedLower != ROBNeckSafetyTargetOff
+        && (!self.lowerNeckTiltCommandKnown
+            || self.commandedLowerNeckTiltTarget == ROBNeckSafetyTargetOff)
+        && supervisedLowerRecovery;
+    BOOL coupledUpperPoseIsUnknown = lowerChangeRequested
+        && boundedLower != ROBNeckSafetyTargetOff
+        && levelingRequired
+        && (!self.upperNeckTiltCommandKnown
+            || self.commandedUpperNeckTiltTarget == ROBNeckSafetyTargetOff)
+        && effectiveDesiredUpperTarget != ROBNeckSafetyTargetOff;
+
+    ROBNeckSafetyPanBounds conservativeUnknownBounds = {0};
+    if (!ROBNeckConservativeUnknownPanBounds(
+            &effectiveConfiguration,
+            &conservativeUnknownBounds
+        )) {
+        self.neckCommandSafetyStatus = @"Neck command rejected: invalid conservative pan bounds.";
+        return ROBNeckCommandDispositionRejected;
+    }
+    ROBNeckSafetyPanBounds currentEnvelopeBounds = {
+        .minimumDegrees = self.currentNeckPanMinimumDegrees,
+        .maximumDegrees = self.currentNeckPanMaximumDegrees,
+    };
+    if (!calibrationConfirmed || !ROBNeckPanBoundsAreValid(currentEnvelopeBounds)) {
+        currentEnvelopeBounds = conservativeUnknownBounds;
+    }
+    ROBNeckSafetyPanBounds requestedEnvelopeBounds = conservativeUnknownBounds;
+    if (calibrationConfirmed
+        && boundedLower != ROBNeckSafetyTargetOff
+        && !ROBNeckSafetyAllowedPanBounds(
+            &effectiveConfiguration,
+            boundedLower,
+            &requestedEnvelopeBounds
+        )) {
+        self.neckCommandSafetyStatus = @"Neck command rejected: invalid requested pan bounds.";
+        return ROBNeckCommandDispositionRejected;
+    }
+
+    // Tighten each edge immediately. Widen either edge only after the lower
+    // target settles. Persisting this explicit intersection is essential for
+    // cross-branch moves whose envelopes are not nested (for example,
+    // symmetric -45...+45 to forward -50...+40 remains -45...+40).
+    ROBNeckSafetyPanBounds activeEnvelopeBounds = currentEnvelopeBounds;
+    if (includeLower
+        && !ROBNeckPanBoundsIntersect(
+            currentEnvelopeBounds,
+            requestedEnvelopeBounds,
+            &activeEnvelopeBounds
+        )) {
+        self.neckCommandSafetyStatus = @"Neck command rejected: pan envelopes do not intersect.";
+        return ROBNeckCommandDispositionRejected;
+    }
+    BOOL requestedEnvelopeIsContained = ROBNeckPanBoundsContain(
+        currentEnvelopeBounds,
+        requestedEnvelopeBounds
+    );
+
+    int envelopeLower = calibrationConfirmed && self.panEnvelopeLowerTargetIsKnown
+        ? self.panEnvelopeLowerTarget
+        : ROBNeckSafetyTargetOff;
+    if (includeLower && boundedLower == ROBNeckSafetyTargetOff) {
+        // OFF has no shaft feedback. Keep the current/unknown intersection and
+        // never grant a wider pan range merely because torque was released.
+        self.panEnvelopeLowerTargetIsKnown = NO;
+        self.pendingPanEnvelopeLowerTarget = ROBNeckSafetyTargetOff;
+        self.pendingPanEnvelopeReadyAt = 0;
+        envelopeLower = ROBNeckSafetyTargetOff;
+    } else if (calibrationConfirmed
+               && includeLower
+               && boundedLower != ROBNeckSafetyTargetOff
+               && requestedEnvelopeIsContained) {
+        self.panEnvelopeLowerTarget = boundedLower;
+        self.panEnvelopeLowerTargetIsKnown = YES;
+        self.pendingPanEnvelopeLowerTarget = ROBNeckSafetyTargetOff;
+        self.pendingPanEnvelopeReadyAt = 0;
+        envelopeLower = boundedLower;
+    }
+    if (!calibrationConfirmed) {
+        self.panEnvelopeLowerTargetIsKnown = NO;
+        self.pendingPanEnvelopeLowerTarget = ROBNeckSafetyTargetOff;
+        self.pendingPanEnvelopeReadyAt = 0;
+        activeEnvelopeBounds = conservativeUnknownBounds;
+        envelopeLower = ROBNeckSafetyTargetOff;
+    }
+
+    // Before a lower move (including active -> OFF), establish pan inside the
+    // destination envelope. The pure-C latch keeps its original monotonic
+    // deadline across repeated continuous-slider events.
+    BOOL lowerHeldForPanRecenter = NO;
+    ROBNeckSafetySettleGate panGate = self.panRecenterSettleGate;
+    BOOL bypassSequencingForUnknownAllOff = allNeckOffRequested
+        && !self.lowerNeckTiltCommandKnown;
+    if (lowerChangeRequested
+        && !bypassSequencingForUnknownAllOff
+        && !lowerHeldForDisabledUpper
+        && !lowerHeldForCalibration
+        && !lowerHeldForRecovery) {
+        ROBNeckSafetyResult candidatePan = {0};
+        if (!ROBNeckSafetyApply(
+            &effectiveConfiguration,
+            self.neckPanCommandKnown
+                ? (int)self.commandedNeckPanTarget
+                : ROBNeckSafetyTargetOff,
+            calibrationConfirmed ? boundedLower : ROBNeckSafetyTargetOff,
+            ROBNeckSafetyTargetOff,
+            &candidatePan
+        )) {
+            self.neckCommandSafetyStatus = @"Neck command rejected by the pan safety envelope.";
+            return ROBNeckCommandDispositionRejected;
+        }
+        ROBNeckSafetyResult stagedPan = {0};
+        if (!ROBNeckSafetyApply(
+                &effectiveConfiguration,
+                effectivePanTarget,
+                envelopeLower,
+                ROBNeckSafetyTargetOff,
+                &stagedPan
+            )
+            || !ROBNeckClampPanResultToBounds(
+                &effectiveConfiguration,
+                activeEnvelopeBounds,
+                &stagedPan
+            )) {
+            self.neckCommandSafetyStatus = @"Neck command rejected by the staged pan envelope.";
+            return ROBNeckCommandDispositionRejected;
+        }
+        BOOL panPoseIsUnknown =
+            !self.neckPanCommandKnown
+            || self.commandedNeckPanTarget == ROBNeckSafetyTargetOff;
+        BOOL currentPanIsOutsideCandidateEnvelope =
+            !panPoseIsUnknown
+            && candidatePan.panTarget != self.commandedNeckPanTarget;
+        BOOL requestedPanWillChange = !self.neckPanCommandKnown
+            || stagedPan.panTarget != self.commandedNeckPanTarget;
+        BOOL priorPanTargetIsStillSettling = self.neckPanCommandKnown
+            && now < self.commandedNeckPanTargetReadyAt;
+        BOOL sequencingRequired = panPoseIsUnknown
+            || currentPanIsOutsideCandidateEnvelope
+            || requestedPanWillChange
+            || priorPanTargetIsStillSettling
+            || coupledUpperPoseIsUnknown
+            || panGate.active;
+        if (sequencingRequired) {
+            lowerHeldForPanRecenter = ROBNeckSafetySettleGateShouldHold(
+                &panGate,
+                boundedLower,
+                stagedPan.panTarget,
+                effectivePanTarget != ROBNeckSafetyTargetOff,
+                !panPoseIsUnknown
+                    && !currentPanIsOutsideCandidateEnvelope
+                    && !requestedPanWillChange
+                    && !priorPanTargetIsStillSettling
+                    && !coupledUpperPoseIsUnknown,
+                now,
+                kROBNeckPanRecenterSeconds
+            );
+        } else {
+            ROBNeckSafetySettleGateReset(&panGate);
+        }
+    } else {
+        ROBNeckSafetySettleGateReset(&panGate);
+    }
+    self.panRecenterSettleGate = panGate;
+
+    BOOL upperOffStagedForLowerShutdown = lowerTurningOff
+        && lowerHeldForPanRecenter
+        && desiredUpperTarget == ROBNeckSafetyTargetOff
+        && self.upperNeckTiltCommandKnown
+        && self.commandedUpperNeckTiltTarget != ROBNeckSafetyTargetOff;
+    if (upperOffStagedForLowerShutdown) {
+        if (!self.lastDesiredUpperNeckTargetIsKnown) {
+            self.neckCommandSafetyStatus =
+                @"LOWER OFF HELD: prior uncompensated camera demand is unknown.";
+            return ROBNeckCommandDispositionHeldForSafety;
+        }
+        effectiveDesiredUpperTarget = self.lastDesiredUpperNeckTarget;
+    }
+
+    ROBNeckSafetyResult panResult = {0};
+    if (!ROBNeckSafetyApply(
+            &effectiveConfiguration,
+            effectivePanTarget,
+            envelopeLower,
+            ROBNeckSafetyTargetOff,
+            &panResult
+        )
+        || !ROBNeckClampPanResultToBounds(
+            &effectiveConfiguration,
+            activeEnvelopeBounds,
+            &panResult
+        )) {
+        self.neckCommandSafetyStatus = @"Neck command rejected by the pan safety envelope.";
+        return ROBNeckCommandDispositionRejected;
+    }
+
+    BOOL panTargetChanged = !self.neckPanCommandKnown
+        || panResult.panTarget != self.commandedNeckPanTarget;
+    BOOL panWriteSucceeded = [self sendMaestroTarget:(unsigned short)panResult.panTarget
+                                              channel:0];
+    if (!panWriteSucceeded) {
+        [self invalidateNeckCommandStateWithStatus:
+            @"NECK OUTPUT FAILED; physical pose and prior targets are unknown."];
+        return ROBNeckCommandDispositionRejected;
+    }
+    self.commandedNeckPanTarget = panResult.panTarget;
+    self.neckPanCommandKnown = YES;
+    if (panTargetChanged) {
+        self.commandedNeckPanTargetReadyAt = now + kROBNeckPanRecenterSeconds;
+    }
+    self.currentNeckPanMinimumDegrees = panResult.allowedPanMinimumDegrees;
+    self.currentNeckPanMaximumDegrees = panResult.allowedPanMaximumDegrees;
+    self.neckPanCommandLimited = panResult.panClamped;
+    double degrees = NAN;
+    self.commandedNeckPanDegrees = ROBNeckSafetyPanTargetToDegrees(
+        &effectiveConfiguration,
+        panResult.panTarget,
+        &degrees
+    ) ? degrees : NAN;
+
+    int lowerForLeveling = (lowerChangeRequested
+                            && !lowerHeldForDisabledUpper
+                            && !lowerHeldForPanRecenter)
+        ? boundedLower
+        : (int)self.commandedLowerNeckTiltTarget;
+    if (lowerForLeveling == ROBNeckSafetyTargetOff && boundedLower != ROBNeckSafetyTargetOff) {
+        lowerForLeveling = boundedLower;
+    }
+
+    if (levelingRequired
+        && self.commandedLowerNeckTiltTarget == ROBNeckSafetyTargetOff
+        && lowerForLeveling != ROBNeckSafetyTargetOff) {
+        // Until the first lower target is actually issued, keep rebasing the
+        // desired upper target so no compensation accumulates against an
+        // unknown physical lower pose.
+        self.neckLevelingReferenceLowerTarget = lowerForLeveling;
+        self.neckLevelingReferenceIsValid = YES;
+    } else if (levelingRequired
+        && !self.neckLevelingReferenceIsValid
+        && lowerForLeveling != ROBNeckSafetyTargetOff
+        && effectiveDesiredUpperTarget != ROBNeckSafetyTargetOff) {
+        self.neckLevelingReferenceLowerTarget = lowerForLeveling;
+        self.neckLevelingReferenceIsValid = YES;
+    }
+
+    // The upper slider/controller value stays an uncompensated camera demand.
+    // Shift that demand into the policy's configured reference frame so the
+    // first accepted command never causes an automatic leveling jump.
+    int adjustedDesiredUpper = effectiveDesiredUpperTarget;
+    if (effectiveDesiredUpperTarget != ROBNeckSafetyTargetOff
+        && lowerForLeveling != ROBNeckSafetyTargetOff
+        && levelingRequired
+        && self.neckLevelingReferenceIsValid) {
+        double configuredReference = ROBNeckSafetyReferenceLowerTarget(&effectiveConfiguration);
+        double referenceAdjustment = effectiveConfiguration.upperCounterRotationGain
+            * (configuredReference - self.neckLevelingReferenceLowerTarget);
+        double adjusted = (double)effectiveDesiredUpperTarget + referenceAdjustment;
+        adjusted = fmax((double)INT32_MIN, fmin((double)INT32_MAX, adjusted));
+        adjustedDesiredUpper = (int)lround(adjusted);
+    }
+
+    ROBNeckSafetyResult leveledResult = {0};
+    if (!ROBNeckSafetyApply(
+            &effectiveConfiguration,
+            ROBNeckSafetyTargetOff,
+            lowerForLeveling,
+            adjustedDesiredUpper,
+            &leveledResult
+        )) {
+        self.neckCommandSafetyStatus = @"Neck command rejected by camera-leveling safety.";
+        return ROBNeckCommandDispositionRejected;
+    }
+
+    // If the requested lower move would exhaust the upper camera joint, keep
+    // the lower joint where it is. Recompute the upper command for that held
+    // lower pose so a rejected move does not unnecessarily drive the camera
+    // into its stop.
+    double configuredLowerReference = ROBNeckSafetyReferenceLowerTarget(
+        &effectiveConfiguration
+    );
+    double requestedUnclampedUpper = (double)adjustedDesiredUpper;
+    if (levelingRequired
+        && lowerForLeveling != ROBNeckSafetyTargetOff) {
+        requestedUnclampedUpper += effectiveConfiguration.upperCounterRotationGain
+            * ((double)lowerForLeveling - configuredLowerReference);
+    }
+    double currentUnclampedUpper = (double)adjustedDesiredUpper;
+    if (levelingRequired
+        && self.lowerNeckTiltCommandKnown
+        && self.commandedLowerNeckTiltTarget != ROBNeckSafetyTargetOff) {
+        currentUnclampedUpper += effectiveConfiguration.upperCounterRotationGain
+            * ((double)self.commandedLowerNeckTiltTarget - configuredLowerReference);
+    }
+    double requestedUpperOverflow = ROBTargetOverflow(
+        requestedUnclampedUpper,
+        effectiveConfiguration.upperMinimumTarget,
+        effectiveConfiguration.upperMaximumTarget
+    );
+    double currentUpperOverflow = ROBTargetOverflow(
+        currentUnclampedUpper,
+        effectiveConfiguration.upperMinimumTarget,
+        effectiveConfiguration.upperMaximumTarget
+    );
+    BOOL cameraLimitMoveImprovesRecovery = requestedUpperOverflow + 0.5
+        < currentUpperOverflow;
+    BOOL lowerHeldForCameraLimit = lowerChangeRequested
+        && boundedLower != ROBNeckSafetyTargetOff
+        && levelingRequired
+        && !lowerHeldForDisabledUpper
+        && !lowerHeldForCalibration
+        && !lowerHeldForRecovery
+        && !lowerHeldForPanRecenter
+        && leveledResult.upperClamped
+        && !cameraLimitMoveImprovesRecovery;
+    BOOL requestedCameraLimitWasReached = leveledResult.upperClamped;
+    if (lowerHeldForCameraLimit) {
+        lowerForLeveling = (int)self.commandedLowerNeckTiltTarget;
+        if (!ROBNeckSafetyApply(
+                &effectiveConfiguration,
+                ROBNeckSafetyTargetOff,
+                lowerForLeveling,
+                adjustedDesiredUpper,
+                &leveledResult
+            )) {
+            self.neckCommandSafetyStatus = @"Neck command rejected by camera-leveling safety.";
+            return ROBNeckCommandDispositionRejected;
+        }
+    }
+
+    BOOL mayMoveLower = includeLower
+        && !lowerHeldForDisabledUpper
+        && !lowerHeldForCalibration
+        && !lowerHeldForRecovery
+        && !lowerHeldForPanRecenter
+        && !lowerHeldForCameraLimit;
+    BOOL lowerWriteSucceeded = NO;
+    BOOL upperWriteSucceeded = NO;
+    if (mayMoveLower) {
+        // Once pan/unknown-pose staging has cleared, channels 1 and 2 receive
+        // their lower and counter-rotated upper targets together. This keeps
+        // an established camera from being pre-tilted to its final endpoint
+        // before lower motion starts. The installed joints use matching
+        // servos; with the calibrated -1 gain, equal and opposite target
+        // deltas are issued together for nominally matched travel.
+        BOOL coupledWriteSucceeded = [self
+            sendMaestroLowerTarget:(unsigned short)boundedLower
+            upperTarget:(unsigned short)leveledResult.upperTarget];
+        lowerWriteSucceeded = coupledWriteSucceeded;
+        upperWriteSucceeded = coupledWriteSucceeded;
+    } else {
+        // A held lower joint still permits an upper target to be established,
+        // which is needed when that coupled axis was previously unknown/off.
+        upperWriteSucceeded = [self
+            sendMaestroTarget:(unsigned short)leveledResult.upperTarget
+            channel:2];
+    }
+    if (!upperWriteSucceeded || (mayMoveLower && !lowerWriteSucceeded)) {
+        [self invalidateNeckCommandStateWithStatus:
+            @"NECK OUTPUT PARTIAL; physical pose and prior targets are unknown."];
+        return ROBNeckCommandDispositionRejected;
+    }
+    self.commandedUpperNeckTiltTarget = leveledResult.upperTarget;
+    self.upperNeckTiltCommandKnown = YES;
+    self.lastDesiredUpperNeckTargetIsKnown =
+        effectiveDesiredUpperTarget != ROBNeckSafetyTargetOff;
+    self.lastDesiredUpperNeckTarget = MAX(
+        effectiveConfiguration.upperMinimumTarget,
+        MIN(effectiveConfiguration.upperMaximumTarget, effectiveDesiredUpperTarget)
+    );
+    double runtimeAdjustment = levelingRequired
+        && self.neckLevelingReferenceIsValid
+        ? effectiveConfiguration.upperCounterRotationGain
+            * (lowerForLeveling - self.neckLevelingReferenceLowerTarget)
+        : 0.0;
+    self.upperNeckCommandCompensated =
+        leveledResult.upperTarget != ROBNeckSafetyTargetOff
+        && fabs(runtimeAdjustment) >= 0.5;
+    if (leveledResult.upperTarget == ROBNeckSafetyTargetOff) {
+        self.neckLevelingReferenceIsValid = NO;
+    }
+
+    if (mayMoveLower) {
+        self.commandedLowerNeckTiltTarget = boundedLower;
+        self.lowerNeckTiltCommandKnown = YES;
+        self.supervisedLowerRecoveryUntil = 0;
+        self.panRecenterSettleGate = (ROBNeckSafetySettleGate){0};
+        if (boundedLower == ROBNeckSafetyTargetOff) {
+            self.panEnvelopeLowerTargetIsKnown = NO;
+            self.pendingPanEnvelopeLowerTarget = ROBNeckSafetyTargetOff;
+            self.pendingPanEnvelopeReadyAt = 0;
+            self.neckLevelingReferenceIsValid = NO;
+            if (panTarget == ROBNeckSafetyTargetOff
+                && panResult.panTarget != ROBNeckSafetyTargetOff) {
+                if (![self sendMaestroTarget:ROBNeckSafetyTargetOff channel:0]) {
+                    [self invalidateNeckCommandStateWithStatus:
+                        @"NECK OUTPUT PARTIAL; physical pose and prior targets are unknown."];
+                    return ROBNeckCommandDispositionRejected;
+                }
+                self.commandedNeckPanTarget = ROBNeckSafetyTargetOff;
+                self.neckPanCommandKnown = YES;
+                self.commandedNeckPanTargetReadyAt = now
+                    + kROBNeckPanRecenterSeconds;
+                self.commandedNeckPanDegrees = NAN;
+                self.neckPanCommandLimited = NO;
+            }
+        } else if (calibrationConfirmed
+                   && !requestedEnvelopeIsContained) {
+            if (self.pendingPanEnvelopeLowerTarget != boundedLower
+                || self.pendingPanEnvelopeReadyAt <= 0) {
+                // One or both destination edges widen only after settling.
+                // Identical periodic/gesture demands must not postpone this
+                // deadline forever; only a new lower target restarts it.
+                self.pendingPanEnvelopeLowerTarget = boundedLower;
+                self.pendingPanEnvelopeReadyAt = now
+                    + kROBNeckClearanceSettleSeconds;
+            }
+        } else if (calibrationConfirmed) {
+            self.panEnvelopeLowerTarget = boundedLower;
+            self.panEnvelopeLowerTargetIsKnown = YES;
+        }
+    }
+
+    self.neckCommandSource = source ?: @"Unknown";
+
+    NSMutableArray<NSString *> *status = [NSMutableArray array];
+    if (!calibrationConfirmed) {
+        [status addObject:[NSString stringWithFormat:
+            @"CALIBRATION REQUIRED: AUTOMATIC LOWER MOTION HELD; PAN %.1f°…%+.1f°",
+            panResult.allowedPanMinimumDegrees,
+            panResult.allowedPanMaximumDegrees]];
+    }
+    if (panResult.panClamped) {
+        [status addObject:[NSString stringWithFormat:
+            @"PAN LIMITED %.1f°…%+.1f°",
+            panResult.allowedPanMinimumDegrees,
+            panResult.allowedPanMaximumDegrees]];
+    }
+    if (boundedJoints.lowerClamped) [status addObject:@"LOWER CLAMPED"];
+    if (self.upperNeckCommandCompensated) [status addObject:@"CAMERA COUNTER-ROTATED"];
+    if (requestedCameraLimitWasReached) [status addObject:@"CAMERA LIMIT REACHED"];
+    if (lowerHeldForDisabledUpper) [status addObject:@"LOWER HELD: UPPER SERVO OFF"];
+    if (lowerHeldForCalibration) [status addObject:@"LOWER HELD: CALIBRATION REQUIRED (USE SUPERVISED MANUAL JOG)"];
+    if (lowerHeldForRecovery) [status addObject:@"LOWER HELD: MANUAL POSE RECOVERY REQUIRED"];
+    if (supervisedLowerReferenceRecovery) [status addObject:@"SUPERVISED LOWER REFERENCE RECOVERY (NO SHAFT FEEDBACK)"];
+    if (lowerHeldForPanRecenter) [status addObject:@"LOWER HELD: ESTABLISHING SAFE PAN/CAMERA TARGETS"];
+    if (lowerHeldForCameraLimit) [status addObject:@"LOWER HELD: CAMERA COMPENSATION LIMIT"];
+    if (panOffHeldForActiveLower) [status addObject:@"PAN OFF HELD: LOWER SERVO ACTIVE"];
+    if (upperOffHeldForActiveLower) [status addObject:@"UPPER OFF HELD: LOWER SERVO ACTIVE"];
+    if (upperOffStagedForLowerShutdown) [status addObject:@"UPPER OFF STAGED UNTIL PAN RECENTERS"];
+    if (self.pendingPanEnvelopeLowerTarget != ROBNeckSafetyTargetOff) {
+        [status addObject:@"CLEARANCE SETTLING"];
+    }
+    if (status.count == 0) [status addObject:@"Within configured command envelope"];
+    self.neckCommandSafetyStatus = [status componentsJoinedByString:@" • "];
+    return (lowerHeldForDisabledUpper
+            || lowerHeldForCalibration
+            || lowerHeldForRecovery
+            || lowerHeldForPanRecenter
+            || lowerHeldForCameraLimit)
+        ? ROBNeckCommandDispositionHeldForSafety
+        : ROBNeckCommandDispositionAppliedCommand;
+    }
 }
 
 
@@ -673,29 +1822,45 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
 
 // updates the textarea for incoming text by appending text
 - (void)appendToIncomingText_base: (id) text{
-    // add the text to the textarea
-    NSAttributedString* attrString = [[NSMutableAttributedString alloc] initWithString: text];
+    // Give every appended run a semantic foreground. A bare attributed
+    // string otherwise receives a fixed default that can remain dark when the
+    // app moves into Dark Mode.
+    NSString *outputText = [text isKindOfClass:[NSString class]]
+        ? [(NSString *)text copy]
+        : [[text description] copy];
     //TODO: DISPATCH GET MAIN THREAD HERE FOR USING TEXTSTORAGE
     dispatch_async(dispatch_get_main_queue(), ^(){
-        NSTextStorage *textStorage = [self.serialOutputArea_base textStorage];
-        [self.delegate didOutputSerialResponse_Base:attrString.string];
+        [self.delegate didOutputSerialResponse_Base:outputText];
+        // The console is intentionally opt-in. Serial parsing and robot state
+        // continue headlessly, but output is not retained or rendered while
+        // its separate diagnostics window is closed.
+        NSTextView *outputArea = self.serialOutputArea_base;
+        if (outputArea == nil) {
+            return;
+        }
+        NSAttributedString *attrString = [[NSAttributedString alloc]
+            initWithString:outputText
+                 attributes:@{NSForegroundColorAttributeName: NSColor.labelColor}];
+        NSTextStorage *textStorage = outputArea.textStorage;
         [textStorage beginEditing];
         [textStorage appendAttributedString:attrString];
+        if (textStorage.length > kROBBaseConsoleMaximumCharacters) {
+            NSUInteger excess = textStorage.length - kROBBaseConsoleMaximumCharacters;
+            NSRange trimRange = [textStorage.string
+                rangeOfComposedCharacterSequencesForRange:NSMakeRange(0, excess)];
+            [textStorage deleteCharactersInRange:trimRange];
+        }
         [textStorage endEditing];
         
         // scroll to the bottom
         NSRange myRange;
-        myRange.length = 1;
+        myRange.length = 0;
         myRange.location = [textStorage length];
-        [self.serialOutputArea_base scrollRangeToVisible:myRange];
+        [outputArea scrollRangeToVisible:myRange];
     });
 }
 
 - (void)incomingTextUpdateThread_base: (NSThread *) parentThread{
-    
-    // create a pool so we can use regular Cocoa stuff
-    //   child threads can't re-use the parent's autorelease pool
-    //NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     
     // mark that the thread is running
     readThreadRunning_base = TRUE;
@@ -727,8 +1892,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     // mark that the thread has quit
     readThreadRunning_base = FALSE;
     
-    // give back the pool
-    //[pool release];
 }
 
 - (void)consumeBaseSerialBytes:(const void *)bytes length:(NSUInteger)length
@@ -809,53 +1972,57 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
 
 
 - (void) refreshSerialList_base: (NSString *) selectedText {
-    io_object_t serialPort;
-    io_iterator_t serialPortIterator;
-    
-    // remove everything from the pull down list
-    [self.serialListPullDown_base removeAllItems];
-    
-    // ask for all the serial ports
-    IOServiceGetMatchingServices(kIOMasterPortDefault, IOServiceMatching(kIOSerialBSDServiceValue), &serialPortIterator);
-    
-    // loop through all the serial ports and add them to the array
-    while ((serialPort = IOIteratorNext(serialPortIterator))) {
-        [self.serialListPullDown_base addItemWithTitle:
-         //CheckHere for ARC Stuff related to the CFSTR string ownership
-         (__bridge NSString*)IORegistryEntryCreateCFProperty(serialPort, CFSTR(kIOCalloutDeviceKey),  kCFAllocatorDefault, 0)];
-        IOObjectRelease(serialPort);
-    }
-    
-    // add the selected text to the top
-    [self.serialListPullDown_base insertItemWithTitle:selectedText atIndex:0];
-    [self.serialListPullDown_base selectItemAtIndex:0];
-    
-    IOObjectRelease(serialPortIterator);
+    self.baseSerialStatusText = selectedText.length > 0
+        ? selectedText
+        : @"Base USB status unavailable";
+    NSArray<NSString *> *paths = [self usbSerialPortPaths];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSPopUpButton *popup = self.serialListPullDown_base;
+        if (popup != nil) {
+            [popup removeAllItems];
+            [popup addItemWithTitle:self.baseSerialStatusText];
+            popup.itemArray.firstObject.enabled =
+                [self.baseSerialStatusText hasPrefix:@"/dev/cu.usb"];
+            for (NSString *path in paths) {
+                if (![path isEqualToString:self.baseSerialStatusText]) {
+                    [popup addItemWithTitle:path];
+                }
+            }
+            [popup selectItemAtIndex:0];
+        }
+        [[NSNotificationCenter defaultCenter]
+            postNotificationName:ROBSerialHardwareDidChangeNotification
+                          object:self];
+    });
 }
 
 - (void) refreshSerialList_maestro: (NSString *) selectedText {
-    io_object_t serialPort;
-    io_iterator_t serialPortIterator;
-    
-    // remove everything from the pull down list
-    [self.serialListPullDown_maestro removeAllItems];
-    
-    // ask for all the serial ports
-    IOServiceGetMatchingServices(kIOMasterPortDefault, IOServiceMatching(kIOSerialBSDServiceValue), &serialPortIterator);
-    
-    // loop through all the serial ports and add them to the array
-    while ((serialPort = IOIteratorNext(serialPortIterator))) {
-        [self.serialListPullDown_maestro addItemWithTitle:
-         //CheckHere for ARC Stuff related to the CFSTR string ownership
-         (__bridge NSString*)IORegistryEntryCreateCFProperty(serialPort, CFSTR(kIOCalloutDeviceKey),  kCFAllocatorDefault, 0)];
-        IOObjectRelease(serialPort);
-    }
-    
-    // add the selected text to the top
-    [self.serialListPullDown_maestro insertItemWithTitle:selectedText atIndex:0];
-    [self.serialListPullDown_maestro selectItemAtIndex:0];
-    
-    IOObjectRelease(serialPortIterator);
+    self.maestroSerialStatusText = selectedText.length > 0
+        ? selectedText
+        : @"Maestro USB status unavailable";
+    NSArray<NSString *> *paths = [self usbSerialPortPaths];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSPopUpButton *popup = self.serialListPullDown_maestro;
+        if (popup != nil) {
+            [popup removeAllItems];
+            [popup addItemWithTitle:self.maestroSerialStatusText];
+            for (NSString *path in paths) {
+                if (![path isEqualToString:self.maestroSerialStatusText]) {
+                    [popup addItemWithTitle:path];
+                }
+            }
+            [popup selectItemAtIndex:0];
+        }
+        [[NSNotificationCenter defaultCenter]
+            postNotificationName:ROBSerialHardwareDidChangeNotification
+                          object:self];
+    });
+}
+
+- (void)refreshSerialPortControls
+{
+    [self refreshSerialList_base:self.baseSerialStatusText ?: @"Detecting Base firmware…"];
+    [self refreshSerialList_maestro:self.maestroSerialStatusText ?: @"Discovering Maestro by USB identity…"];
 }
 
 // send a string to the serial port
@@ -880,16 +2047,47 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
 
 - (void) serialPortSelected_base
 {
-    NSString *titleOfSelectedItem = [self.serialListPullDown_base titleOfSelectedItem];
+    [self selectBaseSerialPort:self.serialListPullDown_base.titleOfSelectedItem];
+}
+
+- (void)selectBaseSerialPort:(NSString *)path
+{
+    NSString *selectedPath = [path copy] ?: @"";
+    if (![selectedPath hasPrefix:@"/dev/cu.usb"] ||
+        ![[self usbSerialPortPaths] containsObject:selectedPath]) {
+        NSBeep();
+        [self refreshSerialPortControls];
+        return;
+    }
+    @synchronized (self) {
+        if (self.baseDetectionInProgress) {
+            NSBeep();
+            [self appendToIncomingText_base:
+                @"\nAutomatic Base USB detection is still running; try the override again when it finishes.\n"];
+            return;
+        }
+        if (serialFileDescriptor_base >= 0) {
+            // Never replace the descriptor underneath the live reader thread.
+            // A manual choice is a recovery override only when automatic Base
+            // discovery has not already established a connection.
+            if (![self.baseSerialStatusText isEqualToString:selectedPath]) {
+                NSBeep();
+                [self appendToIncomingText_base:
+                    @"\nBase is already connected; manual USB override was not applied.\n"];
+            }
+            [self refreshSerialPortControls];
+            return;
+        }
+    }
     // open the serial port
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-        NSString *error = [self openSerialPort:titleOfSelectedItem baud:kRHAPI_BAUDRATE serialFileDescriptor:&serialFileDescriptor_base contextInt:kBaseSerialContext];
+        NSString *error = [self openSerialPort:selectedPath baud:kRHAPI_BAUDRATE serialFileDescriptor:&serialFileDescriptor_base contextInt:kBaseSerialContext];
         
         if(error!=nil) {
             [self refreshSerialList_base:error];
             [self appendToIncomingText_base:error];
         } else {
-            [self refreshSerialList_base:titleOfSelectedItem];
+            [self refreshSerialList_base:selectedPath];
             [self performSelectorInBackground:@selector(incomingTextUpdateThread_base:) withObject:[NSThread currentThread]];
         }
     });
@@ -897,33 +2095,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
 
 - (void) serialPortSelected_maestro
 {
-    /*
-     // open the serial port
-     NSString *error = [self openSerialPort:[self.serialListPullDown_maestro titleOfSelectedItem] baud:kRHAPI_MAESTRO_BAUDRATE serialFileDescriptor:&serialFileDescriptor_maestro contextInt:kMaestroSerialContext];
-     
-     if(error!=nil) {
-     [self refreshSerialList_maestro:error];
-     [self appendToIncomingText_maestro:error];
-     } else {
-     [self refreshSerialList_maestro:[self.serialListPullDown_maestro titleOfSelectedItem]];
-     [self performSelectorInBackground:@selector(incomingTextUpdateThread_maestro:) withObject:[NSThread currentThread]];
-     }*/
 }
-/*
- // JUST AN EXAMPLE OF CHANGING THE BAUD RATE FOR INFORMATIONAL PUROSES
- - (IBAction) baudAction: (id) cntrl {
- if (serialFileDescriptor != -1) {
- speed_t baudRate = kRHAPI_BAUDRATE;
- 
- // if the new baud rate isn't possible, refresh the serial list
- //   this will also deselect the current serial port
- if(ioctl(serialFileDescriptor, IOSSIOSPEED, &baudRate)==-1) {
- [self refreshSerialList:@"Error: Baud Rate out of bounds"];
- [self appendToIncomingText_base:@"Error: Baud Rate out of bounds"];
- }
- }
- }
- */
 
 // action from refresh button
 - (IBAction) refreshAction: (id) cntrl {
@@ -950,28 +2122,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     
     // blank the field
     serialInputField.stringValue = @"";
-    //[serialInputField setTitleWithMnemonic:@""];
 }
-
-
-
-/*
- CGPoint touchPadPoint = CGPointMake([touchPad_array[0] floatValue], [touchPad_array[1] floatValue]);
- float Lat = [geoPosition_array[0] floatValue];
- float Long = [geoPosition_array[1] floatValue];
- bool tredBrakeLock = [[command_components[8] componentsSeparatedByString:@"tredBrakeLock="][1] boolValue];
- bool flipper1 = [flipper1_array[0] boolValue];
- bool flipper2 = [flipper1_array[1] boolValue];
- bool flipper3 = [flipper1_array[2] boolValue];
- bool flipper4 = [flipper1_array[3] boolValue];
- bool lact1 = [lact_array[0] boolValue];
- bool lact2 = [lact_array[1] boolValue];
- bool lact3 = [lact_array[2] boolValue];
- float speed = [speed_array[0] floatValue];
- bool speed_playPause = [speed_array[1] boolValue];
- bool speed_forward_reverse = [speed_array[2] boolValue];
- NSString *textInput = [command_components[12] componentsSeparatedByString:@"TEXT="][1];
- */
 
 - (float) animateLeftToTargetSpeed:(float)newTargetSpeed //0-100
 {
@@ -1039,7 +2190,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     int actual_speed_M1L = 0;
     int actual_speed_M2R = 0;
     
-    //printf("-");
     ///------- DUPLICATED BLOCK IN ROBSerialBox.m ---------
     
     NSString *deltaText = [textInput stringByReplacingOccurrencesOfString:self.currentIncommingVerbalMessage withString:@""];
@@ -1078,31 +2228,18 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     
     if (touchPadPointL.x > -999 && touchPadPointL.y > -999)
     {
-        //normalize touchPadPoint
-        //touchPadPointL = CGPointMake((touchPadPointL.x - 0.5), -(touchPadPointL.y - 0.5));
-        //touchPadPointR = CGPointMake((touchPadPointR.x - 125.0)/125.0, -(touchPadPointR.y - 125.0)/125.0);
-        
         speedMagnitudeL = sqrt(touchPadPointL.x * touchPadPointL.x + touchPadPointL.y * touchPadPointL.y);
-        //speedMagnitudeR = sqrt(touchPadPointR.x * touchPadPointR.x + touchPadPointR.y * touchPadPointR.y);
-        
-        //touchPadPoint.x;
         float angleL = atan(touchPadPointL.y/touchPadPointL.x);
         float actualSpeedL = [self animateLeftToTargetSpeed:speed];
         
-        //float angleR = atan(touchPadPointR.y/touchPadPointR.x);
-        //float actualSpeedR = [self animateToTargetSpeed:speed];
-        
         //Set MotorDirection
         motorDirection_forwardBackward_M1L = (touchPadPointL.y > 0 ) ? @"+" : @"-";
-        //motorDirection_forwardBackward_M2R = (touchPadPointR.y > 0 ) ? @"+" : @"-";
         
         //Magnitude is between -0.5 and 0.5 so If we want 255 we have to multiply 0.5 * 2 for speed value
         actual_speed_M1L = (kMaxMovementSpeed*speedMagnitudeL*2)*actualSpeedL/100;
-        //actual_speed_M2R = (kMaxMovementSpeed*speedMagnitudeR)*actualSpeedL/100;
         actual_speed_M1L = (actual_speed_M1L > 255) ? 255 : actual_speed_M1L;
         
         actual_tred_speed_M1L = [NSString stringWithFormat:@"%04d", actual_speed_M1L];
-        //actual_tred_speed_M2R = [NSString stringWithFormat:@"%04d", actual_speed_M2R];
         
         tredBrakeLockL = false;
         //  Animate target_speed to the actual_speed values 0-255
@@ -1114,28 +2251,17 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     
     if (touchPadPointR.x > -999 && touchPadPointR.y > -999)
     {
-        //normalize touchPadPoint
-        //touchPadPointL = CGPointMake((touchPadPointL.x - 125.0)/125.0, -(touchPadPointL.y - 125.0)/125.0);
-        //touchPadPointR = CGPointMake((touchPadPointR.x - 0.5), -(touchPadPointR.y - 0.5));
-        
-        //speedMagnitudeL = sqrt(touchPadPointL.x * touchPadPointL.x + touchPadPointL.y * touchPadPointL.y);
         speedMagnitudeR = sqrt(touchPadPointR.x * touchPadPointR.x + touchPadPointR.y * touchPadPointR.y);
-        
-        //float angleL = atan(touchPadPointL.y/touchPadPointL.x);
-        //float actualSpeedL = [self animateToTargetSpeed:speed];
         
         float angleR = atan(touchPadPointR.y/touchPadPointR.x);
         float actualSpeedR = [self animateRightToTargetSpeed:speed];
         
         //Set MotorDirection
-        //motorDirection_forwardBackward_M1L = (touchPadPointL.y > 0 ) ? @"+" : @"-";
         motorDirection_forwardBackward_M2R = (touchPadPointR.y > 0 ) ? @"+" : @"-";
         
         //Magnitude is between -0.5 and 0.5 so If we want 255 we have to multiply 0.5 * 2 for speed value
-        //actual_speed_M1L = (kMaxMovementSpeed*speedMagnitudeL)*actualSpeedL/100;
         actual_speed_M2R = (kMaxMovementSpeed*speedMagnitudeR*2)*actualSpeedR/100;
         actual_speed_M2R = (actual_speed_M2R > 255) ? 255 : actual_speed_M2R;
-        //actual_tred_speed_M1L = [NSString stringWithFormat:@"%04d", actual_speed_M1L];
         actual_tred_speed_M2R = [NSString stringWithFormat:@"%04d", actual_speed_M2R];
         
         tredBrakeLockR = false;
@@ -1170,22 +2296,13 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     
     NSString *lactDirection = (lact1) ? @"-" : @"+";
     NSString *lactSpeed = (lact1 || lact3) ? @"3200" : @"0000";
-    //self.flipper_FORWARD_isDown, self.flipper_RELAX_isDown, self.flipper_BACKWARD_isDown, self.flipper_BRAKELOCK,
-    //self.lact_BACK_isDown, self.lact_GRAVITY_toggle, self.lact_FRONT_isDown,
     
     
     NSString *base_command = [NSString stringWithFormat:@"~+000%i,%@%@,+000%i,%@%@,+000%i,%@%@,%@%@", (int)tredBrakeLockL,
                               motorDirection_forwardBackward_M1L, actual_tred_speed_M1L, (int)tredBrakeLockR, motorDirection_forwardBackward_M2R,
                               actual_tred_speed_M2R, (int)flipperBrakeLock, flipper_direction, actual_flipper_speed, lactDirection, lactSpeed];
     
-    //NSLog(@"command = %@", command);
-    
     [self writeString:base_command serialFileDescriptor:serialFileDescriptor_base];
-    
-    //******
-    //Shows me i need to keep pulsing the data
-    //Only worked with old wiring system which is now severed
-    //******
 }
 
 
@@ -1206,17 +2323,41 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
                               arm_L_wrist_pan:(NSString *)arm_L_wrist_pan
                              arm_L_wrist_tilt:(NSString *)arm_L_wrist_tilt
                                 arm_L_gripper:(NSString *)arm_L_gripper
+                            operatorInitiated:(BOOL)operatorInitiated
+                   lowerTiltOperatorInitiated:(BOOL)lowerTiltOperatorInitiated
 
 {
-    //NSLog(@"headPan = %d, headTilt = %d, headUpperNeckTilt = %d", [head_pan intValue], [head_tilt intValue], [head_upperNeckTilt intValue]);
     //---
     //7790 max for upperNeckTilt, 4300 min for uppperNeckTilt
     //7675 max for headTilt, 4375 max for the headTilt
 
     if (!self.maestroConnectionValid) return;
-    [self sendMaestroTarget:[head_pan intValue] channel:0];
-    [self sendMaestroTarget:[head_tilt intValue] channel:1];
-    [self sendMaestroTarget:[head_upperNeckTilt intValue] channel:2];
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (operatorInitiated) {
+        self.manualNeckOverrideUntil = now + kROBNeckManualOverrideSeconds;
+        self.gestureNeckAuthorityUntil = 0;
+        self.torsoNeckAuthorityRequiresOperatorAction = NO;
+    }
+    BOOL gestureOwnsNeck = !operatorInitiated
+        && now >= self.manualNeckOverrideUntil
+        && now < self.gestureNeckAuthorityUntil;
+    BOOL visionOwnsNeck = !operatorInitiated
+        && !gestureOwnsNeck
+        && now >= self.manualNeckOverrideUntil
+        && now < self.visionNeckAuthorityUntil;
+    BOOL torsoMayResumeNeck = operatorInitiated
+        || !self.torsoNeckAuthorityRequiresOperatorAction;
+    if (!gestureOwnsNeck && !visionOwnsNeck && torsoMayResumeNeck) {
+        NSString *source = (operatorInitiated || now < self.manualNeckOverrideUntil)
+            ? @"Torso manual"
+            : @"Torso tracking";
+        [self applySafeNeckPanTarget:[head_pan intValue]
+                    lowerTiltTarget:[head_tilt intValue]
+                  desiredUpperTarget:[head_upperNeckTilt intValue]
+                        includeLower:YES
+       allowSupervisedLowerRecovery:lowerTiltOperatorInitiated
+                              source:source];
+    }
 
     [self sendMaestroTarget:[arm_L_elbow_pan intValue] channel:4];
     [self sendMaestroTarget:[arm_R_elbow_pan intValue] channel:5];
@@ -1234,52 +2375,56 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     [self sendMaestroTarget:[arm_L_wrist_tilt intValue] channel:16];
     [self sendMaestroTarget:[arm_L_gripper intValue] channel:17];
     
-    // Open the Maestro's virtual COM port.
-    //"/dev/cu.usbmodem00034567";  // Mac OS X
-    
-    
-    /*const char * device = [kRHAPI_SERIAL_PORT_MAESTRO_COM cStringUsingEncoding:NSUTF8StringEncoding];
-     
-     int fd = open(device, O_RDWR | O_NOCTTY);
-     if (fd == -1)
-     {
-     perror(device);
-     return;
-     }
-     
-     
-     struct termios options;
-     tcgetattr(fd, &options);
-     options.c_iflag &= ~(INLCR | IGNCR | ICRNL | IXON | IXOFF);
-     options.c_oflag &= ~(ONLCR | OCRNL);
-     options.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
-     tcsetattr(fd, TCSANOW, &options);
-     
-     int position = maestroGetPosition(fd, 0);
-     printf("Current position is %d.\n", position);
-     
-     int target = (position < 6000) ? 7000 : 5000;
-     printf("Setting target to %d (%d us).\n", target, target/4);
-     maestroSetTarget(fd, 0, target);
-     
-     close(fd);
-     */
-    
-    
-    
 }
 
 - (void)applyVisionNeckPan:(float)pan tilt:(float)tilt
 {
-    if (!isfinite(pan) || !isfinite(tilt) || !self.maestroConnectionValid) {
+    if (!isfinite(pan)
+        || !isfinite(tilt)
+        || !self.maestroConnectionValid
+        || !self.neckSafetyCalibrationConfirmed
+        || !self.neckCommandStateKnown
+        || self.commandedLowerNeckTiltTarget == ROBNeckSafetyTargetOff) {
         return;
     }
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (now < self.manualNeckOverrideUntil
+        || now < self.gestureNeckAuthorityUntil) {
+        return;
+    }
+    BOOL acquiringVisionAuthority = now >= self.visionNeckAuthorityUntil;
+    if (acquiringVisionAuthority) {
+        ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
+        self.lastVisionNeckPanTarget = self.commandedNeckPanTarget != ROBNeckSafetyTargetOff
+            ? (int)self.commandedNeckPanTarget
+            : configuration.panCenterTarget;
+        if (self.lastDesiredUpperNeckTargetIsKnown) {
+            self.lastVisionNeckTiltTarget = self.lastDesiredUpperNeckTarget;
+        } else if (self.commandedUpperNeckTiltTarget != ROBNeckSafetyTargetOff) {
+            self.lastVisionNeckTiltTarget = (int)self.commandedUpperNeckTiltTarget;
+        } else {
+            self.lastVisionNeckTiltTarget = 6045;
+        }
+    }
+    self.visionNeckAuthorityUntil = now + kROBNeckVisionAuthoritySeconds;
+    self.torsoNeckAuthorityRequiresOperatorAction = YES;
     // Normalized Vision Pro demands are converted only here, behind Cerebro's
     // fresh-master-controller gate. Channel 0 is neck pan and channel 2 is the
     // upper camera tilt used by the existing face tracker.
     float boundedPan = MAX(-1.0f, MIN(1.0f, pan));
     float boundedTilt = MAX(-1.0f, MIN(1.0f, tilt));
-    int requestedPan = (int)lroundf(6000.0f + boundedPan * 2000.0f);
+    ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
+    int32_t requestedPanTarget = configuration.panCenterTarget;
+    double requestedPanDegrees = boundedPan
+        * ROBNeckSafetyFullPanDegrees(&configuration);
+    if (!ROBNeckSafetyPanDegreesToTarget(
+            &configuration,
+            requestedPanDegrees,
+            &requestedPanTarget
+        )) {
+        return;
+    }
+    int requestedPan = requestedPanTarget;
     int requestedTilt = (int)lroundf(6045.0f - boundedTilt * 1745.0f);
     // renderController runs at 10 Hz. Limit each accepted step so a tracking
     // discontinuity or rapid head turn cannot command a full-range servo jump.
@@ -1288,8 +2433,83 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     int tiltDelta = MAX(-maximumStep, MIN(maximumStep, requestedTilt - self.lastVisionNeckTiltTarget));
     self.lastVisionNeckPanTarget += panDelta;
     self.lastVisionNeckTiltTarget += tiltDelta;
-    [self sendMaestroTarget:self.lastVisionNeckPanTarget channel:0];
-    [self sendMaestroTarget:self.lastVisionNeckTiltTarget channel:2];
+    [self applySafeNeckPanTarget:self.lastVisionNeckPanTarget
+                lowerTiltTarget:ROBNeckSafetyTargetOff
+              desiredUpperTarget:self.lastVisionNeckTiltTarget
+                    includeLower:NO
+   allowSupervisedLowerRecovery:NO
+                          source:@"Vision controller"];
+    // Keep Vision's slew baseline at the applied safe pan target. If the
+    // lower neck later clears the arms, pan expands at the existing 80-target
+    // step instead of jumping from the edge of the restricted envelope.
+    if (self.commandedNeckPanTarget != ROBNeckSafetyTargetOff) {
+        self.lastVisionNeckPanTarget = (int)self.commandedNeckPanTarget;
+    }
+}
+
+- (ROBNeckCommandDisposition)requestNeckGesturePanDegrees:(double)panDegrees
+                                      lowerTiltRawTarget:(NSInteger)lowerTiltRawTarget
+                                     cameraTiltRawTarget:(NSInteger)cameraTiltRawTarget
+                                           leaseDuration:(NSTimeInterval)leaseDuration
+                                                   source:(NSString *)source
+{
+    ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
+    if (![NSThread isMainThread]
+        || !self.maestroConnectionValid
+        || !self.neckSafetyCalibrationConfirmed
+        || !self.neckCommandStateKnown
+        || self.commandedNeckPanTarget == ROBNeckSafetyTargetOff
+        || self.commandedLowerNeckTiltTarget == ROBNeckSafetyTargetOff
+        || self.commandedUpperNeckTiltTarget == ROBNeckSafetyTargetOff
+        || !isfinite(panDegrees)
+        || !isfinite(leaseDuration)
+        || leaseDuration < 0.1
+        || leaseDuration > 2.0
+        || source.length == 0
+        || lowerTiltRawTarget < configuration.lowerMinimumTarget
+        || lowerTiltRawTarget > configuration.lowerMaximumTarget
+        || cameraTiltRawTarget < configuration.upperMinimumTarget
+        || cameraTiltRawTarget > configuration.upperMaximumTarget) {
+        self.neckCommandSafetyStatus =
+            @"Gesture request rejected: connection, calibration, thread, target, or lease is invalid.";
+        return ROBNeckCommandDispositionRejected;
+    }
+
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (now < self.manualNeckOverrideUntil) {
+        self.neckCommandSafetyStatus = @"Gesture request rejected: manual neck control owns the lease.";
+        return ROBNeckCommandDispositionRejected;
+    }
+
+    int32_t panTarget = ROBNeckSafetyTargetOff;
+    if (!ROBNeckSafetyPanDegreesToTarget(&configuration, panDegrees, &panTarget)) {
+        self.neckCommandSafetyStatus = @"Gesture request rejected: pan angle is outside calibration.";
+        return ROBNeckCommandDispositionRejected;
+    }
+
+    self.visionNeckAuthorityUntil = 0;
+    self.gestureNeckAuthorityUntil = now + leaseDuration;
+    self.torsoNeckAuthorityRequiresOperatorAction = YES;
+    NSString *commandSource = [@"Gesture: " stringByAppendingString:source];
+    ROBNeckCommandDisposition disposition = [self
+        applySafeNeckPanTarget:panTarget
+        lowerTiltTarget:(int)lowerTiltRawTarget
+        desiredUpperTarget:(int)cameraTiltRawTarget
+        includeLower:YES
+        allowSupervisedLowerRecovery:NO
+        source:commandSource];
+    if (disposition == ROBNeckCommandDispositionRejected) {
+        self.gestureNeckAuthorityUntil = 0;
+    }
+    return disposition;
+}
+
+- (void)cancelNeckGestureAuthority
+{
+    self.gestureNeckAuthorityUntil = 0;
+    self.torsoNeckAuthorityRequiresOperatorAction = YES;
+    self.neckCommandSafetyStatus =
+        @"Gesture authority released; holding the last commanded targets.";
 }
 
 - (void)applyVisionGrippersActive:(BOOL)active leftClosed:(BOOL)leftClosed rightClosed:(BOOL)rightClosed
@@ -1601,7 +2821,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
             // At this point, the task might still be running, but the pipe is closed.
             // You can process the final data here.
             NSString *finalOutput = [[NSString alloc] initWithData:self.receivedData_R11_log encoding:NSUTF8StringEncoding];
-            //NSLog(@"L10:\n%@", finalOutput);
             dispatch_async(dispatch_get_main_queue(), ^{
                 self.amberMasterCoreOutput_R11.string = [self.amberMasterCoreOutput_R11.string stringByAppendingString:finalOutput];
                 [self.amberMasterCoreOutput_R11 setNeedsDisplay:YES];
@@ -1613,9 +2832,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
             self.core_R11_isOnline = true;
             [self.receivedData_R11_log appendData:data];
             
-            // For demonstration, print the partial output.
             NSString *partialString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-            //NSLog(@"L10: %@", partialString);
             dispatch_async(dispatch_get_main_queue(), ^{
                 self.amberMasterCoreOutput_R11.string = [self.amberMasterCoreOutput_R11.string stringByAppendingString:partialString];
                 [self.amberMasterCoreOutput_R11 setNeedsDisplay:YES];
@@ -1673,7 +2890,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
             // At this point, the task might still be running, but the pipe is closed.
             // You can process the final data here.
             NSString *finalOutput = [[NSString alloc] initWithData:self.receivedData_R11_Core encoding:NSUTF8StringEncoding];
-            //NSLog(@"R11:\n%@", finalOutput);
             dispatch_async(dispatch_get_main_queue(), ^{
                 self.amberMasterCoreOutput_R11.string = [self.amberMasterCoreOutput_R11.string stringByAppendingString:finalOutput];
                 [self.amberMasterCoreOutput_R11 setNeedsDisplay:YES];
@@ -1684,9 +2900,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
             // Append the new data to our storage.
             [self.receivedData_R11_Core appendData:data];
             
-            // For demonstration, print the partial output.
             NSString *partialString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-            //NSLog(@"R11: %@", partialString);
             dispatch_async(dispatch_get_main_queue(), ^{
                 self.amberMasterCoreOutput_R11.string = [self.amberMasterCoreOutput_R11.string stringByAppendingString:partialString];
                 [self.amberMasterCoreOutput_R11 setNeedsDisplay:YES];
@@ -1876,7 +3090,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
             // At this point, the task might still be running, but the pipe is closed.
             // You can process the final data here.
             NSString *finalOutput = [[NSString alloc] initWithData:self.receivedData_L10_log encoding:NSUTF8StringEncoding];
-            //NSLog(@"L10:\n%@", finalOutput);
             dispatch_async(dispatch_get_main_queue(), ^{
                 self.amberMasterCoreOutput_L10.string = [self.amberMasterCoreOutput_L10.string stringByAppendingString:finalOutput];
                 [self.amberMasterCoreOutput_L10 setNeedsDisplay:YES];
@@ -1888,9 +3101,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
             self.core_L10_isOnline = true;
             [self.receivedData_L10_log appendData:data];
             
-            // For demonstration, print the partial output.
             NSString *partialString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-            //NSLog(@"L10: %@", partialString);
             dispatch_async(dispatch_get_main_queue(), ^{
                 self.amberMasterCoreOutput_L10.string = [self.amberMasterCoreOutput_L10.string stringByAppendingString:partialString];
                 [self.amberMasterCoreOutput_L10 setNeedsDisplay:YES];
@@ -1948,7 +3159,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
             // At this point, the task might still be running, but the pipe is closed.
             // You can process the final data here.
             NSString *finalOutput = [[NSString alloc] initWithData:self.receivedData_L10_Core encoding:NSUTF8StringEncoding];
-            //NSLog(@"L10:\n%@", finalOutput);
             dispatch_async(dispatch_get_main_queue(), ^{
                 self.amberMasterCoreOutput_L10.string = [self.amberMasterCoreOutput_L10.string stringByAppendingString:finalOutput];
                 [self.amberMasterCoreOutput_L10 setNeedsDisplay:YES];
@@ -1960,9 +3170,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
             self.core_L10_isOnline = true;
             [self.receivedData_L10_Core appendData:data];
             
-            // For demonstration, print the partial output.
             NSString *partialString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-            //NSLog(@"L10: %@", partialString);
             dispatch_async(dispatch_get_main_queue(), ^{
                 self.amberMasterCoreOutput_L10.string = [self.amberMasterCoreOutput_L10.string stringByAppendingString:partialString];
                 [self.amberMasterCoreOutput_L10 setNeedsDisplay:YES];
@@ -2273,7 +3481,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         
         NSString *cmd_position_input = [[NSBundle mainBundle] pathForResource:@"cmd_position_input_v2" ofType:@"py"];
         //cmd_cartesian_input.py --ip 10.0.0.5 --port 26002 --cmd_time 2 --cmd_sleep 2 --pos_x 0.1 --pos_y -0.33 --pos_z 0.2 --roll 0.0 --pitch -1.5 --yaw 0.5
-        //NSLog(@"cmd_cartesian_input = %@", cmd_cartesian_input);
         
         [arguments addObject:cmd_position_input];
         
@@ -2335,7 +3542,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         
         NSString *cmd_cartesian_input = [[NSBundle mainBundle] pathForResource:@"cmd_cartesian_input" ofType:@"py"];
         //cmd_cartesian_input.py --ip 10.0.0.5 --port 26002 --cmd_time 2 --cmd_sleep 2 --pos_x 0.1 --pos_y -0.33 --pos_z 0.2 --roll 0.0 --pitch -1.5 --yaw 0.5
-        //NSLog(@"cmd_cartesian_input = %@", cmd_cartesian_input);
         
         [arguments addObject:cmd_cartesian_input];
         
@@ -2418,8 +3624,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
 
 - (void) renderController
 {
-    //NSLog(@"self.masterControllerID = %@", self.masterControllerID);
-    
     //render should fire the code [below here:]
     ROBBaseControllerModel *controllerModelData = [self.controlModelDataDictionary valueForKey:self.masterControllerID];
     
@@ -2430,7 +3634,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
 
     if (snapshotIsFresh)
     {
-        //NSLog(@"//       ---------             RENDER CONTROLLER           ----------              //");
         //MasterControllerId data should go through
         [self controllerPassthrough:controllerModelData.touchPadPointL
                      touchPadPointR:controllerModelData.touchPadPointR

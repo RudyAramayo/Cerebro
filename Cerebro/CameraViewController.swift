@@ -14,6 +14,79 @@ import CoreImage.CIFilterBuiltins
 
 extension Notification.Name {
     static let ROBDepthCloudFrame = Notification.Name("ROBDepthCloudFrame")
+    static let robMainCameraProcessingSettingsDidChange = Notification.Name(
+        "ROBMainCameraProcessingSettingsDidChange"
+    )
+}
+
+/// Typed ownership for preferences that used to live in the main-camera
+/// diagnostics window. The headless capture service and Settings can now share
+/// them without making the preview window part of the runtime lifecycle.
+@objcMembers public final class ROBMainCameraProcessingSettings: NSObject {
+    public static let shared = ROBMainCameraProcessingSettings()
+
+    private static let pose3DEnabledKey = "ROBCameraPose3DEnabled"
+    private static let pose3DFPSKey = "ROBCameraPose3DFPS"
+    private static let swordTrackerEnabledKey = "ROBCameraSwordTrackerEnabled"
+    private static let swordTrackerFPSKey = "ROBCameraSwordTrackerFPS"
+    private static let depthOverlayOpacityKey = "ROBCameraDepthOverlayOpacity"
+    private let defaults = UserDefaults.standard
+
+    public var pose3DEnabled: Bool {
+        get { defaults.object(forKey: Self.pose3DEnabledKey) == nil || defaults.bool(forKey: Self.pose3DEnabledKey) }
+        set { set(newValue, key: Self.pose3DEnabledKey) }
+    }
+
+    public var pose3DFramesPerSecond: Double {
+        get {
+            defaults.object(forKey: Self.pose3DFPSKey) == nil
+                ? 0.5
+                : max(0.1, min(2, defaults.double(forKey: Self.pose3DFPSKey)))
+        }
+        set { set(max(0.1, min(2, newValue)), key: Self.pose3DFPSKey) }
+    }
+
+    public var swordTrackerEnabled: Bool {
+        get {
+            defaults.object(forKey: Self.swordTrackerEnabledKey) == nil
+                || defaults.bool(forKey: Self.swordTrackerEnabledKey)
+        }
+        set { set(newValue, key: Self.swordTrackerEnabledKey) }
+    }
+
+    public var swordTrackerFramesPerSecond: Double {
+        get {
+            defaults.object(forKey: Self.swordTrackerFPSKey) == nil
+                ? 30
+                : max(5, min(60, defaults.double(forKey: Self.swordTrackerFPSKey)))
+        }
+        set { set(max(5, min(60, newValue)), key: Self.swordTrackerFPSKey) }
+    }
+
+    public var depthOverlayOpacity: Double {
+        get {
+            defaults.object(forKey: Self.depthOverlayOpacityKey) == nil
+                ? 0.45
+                : max(0, min(1, defaults.double(forKey: Self.depthOverlayOpacityKey)))
+        }
+        set { set(max(0, min(1, newValue)), key: Self.depthOverlayOpacityKey) }
+    }
+
+    private func set(_ value: Bool, key: String) {
+        guard defaults.object(forKey: key) == nil || defaults.bool(forKey: key) != value else { return }
+        defaults.set(value, forKey: key)
+        notifyChange()
+    }
+
+    private func set(_ value: Double, key: String) {
+        guard defaults.object(forKey: key) == nil || defaults.double(forKey: key) != value else { return }
+        defaults.set(value, forKey: key)
+        notifyChange()
+    }
+
+    private func notifyChange() {
+        NotificationCenter.default.post(name: .robMainCameraProcessingSettingsDidChange, object: self)
+    }
 }
 
 @objcMembers public final class ROBDepthCloudFrame: NSObject {
@@ -333,6 +406,21 @@ private final class ROBSwordTracker {
     private static func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat { hypot(a.x - b.x, a.y - b.y) }
 }
 
+struct ROBCameraServiceStatusSnapshot: Sendable {
+    let state: String
+    let detail: String?
+    let stateChangedAt: Date
+    let framesReceived: UInt64
+    let lastFrameAt: Date?
+    let sessionRequested: Bool
+    let visibleConsumer: Bool
+    let automaticProcessingConsumer: Bool
+    let geminiConsumer: Bool
+    let remoteMediaConsumer: Bool
+    let videoServer: ROBVideoServerStatusSnapshot?
+    let videoServerStartupError: String?
+}
+
 final class CameraViewController: NSViewController {
     private var cameraManager: CameraManagerProtocol?
     private var videoServer: ROBVideoServer?
@@ -340,6 +428,12 @@ final class CameraViewController: NSViewController {
     private var remoteVideoIsActive = false
     private var geminiVideoIsActive = false
     private var cameraSessionIsRequested = false
+    private var cameraStatusState = CameraSourceState.stopped
+    private var cameraStatusDetail: String?
+    private var cameraStatusChangedAt = Date()
+    private var cameraFramesReceived: UInt64 = 0
+    private var cameraLastFrameAt: Date?
+    private var videoServerStartupError: String?
     
     @IBOutlet weak var skeletonView: SCNView!
     @IBOutlet weak var personMaskImageView: NSImageView!
@@ -353,7 +447,7 @@ final class CameraViewController: NSViewController {
     let context = CIContext()
     private let depthOverlayRenderer = ROBDepthOverlayRenderer()
     private let depthOverlayView = NSImageView()
-    private let depthOpacitySlider = NSSlider(value: 0.45, minValue: 0, maxValue: 1, target: nil, action: nil)
+    private let processingSettings = ROBMainCameraProcessingSettings.shared
     private var latestHumanObservations: [VNHumanObservation] = []
     private var lastSceneSnapshotUpdate: CFTimeInterval = 0
     private var lastVisionProcessingUpdate: CFTimeInterval = 0
@@ -362,16 +456,6 @@ final class CameraViewController: NSViewController {
     private let visionAdmissionLock = NSLock()
     private var visionAnalysisInFlight = false
     private let reversePoseEstimator = ROBReverseCameraPoseEstimator()
-    private static let pose3DEnabledKey = "ROBCameraPose3DEnabled"
-    private static let pose3DFPSKey = "ROBCameraPose3DFPS"
-    private let pose3DRates: [Double] = [0.1, 0.25, 0.5, 1, 2]
-    private let pose3DToggle = NSButton(checkboxWithTitle: "Render 3D pose", target: nil, action: nil)
-    private let pose3DFPSPopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private static let swordTrackerEnabledKey = "ROBCameraSwordTrackerEnabled"
-    private static let swordTrackerFPSKey = "ROBCameraSwordTrackerFPS"
-    private let swordTrackerRates: [Double] = [5, 10, 15, 30, 60]
-    private let swordTrackerToggle = NSButton(checkboxWithTitle: "Track training sword", target: nil, action: nil)
-    private let swordTrackerFPSPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let swordTracker = ROBSwordTracker()
     private let swordWristLock = NSLock()
     private var swordWristAnchors: [CGPoint] = []
@@ -383,23 +467,19 @@ final class CameraViewController: NSViewController {
     }()
 
     private var pose3DEnabled: Bool {
-        let defaults = UserDefaults.standard
-        return defaults.object(forKey: Self.pose3DEnabledKey) == nil || defaults.bool(forKey: Self.pose3DEnabledKey)
+        processingSettings.pose3DEnabled
     }
 
     private var pose3DFPS: Double {
-        let defaults = UserDefaults.standard
-        return defaults.object(forKey: Self.pose3DFPSKey) == nil ? 0.5 : max(0.1, min(2, defaults.double(forKey: Self.pose3DFPSKey)))
+        processingSettings.pose3DFramesPerSecond
     }
 
     private var swordTrackerEnabled: Bool {
-        let defaults = UserDefaults.standard
-        return defaults.object(forKey: Self.swordTrackerEnabledKey) == nil || defaults.bool(forKey: Self.swordTrackerEnabledKey)
+        processingSettings.swordTrackerEnabled
     }
 
     private var swordTrackerFPS: Double {
-        let defaults = UserDefaults.standard
-        return defaults.object(forKey: Self.swordTrackerFPSKey) == nil ? 30 : max(5, min(60, defaults.double(forKey: Self.swordTrackerFPSKey)))
+        processingSettings.swordTrackerFramesPerSecond
     }
     
     
@@ -412,6 +492,30 @@ final class CameraViewController: NSViewController {
             self,
             selector: #selector(applicationWillTerminate),
             name: NSApplication.willTerminateNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(perceptionSettingsDidChange(_:)),
+            name: .robMainCameraProcessingSettingsDidChange,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(perceptionSettingsDidChange(_:)),
+            name: .robMLXRuntimeDidChange,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(perceptionSettingsDidChange(_:)),
+            name: .robDetectorSettingsDidChange,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(perceptionSettingsDidChange(_:)),
+            name: Notification.Name("ROBHologramMovieRecordingStateDidChange"),
             object: nil
         )
 
@@ -429,13 +533,15 @@ final class CameraViewController: NSViewController {
             }
         } catch {
             // Perception remains available if the optional media service fails.
+            videoServerStartupError = error.localizedDescription
             print("ROBVideo startup failed: \(error.localizedDescription)")
         }
         
         setupSceneKitView()
         setupDepthOverlay()
-        setup3DPoseControls()
-        setupSwordTrackerControls()
+        manager.setPreviewVisible(false)
+        applyProcessingSettings()
+        reconcileCameraSession()
     }
     
     @IBAction func toggleCamera(_ sender: Any?) {
@@ -483,6 +589,22 @@ final class CameraViewController: NSViewController {
         geminiVideoIsActive = isActive
         reconcileCameraSession()
     }
+
+    /// Controls only the local diagnostics renderer. Camera capture remains
+    /// governed by the independent perception, Gemini, recording, and remote
+    /// media consumers.
+    @objc(setDiagnosticsPreviewVisible:)
+    func setDiagnosticsPreviewVisible(_ isVisible: Bool) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { [weak self] in
+                self?.setDiagnosticsPreviewVisible(isVisible)
+            }
+            return
+        }
+        cameraViewIsVisible = isVisible
+        cameraManager?.setPreviewVisible(isVisible)
+        reconcileCameraSession()
+    }
     
     
     override var representedObject: Any? {
@@ -494,12 +616,14 @@ final class CameraViewController: NSViewController {
     override func viewDidAppear() {
         super.viewDidAppear()
         cameraViewIsVisible = true
+        cameraManager?.setPreviewVisible(true)
         reconcileCameraSession()
     }
     
     override func viewDidDisappear() {
         super.viewDidDisappear()
         cameraViewIsVisible = false
+        cameraManager?.setPreviewVisible(false)
         reconcileCameraSession()
     }
 
@@ -515,7 +639,11 @@ final class CameraViewController: NSViewController {
 
     private func reconcileCameraSession() {
         guard let cameraManager else { return }
-        let shouldRun = cameraViewIsVisible || remoteVideoIsActive || geminiVideoIsActive
+        let shouldRun = cameraViewIsVisible
+            || automaticProcessingNeedsFrames
+            || remoteVideoIsActive
+            || geminiVideoIsActive
+            || ROBHologramExporter.shared.isMovieRecording
         guard shouldRun != cameraSessionIsRequested else { return }
         do {
             if shouldRun {
@@ -527,6 +655,76 @@ final class CameraViewController: NSViewController {
         } catch {
             print(error.localizedDescription)
         }
+    }
+
+    private var automaticProcessingNeedsFrames: Bool {
+        if swordTrackerEnabled { return true }
+        let registry = ROBDynamicDetectorRegistry.shared
+        guard registry.processingFramesPerSecond(for: .mainCamera) > 0 else { return false }
+        return ROBMLXRuntime.shared.mainCameraDetectionEnabled
+            || registry.enabled("body-pose", source: .mainCamera)
+            || registry.requiresFrames(for: .mainCamera)
+            || pose3DEnabled
+    }
+
+    @objc private func perceptionSettingsDidChange(_ notification: Notification) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.perceptionSettingsDidChange(notification)
+            }
+            return
+        }
+        applyProcessingSettings()
+        reconcileCameraSession()
+    }
+
+    private func applyProcessingSettings() {
+        depthOverlayView.alphaValue = processingSettings.depthOverlayOpacity
+        let processingEnabled = ROBDynamicDetectorRegistry.shared
+            .processingFramesPerSecond(for: .mainCamera) > 0
+        if !processingEnabled {
+            latestHumanObservations = []
+            poseView.bodyPose_observations = []
+            poseView.humanHandPose_observations = []
+            poseView.dynamicDetectorOutput = nil
+        }
+        if !pose3DEnabled || !processingEnabled {
+            skeletonView.isHidden = true
+            skeletonView.scene = nil
+            sceneCreated = false
+            poseView.projectedPose3D = nil
+        }
+        if !swordTrackerEnabled {
+            swordTracker.reset()
+            swordWristLock.lock()
+            swordWristAnchors = []
+            swordWristLock.unlock()
+            poseView.swordTrack = nil
+            poseView.swordTrackingStatus = nil
+        } else if poseView.swordTrackingStatus == nil {
+            poseView.swordTrackingStatus = "Sword: waiting for camera frames"
+        }
+        poseView.needsDisplay = true
+    }
+
+    /// Cached state for the process grid. Reading this snapshot has no camera,
+    /// permission, model-loading, or network side effects.
+    @nonobjc func serviceStatusSnapshot() -> ROBCameraServiceStatusSnapshot {
+        precondition(Thread.isMainThread, "Camera status is owned by the main thread")
+        return ROBCameraServiceStatusSnapshot(
+            state: cameraStatusState.rawValue,
+            detail: cameraStatusDetail,
+            stateChangedAt: cameraStatusChangedAt,
+            framesReceived: cameraFramesReceived,
+            lastFrameAt: cameraLastFrameAt,
+            sessionRequested: cameraSessionIsRequested,
+            visibleConsumer: cameraViewIsVisible,
+            automaticProcessingConsumer: automaticProcessingNeedsFrames,
+            geminiConsumer: geminiVideoIsActive,
+            remoteMediaConsumer: remoteVideoIsActive,
+            videoServer: videoServer?.statusSnapshot(),
+            videoServerStartupError: videoServerStartupError
+        )
     }
 }
 
@@ -643,125 +841,18 @@ extension CameraViewController: CameraManagerDelegate {
         self.skeletonView.isHidden = true
     }
 
-    private func setup3DPoseControls() {
-        pose3DToggle.state = pose3DEnabled ? .on : .off
-        pose3DToggle.target = self
-        pose3DToggle.action = #selector(pose3DSettingChanged(_:))
-        pose3DToggle.translatesAutoresizingMaskIntoConstraints = false
-        pose3DFPSPopup.addItems(withTitles: ["0.1 FPS", "0.25 FPS", "0.5 FPS", "1 FPS", "2 FPS"])
-        let selected = pose3DRates.enumerated().min(by: { abs($0.element - pose3DFPS) < abs($1.element - pose3DFPS) })?.offset ?? 2
-        pose3DFPSPopup.selectItem(at: selected)
-        pose3DFPSPopup.target = self
-        pose3DFPSPopup.action = #selector(pose3DSettingChanged(_:))
-        pose3DFPSPopup.translatesAutoresizingMaskIntoConstraints = false
-        pose3DFPSPopup.isEnabled = pose3DEnabled
-        pose3DToggle.toolTip = "Uses Apple's 3D body-pose model on the serialized main-camera analysis queue."
-        pose3DFPSPopup.toolTip = "Independent conservative ceiling; also limited by the main-camera analysis rate."
-        view.addSubview(pose3DToggle, positioned: .above, relativeTo: nil)
-        view.addSubview(pose3DFPSPopup, positioned: .above, relativeTo: nil)
-        NSLayoutConstraint.activate([
-            pose3DToggle.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 18),
-            pose3DToggle.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -52),
-            pose3DFPSPopup.leadingAnchor.constraint(equalTo: pose3DToggle.trailingAnchor, constant: 10),
-            pose3DFPSPopup.centerYAnchor.constraint(equalTo: pose3DToggle.centerYAnchor)
-        ])
-    }
-
-    @objc private func pose3DSettingChanged(_ sender: Any?) {
-        if sender as AnyObject === pose3DToggle {
-            let enabled = pose3DToggle.state == .on
-            UserDefaults.standard.set(enabled, forKey: Self.pose3DEnabledKey)
-            pose3DFPSPopup.isEnabled = enabled
-            if !enabled {
-                skeletonView.isHidden = true
-                skeletonView.scene = nil
-                sceneCreated = false
-                poseView.projectedPose3D = nil
-                poseView.needsDisplay = true
-            }
-        } else if pose3DRates.indices.contains(pose3DFPSPopup.indexOfSelectedItem) {
-            UserDefaults.standard.set(pose3DRates[pose3DFPSPopup.indexOfSelectedItem], forKey: Self.pose3DFPSKey)
-        }
-    }
-
-    private func setupSwordTrackerControls() {
-        swordTrackerToggle.state = swordTrackerEnabled ? .on : .off
-        swordTrackerToggle.target = self
-        swordTrackerToggle.action = #selector(swordTrackerSettingChanged(_:))
-        swordTrackerToggle.translatesAutoresizingMaskIntoConstraints = false
-        swordTrackerFPSPopup.addItems(withTitles: ["5 FPS", "10 FPS", "15 FPS", "30 FPS", "60 FPS"])
-        let selected = swordTrackerRates.enumerated().min(by: { abs($0.element - swordTrackerFPS) < abs($1.element - swordTrackerFPS) })?.offset ?? 3
-        swordTrackerFPSPopup.selectItem(at: selected)
-        swordTrackerFPSPopup.target = self
-        swordTrackerFPSPopup.action = #selector(swordTrackerSettingChanged(_:))
-        swordTrackerFPSPopup.translatesAutoresizingMaskIntoConstraints = false
-        swordTrackerFPSPopup.isEnabled = swordTrackerEnabled
-        poseView.swordTrackingStatus = swordTrackerEnabled ? "Sword: waiting for camera frames" : nil
-        swordTrackerToggle.toolTip = "Tracks elongated high-contrast training implements near detected wrists."
-        swordTrackerFPSPopup.toolTip = "Maximum admission rate; actual speed is limited by camera FPS and contour processing time."
-        view.addSubview(swordTrackerToggle, positioned: .above, relativeTo: nil)
-        view.addSubview(swordTrackerFPSPopup, positioned: .above, relativeTo: nil)
-        NSLayoutConstraint.activate([
-            swordTrackerToggle.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 18),
-            swordTrackerToggle.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -84),
-            swordTrackerFPSPopup.leadingAnchor.constraint(equalTo: swordTrackerToggle.trailingAnchor, constant: 10),
-            swordTrackerFPSPopup.centerYAnchor.constraint(equalTo: swordTrackerToggle.centerYAnchor)
-        ])
-    }
-
-    @objc private func swordTrackerSettingChanged(_ sender: Any?) {
-        if sender as AnyObject === swordTrackerToggle {
-            let enabled = swordTrackerToggle.state == .on
-            UserDefaults.standard.set(enabled, forKey: Self.swordTrackerEnabledKey)
-            swordTrackerFPSPopup.isEnabled = enabled
-            if !enabled {
-                swordTracker.reset()
-                poseView.swordTrack = nil
-                poseView.swordTrackingStatus = nil
-                poseView.needsDisplay = true
-            }
-        } else if swordTrackerRates.indices.contains(swordTrackerFPSPopup.indexOfSelectedItem) {
-            UserDefaults.standard.set(swordTrackerRates[swordTrackerFPSPopup.indexOfSelectedItem], forKey: Self.swordTrackerFPSKey)
-        }
-    }
-
     private func setupDepthOverlay() {
         depthOverlayView.imageScaling = .scaleProportionallyUpOrDown
-        depthOverlayView.alphaValue = depthOpacitySlider.doubleValue
+        depthOverlayView.alphaValue = processingSettings.depthOverlayOpacity
         depthOverlayView.translatesAutoresizingMaskIntoConstraints = false
         depthOverlayView.isHidden = true
         view.addSubview(depthOverlayView, positioned: .below, relativeTo: poseView)
-
-        let label = NSTextField(labelWithString: "RGB   Depth overlay")
-        label.textColor = .white
-        label.drawsBackground = true
-        label.backgroundColor = NSColor.black.withAlphaComponent(0.65)
-        label.translatesAutoresizingMaskIntoConstraints = false
-        depthOpacitySlider.target = self
-        depthOpacitySlider.action = #selector(depthOpacityChanged(_:))
-        depthOpacitySlider.isEnabled = true
-        depthOpacitySlider.isContinuous = true
-        depthOpacitySlider.translatesAutoresizingMaskIntoConstraints = false
-        // PoseDrawingView covers the entire camera window. Put interactive
-        // depth controls at the absolute top of the sibling stack so that the
-        // transparent pose overlay cannot consume their mouse events.
-        view.addSubview(label, positioned: .above, relativeTo: nil)
-        view.addSubview(depthOpacitySlider, positioned: .above, relativeTo: nil)
         NSLayoutConstraint.activate([
             depthOverlayView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             depthOverlayView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             depthOverlayView.topAnchor.constraint(equalTo: view.topAnchor),
-            depthOverlayView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            label.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 18),
-            label.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -18),
-            depthOpacitySlider.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 10),
-            depthOpacitySlider.centerYAnchor.constraint(equalTo: label.centerYAnchor),
-            depthOpacitySlider.widthAnchor.constraint(equalToConstant: 220)
+            depthOverlayView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
-    }
-
-    @objc private func depthOpacityChanged(_ sender: NSSlider) {
-        depthOverlayView.alphaValue = sender.doubleValue
     }
     
     func applySourceOverCompositing(inputImage: CIImage, backgroundImage: CIImage) -> CIImage? {
@@ -782,6 +873,8 @@ extension CameraViewController: CameraManagerDelegate {
     }
     
     func cameraManager(_ manager: CameraManagerProtocol, didOutput frameSet: CameraFrameSet) {
+        cameraFramesReceived &+= 1
+        cameraLastFrameAt = Date()
         let sampleBuffer = frameSet.rgbSampleBuffer
         let sceneUpdateTime = CACurrentMediaTime()
         let shouldUpdateSceneSnapshot = sceneUpdateTime - lastSceneSnapshotUpdate >= 0.2
@@ -949,7 +1042,6 @@ extension CameraViewController: CameraManagerDelegate {
                     
                     //------ Working draw mask after transform
                     let rep: NSCIImageRep = NSCIImageRep(ciImage: maskImage) //Render the mask image which looks good...
-                    //let rep: NSCIImageRep = NSCIImageRep(ciImage: ciImage) //Render the sampleBuffer image which looks good...
                     let mask_nsImage: NSImage = NSImage(size: rep.size)
                     mask_nsImage.addRepresentation(rep)
 
@@ -957,90 +1049,6 @@ extension CameraViewController: CameraManagerDelegate {
                         self.personMaskImageView_maskImage.image = mask_nsImage
                     }
                     //------
-                    //------ FAILED TO RENDER THE COLORED MASK and Composite Image!!!
-                    // 7. Create a color for the overlay.
-//                    let solidColor = CIColor(red: 1.0, green: 0.0, blue: 0.0, alpha: 0.5) // Red with 50% opacity
-//                    let coloredMask = maskImage.applyingFilter("CIConstantColorGenerator", parameters: [kCIInputColorKey: solidColor])
-//
-//                    let rep: NSCIImageRep = NSCIImageRep(ciImage: coloredMask) //Render the mask image which looks good...
-//                    //let rep: NSCIImageRep = NSCIImageRep(ciImage: ciImage) //Render the sampleBuffer image which looks good...
-//                    let mask_nsImage: NSImage = NSImage(size: rep.size)
-//                    mask_nsImage.addRepresentation(rep)
-//
-//                    DispatchQueue.main.async {
-//                        self.personMaskImageView_maskImage.image = mask_nsImage
-//                    }
-//                    // 8. Composite the colored mask onto the original image.
-//                    let compositedImage = coloredMask.applyingFilter("CISourceOverCompositing", parameters: [kCIInputImageKey: ciImage])
-//                    
-//                    // 9. Render the final image from the CIImage.
-//                    let context = CIContext(options: nil)
-//                    guard let finalImage = context.createCGImage(compositedImage, from: compositedImage.extent) else {
-//                        return
-//                    }
-//                    
-//                    let nsImage = NSImage(cgImage: finalImage, size: NSSize(width: finalImage.width, height: finalImage.height))
-//
-//                    DispatchQueue.main.async {
-//                        self.personMaskImageView.image = nsImage
-//                    }
-//                    //----
-                    
-                    
-                    //This block also fails to render properly
-                    // 3. Create the CISourceOverCompositing filter
-//                    let filter = CIFilter.sourceOverCompositing()
-//                    
-//                    // 4. Set the input parameters
-//                    // The logo is the 'inputImage' (the source)
-//                    filter.inputImage = ciImage
-//                    // The background is the 'backgroundImage' (the destination)
-//                    filter.backgroundImage = maskImage
-//                    
-//                    // 5. Get the output image from the filter
-//                    guard let outputCIImage = filter.outputImage else {
-//                        print("Error: Filter did not produce an output image.")
-//                        return
-//                    }
-//                    
-//                    let rep_output: NSCIImageRep = NSCIImageRep(ciImage: outputCIImage) //Render the mask image which looks good...
-//                    //let rep: NSCIImageRep = NSCIImageRep(ciImage: ciImage) //Render the sampleBuffer image which looks good...
-//                    let nsImage_output: NSImage = NSImage(size: rep_output.size)
-//                    nsImage_output.addRepresentation(rep_output)
-//
-//                    DispatchQueue.main.async {
-//                        self.personMaskImageView.image = nsImage_output
-//                    }
-                    
-                    //Compositing test
-//                    let foregroundColor = CIColor.init(red: 0.0, green: 0.0, blue: 1.0, alpha: 0.7)
-//                    let foregroundImage = CIImage(color: foregroundColor).cropped(to: CGRect(x: 0, y: 0, width: 200, height: 200))
-//
-//                    let backgroundColor = CIColor.red
-//                    let backgroundImage = CIImage(color: backgroundColor).cropped(to: CGRect(x: 0, y: 0, width: 400, height: 400))
-//
-//                    if let resultImage = self.applySourceOverCompositing(inputImage: foregroundImage, backgroundImage: backgroundImage) {
-//                        // 4. Handle the output image.
-//                        // In a macOS app, you might draw this image in a view.
-//                        // For this console example, we'll print its details.
-//                        print("Successfully created a composite image with extent: \(resultImage.extent)")
-//
-//                        // To display the image in a real application, you would render it.
-//                        // For example, in a NSView's `draw` method:
-//                        // let context = CIContext()
-//                        // let cgImage = context.createCGImage(resultImage, from: resultImage.extent)
-//                        // NSGraphicsContext.current?.cgContext.draw(cgImage, in: resultImage.extent)
-//                        guard let cgImage = self.context.createCGImage(resultImage, from: resultImage.extent) else {
-//                            print("Error: Could not create CGImage from final CIImage.")
-//                            return
-//                        }
-//
-//                        let final_nsImage = NSImage(cgImage: cgImage, size: resultImage.extent.size)
-//                        DispatchQueue.main.async {
-//                            self.personMaskImageView.image = final_nsImage
-//                        }
-//                    }
-                    
                 } catch {
                     print("Failed to perform Vision request: \(error.localizedDescription)")
                     return
@@ -1087,6 +1095,9 @@ extension CameraViewController: CameraManagerDelegate {
         didChange state: CameraSourceState,
         detail: String?
     ) {
+        cameraStatusState = state
+        cameraStatusDetail = detail
+        cameraStatusChangedAt = Date()
         videoServer?.updateCameraState(state)
         ROBSceneSnapshotStore.shared.updateCameraState(state.rawValue)
         if state != .streamingRGBD {
@@ -1100,7 +1111,6 @@ extension CameraViewController: CameraManagerDelegate {
     }
     
     func processAndDrawMask(observation: VNPixelBufferObservation, on originalCIImage: CIImage) {
-            //let originalCIImage = CIImage(cgImage: sourceImage.cgImage(forProposedRect: nil, context: nil, hints: nil)!)
             let maskPixelBuffer = observation.pixelBuffer
 
             // Create a CIImage from the segmentation mask.
@@ -1116,15 +1126,6 @@ extension CameraViewController: CameraManagerDelegate {
             let filter = CIFilter(name: "CISourceOverCompositing")
             filter?.setValue(scaledMaskImage, forKey: kCIInputImageKey)
             filter?.setValue(originalCIImage, forKey: kCIInputBackgroundImageKey)
-            
-            // You can use a different filter, for example, to replace the background:
-            /*
-            let backgroundCIImage = CIImage(color: CIColor(red: 0, green: 0.5, blue: 1.0, alpha: 1.0)).cropped(to: originalCIImage.extent)
-            let blendFilter = CIFilter(name: "CIBlendWithMask")
-            blendFilter?.setValue(originalCIImage, forKey: kCIInputImageKey)
-            blendFilter?.setValue(backgroundCIImage, forKey: kCIInputBackgroundImageKey)
-            blendFilter?.setValue(scaledMaskImage, forKey: kCIInputMaskImageKey)
-            */
             
             // Get the final output image.
             guard let outputCIImage = filter?.outputImage else {
@@ -1269,7 +1270,6 @@ class PoseDrawingView: NSView {
     }
     
     @objc func clearScreen() {
-        //print("clearing screen") //This is called every few seconds... not efficient when screen is blank
         self.humanHandPose_observations = []
         self.humanRect_observations = []
         self.bodyPose_observations = []

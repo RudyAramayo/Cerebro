@@ -1,6 +1,160 @@
 import AppKit
 import Foundation
-import UniformTypeIdentifiers
+
+/// Draws against the same horizontally stretched equirectangular bounds used
+/// by the diagnostics image. Neutral degree ticks are always visible; the
+/// robot-relative pair appears only for an effective, projection-matched
+/// calibration. FRONT/REAR do not depend on unverified left/right handedness.
+private final class ROBInsta360OrientationGuideView: NSView {
+    private var calibratedForwardDegrees: Double?
+
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        needsDisplay = true
+    }
+
+    func update(calibratedForwardDegrees: Double?) {
+        let normalized = calibratedForwardDegrees.map(Self.normalizedDegrees)
+        guard normalized != self.calibratedForwardDegrees else { return }
+        self.calibratedForwardDegrees = normalized
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard bounds.width > 1, bounds.height > 1 else { return }
+
+        let rulerHeight: CGFloat = 28
+        NSColor.black.withAlphaComponent(0.64).setFill()
+        NSBezierPath(rect: NSRect(
+            x: bounds.minX,
+            y: bounds.minY,
+            width: bounds.width,
+            height: rulerHeight
+        )).fill()
+
+        // Both seams are labeled so the operator can confirm the full mapping
+        // from 0° through 360°, including wraparound.
+        let rulerTicks: [(Double, String)] = [
+            (0, "0°"), (90, "90°"), (180, "180°"),
+            (270, "270°"), (360, "360°")
+        ]
+        for (degrees, label) in rulerTicks {
+            let x = xPosition(forDegrees: degrees)
+            NSColor.white.withAlphaComponent(0.82).setStroke()
+            let tick = NSBezierPath()
+            tick.move(to: NSPoint(x: x, y: 0))
+            tick.line(to: NSPoint(x: x, y: rulerHeight))
+            tick.lineWidth = degrees == 0 || degrees == 360 ? 2 : 1
+            tick.stroke()
+            drawLabel(
+                label,
+                centeredAtX: x,
+                top: 5,
+                foreground: .white,
+                background: .clear,
+                font: .monospacedSystemFont(ofSize: 11, weight: .semibold)
+            )
+        }
+
+        guard let forward = calibratedForwardDegrees else {
+            drawLabel(
+                "ORIENTATION UNCALIBRATED",
+                centeredAtX: bounds.midX,
+                top: rulerHeight + 8,
+                foreground: .white,
+                background: NSColor.systemRed.withAlphaComponent(0.82),
+                font: .boldSystemFont(ofSize: 11)
+            )
+            return
+        }
+
+        drawDirectionMarker(
+            label: "FRONT",
+            degrees: forward,
+            color: .systemGreen,
+            labelTop: rulerHeight + 8
+        )
+        drawDirectionMarker(
+            label: "REAR",
+            degrees: Self.normalizedDegrees(forward + 180),
+            color: .systemOrange,
+            labelTop: rulerHeight + 34
+        )
+    }
+
+    private func drawDirectionMarker(
+        label: String,
+        degrees: Double,
+        color: NSColor,
+        labelTop: CGFloat
+    ) {
+        let x = xPosition(forDegrees: degrees)
+        color.withAlphaComponent(0.92).setStroke()
+        let line = NSBezierPath()
+        line.move(to: NSPoint(x: x, y: 0))
+        line.line(to: NSPoint(x: x, y: bounds.maxY))
+        line.lineWidth = 3
+        line.stroke()
+        drawLabel(
+            String(format: "%@ %.0f°", label, degrees),
+            centeredAtX: x,
+            top: labelTop,
+            foreground: .black,
+            background: color.withAlphaComponent(0.92),
+            font: .boldSystemFont(ofSize: 12)
+        )
+    }
+
+    private func drawLabel(
+        _ value: String,
+        centeredAtX x: CGFloat,
+        top: CGFloat,
+        foreground: NSColor,
+        background: NSColor,
+        font: NSFont
+    ) {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: foreground
+        ]
+        let text = value as NSString
+        let textSize = text.size(withAttributes: attributes)
+        let hasBackground = background != .clear
+        let horizontalPadding: CGFloat = hasBackground ? 6 : 2
+        let verticalPadding: CGFloat = hasBackground ? 3 : 0
+        let width = textSize.width + horizontalPadding * 2
+        let height = textSize.height + verticalPadding * 2
+        let originX = min(
+            max(x - width / 2, bounds.minX + 2),
+            max(bounds.minX + 2, bounds.maxX - width - 2)
+        )
+        let rect = NSRect(x: originX, y: top, width: width, height: height)
+        if hasBackground {
+            background.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).fill()
+        }
+        text.draw(
+            at: NSPoint(x: rect.minX + horizontalPadding, y: rect.minY + verticalPadding),
+            withAttributes: attributes
+        )
+    }
+
+    private func xPosition(forDegrees degrees: Double) -> CGFloat {
+        let clamped = min(max(degrees, 0), 360)
+        let x = bounds.minX + bounds.width * CGFloat(clamped / 360)
+        return min(max(x, bounds.minX + 0.5), bounds.maxX - 0.5)
+    }
+
+    private static func normalizedDegrees(_ value: Double) -> Double {
+        guard value.isFinite else { return 180 }
+        let wrapped = value.truncatingRemainder(dividingBy: 360)
+        return wrapped >= 0 ? wrapped : wrapped + 360
+    }
+}
 
 @objcMembers public final class ROBInsta360DiagnosticsWindowController: NSWindowController, NSWindowDelegate {
     private let service = ROBInsta360CameraService.shared
@@ -8,25 +162,14 @@ import UniformTypeIdentifiers
     private let stateLabel = NSTextField(labelWithString: "")
     private let urlLabel = NSTextField(labelWithString: "")
     private let metricsLabel = NSTextField(labelWithString: "")
-    private let restartButton = NSButton(title: "Apply Preview Settings", target: nil, action: nil)
-    private let stabilizationToggle = NSButton(checkboxWithTitle: "Gyro stabilization", target: nil, action: nil)
+    private let processingSummaryLabel = NSTextField(wrappingLabelWithString: "")
+    private let openSettingsButton = NSButton(title: "Open Processing Settings…", target: nil, action: nil)
     private let modelProgress = NSProgressIndicator()
     private let modelStatusLabel = NSTextField(labelWithString: "MLX model: preparing…")
-    private let mainCameraDetectionToggle = NSButton(checkboxWithTitle: "Analyze main live-feed camera", target: nil, action: nil)
-    private let insta360DetectionToggle = NSButton(checkboxWithTitle: "Analyze Insta360 preview", target: nil, action: nil)
-    private let showInferenceToggle = NSButton(checkboxWithTitle: "Show MLX inference output", target: nil, action: nil)
     private let inferenceOutput = NSTextView()
     private let inferenceScroll = NSScrollView()
     private let detectionOverlay = ROBDetectionOverlayView()
-    private let mainPoseToggle = NSButton(checkboxWithTitle: "Main pose", target: nil, action: nil)
-    private let instaPoseToggle = NSButton(checkboxWithTitle: "360° pose overlay", target: nil, action: nil)
-    private let mainObjectsToggle = NSButton(checkboxWithTitle: "Main object labels", target: nil, action: nil)
-    private let instaObjectsToggle = NSButton(checkboxWithTitle: "360° object labels", target: nil, action: nil)
-    private let addModelButton = NSButton(title: "Add Core ML Model…", target: nil, action: nil)
-    private let analysisGeometryPopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let mainFPSPopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let instaFPSPopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let processingRates: [Double] = [0, 0.25, 0.5, 1, 2, 5, 10, 15, 30]
+    private let orientationGuide = ROBInsta360OrientationGuideView()
 
     public init() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 980, height: 650),
@@ -46,6 +189,8 @@ import UniformTypeIdentifiers
                                                name: .robDetectorOutputDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(detectorSettingNotification(_:)),
                                                name: .robDetectorSettingsDidChange, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(geminiVideoSettingsChanged(_:)),
+                                               name: .robGeminiVideoSourceSettingsDidChange, object: nil)
         refresh()
     }
 
@@ -80,15 +225,6 @@ import UniformTypeIdentifiers
         let modelRow = NSStackView(views: [modelStatusLabel, modelProgress])
         modelRow.orientation = .horizontal
         modelRow.spacing = 8
-        mainCameraDetectionToggle.target = self
-        mainCameraDetectionToggle.action = #selector(detectionSettingChanged(_:))
-        insta360DetectionToggle.target = self
-        insta360DetectionToggle.action = #selector(detectionSettingChanged(_:))
-        showInferenceToggle.target = self
-        showInferenceToggle.action = #selector(detectionSettingChanged(_:))
-        let detectionRow = NSStackView(views: [mainCameraDetectionToggle, insta360DetectionToggle, showInferenceToggle])
-        detectionRow.orientation = .horizontal
-        detectionRow.spacing = 16
         inferenceOutput.isEditable = false
         inferenceOutput.isSelectable = true
         inferenceOutput.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
@@ -97,10 +233,11 @@ import UniformTypeIdentifiers
         inferenceScroll.documentView = inferenceOutput
         inferenceScroll.hasVerticalScroller = true
         inferenceScroll.borderType = .bezelBorder
-        restartButton.target = self
-        restartButton.action = #selector(restart(_:))
-        stabilizationToggle.target = self
-        stabilizationToggle.action = #selector(stabilizationChanged(_:))
+        openSettingsButton.target = self
+        openSettingsButton.action = #selector(openProcessingSettings(_:))
+        openSettingsButton.bezelStyle = .rounded
+        processingSummaryLabel.textColor = .secondaryLabelColor
+        processingSummaryLabel.maximumNumberOfLines = 0
         // Diagnostic/show mode favors using every available pixel. A 360°
         // equirectangular feed is intentionally wide, and this keeps the
         // preview attached to every window edge while the operator resizes it.
@@ -113,51 +250,34 @@ import UniformTypeIdentifiers
         imageView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         detectionOverlay.translatesAutoresizingMaskIntoConstraints = false
         imageView.addSubview(detectionOverlay)
+        orientationGuide.translatesAutoresizingMaskIntoConstraints = false
+        imageView.addSubview(orientationGuide)
         NSLayoutConstraint.activate([
             detectionOverlay.leadingAnchor.constraint(equalTo: imageView.leadingAnchor),
             detectionOverlay.trailingAnchor.constraint(equalTo: imageView.trailingAnchor),
             detectionOverlay.topAnchor.constraint(equalTo: imageView.topAnchor),
-            detectionOverlay.bottomAnchor.constraint(equalTo: imageView.bottomAnchor)
+            detectionOverlay.bottomAnchor.constraint(equalTo: imageView.bottomAnchor),
+            orientationGuide.leadingAnchor.constraint(equalTo: imageView.leadingAnchor),
+            orientationGuide.trailingAnchor.constraint(equalTo: imageView.trailingAnchor),
+            orientationGuide.topAnchor.constraint(equalTo: imageView.topAnchor),
+            orientationGuide.bottomAnchor.constraint(equalTo: imageView.bottomAnchor)
         ])
-        for toggle in [mainPoseToggle, instaPoseToggle, mainObjectsToggle, instaObjectsToggle] {
-            toggle.target = self; toggle.action = #selector(detectorSettingChanged(_:))
-        }
-        addModelButton.target = self; addModelButton.action = #selector(addCoreMLModel(_:))
-        analysisGeometryPopup.addItems(withTitles: ["Full stitched panorama", "Six detector sectors"])
-        analysisGeometryPopup.target = self
-        analysisGeometryPopup.action = #selector(analysisGeometryChanged(_:))
-        analysisGeometryPopup.toolTip = "Six sectors are derived locally from the stitched stream; this is not six native Pro II sensor streams."
-        let geometryLabel = NSTextField(labelWithString: "360° analysis:")
-        let geometryNote = NSTextField(labelWithString: "Network: one stitched RTMP feed")
-        geometryNote.textColor = .secondaryLabelColor
-        let geometryRow = NSStackView(views: [geometryLabel, analysisGeometryPopup, geometryNote])
-        geometryRow.orientation = .horizontal; geometryRow.spacing = 8
-        for popup in [mainFPSPopup, instaFPSPopup] {
-            popup.addItems(withTitles: ["Off", "0.25 FPS", "0.5 FPS", "1 FPS", "2 FPS", "5 FPS", "10 FPS", "15 FPS", "30 FPS"])
-            popup.target = self; popup.action = #selector(processingFPSChanged(_:))
-        }
-        let rateNote = NSTextField(labelWithString: "Ceiling; slow MLX requests never overlap")
-        rateNote.textColor = .secondaryLabelColor
-        let rateRow = NSStackView(views: [NSTextField(labelWithString: "Main analysis:"), mainFPSPopup,
-                                          NSTextField(labelWithString: "Insta360 analysis:"), instaFPSPopup, rateNote])
-        rateRow.orientation = .horizontal; rateRow.spacing = 8
-        let detectorRow = NSStackView(views: [mainPoseToggle, instaPoseToggle, mainObjectsToggle, instaObjectsToggle, addModelButton])
-        detectorRow.orientation = .horizontal; detectorRow.spacing = 12
         let previewStatus = NSStackView(views: [stateLabel, urlLabel])
         previewStatus.orientation = .vertical
         previewStatus.alignment = .leading
         previewStatus.spacing = 3
-        let statusFooter = NSStackView(views: [previewStatus, NSView(), stabilizationToggle, restartButton])
+        let statusFooter = NSStackView(views: [previewStatus, NSView(), openSettingsButton])
         statusFooter.orientation = .horizontal
         statusFooter.alignment = .centerY
         statusFooter.spacing = 12
 
-        let analysisHeading = NSTextField(labelWithString: "Analysis Options")
+        let analysisHeading = NSTextField(labelWithString: "Automatic Processing")
         analysisHeading.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
         let mlxHeading = NSTextField(labelWithString: "MLX Status and Output")
         mlxHeading.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
-        let options = NSStackView(views: [analysisHeading, detectionRow, rateRow, geometryRow,
-                                          detectorRow, NSGridView(), mlxHeading, modelRow, inferenceScroll])
+        let options = NSStackView(views: [analysisHeading, processingSummaryLabel,
+                                          NSGridView(), mlxHeading,
+                                          modelRow, inferenceScroll])
         options.translatesAutoresizingMaskIntoConstraints = false
         options.orientation = .vertical
         options.alignment = .leading
@@ -192,58 +312,16 @@ import UniformTypeIdentifiers
             optionsScroll.heightAnchor.constraint(equalToConstant: 225),
             options.widthAnchor.constraint(equalTo: optionsScroll.contentView.widthAnchor),
             modelProgress.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
-            detectionRow.widthAnchor.constraint(equalTo: options.widthAnchor, constant: -20),
-            rateRow.widthAnchor.constraint(equalTo: options.widthAnchor, constant: -20),
-            geometryRow.widthAnchor.constraint(equalTo: options.widthAnchor, constant: -20),
-            detectorRow.widthAnchor.constraint(equalTo: options.widthAnchor, constant: -20),
+            processingSummaryLabel.widthAnchor.constraint(equalTo: options.widthAnchor, constant: -20),
             modelRow.widthAnchor.constraint(equalTo: options.widthAnchor, constant: -20),
             inferenceScroll.widthAnchor.constraint(equalTo: options.widthAnchor, constant: -20),
             inferenceScroll.heightAnchor.constraint(equalToConstant: 82)
         ])
     }
 
-    @objc private func restart(_ sender: Any?) { service.restart() }
-    @objc private func stabilizationChanged(_ sender: NSButton) {
-        service.gyroStabilizationEnabled = sender.state == .on
-    }
     @objc private func serviceChanged(_ notification: Notification) { refresh() }
     @objc private func mlxChanged(_ notification: Notification) { refreshMLX() }
-    @objc private func detectionSettingChanged(_ sender: NSButton) {
-        let runtime = ROBMLXRuntime.shared
-        runtime.mainCameraDetectionEnabled = mainCameraDetectionToggle.state == .on
-        runtime.insta360DetectionEnabled = insta360DetectionToggle.state == .on
-        runtime.showInferenceOutput = showInferenceToggle.state == .on
-        service.refreshDecoderDemand()
-        refreshMLX()
-    }
-    @objc private func detectorSettingChanged(_ sender: NSButton) {
-        let registry = ROBDynamicDetectorRegistry.shared
-        if sender === mainPoseToggle {
-            registry.setEnabled(sender.state == .on, detector: "body-pose", source: .mainCamera)
-        } else if sender === instaPoseToggle {
-            registry.setEnabled(sender.state == .on, detector: "body-pose", source: .insta360)
-        } else if sender === mainObjectsToggle {
-            registry.setEnabled(sender.state == .on, detector: "generic-objects", source: .mainCamera)
-        } else if sender === instaObjectsToggle {
-            registry.setEnabled(sender.state == .on, detector: "generic-objects", source: .insta360)
-        }
-        service.refreshDecoderDemand()
-    }
-    @objc private func analysisGeometryChanged(_ sender: NSPopUpButton) {
-        ROBDynamicDetectorRegistry.shared.insta360AnalysisGeometry =
-            sender.indexOfSelectedItem == 1 ? .sixSectors : .stitchedPanorama
-        detectionOverlay.output = nil
-    }
-    @objc private func processingFPSChanged(_ sender: NSPopUpButton) {
-        guard processingRates.indices.contains(sender.indexOfSelectedItem) else { return }
-        let source: ROBDetectorSource = sender === mainFPSPopup ? .mainCamera : .insta360
-        ROBDynamicDetectorRegistry.shared.setProcessingFramesPerSecond(
-            processingRates[sender.indexOfSelectedItem], for: source)
-        if source == .insta360 { service.refreshDecoderDemand() }
-        if processingRates[sender.indexOfSelectedItem] == 0, source == .insta360 {
-            detectionOverlay.output = nil
-        }
-    }
+    @objc private func geminiVideoSettingsChanged(_ notification: Notification) { refresh() }
     @objc private func detectorOutputChanged(_ notification: Notification) {
         guard let output = notification.userInfo?["output"] as? ROBDetectorOutput,
               output.source == .insta360 else { return }
@@ -251,24 +329,26 @@ import UniformTypeIdentifiers
     }
     @objc private func detectorSettingNotification(_ notification: Notification) {
         guard let source = notification.userInfo?["source"] as? ROBDetectorSource,
-              source == .insta360,
-              notification.userInfo?["enabled"] as? Bool == false else { return }
-        detectionOverlay.output = nil
+              source == .insta360 else { return }
+        let detectorWasDisabled = notification.userInfo?["enabled"] as? Bool == false
+        let geometryChanged = notification.userInfo?["geometryChanged"] as? Bool == true
+        let analysisStopped = ROBDynamicDetectorRegistry.shared
+            .processingFramesPerSecond(for: .insta360) == 0
+        if detectorWasDisabled || geometryChanged || analysisStopped {
+            detectionOverlay.output = nil
+        }
+        refreshMLX()
     }
-    @objc private func addCoreMLModel(_ sender: Any?) {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.init(filenameExtension: "mlmodel")!, .init(filenameExtension: "mlmodelc")!]
-        panel.allowsMultipleSelection = false
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do { try ROBDynamicDetectorRegistry.shared.registerCoreMLModel(at: url) }
-        catch { presentError(error) }
+    @objc private func openProcessingSettings(_ sender: Any?) {
+        let delegate = NSApp.delegate as AnyObject?
+        let selector = NSSelectorFromString("showInsta360Settings:")
+        if delegate?.responds(to: selector) == true {
+            _ = delegate?.perform(selector, with: sender)
+        }
     }
 
     private func refresh() {
         stateLabel.stringValue = service.lastError.map { "\(service.state) — \($0)" } ?? service.state
-        stabilizationToggle.state = service.gyroStabilizationEnabled ? .on : .off
-        restartButton.isEnabled = service.previewSettingsPending
-        restartButton.title = service.previewSettingsPending ? "Apply Preview Settings" : "Preview Settings Applied"
         urlLabel.stringValue = service.streamURL
         metricsLabel.stringValue = String(format: "Frames %llu   Decoded %@   FPS %.1f",
             service.framesReceived,
@@ -277,6 +357,24 @@ import UniformTypeIdentifiers
         let perception = ROBInsta360PerceptionService.shared
         if !perception.lastLabels.isEmpty {
             metricsLabel.stringValue += "   Items: " + perception.lastLabels.joined(separator: ", ")
+        }
+        let geminiVideoSettings = ROBGeminiVideoSourceSettings.shared
+        let projectionIdentity = service.calibrationProjectionIdentity
+        let insta360OrientationCalibrated = geminiVideoSettings
+            .isInsta360OrientationCalibrationValid(
+                forProjectionIdentity: projectionIdentity
+            )
+        let forward = geminiVideoSettings.insta360ForwardMarkerDegrees
+        orientationGuide.update(
+            calibratedForwardDegrees: insta360OrientationCalibrated ? forward : nil
+        )
+        if insta360OrientationCalibrated {
+            let rear = GeminiRoboticsRuntimeSettings.normalizedDegrees(forward + 180)
+            metricsLabel.stringValue += String(
+                format: "   ROB guide: FRONT %.0f° / REAR %.0f°", forward, rear
+            )
+        } else {
+            metricsLabel.stringValue += "   ROB guide: Uncalibrated"
         }
         if let frame = service.latestFrame { imageView.image = frame }
         refreshMLX()
@@ -298,17 +396,20 @@ import UniformTypeIdentifiers
                 self.modelStatusLabel.stringValue = "MLX model: " + (diagnostics.downloadDetail ?? diagnostics.state) + percent
                 self.modelProgress.isHidden = progress == 1 && diagnostics.state == "ready"
                 let runtime = ROBMLXRuntime.shared
-                self.mainCameraDetectionToggle.state = runtime.mainCameraDetectionEnabled ? .on : .off
-                self.insta360DetectionToggle.state = runtime.insta360DetectionEnabled ? .on : .off
-                self.showInferenceToggle.state = runtime.showInferenceOutput ? .on : .off
                 let registry = ROBDynamicDetectorRegistry.shared
-                self.mainFPSPopup.selectItem(at: self.rateIndex(registry.processingFramesPerSecond(for: .mainCamera)))
-                self.instaFPSPopup.selectItem(at: self.rateIndex(registry.processingFramesPerSecond(for: .insta360)))
-                self.analysisGeometryPopup.selectItem(at: registry.insta360AnalysisGeometry.rawValue)
-                self.mainPoseToggle.state = registry.enabled("body-pose", source: .mainCamera) ? .on : .off
-                self.instaPoseToggle.state = registry.enabled("body-pose", source: .insta360) ? .on : .off
-                self.mainObjectsToggle.state = registry.enabled("generic-objects", source: .mainCamera) ? .on : .off
-                self.instaObjectsToggle.state = registry.enabled("generic-objects", source: .insta360) ? .on : .off
+                let geometry = registry.insta360AnalysisGeometry == .sixSectors
+                    ? "six 60° sectors"
+                    : "stitched panorama"
+                self.processingSummaryLabel.stringValue = String(
+                    format: "Insta360: %@ at %.2f FPS; MLX %@; human detection %@; object detection %@; gyro stabilization %@.%@",
+                    geometry,
+                    registry.processingFramesPerSecond(for: .insta360),
+                    runtime.insta360DetectionEnabled ? "on" : "off",
+                    registry.enabled("body-pose", source: .insta360) ? "on" : "off",
+                    registry.enabled("generic-objects", source: .insta360) ? "on" : "off",
+                    self.service.gyroStabilizationEnabled ? "on" : "off",
+                    self.service.previewSettingsPending ? " Preview changes are waiting to be applied" : ""
+                )
                 self.inferenceScroll.isHidden = !runtime.showInferenceOutput
                 if let output = diagnostics.lastVisionObservation, !output.isEmpty {
                     self.inferenceOutput.string = "Source: \(diagnostics.lastVisionSource ?? "unknown")\n\(output)"
@@ -322,7 +423,4 @@ import UniformTypeIdentifiers
         }
     }
 
-    private func rateIndex(_ fps: Double) -> Int {
-        processingRates.enumerated().min(by: { abs($0.element - fps) < abs($1.element - fps) })?.offset ?? 0
-    }
 }

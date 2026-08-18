@@ -2,7 +2,7 @@
 //  ROBNewsSearchService.swift
 //  Cerebro
 //
-//  Read-only current-headline lookup over a fixed set of public RSS feeds.
+//  Read-only current-headline lookup over fixed public publisher sources.
 //
 
 import Foundation
@@ -43,6 +43,12 @@ struct ROBNewsSource: Equatable {
             publisher: "CBS News",
             feedURL: URL(string: "https://www.cbsnews.com/latest/rss/main")!,
             allowedArticleHosts: ["cbsnews.com", "www.cbsnews.com"]
+        ),
+        ROBNewsSource(
+            id: "cnn",
+            publisher: "CNN",
+            feedURL: URL(string: "https://www.cnn.com/sitemap/news.xml")!,
+            allowedArticleHosts: ["www.cnn.com"]
         )
     ]
 
@@ -51,6 +57,12 @@ struct ROBNewsSource: Equatable {
     static func source(withID rawID: String) -> ROBNewsSource? {
         let id = rawID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return all.first { $0.id == id }
+    }
+
+    var maximumResponseBytes: Int {
+        // RT's official general feed is currently roughly 0.6 MiB. The other
+        // feeds and CNN's current-news sitemap are much smaller.
+        id == "rt" ? 2 * 1_024 * 1_024 : 512 * 1_024
     }
 }
 
@@ -89,7 +101,7 @@ enum ROBNewsSearchError: LocalizedError {
         case .invalidResponse: return "The publisher returned an invalid feed response."
         case .responseTooLarge: return "The publisher feed exceeded Cerebro's size limit."
         case .httpStatus(let status): return "The publisher feed returned HTTP status \(status)."
-        case .malformedFeed: return "The publisher returned an unreadable RSS feed."
+        case .malformedFeed: return "The publisher returned an unreadable news source."
         }
     }
 }
@@ -276,7 +288,7 @@ final class ROBNewsSearchService {
         let transportResult = await transport.data(
             for: request,
             expectedURL: source.feedURL,
-            maximumBytes: Self.maximumResponseBytes
+            maximumBytes: min(Self.maximumResponseBytes, source.maximumResponseBytes)
         )
         if let error = transportResult.error {
             throw error
@@ -386,6 +398,7 @@ private final class ROBNewsXMLDelegate: NSObject, XMLParserDelegate {
     private var link = ""
     private var guid = ""
     private var published = ""
+    private var modified = ""
 
     init(source: ROBNewsSource) {
         self.source = source
@@ -399,23 +412,24 @@ private final class ROBNewsXMLDelegate: NSObject, XMLParserDelegate {
         attributes attributeDict: [String: String] = [:]
     ) {
         let name = normalizedName(elementName)
-        if name == "rss" || name == "feed" {
+        if name == "rss" || name == "feed" || (source.id == "cnn" && name == "urlset") {
             sawFeedRoot = true
         }
-        if name == "item" || name == "entry" {
+        if name == "item" || name == "entry" || (source.id == "cnn" && name == "url") {
             isInsideItem = true
             title = ""
             summary = ""
             link = ""
             guid = ""
             published = ""
+            modified = ""
             currentField = nil
             currentText = ""
             return
         }
         guard isInsideItem else { return }
         switch name {
-        case "title", "description", "summary", "encoded", "link", "guid", "pubdate", "published", "updated", "date":
+        case "title", "description", "summary", "encoded", "link", "loc", "guid", "pubdate", "published", "updated", "date", "publication_date", "lastmod":
             currentField = name
             currentText = ""
             if name == "link", let href = attributeDict["href"], !href.isEmpty {
@@ -445,7 +459,7 @@ private final class ROBNewsXMLDelegate: NSObject, XMLParserDelegate {
         qualifiedName qName: String?
     ) {
         let name = normalizedName(elementName)
-        if name == "item" || name == "entry" {
+        if name == "item" || name == "entry" || (source.id == "cnn" && name == "url") {
             appendCurrentHeadline()
             isInsideItem = false
             currentField = nil
@@ -459,12 +473,14 @@ private final class ROBNewsXMLDelegate: NSObject, XMLParserDelegate {
             if title.isEmpty { title = value }
         case "description", "summary", "encoded":
             if summary.isEmpty { summary = value }
-        case "link":
+        case "link", "loc":
             if link.isEmpty { link = value }
         case "guid":
             if guid.isEmpty { guid = value }
-        case "pubdate", "published", "updated", "date":
+        case "pubdate", "published", "updated", "date", "publication_date":
             if published.isEmpty { published = value }
+        case "lastmod":
+            if modified.isEmpty { modified = value }
         default:
             break
         }
@@ -483,7 +499,8 @@ private final class ROBNewsXMLDelegate: NSObject, XMLParserDelegate {
               source.allowedArticleHosts.contains(host) else {
             return
         }
-        let publishedAt = parsedDate(published).map(ROBNewsSearchService.internetDate)
+        let publicationText = published.isEmpty ? modified : published
+        let publishedAt = parsedDate(publicationText).map(ROBNewsSearchService.internetDate)
         let headline = ROBNewsHeadline(
             sourceID: source.id,
             publisher: source.publisher,
@@ -522,6 +539,11 @@ private final class ROBNewsXMLDelegate: NSObject, XMLParserDelegate {
         guard !trimmed.isEmpty else { return nil }
         let internetFormatter = ISO8601DateFormatter()
         if let date = internetFormatter.date(from: trimmed) {
+            return date
+        }
+        let fractionalInternetFormatter = ISO8601DateFormatter()
+        fractionalInternetFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractionalInternetFormatter.date(from: trimmed) {
             return date
         }
         for format in [

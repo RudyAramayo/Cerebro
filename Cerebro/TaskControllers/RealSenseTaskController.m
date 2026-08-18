@@ -31,8 +31,6 @@
 - (IBAction) startTask:(id)sender
 {
     self.shouldRelaunch = true;
-    //self.textView.string = @"";
-    
     dispatch_queue_t aQueue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0);
 
     dispatch_async(aQueue, ^{
@@ -42,7 +40,6 @@
         if (path.length > 0) {
             self.task.executableURL = [NSURL fileURLWithPath:path];
         }
-        //self.task.arguments = @[@""];
 
         __weak RealSenseTaskController *weakSelf = self;
 
@@ -98,17 +95,6 @@
         
         //TODO: capture the robot position here!
         NSLog(@"outputString = %@", outputString);
-          
-        /* //ONLY PROCESS TEXT IF YOU ARE WATCHING AS A HUMAN
-        dispatch_async(dispatch_get_main_queue(), ^(){
-            self.textView.string = outputString;
-            NSString *previousOutput = self.textView.string;
-            NSString *nextOutput = [previousOutput stringByAppendingString:outputString];
-            self.textView.string = nextOutput;
-            NSRange range = NSMakeRange([nextOutput length], 0);
-            [self.textView scrollRangeToVisible:range];
-        });
-        //Not sure if this is necessary but it was crashing*/
         [self.outputPipe.fileHandleForReading waitForDataInBackgroundAndNotify];
         
     }];
@@ -117,9 +103,7 @@
     [[NSNotificationCenter defaultCenter] addObserverForName:NSFileHandleDataAvailableNotification object:self.errorPipe.fileHandleForReading queue:nil usingBlock:^(NSNotification *note){
         NSData *output = self.errorPipe.fileHandleForReading.availableData;
         NSString *outputString = [[NSString alloc] initWithData:output encoding:NSUTF8StringEncoding];
-        
-        //NSLog(@"errorString = %@", outputString);
-        
+
         dispatch_async(dispatch_get_main_queue(), ^(){
             NSString *previousOutput = self.textView.string;
             NSString *nextOutput = [[previousOutput stringByAppendingString:@"\n"] stringByAppendingString:outputString];
@@ -127,8 +111,6 @@
             NSRange range = NSMakeRange([nextOutput length], 0);
             [self.textView scrollRangeToVisible:range];
         });
-        //Not sure if this is necessary but it was crashing
-        //[self.outputPipe.fileHandleForReading waitForDataInBackgroundAndNotify];
     }];
 }
 

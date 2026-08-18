@@ -8,6 +8,7 @@
 #import "AppDelegate.h"
 #import "ROBMainViewController.h"
 #import "ROBSerialBox.h"
+#import "ROBBaseSerialConsoleWindowController.h"
 #import "ROBBaseControllerModel.h"
 #import "ROBSpeechBox.h"
 #import "ROBKeyboardControlsViewController.h"
@@ -16,7 +17,6 @@
 
 #import "ROBNiTEManager.h"
 #import "ROBConsciousness.h"
-//#import "ROBLeap.h"
 #import "SimpleUserTrackerTaskController.h"
 #import "AudioInputTaskController.h"
 #import "JoinWifiTaskController.h"
@@ -36,6 +36,7 @@ static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
 static NSString * const ROBDevelopmentModeDefaultsKey = @"ROBDevelopmentMode";
 static NSString * const ROBShowControllerInputDiagnosticsNotification = @"ROBShowControllerInputDiagnostics";
 static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopmentModeDidChange";
+static NSString * const ROBGeminiVideoSourceSettingsDidChangeNotification = @"ROBGeminiVideoSourceSettingsDidChange";
 
 #import "AVFoundation/AVFoundation.h"
 #import "Cerebro-Swift.h"
@@ -138,20 +139,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 @interface ROBMainViewController () <HumanTrackingDelegate, TrackingDelegate, AutoNetServerDataDelegate, NSTextViewDelegate, NSTableViewDataSource, NSTableViewDelegate, ROBAIDelegate, ROBAutonomyCoordinatorDelegate, ROBStageShowCoordinatorDelegate, ROBGeminiRuntimeControlDelegate>
 
-//--- Base and Maestro SerialBox bindings
-
-@property (readwrite, retain) IBOutlet NSTextView *serialOutputArea_base;
-@property (readwrite, retain) IBOutlet NSTextField *serialInputField_base;
-
-@property (readwrite, retain) IBOutlet NSPopUpButton *serialListPullDown_base;
-@property (readwrite, retain) IBOutlet NSPopUpButton *serialListPullDown_maestro;
-//-----
-
 @property (readwrite, retain) ROBSCNViewController *scnViewController;
 @property (readwrite, retain) NSWindowController *controllerDiagnosticsWindowController;
 @property (readwrite, retain) NSTimer *niteHeartbeatTimer;
 
-//@property (readwrite, retain) ROBLeap *robLeap;
 @property (readwrite, retain) IBOutlet SCNView *robo_scnView;
 @property (readwrite, retain) NSWindowController *controlsWindowController;
 @property (readwrite, retain) NSWindowController *torsoControlsWindowController;
@@ -159,24 +150,25 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 @property (readwrite, retain) NSWindowController *cameraWindowController;
 @property (readwrite, retain) CameraViewController *cameraViewController;
+@property (readwrite, retain) ROBBaseSerialConsoleWindowController *baseSerialConsoleWindowController;
 @property (atomic, readwrite, strong) ROBAlignedDepthFrame *latestAlignedDepthFrame;
 
 @property (readwrite, retain) NSWindowController *tastsWindowController;
 @property (readwrite, retain) NSTimer *speechResponseAttentionTimer;
 
-- (IBAction)sendText_base:(id)sender;
-- (IBAction)serialPortSelected_base: (id) cntrl;
-- (IBAction)serialPortSelected_maestro: (id) cntrl;
-
-
 @property (readwrite, retain) AutoNetServer *autoNetServer;
 @property (readwrite, retain) ROBAI *robAI;
 @property (readwrite, retain) ROBGeminiDiagnosticsWindowController *geminiDiagnosticsWindowController;
 @property (readwrite, retain) ROBInsta360DiagnosticsWindowController *insta360DiagnosticsWindowController;
+@property (readwrite, retain) ROBSystemStatusCoordinator *systemStatusCoordinator;
 @property (readwrite, retain) ROBStageShowWindowController *stageShowWindowController;
 @property (readwrite, retain) ROBStageShowCoordinator *stageShowCoordinator;
 @property (readwrite, retain) ROBAutonomyCoordinator *autonomyCoordinator;
 @property (readwrite, assign) NSUInteger saberChoreographyGeneration;
+- (void)speakConfiguredAcknowledgementIfNotQueued;
+- (void)ensureMainCameraRuntime;
+- (void)synchronizeDevelopmentCameraDiagnostics;
+- (void)mainCameraDiagnosticsWindowWillClose:(NSNotification *)notification;
 - (void)executeSaberTransforms:(NSArray<ROBSaberTransform *> *)transforms
                          index:(NSUInteger)index
                     generation:(NSUInteger)generation
@@ -253,6 +245,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void)finishControllerApprovedAmberGestureCallID:(NSString *)callID
                                              result:(NSDictionary *)result;
 - (void)updateGeminiCameraDemand;
+- (void)geminiVideoSourceSettingsDidChange:(NSNotification *)notification;
 - (void)configureConversationTranscript;
 - (void)appendConversationText:(NSString *)text fromUser:(BOOL)fromUser;
 - (void)loadConversationLog;
@@ -533,9 +526,15 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     // the separate on-device Apple speech-recognition transcript.
     NSLog(@"Gemini Robotics heard: %@", text);
     [self appendConversationText:text fromUser:YES];
-    if (!self.speechBox.isSpeaking) {
-        [self.speechBox sayItIfNotQueued:@"I hear you."];
+    [self speakConfiguredAcknowledgementIfNotQueued];
+}
+
+- (void)speakConfiguredAcknowledgementIfNotQueued
+{
+    if (self.speechBox.isSpeaking) {
+        return;
     }
+    [self.speechBox sayItIfNotQueued:ROBResolvedSpeechAcknowledgementPhrase()];
 }
 
 - (void)robAI:(ROBAI *)robAI didFailRequestWithDetail:(NSString *)detail
@@ -640,10 +639,21 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void)updateGeminiCameraDemand
 {
-    BOOL geminiVideoIsActive = self.robAI.isGeminiConnectionEnabled &&
-        self.robAI.isLiveSessionReady &&
-        self.robAI.streamsCameraVideo;
-    [self.cameraViewController setGeminiVideoDemandActive:geminiVideoIsActive];
+    BOOL geminiLiveIsReady = self.robAI.isGeminiConnectionEnabled &&
+        self.robAI.isLiveSessionReady;
+    BOOL mainCameraIsActive = geminiLiveIsReady &&
+        self.robAI.streamsMainCameraVideo;
+    BOOL insta360IsActive = geminiLiveIsReady &&
+        self.robAI.streamsInsta360Video;
+    [self.cameraViewController setGeminiVideoDemandActive:mainCameraIsActive];
+    [[ROBInsta360CameraService shared]
+        setGeminiVideoDemandActive:insta360IsActive];
+}
+
+- (void)geminiVideoSourceSettingsDidChange:(NSNotification *)notification
+{
+    [self.robAI synchronizeVideoSourceSettings];
+    [self updateGeminiCameraDemand];
 }
 
 - (void)robAIWasInterrupted:(ROBAI *)robAI
@@ -1413,8 +1423,6 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void) willSpeakWord:(NSRange)characterRange ofString:(NSString *)string {
     NSLog(@"willSpeakWord ROBMainViewController");
-    //somehow then I used this the speech append audio buffer fails?
-    //[self resetSpeechResponseAttentionTimer];
 }
 
 - (void)didCaptureAudioBuffer:(AVAudioPCMBuffer *)buffer
@@ -1434,7 +1442,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     BOOL addressesROB = [addressTokens containsObject:@"robbie"] ||
         [addressTokens containsObject:@"rob"] ||
         [addressTokens containsObject:@"robot"];
-    NSString *pendingThinkingAcknowledgement = nil;
+    BOOL shouldAcknowledgeAcceptedTurn = NO;
 
     // Safety phrases stay local and effective even when Gemini is unavailable
     // or intentionally turned off.
@@ -1463,9 +1471,6 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         NSLog(@"Listening for spoken input");
         [self resetSpeechResponseAttentionTimer];
         
-        NSArray *thinking_acknowledgements = @[@"Let me think.", @"I'm thinking.", @"I hear you."];
-        NSString *thinking_acknowledgement = [thinking_acknowledgements objectAtIndex:arc4random_uniform((uint32_t)thinking_acknowledgements.count)];
-        
         NSArray *greeting_acknowledgements = @[@"Hey there", @"How are you", @"What's up!", @"Greetings"];
         NSString *greeting_acknowledgement = [greeting_acknowledgements objectAtIndex:arc4random_uniform((uint32_t)greeting_acknowledgements.count)];
         
@@ -1477,7 +1482,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             [self.speechBox sayIt:greeting_acknowledgement];
             return;
         } else {
-            pendingThinkingAcknowledgement = thinking_acknowledgement;
+            shouldAcknowledgeAcceptedTurn = YES;
         }
     }
     if (!geminiOwnsMicrophone && [textInput containsString:@"follow"])
@@ -1495,7 +1500,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             // raw-audio turn should receive a bounded Gemini response.
             if (!self.speechBox.isSpeaking) {
                 [self.robAI noteMicrophoneTurnAwaitingResponseForTranscript:textInput];
-                [self.speechBox sayItIfNotQueued:@"I hear you."];
+                [self speakConfiguredAcknowledgementIfNotQueued];
             }
         } else {
             NSLog(@"textInput = %@", textInput);
@@ -1504,8 +1509,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             if (accepted) {
                 [self appendConversationText:textInput fromUser:YES];
             }
-            if (accepted && pendingThinkingAcknowledgement.length > 0) {
-                [self.speechBox sayIt:pendingThinkingAcknowledgement];
+            if (accepted && shouldAcknowledgeAcceptedTurn) {
+                [self speakConfiguredAcknowledgementIfNotQueued];
             }
         }
     } else if (self.ignoreText) {
@@ -1528,7 +1533,6 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void) makeTextViewFirstResponder:(NSTextView *)textView {
     [[[self tastsWindowController] window] makeFirstResponder:textView];
-    //[textView didChangeText];
 }
 
 - (void) clearInputTextMessage
@@ -1551,6 +1555,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(developmentModeDidChange:)
                                                  name:ROBDevelopmentModeDidChangeNotification
+                                               object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(geminiVideoSourceSettingsDidChange:)
+                                                 name:ROBGeminiVideoSourceSettingsDidChangeNotification
                                                object:nil];
     //-----------------------------
     //---- Setup User Defaults ----
@@ -1603,30 +1611,17 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                                                                  userInfo:nil
                                                                   repeats:YES];
     //-----
-    //Leap controller always bugs out and isn't reliable... need to keep leap on the laptop for input instead23
-    //self.robLeap = [ROBLeap new];
-    //self.robLeap.delegate = self;
-    //[self.robLeap run];
-//
     //Initilze R.O.B.
     self.robAI = [[ROBAI alloc] init];
     self.robAI.delegate = self;
+    [[ROBInsta360CameraService shared] setGeminiFrameConsumer:self.robAI];
     
     self.serialBox = [ROBSerialBox new];
-    self.serialBox.serialListPullDown_base = self.serialListPullDown_base;
-    self.serialBox.serialListPullDown_maestro = self.serialListPullDown_maestro;
-    
-    self.serialBox.serialOutputArea_base = self.serialOutputArea_base;
-    
-    self.serialBox.serialInputField_base = self.serialInputField_base;
-    
     self.serialBox.delegate = self;
     [self.serialBox initialize_connection];
     
     //---------------------------------------------------------
     //Enable one of these to auto allow a controller to take over... otherwise a controller is required to intiate robot control!
-    //Autonomous Algorithms
-    //self.serialBox.masterControllerID = @"Autonomous";
     //VRController
     [self.serialBox switchToMasterControllerID:@"Brain"];
     //---------------------------------------------------------
@@ -1643,11 +1638,15 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     self.outputLanguage = [[NSUserDefaults standardUserDefaults] valueForKey:@"outputLanguage"];
     [self.speechBox setOutputLanguage:self.outputLanguage];
     [self.robAI start];
+    // The Messages bridge owns isolated text-only AI sessions. It never uses
+    // this controller's SpeechBox or the embodied room-conversation session.
+    [[ROBMessagesBridge shared] start];
     
     [self showROBControls];
     [self showROB_Torso_Controls];
     [self showROBNavigation];
-    [self showROB_Camera_View];
+    [self ensureMainCameraRuntime];
+    [self synchronizeDevelopmentCameraDiagnostics];
     
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [NSApp activateIgnoringOtherApps:YES];
@@ -1714,6 +1713,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void)developmentModeDidChange:(NSNotification *)notification
 {
+    [self synchronizeDevelopmentCameraDiagnostics];
     if (![[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey]) {
         [self.controllerDiagnosticsWindowController close];
     }
@@ -1754,6 +1754,11 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     (void)[[ROBAmberGestureExecutor shared] requestPriorityHold];
     [[ROBAmberDebugAuthority shared] revoke];
     [[ROBAmberGatewayTunnel shared] disconnect];
+    [[ROBMessagesBridge shared] stop];
+    [self.baseSerialConsoleWindowController close];
+    self.baseSerialConsoleWindowController = nil;
+    [[ROBInsta360CameraService shared] setGeminiVideoDemandActive:NO];
+    [[ROBInsta360CameraService shared] setGeminiFrameConsumer:nil];
     [self.robAI disconnect];
     if (self.stageShowCoordinator.isRunning) {
         [self.stageShowCoordinator cancelWithReason:@"Cerebro is shutting down"];
@@ -1951,16 +1956,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void) didSeeNewPeople:(NSArray *)observations {
     dispatch_async(dispatch_get_main_queue(), ^{
         [self.autonomyCoordinator updatePersonVisible:observations.count > 0];
-        //if (self.isNeckLifted)
-            //NSLog(@"neck lifted state is on");
-        //if (self.liftNeckAnimationTimer)
-            //NSLog(@"liftNeckAnimationTimer %@", self.liftNeckAnimationTimer);
-        
         if (!self.isNeckLifted) {
             float targetHeadTilt = 6168.94; //This is the upright neck
             float targetHeadUpperNeckTilt = 6868.81;
-            //[[self.torsoControlsViewController headTilt] setFloatValue:self.currentPerson_tilt];
-            
             if (self.liftNeckAnimationTimer == nil) {
                 self.liftNeckAnimationTimer = [NSTimer scheduledTimerWithTimeInterval:0.1 repeats:YES block:^(NSTimer * _Nonnull timer) {
                     //exit condition
@@ -2000,10 +1998,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                         deltaUpperNeckTilt_finalValue = deltaHeadUpperNeckTilt;
                     }
                     
-                    //NSLog(@"about to set tilt from = %f to %f", [self.torsoControlsViewController.headTilt floatValue], [self.torsoControlsViewController.headTilt floatValue] + deltaTilt_finalValue);
                     self.currentPerson_tilt = [self.torsoControlsViewController.headTilt floatValue] + deltaTilt_finalValue;
-                    
-                    //NSLog(@"about to set upperNeckTilt from = %f to %f", [self.torsoControlsViewController.headUpperNeckTilt floatValue], [self.torsoControlsViewController.headUpperNeckTilt floatValue] + deltaUpperNeckTilt_finalValue);
                     self.currentPerson_upperNeckTilt = [self.torsoControlsViewController.headUpperNeckTilt floatValue] + deltaUpperNeckTilt_finalValue;
                     
                     [[self.torsoControlsViewController headTilt] setFloatValue:self.currentPerson_tilt];
@@ -2073,14 +2068,12 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         if (self.torsoControlsViewController.headTracking_enabled.state == NSControlStateValueOn) {
             float center_x = headPosition.origin.x + headPosition.size.width/2.0;
             float center_y = headPosition.origin.y + headPosition.size.height/2.0;
-            //NSLog(@"head size = %f, %f", headPosition.size.width, headPosition.size.height);
             [self trackingPerson:userID x:center_x y:center_y z:1.0];
         }
 }
 
 - (void) trackingPerson:(NSString *)userID x:(float)x y:(float)y z:(float)z
 {
-    //if (self.currentPersonTrackingID == [userID intValue])
     {
         self.currentPerson_positionX = x;
         self.currentPerson_positionY = y;
@@ -2090,8 +2083,6 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             
             self.currentPerson_tilt = 6168.94;
 
-            //NSLog(@"Original values: pan %f, tilt %f, upperTilt %f", self.currentPerson_pan, self.currentPerson_tilt, self.currentPerson_upperNeckTilt);
-            
             float pan_speed = 100;
             float upperNeckTilt_speed = 60;
             
@@ -2104,15 +2095,12 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             if (y < 0.45)
                 self.currentPerson_upperNeckTilt = self.currentPerson_upperNeckTilt - (upperNeckTilt_speed * (0.45-y));
             
-            //NSLog(@"About to set:    pan %f, tilt %f, upperTilt %f", self.currentPerson_pan, self.currentPerson_tilt, self.currentPerson_upperNeckTilt);
-            
             // !!! CLAMP VALUES SO WE DON"T BREAK SOMETHING EXPENSIVE LIKE THE CAMERA ON THE HEAD !!!
             if (self.currentPerson_upperNeckTilt > 7400) {
                 self.currentPerson_upperNeckTilt = 7400;
             }
             
             [[self.torsoControlsViewController headPan] setFloatValue:self.currentPerson_pan];
-            //[[self.torsoControlsViewController headTilt] setFloatValue:self.currentPerson_tilt];
             [[self.torsoControlsViewController headUpperNeckTilt] setFloatValue:self.currentPerson_upperNeckTilt];
         });
     }
@@ -2134,44 +2122,32 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         if (y < kTrackingMidpointY - 50)
         {
             //Head Should Look Down
-            
-            //[self.serialBox controllerPassthrough:CGPointMake(0.0, 0.0) touchPadPointR:CGPointMake(0.0, 0.0) Lat:0 Long:0 tredBrakeLock:false flipperForwardIsDown:false flipperRelaxBrake:false flipperBackwardIsDown:false flipperBrakeLock:false lact1:true lact2:false lact3:false speed:[self getFollowingSpeed] speed_playPause:false speed_forward_reverse:false textInput:@""];
         }
         else if (y > kTrackingMidpointY + 50)
         {
             //Head Should Look Up
-            
-            //[self.serialBox controllerPassthrough:CGPointMake(0.0, 0.0) touchPadPointR:CGPointMake(0.0, 0.0) Lat:0 Long:0 tredBrakeLock:false flipperForwardIsDown:false flipperRelaxBrake:false flipperBackwardIsDown:false flipperBrakeLock:false lact1:true lact2:false lact3:false speed:[self getFollowingSpeed] speed_playPause:false speed_forward_reverse:false textInput:@""];
         }
         else if (x > kTrackingMidpointX + 50)
         {
             controller_LeftStick_reducer = 0.0;
             controller_RightStick_reducer = xOffset_R;
-            
-            //[self.serialBox controllerPassthrough:CGPointMake(0.0, xOffset_L) touchPadPointR:CGPointMake(0.0, xOffset_R) Lat:0 Long:0 tredBrakeLock:false flipperForwardIsDown:false flipperRelaxBrake:false flipperBackwardIsDown:false flipperBrakeLock:false lact1:false lact2:false lact3:false speed:[self getFollowingSpeed] speed_playPause:false speed_forward_reverse:false textInput:@""];
         }
         else if (x < kTrackingMidpointX - 50)
         {
             controller_LeftStick_reducer = xOffset_L;
             controller_RightStick_reducer = 0.0;
-            
-            //[self.serialBox controllerPassthrough:CGPointMake(0.0, xOffset_L) touchPadPointR:CGPointMake(0.0, xOffset_R) Lat:0 Long:0 tredBrakeLock:false flipperForwardIsDown:false flipperRelaxBrake:false flipperBackwardIsDown:false flipperBrakeLock:false lact1:false lact2:false lact3:false speed:[self getFollowingSpeed] speed_playPause:false speed_forward_reverse:false textInput:@""];
         }
         else if (z > kMAXFOLLOWDISTANCE)
         {
             //Send forward commands
             controller_zLeftStick = 0.5;
             controller_zRightStick = 0.5;
-            
-            //[self.serialBox controllerPassthrough:CGPointMake(0.5, 0.0) touchPadPointR:CGPointMake(0.5, 0.0) Lat:0 Long:0 tredBrakeLock:false flipperForwardIsDown:false flipperRelaxBrake:false flipperBackwardIsDown:false flipperBrakeLock:false lact1:false lact2:false lact3:false speed:[self getFollowingSpeed] speed_playPause:false speed_forward_reverse:false textInput:@""];
         }
         else if (z < kMAXFOLLOWDISTANCE - 25)
         {
             //Send backward commands
             controller_zLeftStick = -0.5;
             controller_zRightStick = -0.5;
-            
-            //[self.serialBox controllerPassthrough:CGPointMake(-0.5, 0.0) touchPadPointR:CGPointMake(-0.5, 0.0) Lat:0 Long:0 tredBrakeLock:false flipperForwardIsDown:false flipperRelaxBrake:false flipperBackwardIsDown:false flipperBrakeLock:false lact1:false lact2:false lact3:false speed: [self getFollowingSpeed] speed_playPause:false speed_forward_reverse:false textInput:@""];
         }
         
         
@@ -2197,7 +2173,6 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         controllerModelData.textInput = @"";
         
         [self.serialBox controllerId:@"Autonomous" controllerModelData:controllerModelData];
-        //[self.serialBox controllerPassthrough:CGPointMake(-0.5, 0.0) touchPadPointR:CGPointMake(-0.5, 0.0) Lat:0 Long:0 tredBrakeLock:false flipperForwardIsDown:false flipperRelaxBrake:false flipperBackwardIsDown:false flipperBrakeLock:false lact1:false lact2:false lact3:false speed: [self getFollowingSpeed] speed_playPause:false speed_forward_reverse:false textInput:@""];
         //user1 = 517.31, 174.51, 1825.00
     }
 }
@@ -2206,53 +2181,22 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void) heartbeat_NiTE
 {
-    //NSLog(@"pulse");
-    //[self.niteHeartbeatTimer invalidate];
-    //[self startHeartbeatNiTE_ResetTimer];
     self.pulse_count++;
 }
 
 
 - (void) startHeartbeatNiTE_ResetTimer
 {
-//    __weak ROBMainViewController * weakSelf = self;
-//    
-//    self.niteHeartbeatTimer = [NSTimer scheduledTimerWithTimeInterval:6 repeats:YES block:^(NSTimer * _Nonnull timer) {
-//        NSLog(@"validating %i", self.pulse_count);
-//        if (self.pulse_count == 0) //At least 1 pulse in every 5 seconds to check or we reboot vision system
-//        {
-//            self.pulse_count = 1;
-//            self.currentPerson_pan = 5900;
-//            self.currentPerson_tilt = 5593;
-//            
-//            NSLog(@"***** Resetting NiTECamera Capture *****");
-//            dispatch_async(dispatch_get_main_queue(), ^{
-//                //[self.niteManager shutdownNiTEManager];
-//                self.NiTE_IS_ON = false;
-//            });
-//            
-//            //__strong ROBMainViewController * strongSelf = weakSelf;
-//            
-//            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-//                //[self createAndInitializeNiteManager];
-//            });
-//        }
-//        self.pulse_count = 0;
-//    }];
 }
 
 - (void) didTrackHumans:(NSArray *)humanObservations
 {
     for (VNDetectedObjectObservation *observation in humanObservations)
     {
-        //NSLog(@"human = (%f, %f) --- %@", observation.boundingBox.origin.x, observation.boundingBox.origin.y, observation.uuid.UUIDString);
-            //NSAppleScript *script = [[NSAppleScript alloc] initWithSource:[NSString stringWithFormat:@"do shell script \"say %@\"", @"howdy"]];
-            //[script executeAndReturnError:nil];
         CGRect boundingBox = observation.boundingBox;
         CGFloat midx = CGRectGetMidX(boundingBox);
         CGFloat midy = CGRectGetMidY(boundingBox);
         NSLog(@"human = (%f, %f) --- %@", midx, midy, observation.uuid.UUIDString);
-        //if (trackingMode)
         [self trackingPerson:@"person1" x:midx y:midy z:1];
         break;
     }
@@ -2315,7 +2259,6 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     {
         [[NSUserDefaults standardUserDefaults] setValue:language forKey:@"inputLanguage"];
         self.inputLanguage = language;
-        //[self.audioInputTaskController startTask:self withLanguage:language];
     }
 }
 
@@ -2618,8 +2561,6 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         && torsoRotation >= -1.0
         && torsoRotation <= 1.0;
 
-    //NSLog(@"sender = %@. message = %@", sender, msg);
-
     if (error != nil) {
         NSLog(@"Error data recieved: %@", [error localizedDescription]);
     }
@@ -2869,9 +2810,6 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         float pitch = [[command_components[4] componentsSeparatedByString:@"pitch="][1] floatValue];
         float roll = [[command_components[5] componentsSeparatedByString:@"roll="][1] floatValue];
         
-        //NSLog(@"yaw = %f, pitch = %f, roll = %f", yaw, pitch, roll);
-        
-
         NSArray *touchPadL_array = [[command_components[6] componentsSeparatedByString:@"touchPadL - "][1] componentsSeparatedByString:@","];
         CGPoint touchPadPointL = CGPointMake([touchPadL_array[0] floatValue], [touchPadL_array[1] floatValue]);
 
@@ -2907,9 +2845,6 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         bool speed_forward_reverse = [[speed_array[2] componentsSeparatedByString:@"forward-reverse="][1] boolValue] ;
         
         NSString *textInput = [command_components[13] componentsSeparatedByString:@"TEXT="][1];
-        //NSLog(@"textInput = %@", textInput);
-        //self.serialBox.currentIncommingVerbalMessage = textInput;
-        
         ROBBaseControllerModel *controllerModelData = [ROBBaseControllerModel new];
         controllerModelData.touchPadPointL = touchPadPointL;
         controllerModelData.touchPadPointR = touchPadPointR;
@@ -2974,15 +2909,57 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     
 }
 
-- (void) showROB_Camera_View
+- (void)ensureMainCameraRuntime
 {
-    NSStoryboard *storyBoard = [NSStoryboard storyboardWithName:@"Main" bundle:nil]; // get a reference to the storyboard
-    self.cameraWindowController = [storyBoard instantiateControllerWithIdentifier:@"CameraWindowController"]; // instantiate your window controller
-    [self.cameraWindowController showWindow:self]; // show the window}
+    if (self.cameraWindowController != nil && self.cameraViewController != nil) {
+        return;
+    }
+    NSStoryboard *storyBoard = [NSStoryboard storyboardWithName:@"Main" bundle:nil];
+    self.cameraWindowController = [storyBoard instantiateControllerWithIdentifier:@"CameraWindowController"];
+    (void)self.cameraWindowController.window;
     self.cameraViewController = (CameraViewController *)self.cameraWindowController.contentViewController;
+    (void)self.cameraViewController.view;
     self.cameraViewController.robMainViewController = self;
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(mainCameraDiagnosticsWindowWillClose:)
+                                                 name:NSWindowWillCloseNotification
+                                               object:self.cameraWindowController.window];
     [self updateGeminiCameraDemand];
-    //[self.cameraViewController bindROBMainViewControllerWithRobMainViewController:self];
+}
+
+- (IBAction)showMainCameraDiagnostics:(id)sender
+{
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey]) {
+        return;
+    }
+    [self ensureMainCameraRuntime];
+    [self.cameraViewController setDiagnosticsPreviewVisible:YES];
+    [self.cameraWindowController showWindow:sender];
+}
+
+- (void)mainCameraDiagnosticsWindowWillClose:(NSNotification *)notification
+{
+    [self.cameraViewController setDiagnosticsPreviewVisible:NO];
+}
+
+- (IBAction)showCameraDiagnostics:(id)sender
+{
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey]) {
+        return;
+    }
+    [self showMainCameraDiagnostics:sender];
+    [self showInsta360Diagnostics:sender];
+}
+
+- (void)synchronizeDevelopmentCameraDiagnostics
+{
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey]) {
+        [self showCameraDiagnostics:self];
+    } else {
+        [self.cameraViewController setDiagnosticsPreviewVisible:NO];
+        [self.cameraWindowController close];
+        [self.insta360DiagnosticsWindowController close];
+    }
 }
 
 - (void) showROB_Torso_Controls
@@ -3005,31 +2982,23 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     [(ROBKeyboardControlsViewController *)self.controlsWindowController.contentViewController setRobMainViewController:self];
 }
 
-- (IBAction)sendText_base:(id)sender
+- (IBAction)showBaseSerialConsole:(id)sender
 {
-    [self.serialBox sendBaseCommand:[self.serialInputField_base stringValue]];
-}
-
-
-- (IBAction)serialPortSelected_base: (id) cntrl
-{
-    [self.serialBox serialPortSelected_base];
-}
-
-
-- (IBAction)serialPortSelected_maestro: (id) cntrl
-{
-    [self.serialBox serialPortSelected_maestro];
+    if (self.baseSerialConsoleWindowController == nil) {
+        self.baseSerialConsoleWindowController =
+            [[ROBBaseSerialConsoleWindowController alloc] initWithSerialBox:self.serialBox];
+    } else {
+        [self.baseSerialConsoleWindowController bindSerialBox:self.serialBox];
+    }
+    [self.baseSerialConsoleWindowController showWindow:sender];
 }
 
 - (void) shutdownAudioInput
 {
-    //[self.audioInputTaskController beginToIgnore];
 }
 
 - (void) didOutputSerialResponse_Base:(NSString *)response
 {
-    //NSLog(@"BASE: %@", response);
 }
 
 
@@ -3066,6 +3035,18 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             [[ROBInsta360DiagnosticsWindowController alloc] init];
     }
     [self.insta360DiagnosticsWindowController showWindow:sender];
+}
+
+- (IBAction)showSystemStatus:(id)sender
+{
+    if (self.systemStatusCoordinator == nil) {
+        self.systemStatusCoordinator = [[ROBSystemStatusCoordinator alloc]
+            initWithRobAI:self.robAI
+            cameraViewController:self.cameraViewController
+            autoNetServer:self.autoNetServer
+            stageShowCoordinator:self.stageShowCoordinator];
+    }
+    [self.systemStatusCoordinator showWindow:sender];
 }
 
 - (IBAction)showStageShow:(id)sender

@@ -19,7 +19,6 @@
 @property (readwrite, assign) NSTextView *textView;
 @property (readwrite, retain) ROBMainViewController *delegate;
 - (void) resetTranscript;
-//- (IBAction) startTask:(id)sender withLanguage:(NSString *)language;
 - (void) queryTextInput:(NSString *)queryTextInput;
 - (void) shutdownTask;
 - (void) startListeningAgain;

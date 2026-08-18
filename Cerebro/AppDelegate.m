@@ -9,6 +9,7 @@
 #import "AppDelegate.h"
 #import "ROBPythonRuntime.h"
 #import "ROBPythonSettingsWindowController.h"
+#import "ROBMainViewController.h"
 #import "ROBSystemDependencyManager.h"
 #import "ROBTaskLaunchGuard.h"
 #import "Cerebro-Swift.h"
@@ -40,6 +41,7 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
 @property (readwrite, assign) BOOL reportedMissingRPLidarApplication;
 @property (readwrite, retain) NSMenuItem *developmentModeMenuItem;
 @property (readwrite, retain) NSMenuItem *controllerDiagnosticsMenuItem;
+@property (readwrite, retain) NSMenuItem *cameraDiagnosticsMenuItem;
 @property (readwrite, retain) NSMenuItem *amberDiagnosticsMenuItem;
 @property (readwrite, retain) NSMenuItem *wakeUpCalibrationMenuItem;
 @property (readwrite, retain) NSMenuItem *hologramExportMenuItem;
@@ -48,6 +50,7 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
 @property (readwrite, retain) NSMenuItem *hologramStopMenuItem;
 @property (readwrite, retain) NSMenuItem *hologramAirDropMenuItem;
 - (void)workspaceDidWake:(NSNotification *)notification;
+- (ROBMainViewController *)mainViewControllerInViewController:(NSViewController *)viewController;
 
 @end
 
@@ -123,6 +126,12 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
         keyEquivalent:@""];
     self.controllerDiagnosticsMenuItem.target = self;
     [submenu addItem:self.controllerDiagnosticsMenuItem];
+    self.cameraDiagnosticsMenuItem = [[NSMenuItem alloc]
+        initWithTitle:@"Open Camera Diagnostics…"
+               action:@selector(showCameraDiagnostics:)
+        keyEquivalent:@""];
+    self.cameraDiagnosticsMenuItem.target = self;
+    [submenu addItem:self.cameraDiagnosticsMenuItem];
     self.amberDiagnosticsMenuItem = [[NSMenuItem alloc]
         initWithTitle:@"Amber Arm Diagnostics…"
                action:@selector(showAmberArmDiagnostics:)
@@ -179,6 +188,7 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
     BOOL enabled = [[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey];
     self.developmentModeMenuItem.state = enabled ? NSControlStateValueOn : NSControlStateValueOff;
     self.controllerDiagnosticsMenuItem.enabled = enabled;
+    self.cameraDiagnosticsMenuItem.enabled = enabled;
     self.amberDiagnosticsMenuItem.enabled = enabled;
     self.wakeUpCalibrationMenuItem.enabled = enabled;
     self.hologramExportMenuItem.enabled = enabled;
@@ -209,6 +219,23 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
     [[NSNotificationCenter defaultCenter]
         postNotificationName:ROBShowControllerInputDiagnosticsNotification
                       object:self];
+}
+
+- (IBAction)showCameraDiagnostics:(id)sender
+{
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey]) {
+        NSBeep();
+        return;
+    }
+    for (NSWindow *window in NSApp.windows) {
+        ROBMainViewController *mainViewController =
+            [self mainViewControllerInViewController:window.contentViewController];
+        if (mainViewController != nil) {
+            [mainViewController showCameraDiagnostics:sender];
+            return;
+        }
+    }
+    NSBeep();
 }
 
 - (IBAction)showAmberArmDiagnostics:(id)sender
@@ -316,6 +343,43 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
     }
     [NSApp activateIgnoringOtherApps:YES];
     [self.pythonSettingsWindowController showWindow:sender];
+}
+
+- (IBAction)showInsta360Settings:(id)sender
+{
+    if (self.pythonSettingsWindowController == nil) {
+        self.pythonSettingsWindowController = [[ROBPythonSettingsWindowController alloc] init];
+    }
+    [NSApp activateIgnoringOtherApps:YES];
+    [self.pythonSettingsWindowController showInsta360Settings:sender];
+}
+
+- (IBAction)showSystemStatus:(id)sender
+{
+    for (NSWindow *window in NSApp.windows) {
+        ROBMainViewController *mainViewController =
+            [self mainViewControllerInViewController:window.contentViewController];
+        if (mainViewController != nil) {
+            [mainViewController showSystemStatus:sender];
+            return;
+        }
+    }
+    NSBeep();
+}
+
+- (ROBMainViewController *)mainViewControllerInViewController:(NSViewController *)viewController
+{
+    if ([viewController isKindOfClass:[ROBMainViewController class]]) {
+        return (ROBMainViewController *)viewController;
+    }
+    for (NSViewController *childViewController in viewController.childViewControllers) {
+        ROBMainViewController *mainViewController =
+            [self mainViewControllerInViewController:childViewController];
+        if (mainViewController != nil) {
+            return mainViewController;
+        }
+    }
+    return nil;
 }
 
 - (void)pythonConfigurationRequired:(NSNotification *)notification

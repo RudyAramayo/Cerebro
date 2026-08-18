@@ -58,6 +58,7 @@ struct ROBNewsSearchServiceFixtureTests {
         try testFixedSourceRegistry()
         try testRSSParsingAndBounds()
         try testAtomParsing()
+        try testCNNNewsSitemapParsing()
         try await testStrictArgumentsDoNotReachNetwork()
         try await testReadOnlyFetchFilteringAndResultShape()
         try await testAllSourcesAreInterleaved()
@@ -71,7 +72,8 @@ struct ROBNewsSearchServiceFixtureTests {
             "bbc": "https://feeds.bbci.co.uk/news/rss.xml",
             "npr": "https://feeds.npr.org/1001/rss.xml",
             "nbc": "https://feeds.nbcnews.com/nbcnews/public/news",
-            "cbs": "https://www.cbsnews.com/latest/rss/main"
+            "cbs": "https://www.cbsnews.com/latest/rss/main",
+            "cnn": "https://www.cnn.com/sitemap/news.xml"
         ]
         try expect(Set(ROBNewsSource.identifiers) == Set(expected.keys), "News source IDs changed")
         try expect(Set(ROBNewsSource.identifiers).count == ROBNewsSource.all.count, "News source IDs must be unique")
@@ -139,6 +141,50 @@ struct ROBNewsSearchServiceFixtureTests {
         try expect(headlines.count == 1, "Atom entry was not parsed")
         try expect(headlines[0].title == "BBC & Atom headline", "Atom entities were not decoded")
         try expect(headlines[0].publishedAt == "2026-08-16T19:00:00Z", "Atom date was not normalized")
+    }
+
+    private static func testCNNNewsSitemapParsing() throws {
+        let source = try require(ROBNewsSource.source(withID: "cnn"), "Missing CNN fixture source")
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+                xmlns:news="http://www.google.com/schemas/sitemap-news/0.9"
+                xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+          <url>
+            <loc>https://www.cnn.com/2026/08/16/world/current-story</loc>
+            <lastmod>2026-08-17T00:43:03.428000+00:00</lastmod>
+            <news:news>
+              <news:publication_date>2026-08-16T05:39:15.847Z</news:publication_date>
+              <news:title>CNN &amp; current headline</news:title>
+            </news:news>
+            <image:image><image:loc>https://media.cnn.com/image.jpg</image:loc></image:image>
+          </url>
+          <url>
+            <loc>https://example.com/not-cnn</loc>
+            <news:news><news:title>Wrong host</news:title></news:news>
+          </url>
+          <url>
+            <loc>https://www.cnn.com/2026/08/16/us/updated-story</loc>
+            <lastmod>2026-08-16T22:17:25.188Z</lastmod>
+            <news:news><news:title>Fallback timestamp headline</news:title></news:news>
+          </url>
+        </urlset>
+        """
+        let headlines = try ROBNewsFeedParser.parse(data: Data(xml.utf8), source: source)
+        try expect(headlines.count == 2, "CNN sitemap parser did not enforce its article host")
+        try expect(headlines[0].title == "CNN & current headline", "CNN title was not normalized")
+        try expect(
+            headlines[0].url == "https://www.cnn.com/2026/08/16/world/current-story",
+            "CNN article link was replaced by an image link"
+        )
+        try expect(
+            headlines[0].publishedAt == "2026-08-16T05:39:15Z",
+            "CNN publication_date did not override lastmod or normalize fractional seconds"
+        )
+        try expect(
+            headlines[1].publishedAt == "2026-08-16T22:17:25Z",
+            "CNN lastmod fallback was not normalized"
+        )
     }
 
     private static func testStrictArgumentsDoNotReachNetwork() async throws {
@@ -231,7 +277,10 @@ struct ROBNewsSearchServiceFixtureTests {
         try expect(result["status"] as? String == "ok", "Cross-source request failed")
         let headlines = try require(result["headlines"] as? [[String: Any]], "Cross-source headlines missing")
         let sourceIDs = headlines.compactMap { $0["source"] as? String }
-        try expect(sourceIDs == ROBNewsSource.identifiers, "Cross-source highlights were not interleaved")
+        try expect(
+            sourceIDs == Array(ROBNewsSource.identifiers.prefix(5)),
+            "Cross-source highlights were not interleaved"
+        )
     }
 
     private static func testHTTPFailureIsHonest() async throws {

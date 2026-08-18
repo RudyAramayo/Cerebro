@@ -13,6 +13,7 @@
 @property (nonatomic, strong) NSButton *pythonSettingsButton;
 @property (nonatomic, strong) NSButton *geminiDiagnosticsButton;
 @property (nonatomic, strong) NSButton *insta360DiagnosticsButton;
+@property (nonatomic, strong) NSButton *systemStatusButton;
 @property (nonatomic, strong) NSButton *stageShowButton;
 @property (nonatomic, strong) NSTitlebarAccessoryViewController *settingsAccessoryController;
 @property (nonatomic, assign) BOOL pythonRuntimeNeedsAttention;
@@ -45,20 +46,28 @@
     self.insta360DiagnosticsButton.bezelStyle = NSBezelStyleTexturedRounded;
     self.insta360DiagnosticsButton.toolTip = @"Open the opt-in Insta360 RTSP/RTMP developer monitor";
 
+    self.systemStatusButton = [NSButton buttonWithTitle:@"Services…"
+                                                 target:self
+                                                 action:@selector(openSystemStatus:)];
+    self.systemStatusButton.bezelStyle = NSBezelStyleTexturedRounded;
+    self.systemStatusButton.toolTip = @"View cached health for AI, cameras, perception, media, and every controller session";
+
     self.stageShowButton = [NSButton buttonWithTitle:@"Show…"
                                               target:self
                                               action:@selector(openStageShow:)];
     self.stageShowButton.bezelStyle = NSBezelStyleTexturedRounded;
     self.stageShowButton.toolTip = @"Validate, dry-run, and rehearse a connection-tolerant stage show";
 
-    NSView *accessoryView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 468, 30)];
-    self.stageShowButton.frame = NSMakeRect(4, 1, 98, 28);
-    self.insta360DiagnosticsButton.frame = NSMakeRect(108, 1, 78, 28);
-    self.geminiDiagnosticsButton.frame = NSMakeRect(192, 1, 112, 28);
-    self.pythonSettingsButton.frame = NSMakeRect(310, 1, 148, 28);
+    NSView *accessoryView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 584, 30)];
+    self.stageShowButton.frame = NSMakeRect(4, 1, 90, 28);
+    self.insta360DiagnosticsButton.frame = NSMakeRect(100, 1, 74, 28);
+    self.geminiDiagnosticsButton.frame = NSMakeRect(180, 1, 100, 28);
+    self.systemStatusButton.frame = NSMakeRect(286, 1, 112, 28);
+    self.pythonSettingsButton.frame = NSMakeRect(404, 1, 170, 28);
     [accessoryView addSubview:self.stageShowButton];
     [accessoryView addSubview:self.insta360DiagnosticsButton];
     [accessoryView addSubview:self.geminiDiagnosticsButton];
+    [accessoryView addSubview:self.systemStatusButton];
     [accessoryView addSubview:self.pythonSettingsButton];
 
     self.settingsAccessoryController = [[NSTitlebarAccessoryViewController alloc] init];
@@ -90,6 +99,14 @@
     ROBMainViewController *mainViewController = (ROBMainViewController *)self.contentViewController;
     if ([mainViewController respondsToSelector:@selector(showInsta360Diagnostics:)]) {
         [mainViewController showInsta360Diagnostics:sender];
+    }
+}
+
+- (void)openSystemStatus:(id)sender
+{
+    id appDelegate = NSApp.delegate;
+    if ([appDelegate respondsToSelector:@selector(showSystemStatus:)]) {
+        [appDelegate showSystemStatus:sender];
     }
 }
 

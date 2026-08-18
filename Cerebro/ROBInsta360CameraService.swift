@@ -12,9 +12,41 @@ extension Notification.Name {
     static let robInsta360CameraServiceDidChange = Notification.Name("ROBInsta360CameraServiceDidChange")
 }
 
+@objc public protocol ROBInsta360VideoFrameConsumer: AnyObject {
+    func consumeInsta360JPEGFrame(
+        _ jpegData: Data,
+        capturedAt: Date,
+        capturedAtUptime: TimeInterval
+    )
+}
+
+private struct ROBInsta360PendingFrame {
+    let jpegData: Data
+    let capturedAt: Date
+}
+
+struct ROBInsta360ServiceStatusSnapshot: Sendable {
+    let state: String
+    let streamURL: String
+    let lastError: String?
+    let desiredRunning: Bool
+    let decoderActive: Bool
+    let diagnosticsPreviewVisible: Bool
+    let analysisNeedsFrames: Bool
+    let geminiVideoDemandActive: Bool
+    let framesReceived: UInt64
+    let decodedBytes: UInt64
+    let framesPerSecond: Double
+    let lastFrameAt: Date?
+}
+
 @objcMembers public final class ROBInsta360CameraService: NSObject {
     public static let shared = ROBInsta360CameraService()
     private static let gyroStabilizationDefaultsKey = "ROBInsta360GyroStabilizationEnabled"
+    private static let cameraHostDefaultsKey = "ROBInsta360CameraHost"
+    /// Changing any pixel-to-yaw property requires a new operator calibration.
+    /// Keep this identity stable across ordinary reconnects to the same camera.
+    private static let calibrationProjectionDescriptor = "equirectangular-pano-1920x960-v1"
 
     private let queue = DispatchQueue(label: "com.orbitusrobotics.cerebro.insta360-service")
     private let session: URLSession
@@ -32,10 +64,13 @@ extension Notification.Name {
     private var jpegBuffer = Data()
     private var decoderErrorTail = Data()
     private var startedAt: Date?
-    private var pendingDisplayFrame: NSImage?
+    private var pendingDisplayFrame: ROBInsta360PendingFrame?
     private var displayDeliveryScheduled = false
     private var diagnosticsPreviewVisible = false
+    private var geminiVideoDemandActive = false
     private var activeDecoderURL: String?
+    private var lastFrameAt: Date?
+    private var observedPreviewConfigurationIdentity = ""
 
     public private(set) var state = "Stopped"
     public private(set) var streamURL = "rtmp://10.0.0.18:1935/live/preview"
@@ -45,6 +80,16 @@ extension Notification.Name {
     public private(set) var framesPerSecond: Double = 0
     public private(set) var lastError: String?
     public private(set) var previewSettingsPending = false
+    // This reference is read only from `queue`. Keeping registration on that
+    // same queue prevents the decoder callback from racing startup/shutdown.
+    private weak var geminiFrameConsumer: ROBInsta360VideoFrameConsumer?
+
+    /// The unstabilized host/projection that was successfully applied in this
+    /// process. Nil means robot-relative FRONT/REAR calibration is currently
+    /// ineligible, not merely that the diagnostics window is closed.
+    public var calibrationProjectionIdentity: String? {
+        ROBGeminiVideoSourceSettings.shared.insta360AppliedPreviewProjectionIdentity
+    }
 
     /// Stabilization is opt-out: a new install always requests the camera's
     /// gyro-stabilized panorama unless a developer explicitly disables it.
@@ -55,7 +100,14 @@ extension Notification.Name {
             return defaults.bool(forKey: Self.gyroStabilizationDefaultsKey)
         }
         set {
+            guard gyroStabilizationEnabled != newValue else { return }
             UserDefaults.standard.set(newValue, forKey: Self.gyroStabilizationDefaultsKey)
+            // Gyro stabilization changes panorama yaw without a compensating
+            // transform in Cerebro. Withdraw and erase robot-relative
+            // calibration before the camera command is applied.
+            let settings = ROBGeminiVideoSourceSettings.shared
+            settings.invalidateInsta360OrientationCalibration()
+            settings.setInsta360AppliedPreviewProjectionIdentity(nil)
             DispatchQueue.main.async {
                 self.previewSettingsPending = true
                 NotificationCenter.default.post(name: .robInsta360CameraServiceDidChange, object: self)
@@ -73,6 +125,69 @@ extension Notification.Name {
         configuration.waitsForConnectivity = false
         session = URLSession(configuration: configuration)
         super.init()
+        observedPreviewConfigurationIdentity = requestedPreviewConfigurationIdentity
+        let requestedCalibrationIdentity = calibrationProjectionIdentity(
+            host: cameraHost,
+            stabilizationEnabled: gyroStabilizationEnabled
+        )
+        let storedCalibrationIdentity = UserDefaults.standard.string(
+            forKey: GeminiRoboticsRuntimeSettings
+                .insta360CalibrationProjectionIdentityDefaultsKey
+        )
+        if storedCalibrationIdentity != nil,
+           storedCalibrationIdentity != requestedCalibrationIdentity {
+            // A known host/projection/gyro mismatch is materially different
+            // from waiting for camera confirmation, so fail closed immediately.
+            ROBGeminiVideoSourceSettings.shared
+                .invalidateInsta360OrientationCalibration()
+        }
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(perceptionSettingsDidChange(_:)),
+            name: .robDetectorSettingsDidChange,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(perceptionSettingsDidChange(_:)),
+            name: .robMLXRuntimeDidChange,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(previewDefaultsDidChange(_:)),
+            name: UserDefaults.didChangeNotification,
+            object: UserDefaults.standard
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func perceptionSettingsDidChange(_ notification: Notification) {
+        refreshDecoderDemand()
+    }
+
+    /// Also catches an externally edited camera host. Calibration is cleared
+    /// only when the stable host/projection/stabilization configuration really
+    /// changes, never for frame delivery or a reconnect with the same values.
+    @objc private func previewDefaultsDidChange(_ notification: Notification) {
+        queue.async {
+            let requestedIdentity = self.requestedPreviewConfigurationIdentity
+            guard requestedIdentity != self.observedPreviewConfigurationIdentity else { return }
+            self.observedPreviewConfigurationIdentity = requestedIdentity
+            let settings = ROBGeminiVideoSourceSettings.shared
+            settings.invalidateInsta360OrientationCalibration()
+            settings.setInsta360AppliedPreviewProjectionIdentity(nil)
+            DispatchQueue.main.async {
+                self.previewSettingsPending = true
+                NotificationCenter.default.post(
+                    name: .robInsta360CameraServiceDidChange,
+                    object: self
+                )
+            }
+        }
     }
 
     public func start() {
@@ -123,16 +238,71 @@ extension Notification.Name {
         }
     }
 
+    /// Registers Gemini's raw-JPEG consumer without making it part of the
+    /// AppKit preview path. Registration and frame delivery are serialized on
+    /// the camera service queue.
+    public func setGeminiFrameConsumer(_ consumer: ROBInsta360VideoFrameConsumer?) {
+        queue.async {
+            self.geminiFrameConsumer = consumer
+        }
+    }
+
+    /// Adds Gemini as an independent, headless consumer of the stitched
+    /// preview. This affects decoder demand only; the raw frame still passes
+    /// through ROBAI's connection, source, generation, and rate gates before
+    /// it can leave the Mac.
+    public func setGeminiVideoDemandActive(_ active: Bool) {
+        queue.async {
+            guard self.geminiVideoDemandActive != active else { return }
+            self.geminiVideoDemandActive = active
+            self.reevaluateDecoderDemand()
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: .robInsta360CameraServiceDidChange,
+                    object: self
+                )
+            }
+        }
+    }
+
     public func refreshDecoderDemand() {
         queue.async { self.reevaluateDecoderDemand() }
     }
 
+    /// A lock-consistent, observational snapshot for the service grid. It
+    /// never starts the camera, decoder, diagnostics UI, or a network request.
+    @nonobjc func statusSnapshot() -> ROBInsta360ServiceStatusSnapshot {
+        precondition(Thread.isMainThread, "Insta360 status is presented on the main thread")
+        let displayedState = state
+        let displayedURL = streamURL
+        let displayedError = lastError
+        return queue.sync {
+            ROBInsta360ServiceStatusSnapshot(
+                state: displayedState,
+                streamURL: displayedURL,
+                lastError: displayedError,
+                desiredRunning: desiredRunning,
+                decoderActive: decoder != nil,
+                diagnosticsPreviewVisible: diagnosticsPreviewVisible,
+                analysisNeedsFrames: analysisNeedsFrames,
+                geminiVideoDemandActive: geminiVideoDemandActive,
+                framesReceived: framesReceived,
+                decodedBytes: decodedBytes,
+                framesPerSecond: framesPerSecond,
+                lastFrameAt: lastFrameAt
+            )
+        }
+    }
+
     private var analysisNeedsFrames: Bool {
+        geminiVideoDemandActive || localAnalysisNeedsFrames
+    }
+
+    private var localAnalysisNeedsFrames: Bool {
         let registry = ROBDynamicDetectorRegistry.shared
         guard registry.processingFramesPerSecond(for: .insta360) > 0 else { return false }
         return ROBMLXRuntime.shared.insta360DetectionEnabled
-            || registry.enabled("body-pose", source: .insta360)
-            || registry.enabled("generic-objects", source: .insta360)
+            || registry.requiresFrames(for: .insta360)
     }
 
     private func reevaluateDecoderDemand() {
@@ -179,9 +349,35 @@ extension Notification.Name {
     }
 
     private var cameraHost: String {
-        let configured = UserDefaults.standard.string(forKey: "ROBInsta360CameraHost")?
+        let configured = UserDefaults.standard.string(forKey: Self.cameraHostDefaultsKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return configured?.isEmpty == false ? configured! : "10.0.0.18"
+    }
+
+    private var requestedPreviewConfigurationIdentity: String {
+        previewConfigurationIdentity(
+            host: cameraHost,
+            stabilizationEnabled: gyroStabilizationEnabled
+        )
+    }
+
+    private func previewConfigurationIdentity(
+        host: String,
+        stabilizationEnabled: Bool
+    ) -> String {
+        let normalizedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return "host=\(normalizedHost)|projection=\(Self.calibrationProjectionDescriptor)|gyro=\(stabilizationEnabled ? "on" : "off")"
+    }
+
+    private func calibrationProjectionIdentity(
+        host: String,
+        stabilizationEnabled: Bool
+    ) -> String? {
+        guard !stabilizationEnabled else { return nil }
+        let normalizedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return "host=\(normalizedHost)|projection=\(Self.calibrationProjectionDescriptor)|gyro=off"
     }
 
     private func connect(generation: UInt64) {
@@ -220,6 +416,30 @@ extension Notification.Name {
     }
 
     private func startPreview(existingURL: String?, generation: UInt64) {
+        let requestedHost = cameraHost
+        let stabilizationEnabled = gyroStabilizationEnabled
+        let requestedConfigurationIdentity = previewConfigurationIdentity(
+            host: requestedHost,
+            stabilizationEnabled: stabilizationEnabled
+        )
+        let eligibleCalibrationIdentity = calibrationProjectionIdentity(
+            host: requestedHost,
+            stabilizationEnabled: stabilizationEnabled
+        )
+        if stabilizationEnabled {
+            // This is a known ineligible projection, not a transient lack of
+            // camera confirmation, so any saved robot-relative calibration is
+            // intentionally erased. Reconnects do not repeat a material write.
+            let settings = ROBGeminiVideoSourceSettings.shared
+            settings.invalidateInsta360OrientationCalibration()
+            settings.setInsta360AppliedPreviewProjectionIdentity(nil)
+        }
+        if observedPreviewConfigurationIdentity != requestedConfigurationIdentity {
+            observedPreviewConfigurationIdentity = requestedConfigurationIdentity
+            let settings = ROBGeminiVideoSourceSettings.shared
+            settings.invalidateInsta360OrientationCalibration()
+            settings.setInsta360AppliedPreviewProjectionIdentity(nil)
+        }
         let command: [String: Any] = [
             "name": "camera._startPreview",
             "parameters": [
@@ -228,7 +448,7 @@ extension Notification.Name {
             ],
             // ProCameraApi defines stabilization beside parameters rather than
             // inside the capture-options dictionary.
-            "stabilization": gyroStabilizationEnabled
+            "stabilization": stabilizationEnabled
         ]
         executeCommand(command, fingerprint: fingerprint ?? "", generation: generation) { result in
             let results = result["results"] as? [String: Any]
@@ -238,7 +458,14 @@ extension Notification.Name {
             let url = self.normalizedPreviewURL(advertisedURL)
             self.retryAttempt = 0
             self.heartbeatFailures = 0
-            DispatchQueue.main.async { self.previewSettingsPending = false }
+            let requestedConfigurationIsStillCurrent =
+                self.requestedPreviewConfigurationIdentity == requestedConfigurationIdentity
+            ROBGeminiVideoSourceSettings.shared.setInsta360AppliedPreviewProjectionIdentity(
+                requestedConfigurationIsStillCurrent ? eligibleCalibrationIdentity : nil
+            )
+            DispatchQueue.main.async {
+                self.previewSettingsPending = !requestedConfigurationIsStillCurrent
+            }
             self.publishStreamURL(url)
             self.startDecoder(url: url, generation: generation)
         }
@@ -338,6 +565,7 @@ extension Notification.Name {
                 self.decoder = nil
                 self.decoderOutput = nil
                 self.decoderError = nil
+                ROBDynamicDetectorRegistry.shared.invalidatePendingResults(for: .insta360)
                 let message = detail.replacingOccurrences(of: "\n", with: " ")
                 NSLog("Insta360 decoder error: %@; retrying decoder without releasing camera ownership", message)
                 self.publish(state: "Waiting for preview stream…", error: message)
@@ -374,11 +602,33 @@ extension Notification.Name {
             let frameEnd = end.upperBound
             let jpeg = jpegBuffer.subdata(in: start.lowerBound..<frameEnd)
             jpegBuffer.removeSubrange(jpegBuffer.startIndex..<frameEnd)
-            guard let image = NSImage(data: jpeg) else { continue }
             framesReceived &+= 1
             framesPerSecond = Double(framesReceived) / max(Date().timeIntervalSince(startedAt ?? Date()), 0.001)
-            pendingDisplayFrame = image
-            scheduleLatestFrameDelivery()
+            let capturedAt = Date()
+            let capturedAtUptime = ProcessInfo.processInfo.systemUptime
+            lastFrameAt = capturedAt
+
+            // Gemini consumes the completed JPEG directly from the service
+            // queue. In particular, capture age is measured from this
+            // monotonic timestamp and cannot be hidden by a busy main thread
+            // or by optional NSImage decoding for diagnostics.
+            if geminiVideoDemandActive {
+                geminiFrameConsumer?.consumeInsta360JPEGFrame(
+                    jpeg,
+                    capturedAt: capturedAt,
+                    capturedAtUptime: capturedAtUptime
+                )
+            }
+
+            // AppKit and local perception remain latest-only consumers on the
+            // main thread, and incur no work when neither feature is enabled.
+            if diagnosticsPreviewVisible || localAnalysisNeedsFrames {
+                pendingDisplayFrame = ROBInsta360PendingFrame(
+                    jpegData: jpeg,
+                    capturedAt: capturedAt
+                )
+                scheduleLatestFrameDelivery()
+            }
         }
         if jpegBuffer.count > 32_000_000 { jpegBuffer.removeAll(keepingCapacity: true) }
     }
@@ -392,14 +642,30 @@ extension Notification.Name {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.queue.async {
-                let image = self.pendingDisplayFrame
+                let frame = self.pendingDisplayFrame
                 self.pendingDisplayFrame = nil
                 self.displayDeliveryScheduled = false
-                guard let image else { return }
+                let deliverToLocalConsumers = self.diagnosticsPreviewVisible
+                    || self.localAnalysisNeedsFrames
+                guard let frame else { return }
                 DispatchQueue.main.async {
+                    guard deliverToLocalConsumers,
+                          let image = NSImage(data: frame.jpegData) else {
+                        self.queue.async {
+                            if self.pendingDisplayFrame != nil { self.scheduleLatestFrameDelivery() }
+                        }
+                        return
+                    }
                     self.latestFrame = image
-                    ROBInsta360PerceptionService.shared.offer(image, capturedAt: Date())
-                    ROBDynamicDetectorRegistry.shared.offer(image, source: .insta360)
+                    ROBInsta360PerceptionService.shared.offer(
+                        image,
+                        capturedAt: frame.capturedAt
+                    )
+                    ROBDynamicDetectorRegistry.shared.offer(
+                        image,
+                        source: .insta360,
+                        capturedAt: frame.capturedAt
+                    )
                     NotificationCenter.default.post(name: .robInsta360CameraServiceDidChange, object: self)
                     self.queue.async {
                         if self.pendingDisplayFrame != nil { self.scheduleLatestFrameDelivery() }
@@ -482,6 +748,7 @@ extension Notification.Name {
         decoder = nil
         pendingDisplayFrame = nil
         if task?.isRunning == true { task?.terminate() }
+        ROBDynamicDetectorRegistry.shared.invalidatePendingResults(for: .insta360)
     }
 
     private func publish(state: String, error: String?) {
