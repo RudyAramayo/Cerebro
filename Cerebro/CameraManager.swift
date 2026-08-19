@@ -134,15 +134,21 @@ protocol CameraManagerProtocol: AnyObject {
     func bindCameraRebootSession() throws
 }
 
+enum CameraRole {
+    case face
+    case belly
+}
+
 final class CameraManager: NSObject, CameraManagerProtocol {
     private static let depthCameraSocketDefaultsKey = "ROBDepthCameraSocketPath"
     private static let depthCameraReadyNotification = Notification.Name("ROBDepthCameraServiceReady")
     private static let legacyLuxonisUVCDefaultsKey = "ROBAllowLuxonisUVCFallback"
 
     private let containerView: NSView
-    private let sessionQueue = DispatchQueue(label: "com.orbitusrobotics.Cerebro.camera.session")
-    private let captureQueue = DispatchQueue(label: "com.orbitusrobotics.Cerebro.camera.capture")
-    private let deliveryQueue = DispatchQueue(label: "com.orbitusrobotics.Cerebro.camera.delivery")
+    private let role: CameraRole
+    private let sessionQueue: DispatchQueue
+    private let captureQueue: DispatchQueue
+    private let deliveryQueue: DispatchQueue
     private let deliveryLock = NSLock()
     private let previewLock = NSLock()
 
@@ -173,12 +179,17 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     weak var delegate: CameraManagerDelegate?
     var videoSampleHandler: ((CMSampleBuffer) -> Void)?
 
-    init(containerView: NSView) {
+    init(containerView: NSView, role: CameraRole) {
         let previewLayer: AVCaptureVideoPreviewLayer = {
             dispatchPrecondition(condition: .onQueue(.main))
             return AVCaptureVideoPreviewLayer()
         }()
         self.containerView = containerView
+        self.role = role
+        let queueSuffix = role == .face ? "belly" : "face"
+        self.sessionQueue = DispatchQueue(label: "com.orbitusrobotics.Cerebro.camera.session.\(queueSuffix)")
+        self.captureQueue = DispatchQueue(label: "com.orbitusrobotics.Cerebro.camera.capture.\(queueSuffix)")
+        self.deliveryQueue = DispatchQueue(label: "com.orbitusrobotics.Cerebro.camera.delivery.\(queueSuffix)")
         self.previewLayer = previewLayer
         self.deviceDiscoverySession = AVCaptureDevice.DiscoverySession(
             deviceTypes: [.continuityCamera, .external],
@@ -367,8 +378,26 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     }
 
     private var configuredDepthCameraSocketPath: String? {
-        let path = UserDefaults.standard.string(forKey: Self.depthCameraSocketDefaultsKey)
-        return path?.isEmpty == false ? path : nil
+        let defaultKey = role == .face ? "ROBDepthCameraSocketPathBelly" : Self.depthCameraSocketDefaultsKey
+        let path = UserDefaults.standard.string(forKey: defaultKey)
+        // If not set, provide a default in Application Support to prevent failures
+        if path?.isEmpty == false { return path }
+        
+        let fileManager = FileManager.default
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let serviceDir = appSupport.appendingPathComponent("Cerebro")
+        try? fileManager.createDirectory(at: serviceDir, withIntermediateDirectories: true)
+        
+        let fallbackFilename = role == .face ? "depth-camera-belly.sock" : "depth-camera.sock"
+        let fallbackPath = serviceDir.appendingPathComponent(fallbackFilename).path
+        UserDefaults.standard.set(fallbackPath, forKey: defaultKey)
+        return fallbackPath
+    }
+
+    private var configuredCameraMxid: String? {
+        let mxidKey = role == .face ? "ROBBellyCameraMXID" : "ROBFaceCameraMXID"
+        let mxid = UserDefaults.standard.string(forKey: mxidKey)
+        return mxid?.isEmpty == false ? mxid : nil
     }
 
     private var usesLegacyLuxonisUVCMode: Bool {
@@ -376,7 +405,12 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     }
 
     private func installDepthCameraClient() {
-        let client = DepthCameraServiceClient(socketPath: configuredDepthCameraSocketPath)
+        let shouldLaunchPython = (role == .face)
+        let client = DepthCameraServiceClient(
+            socketPath: configuredDepthCameraSocketPath,
+            mxid: configuredCameraMxid,
+            shouldLaunchPython: shouldLaunchPython
+        )
         client.onStateChange = { [weak self] state, detail, sourceGeneration in
             guard let self else { return }
             self.sessionQueue.async {
@@ -818,12 +852,17 @@ private final class DepthCameraServiceClient {
     private var requestedShouldRun = false
     private var requestedRunGeneration: UInt64 = 0
     private var activeRunGeneration: UInt64 = 0
+    private var pythonProcess: Process?
+    private var mxid: String?
+    private let shouldLaunchPython: Bool
 
     var onFrame: ((CameraFrameSet, UInt64) -> Void)?
     var onStateChange: ((CameraSourceState, String?, UInt64) -> Void)?
 
-    init(socketPath: String?) {
+    init(socketPath: String?, mxid: String? = nil, shouldLaunchPython: Bool = false) {
         self.socketPath = socketPath
+        self.mxid = mxid
+        self.shouldLaunchPython = shouldLaunchPython
     }
 
     func updateSocketPath(_ path: String?) {
@@ -832,8 +871,38 @@ private final class DepthCameraServiceClient {
             if self.socketPath != path {
                 self.socketPath = path
                 self.cancelConnection()
+                if self.shouldLaunchPython {
+                    self.stopPythonProcess()
+                }
             }
         }
+    }
+    
+    private func launchPythonProcess() {
+        guard let socketPath = socketPath, !socketPath.isEmpty else { return }
+        stopPythonProcess()
+        guard let scriptPath = Bundle.main.path(forResource: "Webcam_color", ofType: "py") else {
+            print("Webcam_color.py missing")
+            return
+        }
+        let parentPid = String(ProcessInfo.processInfo.processIdentifier)
+        var args = [scriptPath, "--socket", socketPath, "--parent-pid", parentPid]
+        if let mxid = mxid, !mxid.isEmpty {
+            args.append(contentsOf: ["--mxid", mxid])
+        }
+        
+        do {
+            let task = try ROBPythonRuntime.shared.newTask(withArguments: args)
+            pythonProcess = task
+            try task.run()
+        } catch {
+            print("Failed to launch DepthAI python script: \(error.localizedDescription)")
+        }
+    }
+
+    private func stopPythonProcess() {
+        pythonProcess?.terminate()
+        pythonProcess = nil
     }
 
     @discardableResult
@@ -851,6 +920,9 @@ private final class DepthCameraServiceClient {
                 guard let self else { return }
                 self.activeRunGeneration = generation
                 self.shouldRun = true
+                if self.shouldLaunchPython && (self.pythonProcess == nil || self.pythonProcess?.isRunning == false) {
+                    self.launchPythonProcess()
+                }
                 self.connectIfPossible()
             }
         }
@@ -873,6 +945,9 @@ private final class DepthCameraServiceClient {
             self.reconnectWorkItem?.cancel()
             self.reconnectWorkItem = nil
             self.cancelConnection()
+            if self.shouldLaunchPython {
+                self.stopPythonProcess()
+            }
             self.onStateChange?(.stopped, nil, generation)
         }
     }
@@ -884,6 +959,10 @@ private final class DepthCameraServiceClient {
             self.reconnectWorkItem = nil
             self.reconnectAttempt = 0
             self.cancelConnection()
+            if self.shouldLaunchPython {
+                self.stopPythonProcess()
+                self.launchPythonProcess()
+            }
             self.connectIfPossible()
         }
     }

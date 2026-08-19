@@ -551,12 +551,18 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
 
     NSError *taskError = nil;
     NSString *parentProcessID = [NSString stringWithFormat:@"%d", getpid()];
+    NSString *mxid = [[NSUserDefaults standardUserDefaults] stringForKey:@"ROBFaceCameraMXID"];
+    NSMutableArray *args = [NSMutableArray arrayWithArray:@[
+        webcam_color_script_path,
+        @"--socket", socketPath,
+        @"--parent-pid", parentProcessID
+    ]];
+    if (mxid != nil && mxid.length > 0) {
+        [args addObject:@"--mxid"];
+        [args addObject:mxid];
+    }
     NSTask *task = [[ROBPythonRuntime sharedRuntime]
-        newTaskWithArguments:@[
-            webcam_color_script_path,
-            @"--socket", socketPath,
-            @"--parent-pid", parentProcessID
-        ]
+        newTaskWithArguments:args
                          error:&taskError];
     if (task == nil) {
         NSLog(@"UTC Webcam Python configuration error: %@", taskError.localizedDescription);

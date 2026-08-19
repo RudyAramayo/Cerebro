@@ -46,8 +46,10 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
 @property (readwrite, assign) BOOL rightGripperClosed;
 @property (readwrite, assign) NSTimeInterval lastRobotIntegrationUptime;
 @property (readwrite, retain) SCNNode *liveRGBCloudNode;
+@property (readwrite, retain) SCNNode *liveBellyRGBCloudNode;
 @property (readwrite, strong) dispatch_queue_t cloudQueue;
 @property (readwrite, assign) BOOL cloudUpdatePending;
+@property (readwrite, assign) BOOL bellyCloudUpdatePending;
 @end
 
 @implementation ROBSCNViewController
@@ -207,6 +209,10 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
     self.liveRGBCloudNode = [SCNNode node];
     self.liveRGBCloudNode.name = @"Live OAK RGB point cloud";
     [scene.rootNode addChildNode:self.liveRGBCloudNode];
+
+    self.liveBellyRGBCloudNode = [SCNNode node];
+    self.liveBellyRGBCloudNode.name = @"Live Belly RGB point cloud";
+    [scene.rootNode addChildNode:self.liveBellyRGBCloudNode];
 
     SCNBox *robotBody = [SCNBox boxWithWidth:0.72 height:0.46 length:0.56 chamferRadius:0.08];
     robotBody.materials = @[[self materialWithColor:[NSColor colorWithWhite:0.18 alpha:1] emission:0.05]];
@@ -597,8 +603,21 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
 {
     ROBDepthCloudFrame *frame = [notification.object isKindOfClass:ROBDepthCloudFrame.class]
         ? notification.object : nil;
-    if (frame == nil || self.cloudUpdatePending) return;
-    self.cloudUpdatePending = YES;
+    if (frame == nil) return;
+    
+    BOOL isBelly = NO;
+    if ([frame respondsToSelector:@selector(isBelly)]) {
+        isBelly = frame.isBelly;
+    }
+    
+    if (isBelly) {
+        if (self.bellyCloudUpdatePending) return;
+        self.bellyCloudUpdatePending = YES;
+    } else {
+        if (self.cloudUpdatePending) return;
+        self.cloudUpdatePending = YES;
+    }
+    
     dispatch_async(dispatch_get_main_queue(), ^{
         SCNMatrix4 robotTransform = self.robotNode.presentationNode.worldTransform;
         dispatch_async(self.cloudQueue, ^{
@@ -667,6 +686,14 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
 
 - (void)processDepthFrame:(ROBDepthCloudFrame *)frame robotTransform:(SCNMatrix4)robotTransform
 {
+    BOOL isBelly = NO;
+    if ([frame respondsToSelector:@selector(isBelly)]) {
+        isBelly = frame.isBelly;
+    }
+    
+    float heightOffset = isBelly ? 0.62f : 1.05f;
+    float depthOffset = isBelly ? -0.29f : 0.0f;
+
     const uint8_t *bytes = frame.millimetersLittleEndian.bytes;
     NSInteger width = frame.width, height = frame.height;
     float focal = (float)width / (2.0f * tanf(69.0f * (float)M_PI / 360.0f));
@@ -687,8 +714,8 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
             if (mm < 150 || mm > 10000) continue;
             float z = (float)mm / 1000.0f;
             SCNVector3 local = SCNVector3Make(((float)x - cx) * z / focal,
-                                              1.05f - ((float)y - cy) * z / focal,
-                                              -z);
+                                              heightOffset - ((float)y - cy) * z / focal,
+                                              depthOffset - z);
             SCNVector3 world = SCNVector3Make(
                 robotTransform.m11 * local.x + robotTransform.m21 * local.y + robotTransform.m31 * local.z + robotTransform.m41,
                 robotTransform.m12 * local.x + robotTransform.m22 * local.y + robotTransform.m32 * local.z + robotTransform.m42,
@@ -707,8 +734,13 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
     if (rgb != NULL) CVPixelBufferUnlockBaseAddress(rgb, kCVPixelBufferLock_ReadOnly);
     SCNGeometry *geometry = [self pointGeometry:points colors:colors pointSize:2];
     dispatch_async(dispatch_get_main_queue(), ^{
-        self.liveRGBCloudNode.geometry = geometry;
-        self.cloudUpdatePending = NO;
+        if (isBelly) {
+            self.liveBellyRGBCloudNode.geometry = geometry;
+            self.bellyCloudUpdatePending = NO;
+        } else {
+            self.liveRGBCloudNode.geometry = geometry;
+            self.cloudUpdatePending = NO;
+        }
     });
 }
 

@@ -150,6 +150,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 @property (readwrite, retain) NSWindowController *cameraWindowController;
 @property (readwrite, retain) CameraViewController *cameraViewController;
+@property (readwrite, retain) ROBBellyCameraWindowController *bellyCameraWindowController;
 @property (readwrite, retain) ROBBaseSerialConsoleWindowController *baseSerialConsoleWindowController;
 @property (atomic, readwrite, strong) ROBAlignedDepthFrame *latestAlignedDepthFrame;
 
@@ -2927,6 +2928,14 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     [self updateGeminiCameraDemand];
 }
 
+- (void)ensureBellyCameraRuntime
+{
+    if (self.bellyCameraWindowController != nil) {
+        return;
+    }
+    self.bellyCameraWindowController = [[ROBBellyCameraWindowController alloc] init];
+}
+
 - (IBAction)showMainCameraDiagnostics:(id)sender
 {
     if (![[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey]) {
@@ -2949,6 +2958,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     }
     [self showMainCameraDiagnostics:sender];
     [self showInsta360Diagnostics:sender];
+    [self ensureBellyCameraRuntime];
+    [self.bellyCameraWindowController showWindow:sender];
 }
 
 - (void)synchronizeDevelopmentCameraDiagnostics
@@ -2959,6 +2970,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         [self.cameraViewController setDiagnosticsPreviewVisible:NO];
         [self.cameraWindowController close];
         [self.insta360DiagnosticsWindowController close];
+        [self.bellyCameraWindowController close];
     }
 }
 

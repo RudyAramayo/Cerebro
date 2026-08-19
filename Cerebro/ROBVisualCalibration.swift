@@ -19,12 +19,12 @@ public struct ROBCameraPose: Codable, Sendable {
     public let confidence: Double
 }
 
-private struct ROBRigidCorrespondence {
+struct ROBRigidCorrespondence {
     let camera: SIMD3<Double>
     let robot: SIMD3<Double>
 }
 
-private struct ROBRigidTransform {
+struct ROBRigidTransform {
     let rotation: simd_quatd
     let translation: SIMD3<Double>
     let rms: Double
@@ -34,7 +34,7 @@ private struct ROBRigidTransform {
     }
 }
 
-private enum ROBVisualMarker {
+enum ROBVisualMarker {
     case anchor(id: String, robotPosition: SIMD3<Double>)
     case armJoint(arm: String, joint: String, index: Int)
 
@@ -65,7 +65,7 @@ private enum ROBVisualMarker {
     }
 }
 
-private enum ROBRigidPoseSolver {
+enum ROBRigidPoseSolver {
     /// Horn's absolute-orientation solution. At least three non-collinear
     /// camera/robot correspondences are required.
     static func solve(_ points: [ROBRigidCorrespondence]) -> ROBRigidTransform? {

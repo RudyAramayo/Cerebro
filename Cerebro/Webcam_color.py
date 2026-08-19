@@ -58,6 +58,12 @@ def parse_arguments():
         default=os.getppid(),
         help="Cerebro process ID; the helper exits if this process disappears.",
     )
+    parser.add_argument(
+        "--mxid",
+        type=str,
+        default=None,
+        help="Serial number (MxId) of the specific Luxonis device to connect to.",
+    )
     return parser.parse_args()
 
 
@@ -239,7 +245,7 @@ def send_frame(client, rgb_frame, depth_frame, left_frame, right_frame, rgb_intr
     client.sendall(right_bytes)
 
 
-def stream_camera(client, stop_event):
+def stream_camera(client, stop_event, mxid=None):
     dai = load_depthai()
     device = None
 
@@ -247,7 +253,10 @@ def stream_camera(client, stop_event):
         emit_error("device reconnect status " + str(status))
 
     try:
-        device = dai.Device()
+        if mxid:
+            device = dai.Device(dai.DeviceInfo(mxid))
+        else:
+            device = dai.Device()
         device.setMaxReconnectionAttempts(
             DEVICE_RECONNECT_ATTEMPTS, reconnection_callback
         )
@@ -361,7 +370,7 @@ def client_is_connected(client):
         return False
 
 
-def serve(server, stop_event):
+def serve(server, stop_event, mxid=None):
     while not stop_event.is_set():
         client = accept_client(server, stop_event)
         if client is None:
@@ -371,7 +380,7 @@ def serve(server, stop_event):
             retry_delay = INITIAL_RETRY_DELAY_SECONDS
             while not stop_event.is_set():
                 try:
-                    stream_camera(client, stop_event)
+                    stream_camera(client, stop_event, mxid)
                     break
                 except (BrokenPipeError, ConnectionResetError, socket.timeout) as error:
                     emit_error("camera client disconnected: " + str(error))
@@ -434,7 +443,7 @@ def main():
         )
         parent_monitor.start()
         emit("CEREBRO_DEPTHCAM_READY " + socket_path)
-        serve(server, stop_event)
+        serve(server, stop_event, args.mxid)
         return 0
     except KeyboardInterrupt:
         return 0

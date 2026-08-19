@@ -94,12 +94,14 @@ extension Notification.Name {
     public let width: Int
     public let height: Int
     public let rgbPixelBuffer: CVPixelBuffer?
+    public let isBelly: Bool
 
-    fileprivate init(depth: CameraDepthFrame, rgbSampleBuffer: CMSampleBuffer) {
+    init(depth: CameraDepthFrame, rgbSampleBuffer: CMSampleBuffer, isBelly: Bool = false) {
         millimetersLittleEndian = depth.millimetersLittleEndian as NSData
         width = depth.width
         height = depth.height
         rgbPixelBuffer = CMSampleBufferGetImageBuffer(rgbSampleBuffer)
+        self.isBelly = isBelly
     }
 }
 
@@ -423,6 +425,10 @@ struct ROBCameraServiceStatusSnapshot: Sendable {
 
 final class CameraViewController: NSViewController {
     private var cameraManager: CameraManagerProtocol?
+    private let faceContainerView = NSView()
+    
+    private let faceDepthPointCloudRenderer = ROBDepthPointCloudRenderer()
+    
     private var videoServer: ROBVideoServer?
     private var cameraViewIsVisible = false
     private var remoteVideoIsActive = false
@@ -485,9 +491,18 @@ final class CameraViewController: NSViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        let manager = CameraManager(containerView: view)
+        
+        faceContainerView.frame = view.bounds
+        faceContainerView.autoresizingMask = [.width, .height]
+        view.addSubview(faceContainerView, positioned: .below, relativeTo: nil)
+        
+        skeletonView.frame = view.bounds
+        skeletonView.autoresizingMask = [.width, .height]
+
+        let manager = CameraManager(containerView: faceContainerView, role: .face)
         manager.delegate = self
         cameraManager = manager
+        
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(applicationWillTerminate),
@@ -889,13 +904,14 @@ extension CameraViewController: CameraManagerDelegate {
             )
         }
         if let depth = frameSet.alignedDepth {
-            let hologramFrame = ROBDepthCloudFrame(depth: depth, rgbSampleBuffer: sampleBuffer)
+            let hologramFrame = ROBDepthCloudFrame(depth: depth, rgbSampleBuffer: sampleBuffer, isBelly: false)
             ROBHologramExporter.shared.capture(hologramFrame)
             if cameraViewIsVisible {
                 depthOverlayRenderer.offer(depth: depth) { [weak self] image in
                     self?.depthOverlayView.image = image
                     self?.depthOverlayView.isHidden = false
                 }
+                faceDepthPointCloudRenderer.offer(depth: depth, rgbSampleBuffer: sampleBuffer, in: skeletonView)
             }
             NotificationCenter.default.post(
                 name: .ROBDepthCloudFrame,
