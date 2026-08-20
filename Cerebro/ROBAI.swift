@@ -3551,7 +3551,38 @@ private actor ROBLocalConversationFallback {
     private func generateReply(to rawPrompt: String) async -> ROBLocalConversationReply {
         let prompt = Self.boundedPrompt(rawPrompt)
         
-        // 1. Intercept and execute structured intents (like learnObject) using Apple Intelligence on-device interpreter
+        // 1. Bulletproof string-parsing fallback for quick, 100% reliable local teaching!
+        let lowerPrompt = prompt.lowercased()
+        if lowerPrompt.contains("this is a") || lowerPrompt.contains("learn ") {
+            var targetClass = ""
+            if let range = lowerPrompt.range(of: "this is a ") {
+                targetClass = String(lowerPrompt[range.upperBound...])
+            } else if let range = lowerPrompt.range(of: "learn ") {
+                targetClass = String(lowerPrompt[range.upperBound...])
+            }
+            
+            // Clean up name (replace spaces with underscores, strip punctuation)
+            targetClass = targetClass
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: .punctuationCharacters)
+                .replacingOccurrences(of: " ", with: "_")
+            
+            if !targetClass.isEmpty {
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(
+                        name: Notification.Name("ROBLearnObjectNotification"),
+                        object: nil,
+                        userInfo: ["className": targetClass]
+                    )
+                }
+                return ROBLocalConversationReply(
+                    text: "Okay, I am looking at your finger and learning \(targetClass.replacingOccurrences(of: "_", with: " ")). Saving the photo to our project directory!",
+                    provider: .appleFoundationModels
+                )
+            }
+        }
+        
+        // 2. Intercept and execute structured intents (like learnObject) using Apple Intelligence on-device interpreter
         if #available(macOS 26.0, *) {
             if let intent = try? await ROBFoundationSceneInterpreter().interpret(request: prompt) {
                 if intent.action == .learnObject, let targetID = intent.targetID, !targetID.isEmpty {

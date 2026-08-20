@@ -521,15 +521,7 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                         emit_error("Failed to perform on-device chessboard corners tracking: " + str(error))
 
                     if not chessboard_found:
-                        # Fallback to simulated pieces if no chessboard is currently visible in the room
-                        latest_chess_pieces = [
-                            {"type": "white_pawn", "x": 0.05, "y": -0.10, "z": 0.45},
-                            {"type": "white_knight", "x": -0.10, "y": -0.10, "z": 0.48},
-                            {"type": "white_bishop", "x": -0.05, "y": -0.10, "z": 0.47},
-                            {"type": "black_pawn", "x": 0.05, "y": 0.10, "z": 0.75},
-                            {"type": "black_knight", "x": -0.10, "y": 0.10, "z": 0.78},
-                            {"type": "black_king", "x": 0.00, "y": 0.10, "z": 0.82}
-                        ]
+                        latest_chess_pieces = []
 
                 send_frame(
                     client, rgb_frame, depth_frame, left_frame, right_frame,
