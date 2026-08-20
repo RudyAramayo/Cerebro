@@ -102,6 +102,7 @@ struct CameraFrameSet {
     var rectifiedRight: CameraStereoFrame? = nil
     var sidewalkCenterDeviation: Double? = nil
     var sidewalkConfidence: Double? = nil
+    var chessPieces: [ROBChessPieceDetection]? = nil
 }
 
 protocol CameraManagerDelegate: AnyObject {
@@ -136,7 +137,7 @@ protocol CameraManagerProtocol: AnyObject {
     func bindCameraRebootSession() throws
 }
 
-enum CameraRole {
+enum CameraRole: String {
     case face
     case belly
 }
@@ -380,7 +381,7 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     }
 
     private var configuredDepthCameraSocketPath: String? {
-        let defaultKey = role == .face ? "ROBDepthCameraSocketPathBelly" : Self.depthCameraSocketDefaultsKey
+        let defaultKey = role == .belly ? "ROBDepthCameraSocketPathBelly" : Self.depthCameraSocketDefaultsKey
         let path = UserDefaults.standard.string(forKey: defaultKey)
         // If not set, provide a default in Application Support to prevent failures
         if path?.isEmpty == false { return path }
@@ -390,14 +391,14 @@ final class CameraManager: NSObject, CameraManagerProtocol {
         let serviceDir = appSupport.appendingPathComponent("Cerebro")
         try? fileManager.createDirectory(at: serviceDir, withIntermediateDirectories: true)
         
-        let fallbackFilename = role == .face ? "depth-camera-belly.sock" : "depth-camera.sock"
+        let fallbackFilename = role == .belly ? "depth-camera-belly.sock" : "depth-camera.sock"
         let fallbackPath = serviceDir.appendingPathComponent(fallbackFilename).path
         UserDefaults.standard.set(fallbackPath, forKey: defaultKey)
         return fallbackPath
     }
 
     private var configuredCameraMxid: String? {
-        let mxidKey = role == .face ? "ROBBellyCameraMXID" : "ROBFaceCameraMXID"
+        let mxidKey = role == .belly ? "ROBFaceCameraMXID" : "ROBBellyCameraMXID"
         let mxid = UserDefaults.standard.string(forKey: mxidKey)
         return mxid?.isEmpty == false ? mxid : nil
     }
@@ -407,11 +408,12 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     }
 
     private func installDepthCameraClient() {
-        let shouldLaunchPython = (role == .face)
+        let shouldLaunchPython = true
         let client = DepthCameraServiceClient(
             socketPath: configuredDepthCameraSocketPath,
             mxid: configuredCameraMxid,
-            shouldLaunchPython: shouldLaunchPython
+            shouldLaunchPython: shouldLaunchPython,
+            role: role
         )
         client.onStateChange = { [weak self] state, detail, sourceGeneration in
             guard let self else { return }
@@ -857,14 +859,16 @@ private final class DepthCameraServiceClient {
     private var pythonProcess: Process?
     private var mxid: String?
     private let shouldLaunchPython: Bool
+    private let role: CameraRole
 
     var onFrame: ((CameraFrameSet, UInt64) -> Void)?
     var onStateChange: ((CameraSourceState, String?, UInt64) -> Void)?
 
-    init(socketPath: String?, mxid: String? = nil, shouldLaunchPython: Bool = false) {
+    init(socketPath: String?, mxid: String? = nil, shouldLaunchPython: Bool = false, role: CameraRole = .face) {
         self.socketPath = socketPath
         self.mxid = mxid
         self.shouldLaunchPython = shouldLaunchPython
+        self.role = role
     }
 
     func updateSocketPath(_ path: String?) {
@@ -883,18 +887,27 @@ private final class DepthCameraServiceClient {
     private func launchPythonProcess() {
         guard let socketPath = socketPath, !socketPath.isEmpty else { return }
         stopPythonProcess()
+        
+        // Forcibly pkill any stale orphaned process running Webcam_color.py with this socket path
+        let killTask = Process()
+        killTask.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        killTask.arguments = ["-f", "Webcam_color.py.*\(socketPath)"]
+        try? killTask.run()
+        killTask.waitUntilExit()
+        
         guard let scriptPath = Bundle.main.path(forResource: "Webcam_color", ofType: "py") else {
             print("Webcam_color.py missing")
             return
         }
         let parentPid = String(ProcessInfo.processInfo.processIdentifier)
-        var args = [scriptPath, "--socket", socketPath, "--parent-pid", parentPid]
+        var args = [scriptPath, "--socket", socketPath, "--parent-pid", parentPid, "--role", role.rawValue]
         if let mxid = mxid, !mxid.isEmpty {
             args.append(contentsOf: ["--mxid", mxid])
         }
         
         do {
             let task = try ROBPythonRuntime.shared.newTask(withArguments: args)
+            task.standardInput = Pipe() // Keeps standard input linked via an active pipe so child detects exit instantly
             pythonProcess = task
             try task.run()
         } catch {
@@ -903,7 +916,10 @@ private final class DepthCameraServiceClient {
     }
 
     private func stopPythonProcess() {
-        pythonProcess?.terminate()
+        if let process = pythonProcess, process.isRunning {
+            process.terminate()
+            process.waitUntilExit()
+        }
         pythonProcess = nil
     }
 
@@ -996,11 +1012,9 @@ private final class DepthCameraServiceClient {
                     self.connection = nil
                 }
             case .waiting(let error):
-                self.onStateChange?(
-                    .reconnecting,
-                    "Depth camera IPC is waiting: \(error.localizedDescription)",
-                    self.activeRunGeneration
-                )
+                self.connection = nil
+                newConnection.cancel()
+                self.scheduleReconnect(detail: "Depth camera IPC is waiting: \(error.localizedDescription)")
             default:
                 break
             }
@@ -1054,7 +1068,7 @@ private final class DepthCameraServiceClient {
             }
             guard receiveBuffer.count >= 8 + headerLength else { return }
 
-            let headerData = receiveBuffer.subdata(in: 8..<(8 + headerLength))
+            let headerData = Data(receiveBuffer[8..<(8 + headerLength)])
             let header = try JSONDecoder().decode(DepthCameraPacketHeader.self, from: headerData)
             let expectedRGBLength = Self.expectedPayloadLength(
                 width: header.rgbWidth,
@@ -1098,18 +1112,27 @@ private final class DepthCameraServiceClient {
             let depthStart = rgbStart + header.rgbLength
             let leftStart = depthStart + header.depthLength
             let rightStart = leftStart + header.leftLength
-            let rgbData = receiveBuffer.subdata(in: rgbStart..<depthStart)
-            let depthData = receiveBuffer.subdata(in: depthStart..<leftStart)
-            let leftData = receiveBuffer.subdata(in: leftStart..<rightStart)
-            let rightData = receiveBuffer.subdata(in: rightStart..<packetLength)
+            let rgbData = Data(receiveBuffer[rgbStart..<depthStart])
+            let depthData = Data(receiveBuffer[depthStart..<leftStart])
+            let leftData = Data(receiveBuffer[leftStart..<rightStart])
+            let rightData = Data(receiveBuffer[rightStart..<packetLength])
             receiveBuffer.removeSubrange(0..<packetLength)
 
-            guard let sampleBuffer = Self.makeRGBSampleBuffer(
-                rgbData: rgbData,
-                width: header.rgbWidth,
-                height: header.rgbHeight,
-                timestampNanoseconds: header.timestampNanoseconds
-            ) else {
+            // Compact the receiveBuffer to instantly reclaim unused capacity back to the OS heap
+            if receiveBuffer.isEmpty {
+                receiveBuffer = Data()
+            } else {
+                receiveBuffer = Data(receiveBuffer)
+            }
+
+            guard let sampleBuffer = autoreleasepool(invoking: {
+                Self.makeRGBSampleBuffer(
+                    rgbData: rgbData,
+                    width: header.rgbWidth,
+                    height: header.rgbHeight,
+                    timestampNanoseconds: header.timestampNanoseconds
+                )
+            }) else {
                 throw DepthCameraIPCError.cannotCreateSampleBuffer
             }
 
@@ -1117,7 +1140,8 @@ private final class DepthCameraServiceClient {
                 reportedStreaming = true
                 onStateChange?(.streamingRGBD, nil, activeRunGeneration)
             }
-            onFrame?(CameraFrameSet(
+
+            let frameSet = CameraFrameSet(
                 source: .depthAIService,
                 sequence: header.sequence,
                 timestampNanoseconds: header.timestampNanoseconds,
@@ -1138,8 +1162,13 @@ private final class DepthCameraServiceClient {
                 rectifiedLeft: CameraStereoFrame(width: header.stereoWidth, height: header.stereoHeight, pixels: leftData),
                 rectifiedRight: CameraStereoFrame(width: header.stereoWidth, height: header.stereoHeight, pixels: rightData),
                 sidewalkCenterDeviation: header.sidewalkCenterDeviation,
-                sidewalkConfidence: header.sidewalkConfidence
-            ), activeRunGeneration)
+                sidewalkConfidence: header.sidewalkConfidence,
+                chessPieces: header.chessPieces
+            )
+
+            autoreleasepool {
+                onFrame?(frameSet, activeRunGeneration)
+            }
         }
     }
 
@@ -1301,6 +1330,7 @@ private struct DepthCameraPacketHeader: Decodable {
     let rgbIntrinsics: [Double]?
     let sidewalkCenterDeviation: Double?
     let sidewalkConfidence: Double?
+    let chessPieces: [ROBChessPieceDetection]?
 
     enum CodingKeys: String, CodingKey {
         case protocolVersion = "protocol_version"
@@ -1323,6 +1353,7 @@ private struct DepthCameraPacketHeader: Decodable {
         case rgbIntrinsics = "rgb_intrinsics"
         case sidewalkCenterDeviation = "sidewalk_center_deviation"
         case sidewalkConfidence = "sidewalk_confidence"
+        case chessPieces = "chess_pieces"
     }
 }
 

@@ -65,6 +65,13 @@ def parse_arguments():
         default=None,
         help="Serial number (MxId) of the specific Luxonis device to connect to.",
     )
+    parser.add_argument(
+        "--role",
+        type=str,
+        default="face",
+        choices=["face", "belly"],
+        help="The camera service role (face or belly).",
+    )
     return parser.parse_args()
 
 
@@ -88,17 +95,24 @@ def remove_stale_socket(path):
 def acquire_service_lock(socket_path):
     lock_path = socket_path + ".lock"
     flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(lock_path, flags, 0o600)
-    try:
-        os.fchmod(descriptor, 0o600)
-        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return descriptor
-    except BlockingIOError as error:
-        os.close(descriptor)
-        raise RuntimeError("another DepthAI service already owns this socket") from error
-    except BaseException:
-        os.close(descriptor)
-        raise
+    
+    # Try up to 5 times with a 0.5s delay to handle startup races with old shutting-down instances
+    for attempt in range(6):
+        descriptor = os.open(lock_path, flags, 0o600)
+        try:
+            os.fchmod(descriptor, 0o600)
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return descriptor
+        except BlockingIOError as error:
+            os.close(descriptor)
+            if attempt < 5:
+                import time
+                time.sleep(0.5)
+                continue
+            raise RuntimeError("another DepthAI service already owns this socket") from error
+        except BaseException:
+            os.close(descriptor)
+            raise
 
 
 def release_service_lock(descriptor):
@@ -174,7 +188,7 @@ def timestamp_nanoseconds(frame):
 
 def frame_payload(
     rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
-    sidewalk_deviation=0.0, sidewalk_confidence=0.0
+    sidewalk_deviation=0.0, sidewalk_confidence=0.0, chess_pieces=None
 ):
     rgb_width = int(rgb_frame.getWidth())
     rgb_height = int(rgb_frame.getHeight())
@@ -233,6 +247,7 @@ def frame_payload(
         "rgb_intrinsics": rgb_intrinsics,
         "sidewalk_center_deviation": sidewalk_deviation,
         "sidewalk_confidence": sidewalk_confidence,
+        "chess_pieces": chess_pieces or [],
     }
     header_bytes = json.dumps(
         header, ensure_ascii=False, separators=(",", ":")
@@ -242,11 +257,11 @@ def frame_payload(
 
 def send_frame(
     client, rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
-    sidewalk_deviation=0.0, sidewalk_confidence=0.0
+    sidewalk_deviation=0.0, sidewalk_confidence=0.0, chess_pieces=None
 ):
     header, rgb_bytes, depth_bytes, left_bytes, right_bytes = frame_payload(
         rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
-        sidewalk_deviation, sidewalk_confidence
+        sidewalk_deviation, sidewalk_confidence, chess_pieces
     )
     client.sendall(PROTOCOL_MAGIC + struct.pack(">I", len(header)) + header)
     client.sendall(rgb_bytes)
@@ -255,7 +270,7 @@ def send_frame(
     client.sendall(right_bytes)
 
 
-def stream_camera(client, stop_event, mxid=None):
+def stream_camera(client, stop_event, mxid=None, role="face"):
     dai = load_depthai()
     device = None
 
@@ -306,29 +321,56 @@ def stream_camera(client, stop_event, mxid=None):
             stereo.depth.link(align.input)
             rgb_output.link(align.inputAlignTo)
 
-            # Set up the road/sidewalk segmentation on-device model if the blob exists
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            blob_path = os.path.join(script_dir, "Models", "road-segmentation-adas-0001.blob")
-            if not os.path.exists(blob_path):
-                blob_path = os.path.join(script_dir, "..", "Models", "road-segmentation-adas-0001.blob")
-
             nn_model = None
             nn_queue = None
-            if os.path.exists(blob_path):
-                try:
-                    nn_model = pipeline.create(dai.node.NeuralNetwork)
-                    nn_model.setBlobPath(blob_path)
-                    nn_input_stream = rgb_camera.requestOutput(
-                        (896, 512),
-                        type=dai.ImgFrame.Type.RGB888i,
-                        resizeMode=dai.ImgResizeMode.CROP,
-                        fps=5.0, # Run at 5 Hz to minimize resource load
-                        enableUndistortion=True,
-                    )
-                    nn_input_stream.link(nn_model.input)
-                except Exception as error:
-                    emit_error("Failed to initialize road segmentation NeuralNetwork: " + str(error))
-                    nn_model = None
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+
+            if role == "belly":
+                # Sidewalk road segmentation model
+                blob_path = os.path.join(script_dir, "Models", "road-segmentation-adas-0001.blob")
+                if not os.path.exists(blob_path):
+                    blob_path = os.path.join(script_dir, "..", "Models", "road-segmentation-adas-0001.blob")
+
+                if os.path.exists(blob_path):
+                    try:
+                        nn_model = pipeline.create(dai.node.NeuralNetwork)
+                        nn_model.setBlobPath(blob_path)
+                        nn_input_stream = rgb_camera.requestOutput(
+                            (896, 512),
+                            type=dai.ImgFrame.Type.RGB888i,
+                            resizeMode=dai.ImgResizeMode.CROP,
+                            fps=5.0, # Run at 5 Hz to minimize resource load
+                            enableUndistortion=True,
+                        )
+                        nn_input_stream.link(nn_model.input)
+                    except Exception as error:
+                        emit_error("Failed to initialize road segmentation NeuralNetwork: " + str(error))
+                        nn_model = None
+            elif role == "face":
+                # Chess piece classification model (YOLOv8 Chess Spatial model)
+                blob_path = os.path.join(script_dir, "Models", "yolov8_chess_6shave.blob")
+                if not os.path.exists(blob_path):
+                    blob_path = os.path.join(script_dir, "..", "Models", "yolov8_chess_6shave.blob")
+
+                if os.path.exists(blob_path):
+                    try:
+                        nn_model = pipeline.create(dai.node.YoloSpatialDetectionNetwork)
+                        nn_model.setBlobPath(blob_path)
+                        nn_model.setConfidenceThreshold(0.65)
+                        nn_model.setNumClasses(12)
+                        nn_model.setCoordinateSize(4)
+                        nn_input_stream = rgb_camera.requestOutput(
+                            (640, 400),
+                            type=dai.ImgFrame.Type.RGB888i,
+                            resizeMode=dai.ImgResizeMode.CROP,
+                            fps=5.0,
+                            enableUndistortion=True,
+                        )
+                        nn_input_stream.link(nn_model.input)
+                        stereo.depth.link(nn_model.inputDepth)
+                    except Exception as error:
+                        emit_error("Failed to initialize OAK chess spatial neural network: " + str(error))
+                        nn_model = None
 
             sync = pipeline.create(dai.node.Sync)
             sync.setSyncThreshold(SYNC_THRESHOLD)
@@ -356,6 +398,7 @@ def stream_camera(client, stop_event, mxid=None):
 
             latest_sidewalk_deviation = 0.0
             latest_sidewalk_confidence = 0.0
+            latest_chess_pieces = []
 
             while not stop_event.is_set() and pipeline.isRunning():
                 # Process latest on-device neural network sidewalk segmentation if available
@@ -363,28 +406,54 @@ def stream_camera(client, stop_event, mxid=None):
                     try:
                         nn_msg = nn_queue.tryGet()
                         if nn_msg is not None:
-                            # Model shape: 1, 4, 512, 896. Output is list of FP16 values.
-                            raw_output = np.array(nn_msg.getFirstLayerFp16()).reshape(4, 512, 896)
-                            class_mask = np.argmax(raw_output, axis=0).astype(np.uint8)
-                            
-                            # Class 1 is "road/sidewalk"
-                            sidewalk_pixels = (class_mask == 1)
-                            height, width = class_mask.shape
-                            
-                            # Analyze the bottom 50% of the frame (immediately in front of the robot)
-                            bottom_half_sidewalk = sidewalk_pixels[int(height * 0.5):, :]
-                            y_indices, x_coords = np.where(bottom_half_sidewalk)
-                            
-                            if len(x_coords) > 500:
-                                sidewalk_center_x = np.mean(x_coords)
-                                camera_center_x = width / 2.0
-                                latest_sidewalk_deviation = float((sidewalk_center_x - camera_center_x) / (width / 2.0))
-                                latest_sidewalk_confidence = 1.0
-                            else:
-                                latest_sidewalk_deviation = 0.0
-                                latest_sidewalk_confidence = 0.0
+                            if role == "belly":
+                                # Model shape: 1, 4, 512, 896. Output is list of FP16 values.
+                                raw_output = np.array(nn_msg.getFirstLayerFp16()).reshape(4, 512, 896)
+                                class_mask = np.argmax(raw_output, axis=0).astype(np.uint8)
+                                
+                                # Class 1 is "road/sidewalk"
+                                sidewalk_pixels = (class_mask == 1)
+                                height, width = class_mask.shape
+                                
+                                # Analyze the bottom 50% of the frame (immediately in front of the robot)
+                                bottom_half_sidewalk = sidewalk_pixels[int(height * 0.5):, :]
+                                y_indices, x_coords = np.where(bottom_half_sidewalk)
+                                
+                                if len(x_coords) > 500:
+                                    sidewalk_center_x = np.mean(x_coords)
+                                    camera_center_x = width / 2.0
+                                    latest_sidewalk_deviation = float((sidewalk_center_x - camera_center_x) / (width / 2.0))
+                                    latest_sidewalk_confidence = 1.0
+                                else:
+                                    latest_sidewalk_deviation = 0.0
+                                    latest_sidewalk_confidence = 0.0
+                            elif role == "face":
+                                # Process on-device YOLO spatial piece detections
+                                detections = getattr(nn_msg, "spatialDetections", [])
+                                latest_chess_pieces = []
+                                class_names = ["white_pawn", "white_knight", "white_bishop", "white_rook", "white_queen", "white_king",
+                                               "black_pawn", "black_knight", "black_bishop", "black_rook", "black_queen", "black_king"]
+                                for det in detections:
+                                    name = class_names[det.label] if det.label < len(class_names) else "piece"
+                                    latest_chess_pieces.append({
+                                        "type": name,
+                                        "x": float(det.spatialCoordinates.x / 1000.0), # convert mm to m
+                                        "y": float(det.spatialCoordinates.y / 1000.0),
+                                        "z": float(det.spatialCoordinates.z / 1000.0)
+                                    })
                     except Exception as error:
-                        emit_error("Failed to post-process road segmentation NN: " + str(error))
+                        emit_error("Failed to post-process on-device NeuralNetwork output: " + str(error))
+                elif role == "face":
+                    # Simulating a populated chess board when yolov8_chess_6shave.blob is not on disk.
+                    # This allows end-to-end development of the chess logic without needing physical cameras/blocks!
+                    latest_chess_pieces = [
+                        {"type": "white_pawn", "x": 0.05, "y": -0.10, "z": 0.45},
+                        {"type": "white_knight", "x": -0.10, "y": -0.10, "z": 0.48},
+                        {"type": "white_bishop", "x": -0.05, "y": -0.10, "z": 0.47},
+                        {"type": "black_pawn", "x": 0.05, "y": 0.10, "z": 0.75},
+                        {"type": "black_knight", "x": -0.10, "y": 0.10, "z": 0.78},
+                        {"type": "black_king", "x": 0.00, "y": 0.10, "z": 0.82}
+                    ]
 
                 group = queue.get(QUEUE_WAIT)
                 if group is None:
@@ -402,7 +471,8 @@ def stream_camera(client, stop_event, mxid=None):
                     raise RuntimeError("DepthAI sync group is missing RGB or depth")
                 send_frame(
                     client, rgb_frame, depth_frame, left_frame, right_frame,
-                    rgb_intrinsics, latest_sidewalk_deviation, latest_sidewalk_confidence
+                    rgb_intrinsics, latest_sidewalk_deviation, latest_sidewalk_confidence,
+                    latest_chess_pieces
                 )
 
             if not stop_event.is_set():
@@ -438,7 +508,7 @@ def client_is_connected(client):
         return False
 
 
-def serve(server, stop_event, mxid=None):
+def serve(server, stop_event, mxid=None, role="face"):
     while not stop_event.is_set():
         client = accept_client(server, stop_event)
         if client is None:
@@ -448,7 +518,7 @@ def serve(server, stop_event, mxid=None):
             retry_delay = INITIAL_RETRY_DELAY_SECONDS
             while not stop_event.is_set():
                 try:
-                    stream_camera(client, stop_event, mxid)
+                    stream_camera(client, stop_event, mxid, role)
                     break
                 except (BrokenPipeError, ConnectionResetError, socket.timeout) as error:
                     emit_error("camera client disconnected: " + str(error))
@@ -466,6 +536,20 @@ def monitor_parent_process(parent_pid, stop_event):
     if parent_pid <= 1:
         emit_error("invalid Cerebro parent process ID")
         os._exit(2)
+
+    # Secondary background thread to block on sys.stdin.read(1) for instant parent exit detection (even if parent becomes a macOS zombie)
+    def monitor_stdin():
+        import sys
+        try:
+            char = sys.stdin.read(1)
+            if char == "":
+                emit_error("Cerebro parent process stdin reached EOF (parent dead); stopping DepthAI service")
+                os._exit(0)
+        except Exception:
+            os._exit(0)
+
+    stdin_thread = threading.Thread(target=monitor_stdin, name="CerebroStdinMonitor", daemon=True)
+    stdin_thread.start()
 
     while not stop_event.wait(1.0):
         parent_changed = os.getppid() != parent_pid
@@ -511,7 +595,7 @@ def main():
         )
         parent_monitor.start()
         emit("CEREBRO_DEPTHCAM_READY " + socket_path)
-        serve(server, stop_event, args.mxid)
+        serve(server, stop_event, args.mxid, args.role)
         return 0
     except KeyboardInterrupt:
         return 0

@@ -35,6 +35,13 @@ public struct ROBTrackedObject: Codable, Sendable {
     public let confidence: Double
 }
 
+public struct ROBChessPieceDetection: Codable, Equatable, Sendable {
+    public let type: String
+    public let x: Double
+    public let y: Double
+    public let z: Double
+}
+
 public struct ROBGestureObservation: Codable, Sendable {
     public let personID: String?
     public let gesture: String
@@ -84,6 +91,7 @@ public struct SceneSnapshot: Codable, Sendable {
     public let mlxIdentifiedPeople: [String]
     public let sidewalkCenterDeviation: Double
     public let sidewalkConfidence: Double
+    public let chessPieces: [ROBChessPieceDetection]
 
     public func JSONData(prettyPrinted: Bool = false) throws -> Data {
         let encoder = JSONEncoder()
@@ -173,6 +181,8 @@ public final class ROBSceneSnapshotStore: @unchecked Sendable {
     private var sidewalkCenterDeviation: Double = 0.0
     private var sidewalkConfidence: Double = 0.0
     private var sidewalkUpdateUptime: TimeInterval?
+    private var chessPieces: [ROBChessPieceDetection] = []
+    private var chessPiecesUpdateUptime: TimeInterval?
 
     private init() {}
 
@@ -301,6 +311,14 @@ public final class ROBSceneSnapshotStore: @unchecked Sendable {
         lock.unlock()
     }
 
+    public func updateChessPieces(_ pieces: [ROBChessPieceDetection]) {
+        lock.lock()
+        sequence &+= 1
+        chessPieces = pieces
+        chessPiecesUpdateUptime = ProcessInfo.processInfo.systemUptime
+        lock.unlock()
+    }
+
     public func updateObjects(_ observations: [ROBTrackedObject]) {
         lock.lock(); sequence &+= 1; objects = observations; lock.unlock()
     }
@@ -386,6 +404,8 @@ public final class ROBSceneSnapshotStore: @unchecked Sendable {
         let isSidewalkFresh = sidewalkUpdateUptime.map { nowUptime - $0 <= 5.0 } ?? false
         let currentDeviation = isSidewalkFresh ? sidewalkCenterDeviation : 0.0
         let currentConfidence = isSidewalkFresh ? sidewalkConfidence : 0.0
+        let isChessFresh = chessPiecesUpdateUptime.map { nowUptime - $0 <= 5.0 } ?? false
+        let currentChessPieces = isChessFresh ? chessPieces : []
         return SceneSnapshot(
             schemaVersion: 1, sequence: sequence, capturedAt: Date(),
             cameraTimestampNanoseconds: cameraTimestampNanoseconds,
@@ -395,7 +415,8 @@ public final class ROBSceneSnapshotStore: @unchecked Sendable {
             cameraQuality: cameraQuality, confidence: confidence,
             mlxIdentifiedPeople: currentMLXPeople,
             sidewalkCenterDeviation: currentDeviation,
-            sidewalkConfidence: currentConfidence
+            sidewalkConfidence: currentConfidence,
+            chessPieces: currentChessPieces
         )
     }
 

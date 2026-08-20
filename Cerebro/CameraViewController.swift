@@ -32,6 +32,9 @@ extension Notification.Name {
     private static let depthOverlayOpacityKey = "ROBCameraDepthOverlayOpacity"
     private static let bellyPose2DEnabledKey = "ROBCameraBellyPose2DEnabled"
     private static let bellyDepthOverlayOpacityKey = "ROBCameraBellyDepthOverlayOpacity"
+    private static let bellyDepthOverlayEnabledKey = "ROBCameraBellyDepthOverlayEnabled"
+    private static let bellySidewalkOverlayEnabledKey = "ROBCameraBellySidewalkOverlayEnabled"
+    private static let bellySidewalkOverlayOpacityKey = "ROBCameraBellySidewalkOverlayOpacity"
     private let defaults = UserDefaults.standard
 
     public var pose3DEnabled: Bool {
@@ -89,6 +92,31 @@ extension Notification.Name {
                 : max(0, min(1, defaults.double(forKey: Self.bellyDepthOverlayOpacityKey)))
         }
         set { set(max(0, min(1, newValue)), key: Self.bellyDepthOverlayOpacityKey) }
+    }
+
+    public var bellyDepthOverlayEnabled: Bool {
+        get {
+            defaults.object(forKey: Self.bellyDepthOverlayEnabledKey) == nil
+                || defaults.bool(forKey: Self.bellyDepthOverlayEnabledKey)
+        }
+        set { set(newValue, key: Self.bellyDepthOverlayEnabledKey) }
+    }
+
+    public var bellySidewalkOverlayEnabled: Bool {
+        get {
+            defaults.object(forKey: Self.bellySidewalkOverlayEnabledKey) == nil
+                || defaults.bool(forKey: Self.bellySidewalkOverlayEnabledKey)
+        }
+        set { set(newValue, key: Self.bellySidewalkOverlayEnabledKey) }
+    }
+
+    public var bellySidewalkOverlayOpacity: Double {
+        get {
+            defaults.object(forKey: Self.bellySidewalkOverlayOpacityKey) == nil
+                ? 0.45
+                : max(0, min(1, defaults.double(forKey: Self.bellySidewalkOverlayOpacityKey)))
+        }
+        set { set(max(0, min(1, newValue)), key: Self.bellySidewalkOverlayOpacityKey) }
     }
 
     private func set(_ value: Bool, key: String) {
@@ -1028,6 +1056,9 @@ extension CameraViewController: CameraManagerDelegate {
                 deviation: frameSet.sidewalkCenterDeviation ?? 0.0,
                 confidence: frameSet.sidewalkConfidence ?? 0.0
             )
+            if let pieces = frameSet.chessPieces {
+                ROBSceneSnapshotStore.shared.updateChessPieces(pieces)
+            }
         }
         
         let poseEnabled = ROBDynamicDetectorRegistry.shared.enabled("body-pose", source: .mainCamera)
@@ -1580,6 +1611,75 @@ class PoseDrawingView: NSView {
                     withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold),
                                      .foregroundColor: NSColor.white,
                                      .backgroundColor: NSColor.black.withAlphaComponent(0.65)])
+            }
+        }
+
+        // Render sidewalk centerline path overlay
+        let settings = ROBMainCameraProcessingSettings.shared
+        if settings.bellySidewalkOverlayEnabled {
+            let snapshot = ROBSceneSnapshotStore.shared.snapshot()
+            let confidence = snapshot.sidewalkConfidence
+            let deviation = snapshot.sidewalkCenterDeviation
+
+            // Draw a permanent diagnostic status overlay at the top left of the preview
+            context.saveGState()
+            let statusText: String
+            let textColor: NSColor
+            if confidence >= 0.5 {
+                statusText = "SIDEWALK PATH DETECTED (Dev: \(String(format: "%.2f", deviation)), Conf: \(Int(confidence * 100))%)"
+                textColor = .systemGreen
+            } else {
+                statusText = "NON-SIDEWALK TERRAIN (Searching...)"
+                textColor = .systemOrange
+            }
+            let nsText = "[OAK-D CNN: \(statusText)]" as NSString
+            nsText.draw(
+                at: CGPoint(x: 15, y: bounds.height - 25),
+                withAttributes: [
+                    .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .bold),
+                    .foregroundColor: textColor.withAlphaComponent(CGFloat(settings.bellySidewalkOverlayOpacity)),
+                    .backgroundColor: NSColor.black.withAlphaComponent(0.7 * CGFloat(settings.bellySidewalkOverlayOpacity))
+                ]
+            )
+            context.restoreGState()
+
+            if confidence >= 0.5 {
+                let deviation = snapshot.sidewalkCenterDeviation // between -1.0 and 1.0
+                let confidence = snapshot.sidewalkConfidence
+                
+                context.saveGState()
+                
+                // Map the normalized deviation (-1.0 to 1.0) to x-coordinate in view bounds
+                let centerX = bounds.width / 2.0
+                let targetX = centerX + CGFloat(deviation) * (bounds.width / 2.0)
+                
+                // Draw a beautiful vertical guideline / path representing the sidewalk center-line
+                context.setStrokeColor(NSColor.systemGreen.withAlphaComponent(CGFloat(settings.bellySidewalkOverlayOpacity)).cgColor)
+                context.setLineWidth(12.0)
+                context.setLineCap(.round)
+                context.setLineJoin(.round)
+                
+                // Draw a vertical guideline on the bottom 60% of the frame (forward lane prediction)
+                context.move(to: CGPoint(x: targetX, y: 0))
+                context.addLine(to: CGPoint(x: targetX, y: bounds.height * 0.6))
+                context.strokePath()
+                
+                // Draw a small target/crosshair representing the centered point
+                context.setFillColor(NSColor.systemGreen.withAlphaComponent(CGFloat(settings.bellySidewalkOverlayOpacity)).cgColor)
+                context.fillEllipse(in: CGRect(x: targetX - 8, y: bounds.height * 0.3 - 8, width: 16, height: 16))
+                
+                // Draw a nice text label
+                let text = "Sidewalk: \(Int(confidence * 100))%" as NSString
+                text.draw(
+                    at: CGPoint(x: targetX + 12, y: bounds.height * 0.3 - 6),
+                    withAttributes: [
+                        .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .bold),
+                        .foregroundColor: NSColor.systemGreen,
+                        .backgroundColor: NSColor.black.withAlphaComponent(0.6 * CGFloat(settings.bellySidewalkOverlayOpacity))
+                    ]
+                )
+                
+                context.restoreGState()
             }
         }
     }

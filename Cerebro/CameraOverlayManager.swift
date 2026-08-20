@@ -84,10 +84,13 @@ import AVFoundation
     ) {
         // 1. Process Depth overlay if available
         if let depth = depthFrame {
-            depthOverlayView.alphaValue = CGFloat(depthOpacity)
             depthOverlayRenderer.offer(depth: depth) { [weak self] image in
-                self?.depthOverlayView.image = image
-                self?.depthOverlayView.isHidden = false
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.depthOverlayView.alphaValue = CGFloat(depthOpacity)
+                    self.depthOverlayView.image = image
+                    self.depthOverlayView.isHidden = false
+                }
             }
         } else {
             DispatchQueue.main.async { [weak self] in

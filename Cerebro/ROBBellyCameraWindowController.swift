@@ -196,7 +196,7 @@ import AVFoundation
             sampleBuffer: frameSet.rgbSampleBuffer,
             depthFrame: frameSet.alignedDepth,
             poseEnabled: mainCameraSettings.bellyPose2DEnabled,
-            depthOpacity: mainCameraSettings.bellyDepthOverlayOpacity,
+            depthOpacity: mainCameraSettings.bellyDepthOverlayEnabled ? mainCameraSettings.bellyDepthOverlayOpacity : 0.0,
             processingFPS: ROBDynamicDetectorRegistry.shared.processingFramesPerSecond(for: .mainCamera)
         )
         

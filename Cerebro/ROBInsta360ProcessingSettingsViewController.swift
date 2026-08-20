@@ -59,9 +59,17 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
 
     private let bellyPoseToggle = NSButton(
         checkboxWithTitle: "Render Belly camera 2D pose", target: nil, action: nil)
+    private let bellyDepthOverlayEnabledToggle = NSButton(
+        checkboxWithTitle: "Show Depth overlay", target: nil, action: nil)
     private let bellyDepthOpacitySlider = NSSlider(
         value: 0.45, minValue: 0, maxValue: 1, target: nil, action: nil)
     private let bellyDepthOpacityValueLabel = NSTextField(labelWithString: "45%")
+
+    private let bellySidewalkOverlayEnabledToggle = NSButton(
+        checkboxWithTitle: "Show Sidewalk path", target: nil, action: nil)
+    private let bellySidewalkOpacitySlider = NSSlider(
+        value: 0.45, minValue: 0, maxValue: 1, target: nil, action: nil)
+    private let bellySidewalkOpacityValueLabel = NSTextField(labelWithString: "45%")
 
     private let stabilizationToggle = NSButton(
         checkboxWithTitle: "Gyro stabilization", target: nil, action: nil)
@@ -201,8 +209,13 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         updateDepthOpacityValueLabel()
 
         bellyPoseToggle.state = mainCameraSettings.bellyPose2DEnabled ? .on : .off
+        bellyDepthOverlayEnabledToggle.state = mainCameraSettings.bellyDepthOverlayEnabled ? .on : .off
         bellyDepthOpacitySlider.doubleValue = mainCameraSettings.bellyDepthOverlayOpacity
         updateBellyDepthOpacityValueLabel()
+
+        bellySidewalkOverlayEnabledToggle.state = mainCameraSettings.bellySidewalkOverlayEnabled ? .on : .off
+        bellySidewalkOpacitySlider.doubleValue = mainCameraSettings.bellySidewalkOverlayOpacity
+        updateBellySidewalkOpacityValueLabel()
 
         geminiMainCameraToggle.state = geminiVideoSettings.mainCameraEnabled ? .on : .off
         geminiInsta360Toggle.state = geminiVideoSettings.insta360Enabled ? .on : .off
@@ -392,11 +405,20 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         bellyDepthOpacitySlider.widthAnchor.constraint(equalToConstant: 220).isActive = true
         bellyDepthOpacityValueLabel.alignment = .right
         bellyDepthOpacityValueLabel.widthAnchor.constraint(equalToConstant: 42).isActive = true
+        bellySidewalkOpacitySlider.widthAnchor.constraint(equalToConstant: 220).isActive = true
+        bellySidewalkOpacityValueLabel.alignment = .right
+        bellySidewalkOpacityValueLabel.widthAnchor.constraint(equalToConstant: 42).isActive = true
         let bellyCameraStack = NSStackView(views: [
             row([bellyPoseToggle]),
+            row([bellyDepthOverlayEnabledToggle]),
             row([
                 NSTextField(labelWithString: "Depth overlay opacity:"),
                 bellyDepthOpacitySlider, bellyDepthOpacityValueLabel
+            ]),
+            row([bellySidewalkOverlayEnabledToggle]),
+            row([
+                NSTextField(labelWithString: "Sidewalk path opacity:"),
+                bellySidewalkOpacitySlider, bellySidewalkOpacityValueLabel
             ])
         ])
         configureVerticalStack(bellyCameraStack)
@@ -551,6 +573,9 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         bellyPoseToggle.setAccessibilityIdentifier("ROB.BellyCamera.Pose.Enabled")
         bellyPoseToggle.toolTip = "Renders 2D skeleton pose overlay on top of the belly camera preview."
 
+        bellyDepthOverlayEnabledToggle.target = self
+        bellyDepthOverlayEnabledToggle.action = #selector(bellyDepthOverlayEnabledChanged(_:))
+
         bellyDepthOpacitySlider.target = self
         bellyDepthOpacitySlider.action = #selector(bellyDepthOverlayOpacityChanged(_:))
         bellyDepthOpacitySlider.isContinuous = true
@@ -561,6 +586,18 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         bellyDepthOpacityValueLabel.font = .monospacedDigitSystemFont(
             ofSize: NSFont.smallSystemFontSize, weight: .regular)
         bellyDepthOpacityValueLabel.textColor = .secondaryLabelColor
+
+        bellySidewalkOverlayEnabledToggle.target = self
+        bellySidewalkOverlayEnabledToggle.action = #selector(bellySidewalkOverlayEnabledChanged(_:))
+
+        bellySidewalkOpacitySlider.target = self
+        bellySidewalkOpacitySlider.action = #selector(bellySidewalkOverlayOpacityChanged(_:))
+        bellySidewalkOpacitySlider.isContinuous = true
+        bellySidewalkOpacitySlider.numberOfTickMarks = 11
+        bellySidewalkOpacitySlider.allowsTickMarkValuesOnly = false
+        bellySidewalkOpacityValueLabel.font = .monospacedDigitSystemFont(
+            ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        bellySidewalkOpacityValueLabel.textColor = .secondaryLabelColor
 
         addModelButton.target = self
         addModelButton.action = #selector(addCoreMLModel(_:))
@@ -727,6 +764,20 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         updateBellyDepthOpacityValueLabel()
     }
 
+    @objc private func bellyDepthOverlayEnabledChanged(_ sender: NSButton) {
+        mainCameraSettings.bellyDepthOverlayEnabled = (sender.state == .on)
+    }
+
+    @objc private func bellySidewalkOverlayEnabledChanged(_ sender: NSButton) {
+        mainCameraSettings.bellySidewalkOverlayEnabled = (sender.state == .on)
+    }
+
+    @objc private func bellySidewalkOverlayOpacityChanged(_ sender: NSSlider) {
+        mainCameraSettings.bellySidewalkOverlayOpacity = sender.doubleValue
+        sender.doubleValue = mainCameraSettings.bellySidewalkOverlayOpacity
+        updateBellySidewalkOpacityValueLabel()
+    }
+
     @objc private func stabilizationChanged(_ sender: NSButton) {
         if service.gyroStabilizationEnabled != (sender.state == .on) {
             geminiVideoSettings.invalidateInsta360OrientationCalibration()
@@ -788,6 +839,11 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
     private func updateBellyDepthOpacityValueLabel() {
         bellyDepthOpacityValueLabel.stringValue = String(
             format: "%.0f%%", bellyDepthOpacitySlider.doubleValue * 100)
+    }
+
+    private func updateBellySidewalkOpacityValueLabel() {
+        bellySidewalkOpacityValueLabel.stringValue = String(
+            format: "%.0f%%", bellySidewalkOpacitySlider.doubleValue * 100)
     }
 
     private func circularDegreeDistance(_ lhs: Double, _ rhs: Double) -> Double {

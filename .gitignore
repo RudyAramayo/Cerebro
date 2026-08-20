@@ -1,0 +1,20 @@
+# Xcode and macOS build artifacts
+build/
+DerivedData/
+*.moved-aside
+*.xcuserstate
+.DS_Store
+
+# Swift Package Manager (SPM)
+.build/
+.swiftpm/
+
+# Python compiled bytecode and local virtual environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv
+env/
+venv/
