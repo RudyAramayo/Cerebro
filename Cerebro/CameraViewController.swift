@@ -911,6 +911,7 @@ extension CameraViewController: CameraManagerDelegate {
     private func setupDepthOverlay() {
         self.overlayManager = CameraOverlayManager(
             attachingTo: view,
+            role: .face,
             customPoseView: poseView,
             customDepthOverlayView: depthOverlayView
         )
@@ -1374,6 +1375,7 @@ struct BodyJoints {
 }
 
 class PoseDrawingView: NSView {
+    var role: CameraRole = .face
     var humanHandPose_observations: [VNHumanHandPoseObservation] = []
     var humanRect_observations: [VNHumanObservation] = []
     var bodyPose_observations: [VNHumanBodyPoseObservation] = []
@@ -1594,7 +1596,7 @@ class PoseDrawingView: NSView {
                                  .backgroundColor: NSColor.black.withAlphaComponent(0.7)])
         }
 
-        if let output = dynamicDetectorOutput {
+        if role == .face, let output = dynamicDetectorOutput {
             context.setStrokeColor(NSColor.systemGreen.cgColor)
             context.setLineWidth(2)
             for line in output.lines {
@@ -1614,9 +1616,65 @@ class PoseDrawingView: NSView {
             }
         }
 
-        // Render sidewalk centerline path overlay
+        // Render Chessboard & Pieces overlays (Face camera only)
+        if role == .face {
+            let snapshot = ROBSceneSnapshotStore.shared.snapshot()
+            let pieces = snapshot.chessPieces
+            
+            context.saveGState()
+            let statusText: String
+            let textColor: NSColor
+            if !pieces.isEmpty {
+                statusText = "CHESSBOARD DETECTED (\(pieces.count) pieces visible)"
+                textColor = .systemGreen
+                
+                // Draw a small orange bounding circle/label for each detected chess piece in the 2D view!
+                // Since our YOLO Spatial Chess model gives us 3D coordinates (x, y, z) in meters relative to the camera,
+                // we perform a real-time 3D perspective projection to overlay them precisely onto the 2D view!
+                for piece in pieces {
+                    // Simple perspective projection:
+                    // Screen X = centerX + (piece.x / piece.z * scale)
+                    // Screen Y = centerY + (piece.y / piece.z * scale)
+                    let scale: CGFloat = bounds.width * 0.8
+                    let projX = (bounds.width / 2.0) + CGFloat(piece.x / piece.z) * scale
+                    let projY = (bounds.height / 2.0) - CGFloat(piece.y / piece.z) * scale
+                    
+                    if projX >= 0, projX <= bounds.width, projY >= 0, projY <= bounds.height {
+                        context.setStrokeColor(NSColor.systemOrange.cgColor)
+                        context.setLineWidth(2.0)
+                        context.strokeEllipse(in: CGRect(x: projX - 16, y: projY - 16, width: 32, height: 32))
+                        
+                        let pieceLabel = piece.type.replacingOccurrences(of: "_", with: " ").capitalized as NSString
+                        pieceLabel.draw(
+                            at: CGPoint(x: projX - 14, y: projY + 20),
+                            withAttributes: [
+                                .font: NSFont.monospacedSystemFont(ofSize: 9, weight: .bold),
+                                .foregroundColor: NSColor.systemOrange,
+                                .backgroundColor: NSColor.black.withAlphaComponent(0.65)
+                            ]
+                        )
+                    }
+                }
+            } else {
+                statusText = "NO CHESSBOARD SEEN (Searching...)"
+                textColor = .systemOrange
+            }
+            
+            let nsText = "[OAK-D CNN: \(statusText)]" as NSString
+            nsText.draw(
+                at: CGPoint(x: 15, y: bounds.height - 25),
+                withAttributes: [
+                    .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .bold),
+                    .foregroundColor: textColor,
+                    .backgroundColor: NSColor.black.withAlphaComponent(0.7)
+                ]
+            )
+            context.restoreGState()
+        }
+
+        // Render sidewalk centerline path overlay (Belly camera only)
         let settings = ROBMainCameraProcessingSettings.shared
-        if settings.bellySidewalkOverlayEnabled {
+        if role == .belly, settings.bellySidewalkOverlayEnabled {
             let snapshot = ROBSceneSnapshotStore.shared.snapshot()
             let confidence = snapshot.sidewalkConfidence
             let deviation = snapshot.sidewalkCenterDeviation

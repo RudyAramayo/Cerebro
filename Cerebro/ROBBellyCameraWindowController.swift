@@ -58,7 +58,7 @@ import AVFoundation
         containerView.autoresizingMask = [.width, .height]
         contentView.addSubview(containerView)
         
-        self.overlayManager = CameraOverlayManager(attachingTo: containerView)
+        self.overlayManager = CameraOverlayManager(attachingTo: containerView, role: .belly)
         
         let manager = CameraManager(containerView: containerView, role: .belly)
         manager.delegate = self

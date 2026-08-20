@@ -43,8 +43,9 @@ import AVFoundation
         }
     }()
     
-    init(attachingTo parentView: NSView, customPoseView: PoseDrawingView? = nil, customDepthOverlayView: NSImageView? = nil) {
+    init(attachingTo parentView: NSView, role: CameraRole = .face, customPoseView: PoseDrawingView? = nil, customDepthOverlayView: NSImageView? = nil) {
         self.poseView = customPoseView ?? PoseDrawingView()
+        self.poseView.role = role
         self.depthOverlayView = customDepthOverlayView ?? NSImageView()
         super.init()
         
