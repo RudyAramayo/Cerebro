@@ -36,6 +36,13 @@ import AVFoundation
     private lazy var humanHandPoseRequest: VNDetectHumanHandPoseRequest = {
         VNDetectHumanHandPoseRequest { [weak self] request, error in
             let observations = (request.results as? [VNHumanHandPoseObservation]) ?? []
+            if let firstHand = observations.first,
+               let indexTip = try? firstHand.recognizedPoint(.indexTip),
+               indexTip.confidence > 0.3 {
+                // CoreImage coordinate space has origin at bottom-left, top-right is (1,1).
+                let normalizedPoint = CGPoint(x: indexTip.location.x, y: indexTip.location.y)
+                ROBSceneSnapshotStore.shared.updateLatestIndexFingerPoint(normalizedPoint)
+            }
             DispatchQueue.main.async {
                 self?.poseView.humanHandPose_observations = observations
                 self?.poseView.needsDisplay = true

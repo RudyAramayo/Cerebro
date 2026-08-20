@@ -900,9 +900,19 @@ private final class DepthCameraServiceClient {
             return
         }
         let parentPid = String(ProcessInfo.processInfo.processIdentifier)
-        var args = [scriptPath, "--socket", socketPath, "--parent-pid", parentPid, "--role", role.rawValue]
+        
+        let resolution = ROBMLXRuntime.shared.mainCameraResolution
+        let parts = resolution.components(separatedBy: "x")
+        let width = parts.first ?? "1280"
+        let height = parts.last ?? "720"
+        
+        var args = [scriptPath, "--socket", socketPath, "--parent-pid", parentPid, "--role", role.rawValue, "--width", width, "--height", height]
         if let mxid = mxid, !mxid.isEmpty {
             args.append(contentsOf: ["--mxid", mxid])
+        }
+        if role == .face {
+            let activeProject = ROBDatasetManager.shared.activeProject ?? "chess"
+            args.append(contentsOf: ["--model-name", activeProject])
         }
         
         do {

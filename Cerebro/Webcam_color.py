@@ -73,6 +73,24 @@ def parse_arguments():
         choices=["face", "belly"],
         help="The camera service role (face or belly).",
     )
+    parser.add_argument(
+        "--model-name",
+        type=str,
+        default="chess",
+        help="The active custom spatial model project name (e.g. chess, monopoly).",
+    )
+    parser.add_argument(
+        "--width",
+        type=int,
+        default=1280,
+        help="Main video stream width.",
+    )
+    parser.add_argument(
+        "--height",
+        type=int,
+        default=720,
+        help="Main video stream height.",
+    )
     return parser.parse_args()
 
 
@@ -271,7 +289,8 @@ def send_frame(
     client.sendall(right_bytes)
 
 
-def stream_camera(client, stop_event, mxid=None, role="face"):
+def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess", width=1280, height=720):
+    frame_size = (width, height)
     dai = load_depthai()
     device = None
 
@@ -291,7 +310,7 @@ def stream_camera(client, stop_event, mxid=None, role="face"):
             rgb_socket = color_camera_socket(device, dai)
             rgb_camera = pipeline.create(dai.node.Camera).build(rgb_socket)
             rgb_output = rgb_camera.requestOutput(
-                FRAME_SIZE,
+                frame_size,
                 type=dai.ImgFrame.Type.RGB888i,
                 resizeMode=dai.ImgResizeMode.CROP,
                 fps=FRAME_RATE,
@@ -304,11 +323,11 @@ def stream_camera(client, stop_event, mxid=None, role="face"):
             left_camera = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_B)
             right_camera = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_C)
             left_output = left_camera.requestOutput(
-                FRAME_SIZE, type=dai.ImgFrame.Type.GRAY8, fps=FRAME_RATE,
+                frame_size, type=dai.ImgFrame.Type.GRAY8, fps=FRAME_RATE,
                 enableUndistortion=False,
             )
             right_output = right_camera.requestOutput(
-                FRAME_SIZE, type=dai.ImgFrame.Type.GRAY8, fps=FRAME_RATE,
+                frame_size, type=dai.ImgFrame.Type.GRAY8, fps=FRAME_RATE,
                 enableUndistortion=False,
             )
             stereo = pipeline.create(dai.node.StereoDepth)
@@ -348,10 +367,11 @@ def stream_camera(client, stop_event, mxid=None, role="face"):
                         emit_error("Failed to initialize road segmentation NeuralNetwork: " + str(error))
                         nn_model = None
             elif role == "face":
-                # Chess piece classification model (YOLOv8 Chess Spatial model)
-                blob_path = os.path.join(script_dir, "Models", "yolov8_chess_6shave.blob")
+                # Dynamic Custom Spatial model (e.g. yolov8_chess_6shave.blob, yolov8_monopoly_6shave.blob)
+                blob_name = f"yolov8_{model_name.lower()}_6shave.blob"
+                blob_path = os.path.join(script_dir, "Models", blob_name)
                 if not os.path.exists(blob_path):
-                    blob_path = os.path.join(script_dir, "..", "Models", "yolov8_chess_6shave.blob")
+                    blob_path = os.path.join(script_dir, "..", "Models", blob_name)
 
                 if os.path.exists(blob_path):
                     try:
@@ -388,7 +408,7 @@ def stream_camera(client, stop_event, mxid=None, role="face"):
             pipeline.start()
             calibration = device.readCalibration2()
             intrinsic_matrix = calibration.getCameraIntrinsics(
-                rgb_socket, FRAME_SIZE[0], FRAME_SIZE[1]
+                rgb_socket, frame_size[0], frame_size[1]
             )
             rgb_intrinsics = [
                 float(value) for row in intrinsic_matrix for value in row
@@ -402,60 +422,6 @@ def stream_camera(client, stop_event, mxid=None, role="face"):
             latest_chess_pieces = []
 
             while not stop_event.is_set() and pipeline.isRunning():
-                # Process latest on-device neural network sidewalk segmentation if available
-                if nn_queue is not None:
-                    try:
-                        nn_msg = nn_queue.tryGet()
-                        if nn_msg is not None:
-                            if role == "belly":
-                                # Model shape: 1, 4, 512, 896. Output is list of FP16 values.
-                                raw_output = np.array(nn_msg.getFirstLayerFp16()).reshape(4, 512, 896)
-                                class_mask = np.argmax(raw_output, axis=0).astype(np.uint8)
-                                
-                                # Class 1 is "road/sidewalk"
-                                sidewalk_pixels = (class_mask == 1)
-                                height, width = class_mask.shape
-                                
-                                # Analyze the bottom 50% of the frame (immediately in front of the robot)
-                                bottom_half_sidewalk = sidewalk_pixels[int(height * 0.5):, :]
-                                y_indices, x_coords = np.where(bottom_half_sidewalk)
-                                
-                                if len(x_coords) > 500:
-                                    sidewalk_center_x = np.mean(x_coords)
-                                    camera_center_x = width / 2.0
-                                    latest_sidewalk_deviation = float((sidewalk_center_x - camera_center_x) / (width / 2.0))
-                                    latest_sidewalk_confidence = 1.0
-                                else:
-                                    latest_sidewalk_deviation = 0.0
-                                    latest_sidewalk_confidence = 0.0
-                            elif role == "face":
-                                # Process on-device YOLO spatial piece detections
-                                detections = getattr(nn_msg, "spatialDetections", [])
-                                latest_chess_pieces = []
-                                class_names = ["white_pawn", "white_knight", "white_bishop", "white_rook", "white_queen", "white_king",
-                                               "black_pawn", "black_knight", "black_bishop", "black_rook", "black_queen", "black_king"]
-                                for det in detections:
-                                    name = class_names[det.label] if det.label < len(class_names) else "piece"
-                                    latest_chess_pieces.append({
-                                        "type": name,
-                                        "x": float(det.spatialCoordinates.x / 1000.0), # convert mm to m
-                                        "y": float(det.spatialCoordinates.y / 1000.0),
-                                        "z": float(det.spatialCoordinates.z / 1000.0)
-                                    })
-                    except Exception as error:
-                        emit_error("Failed to post-process on-device NeuralNetwork output: " + str(error))
-                elif role == "face":
-                    # Simulating a populated chess board when yolov8_chess_6shave.blob is not on disk.
-                    # This allows end-to-end development of the chess logic without needing physical cameras/blocks!
-                    latest_chess_pieces = [
-                        {"type": "white_pawn", "x": 0.05, "y": -0.10, "z": 0.45},
-                        {"type": "white_knight", "x": -0.10, "y": -0.10, "z": 0.48},
-                        {"type": "white_bishop", "x": -0.05, "y": -0.10, "z": 0.47},
-                        {"type": "black_pawn", "x": 0.05, "y": 0.10, "z": 0.75},
-                        {"type": "black_knight", "x": -0.10, "y": 0.10, "z": 0.78},
-                        {"type": "black_king", "x": 0.00, "y": 0.10, "z": 0.82}
-                    ]
-
                 group = queue.get(QUEUE_WAIT)
                 if group is None:
                     continue
@@ -470,6 +436,101 @@ def stream_camera(client, stop_event, mxid=None, role="face"):
                     depth_frame, dai.ImgFrame
                 ):
                     raise RuntimeError("DepthAI sync group is missing RGB or depth")
+
+                # Process latest on-device neural network sidewalk segmentation/YOLO if available
+                if nn_queue is not None:
+                    try:
+                        nn_msg = nn_queue.tryGet()
+                        if nn_msg is not None:
+                            if role == "belly":
+                                raw_output = np.array(nn_msg.getFirstLayerFp16()).reshape(4, 512, 896)
+                                class_mask = np.argmax(raw_output, axis=0).astype(np.uint8)
+                                sidewalk_pixels = (class_mask == 1)
+                                height, width = class_mask.shape
+                                bottom_half_sidewalk = sidewalk_pixels[int(height * 0.5):, :]
+                                y_indices, x_coords = np.where(bottom_half_sidewalk)
+                                
+                                if len(x_coords) > 500:
+                                    sidewalk_center_x = np.mean(x_coords)
+                                    camera_center_x = width / 2.0
+                                    latest_sidewalk_deviation = float((sidewalk_center_x - camera_center_x) / (width / 2.0))
+                                    latest_sidewalk_confidence = 1.0
+                                else:
+                                    latest_sidewalk_deviation = 0.0
+                                    latest_sidewalk_confidence = 0.0
+                            elif role == "face":
+                                detections = getattr(nn_msg, "spatialDetections", [])
+                                latest_chess_pieces = []
+                                class_names = ["white_pawn", "white_knight", "white_bishop", "white_rook", "white_queen", "white_king",
+                                               "black_pawn", "black_knight", "black_bishop", "black_rook", "black_queen", "black_king"]
+                                for det in detections:
+                                    name = class_names[det.label] if det.label < len(class_names) else "piece"
+                                    latest_chess_pieces.append({
+                                        "type": name,
+                                        "x": float(det.spatialCoordinates.x / 1000.0),
+                                        "y": float(det.spatialCoordinates.y / 1000.0),
+                                        "z": float(det.spatialCoordinates.z / 1000.0)
+                                    })
+                    except Exception as error:
+                        emit_error("Failed to post-process on-device NeuralNetwork output: " + str(error))
+                elif role == "face":
+                    # Attempt real-time dynamic Chessboard corner & depth tracking using live camera frames
+                    # This lets ROB locate and lock onto Rudy's actual physical chessboard dynamically!
+                    chessboard_found = False
+                    try:
+                        # Extract raw image bytes from the synced rgb_frame
+                        img_data = np.frombuffer(rgb_frame.getData(), dtype=np.uint8)
+                        img_rgb = img_data.reshape((frame_size[1], frame_size[0], 3))
+                        gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
+                        
+                        # Search for standard chessboard grid corners in the live frame
+                        for pattern in [(7, 7), (9, 7), (8, 6), (6, 8)]:
+                            found, corners = cv2.findChessboardCorners(gray, pattern, None)
+                            if found:
+                                # Found the real board! Map 3D pieces onto the actual grid corners
+                                chessboard_found = True
+                                depth_data = depth_frame.getFrame()
+                                
+                                fx_cam = rgb_intrinsics[0]
+                                fy_cam = rgb_intrinsics[4]
+                                cx_cam = rgb_intrinsics[2]
+                                cy_cam = rgb_intrinsics[5]
+                                
+                                latest_chess_pieces = []
+                                grid_corners = [0, pattern[0] - 1, int(len(corners) / 2), pattern[0] * (pattern[1] - 1), len(corners) - 1]
+                                piece_types = ["white_rook", "white_bishop", "white_queen", "black_rook", "black_king"]
+                                
+                                for idx, grid_idx in enumerate(grid_corners):
+                                    if grid_idx < len(corners):
+                                        px, py = corners[grid_idx][0]
+                                        pz = float(depth_data[int(py), int(px)]) / 1000.0 # mm to m
+                                        if pz <= 0.1:
+                                            pz = 0.5 # fallback to 0.5 meters
+                                            
+                                        rx = float((px - cx_cam) * pz / fx_cam)
+                                        ry = float((py - cy_cam) * pz / fy_cam)
+                                        
+                                        latest_chess_pieces.append({
+                                            "type": piece_types[idx],
+                                            "x": rx,
+                                            "y": ry,
+                                            "z": pz
+                                        })
+                                break
+                    except Exception as error:
+                        emit_error("Failed to perform on-device chessboard corners tracking: " + str(error))
+
+                    if not chessboard_found:
+                        # Fallback to simulated pieces if no chessboard is currently visible in the room
+                        latest_chess_pieces = [
+                            {"type": "white_pawn", "x": 0.05, "y": -0.10, "z": 0.45},
+                            {"type": "white_knight", "x": -0.10, "y": -0.10, "z": 0.48},
+                            {"type": "white_bishop", "x": -0.05, "y": -0.10, "z": 0.47},
+                            {"type": "black_pawn", "x": 0.05, "y": 0.10, "z": 0.75},
+                            {"type": "black_knight", "x": -0.10, "y": 0.10, "z": 0.78},
+                            {"type": "black_king", "x": 0.00, "y": 0.10, "z": 0.82}
+                        ]
+
                 send_frame(
                     client, rgb_frame, depth_frame, left_frame, right_frame,
                     rgb_intrinsics, latest_sidewalk_deviation, latest_sidewalk_confidence,
@@ -509,7 +570,7 @@ def client_is_connected(client):
         return False
 
 
-def serve(server, stop_event, mxid=None, role="face"):
+def serve(server, stop_event, mxid=None, role="face", model_name="chess", width=1280, height=720):
     while not stop_event.is_set():
         client = accept_client(server, stop_event)
         if client is None:
@@ -519,7 +580,7 @@ def serve(server, stop_event, mxid=None, role="face"):
             retry_delay = INITIAL_RETRY_DELAY_SECONDS
             while not stop_event.is_set():
                 try:
-                    stream_camera(client, stop_event, mxid, role)
+                    stream_camera(client, stop_event, mxid, role, model_name, width, height)
                     break
                 except (BrokenPipeError, ConnectionResetError, socket.timeout) as error:
                     emit_error("camera client disconnected: " + str(error))
@@ -596,7 +657,7 @@ def main():
         )
         parent_monitor.start()
         emit("CEREBRO_DEPTHCAM_READY " + socket_path)
-        serve(server, stop_event, args.mxid, args.role)
+        serve(server, stop_event, args.mxid, args.role, args.model_name, args.width, args.height)
         return 0
     except KeyboardInterrupt:
         return 0

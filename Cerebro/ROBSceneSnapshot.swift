@@ -134,6 +134,7 @@ public enum ROBAssistantAction: String, Codable, Sendable {
     case describeScene
     case suggestNavigation
     case inspectObject
+    case learnObject
     case stop
     case noAction
 }
@@ -183,6 +184,8 @@ public final class ROBSceneSnapshotStore: @unchecked Sendable {
     private var sidewalkUpdateUptime: TimeInterval?
     private var chessPieces: [ROBChessPieceDetection] = []
     private var chessPiecesUpdateUptime: TimeInterval?
+    public private(set) var latestIndexFingerPoint: CGPoint?
+    public private(set) var latestIndexFingerPointTime: TimeInterval?
 
     private init() {}
 
@@ -316,6 +319,13 @@ public final class ROBSceneSnapshotStore: @unchecked Sendable {
         sequence &+= 1
         chessPieces = pieces
         chessPiecesUpdateUptime = ProcessInfo.processInfo.systemUptime
+        lock.unlock()
+    }
+
+    public func updateLatestIndexFingerPoint(_ point: CGPoint) {
+        lock.lock()
+        latestIndexFingerPoint = point
+        latestIndexFingerPointTime = ProcessInfo.processInfo.systemUptime
         lock.unlock()
     }
 
@@ -500,7 +510,7 @@ public final class ROBSceneSnapshotStore: @unchecked Sendable {
 @available(macOS 26.0, *)
 @Generable
 private struct ROBGeneratedAssistantIntent {
-    @Guide(description: "One allowed high-level action", .anyOf(["answer", "askForClarification", "describeScene", "suggestNavigation", "inspectObject", "stop", "noAction"]))
+    @Guide(description: "One allowed high-level action", .anyOf(["answer", "askForClarification", "describeScene", "suggestNavigation", "inspectObject", "learnObject", "stop", "noAction"]))
     var action: String
     @Guide(description: "The exact scene object or person ID, or an empty string")
     var targetID: String
@@ -609,5 +619,107 @@ public extension SceneSnapshot {
         }
 
         return lines.joined(separator: "\n")
+    }
+}
+
+public final class ROBDatasetManager {
+    public static let shared = ROBDatasetManager()
+    private let datasetsURL: URL
+    public private(set) var activeProject: String?
+    public private(set) var currentClasses: [String] = []
+
+    private init() {
+        // Use the source directory for datasets so they are easily accessible by the user.
+        let devDir = URL(fileURLWithPath: "/Users/rob/dev/Cerebro")
+        datasetsURL = devDir.appendingPathComponent("Datasets")
+        try? FileManager.default.createDirectory(at: datasetsURL, withIntermediateDirectories: true)
+        
+        // Default to Chess on first boot
+        setActiveProject("Chess")
+    }
+
+    public func getAvailableProjects() -> [String] {
+        guard let items = try? FileManager.default.contentsOfDirectory(at: datasetsURL, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
+        return items.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }.map(\.lastPathComponent)
+    }
+
+    public func setActiveProject(_ name: String) {
+        let projectURL = datasetsURL.appendingPathComponent(name)
+        let imagesURL = projectURL.appendingPathComponent("images/train")
+        let labelsURL = projectURL.appendingPathComponent("labels/train")
+
+        try? FileManager.default.createDirectory(at: imagesURL, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: labelsURL, withIntermediateDirectories: true)
+
+        activeProject = name
+        loadClasses()
+        
+        // Write default data.yaml if it doesn't exist
+        let yamlURL = projectURL.appendingPathComponent("data.yaml")
+        if !FileManager.default.fileExists(atPath: yamlURL.path) {
+            writeYAML()
+        }
+    }
+
+    public func addClass(_ className: String) {
+        if !currentClasses.contains(className) {
+            currentClasses.append(className)
+            writeYAML()
+        }
+    }
+
+    private func loadClasses() {
+        guard let activeProject else { return }
+        let projectURL = datasetsURL.appendingPathComponent(activeProject)
+        let classesURL = projectURL.appendingPathComponent("classes.txt")
+        if let contents = try? String(contentsOf: classesURL) {
+            currentClasses = contents.components(separatedBy: .newlines).filter { !$0.isEmpty }
+        } else {
+            currentClasses = []
+        }
+    }
+
+    private func writeYAML() {
+        guard let activeProject else { return }
+        let projectURL = datasetsURL.appendingPathComponent(activeProject)
+        
+        // Save classes.txt
+        let classesText = currentClasses.joined(separator: "\n")
+        try? classesText.write(to: projectURL.appendingPathComponent("classes.txt"), atomically: true, encoding: .utf8)
+
+        // Save data.yaml
+        var yaml = "train: ./images/train\nval: ./images/train\n\n"
+        yaml += "nc: \(currentClasses.count)\n"
+        yaml += "names:\n"
+        for (index, name) in currentClasses.enumerated() {
+            yaml += "  \(index): \(name)\n"
+        }
+        try? yaml.write(to: projectURL.appendingPathComponent("data.yaml"), atomically: true, encoding: .utf8)
+    }
+
+    public func saveSample(image: NSImage, boundingBox: CGRect, className: String) {
+        guard let activeProject else { return }
+        addClass(className)
+        guard let classIndex = currentClasses.firstIndex(of: className) else { return }
+
+        let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+        let filename = "\(activeProject)_\(timestamp)"
+
+        let projectURL = datasetsURL.appendingPathComponent(activeProject)
+        let imageURL = projectURL.appendingPathComponent("images/train/\(filename).jpg")
+        let labelURL = projectURL.appendingPathComponent("labels/train/\(filename).txt")
+
+        // Save Image
+        guard let tiffData = image.tiffRepresentation,
+              let bitmapImage = NSBitmapImageRep(data: tiffData),
+              let jpegData = bitmapImage.representation(using: .jpeg, properties: [.compressionFactor: 0.9]) else { return }
+        try? jpegData.write(to: imageURL)
+
+        // Save YOLO Label (x_center y_center width height)
+        // Note: boundingBox should be normalized coordinates (0.0 to 1.0)
+        let labelLine = "\(classIndex) \(boundingBox.midX) \(boundingBox.midY) \(boundingBox.width) \(boundingBox.height)\n"
+        try? labelLine.write(to: labelURL, atomically: true, encoding: .utf8)
+        
+        NSLog("[DatasetManager] Saved sample to project \(activeProject): \(filename) -> \(className)")
     }
 }

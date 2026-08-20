@@ -478,6 +478,9 @@ final class CameraViewController: NSViewController {
     
     private var videoServer: ROBVideoServer?
     private var cameraViewIsVisible = false
+    private var latestFrameSet: CameraFrameSet?
+    private var lastActiveProject = ROBDatasetManager.shared.activeProject
+    private var lastMainCameraResolution = ROBMLXRuntime.shared.mainCameraResolution
     private var remoteVideoIsActive = false
     private var geminiVideoIsActive = false
     private var cameraSessionIsRequested = false
@@ -577,6 +580,12 @@ final class CameraViewController: NSViewController {
             self,
             selector: #selector(perceptionSettingsDidChange(_:)),
             name: .robDetectorSettingsDidChange,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleLearnObjectNotification(_:)),
+            name: Notification.Name("ROBLearnObjectNotification"),
             object: nil
         )
         NotificationCenter.default.addObserver(
@@ -742,7 +751,21 @@ final class CameraViewController: NSViewController {
             return
         }
         applyProcessingSettings()
-        reconcileCameraSession()
+        
+        let currentProject = ROBDatasetManager.shared.activeProject
+        let currentResolution = ROBMLXRuntime.shared.mainCameraResolution
+        
+        if lastActiveProject != currentProject || lastMainCameraResolution != currentResolution {
+            lastActiveProject = currentProject
+            lastMainCameraResolution = currentResolution
+            if cameraSessionIsRequested {
+                // Forcibly reboot camera session to hot-swap model blob and load new resolution parameters dynamically
+                try? cameraManager?.stopSession()
+                try? cameraManager?.startSession()
+            }
+        } else {
+            reconcileCameraSession()
+        }
     }
 
     private func applyProcessingSettings() {
@@ -792,6 +815,46 @@ final class CameraViewController: NSViewController {
             videoServer: videoServer?.statusSnapshot(),
             videoServerStartupError: videoServerStartupError
         )
+    }
+
+    @objc private func handleLearnObjectNotification(_ notification: Notification) {
+        guard let className = notification.userInfo?["className"] as? String else { return }
+        
+        // Grab the latest index finger tip point and check if it's fresh (e.g. less than 2 seconds old)
+        let store = ROBSceneSnapshotStore.shared
+        guard let fingerPoint = store.latestIndexFingerPoint,
+              let fingerTime = store.latestIndexFingerPointTime,
+              ProcessInfo.processInfo.systemUptime - fingerTime <= 2.0 else {
+            NSLog("[LearnObject] No fresh index finger pointing detected (must point and speak within 2 seconds).")
+            return
+        }
+        
+        // Grab the latest frame set
+        guard let latestFrameSet = self.latestFrameSet else { return }
+        
+        // Convert CMSampleBuffer (rgbSampleBuffer) to NSImage
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(latestFrameSet.rgbSampleBuffer) else { return }
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        let context = CIContext()
+        guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else { return }
+        let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        
+        // Calculate the relative bounding box for YOLO
+        // Note: fingerPoint.x is between 0.0 and 1.0 (relative to width), fingerPoint.y is between 0.0 and 1.0 (relative to height, 0 is bottom)
+        let boxWidth: CGFloat = 0.12
+        let boxHeight: CGFloat = 0.18
+        let xCenter = fingerPoint.x
+        let yCenter = 1.0 - fingerPoint.y - 0.09 // Invert y because YOLO/Cocoa coordinate space has origin at top-left, and offset upwards
+        
+        let boundingBox = CGRect(
+            x: xCenter,
+            y: max(0.0, min(1.0, yCenter)),
+            width: boxWidth,
+            height: boxHeight
+        )
+        
+        // Save to active project using ROBDatasetManager
+        ROBDatasetManager.shared.saveSample(image: nsImage, boundingBox: boundingBox, className: className)
     }
 }
 
@@ -983,6 +1046,7 @@ extension CameraViewController: CameraManagerDelegate {
         cameraFramesReceived &+= 1
         cameraLastFrameAt = Date()
         let sampleBuffer = frameSet.rgbSampleBuffer
+        self.latestFrameSet = frameSet
         
         if isCalibrationRequested {
             isCalibrationRequested = false

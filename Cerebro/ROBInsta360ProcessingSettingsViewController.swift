@@ -36,6 +36,8 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
     private let instaFPSPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let analysisGeometryPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let rudyGreetingPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let activeProjectField = NSTextField(frame: .zero)
+    private let mainResolutionPopup = NSPopUpButton(frame: .zero, pullsDown: false)
 
     private let mainPoseToggle = NSButton(
         checkboxWithTitle: "Main pose", target: nil, action: nil)
@@ -181,6 +183,11 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         if let index = ROBMLXRuntime.rudyGreetingTitles.firstIndex(of: runtime.rudyGreetingTitle) {
             rudyGreetingPopup.selectItem(at: index)
         }
+        activeProjectField.stringValue = ROBDatasetManager.shared.activeProject ?? "Chess"
+
+        if let resIndex = ROBMLXRuntime.mainCameraResolutions.firstIndex(of: runtime.mainCameraResolution) {
+            mainResolutionPopup.selectItem(at: resIndex)
+        }
 
         mainFPSPopup.selectItem(at: rateIndex(
             registry.processingFramesPerSecond(for: .mainCamera)))
@@ -324,6 +331,14 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
             row([
                 NSTextField(labelWithString: "Rudy greeting title:"), rudyGreetingPopup,
                 secondaryLabel("The funny or formal title ROB will use to greet you")
+            ]),
+            row([
+                NSTextField(labelWithString: "Active Project:"), activeProjectField,
+                secondaryLabel("Active game (e.g. Chess, Monopoly) to load blob for")
+            ]),
+            row([
+                NSTextField(labelWithString: "Main Camera Resolution:"), mainResolutionPopup,
+                secondaryLabel("Upgrade to 720p HD for super-crisp spatial pieces")
             ]),
             row([
                 mainPoseToggle, instaPoseToggle
@@ -614,6 +629,14 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         rudyGreetingPopup.addItems(withTitles: ROBMLXRuntime.rudyGreetingTitles)
         rudyGreetingPopup.target = self
         rudyGreetingPopup.action = #selector(rudyGreetingChanged(_:))
+
+        activeProjectField.target = self
+        activeProjectField.action = #selector(activeProjectChanged(_:))
+        activeProjectField.widthAnchor.constraint(equalToConstant: 120).isActive = true
+
+        mainResolutionPopup.addItems(withTitles: ROBMLXRuntime.mainCameraResolutions)
+        mainResolutionPopup.target = self
+        mainResolutionPopup.action = #selector(mainResolutionChanged(_:))
     }
 
     @objc private func settingsDidChange(_ notification: Notification) {
@@ -655,6 +678,22 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         let index = sender.indexOfSelectedItem
         guard ROBMLXRuntime.rudyGreetingTitles.indices.contains(index) else { return }
         runtime.rudyGreetingTitle = ROBMLXRuntime.rudyGreetingTitles[index]
+    }
+
+    @objc private func activeProjectChanged(_ sender: NSTextField) {
+        let newName = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !newName.isEmpty else { return }
+        
+        ROBDatasetManager.shared.setActiveProject(newName)
+        
+        // Notify of changes, which can trigger a camera session reboot to load the new blob
+        NotificationCenter.default.post(name: .robMLXRuntimeDidChange, object: nil)
+    }
+
+    @objc private func mainResolutionChanged(_ sender: NSPopUpButton) {
+        let index = sender.indexOfSelectedItem
+        guard ROBMLXRuntime.mainCameraResolutions.indices.contains(index) else { return }
+        runtime.mainCameraResolution = ROBMLXRuntime.mainCameraResolutions[index]
     }
 
     @objc private func geminiVideoSourceChanged(_ sender: NSButton) {

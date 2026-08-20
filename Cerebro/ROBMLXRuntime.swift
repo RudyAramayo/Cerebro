@@ -392,6 +392,20 @@ public final class ROBMLXRuntime: NSObject {
     private static let showInferenceOutputKey = "ROBMLXShowInferenceOutput"
     private static let rudyGreetingTitleKey = "ROBMLXGreetingTitle"
     private static let localFollowSidewalkKey = "ROBLocalFollowSidewalkEnabled"
+    private static let mainCameraResolutionKey = "ROBMLXMainCameraResolution"
+
+    public static let mainCameraResolutions = [
+        "1280x720",
+        "640x400"
+    ]
+
+    public var mainCameraResolution: String {
+        get { UserDefaults.standard.string(forKey: Self.mainCameraResolutionKey) ?? "1280x720" }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Self.mainCameraResolutionKey)
+            NotificationCenter.default.post(name: .robMLXRuntimeDidChange, object: self)
+        }
+    }
 
     public static let rudyGreetingTitles = [
         "the creator",
