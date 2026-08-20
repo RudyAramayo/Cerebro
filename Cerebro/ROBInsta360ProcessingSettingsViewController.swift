@@ -29,10 +29,13 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         checkboxWithTitle: "Analyze Insta360 preview", target: nil, action: nil)
     private let showInferenceToggle = NSButton(
         checkboxWithTitle: "Show MLX inference output", target: nil, action: nil)
+    private let localFollowSidewalkToggle = NSButton(
+        checkboxWithTitle: "Follow sidewalks and paths (OAK-D CNN)", target: nil, action: nil)
 
     private let mainFPSPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let instaFPSPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let analysisGeometryPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let rudyGreetingPopup = NSPopUpButton(frame: .zero, pullsDown: false)
 
     private let mainPoseToggle = NSButton(
         checkboxWithTitle: "Main pose", target: nil, action: nil)
@@ -53,6 +56,12 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
     private let depthOpacitySlider = NSSlider(
         value: 0.45, minValue: 0, maxValue: 1, target: nil, action: nil)
     private let depthOpacityValueLabel = NSTextField(labelWithString: "45%")
+
+    private let bellyPoseToggle = NSButton(
+        checkboxWithTitle: "Render Belly camera 2D pose", target: nil, action: nil)
+    private let bellyDepthOpacitySlider = NSSlider(
+        value: 0.45, minValue: 0, maxValue: 1, target: nil, action: nil)
+    private let bellyDepthOpacityValueLabel = NSTextField(labelWithString: "45%")
 
     private let stabilizationToggle = NSButton(
         checkboxWithTitle: "Gyro stabilization", target: nil, action: nil)
@@ -159,6 +168,11 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         mainCameraDetectionToggle.state = runtime.mainCameraDetectionEnabled ? .on : .off
         insta360DetectionToggle.state = runtime.insta360DetectionEnabled ? .on : .off
         showInferenceToggle.state = runtime.showInferenceOutput ? .on : .off
+        localFollowSidewalkToggle.state = runtime.localFollowSidewalkEnabled ? .on : .off
+
+        if let index = ROBMLXRuntime.rudyGreetingTitles.firstIndex(of: runtime.rudyGreetingTitle) {
+            rudyGreetingPopup.selectItem(at: index)
+        }
 
         mainFPSPopup.selectItem(at: rateIndex(
             registry.processingFramesPerSecond(for: .mainCamera)))
@@ -185,6 +199,10 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         swordTrackerFPSPopup.isEnabled = mainCameraSettings.swordTrackerEnabled
         depthOpacitySlider.doubleValue = mainCameraSettings.depthOverlayOpacity
         updateDepthOpacityValueLabel()
+
+        bellyPoseToggle.state = mainCameraSettings.bellyPose2DEnabled ? .on : .off
+        bellyDepthOpacitySlider.doubleValue = mainCameraSettings.bellyDepthOverlayOpacity
+        updateBellyDepthOpacityValueLabel()
 
         geminiMainCameraToggle.state = geminiVideoSettings.mainCameraEnabled ? .on : .off
         geminiInsta360Toggle.state = geminiVideoSettings.insta360Enabled ? .on : .off
@@ -281,6 +299,7 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         analysisBox.contentView = NSView()
         let analysisStack = NSStackView(views: [
             row([mainCameraDetectionToggle, insta360DetectionToggle, showInferenceToggle]),
+            row([localFollowSidewalkToggle]),
             row([
                 NSTextField(labelWithString: "Main analysis:"), mainFPSPopup,
                 NSTextField(labelWithString: "Insta360 analysis:"), instaFPSPopup
@@ -288,6 +307,10 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
             row([
                 NSTextField(labelWithString: "360° analysis:"), analysisGeometryPopup,
                 secondaryLabel("One stitched network feed")
+            ]),
+            row([
+                NSTextField(labelWithString: "Rudy greeting title:"), rudyGreetingPopup,
+                secondaryLabel("The funny or formal title ROB will use to greet you")
             ]),
             row([
                 mainPoseToggle, instaPoseToggle
@@ -363,8 +386,36 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
             ])
         }
 
+        let bellyCameraBox = NSBox()
+        bellyCameraBox.title = "Belly Camera Processing"
+        bellyCameraBox.contentView = NSView()
+        bellyDepthOpacitySlider.widthAnchor.constraint(equalToConstant: 220).isActive = true
+        bellyDepthOpacityValueLabel.alignment = .right
+        bellyDepthOpacityValueLabel.widthAnchor.constraint(equalToConstant: 42).isActive = true
+        let bellyCameraStack = NSStackView(views: [
+            row([bellyPoseToggle]),
+            row([
+                NSTextField(labelWithString: "Depth overlay opacity:"),
+                bellyDepthOpacitySlider, bellyDepthOpacityValueLabel
+            ])
+        ])
+        configureVerticalStack(bellyCameraStack)
+        bellyCameraBox.contentView?.addSubview(bellyCameraStack)
+        if let bellyCameraContent = bellyCameraBox.contentView {
+            NSLayoutConstraint.activate([
+                bellyCameraStack.leadingAnchor.constraint(
+                    equalTo: bellyCameraContent.leadingAnchor, constant: 12),
+                bellyCameraStack.trailingAnchor.constraint(
+                    equalTo: bellyCameraContent.trailingAnchor, constant: -12),
+                bellyCameraStack.topAnchor.constraint(
+                    equalTo: bellyCameraContent.topAnchor, constant: 10),
+                bellyCameraStack.bottomAnchor.constraint(
+                    equalTo: bellyCameraContent.bottomAnchor, constant: -12)
+            ])
+        }
+
         let rootStack = NSStackView(views: [
-            heading, explanation, geminiBox, analysisBox, mainCameraBox, previewBox
+            heading, explanation, geminiBox, analysisBox, mainCameraBox, bellyCameraBox, previewBox
         ])
         configureVerticalStack(rootStack)
         rootStack.spacing = 10
@@ -401,6 +452,8 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
             analysisBox.heightAnchor.constraint(greaterThanOrEqualToConstant: 225),
             mainCameraBox.widthAnchor.constraint(equalTo: rootStack.widthAnchor),
             mainCameraBox.heightAnchor.constraint(greaterThanOrEqualToConstant: 125),
+            bellyCameraBox.widthAnchor.constraint(equalTo: rootStack.widthAnchor),
+            bellyCameraBox.heightAnchor.constraint(greaterThanOrEqualToConstant: 95),
             previewBox.widthAnchor.constraint(equalTo: rootStack.widthAnchor),
             previewBox.heightAnchor.constraint(greaterThanOrEqualToConstant: 65)
         ])
@@ -436,6 +489,8 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         insta360DetectionToggle.action = #selector(mlxSettingChanged(_:))
         showInferenceToggle.target = self
         showInferenceToggle.action = #selector(mlxSettingChanged(_:))
+        localFollowSidewalkToggle.target = self
+        localFollowSidewalkToggle.action = #selector(mlxSettingChanged(_:))
 
         for popup in [mainFPSPopup, instaFPSPopup] {
             popup.addItems(withTitles: processingRateTitles)
@@ -491,6 +546,22 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
             ofSize: NSFont.smallSystemFontSize, weight: .regular)
         depthOpacityValueLabel.textColor = .secondaryLabelColor
 
+        bellyPoseToggle.target = self
+        bellyPoseToggle.action = #selector(bellyPoseSettingChanged(_:))
+        bellyPoseToggle.setAccessibilityIdentifier("ROB.BellyCamera.Pose.Enabled")
+        bellyPoseToggle.toolTip = "Renders 2D skeleton pose overlay on top of the belly camera preview."
+
+        bellyDepthOpacitySlider.target = self
+        bellyDepthOpacitySlider.action = #selector(bellyDepthOverlayOpacityChanged(_:))
+        bellyDepthOpacitySlider.isContinuous = true
+        bellyDepthOpacitySlider.numberOfTickMarks = 11
+        bellyDepthOpacitySlider.allowsTickMarkValuesOnly = false
+        bellyDepthOpacitySlider.setAccessibilityIdentifier("ROB.BellyCamera.DepthOverlayOpacity")
+        bellyDepthOpacitySlider.setAccessibilityLabel("Belly camera depth overlay opacity")
+        bellyDepthOpacityValueLabel.font = .monospacedDigitSystemFont(
+            ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        bellyDepthOpacityValueLabel.textColor = .secondaryLabelColor
+
         addModelButton.target = self
         addModelButton.action = #selector(addCoreMLModel(_:))
         addModelButton.bezelStyle = .rounded
@@ -502,6 +573,10 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         applyPreviewSettingsButton.target = self
         applyPreviewSettingsButton.action = #selector(applyPreviewSettings(_:))
         applyPreviewSettingsButton.bezelStyle = .rounded
+
+        rudyGreetingPopup.addItems(withTitles: ROBMLXRuntime.rudyGreetingTitles)
+        rudyGreetingPopup.target = self
+        rudyGreetingPopup.action = #selector(rudyGreetingChanged(_:))
     }
 
     @objc private func settingsDidChange(_ notification: Notification) {
@@ -534,7 +609,15 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
             service.refreshDecoderDemand()
         } else if sender === showInferenceToggle {
             runtime.showInferenceOutput = sender.state == .on
+        } else if sender === localFollowSidewalkToggle {
+            runtime.localFollowSidewalkEnabled = sender.state == .on
         }
+    }
+
+    @objc private func rudyGreetingChanged(_ sender: NSPopUpButton) {
+        let index = sender.indexOfSelectedItem
+        guard ROBMLXRuntime.rudyGreetingTitles.indices.contains(index) else { return }
+        runtime.rudyGreetingTitle = ROBMLXRuntime.rudyGreetingTitles[index]
     }
 
     @objc private func geminiVideoSourceChanged(_ sender: NSButton) {
@@ -634,6 +717,16 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         updateDepthOpacityValueLabel()
     }
 
+    @objc private func bellyPoseSettingChanged(_ sender: NSButton) {
+        mainCameraSettings.bellyPose2DEnabled = (sender.state == .on)
+    }
+
+    @objc private func bellyDepthOverlayOpacityChanged(_ sender: NSSlider) {
+        mainCameraSettings.bellyDepthOverlayOpacity = sender.doubleValue
+        sender.doubleValue = mainCameraSettings.bellyDepthOverlayOpacity
+        updateBellyDepthOpacityValueLabel()
+    }
+
     @objc private func stabilizationChanged(_ sender: NSButton) {
         if service.gyroStabilizationEnabled != (sender.state == .on) {
             geminiVideoSettings.invalidateInsta360OrientationCalibration()
@@ -690,6 +783,11 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
     private func updateDepthOpacityValueLabel() {
         depthOpacityValueLabel.stringValue = String(
             format: "%.0f%%", depthOpacitySlider.doubleValue * 100)
+    }
+
+    private func updateBellyDepthOpacityValueLabel() {
+        bellyDepthOpacityValueLabel.stringValue = String(
+            format: "%.0f%%", bellyDepthOpacitySlider.doubleValue * 100)
     }
 
     private func circularDegreeDistance(_ lhs: Double, _ rhs: Double) -> Double {

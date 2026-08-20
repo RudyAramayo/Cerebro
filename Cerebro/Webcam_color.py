@@ -11,6 +11,7 @@ import argparse
 from datetime import timedelta
 import fcntl
 import json
+import numpy as np
 import os
 import select
 import signal
@@ -171,7 +172,10 @@ def timestamp_nanoseconds(frame):
     )
 
 
-def frame_payload(rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics):
+def frame_payload(
+    rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
+    sidewalk_deviation=0.0, sidewalk_confidence=0.0
+):
     rgb_width = int(rgb_frame.getWidth())
     rgb_height = int(rgb_frame.getHeight())
     depth_width = int(depth_frame.getWidth())
@@ -227,6 +231,8 @@ def frame_payload(rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsic
         "left_length": len(left_bytes),
         "right_length": len(right_bytes),
         "rgb_intrinsics": rgb_intrinsics,
+        "sidewalk_center_deviation": sidewalk_deviation,
+        "sidewalk_confidence": sidewalk_confidence,
     }
     header_bytes = json.dumps(
         header, ensure_ascii=False, separators=(",", ":")
@@ -234,9 +240,13 @@ def frame_payload(rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsic
     return header_bytes, rgb_bytes, depth_bytes, left_bytes, right_bytes
 
 
-def send_frame(client, rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics):
+def send_frame(
+    client, rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
+    sidewalk_deviation=0.0, sidewalk_confidence=0.0
+):
     header, rgb_bytes, depth_bytes, left_bytes, right_bytes = frame_payload(
-        rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics
+        rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
+        sidewalk_deviation, sidewalk_confidence
     )
     client.sendall(PROTOCOL_MAGIC + struct.pack(">I", len(header)) + header)
     client.sendall(rgb_bytes)
@@ -296,6 +306,30 @@ def stream_camera(client, stop_event, mxid=None):
             stereo.depth.link(align.input)
             rgb_output.link(align.inputAlignTo)
 
+            # Set up the road/sidewalk segmentation on-device model if the blob exists
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            blob_path = os.path.join(script_dir, "Models", "road-segmentation-adas-0001.blob")
+            if not os.path.exists(blob_path):
+                blob_path = os.path.join(script_dir, "..", "Models", "road-segmentation-adas-0001.blob")
+
+            nn_model = None
+            nn_queue = None
+            if os.path.exists(blob_path):
+                try:
+                    nn_model = pipeline.create(dai.node.NeuralNetwork)
+                    nn_model.setBlobPath(blob_path)
+                    nn_input_stream = rgb_camera.requestOutput(
+                        (896, 512),
+                        type=dai.ImgFrame.Type.RGB888i,
+                        resizeMode=dai.ImgResizeMode.CROP,
+                        fps=5.0, # Run at 5 Hz to minimize resource load
+                        enableUndistortion=True,
+                    )
+                    nn_input_stream.link(nn_model.input)
+                except Exception as error:
+                    emit_error("Failed to initialize road segmentation NeuralNetwork: " + str(error))
+                    nn_model = None
+
             sync = pipeline.create(dai.node.Sync)
             sync.setSyncThreshold(SYNC_THRESHOLD)
             sync.setSyncAttempts(3)
@@ -304,6 +338,9 @@ def stream_camera(client, stop_event, mxid=None):
             stereo.rectifiedLeft.link(sync.inputs["left"])
             stereo.rectifiedRight.link(sync.inputs["right"])
             queue = sync.out.createOutputQueue(maxSize=1, blocking=False)
+            
+            if nn_model is not None:
+                nn_queue = nn_model.out.createOutputQueue(maxSize=1, blocking=False)
 
             pipeline.start()
             calibration = device.readCalibration2()
@@ -317,7 +354,38 @@ def stream_camera(client, stop_event, mxid=None):
                 raise RuntimeError("DepthAI returned invalid RGB camera intrinsics")
             emit("CEREBRO_DEPTHCAM_STREAMING")
 
+            latest_sidewalk_deviation = 0.0
+            latest_sidewalk_confidence = 0.0
+
             while not stop_event.is_set() and pipeline.isRunning():
+                # Process latest on-device neural network sidewalk segmentation if available
+                if nn_queue is not None:
+                    try:
+                        nn_msg = nn_queue.tryGet()
+                        if nn_msg is not None:
+                            # Model shape: 1, 4, 512, 896. Output is list of FP16 values.
+                            raw_output = np.array(nn_msg.getFirstLayerFp16()).reshape(4, 512, 896)
+                            class_mask = np.argmax(raw_output, axis=0).astype(np.uint8)
+                            
+                            # Class 1 is "road/sidewalk"
+                            sidewalk_pixels = (class_mask == 1)
+                            height, width = class_mask.shape
+                            
+                            # Analyze the bottom 50% of the frame (immediately in front of the robot)
+                            bottom_half_sidewalk = sidewalk_pixels[int(height * 0.5):, :]
+                            y_indices, x_coords = np.where(bottom_half_sidewalk)
+                            
+                            if len(x_coords) > 500:
+                                sidewalk_center_x = np.mean(x_coords)
+                                camera_center_x = width / 2.0
+                                latest_sidewalk_deviation = float((sidewalk_center_x - camera_center_x) / (width / 2.0))
+                                latest_sidewalk_confidence = 1.0
+                            else:
+                                latest_sidewalk_deviation = 0.0
+                                latest_sidewalk_confidence = 0.0
+                    except Exception as error:
+                        emit_error("Failed to post-process road segmentation NN: " + str(error))
+
                 group = queue.get(QUEUE_WAIT)
                 if group is None:
                     continue
@@ -334,7 +402,7 @@ def stream_camera(client, stop_event, mxid=None):
                     raise RuntimeError("DepthAI sync group is missing RGB or depth")
                 send_frame(
                     client, rgb_frame, depth_frame, left_frame, right_frame,
-                    rgb_intrinsics
+                    rgb_intrinsics, latest_sidewalk_deviation, latest_sidewalk_confidence
                 )
 
             if not stop_event.is_set():

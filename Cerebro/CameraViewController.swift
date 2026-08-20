@@ -30,6 +30,8 @@ extension Notification.Name {
     private static let swordTrackerEnabledKey = "ROBCameraSwordTrackerEnabled"
     private static let swordTrackerFPSKey = "ROBCameraSwordTrackerFPS"
     private static let depthOverlayOpacityKey = "ROBCameraDepthOverlayOpacity"
+    private static let bellyPose2DEnabledKey = "ROBCameraBellyPose2DEnabled"
+    private static let bellyDepthOverlayOpacityKey = "ROBCameraBellyDepthOverlayOpacity"
     private let defaults = UserDefaults.standard
 
     public var pose3DEnabled: Bool {
@@ -72,6 +74,23 @@ extension Notification.Name {
         set { set(max(0, min(1, newValue)), key: Self.depthOverlayOpacityKey) }
     }
 
+    public var bellyPose2DEnabled: Bool {
+        get {
+            defaults.object(forKey: Self.bellyPose2DEnabledKey) == nil
+                || defaults.bool(forKey: Self.bellyPose2DEnabledKey)
+        }
+        set { set(newValue, key: Self.bellyPose2DEnabledKey) }
+    }
+
+    public var bellyDepthOverlayOpacity: Double {
+        get {
+            defaults.object(forKey: Self.bellyDepthOverlayOpacityKey) == nil
+                ? 0.45
+                : max(0, min(1, defaults.double(forKey: Self.bellyDepthOverlayOpacityKey)))
+        }
+        set { set(max(0, min(1, newValue)), key: Self.bellyDepthOverlayOpacityKey) }
+    }
+
     private func set(_ value: Bool, key: String) {
         guard defaults.object(forKey: key) == nil || defaults.bool(forKey: key) != value else { return }
         defaults.set(value, forKey: key)
@@ -105,7 +124,7 @@ extension Notification.Name {
     }
 }
 
-private final class ROBDepthOverlayRenderer {
+final class ROBDepthOverlayRenderer {
     private let queue = DispatchQueue(label: "com.orbitusrobotics.Cerebro.depth-overlay", qos: .utility)
     private let lock = NSLock()
     private var busy = false
@@ -451,8 +470,11 @@ final class CameraViewController: NSViewController {
     let renderer = HumanBodySkeletonRenderer()
     var viewModel: HumanBodyPose3DDetector = HumanBodyPose3DDetector()
     let context = CIContext()
-    private let depthOverlayRenderer = ROBDepthOverlayRenderer()
     private let depthOverlayView = NSImageView()
+    private var overlayManager: CameraOverlayManager?
+    private var hasSetAspectRatio = false
+    private var isCalibrationRequested = false
+    private let calibrateButton = NSButton()
     private let processingSettings = ROBMainCameraProcessingSettings.shared
     private var latestHumanObservations: [VNHumanObservation] = []
     private var lastSceneSnapshotUpdate: CFTimeInterval = 0
@@ -502,6 +524,8 @@ final class CameraViewController: NSViewController {
         let manager = CameraManager(containerView: faceContainerView, role: .face)
         manager.delegate = self
         cameraManager = manager
+        
+        setupCalibrateButton()
         
         NotificationCenter.default.addObserver(
             self,
@@ -857,8 +881,25 @@ extension CameraViewController: CameraManagerDelegate {
     }
 
     private func setupDepthOverlay() {
+        self.overlayManager = CameraOverlayManager(
+            attachingTo: view,
+            customPoseView: poseView,
+            customDepthOverlayView: depthOverlayView
+        )
+        self.overlayManager?.onBodyPoseDetected = { [weak self] observations in
+            let wrists = observations.flatMap { observation -> [CGPoint] in
+                [VNHumanBodyPoseObservation.JointName.leftWrist,
+                 VNHumanBodyPoseObservation.JointName.rightWrist].compactMap { name in
+                    guard let point = try? observation.recognizedPoint(name), point.confidence >= 0.25 else { return nil }
+                    return point.location
+                }
+            }
+            self?.swordWristLock.lock()
+            self?.swordWristAnchors = wrists
+            self?.swordWristLock.unlock()
+        }
         depthOverlayView.imageScaling = .scaleProportionallyUpOrDown
-        depthOverlayView.alphaValue = processingSettings.depthOverlayOpacity
+        depthOverlayView.alphaValue = CGFloat(processingSettings.depthOverlayOpacity)
         depthOverlayView.translatesAutoresizingMaskIntoConstraints = false
         depthOverlayView.isHidden = true
         view.addSubview(depthOverlayView, positioned: .below, relativeTo: poseView)
@@ -868,6 +909,28 @@ extension CameraViewController: CameraManagerDelegate {
             depthOverlayView.topAnchor.constraint(equalTo: view.topAnchor),
             depthOverlayView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
+    }
+
+    private func setupCalibrateButton() {
+        calibrateButton.title = "Calibrate Camera (Chessboard)"
+        calibrateButton.bezelStyle = .rounded
+        calibrateButton.target = self
+        calibrateButton.action = #selector(calibrateButtonClicked(_:))
+        calibrateButton.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(calibrateButton, positioned: .above, relativeTo: nil)
+        
+        NSLayoutConstraint.activate([
+            calibrateButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+            calibrateButton.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -20),
+            calibrateButton.widthAnchor.constraint(equalToConstant: 220),
+            calibrateButton.heightAnchor.constraint(equalToConstant: 32)
+        ])
+    }
+    
+    @objc private func calibrateButtonClicked(_ sender: NSButton) {
+        isCalibrationRequested = true
+        sender.isEnabled = false
+        sender.title = "Calibrating..."
     }
     
     func applySourceOverCompositing(inputImage: CIImage, backgroundImage: CIImage) -> CIImage? {
@@ -891,6 +954,65 @@ extension CameraViewController: CameraManagerDelegate {
         cameraFramesReceived &+= 1
         cameraLastFrameAt = Date()
         let sampleBuffer = frameSet.rgbSampleBuffer
+        
+        if isCalibrationRequested {
+            isCalibrationRequested = false
+            if let depth = frameSet.alignedDepth, let intrinsics = frameSet.intrinsics {
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    do {
+                        let rms = try ROBChessboardCalibration.performCalibration(
+                            role: .face,
+                            rgbSampleBuffer: sampleBuffer,
+                            depth: depth,
+                            intrinsics: intrinsics,
+                            cols: 9,
+                            rows: 6,
+                            squareSizeMeters: 0.036909375
+                        )
+                        DispatchQueue.main.async {
+                            self?.calibrateButton.isEnabled = true
+                            self?.calibrateButton.title = "Calibrate Camera (Chessboard)"
+                            let alert = NSAlert()
+                            alert.messageText = "Calibration Succeeded!"
+                            alert.informativeText = String(format: "Successfully calibrated the Face camera!\nSolved RMS Error: %.4f meters", rms)
+                            alert.runModal()
+                        }
+                    } catch {
+                        DispatchQueue.main.async {
+                            self?.calibrateButton.isEnabled = true
+                            self?.calibrateButton.title = "Calibrate Camera (Chessboard)"
+                            let alert = NSAlert()
+                            alert.messageText = "Calibration Failed"
+                            alert.informativeText = error.localizedDescription
+                            alert.runModal()
+                        }
+                    }
+                }
+            } else {
+                DispatchQueue.main.async { [weak self] in
+                    self?.calibrateButton.isEnabled = true
+                    self?.calibrateButton.title = "Calibrate Camera (Chessboard)"
+                    let alert = NSAlert()
+                    alert.messageText = "Calibration Failed"
+                    alert.informativeText = "Depth frame is currently unavailable."
+                    alert.runModal()
+                }
+            }
+        }
+        
+        if !hasSetAspectRatio {
+            if let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+                let width = CGFloat(CVPixelBufferGetWidth(imageBuffer))
+                let height = CGFloat(CVPixelBufferGetHeight(imageBuffer))
+                if width > 0 && height > 0 {
+                    hasSetAspectRatio = true
+                    DispatchQueue.main.async { [weak self] in
+                        self?.view.window?.contentAspectRatio = NSSize(width: width, height: height)
+                    }
+                }
+            }
+        }
+        
         let sceneUpdateTime = CACurrentMediaTime()
         let shouldUpdateSceneSnapshot = sceneUpdateTime - lastSceneSnapshotUpdate >= 0.2
         if shouldUpdateSceneSnapshot {
@@ -902,15 +1024,26 @@ extension CameraViewController: CameraManagerDelegate {
                 people: latestHumanObservations,
                 depth: frameSet.alignedDepth
             )
+            ROBSceneSnapshotStore.shared.updateSidewalkDetection(
+                deviation: frameSet.sidewalkCenterDeviation ?? 0.0,
+                confidence: frameSet.sidewalkConfidence ?? 0.0
+            )
         }
+        
+        let poseEnabled = ROBDynamicDetectorRegistry.shared.enabled("body-pose", source: .mainCamera)
+        let processingFPS = ROBDynamicDetectorRegistry.shared.processingFramesPerSecond(for: .mainCamera)
+        overlayManager?.offer(
+            sampleBuffer: sampleBuffer,
+            depthFrame: frameSet.alignedDepth,
+            poseEnabled: poseEnabled,
+            depthOpacity: processingSettings.depthOverlayOpacity,
+            processingFPS: processingFPS
+        )
+        
         if let depth = frameSet.alignedDepth {
             let hologramFrame = ROBDepthCloudFrame(depth: depth, rgbSampleBuffer: sampleBuffer, isBelly: false)
             ROBHologramExporter.shared.capture(hologramFrame)
             if cameraViewIsVisible {
-                depthOverlayRenderer.offer(depth: depth) { [weak self] image in
-                    self?.depthOverlayView.image = image
-                    self?.depthOverlayView.isHidden = false
-                }
                 faceDepthPointCloudRenderer.offer(depth: depth, rgbSampleBuffer: sampleBuffer, in: skeletonView)
             }
             NotificationCenter.default.post(
@@ -949,7 +1082,6 @@ extension CameraViewController: CameraManagerDelegate {
 
         // Keep the legacy Vision requests under the same user-selected
         // analysis ceiling as MLX and the dynamic detector registry.
-        let processingFPS = ROBDynamicDetectorRegistry.shared.processingFramesPerSecond(for: .mainCamera)
         guard processingFPS > 0 else { return }
         let visionProcessingTime = CACurrentMediaTime()
         guard visionProcessingTime - lastVisionProcessingUpdate >= 1 / processingFPS else { return }
@@ -982,28 +1114,6 @@ extension CameraViewController: CameraManagerDelegate {
         humanRectanglesRequest.revision = VNDetectHumanRectanglesRequestRevision2
         humanRectanglesRequest.upperBodyOnly = false
         
-        let humanBodyPoseRequest = VNDetectHumanBodyPoseRequest { request, error in
-            let observations = (request.results as? [VNHumanBodyPoseObservation]) ?? []
-            let wrists = observations.flatMap { observation -> [CGPoint] in
-                [VNHumanBodyPoseObservation.JointName.leftWrist,
-                 VNHumanBodyPoseObservation.JointName.rightWrist].compactMap { name in
-                    guard let point = try? observation.recognizedPoint(name), point.confidence >= 0.25 else { return nil }
-                    return point.location
-                }
-            }
-            self.swordWristLock.lock(); self.swordWristAnchors = wrists; self.swordWristLock.unlock()
-            DispatchQueue.main.async {
-                self.poseView.bodyPose_observations = observations
-                self.poseView.setNeedsDisplay(self.poseView.bounds)
-            }
-        }
-        let humanHandPoseRequest = VNDetectHumanHandPoseRequest { request, error in
-            let observations = (request.results as? [VNHumanHandPoseObservation]) ?? []
-            DispatchQueue.main.async {
-                self.poseView.humanHandPose_observations = observations
-                self.poseView.setNeedsDisplay(self.poseView.bounds)
-            }
-        }
         let calibrationBarcodeRequest = VNDetectBarcodesRequest { request, error in
             let observations = (request.results as? [VNBarcodeObservation]) ?? []
             self.reversePoseEstimator.process(
@@ -1089,10 +1199,6 @@ extension CameraViewController: CameraManagerDelegate {
         // Keep the real-time path deliberately narrow. Rectangles, hands,
         // faces, saliency, and semantic models run through lower-rate services.
         var requests: [VNRequest] = []
-        if ROBDynamicDetectorRegistry.shared.enabled("body-pose", source: .mainCamera) {
-            requests.append(humanBodyPoseRequest)
-            requests.append(humanHandPoseRequest)
-        }
         if shouldUpdateSceneSnapshot {
             requests.append(calibrationBarcodeRequest)
         }

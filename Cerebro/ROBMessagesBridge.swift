@@ -29,6 +29,7 @@ struct ROBMessagesBridgeConfiguration: Equatable, Sendable {
     let enabled: Bool
     let receivingAccount: String
     let allowedSenders: Set<String>
+    let allowAllSenders: Bool
 
     static func canonicalHandle(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -339,8 +340,8 @@ enum ROBMessagesBridgePolicy {
             return .outboundOrSelf
         }
         // The receiving account is not sender authorization. An empty list is
-        // deliberately fail-closed, even for one-to-one chats.
-        guard configuration.allowedSenders.contains(sender) else {
+        // deliberately fail-closed, even for one-to-one chats, unless allowAllSenders is active.
+        guard configuration.allowAllSenders || configuration.allowedSenders.contains(sender) else {
             return .senderNotAllowed
         }
         guard message.participantCount == 1 else { return .groupChat }
@@ -942,6 +943,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
     private static let enabledDefaultsKey = "ROBMessagesBridgeEnabled"
     private static let accountDefaultsKey = "ROBMessagesBridgeReceivingAccount"
     private static let allowedSendersDefaultsKey = "ROBMessagesBridgeAllowedSenders"
+    private static let allowAllSendersDefaultsKey = "ROBMessagesBridgeAllowAllSenders"
     private static let cursorDefaultsKey = "ROBMessagesBridgeLastMessageRowID"
     private static let recentGUIDsDefaultsKey = "ROBMessagesBridgeRecentMessageGUIDs"
     private static let pollingInterval: TimeInterval = 2
@@ -1076,6 +1078,15 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         postSettingsChange()
     }
 
+    public static func configuredAllowAllSenders() -> Bool {
+        UserDefaults.standard.bool(forKey: allowAllSendersDefaultsKey)
+    }
+
+    public static func setConfiguredAllowAllSenders(_ value: Bool) {
+        UserDefaults.standard.set(value, forKey: allowAllSendersDefaultsKey)
+        postSettingsChange()
+    }
+
     public func start() {
         guard !hasStarted else { return }
         hasStarted = true
@@ -1124,17 +1135,23 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         return true
     }
 
+    private func openSystemSettings(forPrivacySection section: String) -> Bool {
+        let candidates = [
+            "x-apple.systempreferences:com.apple.preference.security?\(section)",
+            "x-apple.systempreferences:com.apple.preference.security.extension?\(section)"
+        ]
+        for candidate in candidates {
+            if let url = URL(string: candidate), NSWorkspace.shared.open(url) {
+                return true
+            }
+        }
+        return false
+    }
+
     private func openMessagesAutomationSettingsIfNeeded() {
         guard !hasOpenedMessagesAutomationSettings else { return }
         hasOpenedMessagesAutomationSettings = true
-        let urlString = "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"
-        if let settingsURL = URL(string: urlString) {
-            if !NSWorkspace.shared.open(settingsURL) {
-                state = "error"
-                detail = "Unable to open System Settings Privacy & Security → Automation."
-                publishStatus()
-            }
-        } else {
+        if !openSystemSettings(forPrivacySection: "Privacy_Automation") {
             state = "error"
             detail = "Unable to open System Settings Privacy & Security → Automation."
             publishStatus()
@@ -1144,14 +1161,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
     private func openFullDiskAccessSettingsIfNeeded() {
         guard !hasOpenedFullDiskAccessSettings else { return }
         hasOpenedFullDiskAccessSettings = true
-        let urlString = "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
-        if let settingsURL = URL(string: urlString) {
-            if !NSWorkspace.shared.open(settingsURL) {
-                state = "error"
-                detail = "Unable to open System Settings Privacy & Security → Full Disk Access."
-                publishStatus()
-            }
-        } else {
+        if !openSystemSettings(forPrivacySection: "Privacy_AllFiles") {
             state = "error"
             detail = "Unable to open System Settings Privacy & Security → Full Disk Access."
             publishStatus()
@@ -1227,7 +1237,8 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             ),
             allowedSenders: ROBMessagesBridgeConfiguration.parseAllowedSenders(
                 configuredAllowedSendersText()
-            )
+            ),
+            allowAllSenders: configuredAllowAllSenders()
         )
     }
 
@@ -1268,7 +1279,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         let hasAuthorizedConfiguration = hasStarted &&
             configuration.enabled &&
             !configuration.receivingAccount.isEmpty &&
-            !configuration.allowedSenders.isEmpty &&
+            (configuration.allowAllSenders || !configuration.allowedSenders.isEmpty) &&
             aiResponder.statusSnapshot().isConfigured
         replyAuthorizationGate.update(
             generation: generation,
@@ -1291,7 +1302,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             publishStatus()
             return
         }
-        guard !configuration.allowedSenders.isEmpty else {
+        guard configuration.allowAllSenders || !configuration.allowedSenders.isEmpty else {
             state = "configuration required"
             detail = "Add at least one locally approved sender before enabling replies."
             publishStatus()

@@ -16,6 +16,10 @@ import AVFoundation
     private let containerView = NSView()
     private var cameraViewIsVisible = false
     private var cameraSessionIsRequested = false
+    private var overlayManager: CameraOverlayManager?
+    private var hasSetAspectRatio = false
+    private var isCalibrationRequested = false
+    private let calibrateButton = NSButton()
     
     public init() {
         let window = NSWindow(
@@ -54,12 +58,35 @@ import AVFoundation
         containerView.autoresizingMask = [.width, .height]
         contentView.addSubview(containerView)
         
+        self.overlayManager = CameraOverlayManager(attachingTo: containerView)
+        
         let manager = CameraManager(containerView: containerView, role: .belly)
         manager.delegate = self
         self.bellyCameraManager = manager
         
+        // Setup Calibrate Button
+        calibrateButton.title = "Calibrate Camera (Chessboard)"
+        calibrateButton.bezelStyle = .rounded
+        calibrateButton.target = self
+        calibrateButton.action = #selector(calibrateButtonClicked(_:))
+        calibrateButton.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(calibrateButton, positioned: .above, relativeTo: nil)
+        
+        NSLayoutConstraint.activate([
+            calibrateButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
+            calibrateButton.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -20),
+            calibrateButton.widthAnchor.constraint(equalToConstant: 220),
+            calibrateButton.heightAnchor.constraint(equalToConstant: 32)
+        ])
+        
         manager.setPreviewVisible(false)
         reconcileCameraSession()
+    }
+    
+    @objc private func calibrateButtonClicked(_ sender: NSButton) {
+        isCalibrationRequested = true
+        sender.isEnabled = false
+        sender.title = "Calibrating..."
     }
     
     public func setDiagnosticsPreviewVisible(_ isVisible: Bool) {
@@ -106,6 +133,73 @@ import AVFoundation
     // MARK: - CameraManagerDelegate
     
     func cameraManager(_ manager: CameraManagerProtocol, didOutput frameSet: CameraFrameSet) {
+        if isCalibrationRequested {
+            isCalibrationRequested = false
+            if let depth = frameSet.alignedDepth, let intrinsics = frameSet.intrinsics {
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    do {
+                        let rms = try ROBChessboardCalibration.performCalibration(
+                            role: .belly,
+                            rgbSampleBuffer: frameSet.rgbSampleBuffer,
+                            depth: depth,
+                            intrinsics: intrinsics,
+                            cols: 9,
+                            rows: 6,
+                            squareSizeMeters: 0.036909375
+                        )
+                        DispatchQueue.main.async {
+                            self?.calibrateButton.isEnabled = true
+                            self?.calibrateButton.title = "Calibrate Camera (Chessboard)"
+                            let alert = NSAlert()
+                            alert.messageText = "Calibration Succeeded!"
+                            alert.informativeText = String(format: "Successfully calibrated the Belly camera!\nSolved RMS Error: %.4f meters", rms)
+                            alert.runModal()
+                        }
+                    } catch {
+                        DispatchQueue.main.async {
+                            self?.calibrateButton.isEnabled = true
+                            self?.calibrateButton.title = "Calibrate Camera (Chessboard)"
+                            let alert = NSAlert()
+                            alert.messageText = "Calibration Failed"
+                            alert.informativeText = error.localizedDescription
+                            alert.runModal()
+                        }
+                    }
+                }
+            } else {
+                DispatchQueue.main.async { [weak self] in
+                    self?.calibrateButton.isEnabled = true
+                    self?.calibrateButton.title = "Calibrate Camera (Chessboard)"
+                    let alert = NSAlert()
+                    alert.messageText = "Calibration Failed"
+                    alert.informativeText = "Depth frame is currently unavailable."
+                    alert.runModal()
+                }
+            }
+        }
+        
+        if !hasSetAspectRatio {
+            if let imageBuffer = CMSampleBufferGetImageBuffer(frameSet.rgbSampleBuffer) {
+                let width = CGFloat(CVPixelBufferGetWidth(imageBuffer))
+                let height = CGFloat(CVPixelBufferGetHeight(imageBuffer))
+                if width > 0 && height > 0 {
+                    hasSetAspectRatio = true
+                    DispatchQueue.main.async { [weak self] in
+                        self?.window?.contentAspectRatio = NSSize(width: width, height: height)
+                    }
+                }
+            }
+        }
+        
+        let mainCameraSettings = ROBMainCameraProcessingSettings.shared
+        overlayManager?.offer(
+            sampleBuffer: frameSet.rgbSampleBuffer,
+            depthFrame: frameSet.alignedDepth,
+            poseEnabled: mainCameraSettings.bellyPose2DEnabled,
+            depthOpacity: mainCameraSettings.bellyDepthOverlayOpacity,
+            processingFPS: ROBDynamicDetectorRegistry.shared.processingFramesPerSecond(for: .mainCamera)
+        )
+        
         guard let depth = frameSet.alignedDepth else { return }
         let hologramFrame = ROBDepthCloudFrame(depth: depth, rgbSampleBuffer: frameSet.rgbSampleBuffer, isBelly: true)
         NotificationCenter.default.post(

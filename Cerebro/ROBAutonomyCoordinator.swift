@@ -54,6 +54,7 @@ import Foundation
         case turningLeft
         case turningRight
         case returningToZone
+        case followingSidewalk
     }
 
     private let robotID: String
@@ -72,6 +73,7 @@ import Foundation
     private var motionState: MotionState = .silent
     private var lastPublishedDetail: String?
     private var lastStatusUptime: TimeInterval = 0
+    private var lastGreetedTimes: [String: TimeInterval] = [:]
 
     private static let plannerInterval: TimeInterval = 0.2
     private static let lidarFreshness: TimeInterval = 0.75
@@ -81,6 +83,12 @@ import Foundation
     public init(robotID: String) {
         self.robotID = robotID
         super.init()
+        
+        // Start the background tick timer for intrinsic/conversational autonomy on boot
+        nextConversationUptime = ProcessInfo.processInfo.systemUptime + 15
+        tickTimer = Timer.scheduledTimer(withTimeInterval: Self.plannerInterval, repeats: true) { [weak self] _ in
+            self?.plannerTick()
+        }
     }
 
     public func handleSessionMessage(_ message: ROBAutonomySessionMessage) {
@@ -177,8 +185,7 @@ import Foundation
         let statusSequence = max(sequence, 1)
 
         active = false
-        tickTimer?.invalidate()
-        tickTimer = nil
+        // Keep tickTimer active for intrinsic background greetings and conversation on boot
         motionState = .silent
         delegate?.autonomyCoordinatorDidRequestBaseStop(self)
 
@@ -253,9 +260,10 @@ import Foundation
 
         nextWanderChangeUptime = ProcessInfo.processInfo.systemUptime + 4
         nextConversationUptime = ProcessInfo.processInfo.systemUptime + 15
-        tickTimer?.invalidate()
-        tickTimer = Timer.scheduledTimer(withTimeInterval: Self.plannerInterval, repeats: true) { [weak self] _ in
-            self?.plannerTick()
+        if tickTimer == nil {
+            tickTimer = Timer.scheduledTimer(withTimeInterval: Self.plannerInterval, repeats: true) { [weak self] _ in
+                self?.plannerTick()
+            }
         }
         publishActiveStatus(force: true)
         plannerTick()
@@ -277,12 +285,17 @@ import Foundation
     }
 
     private func plannerTick() {
-        guard active else { return }
         let now = ProcessInfo.processInfo.systemUptime
+        guard active else {
+            maybeRequestConversation(now: now)
+            return
+        }
         if let expiresAt, Date() >= expiresAt {
             stop(reason: "Autonomy session duration ended")
             return
         }
+
+        let snapshot = ROBSceneSnapshotStore.shared.snapshot()
 
         if profile == .expressiveStationary || !behaviors.contains("roam") {
             transition(to: .silent, left: nil, right: nil, detail: "Expressive stationary autonomy is active")
@@ -364,6 +377,20 @@ import Foundation
                 right: turnLeft ? 0.09 : -0.09,
                 detail: "Making a small organic course change"
             )
+        } else if (behaviors.contains("follow_sidewalk") || ROBMLXRuntime.shared.localFollowSidewalkEnabled) && snapshot.sidewalkConfidence >= 0.5 {
+            let error = snapshot.sidewalkCenterDeviation // between -1.0 and 1.0
+            let kp = 0.12 // Proportional gain
+            
+            // Proportional steering: add error * gain to one tread, subtract from other
+            let leftTread = 0.12 + (error * kp)
+            let rightTread = 0.12 - (error * kp)
+            
+            transition(
+                to: .followingSidewalk,
+                left: max(0.04, min(0.20, leftTread)),
+                right: max(0.04, min(0.20, rightTread)),
+                detail: "Centering ROB on the sidewalk path (deviation: \(String(format: "%.2f", error)))"
+            )
         } else {
             transition(
                 to: .forward,
@@ -401,7 +428,40 @@ import Foundation
     }
 
     private func maybeRequestConversation(now: TimeInterval) {
-        guard behaviors.contains("talk"), now >= nextConversationUptime else { return }
+        // Conversational/greeting autonomy is intrinsically standard on boot,
+        // but when active/authorized, we respect the behaviors selection.
+        guard !active || behaviors.contains("talk") else { return }
+
+        // 1. Check for newly recognized identified people to greet pro-actively
+        let snapshot = ROBSceneSnapshotStore.shared.snapshot()
+        let identifiedPeople = snapshot.mlxIdentifiedPeople
+        var personToGreet: String? = nil
+
+        for person in identifiedPeople {
+            let lastGreeted = lastGreetedTimes[person] ?? 0
+            if now - lastGreeted >= 300 { // 5-minute cooldown
+                lastGreetedTimes[person] = now
+                personToGreet = person
+                break
+            }
+        }
+
+        if let person = personToGreet {
+            // Push next regular conversation interval forward so we don't immediately talk again
+            nextConversationUptime = now + Double.random(in: 45 ... 90)
+            var greetingName = person
+            if person.lowercased().contains("rudy") {
+                let title = ROBMLXRuntime.shared.rudyGreetingTitle
+                greetingName = "Rudy (\(title))"
+            }
+            NSLog("[Autonomy] Triggering proactive greeting for: \(greetingName)")
+            let prompt = "Autonomy context: you have just recognized \(greetingName) in the camera frame! You have not greeted them recently. Briefly and naturally greet them by name/description, welcome them, and start a friendly, polite conversation."
+            delegate?.autonomyCoordinator(self, requestConversationPrompt: prompt)
+            return
+        }
+
+        // 2. Regular periodic conversation request
+        guard now >= nextConversationUptime else { return }
         nextConversationUptime = now + Double.random(in: 45 ... 90)
         let prompt: String
         if personVisible {

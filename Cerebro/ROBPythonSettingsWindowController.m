@@ -25,6 +25,7 @@
 @property (nonatomic, strong) NSPopUpButton *chineseVoicePopup;
 @property (nonatomic, strong) NSTextView *acknowledgementPhrasesTextView;
 @property (nonatomic, strong) NSButton *messagesBridgeEnabledToggle;
+@property (nonatomic, strong) NSButton *messagesAllowAllSendersToggle;
 @property (nonatomic, strong) NSTextField *messagesReceivingAccountField;
 @property (nonatomic, strong) NSTextView *messagesAllowedSendersTextView;
 @property (nonatomic, strong) NSButton *requestMessagesAutomationPermissionButton;
@@ -274,16 +275,26 @@
         checkboxWithTitle:@"Enable replies received by ROB in Messages"
                    target:self
                    action:@selector(messagesBridgeEnabledChanged:)];
-    self.messagesBridgeEnabledToggle.frame = NSMakeRect(24, 430, 632, 28);
+    self.messagesBridgeEnabledToggle.frame = NSMakeRect(24, 438, 632, 28);
     self.messagesBridgeEnabledToggle.accessibilityIdentifier = @"ROB.MessagesBridge.Enabled";
     self.messagesBridgeEnabledToggle.accessibilityHelp =
         @"The bridge remains fail-closed until a receiving account and at least one approved sender are configured.";
     [messagesView addSubview:self.messagesBridgeEnabledToggle];
 
+    self.messagesAllowAllSendersToggle = [NSButton
+        checkboxWithTitle:@"Allow messages from any sender (Maker Faire public mode)"
+                   target:self
+                   action:@selector(messagesAllowAllSendersChanged:)];
+    self.messagesAllowAllSendersToggle.frame = NSMakeRect(24, 410, 632, 28);
+    self.messagesAllowAllSendersToggle.accessibilityIdentifier = @"ROB.MessagesBridge.AllowAllSenders";
+    self.messagesAllowAllSendersToggle.accessibilityHelp =
+        @"Allows any sender to text ROB while online and receive replies, overriding the approved senders list.";
+    [messagesView addSubview:self.messagesAllowAllSendersToggle];
+
     [messagesView addSubview:[self labelWithString:@"Receiving Messages account:"
-                                               frame:NSMakeRect(24, 397, 632, 20)]];
+                                               frame:NSMakeRect(24, 377, 632, 20)]];
     self.messagesReceivingAccountField = [[NSTextField alloc]
-        initWithFrame:NSMakeRect(24, 361, 500, 28)];
+        initWithFrame:NSMakeRect(24, 341, 500, 28)];
     self.messagesReceivingAccountField.placeholderString = @"rob@orbitusrobotics.com";
     self.messagesReceivingAccountField.delegate = self;
     self.messagesReceivingAccountField.accessibilityLabel = @"ROB receiving Messages account";
@@ -294,9 +305,9 @@
 
     [messagesView addSubview:[self labelWithString:
         @"Approved senders — one exact Messages handle (email or phone) per line (required):"
-        frame:NSMakeRect(24, 329, 632, 20)]];
+        frame:NSMakeRect(24, 309, 632, 20)]];
     NSScrollView *allowedSendersScrollView = [[NSScrollView alloc]
-        initWithFrame:NSMakeRect(24, 203, 632, 118)];
+        initWithFrame:NSMakeRect(24, 183, 632, 118)];
     allowedSendersScrollView.borderType = NSBezelBorder;
     allowedSendersScrollView.hasVerticalScroller = YES;
     allowedSendersScrollView.autohidesScrollers = YES;
@@ -817,6 +828,9 @@
     self.messagesBridgeEnabledToggle.state = [ROBMessagesBridge configuredEnabled]
         ? NSControlStateValueOn
         : NSControlStateValueOff;
+    self.messagesAllowAllSendersToggle.state = [ROBMessagesBridge configuredAllowAllSenders]
+        ? NSControlStateValueOn
+        : NSControlStateValueOff;
     self.messagesReceivingAccountField.stringValue =
         [ROBMessagesBridge configuredAccountIdentifier] ?: @"rob@orbitusrobotics.com";
     self.messagesAllowedSendersTextView.string =
@@ -844,13 +858,13 @@
     // bridge on every keystroke.
     [self.window makeFirstResponder:nil];
     BOOL shouldEnable = sender.state == NSControlStateValueOn;
-    if (shouldEnable && ![self messagesAllowlistContainsSender]) {
+    if (shouldEnable && ![ROBMessagesBridge configuredAllowAllSenders] && ![self messagesAllowlistContainsSender]) {
         sender.state = NSControlStateValueOff;
         [ROBMessagesBridge setConfiguredEnabled:NO];
         NSAlert *alert = [[NSAlert alloc] init];
         alert.messageText = @"Add an approved Messages sender first";
         alert.informativeText =
-            @"ROB will not read or answer Messages until at least one exact sender email address or phone number is listed.";
+            @"ROB will not read or answer Messages until at least one exact sender email address or phone number is listed, or unless you enable 'Allow messages from any sender'.";
         [alert addButtonWithTitle:@"OK"];
         [alert beginSheetModalForWindow:self.window completionHandler:nil];
         return;
@@ -859,6 +873,12 @@
     if (shouldEnable) {
         [self requestMessagesAutomationPermission:self.requestMessagesAutomationPermissionButton];
     }
+}
+
+- (void)messagesAllowAllSendersChanged:(NSButton *)sender
+{
+    BOOL allowAll = sender.state == NSControlStateValueOn;
+    [ROBMessagesBridge setConfiguredAllowAllSenders:allowAll];
 }
 
 - (void)openPrivacySettings:(NSString *)sectionName

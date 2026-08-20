@@ -65,7 +65,7 @@ static NSString * const ROBPythonExecutableDefaultsKey = @"ROBPythonExecutablePa
     // dependency.
     // Keep the fallback identical to PythonRequirements.txt in case the bundle
     // resource is ever omitted from a development build.
-    return @[@"depthai==3.8.0"];
+    return @[@"depthai==3.8.0", @"opencv-python"];
 }
 
 - (NSError *)errorWithCode:(ROBPythonRuntimeErrorCode)code
@@ -413,7 +413,7 @@ static NSString * const ROBPythonExecutableDefaultsKey = @"ROBPythonExecutablePa
         NSError *error = nil;
         NSString *output = [self runPythonWithArguments:@[
             @"-c",
-            @"import sys; import depthai; from amber_api.amber_robot import Amber_Robot; v=str(getattr(depthai, '__version__', '')); assert v == '3.8.0', 'Webcam_color.py requires DepthAI 3.8.0'; print(sys.executable); print(sys.version.split()[0]); print('depthai ' + v); print('amber_api bundled')"
+            @"import sys; import depthai; import cv2; from amber_api.amber_robot import Amber_Robot; v=str(getattr(depthai, '__version__', '')); assert v == '3.8.0', 'Webcam_color.py requires DepthAI 3.8.0'; print(sys.executable); print(sys.version.split()[0]); print('depthai ' + v); print('opencv ' + str(cv2.__version__)); print('amber_api bundled')"
         ] error:&error];
         dispatch_async(dispatch_get_main_queue(), ^{
             completion(error == nil, output ?: @"", error);

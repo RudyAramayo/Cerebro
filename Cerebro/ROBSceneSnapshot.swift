@@ -81,6 +81,9 @@ public struct SceneSnapshot: Codable, Sendable {
     public let cameraPose: ROBCameraPose?
     public let cameraQuality: ROBCameraQuality
     public let confidence: Double
+    public let mlxIdentifiedPeople: [String]
+    public let sidewalkCenterDeviation: Double
+    public let sidewalkConfidence: Double
 
     public func JSONData(prettyPrinted: Bool = false) throws -> Data {
         let encoder = JSONEncoder()
@@ -165,6 +168,11 @@ public final class ROBSceneSnapshotStore: @unchecked Sendable {
         source: "none", state: "stopped", hasAlignedDepth: false,
         validDepthFraction: nil, lensSmudgeConfidence: nil, confidence: 0
     )
+    private var mlxIdentifiedPeople: [String] = []
+    private var mlxIdentifiedPeopleUpdateUptime: TimeInterval?
+    private var sidewalkCenterDeviation: Double = 0.0
+    private var sidewalkConfidence: Double = 0.0
+    private var sidewalkUpdateUptime: TimeInterval?
 
     private init() {}
 
@@ -276,6 +284,23 @@ public final class ROBSceneSnapshotStore: @unchecked Sendable {
         updatePeople([], source: source)
     }
 
+    public func updateMLXIdentifiedPeople(_ people: [String]) {
+        lock.lock()
+        sequence &+= 1
+        mlxIdentifiedPeople = people
+        mlxIdentifiedPeopleUpdateUptime = ProcessInfo.processInfo.systemUptime
+        lock.unlock()
+    }
+
+    public func updateSidewalkDetection(deviation: Double, confidence: Double) {
+        lock.lock()
+        sequence &+= 1
+        sidewalkCenterDeviation = deviation
+        sidewalkConfidence = confidence
+        sidewalkUpdateUptime = ProcessInfo.processInfo.systemUptime
+        lock.unlock()
+    }
+
     public func updateObjects(_ observations: [ROBTrackedObject]) {
         lock.lock(); sequence &+= 1; objects = observations; lock.unlock()
     }
@@ -356,13 +381,21 @@ public final class ROBSceneSnapshotStore: @unchecked Sendable {
         let confidence = allConfidences.isEmpty
             ? 0
             : allConfidences.reduce(0, +) / Double(allConfidences.count)
+        let isMLXFresh = mlxIdentifiedPeopleUpdateUptime.map { nowUptime - $0 <= 15.0 } ?? false
+        let currentMLXPeople = isMLXFresh ? mlxIdentifiedPeople : []
+        let isSidewalkFresh = sidewalkUpdateUptime.map { nowUptime - $0 <= 5.0 } ?? false
+        let currentDeviation = isSidewalkFresh ? sidewalkCenterDeviation : 0.0
+        let currentConfidence = isSidewalkFresh ? sidewalkConfidence : 0.0
         return SceneSnapshot(
             schemaVersion: 1, sequence: sequence, capturedAt: Date(),
             cameraTimestampNanoseconds: cameraTimestampNanoseconds,
             people: currentPeople, objects: objects, gestures: gestures,
             freeSpace: currentLidarFreeSpace + depthFreeSpace, armPose: armPose,
             cameraPose: cameraPose,
-            cameraQuality: cameraQuality, confidence: confidence
+            cameraQuality: cameraQuality, confidence: confidence,
+            mlxIdentifiedPeople: currentMLXPeople,
+            sidewalkCenterDeviation: currentDeviation,
+            sidewalkConfidence: currentConfidence
         )
     }
 

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<document type="com.apple.InterfaceBuilder3.Cocoa.Storyboard.XIB" version="3.0" toolsVersion="24093.7" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none" useAutolayout="YES" initialViewController="B8D-0N-5wS">
+<document type="com.apple.InterfaceBuilder3.Cocoa.Storyboard.XIB" version="3.0" toolsVersion="24765" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none" useAutolayout="YES" initialViewController="B8D-0N-5wS">
     <dependencies>
-        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="24093.7"/>
-        <plugIn identifier="com.apple.SceneKitIBPlugin" version="24093.7"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="24765"/>
+        <plugIn identifier="com.apple.SceneKitIBPlugin" version="24765"/>
         <capability name="System colors introduced in macOS 10.14" minToolsVersion="10.0"/>
         <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
     </dependencies>
@@ -2600,7 +2600,7 @@ Brake
                                     <slider horizontalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="J1f-FG-Z84">
                                         <rect key="frame" x="42" y="82" width="19" height="76"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                        <sliderCell key="cell" continuous="YES" alignment="left" minValue="4375" maxValue="7675" doubleValue="7262.3420365021002" tickMarkPosition="right" sliderType="linear" id="Bud-rf-B0V"/>
+                                        <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4375" maxValue="7675" doubleValue="7014" tickMarkPosition="right" sliderType="linear" id="Bud-rf-B0V"/>
                                         <connections>
                                             <action selector="applyServoCommand:" target="cHj-5R-xNm" id="0Cp-xN-UBU"/>
                                         </connections>
@@ -2608,7 +2608,7 @@ Brake
                                     <slider horizontalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="CyK-bn-gZP">
                                         <rect key="frame" x="42" y="172" width="19" height="76"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                        <sliderCell key="cell" continuous="YES" alignment="left" minValue="4300" maxValue="7790" doubleValue="7790" tickMarkPosition="right" sliderType="linear" id="UIa-yF-izD"/>
+                                        <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4300" maxValue="7790" doubleValue="7330" tickMarkPosition="right" sliderType="linear" id="UIa-yF-izD"/>
                                         <connections>
                                             <action selector="applyServoCommand:" target="cHj-5R-xNm" id="1jw-j1-xfp"/>
                                         </connections>
@@ -4086,15 +4086,15 @@ Brake
                                 <rect key="frame" x="747" y="179" width="454" height="71"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                                 <clipView key="contentView" drawsBackground="NO" id="0EI-GH-yJB">
-                                    <rect key="frame" x="1" y="1" width="452" height="105"/>
+                                    <rect key="frame" x="1" y="1" width="452" height="69"/>
                                     <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                                     <subviews>
                                         <textView focusRingType="exterior" importsGraphics="NO" verticallyResizable="YES" findStyle="panel" continuousSpellChecking="YES" spellingCorrection="YES" smartInsertDelete="YES" id="kiU-Nb-ukE">
-                                            <rect key="frame" x="0.0" y="0.0" width="452" height="105"/>
+                                            <rect key="frame" x="0.0" y="0.0" width="452" height="69"/>
                                             <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                                             <color key="textColor" name="textColor" catalog="System" colorSpace="catalog"/>
                                             <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
-                                            <size key="minSize" width="452" height="105"/>
+                                            <size key="minSize" width="452" height="69"/>
                                             <size key="maxSize" width="473" height="10000000"/>
                                             <color key="insertionPointColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
                                         </textView>
@@ -4105,7 +4105,7 @@ Brake
                                     <autoresizingMask key="autoresizingMask"/>
                                 </scroller>
                                 <scroller key="verticalScroller" wantsLayer="YES" verticalHuggingPriority="750" doubleValue="1" horizontal="NO" id="JuS-jj-nLm">
-                                    <rect key="frame" x="436" y="1" width="17" height="105"/>
+                                    <rect key="frame" x="436" y="1" width="17" height="69"/>
                                     <autoresizingMask key="autoresizingMask"/>
                                 </scroller>
                             </scrollView>

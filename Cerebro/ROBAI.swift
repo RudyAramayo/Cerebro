@@ -3550,9 +3550,14 @@ private actor ROBLocalConversationFallback {
 
     private func generateReply(to rawPrompt: String) async -> ROBLocalConversationReply {
         let prompt = Self.boundedPrompt(rawPrompt)
-        let snapshotContext = (try? ROBSceneSnapshotStore.shared.snapshot().languageModelContext())
+        var snapshotContext = (try? ROBSceneSnapshotStore.shared.snapshot().languageModelContext())
             .map { String($0.prefix(8_000)) }
             ?? "No current sensor snapshot is available."
+
+        if let matches = try? await ROBMLXEngine.shared.retrieve(prompt, limit: 3), !matches.isEmpty {
+            let memoryText = matches.map { "- \($0.text)" }.joined(separator: "\n")
+            snapshotContext += "\n\nRetrieved offline semantic memories:\n\(memoryText)"
+        }
 
         do {
             let raw = try await Self.withTimeout(seconds: 4, label: "Apple Foundation Models") {

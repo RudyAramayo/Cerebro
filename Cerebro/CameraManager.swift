@@ -100,6 +100,8 @@ struct CameraFrameSet {
     var intrinsics: CameraIntrinsics? = nil
     var rectifiedLeft: CameraStereoFrame? = nil
     var rectifiedRight: CameraStereoFrame? = nil
+    var sidewalkCenterDeviation: Double? = nil
+    var sidewalkConfidence: Double? = nil
 }
 
 protocol CameraManagerDelegate: AnyObject {
@@ -1134,7 +1136,9 @@ private final class DepthCameraServiceClient {
                         ? result : nil
                 },
                 rectifiedLeft: CameraStereoFrame(width: header.stereoWidth, height: header.stereoHeight, pixels: leftData),
-                rectifiedRight: CameraStereoFrame(width: header.stereoWidth, height: header.stereoHeight, pixels: rightData)
+                rectifiedRight: CameraStereoFrame(width: header.stereoWidth, height: header.stereoHeight, pixels: rightData),
+                sidewalkCenterDeviation: header.sidewalkCenterDeviation,
+                sidewalkConfidence: header.sidewalkConfidence
             ), activeRunGeneration)
         }
     }
@@ -1295,6 +1299,8 @@ private struct DepthCameraPacketHeader: Decodable {
     let leftLength: Int
     let rightLength: Int
     let rgbIntrinsics: [Double]?
+    let sidewalkCenterDeviation: Double?
+    let sidewalkConfidence: Double?
 
     enum CodingKeys: String, CodingKey {
         case protocolVersion = "protocol_version"
@@ -1315,6 +1321,8 @@ private struct DepthCameraPacketHeader: Decodable {
         case leftLength = "left_length"
         case rightLength = "right_length"
         case rgbIntrinsics = "rgb_intrinsics"
+        case sidewalkCenterDeviation = "sidewalk_center_deviation"
+        case sidewalkConfidence = "sidewalk_confidence"
     }
 }
 
