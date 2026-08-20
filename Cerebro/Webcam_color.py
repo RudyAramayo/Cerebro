@@ -8,6 +8,7 @@ SDK failures are reported and retried instead of terminating the service.
 """
 
 import argparse
+import cv2
 from datetime import timedelta
 import fcntl
 import json

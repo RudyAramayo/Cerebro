@@ -568,3 +568,46 @@ public final class ROBFoundationSceneInterpreter {
         throw InterpreterError.unavailable("Cerebro was built without the macOS 26 Foundation Models framework.")
     }
 }
+
+public extension SceneSnapshot {
+    func formattedNaturalLanguageContext() -> String {
+        var lines: [String] = []
+        
+        // 1. People Detection (using our new SwiftMLX identification data)
+        if !mlxIdentifiedPeople.isEmpty {
+            let names = mlxIdentifiedPeople.joined(separator: ", ")
+            lines.append("- Detected recognized people in front of me: \(names).")
+        } else if !people.isEmpty {
+            lines.append("- Detected \(people.count) unrecognized people in view.")
+        } else {
+            lines.append("- No people are currently visible in front of me.")
+        }
+        
+        // 2. Sidewalk & Path Tracking (using our new OAK-D CNN data)
+        if sidewalkConfidence >= 0.5 {
+            let direction = sidewalkCenterDeviation < -0.1 ? "slightly to the left" : (sidewalkCenterDeviation > 0.1 ? "slightly to the right" : "straight ahead")
+            lines.append("- The downward camera shows a sidewalk or navigable path \(direction) (deviation: \(String(format: "%.2f", sidewalkCenterDeviation)), confidence: \(Int(sidewalkConfidence * 100))%).")
+        } else {
+            lines.append("- No sidewalk or pavement is currently detected in my immediate forward path.")
+        }
+        
+        // 3. Chess Pieces (using our new 3D Spatial Chess model data)
+        if !chessPieces.isEmpty {
+            let pieceNames = chessPieces.map { $0.type.replacingOccurrences(of: "_", with: " ") }.joined(separator: ", ")
+            lines.append("- There is a chessboard in view with \(chessPieces.count) pieces: \(pieceNames).")
+        }
+        
+        // 4. General Objects & Items
+        if !objects.isEmpty {
+            let labels = Array(Set(objects.map(\.label))).joined(separator: ", ")
+            lines.append("- General visible items in scene: \(labels).")
+        }
+        
+        // 5. Camera Quality / State
+        if cameraQuality.state == "reconnecting" || cameraQuality.state == "stopped" {
+            lines.append("- Note: The main depth camera is currently offline or reconnecting.")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+}

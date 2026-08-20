@@ -3550,8 +3550,8 @@ private actor ROBLocalConversationFallback {
 
     private func generateReply(to rawPrompt: String) async -> ROBLocalConversationReply {
         let prompt = Self.boundedPrompt(rawPrompt)
-        var snapshotContext = (try? ROBSceneSnapshotStore.shared.snapshot().languageModelContext())
-            .map { String($0.prefix(8_000)) }
+        let snapshot = try? ROBSceneSnapshotStore.shared.snapshot()
+        var snapshotContext = snapshot?.formattedNaturalLanguageContext()
             ?? "No current sensor snapshot is available."
 
         if let matches = try? await ROBMLXEngine.shared.retrieve(prompt, limit: 3), !matches.isEmpty {
