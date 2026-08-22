@@ -137,9 +137,11 @@ def main() -> None:
         "chatID: message.chatID" in BRIDGE
         and "sender: ROBMessagesBridgeConfiguration.canonicalHandle(message.sender)"
         in BRIDGE
+        and "originatingAccountAliases: message.chatAccountCandidates" in BRIDGE
         and "toChat: route.chatID" in BRIDGE
+        and "originatingAccountAliases: route.originatingAccountAliases" in BRIDGE
         and "expectedSender: route.sender" in BRIDGE,
-        "AI responses are not routed to the immutable originating chat and sender",
+        "AI responses are not routed to the immutable originating chat, account aliases, and sender",
     )
     require(
         'process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")' in BRIDGE
@@ -148,13 +150,13 @@ def main() -> None:
         "Messages reply text must travel as a Process argument, never through shell interpolation",
     )
     require(
-        "if (count of argv) is not 4" in BRIDGE
+        "if (count of argv) is less than 5" in BRIDGE
         and "set expectedSender to item 4 of argv" in BRIDGE
+        and "set expectedAccountAliases to items 5 thru -1 of argv" in BRIDGE
         and "on compactPhonePresentation(candidateValue, expectedValue)" in BRIDGE
-        and 'set colonAccountSuffix to ":" & comparedExpectedAccount' in BRIDGE
-        and 'set semicolonAccountSuffix to ";" & comparedExpectedAccount' in BRIDGE
-        and "comparedAccountID does not end with colonAccountSuffix" in BRIDGE
-        and "comparedAccountID does not end with semicolonAccountSuffix" in BRIDGE
+        and "on accountMatchesAlias(accountDescription, accountID, expectedAlias)" in BRIDGE
+        and "repeat with expectedAliasValue in expectedAccountAliases" in BRIDGE
+        and "if accountMatchesRoute is false" in BRIDGE
         and "accountID does not contain expectedAccount" not in BRIDGE
         and "set targetParticipants to participants of targetChat" in BRIDGE
         and "if (count of targetParticipants) is not 1" in BRIDGE

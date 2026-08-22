@@ -415,6 +415,7 @@ protocol ROBMessagesReplySending: AnyObject, Sendable {
         text: String,
         toChat chatID: String,
         account: String,
+        originatingAccountAliases: [String],
         expectedSender: String
     ) throws
 }
@@ -779,6 +780,9 @@ enum ROBMessagesReplyError: LocalizedError {
 }
 
 final class ROBMessagesAppleScriptReplySender: ROBMessagesReplySending, @unchecked Sendable {
+    private static let maximumAccountAliases = 8
+    private static let maximumAccountAliasCharacters = 512
+
     private static let script = """
     on compactPhonePresentation(candidateValue, expectedValue)
       set candidateText to candidateValue as text
@@ -792,12 +796,24 @@ final class ROBMessagesAppleScriptReplySender: ROBMessagesReplySending, @uncheck
       return compactText
     end compactPhonePresentation
 
+    on accountMatchesAlias(accountDescription, accountID, expectedAlias)
+      set comparedExpectedAlias to my compactPhonePresentation(expectedAlias, expectedAlias)
+      set comparedAccountDescription to my compactPhonePresentation(accountDescription, expectedAlias)
+      set comparedAccountID to my compactPhonePresentation(accountID, expectedAlias)
+      set colonAccountSuffix to ":" & comparedExpectedAlias
+      set semicolonAccountSuffix to ";" & comparedExpectedAlias
+      ignoring case
+        return comparedAccountDescription is comparedExpectedAlias or comparedAccountID is comparedExpectedAlias or comparedAccountID ends with colonAccountSuffix or comparedAccountID ends with semicolonAccountSuffix
+      end ignoring
+    end accountMatchesAlias
+
     on run argv
-      if (count of argv) is not 4 then error "Invalid Cerebro Messages arguments"
+      if (count of argv) is less than 5 then error "Invalid Cerebro Messages arguments"
       set targetID to item 1 of argv
       set replyText to item 2 of argv
       set expectedAccount to item 3 of argv
       set expectedSender to item 4 of argv
+      set expectedAccountAliases to items 5 thru -1 of argv
       tell application id "com.apple.MobileSMS"
         set matchingChats to every chat whose id is targetID
         if (count of matchingChats) is not 1 then error "Originating chat is unavailable"
@@ -805,23 +821,29 @@ final class ROBMessagesAppleScriptReplySender: ROBMessagesReplySending, @uncheck
         set targetAccount to account of targetChat
         set accountDescription to description of targetAccount as text
         set accountID to id of targetAccount as text
-        set comparedExpectedAccount to my compactPhonePresentation(expectedAccount, expectedAccount)
-        set comparedAccountDescription to my compactPhonePresentation(accountDescription, expectedAccount)
-        set comparedAccountID to my compactPhonePresentation(accountID, expectedAccount)
-        set colonAccountSuffix to ":" & comparedExpectedAccount
-        set semicolonAccountSuffix to ";" & comparedExpectedAccount
-        ignoring case
-          if comparedAccountDescription is not comparedExpectedAccount and comparedAccountID is not comparedExpectedAccount and comparedAccountID does not end with colonAccountSuffix and comparedAccountID does not end with semicolonAccountSuffix then error "Originating chat account changed"
-        end ignoring
+        set accountMatchesRoute to false
+        repeat with expectedAliasValue in expectedAccountAliases
+          if my accountMatchesAlias(accountDescription, accountID, expectedAliasValue as text) then set accountMatchesRoute to true
+        end repeat
+        if accountMatchesRoute is false then error "Originating chat account changed"
         set targetParticipants to participants of targetChat
         if (count of targetParticipants) is not 1 then error "Originating chat is no longer one-to-one"
         set participantHandle to handle of item 1 of targetParticipants as text
         set comparedParticipantHandle to my compactPhonePresentation(participantHandle, expectedSender)
         set comparedExpectedSender to my compactPhonePresentation(expectedSender, expectedSender)
+        set comparedExpectedAccount to my compactPhonePresentation(expectedAccount, expectedAccount)
         ignoring case
           if comparedParticipantHandle is comparedExpectedAccount then error "Originating chat participant is the receiving account"
           if comparedParticipantHandle is not comparedExpectedSender then error "Originating chat participant changed"
         end ignoring
+        repeat with expectedAliasValue in expectedAccountAliases
+          set expectedAlias to expectedAliasValue as text
+          set comparedParticipantAlias to my compactPhonePresentation(participantHandle, expectedAlias)
+          set comparedExpectedAlias to my compactPhonePresentation(expectedAlias, expectedAlias)
+          ignoring case
+            if comparedParticipantAlias is comparedExpectedAlias then error "Originating chat participant is the receiving account"
+          end ignoring
+        end repeat
         send replyText to targetChat
       end tell
       return "sent"
@@ -832,13 +854,30 @@ final class ROBMessagesAppleScriptReplySender: ROBMessagesReplySending, @uncheck
         text: String,
         toChat chatID: String,
         account: String,
+        originatingAccountAliases: [String],
         expectedSender: String
     ) throws {
+        let accountAliases = Array(Set(originatingAccountAliases.compactMap { value -> String? in
+            guard let normalized = ROBMessagesPlainTextPolicy.normalized(value),
+                  normalized.count <= Self.maximumAccountAliasCharacters,
+                  !normalized.unicodeScalars.contains(where: {
+                      CharacterSet.controlCharacters.contains($0)
+                  }) else {
+                return nil
+            }
+            let canonical = ROBMessagesBridgeConfiguration.canonicalHandle(normalized)
+            return canonical.isEmpty ? nil : canonical
+        })).sorted()
         guard let reply = ROBMessagesPlainTextPolicy.normalized(text),
               !chatID.isEmpty,
               !account.isEmpty,
               !expectedSender.isEmpty,
-              account.caseInsensitiveCompare(expectedSender) != .orderedSame else {
+              account.caseInsensitiveCompare(expectedSender) != .orderedSame,
+              !accountAliases.isEmpty,
+              accountAliases.count <= Self.maximumAccountAliases,
+              accountAliases.contains(where: {
+                  ROBMessagesBridgePolicy.accountCandidate($0, matches: account)
+              }) else {
             throw ROBMessagesReplyError.failed("The correlated reply was not safe plain text.")
         }
         do {
@@ -869,7 +908,7 @@ final class ROBMessagesAppleScriptReplySender: ROBMessagesReplySending, @uncheck
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         process.arguments = [
             "-e", Self.script, "--", chatID, boundedReply, account, expectedSender
-        ]
+        ] + accountAliases
         let errorPipe = Pipe()
         process.standardOutput = Pipe()
         process.standardError = errorPipe
@@ -1052,6 +1091,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         let messageGUID: String
         let sender: String
         let receivingAccount: String
+        let originatingAccountAliases: [String]
         let generation: UInt64
     }
 
@@ -1559,6 +1599,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             messageGUID: message.guid,
             sender: ROBMessagesBridgeConfiguration.canonicalHandle(message.sender),
             receivingAccount: configuration.receivingAccount,
+            originatingAccountAliases: message.chatAccountCandidates,
             generation: generation
         )
         state = "processing"
@@ -1610,6 +1651,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
                     text: reply,
                     toChat: route.chatID,
                     account: account,
+                    originatingAccountAliases: route.originatingAccountAliases,
                     expectedSender: route.sender
                 )
                 sendResult = .success(())

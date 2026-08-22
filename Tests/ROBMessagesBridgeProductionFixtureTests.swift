@@ -92,6 +92,7 @@ private final class FixtureReplySender: ROBMessagesReplySending, @unchecked Send
         let text: String
         let chatID: String
         let account: String
+        let originatingAccountAliases: [String]
         let expectedSender: String
     }
 
@@ -102,6 +103,7 @@ private final class FixtureReplySender: ROBMessagesReplySending, @unchecked Send
         text: String,
         toChat chatID: String,
         account: String,
+        originatingAccountAliases: [String],
         expectedSender: String
     ) {
         lock.lock()
@@ -109,6 +111,7 @@ private final class FixtureReplySender: ROBMessagesReplySending, @unchecked Send
             text: text,
             chatID: chatID,
             account: account,
+            originatingAccountAliases: originatingAccountAliases,
             expectedSender: expectedSender
         ))
         lock.unlock()
@@ -614,12 +617,14 @@ private struct ROBMessagesBridgeProductionFixtureTests {
                     text: "Answer B",
                     chatID: "fixture-chat-B",
                     account: account,
+                    originatingAccountAliases: [account, "opaque-account-id"],
                     expectedSender: "friend@example.com"
                 ),
                 .init(
                     text: "Answer A",
                     chatID: "fixture-chat-A",
                     account: account,
+                    originatingAccountAliases: [account, "opaque-account-id"],
                     expectedSender: "owner@example.com"
                 ),
             ],
