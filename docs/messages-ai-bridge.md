@@ -14,11 +14,16 @@ room. It is intentionally disabled until an operator configures it locally.
    one per line. An empty list rejects every sender.
 5. In **System Settings → Privacy & Security → Full Disk Access**, add and
    enable the same Cerebro app build that will run the bridge, then restart it.
-6. Turn on **Enable replies received by ROB in Messages**. On the first reply,
-   approve macOS's Automation request for Cerebro to control Messages.
+6. Click **Request Messages Automation Access**. Cerebro checks the current
+   macOS TCC decision, requests consent when it is undecided, and displays an
+   explicit granted/required result. Then turn on **Enable replies received by
+   ROB in Messages**.
 7. Open **Services** and verify that **Messages AI Bridge** changes to
    **Listening**. A saved Gemini credential is required for its isolated AI
    sessions.
+
+Bridge startup also performs a non-prompting Automation check and refuses to
+enter Listening when Cerebro is not currently authorized to control Messages.
 
 The first successful start records the current Messages database high-water
 mark. It does not replay or answer existing conversation history.
@@ -72,9 +77,10 @@ If the card remains unavailable:
 
 - **Full Disk Access required:** verify the exact running app is enabled, quit
   Cerebro completely, and reopen it.
-- **Automation permission required:** enable Cerebro under **Privacy & Security
-  → Automation → Messages**. Remove/re-add the permission only if macOS no
-  longer prompts.
+- **Automation permission required:** click **Request Messages Automation
+  Access**. If access was previously denied, use the alert's **Open Automation
+  Settings** action and enable Cerebro → Messages, then click the request button
+  again so the bridge rechecks and reloads its configuration.
 - **AI unavailable:** save a valid Gemini credential and verify normal Gemini
   connectivity in Services.
 - **Listening but no response:** confirm the sender text exactly matches its

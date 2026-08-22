@@ -260,6 +260,13 @@ def main() -> None:
         "Cerebro does not explain the Automation permission used to send Messages replies",
     )
     require(
+        "AEDeterminePermissionToAutomateTarget(" in BRIDGE
+        and "askUserIfNeeded: false" in BRIDGE
+        and "automationPermissionCheck(false)" in BRIDGE
+        and "checkMessagesAutomationPermission()" in BRIDGE,
+        "Bridge initialization no longer performs a non-prompting Messages Automation check",
+    )
+    require(
         "ENABLE_HARDENED_RUNTIME = YES" in PROJECT,
         "The Cerebro target no longer enables the hardened runtime",
     )
@@ -281,8 +288,11 @@ def main() -> None:
         and 'requestMusicAutomationPermission' in SETTINGS
         and 'handleAutomationPermissionRequest' in SETTINGS
         and '[ROBMessagesBridge requestMessagesAutomationPermission]' in SETTINGS
+        and 'QOS_CLASS_USER_INITIATED' in SETTINGS
+        and 'Messages Automation permission…' in SETTINGS
+        and '[[ROBMessagesBridge shared] reloadConfiguration]' in SETTINGS
         and '[ROBAppleMusicPermissions requestAutomationPermission]' in SETTINGS,
-        "Settings permission-request actions no longer dispatch through the runtime probes",
+        "Settings permission-request actions no longer check asynchronously and reload the bridge",
     )
     require(
         "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?" in SETTINGS

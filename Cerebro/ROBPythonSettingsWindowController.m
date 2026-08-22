@@ -356,7 +356,7 @@
                                                                    frame:NSMakeRect(14, 19, 250, 28)
                                                                   action:@selector(requestMessagesAutomationPermission:)];
     self.requestMessagesAutomationPermissionButton.toolTip =
-        @"Run a lightweight Messages AppleScript call to trigger the local automation permission prompt.";
+        @"Check Cerebro's current Messages Automation authorization and request macOS consent when it has not been decided.";
     self.requestMusicAutomationPermissionButton = [self buttonWithTitle:@"Request Music Automation Access"
                                                                 frame:NSMakeRect(276, 19, 250, 28)
                                                                action:@selector(requestMusicAutomationPermission:)];
@@ -963,23 +963,68 @@
 - (void)handleAutomationPermissionRequest:(NSString *)error
                               forTarget:(NSString *)friendlyName
 {
-    if (error.length == 0) {
+    BOOL granted = error.length == 0;
+    if (granted) {
         [self setLogText:[NSString stringWithFormat:
             @"%@ automation permission is currently granted.",
             friendlyName]];
-        return;
+    } else {
+        [self setLogText:[NSString stringWithFormat:
+            @"%@ automation permission is not granted yet: %@",
+            friendlyName,
+            error]];
     }
-    [self setLogText:[NSString stringWithFormat:
-        @"%@ automation permission is not granted yet: %@",
-        friendlyName,
-        error]];
-    [self openAutomationSettings:self];
+
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.alertStyle = granted ? NSAlertStyleInformational : NSAlertStyleWarning;
+    alert.messageText = granted
+        ? [NSString stringWithFormat:@"%@ Automation Access Granted", friendlyName]
+        : [NSString stringWithFormat:@"%@ Automation Access Required", friendlyName];
+    alert.informativeText = granted
+        ? [NSString stringWithFormat:
+            @"Cerebro is authorized to control %@ for automated replies.",
+            friendlyName]
+        : (error.length > 0
+            ? error
+            : [NSString stringWithFormat:
+                @"Enable Cerebro → %@ in System Settings → Privacy & Security → Automation.",
+                friendlyName]);
+    [alert addButtonWithTitle:granted ? @"OK" : @"Open Automation Settings"];
+    if (!granted) {
+        [alert addButtonWithTitle:@"Cancel"];
+    }
+
+    __weak typeof(self) weakSelf = self;
+    [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
+        if (!granted && response == NSAlertFirstButtonReturn) {
+            [weakSelf openAutomationSettings:weakSelf];
+        }
+    }];
 }
 
 - (void)requestMessagesAutomationPermission:(id)sender
 {
-    [self handleAutomationPermissionRequest:[ROBMessagesBridge requestMessagesAutomationPermission]
-                                  forTarget:@"Messages"];
+    NSButton *button = [sender isKindOfClass:NSButton.class]
+        ? (NSButton *)sender
+        : self.requestMessagesAutomationPermissionButton;
+    button.enabled = NO;
+    [self setLogText:@"Checking Messages Automation permission…"];
+
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSString *error = [ROBMessagesBridge requestMessagesAutomationPermission];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (strongSelf == nil) {
+                return;
+            }
+            button.enabled = YES;
+            [strongSelf handleAutomationPermissionRequest:error forTarget:@"Messages"];
+            if (error.length == 0) {
+                [[ROBMessagesBridge shared] reloadConfiguration];
+            }
+        });
+    });
 }
 
 - (void)requestMusicAutomationPermission:(id)sender

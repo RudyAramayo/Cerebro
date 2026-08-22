@@ -390,10 +390,15 @@ private struct ROBMessagesBridgeProductionFixtureTests {
         let ai = ROBMessagesAIResponder()
         let replies = FixtureReplySender()
         let inbox = ROBMessagesSQLiteInbox(databaseURL: database.url)
+        var automationPermissionChecks: [Bool] = []
         let bridge = ROBMessagesBridge(
             inbox: inbox,
             replySender: replies,
-            aiResponder: ai
+            aiResponder: ai,
+            automationPermissionCheck: { askUserIfNeeded in
+                automationPermissionChecks.append(askUserIfNeeded)
+                return nil
+            }
         )
         bridge.start()
         defer { bridge.stop() }
@@ -402,6 +407,10 @@ private struct ROBMessagesBridgeProductionFixtureTests {
             bridge.statusSnapshot().state == "listening"
         }
         let listeningStatus = bridge.statusSnapshot()
+        try expect(
+            automationPermissionChecks == [false],
+            "Bridge initialization did not perform one non-prompting Automation check"
+        )
         try expect(!listeningStatus.allowAllSenders, "Restricted mode was reported as public")
         try expect(listeningStatus.activeAIProvider == nil, "A fixture AI provider was reported active")
         try expect(listeningStatus.lastAIProvider == nil, "A fixture AI provider was reported as last")
@@ -736,6 +745,31 @@ private struct ROBMessagesBridgeProductionFixtureTests {
             ai.submissions.last?.prompt == "Allowed after re-enable",
             "The post-enable prompt was not the newly authorized message"
         )
+
+        var deniedAutomationChecks: [Bool] = []
+        let deniedAutomationBridge = ROBMessagesBridge(
+            inbox: inbox,
+            replySender: FixtureReplySender(),
+            aiResponder: ROBMessagesAIResponder(),
+            automationPermissionCheck: { askUserIfNeeded in
+                deniedAutomationChecks.append(askUserIfNeeded)
+                return "Fixture Automation permission denied"
+            }
+        )
+        deniedAutomationBridge.start()
+        try expect(
+            deniedAutomationBridge.statusSnapshot().state
+                == "Automation permission required",
+            "A denied startup Automation check entered Listening"
+        )
+        deniedAutomationBridge.reloadConfiguration()
+        try expect(
+            deniedAutomationChecks == [false, false]
+                && deniedAutomationBridge.statusSnapshot().state
+                    == "Automation permission required",
+            "A configuration reload bypassed the denied Automation check"
+        )
+        deniedAutomationBridge.stop()
 
         print("ROB production Messages bridge fixtures passed")
     }

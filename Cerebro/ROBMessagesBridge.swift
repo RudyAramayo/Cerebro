@@ -9,6 +9,7 @@
 
 import Foundation
 import Cocoa
+import ApplicationServices
 import SQLite3
 
 private let ROBMessagesSQLiteTransient = unsafeBitCast(
@@ -843,6 +844,34 @@ private enum ROBAppleScriptPermissionProbeError: Error {
     case executionFailed(String)
 }
 
+private enum ROBAppleEventAutomationPermission {
+    static func errorDescription(
+        bundleIdentifier: String,
+        applicationName: String,
+        askUserIfNeeded: Bool
+    ) -> String? {
+        let target = NSAppleEventDescriptor(bundleIdentifier: bundleIdentifier)
+        let status = AEDeterminePermissionToAutomateTarget(
+            target.aeDesc,
+            typeWildCard,
+            typeWildCard,
+            askUserIfNeeded
+        )
+        switch status {
+        case noErr:
+            return nil
+        case OSStatus(errAEEventNotPermitted):
+            return "Automation permission for \(applicationName) is denied. Enable Cerebro → \(applicationName) in System Settings → Privacy & Security → Automation."
+        case OSStatus(errAEEventWouldRequireUserConsent):
+            return "Automation permission for \(applicationName) has not been granted yet. Click Request \(applicationName) Automation Access to show the macOS consent prompt."
+        case OSStatus(procNotFound):
+            return "\(applicationName) is unavailable. Open \(applicationName), then check Automation access again."
+        default:
+            return "Unable to verify \(applicationName) Automation permission (OSStatus \(status))."
+        }
+    }
+}
+
 private enum ROBAppleScriptPermissionProbe {
     static func requestControl(application: String, script: String) throws {
         if Thread.isMainThread {
@@ -968,6 +997,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
     private let inbox: ROBMessagesInboxReading
     private let replySender: ROBMessagesReplySending
     private let aiResponder: ROBMessagesAIResponder
+    private let automationPermissionCheck: (_ askUserIfNeeded: Bool) -> String?
     private let replyAuthorizationGate = ROBMessagesReplyAuthorizationGate()
     private let workerQueue = DispatchQueue(label: "com.orbitusrobotics.Cerebro.MessagesBridge")
     private var configuration: ROBMessagesBridgeConfiguration
@@ -983,27 +1013,41 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
     private var lastInboundAt: Date?
     private var lastReplyAt: Date?
     private var hasStarted = false
-    private var hasRequestedMessagesAutomationPermission = false
     private var hasRequestedFullDiskAccessPermission = false
-    private var hasOpenedMessagesAutomationSettings = false
     private var hasOpenedFullDiskAccessSettings = false
 
     private override convenience init() {
         self.init(
             inbox: ROBMessagesSQLiteInbox(),
             replySender: ROBMessagesAppleScriptReplySender(),
-            aiResponder: ROBMessagesAIResponder()
+            aiResponder: ROBMessagesAIResponder(),
+            automationPermissionCheck: { askUserIfNeeded in
+                ROBAppleEventAutomationPermission.errorDescription(
+                    bundleIdentifier: "com.apple.MobileSMS",
+                    applicationName: "Messages",
+                    askUserIfNeeded: askUserIfNeeded
+                )
+            }
         )
     }
 
     init(
         inbox: ROBMessagesInboxReading,
         replySender: ROBMessagesReplySending,
-        aiResponder: ROBMessagesAIResponder
+        aiResponder: ROBMessagesAIResponder,
+        automationPermissionCheck: @escaping (_ askUserIfNeeded: Bool) -> String? = {
+            askUserIfNeeded in
+            ROBAppleEventAutomationPermission.errorDescription(
+                bundleIdentifier: "com.apple.MobileSMS",
+                applicationName: "Messages",
+                askUserIfNeeded: askUserIfNeeded
+            )
+        }
     ) {
         self.inbox = inbox
         self.replySender = replySender
         self.aiResponder = aiResponder
+        self.automationPermissionCheck = automationPermissionCheck
         configuration = Self.loadConfiguration()
         let defaults = UserDefaults.standard
         cursor = (defaults.object(forKey: Self.cursorDefaultsKey) as? NSNumber)?.int64Value
@@ -1030,25 +1074,23 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         postSettingsChange()
     }
 
-    /// Triggers a one-time Messages AppleScript automation permission check.
-    /// Returns an optional user-facing error when permission is denied.
+    /// Checks the current Messages Automation decision and asks macOS for
+    /// consent when it has not been decided yet. Returns nil only when granted.
     @objc public static func requestMessagesAutomationPermission() -> NSString? {
-        do {
-            try ROBAppleScriptPermissionProbe.requestControl(
-            application: "com.apple.MobileSMS",
-            script: """
-                tell application id "com.apple.MobileSMS"
-                  return name
-                end tell
-                """
-            )
-            return nil
-        } catch {
-            if let localized = (error as? LocalizedError)?.errorDescription {
-                return NSString(string: localized)
-            }
-            return NSString(string: error.localizedDescription)
-        }
+        ROBAppleEventAutomationPermission.errorDescription(
+            bundleIdentifier: "com.apple.MobileSMS",
+            applicationName: "Messages",
+            askUserIfNeeded: true
+        ).map(NSString.init(string:))
+    }
+
+    /// Checks the current TCC decision without presenting a consent prompt.
+    @objc public static func checkMessagesAutomationPermission() -> NSString? {
+        ROBAppleEventAutomationPermission.errorDescription(
+            bundleIdentifier: "com.apple.MobileSMS",
+            applicationName: "Messages",
+            askUserIfNeeded: false
+        ).map(NSString.init(string:))
     }
 
     public static func configuredAccountIdentifier() -> String {
@@ -1103,9 +1145,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         guard hasStarted else { return }
         hasStarted = false
         generation &+= 1
-        hasRequestedMessagesAutomationPermission = false
         hasRequestedFullDiskAccessPermission = false
-        hasOpenedMessagesAutomationSettings = false
         hasOpenedFullDiskAccessSettings = false
         replyAuthorizationGate.update(
             generation: generation,
@@ -1127,14 +1167,10 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         applyCurrentConfiguration()
     }
 
-    private func requestMessagesAutomationPermissionIfNeeded() -> Bool {
-        guard !hasRequestedMessagesAutomationPermission else { return true }
-        hasRequestedMessagesAutomationPermission = true
-        if let automationError = Self.requestMessagesAutomationPermission() {
+    private func checkMessagesAutomationPermission() -> Bool {
+        if let automationError = automationPermissionCheck(false) {
             state = "Automation permission required"
             detail = "Messages automation: \(automationError)"
-            hasOpenedMessagesAutomationSettings = false
-            openMessagesAutomationSettingsIfNeeded()
             publishStatus()
             return false
         }
@@ -1154,16 +1190,6 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             }
         }
         return false
-    }
-
-    private func openMessagesAutomationSettingsIfNeeded() {
-        guard !hasOpenedMessagesAutomationSettings else { return }
-        hasOpenedMessagesAutomationSettings = true
-        if !openSystemSettings(forPrivacySection: "Privacy_Automation") {
-            state = "error"
-            detail = "Unable to open System Settings Privacy & Security → Automation."
-            publishStatus()
-        }
     }
 
     private func openFullDiskAccessSettingsIfNeeded() {
@@ -1267,7 +1293,6 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             // restart continues from its persisted cursor.
             cursor = nil
             UserDefaults.standard.removeObject(forKey: Self.cursorDefaultsKey)
-            hasRequestedMessagesAutomationPermission = false
             hasRequestedFullDiskAccessPermission = false
             hasOpenedFullDiskAccessSettings = false
         }
@@ -1300,7 +1325,6 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         )
 
         guard configuration.enabled else {
-            hasRequestedMessagesAutomationPermission = false
             hasRequestedFullDiskAccessPermission = false
             hasOpenedFullDiskAccessSettings = false
             state = "disabled"
@@ -1326,7 +1350,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             publishStatus()
             return
         }
-        guard requestMessagesAutomationPermissionIfNeeded() else {
+        guard checkMessagesAutomationPermission() else {
             return
         }
         requestFullDiskAccessPermissionIfNeeded()
