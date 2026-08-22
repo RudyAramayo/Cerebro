@@ -36,6 +36,7 @@ serial = text("ROBSerialBox.m")
 lidar = text("ROBAutonomyCoordinator.swift")
 insta = text("ROBInsta360CameraService.swift")
 app = text("AppDelegate.m")
+window = text("ROBRecordingWindowController.swift")
 
 require(face, "offerCameraFrame(role: .face", "face frames are not recorded")
 require(belly, "offerCameraFrame(role: .belly", "belly frames are not recorded")
@@ -45,6 +46,9 @@ require(insta, "recordingFrameConsumer", "Insta360 recorder consumer is missing"
 require(insta, 'recordingPreviewResolution == "3840x1920"', "Insta360 4K preview selection is missing")
 require(app, 'initWithTitle:@"Open Recording Control…"', "recording control menu is missing")
 require(app, "stopAllForApplicationTermination", "recordings are not finalized at termination")
+require(window, "scroll.documentView = document", "recording controls can collapse instead of scrolling")
+require(window, "setContentCompressionResistancePriority(.required", "recording control text can be compressed")
+require(window, "minimumHeight: 280", "camera-footage controls do not have a usable minimum height")
 
 project = (ROOT / "Cerebro.xcodeproj" / "project.pbxproj").read_text(encoding="utf-8")
 require(project, "ROBRecordingCoordinator.swift in Sources", "coordinator is not in the app target")

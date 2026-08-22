@@ -72,3 +72,18 @@ size, an encoded 4K frame must not be mistaken for 4K source detail.
 
 Both modes refuse to start below 2 GB of free disk space. The panel remains a
 live recording indicator; closing it does not stop recording.
+
+## Validation
+
+The layout smoke test opens the native control window with a fake inactive
+recorder, verifies that both sections retain usable heights, checks that rows
+and button titles do not overlap or compress, and confirms the compact window
+scrolls instead of collapsing its contents:
+
+```sh
+xcrun swiftc -parse-as-library -swift-version 5 -warnings-as-errors \
+  Cerebro/ROBRecordingWindowController.swift \
+  Tests/ROBRecordingWindowLayoutSmokeTests.swift \
+  -o /tmp/ROBRecordingWindowLayoutSmokeTests
+/tmp/ROBRecordingWindowLayoutSmokeTests
+```

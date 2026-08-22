@@ -34,7 +34,7 @@ import Foundation
 
     private override init(window: NSWindow?) {
         let createdWindow = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 670, height: 590),
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 740),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
@@ -42,7 +42,7 @@ import Foundation
         super.init(window: createdWindow)
         createdWindow.title = "ROB Recording Control"
         createdWindow.isReleasedWhenClosed = false
-        createdWindow.minSize = NSSize(width: 620, height: 540)
+        createdWindow.minSize = NSSize(width: 660, height: 560)
         createdWindow.delegate = self
         createdWindow.center()
         configureContent()
@@ -90,6 +90,7 @@ import Foundation
             "Training mode persists synchronized learning evidence. Camera footage is a separate product and is never added to the training corpus automatically."
         )
         intro.textColor = .secondaryLabelColor
+        intro.maximumNumberOfLines = 0
 
         trainingFace.state = .on
         trainingBelly.state = .on
@@ -118,7 +119,12 @@ import Foundation
         )
         trainingNote.textColor = .secondaryLabelColor
         trainingNote.font = .systemFont(ofSize: 11)
-        let trainingBox = box(title: "Traversability training corpus", views: [trainingOptions, trainingActions, trainingStatus, trainingNote])
+        trainingStatus.maximumNumberOfLines = 0
+        let trainingBox = box(
+            title: "Traversability training corpus",
+            minimumHeight: 200,
+            views: [trainingOptions, trainingActions, trainingStatus, trainingNote]
+        )
 
         footageFace.state = .on
         footageBelly.state = .on
@@ -148,25 +154,55 @@ import Foundation
         )
         footageNote.textColor = .secondaryLabelColor
         footageNote.font = .systemFont(ofSize: 11)
-        let footageBox = box(title: "Camera footage (not training data)", views: [faceRow, bellyRow, instaRow, footageActions, footageStatus, footageNote])
+        footageStatus.maximumNumberOfLines = 0
+        let footageBox = box(
+            title: "Camera footage (not training data)",
+            minimumHeight: 280,
+            views: [faceRow, bellyRow, instaRow, footageActions, footageStatus, footageNote]
+        )
 
         let privacy = NSTextField(wrappingLabelWithString:
             "Recording begins only when you press Start and continues if this panel is closed. Stop the session explicitly before removing power. Training data is stored in Application Support; footage is stored in Movies/ROB Recordings."
         )
         privacy.textColor = .secondaryLabelColor
         privacy.font = .systemFont(ofSize: 11)
+        privacy.maximumNumberOfLines = 0
 
         let stack = NSStackView(views: [heading, intro, trainingBox, footageBox, privacy])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 12
+        stack.spacing = 14
         stack.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(stack)
+
+        let document = NSView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(stack)
+
+        let scroll = NSScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.documentView = document
+        content.addSubview(scroll)
+
+        for view in [heading, intro, trainingBox, footageBox, privacy] {
+            view.setContentCompressionResistancePriority(.required, for: .vertical)
+        }
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
-            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
-            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 20),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor, constant: -20),
+            scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: content.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+            document.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
+            document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            document.heightAnchor.constraint(greaterThanOrEqualTo: scroll.contentView.heightAnchor),
+            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -20),
+            stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 20),
+            stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -20),
             trainingBox.widthAnchor.constraint(equalTo: stack.widthAnchor),
             footageBox.widthAnchor.constraint(equalTo: stack.widthAnchor),
             intro.widthAnchor.constraint(equalTo: stack.widthAnchor),
@@ -185,10 +221,17 @@ import Foundation
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 8
+        for view in views where view is NSControl {
+            view.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
         return stack
     }
 
-    private func box(title: String, views: [NSView]) -> NSBox {
+    private func box(
+        title: String,
+        minimumHeight: CGFloat,
+        views: [NSView]
+    ) -> NSBox {
         let box = NSBox()
         box.title = title
         box.boxType = .primary
@@ -196,9 +239,23 @@ import Foundation
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 8
-        stack.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 10, right: 10)
-        for view in views { view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
-        box.contentView = stack
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.setContentCompressionResistancePriority(.required, for: .vertical)
+        for view in views {
+            view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            view.setContentCompressionResistancePriority(.required, for: .vertical)
+        }
+        if let content = box.contentView {
+            content.addSubview(stack)
+            NSLayoutConstraint.activate([
+                stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10),
+                stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -10),
+                stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 10),
+                stack.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -10),
+            ])
+        }
+        box.heightAnchor.constraint(greaterThanOrEqualToConstant: minimumHeight).isActive = true
+        box.setContentCompressionResistancePriority(.required, for: .vertical)
         return box
     }
 
