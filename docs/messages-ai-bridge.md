@@ -16,9 +16,10 @@ until an operator configures it locally.
    `mkierie@gmail.com`. Enter any additional approved sender's exact Messages
    email address or phone handle, one per line.
 5. Click **Administrator Commands…** to review the command table. The initial
-   `Shutdown` command asks the originating administrator to reply `YES` within
-   90 seconds, then runs its locally editable zsh script. The command phrase,
-   question, confirmation reply, script, and enabled state are configurable.
+   `Shutdown` and `Reboot` commands ask the originating administrator to reply
+   `YES` within 90 seconds, then run their locally editable zsh scripts. The
+   command phrases, questions, confirmation replies, scripts, and enabled states
+   are configurable.
 6. In **System Settings → Privacy & Security → Full Disk Access**, add and
    enable the same Cerebro app build that will run the bridge, then restart it.
 7. Click **Request Messages Automation Access**. Cerebro checks the current
@@ -72,10 +73,10 @@ Cerebro user with the fixed `/bin/zsh -f -s` interpreter and a 30-second limit.
 The script arrives through standard input; no inbound message text is ever
 interpolated into a shell command, argument, environment variable, or path.
 Because scripts have the user's macOS authority, saving changes presents a
-local critical warning. The initial Shutdown script asks System Events to shut
-down macOS, which may cause macOS to request Automation access the first time.
-Command and confirmation messages are consumed by this deterministic path and
-are not supplied to the AI.
+local critical warning. The initial Shutdown and Reboot scripts ask System
+Events to shut down or restart macOS, respectively, which may cause macOS to
+request Automation access the first time. Command and confirmation messages are
+consumed by this deterministic path and are not supplied to the AI.
 
 - Each active chat owns a separate Gemini Live session with text responses,
   microphone and live-camera sources off. It exposes only read-only publisher

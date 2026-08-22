@@ -58,6 +58,15 @@ struct ROBMessagesAdministratorCommand: Codable, Equatable, Sendable {
         script: #"/usr/bin/osascript -e 'tell application id "com.apple.systemevents" to shut down'"#
     )
 
+    static let reboot = ROBMessagesAdministratorCommand(
+        id: "reboot",
+        isEnabled: true,
+        command: "Reboot",
+        confirmationPrompt: "Reboot ROB's computer? Reply YES within 90 seconds to confirm.",
+        confirmationResponse: "YES",
+        script: #"/usr/bin/osascript -e 'tell application id "com.apple.systemevents" to restart'"#
+    )
+
     func matches(_ text: String) -> Bool {
         isEnabled && command.caseInsensitiveCompare(text) == .orderedSame
     }
@@ -91,21 +100,49 @@ enum ROBMessagesAdministratorCommandValidationError: LocalizedError {
 }
 
 enum ROBMessagesAdministratorCommandStore {
-    static let defaultsKey = "ROBMessagesBridgeAdministratorCommandsV1"
+    static let defaultsKey = "ROBMessagesBridgeAdministratorCommandsV2"
+    static let legacyDefaultsKey = "ROBMessagesBridgeAdministratorCommandsV1"
     static let maximumCommands = 32
     static let maximumCommandCharacters = 80
     static let maximumPromptCharacters = 500
     static let maximumResponseCharacters = 80
     static let maximumScriptBytes = 32 * 1_024
+    static let builtInCommands: [ROBMessagesAdministratorCommand] = [.shutdown, .reboot]
 
     static func load(defaults: UserDefaults = .standard) -> [ROBMessagesAdministratorCommand] {
-        guard let data = defaults.data(forKey: defaultsKey),
-              let decoded = try? JSONDecoder().decode(
+        if let data = defaults.data(forKey: defaultsKey),
+           let decoded = try? JSONDecoder().decode(
+               [ROBMessagesAdministratorCommand].self,
+               from: data
+           ),
+           let validated = try? validate(decoded) {
+            return validated
+        }
+
+        guard defaults.object(forKey: defaultsKey) == nil,
+              let legacyData = defaults.data(forKey: legacyDefaultsKey),
+              let legacyCommands = try? JSONDecoder().decode(
                   [ROBMessagesAdministratorCommand].self,
-                  from: data
+                  from: legacyData
               ),
-              let validated = try? validate(decoded) else {
-            return [.shutdown]
+              var migrated = try? validate(legacyCommands) else {
+            return builtInCommands
+        }
+
+        let alreadyHasReboot = migrated.contains {
+            $0.id == ROBMessagesAdministratorCommand.reboot.id ||
+                $0.command.caseInsensitiveCompare(
+                    ROBMessagesAdministratorCommand.reboot.command
+                ) == .orderedSame
+        }
+        if !alreadyHasReboot && migrated.count < maximumCommands {
+            migrated.append(.reboot)
+        }
+        guard let validated = try? validate(migrated) else {
+            return builtInCommands
+        }
+        if let encoded = try? JSONEncoder().encode(validated) {
+            defaults.set(encoded, forKey: defaultsKey)
         }
         return validated
     }

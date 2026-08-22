@@ -504,6 +504,7 @@ private struct ROBMessagesBridgeProductionFixtureTests {
         "ROBMessagesBridgeLastMessageRowID",
         "ROBMessagesBridgeRecentMessageGUIDs",
         "ROBMessagesBridgeAdministratorCommandsV1",
+        "ROBMessagesBridgeAdministratorCommandsV2",
     ]
 
     static func main() async throws {
@@ -886,6 +887,52 @@ private struct ROBMessagesBridgeProductionFixtureTests {
         )
 
         _ = try database.addMessage(
+            guid: "administrator-reboot-guid",
+            text: "Reboot",
+            senderHandleRowID: messagesAdministrator,
+            chatRowID: administratorChat,
+            account: account
+        )
+        try await waitUntil("The Reboot confirmation question was not sent") {
+            replies.snapshot().count == 4
+        }
+        try expect(
+            replies.snapshot().last == .init(
+                text: ROBMessagesAdministratorCommand.reboot.confirmationPrompt,
+                chatID: "fixture-administrator-chat",
+                account: account,
+                originatingAccountAliases: [account, "opaque-account-id"],
+                expectedSender: "mkierie@gmail.com"
+            ),
+            "The Reboot confirmation was not correlated to its exact sender and chat"
+        )
+
+        _ = try database.addMessage(
+            guid: "administrator-reboot-confirmation-guid",
+            text: "YES",
+            senderHandleRowID: messagesAdministrator,
+            chatRowID: administratorChat,
+            account: account
+        )
+        try await waitUntil(
+            "The confirmed Reboot script was not executed",
+            attempts: 2_000
+        ) {
+            administratorCommandExecutor.snapshot().count == 2
+        }
+        try expect(
+            administratorCommandExecutor.snapshot() == [
+                ROBMessagesAdministratorCommand.shutdown.script,
+                ROBMessagesAdministratorCommand.reboot.script,
+            ],
+            "The confirmed Reboot command executed anything except its saved script"
+        )
+        try expect(
+            ai.submissions.count == 2,
+            "The Reboot command or confirmation was also submitted to the AI"
+        )
+
+        _ = try database.addMessage(
             guid: "valid-A-guid",
             text: "Duplicate GUID",
             senderHandleRowID: owner,
@@ -1201,6 +1248,7 @@ private struct ROBMessagesBridgeProductionFixtureTests {
         var deniedAutomationChecks: [Bool] = []
         let deniedAutomationBridge = ROBMessagesBridge(
             inbox: inbox,
+            transcriptStore: transcriptStore,
             replySender: FixtureReplySender(),
             aiResponder: ROBMessagesAIResponder(),
             automationPermissionCheck: { askUserIfNeeded in
@@ -1209,10 +1257,10 @@ private struct ROBMessagesBridgeProductionFixtureTests {
             }
         )
         deniedAutomationBridge.start()
+        let deniedStartupState = deniedAutomationBridge.statusSnapshot().state
         try expect(
-            deniedAutomationBridge.statusSnapshot().state
-                == "Automation permission required",
-            "A denied startup Automation check entered Listening"
+            deniedStartupState == "Automation permission required",
+            "A denied startup Automation check entered \(deniedStartupState)"
         )
         deniedAutomationBridge.reloadConfiguration()
         try expect(
@@ -1245,9 +1293,27 @@ private struct ROBMessagesBridgeProductionFixtureTests {
         UserDefaults.standard.removeObject(
             forKey: ROBMessagesAdministratorCommandStore.defaultsKey
         )
+        UserDefaults.standard.removeObject(
+            forKey: ROBMessagesAdministratorCommandStore.legacyDefaultsKey
+        )
         try expect(
-            ROBMessagesAdministratorCommandStore.load() == [.shutdown],
-            "The default Shutdown command was not available"
+            ROBMessagesAdministratorCommandStore.load() == [.shutdown, .reboot],
+            "The default Shutdown and Reboot commands were not available"
+        )
+
+        UserDefaults.standard.set(
+            try JSONEncoder().encode([ROBMessagesAdministratorCommand.shutdown]),
+            forKey: ROBMessagesAdministratorCommandStore.legacyDefaultsKey
+        )
+        try expect(
+            ROBMessagesAdministratorCommandStore.load() == [.shutdown, .reboot],
+            "The Reboot command was not added to a legacy administrator command configuration"
+        )
+        try expect(
+            UserDefaults.standard.data(
+                forKey: ROBMessagesAdministratorCommandStore.defaultsKey
+            ) != nil,
+            "The migrated administrator command configuration was not persisted"
         )
         let custom = ROBMessagesAdministratorCommand(
             id: "fixture",
@@ -1270,6 +1336,9 @@ private struct ROBMessagesBridgeProductionFixtureTests {
         }
         UserDefaults.standard.removeObject(
             forKey: ROBMessagesAdministratorCommandStore.defaultsKey
+        )
+        UserDefaults.standard.removeObject(
+            forKey: ROBMessagesAdministratorCommandStore.legacyDefaultsKey
         )
     }
 
