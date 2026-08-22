@@ -23,6 +23,8 @@ struct ROBMessagesAIStatusSnapshot: Sendable {
     let activeChatCount: Int
     let pendingTurnCount: Int
     let readyChatCount: Int
+    let activeProvider: String?
+    let lastProvider: String?
     let lastError: String?
 }
 
@@ -69,6 +71,8 @@ final class ROBMessagesAIResponder: NSObject {
             activeChatCount: Set(submissions.map(\.chatID)).count,
             pendingTurnCount: completions.count,
             readyChatCount: Set(submissions.map(\.chatID)).count,
+            activeProvider: nil,
+            lastProvider: nil,
             lastError: nil
         )
     }
@@ -319,6 +323,7 @@ private struct ROBMessagesBridgeProductionFixtureTests {
         "ROBMessagesBridgeEnabled",
         "ROBMessagesBridgeReceivingAccount",
         "ROBMessagesBridgeAllowedSenders",
+        "ROBMessagesBridgeAllowAllSenders",
         "ROBMessagesBridgeLastMessageRowID",
         "ROBMessagesBridgeRecentMessageGUIDs",
     ]
@@ -337,6 +342,7 @@ private struct ROBMessagesBridgeProductionFixtureTests {
         let owner = try database.addHandle("owner@example.com")
         let trustedFriend = try database.addHandle("friend@example.com")
         let outsider = try database.addHandle("outsider@example.com")
+        let localAccountHandle = try database.addHandle(account)
         let chatA = try database.addChat(
             guid: "fixture-chat-A",
             account: account,
@@ -361,6 +367,11 @@ private struct ROBMessagesBridgeProductionFixtureTests {
             guid: "fixture-group-chat",
             account: account,
             participants: [owner, trustedFriend]
+        )
+        let selfHandleChat = try database.addChat(
+            guid: "fixture-self-handle-chat",
+            account: account,
+            participants: [localAccountHandle]
         )
         let historicalRowID = try database.addMessage(
             guid: "historical-guid",
@@ -390,6 +401,11 @@ private struct ROBMessagesBridgeProductionFixtureTests {
         try await waitUntil("The production bridge did not seed its first-start cursor") {
             bridge.statusSnapshot().state == "listening"
         }
+        let listeningStatus = bridge.statusSnapshot()
+        try expect(!listeningStatus.allowAllSenders, "Restricted mode was reported as public")
+        try expect(listeningStatus.activeAIProvider == nil, "A fixture AI provider was reported active")
+        try expect(listeningStatus.lastAIProvider == nil, "A fixture AI provider was reported as last")
+        try expect(listeningStatus.lastAIError == nil, "A fixture AI error was reported")
         try expect(
             ai.submissions.isEmpty,
             "First startup replayed an existing Messages history row into the AI"
@@ -443,12 +459,20 @@ private struct ROBMessagesBridgeProductionFixtureTests {
             account: account,
             isFromMe: true
         )
+        _ = try database.addMessage(
+            guid: "self-handle-guid",
+            text: "Local account must not become a remote sender",
+            senderHandleRowID: localAccountHandle,
+            chatRowID: selfHandleChat,
+            account: account
+        )
 
         let policyBatch = try inbox.messages(after: historicalRowID, limit: 100)
         let policyConfiguration = ROBMessagesBridgeConfiguration(
             enabled: true,
             receivingAccount: account,
-            allowedSenders: ["owner@example.com", "friend@example.com"]
+            allowedSenders: ["owner@example.com", "friend@example.com"],
+            allowAllSenders: false
         )
         let rejectionByGUID = Dictionary(uniqueKeysWithValues: policyBatch.messages.map {
             (
@@ -479,6 +503,62 @@ private struct ROBMessagesBridgeProductionFixtureTests {
             rejectionByGUID["outbound-guid"]! == .outboundOrSelf,
             "An outgoing echo passed the inbound policy"
         )
+        try expect(
+            rejectionByGUID["self-handle-guid"]! == .outboundOrSelf,
+            "The local receiving account was conflated with a remote sender"
+        )
+
+        let senderModeCases: [(
+            name: String,
+            configuration: ROBMessagesBridgeConfiguration,
+            outsiderRejection: ROBMessagesMessageRejection?
+        )] = [
+            (
+                "restricted",
+                ROBMessagesBridgeConfiguration(
+                    enabled: true,
+                    receivingAccount: account,
+                    allowedSenders: ["owner@example.com", "friend@example.com"],
+                    allowAllSenders: false
+                ),
+                .senderNotAllowed
+            ),
+            (
+                "public",
+                ROBMessagesBridgeConfiguration(
+                    enabled: true,
+                    receivingAccount: account,
+                    allowedSenders: [],
+                    allowAllSenders: true
+                ),
+                nil
+            ),
+        ]
+        for senderMode in senderModeCases {
+            func rejection(_ guid: String) -> ROBMessagesMessageRejection? {
+                guard let message = policyBatch.messages.first(where: { $0.guid == guid }) else {
+                    return .duplicate
+                }
+                return ROBMessagesBridgePolicy.rejection(
+                    for: message,
+                    configuration: senderMode.configuration,
+                    now: Date(),
+                    seenGUIDs: []
+                )
+            }
+            try expect(
+                rejection("unapproved-sender-guid") == senderMode.outsiderRejection,
+                "\(senderMode.name) sender policy produced the wrong outsider disposition"
+            )
+            try expect(
+                rejection("wrong-account-guid") == .wrongAccount,
+                "\(senderMode.name) mode bypassed receiving-account isolation"
+            )
+            try expect(
+                rejection("self-handle-guid") == .outboundOrSelf,
+                "\(senderMode.name) mode accepted the local account as a remote sender"
+            )
+        }
 
         bridge.reloadConfiguration()
         try await waitUntil("The production bridge did not submit both approved rows") {
@@ -921,7 +1001,8 @@ private struct ROBMessagesBridgeProductionFixtureTests {
         let configuration = ROBMessagesBridgeConfiguration(
             enabled: true,
             receivingAccount: account,
-            allowedSenders: ["owner@example.com"]
+            allowedSenders: ["owner@example.com"],
+            allowAllSenders: false
         )
         func rejection(_ guid: String) -> ROBMessagesMessageRejection? {
             guard let row = byGUID[guid]?.first else { return .duplicate }

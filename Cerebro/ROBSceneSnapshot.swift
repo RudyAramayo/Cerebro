@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import AppKit
 import Vision
 
 #if canImport(FoundationModels)
@@ -120,6 +121,120 @@ public struct SceneSnapshot: Codable, Sendable {
     }
 }
 
+extension SceneSnapshot {
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case sequence
+        case capturedAt
+        case cameraTimestampNanoseconds
+        case people
+        case objects
+        case gestures
+        case freeSpace
+        case armPose
+        case cameraPose
+        case cameraQuality
+        case confidence
+        case mlxIdentifiedPeople
+        case sidewalkCenterDeviation
+        case sidewalkConfidence
+        case chessPieces
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedSchemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        guard decodedSchemaVersion == 1 || decodedSchemaVersion == 2 else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .schemaVersion,
+                in: container,
+                debugDescription: "Unsupported scene snapshot schema version \(decodedSchemaVersion)."
+            )
+        }
+
+        let decodedMLXIdentifiedPeople: [String]
+        let decodedSidewalkCenterDeviation: Double
+        let decodedSidewalkConfidence: Double
+        let decodedChessPieces: [ROBChessPieceDetection]
+        if decodedSchemaVersion == 1 {
+            decodedMLXIdentifiedPeople = container.contains(.mlxIdentifiedPeople)
+                ? try container.decode([String].self, forKey: .mlxIdentifiedPeople)
+                : []
+            decodedSidewalkCenterDeviation = container.contains(.sidewalkCenterDeviation)
+                ? try container.decode(Double.self, forKey: .sidewalkCenterDeviation)
+                : 0
+            decodedSidewalkConfidence = container.contains(.sidewalkConfidence)
+                ? try container.decode(Double.self, forKey: .sidewalkConfidence)
+                : 0
+            decodedChessPieces = container.contains(.chessPieces)
+                ? try container.decode([ROBChessPieceDetection].self, forKey: .chessPieces)
+                : []
+        } else {
+            decodedMLXIdentifiedPeople = try container.decode(
+                [String].self,
+                forKey: .mlxIdentifiedPeople
+            )
+            decodedSidewalkCenterDeviation = try container.decode(
+                Double.self,
+                forKey: .sidewalkCenterDeviation
+            )
+            decodedSidewalkConfidence = try container.decode(
+                Double.self,
+                forKey: .sidewalkConfidence
+            )
+            decodedChessPieces = try container.decode(
+                [ROBChessPieceDetection].self,
+                forKey: .chessPieces
+            )
+        }
+
+        self.init(
+            schemaVersion: 2,
+            sequence: try container.decode(UInt64.self, forKey: .sequence),
+            capturedAt: try container.decode(Date.self, forKey: .capturedAt),
+            cameraTimestampNanoseconds: try container.decodeIfPresent(
+                UInt64.self,
+                forKey: .cameraTimestampNanoseconds
+            ),
+            people: try container.decode([ROBTrackedPerson].self, forKey: .people),
+            objects: try container.decode([ROBTrackedObject].self, forKey: .objects),
+            gestures: try container.decode([ROBGestureObservation].self, forKey: .gestures),
+            freeSpace: try container.decode([ROBFreeSpaceRegion].self, forKey: .freeSpace),
+            armPose: try container.decode([ROBArmJointPose].self, forKey: .armPose),
+            cameraPose: try container.decodeIfPresent(ROBCameraPose.self, forKey: .cameraPose),
+            cameraQuality: try container.decode(ROBCameraQuality.self, forKey: .cameraQuality),
+            confidence: try container.decode(Double.self, forKey: .confidence),
+            mlxIdentifiedPeople: decodedMLXIdentifiedPeople,
+            sidewalkCenterDeviation: decodedSidewalkCenterDeviation,
+            sidewalkConfidence: decodedSidewalkConfidence,
+            chessPieces: decodedChessPieces
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(2, forKey: .schemaVersion)
+        try container.encode(sequence, forKey: .sequence)
+        try container.encode(capturedAt, forKey: .capturedAt)
+        try container.encodeIfPresent(
+            cameraTimestampNanoseconds,
+            forKey: .cameraTimestampNanoseconds
+        )
+        try container.encode(people, forKey: .people)
+        try container.encode(objects, forKey: .objects)
+        try container.encode(gestures, forKey: .gestures)
+        try container.encode(freeSpace, forKey: .freeSpace)
+        try container.encode(armPose, forKey: .armPose)
+        try container.encodeIfPresent(cameraPose, forKey: .cameraPose)
+        try container.encode(cameraQuality, forKey: .cameraQuality)
+        try container.encode(confidence, forKey: .confidence)
+        try container.encode(mlxIdentifiedPeople, forKey: .mlxIdentifiedPeople)
+        try container.encode(sidewalkCenterDeviation, forKey: .sidewalkCenterDeviation)
+        try container.encode(sidewalkConfidence, forKey: .sidewalkConfidence)
+        try container.encode(chessPieces, forKey: .chessPieces)
+    }
+}
+
 /// A lock-consistent view used by deterministic visual-calibration readiness.
 /// Producer ages remain operational metadata and are intentionally not added
 /// to the serialized SceneSnapshot schema or language-model context.
@@ -151,6 +266,8 @@ public struct AssistantIntent: Codable, Sendable {
 /// own portions without making a language model part of a real-time loop.
 public final class ROBSceneSnapshotStore: @unchecked Sendable {
     public static let shared = ROBSceneSnapshotStore()
+
+    private static let navigationTelemetryFreshness: TimeInterval = 0.75
 
     private struct SupplementalPeopleState {
         let people: [ROBTrackedPerson]
@@ -306,6 +423,12 @@ public final class ROBSceneSnapshotStore: @unchecked Sendable {
     }
 
     public func updateSidewalkDetection(deviation: Double, confidence: Double) {
+        guard deviation.isFinite,
+              (-1.0 ... 1.0).contains(deviation),
+              confidence.isFinite,
+              (0.0 ... 1.0).contains(confidence) else {
+            return
+        }
         lock.lock()
         sequence &+= 1
         sidewalkCenterDeviation = deviation
@@ -411,13 +534,15 @@ public final class ROBSceneSnapshotStore: @unchecked Sendable {
             : allConfidences.reduce(0, +) / Double(allConfidences.count)
         let isMLXFresh = mlxIdentifiedPeopleUpdateUptime.map { nowUptime - $0 <= 15.0 } ?? false
         let currentMLXPeople = isMLXFresh ? mlxIdentifiedPeople : []
-        let isSidewalkFresh = sidewalkUpdateUptime.map { nowUptime - $0 <= 5.0 } ?? false
+        let isSidewalkFresh = sidewalkUpdateUptime.map {
+            nowUptime - $0 <= Self.navigationTelemetryFreshness
+        } ?? false
         let currentDeviation = isSidewalkFresh ? sidewalkCenterDeviation : 0.0
         let currentConfidence = isSidewalkFresh ? sidewalkConfidence : 0.0
         let isChessFresh = chessPiecesUpdateUptime.map { nowUptime - $0 <= 5.0 } ?? false
         let currentChessPieces = isChessFresh ? chessPieces : []
         return SceneSnapshot(
-            schemaVersion: 1, sequence: sequence, capturedAt: Date(),
+            schemaVersion: 2, sequence: sequence, capturedAt: Date(),
             cameraTimestampNanoseconds: cameraTimestampNanoseconds,
             people: currentPeople, objects: objects, gestures: gestures,
             freeSpace: currentLidarFreeSpace + depthFreeSpace, armPose: armPose,
@@ -625,102 +750,355 @@ public extension SceneSnapshot {
 
 public final class ROBDatasetManager {
     public static let shared = ROBDatasetManager()
+
+    private enum DatasetManagerError: LocalizedError {
+        case invalidProjectName
+        case invalidClassName
+        case invalidStoredClassName
+        case noActiveProject
+        case invalidBoundingBox
+        case imageEncodingFailed
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidProjectName:
+                return "Project names must be 1-64 ASCII letters, numbers, hyphens, or underscores, and must begin and end with a letter or number."
+            case .invalidClassName:
+                return "Class labels must normalize to a 1-64 character ASCII identifier."
+            case .invalidStoredClassName:
+                return "The project's classes.txt contains an invalid or duplicate class identifier."
+            case .noActiveProject:
+                return "No dataset project is active."
+            case .invalidBoundingBox:
+                return "The sample bounding box must be finite, non-empty, and normalized to the unit square."
+            case .imageEncodingFailed:
+                return "The sample image could not be encoded as JPEG."
+            }
+        }
+    }
+
+    private static let datasetRootDefaultsKey = "ROBDatasetRoot"
+    private let lock = NSLock()
     private let datasetsURL: URL
-    public private(set) var activeProject: String?
-    public private(set) var currentClasses: [String] = []
+    private var storedActiveProject: String?
+    private var storedCurrentClasses: [String] = []
+    private var storedLastError: String?
+
+    public var activeProject: String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedActiveProject
+    }
+
+    public var currentClasses: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedCurrentClasses
+    }
+
+    public var lastError: String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedLastError
+    }
 
     private init() {
-        // Use the source directory for datasets so they are easily accessible by the user.
-        let devDir = URL(fileURLWithPath: "/Users/rob/dev/Cerebro")
-        datasetsURL = devDir.appendingPathComponent("Datasets")
-        try? FileManager.default.createDirectory(at: datasetsURL, withIntermediateDirectories: true)
-        
-        // Default to Chess on first boot
+        let configuredRoot = UserDefaults.standard.string(forKey: Self.datasetRootDefaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let configuredRoot, !configuredRoot.isEmpty {
+            let expandedRoot = NSString(string: configuredRoot).expandingTildeInPath
+            datasetsURL = URL(fileURLWithPath: expandedRoot, isDirectory: true)
+                .standardizedFileURL
+        } else {
+            let applicationSupport = FileManager.default.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            ).first ?? FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Application Support", isDirectory: true)
+            datasetsURL = applicationSupport
+                .appendingPathComponent("Cerebro", isDirectory: true)
+                .appendingPathComponent("Datasets", isDirectory: true)
+        }
+
+        do {
+            try FileManager.default.createDirectory(
+                at: datasetsURL,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            let message = "Unable to create dataset root: \(error.localizedDescription)"
+            storedLastError = message
+            NSLog("[DatasetManager] %@", message)
+            return
+        }
+
         setActiveProject("Chess")
     }
 
     public func getAvailableProjects() -> [String] {
-        guard let items = try? FileManager.default.contentsOfDirectory(at: datasetsURL, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
-        return items.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }.map(\.lastPathComponent)
+        lock.lock()
+        defer { lock.unlock() }
+        do {
+            let items = try FileManager.default.contentsOfDirectory(
+                at: datasetsURL,
+                includingPropertiesForKeys: [.isDirectoryKey]
+            )
+            let projects = try items.compactMap { item -> String? in
+                guard try item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true,
+                      Self.validatedProjectName(item.lastPathComponent) != nil else {
+                    return nil
+                }
+                return item.lastPathComponent
+            }
+            storedLastError = nil
+            return projects.sorted()
+        } catch {
+            recordFailureLocked("Unable to list dataset projects: \(error.localizedDescription)")
+            return []
+        }
     }
 
     public func setActiveProject(_ name: String) {
-        let projectURL = datasetsURL.appendingPathComponent(name)
-        let imagesURL = projectURL.appendingPathComponent("images/train")
-        let labelsURL = projectURL.appendingPathComponent("labels/train")
+        lock.lock()
+        defer { lock.unlock() }
+        guard let projectName = Self.validatedProjectName(name) else {
+            recordFailureLocked(DatasetManagerError.invalidProjectName.localizedDescription)
+            return
+        }
 
-        try? FileManager.default.createDirectory(at: imagesURL, withIntermediateDirectories: true)
-        try? FileManager.default.createDirectory(at: labelsURL, withIntermediateDirectories: true)
-
-        activeProject = name
-        loadClasses()
-        
-        // Write default data.yaml if it doesn't exist
-        let yamlURL = projectURL.appendingPathComponent("data.yaml")
-        if !FileManager.default.fileExists(atPath: yamlURL.path) {
-            writeYAML()
+        let projectURL = datasetsURL.appendingPathComponent(projectName, isDirectory: true)
+        let imagesURL = Self.imagesDirectory(for: projectURL)
+        let labelsURL = Self.labelsDirectory(for: projectURL)
+        do {
+            try FileManager.default.createDirectory(at: imagesURL, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: labelsURL, withIntermediateDirectories: true)
+            let classes = try loadClassesLocked(from: projectURL)
+            let yamlURL = projectURL.appendingPathComponent("data.yaml", isDirectory: false)
+            if !FileManager.default.fileExists(atPath: yamlURL.path) {
+                try writeMetadataLocked(projectURL: projectURL, classes: classes)
+            }
+            storedActiveProject = projectName
+            storedCurrentClasses = classes
+            storedLastError = nil
+        } catch {
+            recordFailureLocked("Unable to activate dataset project: \(error.localizedDescription)")
         }
     }
 
     public func addClass(_ className: String) {
-        if !currentClasses.contains(className) {
-            currentClasses.append(className)
-            writeYAML()
+        lock.lock()
+        defer { lock.unlock() }
+        guard let normalizedClass = Self.normalizedClassIdentifier(className) else {
+            recordFailureLocked(DatasetManagerError.invalidClassName.localizedDescription)
+            return
+        }
+        guard let activeProject = storedActiveProject else {
+            recordFailureLocked(DatasetManagerError.noActiveProject.localizedDescription)
+            return
+        }
+        guard !storedCurrentClasses.contains(normalizedClass) else {
+            storedLastError = nil
+            return
+        }
+
+        var updatedClasses = storedCurrentClasses
+        updatedClasses.append(normalizedClass)
+        let projectURL = datasetsURL.appendingPathComponent(activeProject, isDirectory: true)
+        do {
+            try writeMetadataLocked(projectURL: projectURL, classes: updatedClasses)
+            storedCurrentClasses = updatedClasses
+            storedLastError = nil
+        } catch {
+            recordFailureLocked("Unable to add dataset class: \(error.localizedDescription)")
         }
     }
 
-    private func loadClasses() {
-        guard let activeProject else { return }
-        let projectURL = datasetsURL.appendingPathComponent(activeProject)
+    private func loadClassesLocked(from projectURL: URL) throws -> [String] {
         let classesURL = projectURL.appendingPathComponent("classes.txt")
-        if let contents = try? String(contentsOf: classesURL) {
-            currentClasses = contents.components(separatedBy: .newlines).filter { !$0.isEmpty }
-        } else {
-            currentClasses = []
+        guard FileManager.default.fileExists(atPath: classesURL.path) else { return [] }
+        let contents = try String(contentsOf: classesURL, encoding: .utf8)
+        var classes: [String] = []
+        for value in contents.components(separatedBy: .newlines) where !value.isEmpty {
+            guard let normalized = Self.normalizedClassIdentifier(value),
+                  normalized == value,
+                  !classes.contains(normalized) else {
+                throw DatasetManagerError.invalidStoredClassName
+            }
+            classes.append(normalized)
         }
+        return classes
     }
 
-    private func writeYAML() {
-        guard let activeProject else { return }
-        let projectURL = datasetsURL.appendingPathComponent(activeProject)
-        
-        // Save classes.txt
-        let classesText = currentClasses.joined(separator: "\n")
-        try? classesText.write(to: projectURL.appendingPathComponent("classes.txt"), atomically: true, encoding: .utf8)
+    private func writeMetadataLocked(projectURL: URL, classes: [String]) throws {
+        let classesText = classes.joined(separator: "\n")
+        try classesText.write(
+            to: projectURL.appendingPathComponent("classes.txt", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
 
-        // Save data.yaml
         var yaml = "train: ./images/train\nval: ./images/train\n\n"
-        yaml += "nc: \(currentClasses.count)\n"
+        yaml += "nc: \(classes.count)\n"
         yaml += "names:\n"
-        for (index, name) in currentClasses.enumerated() {
-            yaml += "  \(index): \(name)\n"
+        for (index, name) in classes.enumerated() {
+            let encodedName = String(decoding: try JSONEncoder().encode(name), as: UTF8.self)
+            yaml += "  \(index): \(encodedName)\n"
         }
-        try? yaml.write(to: projectURL.appendingPathComponent("data.yaml"), atomically: true, encoding: .utf8)
+        try yaml.write(
+            to: projectURL.appendingPathComponent("data.yaml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
     }
 
     public func saveSample(image: NSImage, boundingBox: CGRect, className: String) {
-        guard let activeProject else { return }
-        addClass(className)
-        guard let classIndex = currentClasses.firstIndex(of: className) else { return }
-
-        let timestamp = Int(Date().timeIntervalSince1970 * 1000)
-        let filename = "\(activeProject)_\(timestamp)"
-
-        let projectURL = datasetsURL.appendingPathComponent(activeProject)
-        let imageURL = projectURL.appendingPathComponent("images/train/\(filename).jpg")
-        let labelURL = projectURL.appendingPathComponent("labels/train/\(filename).txt")
-
-        // Save Image
+        lock.lock()
+        defer { lock.unlock() }
+        guard let activeProject = storedActiveProject else {
+            recordFailureLocked(DatasetManagerError.noActiveProject.localizedDescription)
+            return
+        }
+        guard let normalizedClass = Self.normalizedClassIdentifier(className) else {
+            recordFailureLocked(DatasetManagerError.invalidClassName.localizedDescription)
+            return
+        }
+        guard Self.isValidNormalizedBoundingBox(boundingBox) else {
+            recordFailureLocked(DatasetManagerError.invalidBoundingBox.localizedDescription)
+            return
+        }
         guard let tiffData = image.tiffRepresentation,
               let bitmapImage = NSBitmapImageRep(data: tiffData),
-              let jpegData = bitmapImage.representation(using: .jpeg, properties: [.compressionFactor: 0.9]) else { return }
-        try? jpegData.write(to: imageURL)
+              let jpegData = bitmapImage.representation(
+                using: .jpeg,
+                properties: [.compressionFactor: 0.9]
+              ) else {
+            recordFailureLocked(DatasetManagerError.imageEncodingFailed.localizedDescription)
+            return
+        }
 
-        // Save YOLO Label (x_center y_center width height)
-        // Note: boundingBox should be normalized coordinates (0.0 to 1.0)
+        var updatedClasses = storedCurrentClasses
+        if !updatedClasses.contains(normalizedClass) {
+            updatedClasses.append(normalizedClass)
+        }
+        guard let classIndex = updatedClasses.firstIndex(of: normalizedClass) else {
+            recordFailureLocked(DatasetManagerError.invalidClassName.localizedDescription)
+            return
+        }
+
+        let projectURL = datasetsURL.appendingPathComponent(activeProject, isDirectory: true)
+        let imagesURL = Self.imagesDirectory(for: projectURL)
+        let labelsURL = Self.labelsDirectory(for: projectURL)
+        let filename = UUID().uuidString.lowercased()
+        let imageURL = imagesURL.appendingPathComponent("\(filename).jpg", isDirectory: false)
+        let labelURL = labelsURL.appendingPathComponent("\(filename).txt", isDirectory: false)
         let labelLine = "\(classIndex) \(boundingBox.midX) \(boundingBox.midY) \(boundingBox.width) \(boundingBox.height)\n"
-        try? labelLine.write(to: labelURL, atomically: true, encoding: .utf8)
-        
-        NSLog("[DatasetManager] Saved sample to project \(activeProject): \(filename) -> \(className)")
+        var createdSampleURLs: [URL] = []
+
+        do {
+            try FileManager.default.createDirectory(at: imagesURL, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: labelsURL, withIntermediateDirectories: true)
+            try jpegData.write(to: imageURL, options: .atomic)
+            createdSampleURLs.append(imageURL)
+            try labelLine.write(to: labelURL, atomically: true, encoding: .utf8)
+            createdSampleURLs.append(labelURL)
+            try writeMetadataLocked(projectURL: projectURL, classes: updatedClasses)
+
+            storedCurrentClasses = updatedClasses
+            storedLastError = nil
+            NSLog(
+                "[DatasetManager] Saved sample to project %@: %@ -> %@",
+                activeProject,
+                filename,
+                normalizedClass
+            )
+        } catch {
+            var cleanupFailures: [String] = []
+            for url in createdSampleURLs {
+                do {
+                    try FileManager.default.removeItem(at: url)
+                } catch {
+                    cleanupFailures.append(error.localizedDescription)
+                }
+            }
+            var message = "Unable to save dataset sample: \(error.localizedDescription)"
+            if !cleanupFailures.isEmpty {
+                message += " Cleanup also failed: \(cleanupFailures.joined(separator: "; "))"
+            }
+            recordFailureLocked(message)
+        }
+    }
+
+    private static func validatedProjectName(_ value: String) -> String? {
+        let name = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.utf8.count <= 64,
+              let first = name.unicodeScalars.first,
+              let last = name.unicodeScalars.last,
+              isASCIIAlphaNumeric(first),
+              isASCIIAlphaNumeric(last),
+              name.unicodeScalars.allSatisfy({ scalar in
+                  isASCIIAlphaNumeric(scalar) || scalar.value == 0x2D || scalar.value == 0x5F
+              }) else {
+            return nil
+        }
+        return name
+    }
+
+    private static func normalizedClassIdentifier(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.utf8.count <= 256 else { return nil }
+        var result = ""
+        var pendingSeparator = false
+        for scalar in trimmed.unicodeScalars {
+            switch scalar.value {
+            case 0x41 ... 0x5A:
+                if pendingSeparator, !result.isEmpty { result.append("_") }
+                result.append(contentsOf: String(scalar).lowercased())
+                pendingSeparator = false
+            case 0x61 ... 0x7A, 0x30 ... 0x39:
+                if pendingSeparator, !result.isEmpty { result.append("_") }
+                result.append(Character(String(scalar)))
+                pendingSeparator = false
+            case 0x09, 0x20, 0x2D, 0x5F:
+                pendingSeparator = !result.isEmpty
+            default:
+                return nil
+            }
+            guard result.utf8.count <= 64 else { return nil }
+        }
+        return result.isEmpty ? nil : result
+    }
+
+    private static func isASCIIAlphaNumeric(_ scalar: UnicodeScalar) -> Bool {
+        switch scalar.value {
+        case 0x30 ... 0x39, 0x41 ... 0x5A, 0x61 ... 0x7A:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func isValidNormalizedBoundingBox(_ bounds: CGRect) -> Bool {
+        bounds.minX.isFinite && bounds.minY.isFinite &&
+            bounds.width.isFinite && bounds.height.isFinite &&
+            bounds.width > 0 && bounds.height > 0 &&
+            bounds.minX >= 0 && bounds.minY >= 0 &&
+            bounds.maxX <= 1 && bounds.maxY <= 1
+    }
+
+    private static func imagesDirectory(for projectURL: URL) -> URL {
+        projectURL
+            .appendingPathComponent("images", isDirectory: true)
+            .appendingPathComponent("train", isDirectory: true)
+    }
+
+    private static func labelsDirectory(for projectURL: URL) -> URL {
+        projectURL
+            .appendingPathComponent("labels", isDirectory: true)
+            .appendingPathComponent("train", isDirectory: true)
+    }
+
+    private func recordFailureLocked(_ message: String) {
+        storedLastError = message
+        NSLog("[DatasetManager] %@", message)
     }
 }

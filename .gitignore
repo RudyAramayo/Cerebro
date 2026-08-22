@@ -18,3 +18,8 @@ __pycache__/
 .venv
 env/
 venv/
+
+# Generated model-training artifacts (deployment .blob files remain trackable)
+Datasets/**/runs/
+*.pt
+*.onnx

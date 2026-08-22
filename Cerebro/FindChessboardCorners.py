@@ -1,6 +1,7 @@
 import sys
 import json
 import argparse
+import math
 import cv2
 
 def main():
@@ -9,6 +10,13 @@ def main():
     parser.add_argument("--cols", type=int, required=True, help="Number of inner corners horizontally.")
     parser.add_argument("--rows", type=int, required=True, help="Number of inner corners vertically.")
     args = parser.parse_args()
+
+    if args.cols <= 1 or args.rows <= 1:
+        print(json.dumps({
+            "success": False,
+            "error": "Chessboard dimensions must both be greater than one."
+        }))
+        return
 
     image = cv2.imread(args.image, cv2.IMREAD_GRAYSCALE)
     if image is None:
@@ -32,48 +40,58 @@ def main():
     except:
         pass
 
-    # Try candidates in order: first requested pattern, then its rotation, then standard fallbacks
-    candidates = []
-    # Add unique candidates
-    for p in [(args.cols, args.rows), (args.rows, args.cols), (7, 7), (8, 5), (5, 8), (6, 6)]:
-        if p not in candidates and p[0] > 1 and p[1] > 1:
-            candidates.append(p)
-            
+    # Calibration geometry is defined by the caller. Never substitute a
+    # rotated or similarly sized grid because that changes corner identities.
+    requested_pattern = (args.cols, args.rows)
     found = False
     corners = None
-    successful_pattern = None
     best_image = None
     
     for label, img in pipelines:
-        for pattern in candidates:
-            found, corners = cv2.findChessboardCorners(img, pattern, None)
-            if found:
-                successful_pattern = pattern
-                best_image = img
-                break
+        found, corners = cv2.findChessboardCorners(img, requested_pattern, None)
         if found:
+            best_image = img
             break
 
-    if found and successful_pattern is not None and best_image is not None:
+    if found and corners is not None and best_image is not None:
         # Refine corner locations for sub-pixel accuracy
         criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
         corners_refined = cv2.cornerSubPix(best_image, corners, (11, 11), (-1, -1), criteria)
+
+        expected_count = args.cols * args.rows
+        if corners_refined is None or len(corners_refined) != expected_count:
+            actual_count = 0 if corners_refined is None else len(corners_refined)
+            print(json.dumps({
+                "success": False,
+                "error": "Expected {} corners for exact pattern {}x{}, found {}.".format(
+                    expected_count, args.cols, args.rows, actual_count
+                )
+            }))
+            return
         
         points = []
         for corner in corners_refined:
             x, y = corner.ravel()
+            if not math.isfinite(float(x)) or not math.isfinite(float(y)):
+                print(json.dumps({
+                    "success": False,
+                    "error": "Corner detector returned a non-finite coordinate."
+                }))
+                return
             points.append({"x": float(x), "y": float(y)})
             
         print(json.dumps({
             "success": True, 
             "corners": points,
-            "cols": successful_pattern[0],
-            "rows": successful_pattern[1]
+            "cols": args.cols,
+            "rows": args.rows
         }))
     else:
         print(json.dumps({
             "success": False, 
-            "error": "Chessboard corners not found. Tried patterns: {}".format(candidates)
+            "error": "Exact requested chessboard pattern {}x{} was not found.".format(
+                args.cols, args.rows
+            )
         }))
 
 if __name__ == "__main__":

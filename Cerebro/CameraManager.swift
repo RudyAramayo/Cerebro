@@ -9,6 +9,7 @@
 
 import AVFoundation
 import Cocoa
+import Darwin
 import Network
 
 enum CameraError: LocalizedError {
@@ -189,7 +190,7 @@ final class CameraManager: NSObject, CameraManagerProtocol {
         }()
         self.containerView = containerView
         self.role = role
-        let queueSuffix = role == .face ? "belly" : "face"
+        let queueSuffix = role.rawValue
         self.sessionQueue = DispatchQueue(label: "com.orbitusrobotics.Cerebro.camera.session.\(queueSuffix)")
         self.captureQueue = DispatchQueue(label: "com.orbitusrobotics.Cerebro.camera.capture.\(queueSuffix)")
         self.deliveryQueue = DispatchQueue(label: "com.orbitusrobotics.Cerebro.camera.delivery.\(queueSuffix)")
@@ -381,7 +382,16 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     }
 
     private var configuredDepthCameraSocketPath: String? {
-        let defaultKey = role == .belly ? "ROBDepthCameraSocketPathBelly" : Self.depthCameraSocketDefaultsKey
+        let defaultKey: String
+        let fallbackFilename: String
+        switch role {
+        case .face:
+            defaultKey = Self.depthCameraSocketDefaultsKey
+            fallbackFilename = "depth-camera.sock"
+        case .belly:
+            defaultKey = "ROBDepthCameraSocketPathBelly"
+            fallbackFilename = "depth-camera-belly.sock"
+        }
         let path = UserDefaults.standard.string(forKey: defaultKey)
         // If not set, provide a default in Application Support to prevent failures
         if path?.isEmpty == false { return path }
@@ -391,14 +401,19 @@ final class CameraManager: NSObject, CameraManagerProtocol {
         let serviceDir = appSupport.appendingPathComponent("Cerebro")
         try? fileManager.createDirectory(at: serviceDir, withIntermediateDirectories: true)
         
-        let fallbackFilename = role == .belly ? "depth-camera-belly.sock" : "depth-camera.sock"
         let fallbackPath = serviceDir.appendingPathComponent(fallbackFilename).path
         UserDefaults.standard.set(fallbackPath, forKey: defaultKey)
         return fallbackPath
     }
 
     private var configuredCameraMxid: String? {
-        let mxidKey = role == .belly ? "ROBFaceCameraMXID" : "ROBBellyCameraMXID"
+        let mxidKey: String
+        switch role {
+        case .face:
+            mxidKey = "ROBFaceCameraMXID"
+        case .belly:
+            mxidKey = "ROBBellyCameraMXID"
+        }
         let mxid = UserDefaults.standard.string(forKey: mxidKey)
         return mxid?.isEmpty == false ? mxid : nil
     }
@@ -856,7 +871,16 @@ private final class DepthCameraServiceClient {
     private var requestedShouldRun = false
     private var requestedRunGeneration: UInt64 = 0
     private var activeRunGeneration: UInt64 = 0
+    private static let pythonGracefulShutdownSeconds: TimeInterval = 1.0
+    private static let pythonForcedShutdownSeconds: TimeInterval = 0.5
+    private static let pythonRelaunchBaseDelaySeconds: TimeInterval = 0.5
+    private static let pythonRelaunchMaximumDelaySeconds: TimeInterval = 8.0
+    private static let pythonHealthyRunSeconds: TimeInterval = 10.0
+    private static let receiveBufferCompactionThresholdBytes = 64 * 1024 * 1024
     private var pythonProcess: Process?
+    private var pythonRelaunchWorkItem: DispatchWorkItem?
+    private var pythonRelaunchAttempt = 0
+    private var pythonRelaunchGeneration: UInt64 = 0
     private var mxid: String?
     private let shouldLaunchPython: Bool
     private let role: CameraRole
@@ -887,16 +911,10 @@ private final class DepthCameraServiceClient {
     private func launchPythonProcess() {
         guard let socketPath = socketPath, !socketPath.isEmpty else { return }
         stopPythonProcess()
-        
-        // Forcibly pkill any stale orphaned process running Webcam_color.py with this socket path
-        let killTask = Process()
-        killTask.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        killTask.arguments = ["-f", "Webcam_color.py.*\(socketPath)"]
-        try? killTask.run()
-        killTask.waitUntilExit()
-        
+
         guard let scriptPath = Bundle.main.path(forResource: "Webcam_color", ofType: "py") else {
             print("Webcam_color.py missing")
+            schedulePythonRelaunch()
             return
         }
         let parentPid = String(ProcessInfo.processInfo.processIdentifier)
@@ -918,19 +936,101 @@ private final class DepthCameraServiceClient {
         do {
             let task = try ROBPythonRuntime.shared.newTask(withArguments: args)
             task.standardInput = Pipe() // Keeps standard input linked via an active pipe so child detects exit instantly
-            pythonProcess = task
+            task.terminationHandler = { [weak self] terminatedProcess in
+                self?.queue.async { [weak self] in
+                    self?.pythonProcessDidTerminate(terminatedProcess)
+                }
+            }
             try task.run()
+            pythonProcess = task
+            queue.asyncAfter(deadline: .now() + Self.pythonHealthyRunSeconds) { [weak self, weak task] in
+                guard let self, let task,
+                      self.pythonProcess === task,
+                      task.isRunning else {
+                    return
+                }
+                self.pythonRelaunchAttempt = 0
+            }
         } catch {
+            pythonProcess = nil
             print("Failed to launch DepthAI python script: \(error.localizedDescription)")
+            schedulePythonRelaunch()
         }
     }
 
     private func stopPythonProcess() {
-        if let process = pythonProcess, process.isRunning {
-            process.terminate()
-            process.waitUntilExit()
-        }
+        cancelPythonRelaunch()
+        guard let process = pythonProcess else { return }
         pythonProcess = nil
+        process.terminationHandler = nil
+
+        if process.isRunning {
+            process.terminate()
+            waitForPythonProcessExit(
+                process,
+                timeout: Self.pythonGracefulShutdownSeconds
+            )
+        }
+        if process.isRunning {
+            let ownedPID = process.processIdentifier
+            if ownedPID > 0 {
+                _ = Darwin.kill(ownedPID, SIGKILL)
+            }
+            waitForPythonProcessExit(
+                process,
+                timeout: Self.pythonForcedShutdownSeconds
+            )
+        }
+    }
+
+    private func waitForPythonProcessExit(_ process: Process, timeout: TimeInterval) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+    }
+
+    private func pythonProcessDidTerminate(_ process: Process) {
+        guard pythonProcess === process else { return }
+        pythonProcess = nil
+        process.terminationHandler = nil
+        guard shouldLaunchPython, shouldRun else { return }
+
+        cancelConnection()
+        onStateChange?(
+            .reconnecting,
+            "Depth camera helper exited with status \(process.terminationStatus).",
+            activeRunGeneration
+        )
+        schedulePythonRelaunch()
+    }
+
+    private func cancelPythonRelaunch() {
+        pythonRelaunchGeneration &+= 1
+        pythonRelaunchWorkItem?.cancel()
+        pythonRelaunchWorkItem = nil
+    }
+
+    private func schedulePythonRelaunch() {
+        guard shouldLaunchPython, shouldRun, pythonRelaunchWorkItem == nil else { return }
+
+        let exponent = min(pythonRelaunchAttempt, 4)
+        let delay = min(
+            Self.pythonRelaunchBaseDelaySeconds * pow(2.0, Double(exponent)),
+            Self.pythonRelaunchMaximumDelaySeconds
+        )
+        pythonRelaunchAttempt = min(pythonRelaunchAttempt + 1, 4)
+        pythonRelaunchGeneration &+= 1
+        let generation = pythonRelaunchGeneration
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, self.pythonRelaunchGeneration == generation else { return }
+            self.pythonRelaunchWorkItem = nil
+            guard self.shouldLaunchPython, self.shouldRun else { return }
+            self.launchPythonProcess()
+            self.connectIfPossible()
+        }
+        pythonRelaunchWorkItem = workItem
+        queue.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
 
     @discardableResult
@@ -949,6 +1049,7 @@ private final class DepthCameraServiceClient {
                 self.activeRunGeneration = generation
                 self.shouldRun = true
                 if self.shouldLaunchPython && (self.pythonProcess == nil || self.pythonProcess?.isRunning == false) {
+                    self.pythonRelaunchAttempt = 0
                     self.launchPythonProcess()
                 }
                 self.connectIfPossible()
@@ -974,6 +1075,7 @@ private final class DepthCameraServiceClient {
             self.reconnectWorkItem = nil
             self.cancelConnection()
             if self.shouldLaunchPython {
+                self.pythonRelaunchAttempt = 0
                 self.stopPythonProcess()
             }
             self.onStateChange?(.stopped, nil, generation)
@@ -988,6 +1090,7 @@ private final class DepthCameraServiceClient {
             self.reconnectAttempt = 0
             self.cancelConnection()
             if self.shouldLaunchPython {
+                self.pythonRelaunchAttempt = 0
                 self.stopPythonProcess()
                 self.launchPythonProcess()
             }
@@ -1128,10 +1231,10 @@ private final class DepthCameraServiceClient {
             let rightData = Data(receiveBuffer[rightStart..<packetLength])
             receiveBuffer.removeSubrange(0..<packetLength)
 
-            // Compact the receiveBuffer to instantly reclaim unused capacity back to the OS heap
-            if receiveBuffer.isEmpty {
-                receiveBuffer = Data()
-            } else {
+            // Preserve normal streaming capacity. Compact only after an unusually
+            // large packet leaves little live data relative to consumed storage.
+            if packetLength >= Self.receiveBufferCompactionThresholdBytes,
+               receiveBuffer.count <= packetLength / 2 {
                 receiveBuffer = Data(receiveBuffer)
             }
 

@@ -83,12 +83,6 @@ import Foundation
     public init(robotID: String) {
         self.robotID = robotID
         super.init()
-        
-        // Start the background tick timer for intrinsic/conversational autonomy on boot
-        nextConversationUptime = ProcessInfo.processInfo.systemUptime + 15
-        tickTimer = Timer.scheduledTimer(withTimeInterval: Self.plannerInterval, repeats: true) { [weak self] _ in
-            self?.plannerTick()
-        }
     }
 
     public func handleSessionMessage(_ message: ROBAutonomySessionMessage) {
@@ -185,7 +179,8 @@ import Foundation
         let statusSequence = max(sequence, 1)
 
         active = false
-        // Keep tickTimer active for intrinsic background greetings and conversation on boot
+        tickTimer?.invalidate()
+        tickTimer = nil
         motionState = .silent
         delegate?.autonomyCoordinatorDidRequestBaseStop(self)
 
@@ -286,10 +281,7 @@ import Foundation
 
     private func plannerTick() {
         let now = ProcessInfo.processInfo.systemUptime
-        guard active else {
-            maybeRequestConversation(now: now)
-            return
-        }
+        guard active else { return }
         if let expiresAt, Date() >= expiresAt {
             stop(reason: "Autonomy session duration ended")
             return
@@ -377,7 +369,7 @@ import Foundation
                 right: turnLeft ? 0.09 : -0.09,
                 detail: "Making a small organic course change"
             )
-        } else if (behaviors.contains("follow_sidewalk") || ROBMLXRuntime.shared.localFollowSidewalkEnabled) && snapshot.sidewalkConfidence >= 0.5 {
+        } else if behaviors.contains("follow_sidewalk") && snapshot.sidewalkConfidence >= 0.5 {
             let error = snapshot.sidewalkCenterDeviation // between -1.0 and 1.0
             let kp = 0.12 // Proportional gain
             
@@ -428,9 +420,7 @@ import Foundation
     }
 
     private func maybeRequestConversation(now: TimeInterval) {
-        // Conversational/greeting autonomy is intrinsically standard on boot,
-        // but when active/authorized, we respect the behaviors selection.
-        guard !active || behaviors.contains("talk") else { return }
+        guard active, behaviors.contains("talk") else { return }
 
         // 1. Check for newly recognized identified people to greet pro-actively
         let snapshot = ROBSceneSnapshotStore.shared.snapshot()

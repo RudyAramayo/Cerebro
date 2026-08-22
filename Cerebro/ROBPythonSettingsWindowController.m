@@ -291,7 +291,7 @@
         @"Allows any sender to text ROB while online and receive replies, overriding the approved senders list.";
     [messagesView addSubview:self.messagesAllowAllSendersToggle];
 
-    [messagesView addSubview:[self labelWithString:@"Receiving Messages account:"
+    [messagesView addSubview:[self labelWithString:@"Local receiving Messages account:"
                                                frame:NSMakeRect(24, 377, 632, 20)]];
     self.messagesReceivingAccountField = [[NSTextField alloc]
         initWithFrame:NSMakeRect(24, 341, 500, 28)];
@@ -300,7 +300,7 @@
     self.messagesReceivingAccountField.accessibilityLabel = @"ROB receiving Messages account";
     self.messagesReceivingAccountField.accessibilityIdentifier = @"ROB.MessagesBridge.Account";
     self.messagesReceivingAccountField.accessibilityHelp =
-        @"Enter the exact Messages account that receives conversations intended for ROB.";
+        @"Enter the exact local Messages account on this Mac that receives conversations intended for ROB. This is the destination account, not an allowed remote sender.";
     [messagesView addSubview:self.messagesReceivingAccountField];
 
     [messagesView addSubview:[self labelWithString:
@@ -878,7 +878,39 @@
 - (void)messagesAllowAllSendersChanged:(NSButton *)sender
 {
     BOOL allowAll = sender.state == NSControlStateValueOn;
-    [ROBMessagesBridge setConfiguredAllowAllSenders:allowAll];
+    if (!allowAll) {
+        [ROBMessagesBridge setConfiguredAllowAllSenders:NO];
+        if ([ROBMessagesBridge configuredEnabled] && ![self messagesAllowlistContainsSender]) {
+            [ROBMessagesBridge setConfiguredEnabled:NO];
+            self.messagesBridgeEnabledToggle.state = NSControlStateValueOff;
+        }
+        return;
+    }
+
+    // Keep the persisted setting fail-closed until the operator explicitly
+    // acknowledges that every one-to-one sender can consume AI resources and
+    // provide text to the isolated Messages responder.
+    sender.state = NSControlStateValueOff;
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.alertStyle = NSAlertStyleCritical;
+    alert.messageText = @"Allow Messages from anyone?";
+    alert.informativeText =
+        @"Public mode lets any one-to-one sender reaching ROB's Messages account submit text to the AI and receive replies. This can create abuse, cost, and privacy exposure. Enable it only while the account is actively supervised.";
+    [alert addButtonWithTitle:@"Allow Any Sender"];
+    [alert addButtonWithTitle:@"Cancel"];
+
+    __weak typeof(self) weakSelf = self;
+    [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse returnCode) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (strongSelf == nil) {
+            return;
+        }
+        BOOL confirmed = returnCode == NSAlertFirstButtonReturn;
+        strongSelf.messagesAllowAllSendersToggle.state = confirmed
+            ? NSControlStateValueOn
+            : NSControlStateValueOff;
+        [ROBMessagesBridge setConfiguredAllowAllSenders:confirmed];
+    }];
 }
 
 - (void)openPrivacySettings:(NSString *)sectionName
@@ -891,7 +923,13 @@
         @"x-apple.systempreferences:com.apple.preference.security.extension?%@",
         sectionName
     ];
-    NSArray<NSString *> *candidates = @[urlString, extensionURL];
+    NSArray<NSString *> *candidates = @[
+        [NSString stringWithFormat:
+            @"x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?%@", sectionName],
+        @"x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
+        urlString,
+        extensionURL
+    ];
 
     for (NSString *candidate in candidates) {
         NSURL *settingsURL = [NSURL URLWithString:candidate];

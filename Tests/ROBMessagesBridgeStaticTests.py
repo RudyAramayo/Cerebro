@@ -9,6 +9,15 @@ BRIDGE_PATH = ROOT / "Cerebro" / "ROBMessagesBridge.swift"
 RESPONDER_PATH = ROOT / "Cerebro" / "ROBMessagesAIResponder.swift"
 BRIDGE = BRIDGE_PATH.read_text(encoding="utf-8")
 RESPONDER = RESPONDER_PATH.read_text(encoding="utf-8")
+LOCAL_PROVIDER_SOURCE = (
+    ROOT / "Cerebro" / "ROBAI.swift"
+).read_text(encoding="utf-8")
+LOCAL_PROVIDER_START = LOCAL_PROVIDER_SOURCE.index("enum ROBIsolatedLocalTextRole")
+LOCAL_PROVIDER_END = LOCAL_PROVIDER_SOURCE.index(
+    "private actor ROBLocalConversationFallback",
+    LOCAL_PROVIDER_START,
+)
+LOCAL_PROVIDER = LOCAL_PROVIDER_SOURCE[LOCAL_PROVIDER_START:LOCAL_PROVIDER_END]
 MAIN = (ROOT / "Cerebro" / "ROBMainViewController.mm").read_text(encoding="utf-8")
 SETTINGS = (
     ROOT / "Cerebro" / "ROBPythonSettingsWindowController.m"
@@ -17,6 +26,9 @@ STATUS = (ROOT / "Cerebro" / "ROBSystemStatusCoordinator.swift").read_text(
     encoding="utf-8"
 )
 INFO = (ROOT / "Cerebro" / "Info.plist").read_text(encoding="utf-8")
+ENTITLEMENTS = (ROOT / "Cerebro" / "Cerebro.entitlements").read_text(
+    encoding="utf-8"
+)
 PROJECT = (ROOT / "Cerebro.xcodeproj" / "project.pbxproj").read_text(
     encoding="utf-8"
 )
@@ -68,9 +80,10 @@ def main() -> None:
         "Outbound/self Messages events are no longer rejected before AI submission",
     )
     require(
-        "configuration.allowedSenders.contains(sender)" in BRIDGE
-        and "!configuration.allowedSenders.isEmpty" in BRIDGE,
-        "The sender allowlist must remain mandatory and fail closed when empty",
+        "configuration.allowAllSenders" in BRIDGE
+        and "configuration.allowedSenders.contains(sender)" in BRIDGE
+        and 'allowAllSendersDefaultsKey = "ROBMessagesBridgeAllowAllSenders"' in BRIDGE,
+        "The sender policy no longer distinguishes restricted and explicit public mode",
     )
     require(
         "message.participantCount == 1" in BRIDGE
@@ -153,9 +166,52 @@ def main() -> None:
     )
     require(
         "sessionsByChatID" in RESPONDER
-        and "let ai = ROBAI(configuration: configuration, userDefaults: isolatedDefaults)"
-        in RESPONDER,
+        and "ROBAI(configuration:" in RESPONDER,
         "Messages chats no longer own isolated AI conversation sessions",
+    )
+    provider_contract = [
+        "ROBMessagesAIProvider",
+        'case gemini = "Gemini"',
+        'case local = "On-device local"',
+        "scheduleGeminiTimeout(for:",
+        "beginLocalFallback(contextID:",
+        "geminiFailure:",
+        "drainLocalQueue(for:",
+        "completeLocalTurn(contextID:",
+        "result:",
+        "allProvidersFailed(gemini:",
+        "local:",
+    ]
+    require(
+        all(symbol in RESPONDER for symbol in provider_contract),
+        "Messages AI no longer implements Gemini-first, bounded local fallback, and combined errors",
+    )
+    local_provider_contract = [
+        "ROBIsolatedLocalTextProvider",
+        "static func respond(",
+        "prompt rawPrompt:",
+        "history:",
+        "ROBIsolatedLocalTextTurn",
+        "ROBIsolatedLocalTextRole",
+    ]
+    require(
+        all(symbol in LOCAL_PROVIDER for symbol in local_provider_contract),
+        "The isolated local Messages provider contract is incomplete",
+    )
+    forbidden_local_dependencies = (
+        "ROBMainViewController",
+        "ROBScene",
+        "ROBMemory",
+        "CameraManager",
+        "AVCapture",
+        "ROBAITool",
+        "ROBRobotTool",
+        "executeTool",
+        "toolDeclarations",
+    )
+    require(
+        not any(symbol in LOCAL_PROVIDER for symbol in forbidden_local_dependencies),
+        "The local Messages fallback references scene, memory, camera, or tool surfaces",
     )
     require(
         "didReceiveToolCall call: ROBAIRobotToolCall" in RESPONDER
@@ -204,6 +260,19 @@ def main() -> None:
         "Cerebro does not explain the Automation permission used to send Messages replies",
     )
     require(
+        "ENABLE_HARDENED_RUNTIME = YES" in PROJECT,
+        "The Cerebro target no longer enables the hardened runtime",
+    )
+    required_entitlements = (
+        "com.apple.security.automation.apple-events",
+        "com.apple.security.device.camera",
+        "com.apple.security.device.audio-input",
+    )
+    require(
+        all(entitlement in ENTITLEMENTS for entitlement in required_entitlements),
+        "Cerebro is missing Automation, camera, or audio-input entitlements",
+    )
+    require(
         "NSAppleMusicUsageDescription" in INFO,
         "Cerebro does not explain Music automation for playback control",
     )
@@ -214,6 +283,11 @@ def main() -> None:
         and '[ROBMessagesBridge requestMessagesAutomationPermission]' in SETTINGS
         and '[ROBAppleMusicPermissions requestAutomationPermission]' in SETTINGS,
         "Settings permission-request actions no longer dispatch through the runtime probes",
+    )
+    require(
+        "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?" in SETTINGS
+        and 'openPrivacySettings:@"Privacy_Automation"' in SETTINGS,
+        "Messages Automation settings no longer use the modern Privacy & Security deep link",
     )
     for filename in ("ROBMessagesBridge.swift", "ROBMessagesAIResponder.swift"):
         require(

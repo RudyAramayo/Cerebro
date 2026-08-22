@@ -8,11 +8,11 @@ SDK failures are reported and retried instead of terminating the service.
 """
 
 import argparse
-import cv2
 from datetime import timedelta
 import fcntl
 import json
-import numpy as np
+import math
+import time
 import os
 import select
 import signal
@@ -207,7 +207,7 @@ def timestamp_nanoseconds(frame):
 
 def frame_payload(
     rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
-    sidewalk_deviation=0.0, sidewalk_confidence=0.0, chess_pieces=None
+    sidewalk_deviation=None, sidewalk_confidence=None, chess_pieces=None
 ):
     rgb_width = int(rgb_frame.getWidth())
     rgb_height = int(rgb_frame.getHeight())
@@ -276,7 +276,7 @@ def frame_payload(
 
 def send_frame(
     client, rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
-    sidewalk_deviation=0.0, sidewalk_confidence=0.0, chess_pieces=None
+    sidewalk_deviation=None, sidewalk_confidence=None, chess_pieces=None
 ):
     header, rgb_bytes, depth_bytes, left_bytes, right_bytes = frame_payload(
         rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
@@ -287,6 +287,73 @@ def send_frame(
     client.sendall(depth_bytes)
     client.sendall(left_bytes)
     client.sendall(right_bytes)
+
+
+FACE_MODEL_MANIFEST_VERSION = 1
+FACE_MODEL_PARSER_TYPE = "depthai_yolo_spatial_v1"
+FACE_DETECTION_TTL_SECONDS = 0.75
+FACE_MODEL_MANIFEST_KEYS = {
+    "manifest_version",
+    "model_stem",
+    "parser_type",
+    "labels",
+    "num_classes",
+    "input_width",
+    "input_height",
+    "coordinate_size",
+    "confidence_threshold",
+    "iou_threshold",
+}
+
+
+def load_face_model_manifest(blob_path):
+    manifest_path = os.path.splitext(blob_path)[0] + ".json"
+    if not os.path.isfile(manifest_path):
+        emit_error("Face model manifest not found; disabling NN: " + manifest_path)
+        return None
+
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as stream:
+            manifest = json.load(stream)
+        if not isinstance(manifest, dict) or set(manifest) != FACE_MODEL_MANIFEST_KEYS:
+            raise ValueError("manifest keys do not match schema version 1")
+        if manifest["manifest_version"] != FACE_MODEL_MANIFEST_VERSION:
+            raise ValueError("unsupported manifest version")
+        expected_stem = os.path.splitext(os.path.basename(blob_path))[0]
+        if manifest["model_stem"] != expected_stem:
+            raise ValueError("model_stem does not match blob filename")
+        if manifest["parser_type"] != FACE_MODEL_PARSER_TYPE:
+            raise ValueError("unsupported parser_type")
+
+        labels = manifest["labels"]
+        if not isinstance(labels, list) or not labels:
+            raise ValueError("labels must be a nonempty array")
+        if any(
+            not isinstance(label, str) or not label or label != label.strip()
+            for label in labels
+        ):
+            raise ValueError("labels must contain nonempty trimmed strings")
+        if len(set(labels)) != len(labels):
+            raise ValueError("labels must be unique")
+        if type(manifest["num_classes"]) is not int or manifest["num_classes"] != len(labels):
+            raise ValueError("num_classes must equal labels length")
+
+        for key in ("input_width", "input_height"):
+            value = manifest[key]
+            if type(value) is not int or value <= 0 or value > 4096:
+                raise ValueError(f"{key} must be an integer from 1 through 4096")
+        if manifest["coordinate_size"] != 4:
+            raise ValueError("coordinate_size must be 4")
+        for key in ("confidence_threshold", "iou_threshold"):
+            value = manifest[key]
+            if type(value) not in (int, float) or not math.isfinite(value):
+                raise ValueError(f"{key} must be finite")
+            if value < 0.0 or value > 1.0:
+                raise ValueError(f"{key} must be between 0 and 1")
+        return manifest
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as error:
+        emit_error("Invalid face model manifest; disabling NN: " + str(error))
+        return None
 
 
 def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess", width=1280, height=720):
@@ -343,29 +410,13 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
 
             nn_model = None
             nn_queue = None
+            face_model_labels = []
             script_dir = os.path.dirname(os.path.abspath(__file__))
 
             if role == "belly":
-                # Sidewalk road segmentation model
-                blob_path = os.path.join(script_dir, "Models", "road-segmentation-adas-0001.blob")
-                if not os.path.exists(blob_path):
-                    blob_path = os.path.join(script_dir, "..", "Models", "road-segmentation-adas-0001.blob")
-
-                if os.path.exists(blob_path):
-                    try:
-                        nn_model = pipeline.create(dai.node.NeuralNetwork)
-                        nn_model.setBlobPath(blob_path)
-                        nn_input_stream = rgb_camera.requestOutput(
-                            (896, 512),
-                            type=dai.ImgFrame.Type.RGB888i,
-                            resizeMode=dai.ImgResizeMode.CROP,
-                            fps=5.0, # Run at 5 Hz to minimize resource load
-                            enableUndistortion=True,
-                        )
-                        nn_input_stream.link(nn_model.input)
-                    except Exception as error:
-                        emit_error("Failed to initialize road segmentation NeuralNetwork: " + str(error))
-                        nn_model = None
+                # The bundled road model has no sidewalk class. Navigation stays
+                # fail-closed until a purpose-built sidewalk contract is added.
+                pass
             elif role == "face":
                 # Dynamic Custom Spatial model (e.g. yolov8_chess_6shave.blob, yolov8_monopoly_6shave.blob)
                 blob_name = f"yolov8_{model_name.lower()}_6shave.blob"
@@ -373,15 +424,22 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                 if not os.path.exists(blob_path):
                     blob_path = os.path.join(script_dir, "..", "Models", blob_name)
 
-                if os.path.exists(blob_path):
+                if not os.path.exists(blob_path):
+                    emit_error("Face model blob not found; disabling NN: " + blob_path)
+                    manifest = None
+                else:
+                    manifest = load_face_model_manifest(blob_path)
+
+                if manifest is not None:
                     try:
                         nn_model = pipeline.create(dai.node.YoloSpatialDetectionNetwork)
                         nn_model.setBlobPath(blob_path)
-                        nn_model.setConfidenceThreshold(0.65)
-                        nn_model.setNumClasses(12)
-                        nn_model.setCoordinateSize(4)
+                        nn_model.setConfidenceThreshold(manifest["confidence_threshold"])
+                        nn_model.setNumClasses(manifest["num_classes"])
+                        nn_model.setCoordinateSize(manifest["coordinate_size"])
+                        nn_model.setIouThreshold(manifest["iou_threshold"])
                         nn_input_stream = rgb_camera.requestOutput(
-                            (640, 400),
+                            (manifest["input_width"], manifest["input_height"]),
                             type=dai.ImgFrame.Type.RGB888i,
                             resizeMode=dai.ImgResizeMode.CROP,
                             fps=5.0,
@@ -389,9 +447,11 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                         )
                         nn_input_stream.link(nn_model.input)
                         stereo.depth.link(nn_model.inputDepth)
+                        face_model_labels = manifest["labels"]
                     except Exception as error:
-                        emit_error("Failed to initialize OAK chess spatial neural network: " + str(error))
+                        emit_error("Failed to initialize manifested face spatial neural network: " + str(error))
                         nn_model = None
+                        face_model_labels = []
 
             sync = pipeline.create(dai.node.Sync)
             sync.setSyncThreshold(SYNC_THRESHOLD)
@@ -417,9 +477,10 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                 raise RuntimeError("DepthAI returned invalid RGB camera intrinsics")
             emit("CEREBRO_DEPTHCAM_STREAMING")
 
-            latest_sidewalk_deviation = 0.0
-            latest_sidewalk_confidence = 0.0
+            latest_sidewalk_deviation = None
+            latest_sidewalk_confidence = None
             latest_chess_pieces = []
+            latest_chess_pieces_updated_at = None
 
             while not stop_event.is_set() and pipeline.isRunning():
                 group = queue.get(QUEUE_WAIT)
@@ -443,85 +504,46 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                         nn_msg = nn_queue.tryGet()
                         if nn_msg is not None:
                             if role == "belly":
-                                raw_output = np.array(nn_msg.getFirstLayerFp16()).reshape(4, 512, 896)
-                                class_mask = np.argmax(raw_output, axis=0).astype(np.uint8)
-                                sidewalk_pixels = (class_mask == 1)
-                                height, width = class_mask.shape
-                                bottom_half_sidewalk = sidewalk_pixels[int(height * 0.5):, :]
-                                y_indices, x_coords = np.where(bottom_half_sidewalk)
-                                
-                                if len(x_coords) > 500:
-                                    sidewalk_center_x = np.mean(x_coords)
-                                    camera_center_x = width / 2.0
-                                    latest_sidewalk_deviation = float((sidewalk_center_x - camera_center_x) / (width / 2.0))
-                                    latest_sidewalk_confidence = 1.0
-                                else:
-                                    latest_sidewalk_deviation = 0.0
-                                    latest_sidewalk_confidence = 0.0
+                                # road-segmentation-adas-0001 has road, curb, and
+                                # mark classes, but no sidewalk class. Fail closed
+                                # until a real sidewalk model and confidence
+                                # contract are available.
+                                latest_sidewalk_deviation = None
+                                latest_sidewalk_confidence = None
                             elif role == "face":
-                                detections = getattr(nn_msg, "spatialDetections", [])
+                                detections = getattr(nn_msg, "detections", None)
+                                if detections is None:
+                                    raise RuntimeError("SpatialImgDetections is missing detections")
                                 latest_chess_pieces = []
-                                class_names = ["white_pawn", "white_knight", "white_bishop", "white_rook", "white_queen", "white_king",
-                                               "black_pawn", "black_knight", "black_bishop", "black_rook", "black_queen", "black_king"]
                                 for det in detections:
-                                    name = class_names[det.label] if det.label < len(class_names) else "piece"
+                                    label_index = int(det.label)
+                                    if label_index < 0 or label_index >= len(face_model_labels):
+                                        raise RuntimeError("Detection label is outside manifested labels")
                                     latest_chess_pieces.append({
-                                        "type": name,
+                                        "type": face_model_labels[label_index],
                                         "x": float(det.spatialCoordinates.x / 1000.0),
                                         "y": float(det.spatialCoordinates.y / 1000.0),
                                         "z": float(det.spatialCoordinates.z / 1000.0)
                                     })
+                                latest_chess_pieces_updated_at = time.monotonic()
                     except Exception as error:
                         emit_error("Failed to post-process on-device NeuralNetwork output: " + str(error))
-                elif role == "face":
-                    # Attempt real-time dynamic Chessboard corner & depth tracking using live camera frames
-                    # This lets ROB locate and lock onto Rudy's actual physical chessboard dynamically!
-                    chessboard_found = False
-                    try:
-                        # Extract raw image bytes from the synced rgb_frame
-                        img_data = np.frombuffer(rgb_frame.getData(), dtype=np.uint8)
-                        img_rgb = img_data.reshape((frame_size[1], frame_size[0], 3))
-                        gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
-                        
-                        # Search for standard chessboard grid corners in the live frame
-                        for pattern in [(7, 7), (9, 7), (8, 6), (6, 8)]:
-                            found, corners = cv2.findChessboardCorners(gray, pattern, None)
-                            if found:
-                                # Found the real board! Map 3D pieces onto the actual grid corners
-                                chessboard_found = True
-                                depth_data = depth_frame.getFrame()
-                                
-                                fx_cam = rgb_intrinsics[0]
-                                fy_cam = rgb_intrinsics[4]
-                                cx_cam = rgb_intrinsics[2]
-                                cy_cam = rgb_intrinsics[5]
-                                
-                                latest_chess_pieces = []
-                                grid_corners = [0, pattern[0] - 1, int(len(corners) / 2), pattern[0] * (pattern[1] - 1), len(corners) - 1]
-                                piece_types = ["white_rook", "white_bishop", "white_queen", "black_rook", "black_king"]
-                                
-                                for idx, grid_idx in enumerate(grid_corners):
-                                    if grid_idx < len(corners):
-                                        px, py = corners[grid_idx][0]
-                                        pz = float(depth_data[int(py), int(px)]) / 1000.0 # mm to m
-                                        if pz <= 0.1:
-                                            pz = 0.5 # fallback to 0.5 meters
-                                            
-                                        rx = float((px - cx_cam) * pz / fx_cam)
-                                        ry = float((py - cy_cam) * pz / fy_cam)
-                                        
-                                        latest_chess_pieces.append({
-                                            "type": piece_types[idx],
-                                            "x": rx,
-                                            "y": ry,
-                                            "z": pz
-                                        })
-                                break
-                    except Exception as error:
-                        emit_error("Failed to perform on-device chessboard corners tracking: " + str(error))
-
-                    if not chessboard_found:
                         latest_chess_pieces = []
+                        latest_chess_pieces_updated_at = None
+                elif role == "face":
+                    # Board corners do not identify chess pieces. Without a
+                    # compatible detection model, publish no piece detections.
+                    latest_chess_pieces = []
+                    latest_chess_pieces_updated_at = None
+
+                if (
+                    role == "face"
+                    and latest_chess_pieces_updated_at is not None
+                    and time.monotonic() - latest_chess_pieces_updated_at
+                    > FACE_DETECTION_TTL_SECONDS
+                ):
+                    latest_chess_pieces = []
+                    latest_chess_pieces_updated_at = None
 
                 send_frame(
                     client, rgb_frame, depth_frame, left_frame, right_frame,

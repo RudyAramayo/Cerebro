@@ -760,8 +760,30 @@ final class CameraViewController: NSViewController {
             lastMainCameraResolution = currentResolution
             if cameraSessionIsRequested {
                 // Forcibly reboot camera session to hot-swap model blob and load new resolution parameters dynamically
-                try? cameraManager?.stopSession()
-                try? cameraManager?.startSession()
+                guard let cameraManager else {
+                    cameraSessionIsRequested = false
+                    let message = "Camera hot restart failed: camera manager is unavailable."
+                    cameraStatusDetail = message
+                    cameraStatusChangedAt = Date()
+                    print(message)
+                    return
+                }
+                do {
+                    try cameraManager.stopSession()
+                    cameraSessionIsRequested = false
+                    try cameraManager.startSession()
+                    cameraSessionIsRequested = true
+                } catch {
+                    // The flag represents a successfully acknowledged session,
+                    // not merely intent. Clearing it allows reconciliation to
+                    // retry instead of suppressing recovery after a failed start.
+                    cameraSessionIsRequested = false
+                    let message = "Camera hot restart failed: \(error.localizedDescription)"
+                    cameraStatusDetail = message
+                    cameraStatusChangedAt = Date()
+                    print(message)
+                    reconcileCameraSession()
+                }
             }
         } else {
             reconcileCameraSession()
@@ -1116,10 +1138,6 @@ extension CameraViewController: CameraManagerDelegate {
                 source: frameSet.source.rawValue,
                 people: latestHumanObservations,
                 depth: frameSet.alignedDepth
-            )
-            ROBSceneSnapshotStore.shared.updateSidewalkDetection(
-                deviation: frameSet.sidewalkCenterDeviation ?? 0.0,
-                confidence: frameSet.sidewalkConfidence ?? 0.0
             )
             if let pieces = frameSet.chessPieces {
                 ROBSceneSnapshotStore.shared.updateChessPieces(pieces)

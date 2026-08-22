@@ -190,6 +190,15 @@ import AVFoundation
                 }
             }
         }
+
+        // Road-navigation telemetry belongs to the belly camera role. The
+        // current road model publishes no navigable sidewalk signal, so absent
+        // values intentionally clear the shared signal instead of preserving
+        // stale data or borrowing telemetry from the face camera.
+        ROBSceneSnapshotStore.shared.updateSidewalkDetection(
+            deviation: frameSet.sidewalkCenterDeviation ?? 0.0,
+            confidence: frameSet.sidewalkConfidence ?? 0.0
+        )
         
         let mainCameraSettings = ROBMainCameraProcessingSettings.shared
         overlayManager?.offer(

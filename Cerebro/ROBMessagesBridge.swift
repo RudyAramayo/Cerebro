@@ -758,6 +758,7 @@ final class ROBMessagesAppleScriptReplySender: ROBMessagesReplySending, @uncheck
         if (count of targetParticipants) is not 1 then error "Originating chat is no longer one-to-one"
         set participantHandle to handle of item 1 of targetParticipants as text
         ignoring case
+          if participantHandle is expectedAccount then error "Originating chat participant is the receiving account"
           if participantHandle is not expectedSender then error "Originating chat participant changed"
         end ignoring
         send replyText to targetChat
@@ -775,7 +776,8 @@ final class ROBMessagesAppleScriptReplySender: ROBMessagesReplySending, @uncheck
         guard let reply = ROBMessagesPlainTextPolicy.normalized(text),
               !chatID.isEmpty,
               !account.isEmpty,
-              !expectedSender.isEmpty else {
+              !expectedSender.isEmpty,
+              account.caseInsensitiveCompare(expectedSender) != .orderedSame else {
             throw ROBMessagesReplyError.failed("The correlated reply was not safe plain text.")
         }
         do {
@@ -929,8 +931,12 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
     public let detail: String
     public let configuredAccount: String
     public let allowedSenderCount: Int
+    public let allowAllSenders: Bool
     public let pendingReplyCount: Int
     public let activeAIChatCount: Int
+    public let activeAIProvider: String?
+    public let lastAIProvider: String?
+    public let lastAIError: String?
     public let lastInboundAt: Date?
     public let lastReplyAt: Date?
 }
@@ -1137,8 +1143,10 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
 
     private func openSystemSettings(forPrivacySection section: String) -> Bool {
         let candidates = [
-            "x-apple.systempreferences:com.apple.preference.security?\(section)",
-            "x-apple.systempreferences:com.apple.preference.security.extension?\(section)"
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?\(section)",
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
+            "x-apple.systempreferences:com.apple.preference.security.extension?\(section)",
+            "x-apple.systempreferences:com.apple.preference.security?\(section)"
         ]
         for candidate in candidates {
             if let url = URL(string: candidate), NSWorkspace.shared.open(url) {
@@ -1210,8 +1218,12 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             detail: detail,
             configuredAccount: configuration.receivingAccount,
             allowedSenderCount: configuration.allowedSenders.count,
+            allowAllSenders: configuration.allowAllSenders,
             pendingReplyCount: pendingRoutes.count,
             activeAIChatCount: ai.activeChatCount,
+            activeAIProvider: ai.activeProvider,
+            lastAIProvider: ai.lastProvider,
+            lastAIError: ai.lastError,
             lastInboundAt: lastInboundAt,
             lastReplyAt: lastReplyAt
         )
@@ -1310,7 +1322,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         }
         guard aiResponder.statusSnapshot().isConfigured else {
             state = "AI unavailable"
-            detail = "Save or provide an enabled Gemini credential for the isolated Messages AI profile."
+            detail = "Neither Gemini nor an on-device local text provider is available for the isolated Messages AI profile."
             publishStatus()
             return
         }

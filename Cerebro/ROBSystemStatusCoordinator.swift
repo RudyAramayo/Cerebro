@@ -290,18 +290,29 @@ import FoundationModels
         let eventDate = [snapshot.lastInboundAt, snapshot.lastReplyAt]
             .compactMap { $0 }
             .max()
+        let authorization = snapshot.allowAllSenders
+            ? "Public: all remote senders"
+            : "Restricted: \(snapshot.allowedSenderCount) authorized remote sender\(snapshot.allowedSenderCount == 1 ? "" : "s")"
+        let providerLabel = snapshot.activeAIProvider == nil
+            ? "Last AI provider"
+            : "Active AI provider"
+        let provider = snapshot.activeAIProvider
+            ?? snapshot.lastAIProvider
+            ?? "None"
+        let lastAIError = snapshot.lastAIError.map { bounded($0) } ?? "None"
         return ROBSystemServiceCardSnapshot(
             id: "messages-ai-bridge",
             displayName: "Messages AI Bridge",
             category: .connectivity,
             state: state,
-            // Do not surface bridge error payloads here: they may originate
-            // from Messages or the AI provider. Counts and state are enough
-            // for health diagnostics without exposing conversation data.
+            // Provider status and bounded AI errors are diagnostic metadata.
+            // Never expose inbound or reply message text in this card.
             detail: detail,
             age: eventDate.map { max(0, now.timeIntervalSince($0)) },
             metrics: [
-                .init(label: "Approved senders", value: "\(snapshot.allowedSenderCount)"),
+                .init(label: "Authorization", value: authorization),
+                .init(label: providerLabel, value: bounded(provider)),
+                .init(label: "Last AI error", value: lastAIError),
                 .init(label: "Pending replies", value: "\(snapshot.pendingReplyCount)"),
                 .init(label: "AI chats", value: "\(snapshot.activeAIChatCount)"),
                 .init(label: "Output", value: "Messages only"),

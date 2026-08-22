@@ -26,10 +26,16 @@ private struct FixtureInboundMessage: Sendable {
 private struct FixtureMessagesBridgeConfiguration: Sendable {
     let receivingAccount: String
     let allowedSenders: Set<String>
+    let allowAllSenders: Bool
 
-    init(receivingAccount: String, allowedSenders: Set<String>? = nil) {
+    init(
+        receivingAccount: String,
+        allowedSenders: Set<String>? = nil,
+        allowAllSenders: Bool = false
+    ) {
         self.receivingAccount = receivingAccount
         self.allowedSenders = Set((allowedSenders ?? []).map(Self.canonicalHandle))
+        self.allowAllSenders = allowAllSenders
     }
 
     static func canonicalHandle(_ handle: String) -> String {
@@ -176,7 +182,8 @@ private actor FixtureMessagesBridge {
         guard !canonicalSender.isEmpty else {
             return .rejected(.missingSender)
         }
-        guard configuration.allowedSenders.contains(canonicalSender) else {
+        guard configuration.allowAllSenders
+                || configuration.allowedSenders.contains(canonicalSender) else {
             return .rejected(.senderNotAllowed)
         }
 
@@ -271,6 +278,42 @@ private struct ROBMessagesBridgeFixtureTests {
             by: failClosedBridge,
             message: message(id: "no-allowlist")
         )
+        let publicAI = FixtureControlledAI()
+        let publicBridge = FixtureMessagesBridge(
+            configuration: FixtureMessagesBridgeConfiguration(
+                receivingAccount: "rob@orbitusrobotics.com",
+                allowedSenders: nil,
+                allowAllSenders: true
+            ),
+            ai: publicAI,
+            output: FixtureOutputRecorder()
+        )
+        let publicDisposition = await publicBridge.receive(
+            message(id: "public-outsider", sender: "stranger@example.com")
+        )
+        guard case .accepted = publicDisposition else {
+            throw FixtureFailure.failed("Public mode rejected a remote sender")
+        }
+        try await expectRejected(
+            .wrongAccount,
+            by: publicBridge,
+            message: message(
+                id: "public-wrong-account",
+                account: "other@example.com",
+                sender: "stranger@example.com"
+            )
+        )
+        try await expectRejected(
+            .outboundOrSelf,
+            by: publicBridge,
+            message: message(
+                id: "public-self-handle",
+                sender: " ROB@OrbitusRobotics.com "
+            )
+        )
+        try await waitUntil("The public remote sender did not reach the AI") {
+            await publicAI.requestSnapshot().count == 1
+        }
         try await expectRejected(
             .missingChat,
             by: bridge,
