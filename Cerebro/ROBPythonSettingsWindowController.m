@@ -26,6 +26,8 @@
 @property (nonatomic, strong) NSTextView *acknowledgementPhrasesTextView;
 @property (nonatomic, strong) NSButton *messagesBridgeEnabledToggle;
 @property (nonatomic, strong) NSButton *messagesAllowAllSendersToggle;
+@property (nonatomic, strong) NSButton *messagesAllowImagesToggle;
+@property (nonatomic, strong) NSButton *messagesAllowGeminiImagesToggle;
 @property (nonatomic, strong) NSTextField *messagesReceivingAccountField;
 @property (nonatomic, strong) NSTextView *messagesAllowedSendersTextView;
 @property (nonatomic, strong) NSButton *requestMessagesAutomationPermissionButton;
@@ -266,7 +268,7 @@
     [messagesView addSubview:messagesHeading];
 
     NSTextField *messagesExplanation = [self labelWithString:
-        @"Approved one-to-one message text is sent to an isolated Gemini session. Replies return only to the originating Messages chat; ROB never speaks them, and camera, search, and robot tools are unavailable."
+        @"Approved one-to-one text and optional still images use isolated AI sessions. Images can remain local or be explicitly allowed for Gemini. Replies return only to the originating chat; ROB never speaks them, and search and robot tools are unavailable."
         frame:NSMakeRect(24, 472, 632, 50)];
     messagesExplanation.textColor = [NSColor secondaryLabelColor];
     [messagesView addSubview:messagesExplanation];
@@ -291,10 +293,30 @@
         @"Allows any sender to text ROB while online and receive replies, overriding the approved senders list.";
     [messagesView addSubview:self.messagesAllowAllSendersToggle];
 
+    self.messagesAllowImagesToggle = [NSButton
+        checkboxWithTitle:@"Allow one image from approved Messages senders"
+                   target:self
+                   action:@selector(messagesAllowImagesChanged:)];
+    self.messagesAllowImagesToggle.frame = NSMakeRect(24, 382, 632, 28);
+    self.messagesAllowImagesToggle.accessibilityIdentifier = @"ROB.MessagesBridge.AllowImages";
+    self.messagesAllowImagesToggle.accessibilityHelp =
+        @"Accept one bounded JPEG, PNG, or HEIC image from an otherwise authorized one-to-one Messages chat.";
+    [messagesView addSubview:self.messagesAllowImagesToggle];
+
+    self.messagesAllowGeminiImagesToggle = [NSButton
+        checkboxWithTitle:@"Allow approved images to be sent to Gemini"
+                   target:self
+                   action:@selector(messagesAllowGeminiImagesChanged:)];
+    self.messagesAllowGeminiImagesToggle.frame = NSMakeRect(24, 354, 632, 28);
+    self.messagesAllowGeminiImagesToggle.accessibilityIdentifier = @"ROB.MessagesBridge.AllowGeminiImages";
+    self.messagesAllowGeminiImagesToggle.accessibilityHelp =
+        @"When enabled, approved Messages images may leave this Mac for Gemini analysis. Otherwise Cerebro uses only Swift MLX followed by Apple Foundation Models.";
+    [messagesView addSubview:self.messagesAllowGeminiImagesToggle];
+
     [messagesView addSubview:[self labelWithString:@"Local receiving Messages account:"
-                                               frame:NSMakeRect(24, 377, 632, 20)]];
+                                               frame:NSMakeRect(24, 326, 632, 20)]];
     self.messagesReceivingAccountField = [[NSTextField alloc]
-        initWithFrame:NSMakeRect(24, 341, 500, 28)];
+        initWithFrame:NSMakeRect(24, 292, 500, 28)];
     self.messagesReceivingAccountField.placeholderString = @"rob@orbitusrobotics.com";
     self.messagesReceivingAccountField.delegate = self;
     self.messagesReceivingAccountField.accessibilityLabel = @"ROB receiving Messages account";
@@ -305,9 +327,9 @@
 
     [messagesView addSubview:[self labelWithString:
         @"Approved senders — one exact Messages handle (email or phone) per line (required):"
-        frame:NSMakeRect(24, 309, 632, 20)]];
+        frame:NSMakeRect(24, 263, 632, 20)]];
     NSScrollView *allowedSendersScrollView = [[NSScrollView alloc]
-        initWithFrame:NSMakeRect(24, 183, 632, 118)];
+        initWithFrame:NSMakeRect(24, 183, 632, 72)];
     allowedSendersScrollView.borderType = NSBezelBorder;
     allowedSendersScrollView.hasVerticalScroller = YES;
     allowedSendersScrollView.autohidesScrollers = YES;
@@ -831,6 +853,14 @@
     self.messagesAllowAllSendersToggle.state = [ROBMessagesBridge configuredAllowAllSenders]
         ? NSControlStateValueOn
         : NSControlStateValueOff;
+    self.messagesAllowImagesToggle.state = [ROBMessagesBridge configuredAllowsImages]
+        ? NSControlStateValueOn
+        : NSControlStateValueOff;
+    self.messagesAllowGeminiImagesToggle.state = [ROBMessagesBridge configuredAllowsGeminiImages]
+        ? NSControlStateValueOn
+        : NSControlStateValueOff;
+    self.messagesAllowGeminiImagesToggle.enabled =
+        self.messagesAllowImagesToggle.state == NSControlStateValueOn;
     self.messagesReceivingAccountField.stringValue =
         [ROBMessagesBridge configuredAccountIdentifier] ?: @"rob@orbitusrobotics.com";
     self.messagesAllowedSendersTextView.string =
@@ -910,6 +940,48 @@
             ? NSControlStateValueOn
             : NSControlStateValueOff;
         [ROBMessagesBridge setConfiguredAllowAllSenders:confirmed];
+    }];
+}
+
+- (void)messagesAllowImagesChanged:(NSButton *)sender
+{
+    BOOL enabled = sender.state == NSControlStateValueOn;
+    [ROBMessagesBridge setConfiguredAllowsImages:enabled];
+    self.messagesAllowGeminiImagesToggle.enabled = enabled;
+    if (!enabled) {
+        self.messagesAllowGeminiImagesToggle.state = NSControlStateValueOff;
+    }
+}
+
+- (void)messagesAllowGeminiImagesChanged:(NSButton *)sender
+{
+    if (sender.state != NSControlStateValueOn) {
+        [ROBMessagesBridge setConfiguredAllowsGeminiImages:NO];
+        return;
+    }
+    if (![ROBMessagesBridge configuredAllowsImages]) {
+        sender.state = NSControlStateValueOff;
+        [ROBMessagesBridge setConfiguredAllowsGeminiImages:NO];
+        return;
+    }
+
+    sender.state = NSControlStateValueOff;
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.alertStyle = NSAlertStyleCritical;
+    alert.messageText = @"Send approved Messages images to Gemini?";
+    alert.informativeText =
+        @"An image accepted from an approved sender will leave this Mac and be processed by Gemini. If you keep this off, Cerebro uses the on-device Swift MLX vision model and passes only its text analysis to Apple Foundation Models.";
+    [alert addButtonWithTitle:@"Allow Gemini Images"];
+    [alert addButtonWithTitle:@"Keep Images Local"];
+    __weak typeof(self) weakSelf = self;
+    [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (strongSelf == nil) { return; }
+        BOOL confirmed = response == NSAlertFirstButtonReturn;
+        strongSelf.messagesAllowGeminiImagesToggle.state = confirmed
+            ? NSControlStateValueOn
+            : NSControlStateValueOff;
+        [ROBMessagesBridge setConfiguredAllowsGeminiImages:confirmed];
     }];
 }
 

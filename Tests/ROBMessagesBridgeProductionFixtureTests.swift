@@ -34,6 +34,8 @@ final class ROBMessagesAIResponder: NSObject {
 
     struct Submission {
         let prompt: String
+        let image: ROBMessagesImageInput?
+        let permitsGeminiImage: Bool
         let chatID: String
         let contextID: String
     }
@@ -48,11 +50,19 @@ final class ROBMessagesAIResponder: NSObject {
 
     func submit(
         prompt: String,
+        image: ROBMessagesImageInput? = nil,
+        permitsGeminiImage: Bool = false,
         chatID: String,
         contextID: String,
         completion: @escaping Completion
     ) {
-        submissions.append(.init(prompt: prompt, chatID: chatID, contextID: contextID))
+        submissions.append(.init(
+            prompt: prompt,
+            image: image,
+            permitsGeminiImage: permitsGeminiImage,
+            chatID: chatID,
+            contextID: contextID
+        ))
         completions[contextID] = completion
     }
 
@@ -124,6 +134,28 @@ private final class FixtureReplySender: ROBMessagesReplySending, @unchecked Send
     }
 }
 
+private final class FixtureImageLoader: ROBMessagesImageLoading, @unchecked Sendable {
+    private let lock = NSLock()
+    private var attachments: [ROBMessagesInboundAttachment] = []
+
+    func loadImage(_ attachment: ROBMessagesInboundAttachment) throws -> ROBMessagesImageInput {
+        lock.lock()
+        attachments.append(attachment)
+        lock.unlock()
+        return ROBMessagesImageInput(
+            jpegData: Data([0xFF, 0xD8, 0xFF, 0xD9]),
+            pixelWidth: 640,
+            pixelHeight: 480
+        )
+    }
+
+    func snapshot() -> [ROBMessagesInboundAttachment] {
+        lock.lock()
+        defer { lock.unlock() }
+        return attachments
+    }
+}
+
 private final class FixtureMessagesDatabase {
     let url: URL
     private let directoryURL: URL
@@ -166,6 +198,14 @@ private final class FixtureMessagesDatabase {
         CREATE TABLE handle (
             ROWID INTEGER PRIMARY KEY AUTOINCREMENT,
             id TEXT
+        );
+        CREATE TABLE attachment (
+            ROWID INTEGER PRIMARY KEY,
+            filename TEXT,
+            mime_type TEXT,
+            uti TEXT,
+            total_bytes INTEGER,
+            is_sticker INTEGER DEFAULT 0
         );
         CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);
         CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);
@@ -240,7 +280,26 @@ private final class FixtureMessagesDatabase {
         return rowID
     }
 
-    func addAttachment(to messageRowID: Int64, attachmentID: Int64 = 1) throws {
+    func addAttachment(
+        to messageRowID: Int64,
+        attachmentID: Int64 = 1,
+        filename: String = "/fixture/Messages/Attachments/image.jpg",
+        mimeType: String = "image/jpeg",
+        uti: String = "public.jpeg",
+        byteCount: Int64 = 128,
+        isSticker: Bool = false
+    ) throws {
+        try execute(
+            "INSERT OR REPLACE INTO attachment (ROWID, filename, mime_type, uti, total_bytes, is_sticker) VALUES (?, ?, ?, ?, ?, ?)",
+            values: [
+                .integer(attachmentID),
+                .text(filename),
+                .text(mimeType),
+                .text(uti),
+                .integer(byteCount),
+                .integer(isSticker ? 1 : 0),
+            ]
+        )
         try execute(
             "INSERT INTO message_attachment_join (message_id, attachment_id) VALUES (?, ?)",
             values: [.integer(messageRowID), .integer(attachmentID)]
@@ -327,6 +386,8 @@ private struct ROBMessagesBridgeProductionFixtureTests {
         "ROBMessagesBridgeReceivingAccount",
         "ROBMessagesBridgeAllowedSenders",
         "ROBMessagesBridgeAllowAllSenders",
+        "ROBMessagesBridgeAllowsImages",
+        "ROBMessagesBridgeAllowsGeminiImages",
         "ROBMessagesBridgeLastMessageRowID",
         "ROBMessagesBridgeRecentMessageGUIDs",
     ]
@@ -338,6 +399,7 @@ private struct ROBMessagesBridgeProductionFixtureTests {
         )
         try testAttributedBodyDecoder()
         try testAttributedBodyInboxSelection()
+        try testBoundedImageLoader()
         try expect(
             ROBMessagesBridgeConfiguration.canonicalHandle("+1 (925) 323-8322")
                 == "+19253238322",
@@ -397,10 +459,12 @@ private struct ROBMessagesBridgeProductionFixtureTests {
 
         let ai = ROBMessagesAIResponder()
         let replies = FixtureReplySender()
+        let imageLoader = FixtureImageLoader()
         let inbox = ROBMessagesSQLiteInbox(databaseURL: database.url)
         var automationPermissionChecks: [Bool] = []
         let bridge = ROBMessagesBridge(
             inbox: inbox,
+            imageLoader: imageLoader,
             replySender: replies,
             aiResponder: ai,
             automationPermissionCheck: { askUserIfNeeded in
@@ -793,6 +857,88 @@ private struct ROBMessagesBridgeProductionFixtureTests {
             "The public reply lost its immutable originating sender"
         )
 
+        ROBMessagesBridge.setConfiguredAllowsImages(true)
+        ROBMessagesBridge.setConfiguredAllowsGeminiImages(true)
+        try await waitUntil("Gemini image mode did not become ready") {
+            let status = bridge.statusSnapshot()
+            return status.state == "listening" &&
+                status.allowsImages && status.allowsGeminiImages
+        }
+        let cloudImageRow = try database.addMessage(
+            guid: "cloud-image-guid",
+            text: "What is in this picture?",
+            senderHandleRowID: owner,
+            chatRowID: chatA,
+            account: account
+        )
+        try database.addAttachment(
+            to: cloudImageRow,
+            attachmentID: 20,
+            filename: "/fixture/Messages/Attachments/cloud-image.jpg"
+        )
+        bridge.reloadConfiguration()
+        try await waitUntil("An approved Gemini image did not reach the AI") {
+            ai.submissions.count == 7
+        }
+        let cloudImageRequest = ai.submissions[6]
+        try expect(
+            cloudImageRequest.prompt == "What is in this picture?" &&
+                cloudImageRequest.image?.pixelWidth == 640 &&
+                cloudImageRequest.permitsGeminiImage,
+            "The image and caption were not correlated for Gemini"
+        )
+        try expect(
+            imageLoader.snapshot().last?.filename.hasSuffix("cloud-image.jpg") == true,
+            "The bridge did not use its bounded image loader"
+        )
+        try expect(
+            ai.complete(contextID: cloudImageRequest.contextID, response: "Cloud image reply"),
+            "The Gemini image fixture could not complete"
+        )
+        try await waitUntil("The Gemini image reply was not delivered") {
+            replies.snapshot().last?.text == "Cloud image reply"
+        }
+
+        ROBMessagesBridge.setConfiguredAllowsGeminiImages(false)
+        try await waitUntil("Local image mode did not become ready") {
+            let status = bridge.statusSnapshot()
+            return status.state == "listening" &&
+                status.allowsImages && !status.allowsGeminiImages
+        }
+        let localImageRow = try database.addMessage(
+            guid: "local-image-guid",
+            text: nil,
+            senderHandleRowID: owner,
+            chatRowID: chatA,
+            account: account
+        )
+        try database.addAttachment(
+            to: localImageRow,
+            attachmentID: 21,
+            filename: "/fixture/Messages/Attachments/local-image.heic",
+            mimeType: "image/heic",
+            uti: "public.heic"
+        )
+        bridge.reloadConfiguration()
+        try await waitUntil("An approved local-only image did not reach the AI") {
+            ai.submissions.count == 8
+        }
+        let localImageRequest = ai.submissions[7]
+        try expect(
+            localImageRequest.prompt ==
+                "Analyze this image and respond appropriately to the sender." &&
+                localImageRequest.image != nil &&
+                !localImageRequest.permitsGeminiImage,
+            "An image-only turn lost its local-only privacy mode or default prompt"
+        )
+        try expect(
+            ai.complete(contextID: localImageRequest.contextID, response: "Local image reply"),
+            "The local image fixture could not complete"
+        )
+        try await waitUntil("The local image reply was not delivered") {
+            replies.snapshot().last?.text == "Local image reply"
+        }
+
         var deniedAutomationChecks: [Bool] = []
         let deniedAutomationBridge = ROBMessagesBridge(
             inbox: inbox,
@@ -920,6 +1066,13 @@ private struct ROBMessagesBridgeProductionFixtureTests {
             ) == nil,
             "An attachment placeholder was treated as an ordinary message"
         )
+        try expect(
+            ROBMessagesAttributedBodyDecoder.plainText(
+                from: attributedArchive(text: "caption\u{FFFC}"),
+                allowsAttachmentPlaceholder: true
+            ) == "caption",
+            "A proven single-image caption did not shed its Messages placeholder"
+        )
         var ambiguous = immutable
         ambiguous.insert(contentsOf: [0x84, 0x01, 0x2B], at: ambiguous.count - 2)
         try expect(
@@ -933,6 +1086,54 @@ private struct ROBMessagesBridgeProductionFixtureTests {
             ROBMessagesAttributedBodyDecoder.plainText(from: forgedLength) == nil,
             "A forged payload length was accepted"
         )
+    }
+
+    private static func testBoundedImageLoader() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "ROBMessagesImageLoaderFixture-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let imageURL = directory.appendingPathComponent("pixel.png")
+        let png = try require(
+            Data(base64Encoded:
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="),
+            "Could not decode the image-loader fixture"
+        )
+        try png.write(to: imageURL, options: .atomic)
+        let loader = ROBMessagesImageLoader(attachmentsRootURL: directory)
+        let attachment = ROBMessagesInboundAttachment(
+            filename: imageURL.path,
+            mimeType: "image/png",
+            uniformTypeIdentifier: "public.png",
+            declaredByteCount: Int64(png.count),
+            isSticker: false
+        )
+        let normalized = try loader.loadImage(attachment)
+        try expect(
+            normalized.pixelWidth == 1 && normalized.pixelHeight == 1 &&
+                normalized.jpegData.starts(with: [0xFF, 0xD8]),
+            "The bounded image loader did not decode and normalize an approved PNG"
+        )
+
+        do {
+            _ = try loader.loadImage(ROBMessagesInboundAttachment(
+                filename: "/tmp/outside-messages-image.png",
+                mimeType: "image/png",
+                uniformTypeIdentifier: "public.png",
+                declaredByteCount: 10,
+                isSticker: false
+            ))
+            throw ProductionFixtureFailure.failed(
+                "The image loader accepted a path outside its Messages attachment root"
+            )
+        } catch ROBMessagesImageError.outsideMessagesAttachments {
+            // Expected fail-closed path boundary.
+        }
     }
 
     private static func testAttributedBodyInboxSelection() throws {
@@ -1095,6 +1296,26 @@ private struct ROBMessagesBridgeProductionFixtureTests {
             )
         }
         try expect(rejection("attachment-row") == .attachment, "An attachment row passed policy")
+        let imageConfiguration = ROBMessagesBridgeConfiguration(
+            enabled: true,
+            receivingAccount: account,
+            allowedSenders: ["owner@example.com"],
+            allowAllSenders: false,
+            allowsImages: true
+        )
+        let attachmentPolicyRow = try require(
+            byGUID["attachment-row"]?.first,
+            "Missing attachment policy row"
+        )
+        try expect(
+            ROBMessagesBridgePolicy.rejection(
+                for: attachmentPolicyRow,
+                configuration: imageConfiguration,
+                now: Date(),
+                seenGUIDs: []
+            ) == nil,
+            "A supported single image with image permission did not pass policy"
+        )
         try expect(
             rejection("participant-mismatch") == .participantMismatch,
             "A mismatched message sender/chat participant passed policy"

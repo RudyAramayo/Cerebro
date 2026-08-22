@@ -10,7 +10,10 @@
 import Foundation
 import Cocoa
 import ApplicationServices
+import CoreImage
+import ImageIO
 import SQLite3
+import UniformTypeIdentifiers
 
 private let ROBMessagesSQLiteTransient = unsafeBitCast(
     -1,
@@ -31,6 +34,24 @@ struct ROBMessagesBridgeConfiguration: Equatable, Sendable {
     let receivingAccount: String
     let allowedSenders: Set<String>
     let allowAllSenders: Bool
+    let allowsImages: Bool
+    let allowsGeminiImages: Bool
+
+    init(
+        enabled: Bool,
+        receivingAccount: String,
+        allowedSenders: Set<String>,
+        allowAllSenders: Bool,
+        allowsImages: Bool = false,
+        allowsGeminiImages: Bool = false
+    ) {
+        self.enabled = enabled
+        self.receivingAccount = receivingAccount
+        self.allowedSenders = allowedSenders
+        self.allowAllSenders = allowAllSenders
+        self.allowsImages = allowsImages
+        self.allowsGeminiImages = allowsImages && allowsGeminiImages
+    }
 
     static func canonicalHandle(_ value: String) -> String {
         let trimmed = value
@@ -93,6 +114,14 @@ enum ROBMessagesPlainTextPolicy {
         }
         return text
     }
+
+    static func normalizedImageCaption(_ value: String?) -> String? {
+        guard let value else { return nil }
+        // Messages may represent the single joined attachment inside its text
+        // payload with U+FFFC. Remove only that known placeholder after policy
+        // has proven there is exactly one supported image attachment.
+        return normalized(value.replacingOccurrences(of: "\u{FFFC}", with: " "))
+    }
 }
 
 /// A deliberately narrow decoder for the legacy NSArchiver typed-stream
@@ -123,7 +152,10 @@ enum ROBMessagesAttributedBodyDecoder {
         ),
     ]
 
-    static func plainText(from archive: Data) -> String? {
+    static func plainText(
+        from archive: Data,
+        allowsAttachmentPlaceholder: Bool = false
+    ) -> String? {
         guard !archive.isEmpty, archive.count <= maximumArchiveBytes else { return nil }
         let bytes = [UInt8](archive)
         guard occurrences(of: valueMarker, in: bytes, stoppingAfter: 1) == 1,
@@ -159,7 +191,9 @@ enum ROBMessagesAttributedBodyDecoder {
               bytes.suffix(2).elementsEqual([0x86, 0x86]) else {
             return nil
         }
-        return ROBMessagesPlainTextPolicy.normalized(decoded)
+        return allowsAttachmentPlaceholder
+            ? ROBMessagesPlainTextPolicy.normalizedImageCaption(decoded)
+            : ROBMessagesPlainTextPolicy.normalized(decoded)
     }
 
     private static func archivePrefix(
@@ -304,12 +338,39 @@ struct ROBMessagesInboundMessage: Sendable {
     let isFromMe: Bool
     let participantCount: Int
     let attachmentCount: Int
+    let attachment: ROBMessagesInboundAttachment?
     let chatJoinCount: Int
     let text: String?
     let date: Date?
     let associatedMessageGUID: String?
     let itemType: Int
     let groupActionType: Int
+}
+
+struct ROBMessagesInboundAttachment: Equatable, Sendable {
+    let filename: String
+    let mimeType: String
+    let uniformTypeIdentifier: String
+    let declaredByteCount: Int64
+    let isSticker: Bool
+
+    var isSupportedImageDeclaration: Bool {
+        guard !isSticker, !filename.isEmpty else { return false }
+        let mime = mimeType.lowercased()
+        let uti = uniformTypeIdentifier.lowercased()
+        let fileExtension = URL(fileURLWithPath: filename).pathExtension.lowercased()
+        return ["image/jpeg", "image/jpg", "image/png", "image/heic", "image/heif"]
+            .contains(mime) ||
+            ["public.jpeg", "public.png", "public.heic", "public.heif"]
+            .contains(uti) ||
+            ["jpg", "jpeg", "png", "heic", "heif"].contains(fileExtension)
+    }
+}
+
+struct ROBMessagesImageInput: Sendable {
+    let jpegData: Data
+    let pixelWidth: Int
+    let pixelHeight: Int
 }
 
 enum ROBMessagesMessageRejection: Equatable, Sendable {
@@ -376,7 +437,17 @@ enum ROBMessagesBridgePolicy {
             return .participantMismatch
         }
         guard message.chatJoinCount == 1 else { return .ambiguousChat }
-        guard message.attachmentCount == 0 else { return .attachment }
+        let hasImage: Bool
+        if message.attachmentCount == 0 {
+            hasImage = false
+        } else {
+            guard configuration.allowsImages,
+                  message.attachmentCount == 1,
+                  message.attachment?.isSupportedImageDeclaration == true else {
+                return .attachment
+            }
+            hasImage = true
+        }
         guard !message.chatID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return .missingChat
         }
@@ -385,7 +456,7 @@ enum ROBMessagesBridgePolicy {
               message.associatedMessageGUID?.isEmpty != false else {
             return .unsupportedEvent
         }
-        guard ROBMessagesPlainTextPolicy.normalized(message.text) != nil else {
+        guard hasImage || ROBMessagesPlainTextPolicy.normalized(message.text) != nil else {
             return .nonText
         }
         guard let date = message.date else { return .stale }
@@ -408,6 +479,155 @@ struct ROBMessagesInboxBatch: Sendable {
 protocol ROBMessagesInboxReading: AnyObject, Sendable {
     func highestRowID() throws -> Int64
     func messages(after rowID: Int64, limit: Int) throws -> ROBMessagesInboxBatch
+}
+
+protocol ROBMessagesImageLoading: AnyObject, Sendable {
+    func loadImage(_ attachment: ROBMessagesInboundAttachment) throws -> ROBMessagesImageInput
+}
+
+enum ROBMessagesImageError: LocalizedError {
+    case unavailable
+    case outsideMessagesAttachments
+    case unsupported
+    case tooLarge
+    case invalidDimensions
+    case decodeFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .unavailable:
+            return "The Messages image attachment is not available on this Mac."
+        case .outsideMessagesAttachments:
+            return "The image path is outside the Messages attachments directory."
+        case .unsupported:
+            return "Only a single JPEG, PNG, or HEIC Messages image is supported."
+        case .tooLarge:
+            return "The Messages image exceeds the safe processing limit."
+        case .invalidDimensions:
+            return "The Messages image dimensions are invalid or too large."
+        case .decodeFailed:
+            return "The Messages image could not be decoded safely."
+        }
+    }
+}
+
+final class ROBMessagesImageLoader: ROBMessagesImageLoading, @unchecked Sendable {
+    private static let maximumCompressedBytes = 10 * 1_024 * 1_024
+    private static let maximumPixelCount = 24_000_000
+    private static let maximumDimension = 12_000
+    private static let normalizedMaximumDimension = 2_048
+    private static let maximumNormalizedJPEGBytes = 4 * 1_024 * 1_024
+    private static let allowedSourceTypes = Set([
+        UTType.jpeg.identifier,
+        UTType.png.identifier,
+        UTType.heic.identifier,
+        UTType.heif.identifier,
+    ])
+
+    private let attachmentsRootURL: URL
+
+    init(attachmentsRootURL: URL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Messages/Attachments", isDirectory: true)) {
+        self.attachmentsRootURL = attachmentsRootURL
+    }
+
+    func loadImage(_ attachment: ROBMessagesInboundAttachment) throws -> ROBMessagesImageInput {
+        guard attachment.isSupportedImageDeclaration else {
+            throw ROBMessagesImageError.unsupported
+        }
+        let expandedPath = (attachment.filename as NSString).expandingTildeInPath
+        guard !expandedPath.isEmpty else { throw ROBMessagesImageError.unavailable }
+        let root = attachmentsRootURL.standardizedFileURL.resolvingSymlinksInPath()
+        let file = URL(fileURLWithPath: expandedPath)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        let rootPrefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+        guard file.path.hasPrefix(rootPrefix) else {
+            throw ROBMessagesImageError.outsideMessagesAttachments
+        }
+
+        let values: URLResourceValues
+        do {
+            values = try file.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        } catch {
+            throw ROBMessagesImageError.unavailable
+        }
+        guard values.isRegularFile == true else { throw ROBMessagesImageError.unavailable }
+        let declaredSize = attachment.declaredByteCount
+        let fileSize = values.fileSize ?? 0
+        guard fileSize > 0,
+              fileSize <= Self.maximumCompressedBytes,
+              declaredSize <= 0 || declaredSize <= Self.maximumCompressedBytes else {
+            throw ROBMessagesImageError.tooLarge
+        }
+
+        let data: Data
+        do {
+            data = try Data(contentsOf: file, options: [.mappedIfSafe])
+        } catch {
+            throw ROBMessagesImageError.unavailable
+        }
+        guard !data.isEmpty, data.count <= Self.maximumCompressedBytes,
+              let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetCount(source) == 1,
+              let sourceType = CGImageSourceGetType(source) as String?,
+              Self.allowedSourceTypes.contains(sourceType),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
+                as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+              let height = properties[kCGImagePropertyPixelHeight] as? NSNumber else {
+            throw ROBMessagesImageError.decodeFailed
+        }
+        let pixelWidth = width.intValue
+        let pixelHeight = height.intValue
+        guard pixelWidth > 0, pixelHeight > 0,
+              pixelWidth <= Self.maximumDimension,
+              pixelHeight <= Self.maximumDimension,
+              pixelWidth <= Self.maximumPixelCount / pixelHeight else {
+            throw ROBMessagesImageError.invalidDimensions
+        }
+
+        let thumbnailOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: Self.normalizedMaximumDimension,
+            kCGImageSourceShouldCacheImmediately: true,
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(
+            source,
+            0,
+            thumbnailOptions as CFDictionary
+        ) else {
+            throw ROBMessagesImageError.decodeFailed
+        }
+        let normalized = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            normalized,
+            UTType.jpeg.identifier as CFString,
+            1,
+            nil
+        ) else {
+            throw ROBMessagesImageError.decodeFailed
+        }
+        CGImageDestinationAddImage(
+            destination,
+            image,
+            [kCGImageDestinationLossyCompressionQuality: 0.84] as CFDictionary
+        )
+        guard CGImageDestinationFinalize(destination) else {
+            throw ROBMessagesImageError.decodeFailed
+        }
+        let jpegData = normalized as Data
+        guard !jpegData.isEmpty,
+              jpegData.count <= Self.maximumNormalizedJPEGBytes else {
+            throw ROBMessagesImageError.tooLarge
+        }
+        return ROBMessagesImageInput(
+            jpegData: jpegData,
+            pixelWidth: image.width,
+            pixelHeight: image.height
+        )
+    }
 }
 
 protocol ROBMessagesReplySending: AnyObject, Sendable {
@@ -484,6 +704,10 @@ final class ROBMessagesSQLiteInbox: ROBMessagesInboxReading, @unchecked Sendable
             let messageColumns = try columns(in: "message", database: database)
             let chatColumns = try columns(in: "chat", database: database)
             let handleColumns = try columns(in: "handle", database: database)
+            let hasAttachmentTable = try tableExists("attachment", database: database)
+            let attachmentColumns = hasAttachmentTable
+                ? try columns(in: "attachment", database: database)
+                : []
             let requiredMessageColumns: Set<String> = [
                 "guid", "text", "handle_id", "is_from_me", "date",
                 "associated_message_guid", "item_type", "group_action_type",
@@ -491,6 +715,8 @@ final class ROBMessagesSQLiteInbox: ROBMessagesInboxReading, @unchecked Sendable
             guard requiredMessageColumns.isSubset(of: messageColumns),
                   chatColumns.contains("guid"),
                   handleColumns.contains("id"),
+                  hasAttachmentTable,
+                  attachmentColumns.contains("filename"),
                   try tableExists("chat_message_join", database: database),
                   try tableExists("chat_handle_join", database: database),
                   try tableExists("message_attachment_join", database: database) else {
@@ -523,6 +749,21 @@ final class ROBMessagesSQLiteInbox: ROBMessagesInboxReading, @unchecked Sendable
             let attributedBody = messageColumns.contains("attributedBody")
                 ? "CASE WHEN typeof(m.attributedBody) = 'blob' AND length(m.attributedBody) <= \(ROBMessagesAttributedBodyDecoder.maximumArchiveBytes) THEN m.attributedBody ELSE NULL END"
                 : "NULL"
+            func attachmentValue(_ column: String, fallback: String) -> String {
+                guard attachmentColumns.contains(column) else { return fallback }
+                return """
+                (SELECT COALESCE(a.\(column), \(fallback))
+                   FROM message_attachment_join attachment_join
+                   JOIN attachment a ON a.ROWID = attachment_join.attachment_id
+                  WHERE attachment_join.message_id = m.ROWID
+                  LIMIT 1)
+                """
+            }
+            let attachmentFilename = attachmentValue("filename", fallback: "''")
+            let attachmentMIMEType = attachmentValue("mime_type", fallback: "''")
+            let attachmentUTI = attachmentValue("uti", fallback: "''")
+            let attachmentBytes = attachmentValue("total_bytes", fallback: "0")
+            let attachmentSticker = attachmentValue("is_sticker", fallback: "0")
             let chatAccountSelect = chatAccountExpressions.joined(separator: ", ")
             let query = """
             SELECT m.ROWID, COALESCE(m.guid, ''), \(boundedText),
@@ -543,6 +784,11 @@ final class ROBMessagesSQLiteInbox: ROBMessagesInboxReading, @unchecked Sendable
                         ON participant.ROWID = participant_join.handle_id
                      WHERE participant_join.chat_id = c.ROWID
                      LIMIT 1),
+                   \(attachmentFilename),
+                   \(attachmentMIMEType),
+                   \(attachmentUTI),
+                   \(attachmentBytes),
+                   \(attachmentSticker),
                    \(chatAccountSelect),
                    \(attributedBody)
               FROM message m
@@ -563,7 +809,8 @@ final class ROBMessagesSQLiteInbox: ROBMessagesInboxReading, @unchecked Sendable
                 if step == SQLITE_DONE { break }
                 guard step == SQLITE_ROW else { throw databaseError(database) }
                 let rawDate = sqlite3_column_int64(statement, 4)
-                let chatAccountStart = 15
+                let attachmentStart = 15
+                let chatAccountStart = attachmentStart + 5
                 let chatAccounts = chatAccountExpressions.indices.map {
                     string(statement, column: Int32(chatAccountStart + $0)) ?? ""
                 }
@@ -571,6 +818,35 @@ final class ROBMessagesSQLiteInbox: ROBMessagesInboxReading, @unchecked Sendable
                     chatAccountStart + chatAccountExpressions.count
                 )
                 let hasDatabaseText = sqlite3_column_int(statement, 13) != 0
+                let attachmentCount = Int(sqlite3_column_int(statement, 11))
+                let attachmentFilename = string(
+                    statement,
+                    column: Int32(attachmentStart),
+                    maximumBytes: 4_096
+                ) ?? ""
+                let attachment = attachmentCount > 0 && !attachmentFilename.isEmpty
+                    ? ROBMessagesInboundAttachment(
+                        filename: attachmentFilename,
+                        mimeType: string(
+                            statement,
+                            column: Int32(attachmentStart + 1),
+                            maximumBytes: 256
+                        ) ?? "",
+                        uniformTypeIdentifier: string(
+                            statement,
+                            column: Int32(attachmentStart + 2),
+                            maximumBytes: 256
+                        ) ?? "",
+                        declaredByteCount: sqlite3_column_int64(
+                            statement,
+                            Int32(attachmentStart + 3)
+                        ),
+                        isSticker: sqlite3_column_int(
+                            statement,
+                            Int32(attachmentStart + 4)
+                        ) != 0
+                    )
+                    : nil
                 let selectedText: String?
                 if hasDatabaseText {
                     // Presence wins even when invalid/oversize; never bypass a
@@ -585,7 +861,12 @@ final class ROBMessagesSQLiteInbox: ROBMessagesInboxReading, @unchecked Sendable
                         statement,
                         column: attributedBodyColumn,
                         maximumBytes: ROBMessagesAttributedBodyDecoder.maximumArchiveBytes
-                    ).flatMap(ROBMessagesAttributedBodyDecoder.plainText(from:))
+                    ).flatMap {
+                        ROBMessagesAttributedBodyDecoder.plainText(
+                            from: $0,
+                            allowsAttachmentPlaceholder: attachmentCount == 1
+                        )
+                    }
                 }
                 messages.append(ROBMessagesInboundMessage(
                     rowID: sqlite3_column_int64(statement, 0),
@@ -596,9 +877,12 @@ final class ROBMessagesSQLiteInbox: ROBMessagesInboxReading, @unchecked Sendable
                     soleChatParticipant: string(statement, column: 14) ?? "",
                     isFromMe: sqlite3_column_int(statement, 3) != 0,
                     participantCount: Int(sqlite3_column_int(statement, 10)),
-                    attachmentCount: Int(sqlite3_column_int(statement, 11)),
+                    attachmentCount: attachmentCount,
+                    attachment: attachment,
                     chatJoinCount: Int(sqlite3_column_int(statement, 12)),
-                    text: ROBMessagesPlainTextPolicy.normalized(selectedText),
+                    text: attachmentCount == 1
+                        ? ROBMessagesPlainTextPolicy.normalizedImageCaption(selectedText)
+                        : ROBMessagesPlainTextPolicy.normalized(selectedText),
                     date: Self.messagesDate(rawDate),
                     associatedMessageGUID: string(statement, column: 7),
                     itemType: Int(sqlite3_column_int(statement, 8)),
@@ -1060,6 +1344,8 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
     public let configuredAccount: String
     public let allowedSenderCount: Int
     public let allowAllSenders: Bool
+    public let allowsImages: Bool
+    public let allowsGeminiImages: Bool
     public let pendingReplyCount: Int
     public let activeAIChatCount: Int
     public let activeAIProvider: String?
@@ -1079,6 +1365,8 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
     private static let accountDefaultsKey = "ROBMessagesBridgeReceivingAccount"
     private static let allowedSendersDefaultsKey = "ROBMessagesBridgeAllowedSenders"
     private static let allowAllSendersDefaultsKey = "ROBMessagesBridgeAllowAllSenders"
+    private static let allowsImagesDefaultsKey = "ROBMessagesBridgeAllowsImages"
+    private static let allowsGeminiImagesDefaultsKey = "ROBMessagesBridgeAllowsGeminiImages"
     private static let cursorDefaultsKey = "ROBMessagesBridgeLastMessageRowID"
     private static let recentGUIDsDefaultsKey = "ROBMessagesBridgeRecentMessageGUIDs"
     private static let pollingInterval: TimeInterval = 2
@@ -1096,6 +1384,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
     }
 
     private let inbox: ROBMessagesInboxReading
+    private let imageLoader: ROBMessagesImageLoading
     private let replySender: ROBMessagesReplySending
     private let aiResponder: ROBMessagesAIResponder
     private let automationPermissionCheck: (_ askUserIfNeeded: Bool) -> String?
@@ -1121,6 +1410,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
     private override convenience init() {
         self.init(
             inbox: ROBMessagesSQLiteInbox(),
+            imageLoader: ROBMessagesImageLoader(),
             replySender: ROBMessagesAppleScriptReplySender(),
             aiResponder: ROBMessagesAIResponder(),
             automationPermissionCheck: { askUserIfNeeded in
@@ -1135,6 +1425,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
 
     init(
         inbox: ROBMessagesInboxReading,
+        imageLoader: ROBMessagesImageLoading = ROBMessagesImageLoader(),
         replySender: ROBMessagesReplySending,
         aiResponder: ROBMessagesAIResponder,
         automationPermissionCheck: @escaping (_ askUserIfNeeded: Bool) -> String? = {
@@ -1147,6 +1438,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         }
     ) {
         self.inbox = inbox
+        self.imageLoader = imageLoader
         self.replySender = replySender
         self.aiResponder = aiResponder
         self.automationPermissionCheck = automationPermissionCheck
@@ -1234,6 +1526,31 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
 
     public static func setConfiguredAllowAllSenders(_ value: Bool) {
         UserDefaults.standard.set(value, forKey: allowAllSendersDefaultsKey)
+        postSettingsChange()
+    }
+
+    public static func configuredAllowsImages() -> Bool {
+        UserDefaults.standard.bool(forKey: allowsImagesDefaultsKey)
+    }
+
+    public static func setConfiguredAllowsImages(_ value: Bool) {
+        UserDefaults.standard.set(value, forKey: allowsImagesDefaultsKey)
+        if !value {
+            UserDefaults.standard.set(false, forKey: allowsGeminiImagesDefaultsKey)
+        }
+        postSettingsChange()
+    }
+
+    public static func configuredAllowsGeminiImages() -> Bool {
+        configuredAllowsImages() &&
+            UserDefaults.standard.bool(forKey: allowsGeminiImagesDefaultsKey)
+    }
+
+    public static func setConfiguredAllowsGeminiImages(_ value: Bool) {
+        UserDefaults.standard.set(
+            value && configuredAllowsImages(),
+            forKey: allowsGeminiImagesDefaultsKey
+        )
         postSettingsChange()
     }
 
@@ -1347,6 +1664,8 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             configuredAccount: configuration.receivingAccount,
             allowedSenderCount: configuration.allowedSenders.count,
             allowAllSenders: configuration.allowAllSenders,
+            allowsImages: configuration.allowsImages,
+            allowsGeminiImages: configuration.allowsGeminiImages,
             pendingReplyCount: pendingRoutes.count,
             activeAIChatCount: ai.activeChatCount,
             activeAIProvider: ai.activeProvider,
@@ -1379,7 +1698,9 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             allowedSenders: ROBMessagesBridgeConfiguration.parseAllowedSenders(
                 configuredAllowedSendersText()
             ),
-            allowAllSenders: configuredAllowAllSenders()
+            allowAllSenders: configuredAllowAllSenders(),
+            allowsImages: configuredAllowsImages(),
+            allowsGeminiImages: configuredAllowsGeminiImages()
         )
     }
 
@@ -1593,6 +1914,9 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         rememberMessageGUID(message.guid)
         lastInboundAt = now
 
+        let prompt = ROBMessagesPlainTextPolicy.normalized(message.text)
+            ?? "Analyze this image and respond appropriately to the sender."
+
         let contextID = "messages:\(UUID().uuidString.lowercased())"
         pendingRoutes[contextID] = PendingRoute(
             chatID: message.chatID,
@@ -1603,12 +1927,61 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             generation: generation
         )
         state = "processing"
-        detail = "Waiting for \(pendingRoutes.count) isolated text reply\(pendingRoutes.count == 1 ? "" : "ies")."
+        detail = message.attachment == nil
+            ? "Waiting for \(pendingRoutes.count) isolated text reply\(pendingRoutes.count == 1 ? "" : "ies")."
+            : "Safely preparing an approved Messages image for isolated analysis."
         publishStatus()
-        guard let prompt = ROBMessagesPlainTextPolicy.normalized(message.text) else { return }
+        guard let attachment = message.attachment else {
+            submitAI(
+                prompt: prompt,
+                image: nil,
+                permitsGeminiImage: false,
+                chatID: message.chatID,
+                contextID: contextID
+            )
+            return
+        }
+        let requestGeneration = generation
+        let imageLoader = imageLoader
+        workerQueue.async { [weak self, imageLoader] in
+            let result = Result { try imageLoader.loadImage(attachment) }
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      requestGeneration == generation,
+                      pendingRoutes[contextID] != nil else {
+                    return
+                }
+                switch result {
+                case .success(let image):
+                    self.submitAI(
+                        prompt: prompt,
+                        image: image,
+                        permitsGeminiImage: self.configuration.allowsGeminiImages,
+                        chatID: message.chatID,
+                        contextID: contextID
+                    )
+                case .failure(let error):
+                    self.finishAIResponse(
+                        .failure(error),
+                        contextID: contextID
+                    )
+                }
+            }
+        }
+    }
+
+    private func submitAI(
+        prompt: String,
+        image: ROBMessagesImageInput?,
+        permitsGeminiImage: Bool,
+        chatID: String,
+        contextID: String
+    ) {
         aiResponder.submit(
             prompt: prompt,
-            chatID: message.chatID,
+            image: image,
+            permitsGeminiImage: permitsGeminiImage,
+            chatID: chatID,
             contextID: contextID
         ) { [weak self] result in
             self?.finishAIResponse(result, contextID: contextID)

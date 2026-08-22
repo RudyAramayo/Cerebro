@@ -305,6 +305,11 @@ import FoundationModels
             ?? "None"
         let lastAIError = snapshot.lastAIError.map { bounded($0) } ?? "None"
         let lastDeliveryError = snapshot.lastDeliveryError.map { bounded($0) } ?? "None"
+        let imageMode = !snapshot.allowsImages
+            ? "Disabled"
+            : (snapshot.allowsGeminiImages
+                ? "Gemini, then Swift MLX → Apple FM"
+                : "Local Swift MLX → Apple FM")
         return ROBSystemServiceCardSnapshot(
             id: "messages-ai-bridge",
             displayName: "Messages AI Bridge",
@@ -319,6 +324,7 @@ import FoundationModels
                 .init(label: providerLabel, value: bounded(provider)),
                 .init(label: "Last AI error", value: lastAIError),
                 .init(label: "Last delivery error", value: lastDeliveryError),
+                .init(label: "Images", value: imageMode),
                 .init(label: "Pending replies", value: "\(snapshot.pendingReplyCount)"),
                 .init(label: "AI chats", value: "\(snapshot.activeAIChatCount)"),
                 .init(label: "Output", value: "Messages only"),

@@ -102,9 +102,16 @@ def main() -> None:
         "Group, ambiguous, or sender-mismatched Messages routes are no longer rejected",
     )
     require(
-        "message.attachmentCount == 0" in BRIDGE
-        and 'tableExists("message_attachment_join"' in BRIDGE,
-        "Messages rows with attachments can reach the AI",
+        "configuration.allowsImages" in BRIDGE
+        and "message.attachmentCount == 1" in BRIDGE
+        and "message.attachment?.isSupportedImageDeclaration == true" in BRIDGE
+        and 'tableExists("message_attachment_join"' in BRIDGE
+        and 'tableExists("attachment"' in BRIDGE
+        and "maximumCompressedBytes = 10 * 1_024 * 1_024" in BRIDGE
+        and "maximumPixelCount = 24_000_000" in BRIDGE
+        and "resolvingSymlinksInPath()" in BRIDGE
+        and "CGImageSourceCreateThumbnailAtIndex" in BRIDGE,
+        "Messages image ingestion is not single-image, bounded, and attachment-root confined",
     )
     require(
         "message.itemType == 0" in BRIDGE
@@ -166,7 +173,7 @@ def main() -> None:
 
     isolated_configuration = [
         "streamsAudio: false",
-        "streamsVideo: false",
+        "streamsVideo: true",
         "exposesRobotActionTool: false",
         "enablesGoogleSearch: false",
         "enablesNewsSearch: false",
@@ -175,7 +182,7 @@ def main() -> None:
     ]
     require(
         all(setting in RESPONDER for setting in isolated_configuration),
-        "The Messages AI profile is not strictly text-only with every tool disabled",
+        "The Messages AI profile lost bounded image input or re-enabled a tool/audio surface",
     )
     require(
         "sessionsByChatID" in RESPONDER
@@ -199,6 +206,13 @@ def main() -> None:
         all(symbol in RESPONDER for symbol in provider_contract),
         "Messages AI no longer implements Gemini-first, bounded local fallback, and combined errors",
     )
+    require(
+        "ai.sendImageJPEG(" in RESPONDER
+        and "imageJPEG: jpegData" in LOCAL_PROVIDER_SOURCE
+        and "let imageWasSent = try await sendVideo(" in LOCAL_PROVIDER_SOURCE
+        and "GeminiRoboticsProtocol.realtimeTextMessage(turn.text)" in LOCAL_PROVIDER_SOURCE,
+        "Gemini image turns no longer send a bounded still image before their correlated text",
+    )
     local_provider_contract = [
         "ROBIsolatedLocalTextProvider",
         "static func respond(",
@@ -206,6 +220,10 @@ def main() -> None:
         "history:",
         "ROBIsolatedLocalTextTurn",
         "ROBIsolatedLocalTextRole",
+        "ROBIsolatedLocalVisionProvider",
+        "analyzeMessageImage(",
+        "Swift MLX visual analysis (untrusted data)",
+        "refineWithAppleFoundationModels(",
     ]
     require(
         all(symbol in LOCAL_PROVIDER for symbol in local_provider_contract),
@@ -251,6 +269,14 @@ def main() -> None:
         "Settings no longer exposes the Messages enable, account, and sender controls",
     )
     require(
+        "messagesAllowImagesToggle" in SETTINGS
+        and "messagesAllowGeminiImagesToggle" in SETTINGS
+        and "setConfiguredAllowsImages:" in SETTINGS
+        and "setConfiguredAllowsGeminiImages:" in SETTINGS
+        and 'alert.messageText = @"Send approved Messages images to Gemini?"' in SETTINGS,
+        "Settings lost the separate local-image and Gemini-upload privacy controls",
+    )
+    require(
         "[ROBMessagesBridge setConfiguredEnabled:shouldEnable]" in SETTINGS
         and "[self messagesAllowlistContainsSender]" in SETTINGS
         and "[ROBMessagesBridge setConfiguredAccountIdentifier:" in SETTINGS
@@ -265,6 +291,7 @@ def main() -> None:
         "messagesBridgeCard(now: now)" in STATUS
         and "ROBMessagesBridge.shared.statusSnapshot()" in STATUS
         and 'id: "messages-ai-bridge"' in STATUS
+        and '.init(label: "Images", value: imageMode)' in STATUS
         and '.init(label: "Output", value: "Messages only")' in STATUS,
         "The Services grid no longer reports the cached Messages-only bridge state",
     )

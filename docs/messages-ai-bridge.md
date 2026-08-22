@@ -1,7 +1,8 @@
 # Messages AI bridge
 
-The Messages bridge lets ROB answer new text messages without speaking in the
-room. It is intentionally disabled until an operator configures it locally.
+The Messages bridge lets ROB answer new text messages and optionally analyze a
+single still image without speaking in the room. It is intentionally disabled
+until an operator configures it locally.
 
 ## Setup
 
@@ -18,7 +19,10 @@ room. It is intentionally disabled until an operator configures it locally.
    macOS TCC decision, requests consent when it is undecided, and displays an
    explicit granted/required result. Then turn on **Enable replies received by
    ROB in Messages**.
-7. Open **Services** and verify that **Messages AI Bridge** changes to
+7. To accept images, enable **Allow one image from approved Messages senders**.
+   Images remain on the Mac unless you separately enable **Allow approved
+   images to be sent to Gemini** and confirm the privacy warning.
+8. Open **Services** and verify that **Messages AI Bridge** changes to
    **Listening**. A saved Gemini credential is required for its isolated AI
    sessions.
 
@@ -36,19 +40,21 @@ replaying that database as history.
 ## Isolation and authorization
 
 - Each active chat owns a separate Gemini Live session with text responses,
-  microphone and camera streaming off, Google/news search off, and no function
-  or robot-action tools. The approved message text is sent to Google's Gemini
-  service; no other Messages history is included.
+  microphone and live-camera sources off, Google/news search off, and no
+  function or robot-action tools. Approved text is sent to Gemini. A normalized
+  still image is sent only when the separate Gemini-image setting is enabled;
+  no other Messages history or camera imagery is included.
 - Messages replies never call `ROBSpeechBox` and do not appear in the room
   conversation transcript.
-- Only incoming plain text sent to the configured receiving account from an
-  exact, locally approved handle is eligible.
+- Only incoming plain text, or one JPEG/PNG/HEIC image with optional text, sent
+  to the configured receiving account from an exact locally approved handle is
+  eligible.
 - Only one-to-one chats are accepted. Cerebro rechecks the account, participant
   count, and expected participant handle immediately before Messages sends a
   reply.
-- Outgoing messages, self-messages, groups, attachments, reactions, edits,
-  deletions, service events, stale messages, duplicates, and oversized text
-  fail closed.
+- Outgoing messages, self-messages, groups, multiple or non-image attachments,
+  stickers, reactions, edits, deletions, service events, stale messages,
+  duplicates, oversized text, and unsafe image files fail closed.
 - Disabling the bridge or changing its account or allowlist revokes queued
   routes, disconnects the isolated sessions, and prevents their late responses
   from being sent.
@@ -60,10 +66,22 @@ is sent through the installed Messages scripting interface to the immutable
 originating chat; it never falls back to the selected conversation or a new
 participant lookup.
 
+Images are accepted only from the Messages attachments directory, limited to
+10 MB and 24 megapixels, decoded through ImageIO, resized to at most 2048 pixels
+on the longest edge, and re-encoded as metadata-free JPEG before inference.
+The normalized bytes are discarded with the completed or cancelled turn.
+
+Gemini is the primary image provider only when cloud image upload is enabled.
+Otherwise—or after a Gemini failure—Cerebro runs the image through the on-device
+Swift MLX Qwen2-VL model. Apple Foundation Models never receives pixels: it
+receives the bounded Swift MLX visual analysis as untrusted data and turns that
+analysis plus the sender's text into the final reply. If Apple Intelligence is
+unavailable, the bounded MLX response is used directly.
+
 The Messages database and its legacy attributed-text archive are private macOS
 implementation details. Cerebro recognizes a narrow, bounded plain-text shape
 without instantiating archived classes and fails closed if Apple changes that
-shape. Attachments and rich app-message placeholders are never decoded.
+shape. Non-image attachments and rich app-message payloads are never decoded.
 
 ## Status and troubleshooting
 
