@@ -267,7 +267,8 @@ import FoundationModels
         } else if normalized.contains("configuration required") ||
                     normalized.contains("full disk access") ||
                     normalized.contains("automation permission") ||
-                    normalized.contains("ai unavailable") {
+                    normalized.contains("ai unavailable") ||
+                    normalized.contains("transcript archive") {
             state = .unavailable
             if normalized.contains("full disk access") {
                 detail = "Full Disk Access is required to read the local Messages inbox."
@@ -275,6 +276,8 @@ import FoundationModels
                 detail = "Automation permission is required to return replies through Messages."
             } else if normalized.contains("ai unavailable") {
                 detail = "The isolated text-only Messages AI session is unavailable."
+            } else if normalized.contains("transcript archive") {
+                detail = "The encrypted Messages transcript is unavailable; no unarchived reply was sent."
             } else {
                 detail = "A receiving account and at least one approved sender are required."
             }
@@ -305,6 +308,10 @@ import FoundationModels
             ?? "None"
         let lastAIError = snapshot.lastAIError.map { bounded($0) } ?? "None"
         let lastDeliveryError = snapshot.lastDeliveryError.map { bounded($0) } ?? "None"
+        let lastTranscriptError = snapshot.lastTranscriptError.map { bounded($0) } ?? "None"
+        let transcriptMode = snapshot.archivesTranscripts
+            ? "Encrypted, \(snapshot.archivedTransactionCount) transaction\(snapshot.archivedTransactionCount == 1 ? "" : "s")"
+            : "Disabled"
         let imageMode = !snapshot.allowsImages
             ? "Disabled"
             : (snapshot.allowsGeminiImages
@@ -324,6 +331,8 @@ import FoundationModels
                 .init(label: providerLabel, value: bounded(provider)),
                 .init(label: "Last AI error", value: lastAIError),
                 .init(label: "Last delivery error", value: lastDeliveryError),
+                .init(label: "Transcript archive", value: transcriptMode),
+                .init(label: "Last transcript error", value: lastTranscriptError),
                 .init(label: "Images", value: imageMode),
                 .init(label: "Pending replies", value: "\(snapshot.pendingReplyCount)"),
                 .init(label: "AI chats", value: "\(snapshot.activeAIChatCount)"),

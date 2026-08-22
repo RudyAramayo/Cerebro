@@ -483,6 +483,7 @@ final class CameraViewController: NSViewController {
     private var lastMainCameraResolution = ROBMLXRuntime.shared.mainCameraResolution
     private var remoteVideoIsActive = false
     private var geminiVideoIsActive = false
+    private var recordingDemandActive = false
     private var cameraSessionIsRequested = false
     private var cameraStatusState = CameraSourceState.stopped
     private var cameraStatusDetail: String?
@@ -554,6 +555,9 @@ final class CameraViewController: NSViewController {
 
         let manager = CameraManager(containerView: faceContainerView, role: .face)
         manager.delegate = self
+        manager.recordingFrameHandler = { frameSet in
+            ROBRecordingCoordinator.shared.offerCameraFrame(role: .face, frameSet: frameSet)
+        }
         cameraManager = manager
         
         setupCalibrateButton()
@@ -594,6 +598,12 @@ final class CameraViewController: NSViewController {
             name: Notification.Name("ROBHologramMovieRecordingStateDidChange"),
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(recordingDemandDidChange(_:)),
+            name: .robRecordingDemandDidChange,
+            object: ROBRecordingCoordinator.shared
+        )
 
         do {
             let videoServer = try ROBVideoServer()
@@ -617,6 +627,7 @@ final class CameraViewController: NSViewController {
         setupDepthOverlay()
         manager.setPreviewVisible(false)
         applyProcessingSettings()
+        applyRecordingDemand()
         reconcileCameraSession()
     }
     
@@ -719,6 +730,7 @@ final class CameraViewController: NSViewController {
             || automaticProcessingNeedsFrames
             || remoteVideoIsActive
             || geminiVideoIsActive
+            || recordingDemandActive
             || ROBHologramExporter.shared.isMovieRecording
         guard shouldRun != cameraSessionIsRequested else { return }
         do {
@@ -788,6 +800,21 @@ final class CameraViewController: NSViewController {
         } else {
             reconcileCameraSession()
         }
+    }
+
+    @objc private func recordingDemandDidChange(_ notification: Notification) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.recordingDemandDidChange(notification) }
+            return
+        }
+        applyRecordingDemand()
+        reconcileCameraSession()
+    }
+
+    private func applyRecordingDemand() {
+        let demand = ROBRecordingCoordinator.shared.cameraCaptureDemand(for: .face)
+        recordingDemandActive = demand.active
+        cameraManager?.setCaptureResolutionOverride(demand.resolutionOverride)
     }
 
     private func applyProcessingSettings() {

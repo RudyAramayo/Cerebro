@@ -55,6 +55,7 @@ import Foundation
         case turningRight
         case returningToZone
         case followingSidewalk
+        case navigating
     }
 
     private let robotID: String
@@ -63,6 +64,7 @@ import Foundation
     private var zoneRadiusMeters = 5.0
     private var maximumSpeedScale = 0.2
     private var behaviors: [String] = []
+    private var destination: (latitude: Double, longitude: Double, name: String?)?
     private var latestLidar: LidarSnapshot?
     private var zoneOrigin: (x: Double, y: Double)?
     private var tickTimer: Timer?
@@ -134,6 +136,26 @@ import Foundation
             receivedAtUptime: ProcessInfo.processInfo.systemUptime
         )
         latestLidar = snapshot
+        ROBRecordingCoordinator.shared.recordLidarPayload(
+            payload,
+            x: snapshot.x,
+            y: snapshot.y,
+            yaw: snapshot.yaw,
+            receivedAtUptime: snapshot.receivedAtUptime,
+            pointCount: snapshot.points.count
+        )
+        ROBNavigationRuntime.shared.updateLocalPose(
+            x: snapshot.x,
+            y: snapshot.y,
+            yaw: snapshot.yaw,
+            receivedAtUptime: snapshot.receivedAtUptime
+        )
+        ROBTraversabilityRuntime.shared.updateLocalPose(
+            x: snapshot.x,
+            y: snapshot.y,
+            yaw: snapshot.yaw,
+            receivedAtUptime: snapshot.receivedAtUptime
+        )
         ROBSceneSnapshotStore.shared.updateLidarFreeSpace(
             Self.sceneFreeSpace(from: points)
         )
@@ -176,15 +198,18 @@ import Foundation
         let stoppedRadius = zoneRadiusMeters
         let stoppedSpeed = maximumSpeedScale
         let stoppedBehaviors = behaviors
+        let stoppedDestination = destination
         let statusSequence = max(sequence, 1)
 
         active = false
+        ROBTraversabilityRuntime.shared.setAutonomousMotionActive(false)
+        ROBNavigationRuntime.shared.clear()
         tickTimer?.invalidate()
         tickTimer = nil
         motionState = .silent
         delegate?.autonomyCoordinatorDidRequestBaseStop(self)
 
-        let status = ROBAutonomySessionMessage.status(
+        let status = makeStatus(
             sessionID: sessionID,
             sequence: statusSequence,
             senderID: robotID,
@@ -193,6 +218,7 @@ import Foundation
             zoneRadiusMeters: stoppedRadius,
             maximumSpeedScale: stoppedSpeed,
             behaviors: stoppedBehaviors,
+            destination: stoppedDestination,
             state: .inactive,
             expiresAt: nil,
             detail: reason
@@ -204,6 +230,7 @@ import Foundation
         expiresAt = nil
         zoneOrigin = nil
         behaviors = []
+        destination = nil
     }
 
     public func shutdown() {
@@ -243,10 +270,24 @@ import Foundation
         zoneRadiusMeters = message.zoneRadiusMeters
         maximumSpeedScale = message.maximumSpeedScale
         behaviors = message.behaviors
+        destination = message.hasDestination
+            ? (message.destinationLatitude, message.destinationLongitude, message.destinationName)
+            : nil
         zoneOrigin = nil
         motionState = .silent
         lastPublishedDetail = nil
         lastStatusUptime = 0
+        ROBTraversabilityRuntime.shared.setAutonomousMotionActive(true)
+        if let destination {
+            ROBNavigationRuntime.shared.configure(
+                destinationLatitude: destination.latitude,
+                destinationLongitude: destination.longitude,
+                destinationName: destination.name,
+                authorizedRadiusMeters: zoneRadiusMeters
+            )
+        } else {
+            ROBNavigationRuntime.shared.clear()
+        }
 
         if let latestLidar,
            ProcessInfo.processInfo.systemUptime - latestLidar.receivedAtUptime <= Self.lidarFreshness {
@@ -323,6 +364,13 @@ import Foundation
             return angle < -Self.frontHalfAngleRadians && angle > -1.5
         }
 
+        if behaviors.contains("navigate_destination") {
+            planDestinationNavigation(lidar: lidar, now: now)
+            maybeRequestConversation(now: now)
+            publishActiveStatus(force: now - lastStatusUptime >= 2)
+            return
+        }
+
         if distanceFromOrigin >= zoneRadiusMeters * 0.82 {
             let targetYaw = atan2(origin.y - lidar.y, origin.x - lidar.x)
             let yawError = Self.normalizedAngle(targetYaw - lidar.yaw)
@@ -396,6 +444,87 @@ import Foundation
         publishActiveStatus(force: now - lastStatusUptime >= 2)
     }
 
+    private func planDestinationNavigation(lidar: LidarSnapshot, now: TimeInterval) {
+        switch ROBNavigationRuntime.shared.guidance(now: now) {
+        case .waiting(let detail), .unavailable(let detail):
+            transition(to: .waitingForLidar, left: nil, right: nil, detail: detail)
+
+        case .arrived:
+            stop(reason: "OpenStreetMap destination reached")
+
+        case .ready(let desiredHeading, let distanceRemaining):
+            guard let perception = ROBTraversabilityRuntime.shared.snapshot(),
+                  now - perception.receivedAtUptime <= Self.lidarFreshness else {
+                transition(
+                    to: .waitingForLidar,
+                    left: nil,
+                    right: nil,
+                    detail: "Destination navigation is waiting for a fresh belly RGB-D frame"
+                )
+                return
+            }
+            guard perception.trainingSampleCount >= ROBTraversabilityRuntime.minimumTrainingSamples else {
+                transition(
+                    to: .waitingForLidar,
+                    left: nil,
+                    right: nil,
+                    detail: "Learning terrain from manual driving (\(perception.trainingSampleCount)/\(ROBTraversabilityRuntime.minimumTrainingSamples) traversed samples)"
+                )
+                return
+            }
+
+            let candidates = perception.directions.compactMap { direction -> (ROBTraversabilityDirection, Double)? in
+                let lidarClearance = minimumDistance(in: lidar.points) { point in
+                    abs(Self.normalizedAngle(point.angle - direction.headingOffset)) <= 0.20
+                }
+                guard lidarClearance >= Self.obstacleDistanceMeters,
+                      direction.geometryConfidence >= 0.50,
+                      direction.depthClearanceMeters >= 0.45,
+                      direction.learnedConfidence >= 0.25,
+                      direction.learnedScore >= 0.18 else { return nil }
+                let routeError = abs(Self.normalizedAngle(direction.headingOffset - desiredHeading))
+                let score = direction.learnedScore * 1.4
+                    + min(direction.depthClearanceMeters, 2.0) * 0.12
+                    + min(lidarClearance, 2.0) * 0.10
+                    - routeError * 1.8
+                return (direction, score)
+            }
+            guard let selected = candidates.max(by: { $0.1 < $1.1 })?.0 else {
+                transition(
+                    to: .waitingForLidar,
+                    left: nil,
+                    right: nil,
+                    detail: "No route-aligned terrain is clear in both depth and RPLidar"
+                )
+                return
+            }
+
+            let heading = selected.headingOffset
+            if abs(desiredHeading) > 1.15 {
+                let turnLeft = desiredHeading > 0
+                transition(
+                    to: .navigating,
+                    left: turnLeft ? -0.07 : 0.07,
+                    right: turnLeft ? 0.07 : -0.07,
+                    detail: String(format: "Turning toward the pedestrian route — %.1f m remaining", distanceRemaining)
+                )
+                return
+            }
+            let base = 0.085
+            let turn = max(-0.075, min(0.075, heading * 0.13))
+            transition(
+                to: .navigating,
+                left: base - turn,
+                right: base + turn,
+                detail: String(
+                    format: "Following clear learned terrain toward the route — %.1f m remaining (model %d)",
+                    distanceRemaining,
+                    perception.trainingSampleCount
+                )
+            )
+        }
+    }
+
     private func transition(
         to newState: MotionState,
         left: Double?,
@@ -467,7 +596,7 @@ import Foundation
               let sessionID = sessionID,
               let controllerID = controllerID else { return }
         lastStatusUptime = ProcessInfo.processInfo.systemUptime
-        let status = ROBAutonomySessionMessage.status(
+        let status = makeStatus(
             sessionID: sessionID,
             sequence: max(sequence, 1),
             senderID: robotID,
@@ -476,6 +605,7 @@ import Foundation
             zoneRadiusMeters: zoneRadiusMeters,
             maximumSpeedScale: maximumSpeedScale,
             behaviors: behaviors,
+            destination: destination,
             state: .active,
             expiresAt: expiresAt,
             detail: lastPublishedDetail ?? "Controller-authorized autonomy is active"
@@ -484,7 +614,7 @@ import Foundation
     }
 
     private func publishUnavailable(for message: ROBAutonomySessionMessage, detail: String) {
-        let status = ROBAutonomySessionMessage.status(
+        let status = makeStatus(
             sessionID: message.sessionID,
             sequence: max(message.sequence, 1),
             senderID: robotID,
@@ -493,6 +623,9 @@ import Foundation
             zoneRadiusMeters: message.zoneRadiusMeters,
             maximumSpeedScale: message.maximumSpeedScale,
             behaviors: message.behaviors,
+            destination: message.hasDestination
+                ? (message.destinationLatitude, message.destinationLongitude, message.destinationName)
+                : nil,
             state: .unavailable,
             expiresAt: nil,
             detail: detail
@@ -501,7 +634,7 @@ import Foundation
     }
 
     private func publishInactive(for message: ROBAutonomySessionMessage, detail: String) {
-        let status = ROBAutonomySessionMessage.status(
+        let status = makeStatus(
             sessionID: message.sessionID,
             sequence: max(message.sequence, 1),
             senderID: robotID,
@@ -510,11 +643,60 @@ import Foundation
             zoneRadiusMeters: message.zoneRadiusMeters,
             maximumSpeedScale: message.maximumSpeedScale,
             behaviors: message.behaviors,
+            destination: message.hasDestination
+                ? (message.destinationLatitude, message.destinationLongitude, message.destinationName)
+                : nil,
             state: .inactive,
             expiresAt: nil,
             detail: detail
         )
         delegate?.autonomyCoordinator(self, publishStatus: status)
+    }
+
+    private func makeStatus(
+        sessionID: String,
+        sequence: UInt64,
+        senderID: String,
+        recipientID: String?,
+        profile: ROBAutonomyProfile,
+        zoneRadiusMeters: Double,
+        maximumSpeedScale: Double,
+        behaviors: [String],
+        destination: (latitude: Double, longitude: Double, name: String?)?,
+        state: ROBAutonomySessionState,
+        expiresAt: Date?,
+        detail: String?
+    ) -> ROBAutonomySessionMessage {
+        if let destination {
+            return .navigationStatus(
+                sessionID: sessionID,
+                sequence: sequence,
+                senderID: senderID,
+                recipientID: recipientID,
+                zoneRadiusMeters: zoneRadiusMeters,
+                maximumSpeedScale: maximumSpeedScale,
+                behaviors: behaviors,
+                state: state,
+                expiresAt: expiresAt,
+                detail: detail,
+                destinationLatitude: destination.latitude,
+                destinationLongitude: destination.longitude,
+                destinationName: destination.name
+            )
+        }
+        return .status(
+            sessionID: sessionID,
+            sequence: sequence,
+            senderID: senderID,
+            recipientID: recipientID,
+            profile: profile,
+            zoneRadiusMeters: zoneRadiusMeters,
+            maximumSpeedScale: maximumSpeedScale,
+            behaviors: behaviors,
+            state: state,
+            expiresAt: expiresAt,
+            detail: detail
+        )
     }
 
     private func minimumDistance(

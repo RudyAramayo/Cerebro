@@ -9,6 +9,9 @@ BRIDGE_PATH = ROOT / "Cerebro" / "ROBMessagesBridge.swift"
 RESPONDER_PATH = ROOT / "Cerebro" / "ROBMessagesAIResponder.swift"
 BRIDGE = BRIDGE_PATH.read_text(encoding="utf-8")
 RESPONDER = RESPONDER_PATH.read_text(encoding="utf-8")
+TRANSCRIPT = (
+    ROOT / "Cerebro" / "ROBMessagesTranscriptStore.swift"
+).read_text(encoding="utf-8")
 LOCAL_PROVIDER_SOURCE = (
     ROOT / "Cerebro" / "ROBAI.swift"
 ).read_text(encoding="utf-8")
@@ -37,6 +40,12 @@ CURRENT_INFORMATION = (
 ).read_text(encoding="utf-8")
 WEATHER = (
     ROOT / "Cerebro" / "ROBWeatherSearchService.swift"
+).read_text(encoding="utf-8")
+VISION_REPLY_POLICY = (
+    ROOT / "Cerebro" / "ROBMessagesVisionReplyPolicy.swift"
+).read_text(encoding="utf-8")
+TRANSCRIPT_WINDOW = (
+    ROOT / "Cerebro" / "ROBMessagesTranscriptWindowController.swift"
 ).read_text(encoding="utf-8")
 
 
@@ -219,6 +228,14 @@ def main() -> None:
         and "GeminiRoboticsProtocol.realtimeTextMessage(turn.text)" in LOCAL_PROVIDER_SOURCE,
         "Gemini image turns no longer send a bounded still image before their correlated text",
     )
+    require(
+        "ROBMessagesVisionReplyPolicy.isGenericDeflection(trimmed)" in RESPONDER
+        and "ROBMessagesVisionReplyPolicy.preferredReply(" in LOCAL_PROVIDER
+        and "using Swift MLX analysis" in LOCAL_PROVIDER
+        and "apologize for the inconvenience" in VISION_REPLY_POLICY
+        and "isGrounded(reply:" in VISION_REPLY_POLICY,
+        "Generic or visually ungrounded model replies can replace Swift MLX image evidence",
+    )
     local_provider_contract = [
         "ROBIsolatedLocalTextProvider",
         "static func respond(",
@@ -294,6 +311,41 @@ def main() -> None:
         and "ROBMessagesCurrentInformationService.swift" in PROJECT,
         "The Messages current-information services are not part of the app target",
     )
+    transcript_contract = [
+        "AES.GCM.seal(",
+        "AES.GCM.open(",
+        "HMAC<SHA256>.authenticationCode(",
+        "kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly",
+        '"MessagesTranscript.sqlite3"',
+        'delivery_status IN (\'delivery_pending\', \'delivered\')',
+        "account_hash = ? AND sender_hash = ?",
+        "maximumMemoryCharacters = 8_000",
+        '"has_image":',
+    ]
+    require(
+        all(symbol in TRANSCRIPT for symbol in transcript_contract),
+        "The Messages transcript is no longer encrypted, device-keyed, bounded, and same-sender scoped",
+    )
+    require(
+        "jpegData" not in TRANSCRIPT and "imageData" not in TRANSCRIPT,
+        "The Messages transcript store must never retain image pixels",
+    )
+    require(
+        "try transcriptStore.recordInbound(" in BRIDGE
+        and "memoryContext = try transcriptStore.memoryContext(" in BRIDGE
+        and "try transcriptStore.recordReply(" in BRIDGE
+        and "try replySender.send(" in BRIDGE
+        and BRIDGE.index("try transcriptStore.recordReply(")
+        < BRIDGE.index("try replySender.send("),
+        "Archived Messages are not persisted before inference and reply delivery",
+    )
+    require(
+        "memoryContext: boundedMemoryContext(memoryContext)" in RESPONDER
+        and "Same-sender encrypted transcript excerpts" in RESPONDER
+        and "memoryContext: turn.memoryContext" in RESPONDER
+        and "for: prompt" in LOCAL_PROVIDER,
+        "Same-sender memory is not bounded across Gemini/local fallback or current-information isolation",
+    )
     require(
         "[[ROBMessagesBridge shared] start]" in MAIN
         and "[[ROBMessagesBridge shared] stop]" in MAIN,
@@ -315,6 +367,25 @@ def main() -> None:
         "Settings lost the separate local-image and Gemini-upload privacy controls",
     )
     require(
+        "messagesArchiveToggle" in SETTINGS
+        and "messagesViewTranscriptButton" in SETTINGS
+        and "showMessagesTranscriptWindow:" in SETTINGS
+        and "setConfiguredArchivesTranscripts:" in SETTINGS
+        and "exportMessagesTranscriptTo:" in SETTINGS
+        and "deleteMessagesTranscript" in SETTINGS
+        and "When Gemini answers, relevant excerpts may be sent to Gemini" in SETTINGS,
+        "Settings lost explicit transcript retention, export, clear, or Gemini privacy disclosure",
+    )
+    require(
+        'window.title = "Messages Transcripts"' in TRANSCRIPT_WINDOW
+        and "Search people and messages" in TRANSCRIPT_WINDOW
+        and "store.browseSnapshot()" in TRANSCRIPT_WINDOW
+        and "record.inboundText" in TRANSCRIPT_WINDOW
+        and "record.replyText" in TRANSCRIPT_WINDOW
+        and "Image attached — pixels are not stored" in TRANSCRIPT_WINDOW,
+        "The local Messages transcript browser lost search, readable turns, or image privacy labeling",
+    )
+    require(
         "[ROBMessagesBridge setConfiguredEnabled:shouldEnable]" in SETTINGS
         and "[self messagesAllowlistContainsSender]" in SETTINGS
         and "[ROBMessagesBridge setConfiguredAccountIdentifier:" in SETTINGS
@@ -330,6 +401,7 @@ def main() -> None:
         and "ROBMessagesBridge.shared.statusSnapshot()" in STATUS
         and 'id: "messages-ai-bridge"' in STATUS
         and '.init(label: "Images", value: imageMode)' in STATUS
+        and '.init(label: "Transcript archive", value: transcriptMode)' in STATUS
         and '.init(label: "Output", value: "Messages only")' in STATUS,
         "The Services grid no longer reports the cached Messages-only bridge state",
     )
@@ -377,7 +449,13 @@ def main() -> None:
         and 'openPrivacySettings:@"Privacy_Automation"' in SETTINGS,
         "Messages Automation settings no longer use the modern Privacy & Security deep link",
     )
-    for filename in ("ROBMessagesBridge.swift", "ROBMessagesAIResponder.swift"):
+    for filename in (
+        "ROBMessagesBridge.swift",
+        "ROBMessagesAIResponder.swift",
+        "ROBMessagesTranscriptStore.swift",
+        "ROBMessagesVisionReplyPolicy.swift",
+        "ROBMessagesTranscriptWindowController.swift",
+    ):
         require(
             PROJECT.count(f"/* {filename} */") >= 2
             and f"/* {filename} in Sources */" in PROJECT,

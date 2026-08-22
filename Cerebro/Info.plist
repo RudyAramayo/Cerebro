@@ -36,6 +36,8 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Cerebro discovers and securely communicates with paired robot controllers and streams requested robot-camera video on the local network.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Cerebro uses ROB's location to follow a nearby operator-authorized OpenStreetMap pedestrian route.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Cerebro uses the robot camera for perception and, when enabled by a paired controller, streams encoded video on the local network or sends sampled images to Google Gemini.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

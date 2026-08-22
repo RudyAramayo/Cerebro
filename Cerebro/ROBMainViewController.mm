@@ -1765,6 +1765,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         [self.stageShowCoordinator cancelWithReason:@"Cerebro is shutting down"];
     }
     [self.autonomyCoordinator shutdown];
+    [self.bellyCameraWindowController setNavigationDemandActive:NO];
     [self.speechBox shutdown];
 }
 
@@ -2907,7 +2908,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void) showROBNavigation
 {
-    
+    // Keep RGB-D perception alive without requiring a diagnostics window.
+    [self ensureBellyCameraRuntime];
+    [self.bellyCameraWindowController setNavigationDemandActive:YES];
 }
 
 - (void)ensureMainCameraRuntime
@@ -3084,7 +3087,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (IBAction)showMainNavigation:(id)sender
 {
-    NSLog(@"show main navigation");
+    [self ensureBellyCameraRuntime];
+    [self.bellyCameraWindowController showWindow:sender];
 }
 
 @end

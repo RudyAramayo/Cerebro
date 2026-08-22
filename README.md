@@ -30,6 +30,21 @@ Cerebro is the macOS controller and operator interface for the R.O.B. droid.
 
 <img width="2393" height="1063" alt="Screenshot 2025-08-05 at 3 58 58 PM" src="https://github.com/user-attachments/assets/951fcac3-bdcf-470d-927f-fce3f94018d1" />
 
+## Training and camera recording
+
+Use **Recording → Open Recording Control…** to start an explicit synchronized
+training session or separate camera-footage recording. Training persists
+timestamped face/belly RGB keyframes, lossless aligned depth, calibration,
+rectified stereo views, RPLidar scans, local pose/odometry, tread commands, and
+provenance-aware traversability labels. Autonomous commands are logged for
+evaluation but cannot label their own images as training truth.
+
+Face, belly, and optional Insta360 footage can be recorded independently at a
+selected resolution, including sizes above the normal autonomy stream. The
+manifest distinguishes requested/encoded dimensions from the camera's actual
+observed source dimensions. See [Training sessions and camera footage](docs/recording-and-training.md)
+for storage layout, label policy, resolution behavior, and recovery semantics.
+
 ## Base Arduino discovery
 
 Base is the only Arduino role currently installed. At launch and when the
@@ -322,6 +337,16 @@ activation pose as the center of a designated radius, keeps tread speed low,
 turns around nearby obstacles, and continues using the existing Gemini
 camera/audio/SpeechBox loop to mingle. A manual control request or explicit
 Autonomy stop ends the session. Cerebro restart also defaults to autonomy off.
+
+The same control can select a nearby OpenStreetMap destination. ROBController
+uses an explicit Nominatim search; Cerebro computes a pedestrian Valhalla route
+from ROB's own location and fuses route heading, belly depth, and fresh RPLidar
+before emitting tread commands. Terrain acceptability is learned automatically
+from manually driven ground that RPLidar odometry later confirms ROB crossed;
+no camera frames or manual annotations are persisted. See
+[controller-activated autonomy](docs/controller-activated-autonomy.md) for the
+50 m pilot boundary, provisional heading alignment, confidence gates, endpoint
+configuration, and validation requirements.
 
 `ROBSerialBox` now expires 5 Hz controller snapshots after three missed updates.
 It writes one neutral/braked base frame and then stops USB writes, allowing the

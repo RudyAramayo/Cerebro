@@ -28,6 +28,10 @@
 @property (nonatomic, strong) NSButton *messagesAllowAllSendersToggle;
 @property (nonatomic, strong) NSButton *messagesAllowImagesToggle;
 @property (nonatomic, strong) NSButton *messagesAllowGeminiImagesToggle;
+@property (nonatomic, strong) NSButton *messagesArchiveToggle;
+@property (nonatomic, strong) NSButton *messagesViewTranscriptButton;
+@property (nonatomic, strong) NSButton *messagesExportTranscriptButton;
+@property (nonatomic, strong) NSButton *messagesClearTranscriptButton;
 @property (nonatomic, strong) NSTextField *messagesReceivingAccountField;
 @property (nonatomic, strong) NSTextView *messagesAllowedSendersTextView;
 @property (nonatomic, strong) NSButton *requestMessagesAutomationPermissionButton;
@@ -327,10 +331,41 @@
         @"When enabled, approved Messages images may leave this Mac for Gemini analysis. Otherwise Cerebro uses only Swift MLX followed by Apple Foundation Models.";
     [messagesView addSubview:self.messagesAllowGeminiImagesToggle];
 
+    self.messagesArchiveToggle = [NSButton
+        checkboxWithTitle:@"Store encrypted transcript memory"
+                   target:self
+                   action:@selector(messagesArchiveChanged:)];
+    self.messagesArchiveToggle.frame = NSMakeRect(24, 326, 298, 28);
+    self.messagesArchiveToggle.accessibilityIdentifier = @"ROB.MessagesBridge.Archive";
+    self.messagesArchiveToggle.accessibilityHelp =
+        @"Stores accepted Messages transactions in Cerebro's encrypted archive and supplies bounded excerpts only to that same sender's future replies.";
+    [messagesView addSubview:self.messagesArchiveToggle];
+    self.messagesViewTranscriptButton = [self buttonWithTitle:@"View Transcripts…"
+                                                        frame:NSMakeRect(330, 326, 142, 28)
+                                                       action:@selector(showMessagesTranscripts:)];
+    self.messagesViewTranscriptButton.accessibilityIdentifier = @"ROB.MessagesBridge.ViewTranscripts";
+    self.messagesViewTranscriptButton.toolTip =
+        @"Open a searchable, locally decrypted view of archived Messages conversations.";
+    [messagesView addSubview:self.messagesViewTranscriptButton];
+    self.messagesExportTranscriptButton = [self buttonWithTitle:@"Export…"
+                                                          frame:NSMakeRect(480, 326, 80, 28)
+                                                         action:@selector(exportMessagesTranscript:)];
+    self.messagesExportTranscriptButton.accessibilityIdentifier = @"ROB.MessagesBridge.ExportTranscript";
+    self.messagesExportTranscriptButton.toolTip =
+        @"Export the encrypted archive as a plaintext JSON file at a location you choose.";
+    [messagesView addSubview:self.messagesExportTranscriptButton];
+    self.messagesClearTranscriptButton = [self buttonWithTitle:@"Clear…"
+                                                         frame:NSMakeRect(568, 326, 88, 28)
+                                                        action:@selector(clearMessagesTranscript:)];
+    self.messagesClearTranscriptButton.accessibilityIdentifier = @"ROB.MessagesBridge.ClearTranscript";
+    self.messagesClearTranscriptButton.toolTip =
+        @"Permanently delete all stored Messages transcript transactions.";
+    [messagesView addSubview:self.messagesClearTranscriptButton];
+
     [messagesView addSubview:[self labelWithString:@"Local receiving Messages account:"
-                                               frame:NSMakeRect(24, 326, 632, 20)]];
+                                               frame:NSMakeRect(24, 298, 632, 20)]];
     self.messagesReceivingAccountField = [[NSTextField alloc]
-        initWithFrame:NSMakeRect(24, 292, 500, 28)];
+        initWithFrame:NSMakeRect(24, 264, 500, 28)];
     self.messagesReceivingAccountField.placeholderString = @"rob@orbitusrobotics.com";
     self.messagesReceivingAccountField.delegate = self;
     self.messagesReceivingAccountField.accessibilityLabel = @"ROB receiving Messages account";
@@ -341,9 +376,9 @@
 
     [messagesView addSubview:[self labelWithString:
         @"Approved senders — one exact Messages handle (email or phone) per line (required):"
-        frame:NSMakeRect(24, 263, 632, 20)]];
+        frame:NSMakeRect(24, 235, 632, 20)]];
     NSScrollView *allowedSendersScrollView = [[NSScrollView alloc]
-        initWithFrame:NSMakeRect(24, 183, 632, 72)];
+        initWithFrame:NSMakeRect(24, 155, 632, 72)];
     allowedSendersScrollView.borderType = NSBezelBorder;
     allowedSendersScrollView.hasVerticalScroller = YES;
     allowedSendersScrollView.autohidesScrollers = YES;
@@ -369,7 +404,7 @@
     allowedSendersScrollView.documentView = self.messagesAllowedSendersTextView;
     [messagesView addSubview:allowedSendersScrollView];
 
-    NSBox *messagesPermissionsBox = [[NSBox alloc] initWithFrame:NSMakeRect(24, 42, 632, 145)];
+    NSBox *messagesPermissionsBox = [[NSBox alloc] initWithFrame:NSMakeRect(24, 10, 632, 145)];
     messagesPermissionsBox.title = @"Required macOS Permissions";
     [messagesView addSubview:messagesPermissionsBox];
     NSTextField *messagesPermissions = [self labelWithString:
@@ -896,6 +931,9 @@
     self.messagesAllowGeminiImagesToggle.state = [ROBMessagesBridge configuredAllowsGeminiImages]
         ? NSControlStateValueOn
         : NSControlStateValueOff;
+    self.messagesArchiveToggle.state = [ROBMessagesBridge configuredArchivesTranscripts]
+        ? NSControlStateValueOn
+        : NSControlStateValueOff;
     self.messagesAllowGeminiImagesToggle.enabled =
         self.messagesAllowImagesToggle.state == NSControlStateValueOn;
     self.messagesReceivingAccountField.stringValue =
@@ -1019,6 +1057,91 @@
             ? NSControlStateValueOn
             : NSControlStateValueOff;
         [ROBMessagesBridge setConfiguredAllowsGeminiImages:confirmed];
+    }];
+}
+
+- (void)messagesArchiveChanged:(NSButton *)sender
+{
+    if (sender.state != NSControlStateValueOn) {
+        [ROBMessagesBridge setConfiguredArchivesTranscripts:NO];
+        return;
+    }
+
+    sender.state = NSControlStateValueOff;
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.alertStyle = NSAlertStyleCritical;
+    alert.messageText = @"Keep an encrypted Messages transcript?";
+    alert.informativeText =
+        @"Cerebro will retain accepted inbound messages and generated replies until you clear the archive. Text and identifying metadata are AES-GCM encrypted with a key kept in this Mac's login Keychain; image pixels are never stored. Only excerpts for the exact same sender and receiving account are used as memory. When Gemini answers, relevant excerpts may be sent to Gemini. A manual export is plaintext.";
+    [alert addButtonWithTitle:@"Enable Encrypted Archive"];
+    [alert addButtonWithTitle:@"Cancel"];
+    __weak typeof(self) weakSelf = self;
+    [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (strongSelf == nil) { return; }
+        BOOL confirmed = response == NSAlertFirstButtonReturn;
+        strongSelf.messagesArchiveToggle.state = confirmed
+            ? NSControlStateValueOn
+            : NSControlStateValueOff;
+        [ROBMessagesBridge setConfiguredArchivesTranscripts:confirmed];
+    }];
+}
+
+- (void)showMessagesTranscripts:(id)sender
+{
+    [ROBMessagesTranscriptWindowController showMessagesTranscriptWindow:sender];
+}
+
+- (void)exportMessagesTranscript:(id)sender
+{
+    NSSavePanel *panel = [NSSavePanel savePanel];
+    panel.nameFieldStringValue = @"Cerebro-Messages-Transcript.json";
+    panel.canCreateDirectories = YES;
+    __weak typeof(self) weakSelf = self;
+    [panel beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
+        if (response != NSModalResponseOK || panel.URL == nil) { return; }
+        NSString *error = [ROBMessagesBridge exportMessagesTranscriptTo:panel.URL];
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (strongSelf == nil) { return; }
+        if (error.length == 0) {
+            [strongSelf setLogText:[NSString stringWithFormat:
+                @"Exported plaintext Messages transcript to %@", panel.URL.path]];
+            return;
+        }
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.alertStyle = NSAlertStyleCritical;
+        alert.messageText = @"Messages transcript export failed";
+        alert.informativeText = error;
+        [alert addButtonWithTitle:@"OK"];
+        [alert beginSheetModalForWindow:strongSelf.window completionHandler:nil];
+    }];
+}
+
+- (void)clearMessagesTranscript:(id)sender
+{
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.alertStyle = NSAlertStyleCritical;
+    alert.messageText = @"Permanently clear the Messages archive?";
+    alert.informativeText =
+        @"This deletes every stored Messages transaction and removes that history from future AI replies. This cannot be undone unless you previously made a plaintext export.";
+    [alert addButtonWithTitle:@"Clear Archive"];
+    [alert addButtonWithTitle:@"Cancel"];
+    __weak typeof(self) weakSelf = self;
+    [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
+        if (response != NSAlertFirstButtonReturn) { return; }
+        NSString *error = [ROBMessagesBridge deleteMessagesTranscript];
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (strongSelf == nil) { return; }
+        if (error.length == 0) {
+            [strongSelf setLogText:@"Cleared the encrypted Messages transcript archive."];
+            return;
+        }
+        NSAlert *failure = [[NSAlert alloc] init];
+        failure.alertStyle = NSAlertStyleCritical;
+        failure.messageText = @"Messages transcript could not be cleared";
+        failure.informativeText = error;
+        [failure addButtonWithTitle:@"OK"];
+        [failure beginSheetModalForWindow:strongSelf.window completionHandler:nil];
     }];
 }
 

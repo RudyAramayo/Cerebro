@@ -68,6 +68,8 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
     private var displayDeliveryScheduled = false
     private var diagnosticsPreviewVisible = false
     private var geminiVideoDemandActive = false
+    private var recordingVideoDemandActive = false
+    private var recordingPreviewResolution: String?
     private var activeDecoderURL: String?
     private var lastFrameAt: Date?
     private var observedPreviewConfigurationIdentity = ""
@@ -83,6 +85,7 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
     // This reference is read only from `queue`. Keeping registration on that
     // same queue prevents the decoder callback from racing startup/shutdown.
     private weak var geminiFrameConsumer: ROBInsta360VideoFrameConsumer?
+    private weak var recordingFrameConsumer: ROBInsta360VideoFrameConsumer?
 
     /// The unstabilized host/projection that was successfully applied in this
     /// process. Nil means robot-relative FRONT/REAR calibration is currently
@@ -247,6 +250,13 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
         }
     }
 
+    /// Registers the footage recorder independently from Gemini and AppKit.
+    public func setRecordingFrameConsumer(_ consumer: ROBInsta360VideoFrameConsumer?) {
+        queue.async {
+            self.recordingFrameConsumer = consumer
+        }
+    }
+
     /// Adds Gemini as an independent, headless consumer of the stitched
     /// preview. This affects decoder demand only; the raw frame still passes
     /// through ROBAI's connection, source, generation, and rate gates before
@@ -256,6 +266,31 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
             guard self.geminiVideoDemandActive != active else { return }
             self.geminiVideoDemandActive = active
             self.reevaluateDecoderDemand()
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: .robInsta360CameraServiceDidChange,
+                    object: self
+                )
+            }
+        }
+    }
+
+    /// Makes the stitched stream available to explicit footage recording.
+    /// 3840x1920 is the Pro Camera API's documented high-resolution pano
+    /// preview; nil restores the ordinary 1920x960 perception preview.
+    public func setRecordingVideoDemandActive(_ active: Bool, resolution: String?) {
+        queue.async {
+            let normalized = active ? Self.normalizedRecordingResolution(resolution) : nil
+            let resolutionChanged = self.recordingPreviewResolution != normalized
+            let demandChanged = self.recordingVideoDemandActive != active
+            guard resolutionChanged || demandChanged else { return }
+            self.recordingVideoDemandActive = active
+            self.recordingPreviewResolution = normalized
+            if resolutionChanged, self.desiredRunning, self.fingerprint != nil {
+                self.reconfigurePreviewOnQueue()
+            } else {
+                self.reevaluateDecoderDemand()
+            }
             DispatchQueue.main.async {
                 NotificationCenter.default.post(
                     name: .robInsta360CameraServiceDidChange,
@@ -295,7 +330,7 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
     }
 
     private var analysisNeedsFrames: Bool {
-        geminiVideoDemandActive || localAnalysisNeedsFrames
+        geminiVideoDemandActive || recordingVideoDemandActive || localAnalysisNeedsFrames
     }
 
     private var localAnalysisNeedsFrames: Bool {
@@ -352,6 +387,19 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
         let configured = UserDefaults.standard.string(forKey: Self.cameraHostDefaultsKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return configured?.isEmpty == false ? configured! : "10.0.0.18"
+    }
+
+    private var requestedStitchedPreviewSize: (width: Int, height: Int) {
+        recordingPreviewResolution == "3840x1920" ? (3840, 1920) : (1920, 960)
+    }
+
+    private static func normalizedRecordingResolution(_ value: String?) -> String? {
+        guard let value else { return nil }
+        switch value.lowercased() {
+        case "3840x1920": return "3840x1920"
+        case "1920x960": return "1920x960"
+        default: return nil
+        }
     }
 
     private var requestedPreviewConfigurationIdentity: String {
@@ -440,11 +488,17 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
             settings.invalidateInsta360OrientationCalibration()
             settings.setInsta360AppliedPreviewProjectionIdentity(nil)
         }
+        let stitchedSize = requestedStitchedPreviewSize
         let command: [String: Any] = [
             "name": "camera._startPreview",
             "parameters": [
                 "origin": ["mime": "h264", "width": 1920, "height": 1440, "framerate": 30, "bitrate": 20480],
-                "stiching": ["mode": "pano", "mime": "h264", "width": 1920, "height": 960, "framerate": 30, "bitrate": 4096]
+                "stiching": [
+                    "mode": "pano", "mime": "h264",
+                    "width": stitchedSize.width, "height": stitchedSize.height,
+                    "framerate": 30,
+                    "bitrate": stitchedSize.width > 1920 ? 10240 : 4096
+                ]
             ],
             // ProCameraApi defines stabilization beside parameters rather than
             // inside the capture-options dictionary.
@@ -614,6 +668,13 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
             // or by optional NSImage decoding for diagnostics.
             if geminiVideoDemandActive {
                 geminiFrameConsumer?.consumeInsta360JPEGFrame(
+                    jpeg,
+                    capturedAt: capturedAt,
+                    capturedAtUptime: capturedAtUptime
+                )
+            }
+            if recordingVideoDemandActive {
+                recordingFrameConsumer?.consumeInsta360JPEGFrame(
                     jpeg,
                     capturedAt: capturedAt,
                     capturedAtUptime: capturedAtUptime

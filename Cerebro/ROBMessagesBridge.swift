@@ -36,6 +36,7 @@ struct ROBMessagesBridgeConfiguration: Equatable, Sendable {
     let allowAllSenders: Bool
     let allowsImages: Bool
     let allowsGeminiImages: Bool
+    let archivesTranscripts: Bool
 
     init(
         enabled: Bool,
@@ -43,7 +44,8 @@ struct ROBMessagesBridgeConfiguration: Equatable, Sendable {
         allowedSenders: Set<String>,
         allowAllSenders: Bool,
         allowsImages: Bool = false,
-        allowsGeminiImages: Bool = false
+        allowsGeminiImages: Bool = false,
+        archivesTranscripts: Bool = false
     ) {
         self.enabled = enabled
         self.receivingAccount = receivingAccount
@@ -51,6 +53,7 @@ struct ROBMessagesBridgeConfiguration: Equatable, Sendable {
         self.allowAllSenders = allowAllSenders
         self.allowsImages = allowsImages
         self.allowsGeminiImages = allowsImages && allowsGeminiImages
+        self.archivesTranscripts = archivesTranscripts
     }
 
     static func canonicalHandle(_ value: String) -> String {
@@ -1346,6 +1349,9 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
     public let allowAllSenders: Bool
     public let allowsImages: Bool
     public let allowsGeminiImages: Bool
+    public let archivesTranscripts: Bool
+    public let archivedTransactionCount: Int
+    public let lastTranscriptError: String?
     public let pendingReplyCount: Int
     public let activeAIChatCount: Int
     public let activeAIProvider: String?
@@ -1367,6 +1373,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
     private static let allowAllSendersDefaultsKey = "ROBMessagesBridgeAllowAllSenders"
     private static let allowsImagesDefaultsKey = "ROBMessagesBridgeAllowsImages"
     private static let allowsGeminiImagesDefaultsKey = "ROBMessagesBridgeAllowsGeminiImages"
+    private static let archivesTranscriptsDefaultsKey = "ROBMessagesBridgeArchivesTranscripts"
     private static let cursorDefaultsKey = "ROBMessagesBridgeLastMessageRowID"
     private static let recentGUIDsDefaultsKey = "ROBMessagesBridgeRecentMessageGUIDs"
     private static let pollingInterval: TimeInterval = 2
@@ -1380,11 +1387,13 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         let sender: String
         let receivingAccount: String
         let originatingAccountAliases: [String]
+        let archivesTranscript: Bool
         let generation: UInt64
     }
 
     private let inbox: ROBMessagesInboxReading
     private let imageLoader: ROBMessagesImageLoading
+    private let transcriptStore: ROBMessagesTranscriptStoring
     private let replySender: ROBMessagesReplySending
     private let aiResponder: ROBMessagesAIResponder
     private let automationPermissionCheck: (_ askUserIfNeeded: Bool) -> String?
@@ -1403,6 +1412,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
     private var lastInboundAt: Date?
     private var lastReplyAt: Date?
     private var lastDeliveryError: String?
+    private var lastTranscriptError: String?
     private var hasStarted = false
     private var hasRequestedFullDiskAccessPermission = false
     private var hasOpenedFullDiskAccessSettings = false
@@ -1411,6 +1421,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         self.init(
             inbox: ROBMessagesSQLiteInbox(),
             imageLoader: ROBMessagesImageLoader(),
+            transcriptStore: ROBMessagesTranscriptStore.shared,
             replySender: ROBMessagesAppleScriptReplySender(),
             aiResponder: ROBMessagesAIResponder(),
             automationPermissionCheck: { askUserIfNeeded in
@@ -1426,6 +1437,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
     init(
         inbox: ROBMessagesInboxReading,
         imageLoader: ROBMessagesImageLoading = ROBMessagesImageLoader(),
+        transcriptStore: ROBMessagesTranscriptStoring = ROBMessagesTranscriptStore.shared,
         replySender: ROBMessagesReplySending,
         aiResponder: ROBMessagesAIResponder,
         automationPermissionCheck: @escaping (_ askUserIfNeeded: Bool) -> String? = {
@@ -1439,6 +1451,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
     ) {
         self.inbox = inbox
         self.imageLoader = imageLoader
+        self.transcriptStore = transcriptStore
         self.replySender = replySender
         self.aiResponder = aiResponder
         self.automationPermissionCheck = automationPermissionCheck
@@ -1554,6 +1567,43 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         postSettingsChange()
     }
 
+    public static func configuredArchivesTranscripts() -> Bool {
+        UserDefaults.standard.bool(forKey: archivesTranscriptsDefaultsKey)
+    }
+
+    public static func setConfiguredArchivesTranscripts(_ value: Bool) {
+        UserDefaults.standard.set(value, forKey: archivesTranscriptsDefaultsKey)
+        postSettingsChange()
+    }
+
+    /// Writes a deliberately explicit plaintext JSON export chosen by the
+    /// operator. The normal database remains encrypted at rest.
+    @objc(exportMessagesTranscriptTo:)
+    public static func exportMessagesTranscript(to url: URL) -> NSString? {
+        do {
+            try ROBMessagesTranscriptStore.shared.exportDecryptedJSON(to: url)
+            return nil
+        } catch {
+            return error.localizedDescription as NSString
+        }
+    }
+
+    @objc(deleteMessagesTranscript)
+    public static func deleteMessagesTranscript() -> NSString? {
+        do {
+            try ROBMessagesTranscriptStore.shared.deleteAll()
+            // Provider sessions and local fallback histories can still retain
+            // excerpts already supplied during this process. Reset them so
+            // Clear Archive also removes future model access to those excerpts.
+            if shared.hasStarted {
+                shared.applyCurrentConfiguration()
+            }
+            return nil
+        } catch {
+            return error.localizedDescription as NSString
+        }
+    }
+
     public func start() {
         guard !hasStarted else { return }
         hasStarted = true
@@ -1574,6 +1624,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         pollTimer?.invalidate()
         pollTimer = nil
         pollInFlight = false
+        cancelPendingTranscriptTransactions()
         pendingRoutes.removeAll()
         aiResponder.shutdown()
         state = "stopped"
@@ -1657,6 +1708,19 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
 
     public func statusSnapshot() -> ROBMessagesBridgeStatusSnapshot {
         let ai = aiResponder.statusSnapshot()
+        let archivedTransactionCount: Int
+        if configuration.archivesTranscripts {
+            do {
+                archivedTransactionCount = try transcriptStore.statistics().transactionCount
+            } catch {
+                archivedTransactionCount = 0
+                lastTranscriptError = error.localizedDescription
+                state = "Transcript archive error"
+                detail = error.localizedDescription
+            }
+        } else {
+            archivedTransactionCount = 0
+        }
         return ROBMessagesBridgeStatusSnapshot(
             enabled: configuration.enabled,
             state: state,
@@ -1666,6 +1730,9 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             allowAllSenders: configuration.allowAllSenders,
             allowsImages: configuration.allowsImages,
             allowsGeminiImages: configuration.allowsGeminiImages,
+            archivesTranscripts: configuration.archivesTranscripts,
+            archivedTransactionCount: archivedTransactionCount,
+            lastTranscriptError: lastTranscriptError,
             pendingReplyCount: pendingRoutes.count,
             activeAIChatCount: ai.activeChatCount,
             activeAIProvider: ai.activeProvider,
@@ -1700,7 +1767,8 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             ),
             allowAllSenders: configuredAllowAllSenders(),
             allowsImages: configuredAllowsImages(),
-            allowsGeminiImages: configuredAllowsGeminiImages()
+            allowsGeminiImages: configuredAllowsGeminiImages(),
+            archivesTranscripts: configuredArchivesTranscripts()
         )
     }
 
@@ -1710,6 +1778,9 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         let updatedConfiguration = Self.loadConfiguration()
         let authorizationChanged = hasStarted && updatedConfiguration != previousConfiguration
         configuration = updatedConfiguration
+        if !configuration.archivesTranscripts {
+            lastTranscriptError = nil
+        }
         if authorizationChanged {
             // Never process messages accumulated while disabled or under a
             // different account/sender authorization. The next valid enable
@@ -1733,6 +1804,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         // every in-flight route before disconnecting its isolated session so
         // a late completion cannot reply after the bridge was disabled or to
         // a chat whose configured receiving account has changed.
+        cancelPendingTranscriptTransactions()
         pendingRoutes.removeAll()
         recentSubmissionDates.removeAll()
         aiResponder.shutdown()
@@ -1867,6 +1939,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             let preservesDeliveryFailure = batch.messages.isEmpty && (
                 state == "Automation permission required" ||
                 state == "AI unavailable" ||
+                state == "Transcript archive error" ||
                 state == "error"
             )
             if !preservesDeliveryFailure {
@@ -1916,14 +1989,22 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
 
         let prompt = ROBMessagesPlainTextPolicy.normalized(message.text)
             ?? "Analyze this image and respond appropriately to the sender."
+        let archivedInboundText = ROBMessagesPlainTextPolicy.normalized(message.text)
+            ?? "[Image attached without a caption]"
 
         let contextID = "messages:\(UUID().uuidString.lowercased())"
+        let scope = ROBMessagesTranscriptScope(
+            receivingAccount: configuration.receivingAccount,
+            sender: ROBMessagesBridgeConfiguration.canonicalHandle(message.sender),
+            chatID: message.chatID
+        )
         pendingRoutes[contextID] = PendingRoute(
             chatID: message.chatID,
             messageGUID: message.guid,
-            sender: ROBMessagesBridgeConfiguration.canonicalHandle(message.sender),
+            sender: scope.sender,
             receivingAccount: configuration.receivingAccount,
             originatingAccountAliases: message.chatAccountCandidates,
+            archivesTranscript: configuration.archivesTranscripts,
             generation: generation
         )
         state = "processing"
@@ -1931,40 +2012,73 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             ? "Waiting for \(pendingRoutes.count) isolated text reply\(pendingRoutes.count == 1 ? "" : "ies")."
             : "Safely preparing an approved Messages image for isolated analysis."
         publishStatus()
-        guard let attachment = message.attachment else {
-            submitAI(
-                prompt: prompt,
-                image: nil,
-                permitsGeminiImage: false,
-                chatID: message.chatID,
-                contextID: contextID
-            )
-            return
-        }
         let requestGeneration = generation
         let imageLoader = imageLoader
-        workerQueue.async { [weak self, imageLoader] in
-            let result = Result { try imageLoader.loadImage(attachment) }
+        let transcriptStore = transcriptStore
+        let archivesTranscript = configuration.archivesTranscripts
+        let attachment = message.attachment
+        workerQueue.async { [weak self, imageLoader, transcriptStore] in
+            var memoryContext: String?
+            var archiveError: Error?
+            if archivesTranscript {
+                do {
+                    try transcriptStore.recordInbound(
+                        contextID: contextID,
+                        messageGUID: message.guid,
+                        scope: scope,
+                        text: archivedInboundText,
+                        hasImage: attachment != nil,
+                        receivedAt: message.date ?? now
+                    )
+                    memoryContext = try transcriptStore.memoryContext(
+                        scope: scope,
+                        query: prompt,
+                        excludingContextID: contextID
+                    )
+                } catch {
+                    archiveError = error
+                    try? transcriptStore.markCancelled(
+                        contextIDs: [contextID],
+                        at: Date()
+                    )
+                }
+            }
+            let imageResult: Result<ROBMessagesImageInput?, Error>
+            if archiveError == nil {
+                imageResult = Result { try attachment.map(imageLoader.loadImage) }
+            } else {
+                imageResult = .success(nil)
+            }
             DispatchQueue.main.async { [weak self] in
                 guard let self,
                       requestGeneration == generation,
                       pendingRoutes[contextID] != nil else {
                     return
                 }
-                switch result {
+                if let archiveError {
+                    self.pendingRoutes.removeValue(forKey: contextID)
+                    self.lastTranscriptError = archiveError.localizedDescription
+                    self.state = "Transcript archive error"
+                    self.detail = archiveError.localizedDescription
+                    self.publishStatus()
+                    return
+                }
+                switch imageResult {
                 case .success(let image):
+                    if archivesTranscript {
+                        self.lastTranscriptError = nil
+                    }
                     self.submitAI(
                         prompt: prompt,
                         image: image,
-                        permitsGeminiImage: self.configuration.allowsGeminiImages,
+                        permitsGeminiImage: image != nil &&
+                            self.configuration.allowsGeminiImages,
+                        memoryContext: memoryContext,
                         chatID: message.chatID,
                         contextID: contextID
                     )
                 case .failure(let error):
-                    self.finishAIResponse(
-                        .failure(error),
-                        contextID: contextID
-                    )
+                    self.finishAIResponse(.failure(error), contextID: contextID)
                 }
             }
         }
@@ -1974,6 +2088,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         prompt: String,
         image: ROBMessagesImageInput?,
         permitsGeminiImage: Bool,
+        memoryContext: String?,
         chatID: String,
         contextID: String
     ) {
@@ -1981,6 +2096,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             prompt: prompt,
             image: image,
             permitsGeminiImage: permitsGeminiImage,
+            memoryContext: memoryContext,
             chatID: chatID,
             contextID: contextID
         ) { [weak self] result in
@@ -1995,6 +2111,15 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             account: route.receivingAccount,
             sender: route.sender
         ) else {
+            if route.archivesTranscript {
+                let transcriptStore = transcriptStore
+                workerQueue.async { [transcriptStore] in
+                    try? transcriptStore.markCancelled(
+                        contextIDs: [contextID],
+                        at: Date()
+                    )
+                }
+            }
             return
         }
         let reply: String
@@ -2010,15 +2135,39 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         let requestGeneration = route.generation
         let replySender = replySender
         let replyAuthorizationGate = replyAuthorizationGate
-        workerQueue.async { [weak self, replySender, replyAuthorizationGate] in
+        let transcriptStore = transcriptStore
+        workerQueue.async { [weak self, replySender, replyAuthorizationGate, transcriptStore] in
             let sendResult: Result<Void, Error>
+            var transcriptError: Error?
             do {
                 guard replyAuthorizationGate.authorizes(
                     generation: requestGeneration,
                     account: account,
                     sender: route.sender
                 ) else {
+                    if route.archivesTranscript {
+                        try? transcriptStore.markCancelled(
+                            contextIDs: [contextID],
+                            at: Date()
+                        )
+                    }
                     return
+                }
+                if route.archivesTranscript {
+                    do {
+                        try transcriptStore.recordReply(
+                            contextID: contextID,
+                            text: reply,
+                            createdAt: Date()
+                        )
+                    } catch {
+                        transcriptError = error
+                        try? transcriptStore.markCancelled(
+                            contextIDs: [contextID],
+                            at: Date()
+                        )
+                        throw error
+                    }
                 }
                 try replySender.send(
                     text: reply,
@@ -2027,18 +2176,47 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
                     originatingAccountAliases: route.originatingAccountAliases,
                     expectedSender: route.sender
                 )
+                if route.archivesTranscript {
+                    do {
+                        try transcriptStore.markDelivered(contextID: contextID, at: Date())
+                    } catch {
+                        transcriptError = error
+                    }
+                }
                 sendResult = .success(())
             } catch {
+                if route.archivesTranscript, transcriptError == nil {
+                    do {
+                        try transcriptStore.markFailed(
+                            contextID: contextID,
+                            error: error.localizedDescription,
+                            at: Date()
+                        )
+                    } catch {
+                        transcriptError = error
+                    }
+                }
                 sendResult = .failure(error)
             }
             DispatchQueue.main.async { [weak self] in
-                self?.finishReply(sendResult, generation: requestGeneration)
+                self?.finishReply(
+                    sendResult,
+                    transcriptError: transcriptError,
+                    generation: requestGeneration
+                )
             }
         }
     }
 
-    private func finishReply(_ result: Result<Void, Error>, generation requestGeneration: UInt64) {
+    private func finishReply(
+        _ result: Result<Void, Error>,
+        transcriptError: Error?,
+        generation requestGeneration: UInt64
+    ) {
         guard requestGeneration == generation else { return }
+        if let transcriptError {
+            lastTranscriptError = transcriptError.localizedDescription
+        }
         switch result {
         case .success:
             lastReplyAt = Date()
@@ -2048,7 +2226,10 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
                 ? "Last isolated AI reply was sent to its originating Messages chat."
                 : "Waiting for \(pendingRoutes.count) additional Messages replies."
         case .failure(let error):
-            if let replyError = error as? ROBMessagesReplyError {
+            if error is ROBMessagesTranscriptError {
+                lastDeliveryError = nil
+                state = "Transcript archive error"
+            } else if let replyError = error as? ROBMessagesReplyError {
                 lastDeliveryError = replyError.diagnosticDescription
             } else {
                 lastDeliveryError = "Unexpected Messages delivery error."
@@ -2060,6 +2241,11 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             }
             detail = error.localizedDescription
         }
+        if let transcriptError {
+            lastDeliveryError = nil
+            state = "Transcript archive error"
+            detail = transcriptError.localizedDescription
+        }
         publishStatus()
     }
 
@@ -2070,6 +2256,17 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             recentGUIDs.removeFirst(recentGUIDs.count - Self.maximumRecentGUIDs)
         }
         UserDefaults.standard.set(recentGUIDs, forKey: Self.recentGUIDsDefaultsKey)
+    }
+
+    private func cancelPendingTranscriptTransactions() {
+        let contextIDs = pendingRoutes.compactMap { contextID, route in
+            route.archivesTranscript ? contextID : nil
+        }
+        guard !contextIDs.isEmpty else { return }
+        let transcriptStore = transcriptStore
+        workerQueue.async { [transcriptStore] in
+            try? transcriptStore.markCancelled(contextIDs: contextIDs, at: Date())
+        }
     }
 
     private func publishStatus() {

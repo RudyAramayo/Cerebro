@@ -358,6 +358,10 @@ def load_face_model_manifest(blob_path):
 
 def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess", width=1280, height=720):
     frame_size = (width, height)
+    # Footage capture may request a color size above the OV9282 stereo
+    # sensors' native output. Keep stereo at a supported aspect-matched size;
+    # ImageAlign below resamples depth into the selected RGB coordinate space.
+    mono_size = (min(width, 1280), min(height, 720))
     dai = load_depthai()
     device = None
 
@@ -390,11 +394,11 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
             left_camera = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_B)
             right_camera = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_C)
             left_output = left_camera.requestOutput(
-                frame_size, type=dai.ImgFrame.Type.GRAY8, fps=FRAME_RATE,
+                mono_size, type=dai.ImgFrame.Type.GRAY8, fps=FRAME_RATE,
                 enableUndistortion=False,
             )
             right_output = right_camera.requestOutput(
-                frame_size, type=dai.ImgFrame.Type.GRAY8, fps=FRAME_RATE,
+                mono_size, type=dai.ImgFrame.Type.GRAY8, fps=FRAME_RATE,
                 enableUndistortion=False,
             )
             stereo = pipeline.create(dai.node.StereoDepth)

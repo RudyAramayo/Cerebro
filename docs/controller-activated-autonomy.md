@@ -42,6 +42,62 @@ The coordinator writes a fresh `Autonomous` controller model; it does not bypass
 `ROBSerialBox` or the Arduino heartbeat. When no fresh model exists,
 `ROBSerialBox` sends one neutral/braked packet and becomes silent.
 
+## Nearby OpenStreetMap destination navigation
+
+ROBController's **Start Autonomy…** flow can now search OpenStreetMap and bind a
+selected latitude, longitude, and display name into autonomy protocol version 2.
+The public Nominatim endpoint is queried only after the operator submits a
+search (never as type-ahead), with an identifying User-Agent and visible
+OpenStreetMap attribution. Set the `ROBNominatimEndpoint` user default to use a
+self-hosted or contracted geocoder.
+
+Cerebro uses its own Core Location fix—the controller phone is not assumed to
+be mounted on ROB—and requests a pedestrian route from Valhalla. The default is
+`https://valhalla1.openstreetmap.de`; set `ROBValhallaEndpoint` to a deployment
+under your control. OpenStreetMap supplies map data, while Valhalla performs the
+pedestrian route computation. The initial pilot rejects a route longer than the
+controller-authorized 50 m zone.
+
+RPLidar yaw is local rather than north-referenced. At session start, point ROB
+along the first route segment; Cerebro records the offset between that segment
+and the first fresh local yaw. A production deployment should replace this
+provisional alignment with a calibrated compass/IMU or a localization estimate.
+
+OpenStreetMap route geometry is intent, never a collision-safety signal. At each
+5 Hz planner tick, destination motion requires all of the following:
+
+- robot location no older than 5 seconds, accuracy of 15 m or better, and a
+  route inside the authorized area;
+- RPLidar scan/pose and belly RGB-D perception no older than 750 ms;
+- at least 0.8 m RPLidar clearance in the candidate heading;
+- sufficient valid depth and at least 0.45 m lower-image depth clearance;
+- a candidate that resembles terrain ROB has previously crossed under manual
+  control.
+
+If any input is stale, uncertain, outside the authorized boundary, or mutually
+inconsistent, Cerebro drops the tread heartbeat instead of guessing.
+
+## Automatic traversability learning
+
+The belly RGB-D camera now runs headlessly so learning does not depend on the
+diagnostics window. While an operator manually drives ROB, Cerebro keeps compact
+directional color, texture, and depth features in memory. A candidate becomes a
+positive training example only after RPLidar odometry confirms forward motion
+of at least 0.35 m across it with limited lateral drift. This is robot-experience
+supervision: no images are saved and no human annotation tool is involved.
+
+The online one-class model persists only counts, running means, and variances at
+`Application Support/Cerebro/Navigation/traversability-model-v1.json`. It needs
+12 confirmed samples before it can influence navigation. Training is disabled
+during autonomous sessions to prevent a self-confirming feedback loop. The
+learned score only ranks candidates that already pass both geometric sensors;
+it can never overrule an obstacle veto.
+
+This compact model is the dependency-free bootstrap implementation. A later
+upgrade can replace its feature vector with DINOv2/Wild Visual Navigation-style
+dense embeddings while retaining the same odometry-derived labels, confidence
+gate, persistence boundary, and depth/RPLidar vetoes.
+
 ## Servo state contract to add next
 
 Do not submit only raw servo pulses to Gemini. Publish a timestamped robot-state

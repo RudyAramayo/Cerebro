@@ -111,7 +111,15 @@ def main():
     try:
         left_source = FakeMonoFrame((7, 8))
         right_source = FakeMonoFrame((9, 10))
-        service.send_frame(sender, FakeRGBFrame(), FakeDepthFrame(), left_source, right_source)
+        intrinsics = {"fx": 100.0, "fy": 101.0, "cx": 1.0, "cy": 0.5}
+        service.send_frame(
+            sender,
+            FakeRGBFrame(),
+            FakeDepthFrame(),
+            left_source,
+            right_source,
+            intrinsics,
+        )
         prefix = receive_exact(receiver, 8)
         assert prefix[:4] == b"CDP1"
         header_length = struct.unpack(">I", prefix[4:])[0]
@@ -139,6 +147,10 @@ def main():
             "stereo_format": "GRAY8",
             "left_length": 2,
             "right_length": 2,
+            "rgb_intrinsics": intrinsics,
+            "sidewalk_center_deviation": None,
+            "sidewalk_confidence": None,
+            "chess_pieces": [],
         }
         assert rgb == FakeRGBFrame.bytes
         assert depth == bytes((0x34, 0x12, 0xCD, 0xAB))

@@ -25,6 +25,11 @@ until an operator configures it locally.
 8. Open **Services** and verify that **Messages AI Bridge** changes to
    **Listening**. A saved Gemini credential is required for its isolated AI
    sessions.
+9. Optional: enable **Store encrypted transcript memory** and
+   accept the retention/privacy warning. Click **View Transcripts…** in the
+   Messages settings tab for the readable people/conversation browser. Use
+   **Export…** for a plaintext JSON copy or **Clear…** to permanently remove
+   the stored transactions.
 
 Bridge startup also performs a non-prompting Automation check and refuses to
 enter Listening when Cerebro is not currently authorized to control Messages.
@@ -44,8 +49,9 @@ replaying that database as history.
   news search and Gemini's server-side Google Search for current public facts
   such as weather; robot-action, Music, file, and device tools remain off.
   Approved text is sent to Gemini. A normalized still image is sent only when
-  the separate Gemini-image setting is enabled; no other Messages history or
-  camera imagery is included.
+  the separate Gemini-image setting is enabled. Archived history is included
+  only when the separate transcript setting is enabled and only for the exact
+  same sender and receiving account; no camera imagery is included.
 - Messages replies never call `ROBSpeechBox` and do not appear in the room
   conversation transcript.
 - Only incoming plain text, or one JPEG/PNG/HEIC image with optional text, sent
@@ -73,12 +79,59 @@ Images are accepted only from the Messages attachments directory, limited to
 on the longest edge, and re-encoded as metadata-free JPEG before inference.
 The normalized bytes are discarded with the completed or cancelled turn.
 
+## Encrypted transcript and same-sender memory
+
+Transcript retention is opt-in and defaults off. When enabled, Cerebro records
+an accepted inbound turn before inference and records the generated reply
+before asking Messages to deliver it. If either required archive write fails,
+the reply fails closed and is not sent without a corresponding transaction.
+Delivery failures and cancellations remain visible in an export for diagnosis,
+but only successfully prepared/delivered history is eligible as model memory.
+
+The archive is stored at
+`~/Library/Application Support/Cerebro/MessagesTranscript.sqlite3`. Message
+text, reply text, delivery errors, sender/account handles, and chat identifiers
+are encrypted individually with AES-GCM. Exact-match indexes use keyed HMACs,
+and the random 256-bit encryption key is kept in the login Keychain as a
+device-only item. The database and its directory are created with owner-only
+permissions. Cerebro stores only an image-present flag and optional caption;
+it never stores image pixels in this archive.
+
+Memory lookup is restricted to the same canonical sender and receiving account.
+It selects a bounded mix of recent and text-relevant exchanges, labels them as
+private/untrusted historical data, and never uses archived text to trigger a
+news or weather network lookup; Gemini is explicitly instructed to make that
+decision from the current message only. This helps answer sender-specific questions
+such as previously shared preferences, but the model is told not to treat the
+archive as verified truth. The excerpts may span that sender's one-to-one chats
+with the same receiving account, but can never be retrieved for another sender.
+
+If Gemini is the active provider, relevant transcript excerpts are included in
+the Gemini prompt and therefore leave the Mac. The local text fallbacks receive
+the same bounded text; for images, Apple Foundation Models receives it alongside
+Swift MLX's visual analysis. Exported
+JSON is deliberately plaintext (with owner-only file permissions), so protect
+or delete it separately. **Clear Archive…** deletes all retained transactions;
+turning retention off stops future writes but does not silently destroy history.
+
+The **Messages Transcripts** window decrypts records only while displaying them
+locally. Its sidebar groups history by remote sender and receiving account; the
+search field matches people, inbound messages, replies, delivery states, and
+errors. Each transaction shows its date, sender text, ROB reply, delivery state,
+and whether an image was attached. Because image pixels are deliberately not
+archived, the browser shows the caption and an image-present notice rather than
+the original picture.
+
 Gemini is the primary image provider only when cloud image upload is enabled.
 Otherwise—or after a Gemini failure—Cerebro runs the image through the on-device
 Swift MLX Qwen2-VL model. Apple Foundation Models never receives pixels: it
 receives the bounded Swift MLX visual analysis as untrusted data and turns that
 analysis plus the sender's text into the final reply. If Apple Intelligence is
 unavailable, the bounded MLX response is used directly.
+If Gemini or Apple Foundation Models returns a generic acknowledgement,
+apology, image-access disclaimer, or a reply with no concrete overlap with the
+grounded MLX analysis, Cerebro rejects that rewrite and returns the MLX result
+instead.
 
 For text requests that fall back locally, Cerebro recognizes explicit
 publisher-news and weather intents before inference. News uses the existing
@@ -101,7 +154,7 @@ The Services card reports only state, counts, and event age. It does not expose
 message bodies, sender handles, account addresses, or provider error payloads.
 Expected states include Disabled, Configuration Required, Full Disk Access
 Required, Starting, Listening, Processing, Rate Limited, Automation Permission
-Required, AI Unavailable, and Error.
+Required, AI Unavailable, Transcript Archive Error, and Error.
 
 If the card remains unavailable:
 
@@ -119,6 +172,10 @@ If the card remains unavailable:
   **Last delivery error**. It distinguishes Automation denial, send timeout,
   chat/account correlation changes, and Messages AppleScript failures without
   displaying the message body.
+- **Transcript Archive Error:** expand the card and read **Last transcript
+  error**. Cerebro does not send a reply when the transaction cannot first be
+  persisted. Reopen the login Keychain if it is locked and verify the app can
+  write its Application Support directory.
 
 ## Validation
 
@@ -129,6 +186,7 @@ contact Gemini, invoke Apple Events, or produce speech.
 ```sh
 xcrun swiftc -parse-as-library -swift-version 5 -warnings-as-errors \
   Cerebro/ROBMessagesBridge.swift \
+  Cerebro/ROBMessagesTranscriptStore.swift \
   Tests/ROBMessagesBridgeProductionFixtureTests.swift \
   -o /tmp/ROBMessagesBridgeProductionFixtureTests
 /tmp/ROBMessagesBridgeProductionFixtureTests
@@ -145,6 +203,25 @@ xcrun swiftc -parse-as-library -swift-version 5 -warnings-as-errors \
   Tests/ROBMessagesCurrentInformationFixtureTests.swift \
   -o /tmp/ROBMessagesCurrentInformationFixtureTests
 /tmp/ROBMessagesCurrentInformationFixtureTests
+
+xcrun swiftc -parse-as-library -swift-version 5 -warnings-as-errors \
+  Cerebro/ROBMessagesTranscriptStore.swift \
+  Tests/ROBMessagesTranscriptStoreFixtureTests.swift \
+  -o /tmp/ROBMessagesTranscriptStoreFixtureTests
+/tmp/ROBMessagesTranscriptStoreFixtureTests
+
+xcrun swiftc -parse-as-library -swift-version 5 -warnings-as-errors \
+  Cerebro/ROBMessagesVisionReplyPolicy.swift \
+  Tests/ROBMessagesVisionReplyPolicyFixtureTests.swift \
+  -o /tmp/ROBMessagesVisionReplyPolicyFixtureTests
+/tmp/ROBMessagesVisionReplyPolicyFixtureTests
+
+xcrun swiftc -parse-as-library -swift-version 5 -warnings-as-errors \
+  Cerebro/ROBMessagesTranscriptStore.swift \
+  Cerebro/ROBMessagesTranscriptWindowController.swift \
+  Tests/ROBMessagesTranscriptWindowSmokeTests.swift \
+  -o /tmp/ROBMessagesTranscriptWindowSmokeTests
+/tmp/ROBMessagesTranscriptWindowSmokeTests
 
 python3 Tests/ROBMessagesBridgeStaticTests.py
 ```

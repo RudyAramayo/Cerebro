@@ -3710,6 +3710,10 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     //store the control model data in the dictionary of data
     controllerModelData.receivedAtUptime = NSProcessInfo.processInfo.systemUptime;
     [self.controlModelDataDictionary setValue:controllerModelData forKey:controllerId];
+    [[ROBRecordingCoordinator shared]
+        recordTreadCommandWithControllerID:controllerId
+                                     model:controllerModelData
+                              activeMaster:[self.masterControllerID isEqualToString:controllerId]];
 }
 
 

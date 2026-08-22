@@ -16,6 +16,54 @@ struct ROBFreeSpaceRegion {
 final class ROBSceneSnapshotStore {
     static let shared = ROBSceneSnapshotStore()
     func updateLidarFreeSpace(_ regions: [ROBFreeSpaceRegion]) {}
+    func snapshot() -> Snapshot { Snapshot() }
+    struct Snapshot {
+        let sidewalkConfidence = 0.0
+        let sidewalkCenterDeviation = 0.0
+        let mlxIdentifiedPeople: [String] = []
+    }
+}
+
+final class ROBMLXRuntime {
+    static let shared = ROBMLXRuntime()
+    let rudyGreetingTitle = "friend"
+}
+
+enum ROBNavigationGuidance {
+    case waiting(String)
+    case ready(headingOffset: Double, distanceRemainingMeters: Double)
+    case arrived
+    case unavailable(String)
+}
+
+final class ROBNavigationRuntime {
+    static let shared = ROBNavigationRuntime()
+    func updateLocalPose(x: Double, y: Double, yaw: Double, receivedAtUptime: TimeInterval) {}
+    func configure(destinationLatitude: Double, destinationLongitude: Double, destinationName: String?, authorizedRadiusMeters: Double) {}
+    func clear() {}
+    func guidance(now: TimeInterval) -> ROBNavigationGuidance { .unavailable("fixture") }
+}
+
+struct ROBTraversabilityDirection {
+    let headingOffset: Double
+    let depthClearanceMeters: Double
+    let geometryConfidence: Double
+    let learnedScore: Double
+    let learnedConfidence: Double
+}
+
+struct ROBTraversabilitySnapshot {
+    let directions: [ROBTraversabilityDirection]
+    let receivedAtUptime: TimeInterval
+    let trainingSampleCount: Int
+}
+
+final class ROBTraversabilityRuntime {
+    static let shared = ROBTraversabilityRuntime()
+    static let minimumTrainingSamples = 12
+    func setAutonomousMotionActive(_ active: Bool) {}
+    func updateLocalPose(x: Double, y: Double, yaw: Double, receivedAtUptime: TimeInterval) {}
+    func snapshot() -> ROBTraversabilitySnapshot? { nil }
 }
 
 private enum FixtureFailure: Error, CustomStringConvertible {
@@ -339,6 +387,45 @@ struct ROBRobotActionProtocolFixtureTests {
         try expect(decoded.zoneRadiusMeters == 5, "Autonomy radius changed")
         try expect(decoded.maximumSpeedScale == 0.2, "Autonomy speed changed")
         try expect(decoded.behaviors.contains("roam"), "Autonomy behaviors changed")
+
+        let navigation = ROBAutonomySessionMessage.startNavigation(
+            sessionID: "navigation-1",
+            sequence: 1,
+            senderID: "controller-1",
+            recipientID: "cerebro-1",
+            zoneRadiusMeters: 50,
+            maximumSpeedScale: 0.14,
+            behaviors: ["roam", "navigate_destination", "use_learned_traversability", "stop_motion"],
+            destinationLatitude: 37.3317,
+            destinationLongitude: -122.0301,
+            destinationName: "Nearby path",
+            expiresAt: Date(timeIntervalSinceNow: 60)
+        )
+        let navigationArchive = try require(
+            ROBAutonomySessionWireCodec.archive(navigation, legacySender: navigation.senderID),
+            "Could not encode a destination navigation session"
+        )
+        let decodedNavigation = try require(
+            ROBAutonomySessionWireCodec.decodeEnvelopeData(navigationArchive),
+            "Could not decode a destination navigation session"
+        )
+        try expect(decodedNavigation.hasDestination, "Navigation destination presence changed")
+        try expect(decodedNavigation.destinationLatitude == 37.3317, "Destination latitude changed")
+        try expect(decodedNavigation.destinationLongitude == -122.0301, "Destination longitude changed")
+        try expect(decodedNavigation.destinationName == "Nearby path", "Destination name changed")
+
+        let invalidNavigation = ROBAutonomySessionMessage.start(
+            sessionID: "navigation-without-destination",
+            sequence: 1,
+            senderID: "controller-1",
+            recipientID: "cerebro-1",
+            profile: .socialRoam,
+            zoneRadiusMeters: 50,
+            maximumSpeedScale: 0.14,
+            behaviors: ["roam", "navigate_destination", "use_learned_traversability"],
+            expiresAt: Date(timeIntervalSinceNow: 60)
+        )
+        try expect(invalidNavigation.validationError != nil, "Navigation without a bound destination was accepted")
 
         let invalidRadius = ROBAutonomySessionMessage.start(
             sessionID: "autonomy-invalid",

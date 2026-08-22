@@ -36,6 +36,7 @@ final class ROBMessagesAIResponder: NSObject {
         let prompt: String
         let image: ROBMessagesImageInput?
         let permitsGeminiImage: Bool
+        let memoryContext: String?
         let chatID: String
         let contextID: String
     }
@@ -52,6 +53,7 @@ final class ROBMessagesAIResponder: NSObject {
         prompt: String,
         image: ROBMessagesImageInput? = nil,
         permitsGeminiImage: Bool = false,
+        memoryContext: String? = nil,
         chatID: String,
         contextID: String,
         completion: @escaping Completion
@@ -60,6 +62,7 @@ final class ROBMessagesAIResponder: NSObject {
             prompt: prompt,
             image: image,
             permitsGeminiImage: permitsGeminiImage,
+            memoryContext: memoryContext,
             chatID: chatID,
             contextID: contextID
         ))
@@ -94,6 +97,97 @@ final class ROBMessagesAIResponder: NSObject {
         }
         completion(.success(response))
         return true
+    }
+}
+
+private final class FixtureTranscriptStore: ROBMessagesTranscriptStoring, @unchecked Sendable {
+    private let lock = NSLock()
+    private var inboundContextIDs: [String] = []
+    private var replyContextIDs: [String] = []
+    private var deliveredContextIDs: [String] = []
+    private var cancelledContextIDs: [String] = []
+    private var rejectsReplies = false
+    var suppliedMemory = "Same-sender fixture memory: favorite constellation is Orion."
+
+    func recordInbound(
+        contextID: String,
+        messageGUID: String,
+        scope: ROBMessagesTranscriptScope,
+        text: String,
+        hasImage: Bool,
+        receivedAt: Date
+    ) throws {
+        lock.lock()
+        inboundContextIDs.append(contextID)
+        lock.unlock()
+    }
+
+    func memoryContext(
+        scope: ROBMessagesTranscriptScope,
+        query: String,
+        excludingContextID: String
+    ) throws -> String? {
+        suppliedMemory
+    }
+
+    func recordReply(contextID: String, text: String, createdAt: Date) throws {
+        lock.lock()
+        if rejectsReplies {
+            lock.unlock()
+            throw ROBMessagesTranscriptError.database("Fixture reply write rejected")
+        }
+        replyContextIDs.append(contextID)
+        lock.unlock()
+    }
+
+    func markDelivered(contextID: String, at date: Date) throws {
+        lock.lock()
+        deliveredContextIDs.append(contextID)
+        lock.unlock()
+    }
+
+    func markFailed(contextID: String, error: String, at date: Date) throws {}
+
+    func markCancelled(contextIDs: [String], at date: Date) throws {
+        lock.lock()
+        cancelledContextIDs.append(contentsOf: contextIDs)
+        lock.unlock()
+    }
+
+    func statistics() throws -> ROBMessagesTranscriptStatistics {
+        lock.lock()
+        defer { lock.unlock() }
+        return .init(
+            transactionCount: inboundContextIDs.count,
+            deliveredCount: deliveredContextIDs.count
+        )
+    }
+
+    func exportDecryptedJSON(to url: URL) throws {}
+    func deleteAll() throws {}
+
+    func recordedInbound(_ contextID: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return inboundContextIDs.contains(contextID)
+    }
+
+    func recordedReply(_ contextID: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return replyContextIDs.contains(contextID)
+    }
+
+    func markedDelivered(_ contextID: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return deliveredContextIDs.contains(contextID)
+    }
+
+    func setRejectsReplies(_ value: Bool) {
+        lock.lock()
+        rejectsReplies = value
+        lock.unlock()
     }
 }
 
@@ -388,6 +482,7 @@ private struct ROBMessagesBridgeProductionFixtureTests {
         "ROBMessagesBridgeAllowAllSenders",
         "ROBMessagesBridgeAllowsImages",
         "ROBMessagesBridgeAllowsGeminiImages",
+        "ROBMessagesBridgeArchivesTranscripts",
         "ROBMessagesBridgeLastMessageRowID",
         "ROBMessagesBridgeRecentMessageGUIDs",
     ]
@@ -460,11 +555,13 @@ private struct ROBMessagesBridgeProductionFixtureTests {
         let ai = ROBMessagesAIResponder()
         let replies = FixtureReplySender()
         let imageLoader = FixtureImageLoader()
+        let transcriptStore = FixtureTranscriptStore()
         let inbox = ROBMessagesSQLiteInbox(databaseURL: database.url)
         var automationPermissionChecks: [Bool] = []
         let bridge = ROBMessagesBridge(
             inbox: inbox,
             imageLoader: imageLoader,
+            transcriptStore: transcriptStore,
             replySender: replies,
             aiResponder: ai,
             automationPermissionCheck: { askUserIfNeeded in
@@ -938,6 +1035,75 @@ private struct ROBMessagesBridgeProductionFixtureTests {
         try await waitUntil("The local image reply was not delivered") {
             replies.snapshot().last?.text == "Local image reply"
         }
+
+        ROBMessagesBridge.setConfiguredArchivesTranscripts(true)
+        try await waitUntil("Encrypted transcript mode did not become ready") {
+            let status = bridge.statusSnapshot()
+            return status.state == "listening" && status.archivesTranscripts
+        }
+        _ = try database.addMessage(
+            guid: "archive-memory-guid",
+            text: "What is my favorite constellation?",
+            senderHandleRowID: owner,
+            chatRowID: chatA,
+            account: account
+        )
+        bridge.reloadConfiguration()
+        try await waitUntil("An archived turn did not reach the isolated AI") {
+            ai.submissions.count == 9
+        }
+        let archivedRequest = ai.submissions[8]
+        try expect(
+            transcriptStore.recordedInbound(archivedRequest.contextID),
+            "The accepted inbound turn was not archived before AI submission"
+        )
+        try expect(
+            archivedRequest.memoryContext == transcriptStore.suppliedMemory,
+            "The bounded same-sender transcript context did not reach the responder"
+        )
+        try expect(
+            ai.complete(contextID: archivedRequest.contextID, response: "Orion"),
+            "The archived fixture request could not complete"
+        )
+        try await waitUntil("The archived reply was not committed and delivered") {
+            transcriptStore.recordedReply(archivedRequest.contextID) &&
+                transcriptStore.markedDelivered(archivedRequest.contextID) &&
+                replies.snapshot().last?.text == "Orion"
+        }
+        let archiveStatus = bridge.statusSnapshot()
+        try expect(
+            archiveStatus.archivedTransactionCount == 1 &&
+                archiveStatus.lastTranscriptError == nil,
+            "The bridge did not report the encrypted archive transaction"
+        )
+
+        transcriptStore.setRejectsReplies(true)
+        let repliesBeforeArchiveFailure = replies.snapshot().count
+        _ = try database.addMessage(
+            guid: "archive-reply-failure-guid",
+            text: "This reply must fail closed",
+            senderHandleRowID: owner,
+            chatRowID: chatA,
+            account: account
+        )
+        bridge.reloadConfiguration()
+        try await waitUntil("The archive failure turn did not reach the isolated AI") {
+            ai.submissions.count == 10
+        }
+        let failedArchiveRequest = ai.submissions[9]
+        try expect(
+            ai.complete(contextID: failedArchiveRequest.contextID, response: "Do not send"),
+            "The archive failure fixture request could not complete"
+        )
+        try await waitUntil("A transcript reply-write failure was not reported") {
+            bridge.statusSnapshot().state == "Transcript archive error"
+        }
+        try expect(
+            replies.snapshot().count == repliesBeforeArchiveFailure &&
+                !transcriptStore.recordedReply(failedArchiveRequest.contextID),
+            "A reply was sent even though its transcript could not be persisted"
+        )
+        transcriptStore.setRejectsReplies(false)
 
         var deniedAutomationChecks: [Bool] = []
         let deniedAutomationBridge = ROBMessagesBridge(

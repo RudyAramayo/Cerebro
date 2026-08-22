@@ -15,6 +15,8 @@ import AVFoundation
     private var bellyCameraManager: CameraManagerProtocol?
     private let containerView = NSView()
     private var cameraViewIsVisible = false
+    private var navigationDemandActive = false
+    private var recordingDemandActive = false
     private var cameraSessionIsRequested = false
     private var overlayManager: CameraOverlayManager?
     private var hasSetAspectRatio = false
@@ -41,6 +43,10 @@ import AVFoundation
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
     
     public override func showWindow(_ sender: Any?) {
         super.showWindow(sender)
@@ -62,6 +68,9 @@ import AVFoundation
         
         let manager = CameraManager(containerView: containerView, role: .belly)
         manager.delegate = self
+        manager.recordingFrameHandler = { frameSet in
+            ROBRecordingCoordinator.shared.offerCameraFrame(role: .belly, frameSet: frameSet)
+        }
         self.bellyCameraManager = manager
         
         // Setup Calibrate Button
@@ -80,6 +89,13 @@ import AVFoundation
         ])
         
         manager.setPreviewVisible(false)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(recordingDemandDidChange(_:)),
+            name: .robRecordingDemandDidChange,
+            object: ROBRecordingCoordinator.shared
+        )
+        applyRecordingDemand()
         reconcileCameraSession()
     }
     
@@ -94,10 +110,32 @@ import AVFoundation
         bellyCameraManager?.setPreviewVisible(isVisible)
         reconcileCameraSession()
     }
+
+    /// Keeps RGB-D perception alive without opening the diagnostics window.
+    /// This is enabled at runtime so manually driven terrain can be learned.
+    public func setNavigationDemandActive(_ active: Bool) {
+        navigationDemandActive = active
+        reconcileCameraSession()
+    }
+
+    @objc private func recordingDemandDidChange(_ notification: Notification) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.recordingDemandDidChange(notification) }
+            return
+        }
+        applyRecordingDemand()
+        reconcileCameraSession()
+    }
+
+    private func applyRecordingDemand() {
+        let demand = ROBRecordingCoordinator.shared.cameraCaptureDemand(for: .belly)
+        recordingDemandActive = demand.active
+        bellyCameraManager?.setCaptureResolutionOverride(demand.resolutionOverride)
+    }
     
     private func reconcileCameraSession() {
         guard let bellyCameraManager else { return }
-        let shouldRun = cameraViewIsVisible
+        let shouldRun = cameraViewIsVisible || navigationDemandActive || recordingDemandActive
         guard shouldRun != cameraSessionIsRequested else { return }
         do {
             if shouldRun {
@@ -133,6 +171,7 @@ import AVFoundation
     // MARK: - CameraManagerDelegate
     
     func cameraManager(_ manager: CameraManagerProtocol, didOutput frameSet: CameraFrameSet) {
+        ROBTraversabilityRuntime.shared.offer(frameSet: frameSet)
         if isCalibrationRequested {
             isCalibrationRequested = false
             if let depth = frameSet.alignedDepth, let intrinsics = frameSet.intrinsics {

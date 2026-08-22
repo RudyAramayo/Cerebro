@@ -130,10 +130,16 @@ protocol CameraManagerProtocol: AnyObject {
     /// A cheap, nonblocking tap that runs before perception's latest-frame
     /// gate. Consumers must retain anything they use asynchronously.
     var videoSampleHandler: ((CMSampleBuffer) -> Void)? { get set }
+    /// Full RGB-D tap for explicit recording. It is invoked before the
+    /// perception gate so expensive Vision work cannot reduce footage rate.
+    var recordingFrameHandler: ((CameraFrameSet) -> Void)? { get set }
 
     func startSession() throws
     func stopSession() throws
     func setPreviewVisible(_ visible: Bool)
+    /// Temporarily changes the hardware capture size for explicit footage
+    /// recording. Nil restores the autonomy/default capture configuration.
+    func setCaptureResolutionOverride(_ resolution: String?)
     func bindCamera() throws
     func bindCameraRebootSession() throws
 }
@@ -179,9 +185,11 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     private var videoDataOutput: AVCaptureVideoDataOutput?
     private var acceptedFallbackOutputID: ObjectIdentifier?
     private var acceptedFallbackOutputGeneration: UInt64?
+    private var captureResolutionOverride: String?
 
     weak var delegate: CameraManagerDelegate?
     var videoSampleHandler: ((CMSampleBuffer) -> Void)?
+    var recordingFrameHandler: ((CameraFrameSet) -> Void)?
 
     init(containerView: NSView, role: CameraRole) {
         let previewLayer: AVCaptureVideoPreviewLayer = {
@@ -293,6 +301,21 @@ final class CameraManager: NSObject, CameraManagerProtocol {
             } else {
                 self.previewLayer.session = nil
                 self.removePreviewLayers(previewGeneration: previewGeneration)
+            }
+        }
+    }
+
+    func setCaptureResolutionOverride(_ resolution: String?) {
+        let normalized = Self.normalizedResolution(resolution)
+        sessionQueue.async { [weak self] in
+            guard let self, self.captureResolutionOverride != normalized else { return }
+            self.captureResolutionOverride = normalized
+            self.depthClient?.updateCaptureResolutionOverride(normalized)
+            if let session = self.videoSession {
+                session.beginConfiguration()
+                let preset = Self.capturePreset(for: normalized)
+                if session.canSetSessionPreset(preset) { session.sessionPreset = preset }
+                session.commitConfiguration()
             }
         }
     }
@@ -533,6 +556,7 @@ final class CameraManager: NSObject, CameraManagerProtocol {
         // Network video owns its own newest-frame gate and must not inherit the
         // latency of the synchronous Vision work performed by the UI delegate.
         videoSampleHandler?(frameSet.rgbSampleBuffer)
+        recordingFrameHandler?(frameSet)
         guard shouldDeliverToPerception else { return }
 
         deliveryQueue.async { [weak self] in
@@ -653,7 +677,8 @@ final class CameraManager: NSObject, CameraManagerProtocol {
             let input = try AVCaptureDeviceInput(device: cameraDevice)
             let session = AVCaptureSession()
             session.beginConfiguration()
-            session.sessionPreset = .low
+            let requestedPreset = Self.capturePreset(for: captureResolutionOverride)
+            session.sessionPreset = session.canSetSessionPreset(requestedPreset) ? requestedPreset : .low
             guard session.canAddInput(input) else { throw CameraError.cannotAddInput }
             session.addInput(input)
 
@@ -704,6 +729,26 @@ final class CameraManager: NSObject, CameraManagerProtocol {
             }
         } else {
             report(.unavailable, detail: detail)
+        }
+    }
+
+    private static func normalizedResolution(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty,
+              value.caseInsensitiveCompare("Source") != .orderedSame else { return nil }
+        let parts = value.lowercased().split(separator: "x")
+        guard parts.count == 2,
+              let width = Int(parts[0]), let height = Int(parts[1]),
+              (320 ... 4096).contains(width), (240 ... 2160).contains(height) else { return nil }
+        return "\(width)x\(height)"
+    }
+
+    private static func capturePreset(for resolution: String?) -> AVCaptureSession.Preset {
+        switch resolution {
+        case "3840x2160": return .hd4K3840x2160
+        case "1920x1080": return .hd1920x1080
+        case "1280x720": return .hd1280x720
+        default: return .low
         }
     }
 
@@ -884,6 +929,7 @@ private final class DepthCameraServiceClient {
     private var mxid: String?
     private let shouldLaunchPython: Bool
     private let role: CameraRole
+    private var captureResolutionOverride: String?
 
     var onFrame: ((CameraFrameSet, UInt64) -> Void)?
     var onStateChange: ((CameraSourceState, String?, UInt64) -> Void)?
@@ -907,6 +953,21 @@ private final class DepthCameraServiceClient {
             }
         }
     }
+
+    func updateCaptureResolutionOverride(_ resolution: String?) {
+        queue.async { [weak self] in
+            guard let self, self.captureResolutionOverride != resolution else { return }
+            self.captureResolutionOverride = resolution
+            guard self.shouldLaunchPython, self.shouldRun else { return }
+            self.reconnectWorkItem?.cancel()
+            self.reconnectWorkItem = nil
+            self.cancelConnection()
+            self.pythonRelaunchAttempt = 0
+            self.stopPythonProcess()
+            self.launchPythonProcess()
+            self.connectIfPossible()
+        }
+    }
     
     private func launchPythonProcess() {
         guard let socketPath = socketPath, !socketPath.isEmpty else { return }
@@ -919,7 +980,7 @@ private final class DepthCameraServiceClient {
         }
         let parentPid = String(ProcessInfo.processInfo.processIdentifier)
         
-        let resolution = ROBMLXRuntime.shared.mainCameraResolution
+        let resolution = captureResolutionOverride ?? ROBMLXRuntime.shared.mainCameraResolution
         let parts = resolution.components(separatedBy: "x")
         let width = parts.first ?? "1280"
         let height = parts.last ?? "720"

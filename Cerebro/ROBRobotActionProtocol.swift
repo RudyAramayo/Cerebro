@@ -596,7 +596,7 @@ private enum ROBRobotActionProtocolError: LocalizedError {
 @objcMembers
 public final class ROBAutonomySessionMessage: NSObject {
     public static let schemaIdentifier = "com.orbitusrobotics.autonomy-session"
-    public static let currentVersion = 1
+    public static let currentVersion = 2
     public static let envelopeMarker = "ROBAutonomySessionProtocol.v1"
     public static let maximumSessionDuration: TimeInterval = 12 * 60 * 60
     public static let supportedBehaviors = [
@@ -604,6 +604,8 @@ public final class ROBAutonomySessionMessage: NSObject {
         "look_at_person",
         "idle_gesture",
         "roam",
+        "navigate_destination",
+        "use_learned_traversability",
         "stop_motion"
     ]
 
@@ -621,6 +623,10 @@ public final class ROBAutonomySessionMessage: NSObject {
     public let behaviors: [String]
     public let state: ROBAutonomySessionState
     public let detail: String?
+    public let hasDestination: Bool
+    public let destinationLatitude: Double
+    public let destinationLongitude: Double
+    public let destinationName: String?
 
     public var isExpired: Bool {
         expiresAtMilliseconds > 0 && Self.nowMilliseconds >= expiresAtMilliseconds
@@ -667,14 +673,52 @@ public final class ROBAutonomySessionMessage: NSObject {
             if profile == .socialRoam, !behaviors.contains("roam") {
                 return "social roam requires the roam behavior"
             }
+            if behaviors.contains("use_learned_traversability"), !behaviors.contains("navigate_destination") {
+                return "learned traversability requires destination navigation"
+            }
+            if behaviors.contains("navigate_destination") {
+                if let destinationError = Self.validateDestination(
+                    present: hasDestination,
+                    latitude: destinationLatitude,
+                    longitude: destinationLongitude,
+                    name: destinationName
+                ) { return destinationError }
+            } else if hasDestination {
+                return "a destination is only valid for destination navigation"
+            }
             return nil
 
         case .stop:
             return nil
 
         case .status:
-            return nil
+            if behaviors.contains("navigate_destination") {
+                return Self.validateDestination(
+                    present: hasDestination,
+                    latitude: destinationLatitude,
+                    longitude: destinationLongitude,
+                    name: destinationName
+                )
+            }
+            return hasDestination ? "a destination is only valid for destination navigation" : nil
         }
+    }
+
+    private static func validateDestination(
+        present: Bool,
+        latitude: Double,
+        longitude: Double,
+        name: String?
+    ) -> String? {
+        guard present, latitude.isFinite, longitude.isFinite,
+              (-90.0 ... 90.0).contains(latitude),
+              (-180.0 ... 180.0).contains(longitude) else {
+            return "destination coordinates are missing or invalid"
+        }
+        if let name, name.count > 512 {
+            return "destination name exceeds 512 characters"
+        }
+        return nil
     }
 
     private init(
@@ -691,7 +735,11 @@ public final class ROBAutonomySessionMessage: NSObject {
         maximumSpeedScale: Double,
         behaviors: [String],
         state: ROBAutonomySessionState,
-        detail: String?
+        detail: String?,
+        hasDestination: Bool = false,
+        destinationLatitude: Double = 0,
+        destinationLongitude: Double = 0,
+        destinationName: String? = nil
     ) {
         self.kind = kind
         self.messageID = messageID
@@ -707,6 +755,10 @@ public final class ROBAutonomySessionMessage: NSObject {
         self.behaviors = Array(behaviors)
         self.state = state
         self.detail = detail
+        self.hasDestination = hasDestination
+        self.destinationLatitude = destinationLatitude
+        self.destinationLongitude = destinationLongitude
+        self.destinationName = destinationName
         super.init()
     }
 
@@ -735,6 +787,40 @@ public final class ROBAutonomySessionMessage: NSObject {
             behaviors: behaviors,
             state: .active,
             detail: nil
+        )
+    }
+
+    @objc(startNavigationWithSessionID:sequence:senderID:recipientID:zoneRadiusMeters:maximumSpeedScale:behaviors:destinationLatitude:destinationLongitude:destinationName:expiresAt:)
+    public static func startNavigation(
+        sessionID: String,
+        sequence: UInt64,
+        senderID: String,
+        recipientID: String?,
+        zoneRadiusMeters: Double,
+        maximumSpeedScale: Double,
+        behaviors: [String],
+        destinationLatitude: Double,
+        destinationLongitude: Double,
+        destinationName: String?,
+        expiresAt: Date
+    ) -> ROBAutonomySessionMessage {
+        ROBAutonomySessionMessage(
+            kind: .start,
+            sessionID: sessionID,
+            sequence: sequence,
+            senderID: senderID,
+            recipientID: recipientID,
+            expiresAtMilliseconds: milliseconds(for: expiresAt),
+            profile: .socialRoam,
+            zoneRadiusMeters: zoneRadiusMeters,
+            maximumSpeedScale: maximumSpeedScale,
+            behaviors: behaviors,
+            state: .active,
+            detail: nil,
+            hasDestination: true,
+            destinationLatitude: destinationLatitude,
+            destinationLongitude: destinationLongitude,
+            destinationName: destinationName
         )
     }
 
@@ -792,6 +878,41 @@ public final class ROBAutonomySessionMessage: NSObject {
         )
     }
 
+    public static func navigationStatus(
+        sessionID: String,
+        sequence: UInt64,
+        senderID: String,
+        recipientID: String?,
+        zoneRadiusMeters: Double,
+        maximumSpeedScale: Double,
+        behaviors: [String],
+        state: ROBAutonomySessionState,
+        expiresAt: Date?,
+        detail: String?,
+        destinationLatitude: Double,
+        destinationLongitude: Double,
+        destinationName: String?
+    ) -> ROBAutonomySessionMessage {
+        ROBAutonomySessionMessage(
+            kind: .status,
+            sessionID: sessionID,
+            sequence: sequence,
+            senderID: senderID,
+            recipientID: recipientID,
+            expiresAtMilliseconds: expiresAt.map(milliseconds(for:)) ?? 0,
+            profile: .socialRoam,
+            zoneRadiusMeters: zoneRadiusMeters,
+            maximumSpeedScale: maximumSpeedScale,
+            behaviors: behaviors,
+            state: state,
+            detail: detail,
+            hasDestination: true,
+            destinationLatitude: destinationLatitude,
+            destinationLongitude: destinationLongitude,
+            destinationName: destinationName
+        )
+    }
+
     fileprivate func encodedJSONData() throws -> Data {
         if let validationError {
             throw ROBAutonomySessionProtocolError.invalidMessage(validationError)
@@ -814,6 +935,13 @@ public final class ROBAutonomySessionMessage: NSObject {
         if let recipientID, !recipientID.isEmpty { object["recipient_id"] = recipientID }
         if expiresAtMilliseconds > 0 { object["expires_at_ms"] = expiresAtMilliseconds }
         if let detail, !detail.isEmpty { object["detail"] = detail }
+        if hasDestination {
+            object["destination"] = [
+                "latitude": destinationLatitude,
+                "longitude": destinationLongitude,
+                "name": destinationName ?? ""
+            ]
+        }
 
         guard JSONSerialization.isValidJSONObject(object) else {
             throw ROBAutonomySessionProtocolError.invalidMessage("message contains non-JSON values")
@@ -832,7 +960,8 @@ public final class ROBAutonomySessionMessage: NSObject {
         let json = try JSONSerialization.jsonObject(with: data)
         guard let object = json as? [String: Any],
               object["schema"] as? String == schemaIdentifier,
-              (object["version"] as? NSNumber)?.intValue == currentVersion,
+              let version = (object["version"] as? NSNumber)?.intValue,
+              (1 ... currentVersion).contains(version),
               let kindName = object["kind"] as? String,
               let kind = kind(from: kindName),
               let messageID = object["message_id"] as? String,
@@ -848,6 +977,7 @@ public final class ROBAutonomySessionMessage: NSObject {
             throw ROBAutonomySessionProtocolError.invalidMessage("required protocol fields are missing")
         }
 
+        let destination = object["destination"] as? [String: Any]
         let message = ROBAutonomySessionMessage(
             kind: kind,
             messageID: messageID,
@@ -862,7 +992,11 @@ public final class ROBAutonomySessionMessage: NSObject {
             maximumSpeedScale: (object["maximum_speed_scale"] as? NSNumber)?.doubleValue ?? 0,
             behaviors: object["behaviors"] as? [String] ?? [],
             state: state,
-            detail: object["detail"] as? String
+            detail: object["detail"] as? String,
+            hasDestination: destination != nil,
+            destinationLatitude: (destination?["latitude"] as? NSNumber)?.doubleValue ?? 0,
+            destinationLongitude: (destination?["longitude"] as? NSNumber)?.doubleValue ?? 0,
+            destinationName: destination?["name"] as? String
         )
         if let validationError = message.validationError {
             throw ROBAutonomySessionProtocolError.invalidMessage(validationError)

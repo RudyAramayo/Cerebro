@@ -71,6 +71,7 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
 
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification
 {
+    [self installRecordingMenu];
     [self installDevelopmentMenu];
     [[[NSWorkspace sharedWorkspace] notificationCenter]
         addObserver:self
@@ -107,6 +108,29 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self rpLidarCheck];
     });
+}
+
+- (void)installRecordingMenu
+{
+    NSMenu *submenu = [[NSMenu alloc] initWithTitle:@"Recording"];
+    NSMenuItem *openItem = [[NSMenuItem alloc]
+        initWithTitle:@"Open Recording Control…"
+               action:@selector(showRecordingControl:)
+        keyEquivalent:@"r"];
+    openItem.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
+    openItem.target = self;
+    [submenu addItem:openItem];
+
+    NSMenuItem *recordingItem = [[NSMenuItem alloc] initWithTitle:@"Recording"
+                                                           action:nil
+                                                    keyEquivalent:@""];
+    recordingItem.submenu = submenu;
+    [NSApp.mainMenu addItem:recordingItem];
+}
+
+- (IBAction)showRecordingControl:(id)sender
+{
+    [[ROBRecordingWindowController shared] showWindow:sender];
 }
 
 - (void)installDevelopmentMenu
@@ -311,6 +335,7 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
     [self.rplidarCheckTimer invalidate];
     [self.utcWebCamCheckTimer invalidate];
     [[ROBHologramExporter shared] stopAirDropSession];
+    [[ROBRecordingCoordinator shared] stopAllForApplicationTermination];
     [[ROBInsta360CameraService shared] stop];
     [self stopUTCWebCamTask];
 }
