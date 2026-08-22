@@ -11,21 +11,27 @@ until an operator configures it locally.
 2. Open **Cerebro → Settings…** (Command-,), then select **Messages**.
 3. Keep the receiving account as `rob@orbitusrobotics.com`, or enter the exact
    Messages account Cerebro should monitor.
-4. Enter each approved sender's exact Messages email address or phone handle,
-   one per line. An empty list rejects every sender.
-5. In **System Settings → Privacy & Security → Full Disk Access**, add and
+4. Three administrator handles are always authorized:
+   `orbitus@orbitusrobotics.com`, `+1 (925) 323-8322`, and
+   `mkierie@gmail.com`. Enter any additional approved sender's exact Messages
+   email address or phone handle, one per line.
+5. Click **Administrator Commands…** to review the command table. The initial
+   `Shutdown` command asks the originating administrator to reply `YES` within
+   90 seconds, then runs its locally editable zsh script. The command phrase,
+   question, confirmation reply, script, and enabled state are configurable.
+6. In **System Settings → Privacy & Security → Full Disk Access**, add and
    enable the same Cerebro app build that will run the bridge, then restart it.
-6. Click **Request Messages Automation Access**. Cerebro checks the current
+7. Click **Request Messages Automation Access**. Cerebro checks the current
    macOS TCC decision, requests consent when it is undecided, and displays an
    explicit granted/required result. Then turn on **Enable replies received by
    ROB in Messages**.
-7. To accept images, enable **Allow one image from approved Messages senders**.
+8. To accept images, enable **Allow one image from approved Messages senders**.
    Images remain on the Mac unless you separately enable **Allow approved
    images to be sent to Gemini** and confirm the privacy warning.
-8. Open **Services** and verify that **Messages AI Bridge** changes to
+9. Open **Services** and verify that **Messages AI Bridge** changes to
    **Listening**. A saved Gemini credential is required for its isolated AI
-   sessions.
-9. Optional: enable **Store encrypted transcript memory** and
+   sessions, but administrator commands remain available without an AI provider.
+10. Optional: enable **Store encrypted transcript memory** and
    accept the retention/privacy warning. Click **View Transcripts…** in the
    Messages settings tab for the readable people/conversation browser. Use
    **Export…** for a plaintext JSON copy or **Clear…** to permanently remove
@@ -43,6 +49,33 @@ reseeds at the replacement database's current high-water mark rather than
 replaying that database as history.
 
 ## Isolation and authorization
+
+### Administrator commands
+
+Administrator commands are a separate, deterministic path and never enter an
+AI prompt. A trigger must be the entire plain-text message in an eligible
+one-to-one chat from one of the three exact administrator handles. Matching is
+case-insensitive after trimming surrounding whitespace; attachments, partial
+phrases, group chats, stale rows, outgoing messages, and duplicate GUIDs cannot
+trigger a command.
+
+Cerebro sends the command's configured confirmation question back to the same
+immutable chat. Only the configured exact confirmation reply from the same
+sender, receiving account, and chat within 90 seconds can execute the saved
+script. A reply already queued before ROB finishes delivering the question is
+ignored, and each confirmation is one-shot. Disabling the bridge or changing
+Messages/command settings cancels pending confirmations. Authorization is
+rechecked on the worker immediately before both the question and script.
+
+Scripts are locally authored in the settings editor and run as the signed-in
+Cerebro user with the fixed `/bin/zsh -f -s` interpreter and a 30-second limit.
+The script arrives through standard input; no inbound message text is ever
+interpolated into a shell command, argument, environment variable, or path.
+Because scripts have the user's macOS authority, saving changes presents a
+local critical warning. The initial Shutdown script asks System Events to shut
+down macOS, which may cause macOS to request Automation access the first time.
+Command and confirmation messages are consumed by this deterministic path and
+are not supplied to the AI.
 
 - Each active chat owns a separate Gemini Live session with text responses,
   microphone and live-camera sources off. It exposes only read-only publisher

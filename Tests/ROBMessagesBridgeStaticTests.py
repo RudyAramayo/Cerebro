@@ -47,6 +47,9 @@ VISION_REPLY_POLICY = (
 TRANSCRIPT_WINDOW = (
     ROOT / "Cerebro" / "ROBMessagesTranscriptWindowController.swift"
 ).read_text(encoding="utf-8")
+COMMAND_WINDOW = (
+    ROOT / "Cerebro" / "ROBMessagesAdministratorCommandWindowController.swift"
+).read_text(encoding="utf-8")
 
 
 def require(condition: bool, message: str) -> None:
@@ -102,8 +105,35 @@ def main() -> None:
     )
     require(
         "allowAllSenders = configuration.allowAllSenders" in BRIDGE
-        and "(allowAllSenders || allowedSenders.contains(sender))" in BRIDGE,
+        and "allowAllSenders ||" in BRIDGE
+        and "allowedSenders.contains(sender)" in BRIDGE
+        and "ROBMessagesAdministratorPolicy.isAdministrator(sender)" in BRIDGE,
         "The final reply gate no longer authorizes explicit public mode",
+    )
+    administrator_contract = [
+        '"orbitus@orbitusrobotics.com"',
+        '"+19253238322"',
+        '"mkierie@gmail.com"',
+        'command: "Shutdown"',
+        'confirmationResponse: "YES"',
+        'tell application id "com.apple.systemevents" to shut down',
+        "message.attachmentCount == 0",
+        "case .sendingQuestion:",
+        "case .awaitingResponse:",
+        "pending.command.confirms(text)",
+        "authorizationGate.authorizes(",
+        "try executor.execute(script: pending.command.script)",
+    ]
+    require(
+        all(symbol in BRIDGE for symbol in administrator_contract),
+        "Administrator commands lost fixed identities, confirmation gating, or final authorization",
+    )
+    require(
+        'process.executableURL = URL(fileURLWithPath: "/bin/zsh")' in BRIDGE
+        and 'process.arguments = ["-f", "-s"]' in BRIDGE
+        and "process.standardInput = inputPipe" in BRIDGE
+        and '"-c"' not in BRIDGE[BRIDGE.index("final class ROBMessagesZshAdministratorCommandExecutor"):BRIDGE.index("enum ROBMessagesInboxError")],
+        "Administrator scripts must use a fixed zsh executable and stdin without shell interpolation",
     )
     require(
         'state = "processing"' in BRIDGE
@@ -157,8 +187,9 @@ def main() -> None:
     )
     require(
         "chatID: message.chatID" in BRIDGE
-        and "sender: ROBMessagesBridgeConfiguration.canonicalHandle(message.sender)"
+        and "let canonicalSender = ROBMessagesBridgeConfiguration.canonicalHandle(message.sender)"
         in BRIDGE
+        and "sender: canonicalSender" in BRIDGE
         and "originatingAccountAliases: message.chatAccountCandidates" in BRIDGE
         and "toChat: route.chatID" in BRIDGE
         and "originatingAccountAliases: route.originatingAccountAliases" in BRIDGE
@@ -336,7 +367,10 @@ def main() -> None:
         and "try transcriptStore.recordReply(" in BRIDGE
         and "try replySender.send(" in BRIDGE
         and BRIDGE.index("try transcriptStore.recordReply(")
-        < BRIDGE.index("try replySender.send("),
+        < BRIDGE.index(
+            "try replySender.send(",
+            BRIDGE.index("try transcriptStore.recordReply("),
+        ),
         "Archived Messages are not persisted before inference and reply delivery",
     )
     require(
@@ -386,8 +420,18 @@ def main() -> None:
         "The local Messages transcript browser lost search, readable turns, or image privacy labeling",
     )
     require(
+        'window.title = "Messages Administrator Commands"' in COMMAND_WINDOW
+        and "NSTableViewDataSource" in COMMAND_WINDOW
+        and 'NSTextView()' in COMMAND_WINDOW
+        and '"Save Commands"' in COMMAND_WINDOW
+        and "ROBMessagesAdministratorCommandStore.save" in COMMAND_WINDOW
+        and "showMessagesAdministratorCommands:" in SETTINGS
+        and "ROBMessagesAdministratorCommandWindowController.swift" in PROJECT,
+        "Settings lost the administrator-command table, script editor, or persistence wiring",
+    )
+    require(
         "[ROBMessagesBridge setConfiguredEnabled:shouldEnable]" in SETTINGS
-        and "[self messagesAllowlistContainsSender]" in SETTINGS
+        and "[ROBMessagesBridge hasConfiguredAuthorizedSenders]" in SETTINGS
         and "[ROBMessagesBridge setConfiguredAccountIdentifier:" in SETTINGS
         and "[ROBMessagesBridge setConfiguredAllowedSendersText:" in SETTINGS,
         "Messages Settings no longer persist a fail-closed account/sender configuration",

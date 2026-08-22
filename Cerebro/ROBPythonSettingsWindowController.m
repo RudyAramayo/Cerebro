@@ -286,7 +286,7 @@
     [messagesView addSubview:messagesHeading];
 
     NSTextField *messagesExplanation = [self labelWithString:
-        @"Approved one-to-one text and optional still images use isolated AI sessions. Images can remain local or be explicitly allowed for Gemini. Read-only publisher news and weather lookup are available; robot, music, file, and action tools are not. Replies return only to the originating chat, and ROB never speaks them."
+        @"Approved one-to-one text and optional still images use isolated AI sessions. Images can remain local or be explicitly allowed for Gemini. AI sessions have no action tools. Separately configured administrator commands require an exact follow-up confirmation before a local script runs."
         frame:NSMakeRect(24, 472, 632, 50)];
     messagesExplanation.textColor = [NSColor secondaryLabelColor];
     [messagesView addSubview:messagesExplanation];
@@ -298,7 +298,7 @@
     self.messagesBridgeEnabledToggle.frame = NSMakeRect(24, 438, 632, 28);
     self.messagesBridgeEnabledToggle.accessibilityIdentifier = @"ROB.MessagesBridge.Enabled";
     self.messagesBridgeEnabledToggle.accessibilityHelp =
-        @"The bridge remains fail-closed until a receiving account and at least one approved sender are configured.";
+        @"The bridge remains fail-closed until a receiving account is configured; built-in administrator handles remain authorized even when the additional sender list is empty.";
     [messagesView addSubview:self.messagesBridgeEnabledToggle];
 
     self.messagesAllowAllSendersToggle = [NSButton
@@ -375,8 +375,15 @@
     [messagesView addSubview:self.messagesReceivingAccountField];
 
     [messagesView addSubview:[self labelWithString:
-        @"Approved senders — one exact Messages handle (email or phone) per line (required):"
-        frame:NSMakeRect(24, 235, 632, 20)]];
+        @"Additional approved senders — one exact Messages handle per line:"
+        frame:NSMakeRect(24, 235, 470, 20)]];
+    NSButton *administratorCommandsButton = [self buttonWithTitle:@"Administrator Commands…"
+                                                            frame:NSMakeRect(492, 230, 164, 28)
+                                                           action:@selector(showMessagesAdministratorCommands:)];
+    administratorCommandsButton.accessibilityIdentifier = @"ROB.MessagesBridge.AdministratorCommands";
+    administratorCommandsButton.toolTip =
+        @"Edit administrator-only Messages command phrases, confirmation replies, and local zsh scripts.";
+    [messagesView addSubview:administratorCommandsButton];
     NSScrollView *allowedSendersScrollView = [[NSScrollView alloc]
         initWithFrame:NSMakeRect(24, 155, 632, 72)];
     allowedSendersScrollView.borderType = NSBezelBorder;
@@ -400,7 +407,7 @@
     self.messagesAllowedSendersTextView.accessibilityLabel = @"Approved Messages senders";
     self.messagesAllowedSendersTextView.accessibilityIdentifier = @"ROB.MessagesBridge.AllowedSenders";
     self.messagesAllowedSendersTextView.accessibilityHelp =
-        @"Enter each sender's exact Messages handle as shown in contact information, one per line. Messages from all other senders and every group chat are ignored.";
+        @"Enter each additional sender's exact Messages handle, one per line. The administrator handles shown in Administrator Commands remain authorized; every group chat is ignored.";
     allowedSendersScrollView.documentView = self.messagesAllowedSendersTextView;
     [messagesView addSubview:allowedSendersScrollView];
 
@@ -408,7 +415,7 @@
     messagesPermissionsBox.title = @"Required macOS Permissions";
     [messagesView addSubview:messagesPermissionsBox];
     NSTextField *messagesPermissions = [self labelWithString:
-        @"Inbound: add Cerebro in System Settings → Privacy & Security → Full Disk Access, then restart Cerebro so it can read the local Messages inbox.\n\nOutbound: allow Cerebro to control Messages under Privacy & Security → Automation when macOS prompts on the first reply. The receiving account must also be signed in and enabled in Messages."
+        @"Inbound: add Cerebro in System Settings → Privacy & Security → Full Disk Access, then restart Cerebro so it can read the local Messages inbox.\n\nOutbound and scripted automation: allow Cerebro to control Messages and any application named by a locally reviewed command script when macOS prompts. The receiving account must be signed in and enabled in Messages."
         frame:NSMakeRect(14, 88, 604, 44)];
     messagesPermissions.textColor = [NSColor secondaryLabelColor];
     messagesPermissions.selectable = YES;
@@ -963,13 +970,13 @@
     // bridge on every keystroke.
     [self.window makeFirstResponder:nil];
     BOOL shouldEnable = sender.state == NSControlStateValueOn;
-    if (shouldEnable && ![ROBMessagesBridge configuredAllowAllSenders] && ![self messagesAllowlistContainsSender]) {
+    if (shouldEnable && ![ROBMessagesBridge hasConfiguredAuthorizedSenders]) {
         sender.state = NSControlStateValueOff;
         [ROBMessagesBridge setConfiguredEnabled:NO];
         NSAlert *alert = [[NSAlert alloc] init];
         alert.messageText = @"Add an approved Messages sender first";
         alert.informativeText =
-            @"ROB will not read or answer Messages until at least one exact sender email address or phone number is listed, or unless you enable 'Allow messages from any sender'.";
+            @"ROB will not read or answer Messages until at least one exact sender email address or phone number is authorized.";
         [alert addButtonWithTitle:@"OK"];
         [alert beginSheetModalForWindow:self.window completionHandler:nil];
         return;
@@ -985,7 +992,7 @@
     BOOL allowAll = sender.state == NSControlStateValueOn;
     if (!allowAll) {
         [ROBMessagesBridge setConfiguredAllowAllSenders:NO];
-        if ([ROBMessagesBridge configuredEnabled] && ![self messagesAllowlistContainsSender]) {
+        if ([ROBMessagesBridge configuredEnabled] && ![ROBMessagesBridge hasConfiguredAuthorizedSenders]) {
             [ROBMessagesBridge setConfiguredEnabled:NO];
             self.messagesBridgeEnabledToggle.state = NSControlStateValueOff;
         }
@@ -1090,6 +1097,11 @@
 - (void)showMessagesTranscripts:(id)sender
 {
     [ROBMessagesTranscriptWindowController showMessagesTranscriptWindow:sender];
+}
+
+- (void)showMessagesAdministratorCommands:(id)sender
+{
+    [ROBMessagesAdministratorCommandWindowController showMessagesAdministratorCommands:sender];
 }
 
 - (void)exportMessagesTranscript:(id)sender

@@ -228,6 +228,24 @@ private final class FixtureReplySender: ROBMessagesReplySending, @unchecked Send
     }
 }
 
+private final class FixtureAdministratorCommandExecutor:
+    ROBMessagesAdministratorCommandExecuting, @unchecked Sendable {
+    private let lock = NSLock()
+    private var scripts: [String] = []
+
+    func execute(script: String) {
+        lock.lock()
+        scripts.append(script)
+        lock.unlock()
+    }
+
+    func snapshot() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return scripts
+    }
+}
+
 private final class FixtureImageLoader: ROBMessagesImageLoading, @unchecked Sendable {
     private let lock = NSLock()
     private var attachments: [ROBMessagesInboundAttachment] = []
@@ -485,6 +503,7 @@ private struct ROBMessagesBridgeProductionFixtureTests {
         "ROBMessagesBridgeArchivesTranscripts",
         "ROBMessagesBridgeLastMessageRowID",
         "ROBMessagesBridgeRecentMessageGUIDs",
+        "ROBMessagesBridgeAdministratorCommandsV1",
     ]
 
     static func main() async throws {
@@ -500,6 +519,7 @@ private struct ROBMessagesBridgeProductionFixtureTests {
                 == "+19253238322",
             "Formatted E.164 sender handles are not canonicalized"
         )
+        try testAdministratorCommandConfiguration()
         resetFixtureDefaults()
         defer { resetFixtureDefaults() }
 
@@ -508,6 +528,7 @@ private struct ROBMessagesBridgeProductionFixtureTests {
         let trustedFriend = try database.addHandle("friend@example.com")
         let outsider = try database.addHandle("outsider@example.com")
         let localAccountHandle = try database.addHandle(account)
+        let messagesAdministrator = try database.addHandle("mkierie@gmail.com")
         let chatA = try database.addChat(
             guid: "fixture-chat-A",
             account: account,
@@ -538,6 +559,11 @@ private struct ROBMessagesBridgeProductionFixtureTests {
             account: account,
             participants: [localAccountHandle]
         )
+        let administratorChat = try database.addChat(
+            guid: "fixture-administrator-chat",
+            account: account,
+            participants: [messagesAdministrator]
+        )
         let historicalRowID = try database.addMessage(
             guid: "historical-guid",
             text: "Do not replay history",
@@ -554,6 +580,7 @@ private struct ROBMessagesBridgeProductionFixtureTests {
 
         let ai = ROBMessagesAIResponder()
         let replies = FixtureReplySender()
+        let administratorCommandExecutor = FixtureAdministratorCommandExecutor()
         let imageLoader = FixtureImageLoader()
         let transcriptStore = FixtureTranscriptStore()
         let inbox = ROBMessagesSQLiteInbox(databaseURL: database.url)
@@ -563,6 +590,7 @@ private struct ROBMessagesBridgeProductionFixtureTests {
             imageLoader: imageLoader,
             transcriptStore: transcriptStore,
             replySender: replies,
+            administratorCommandExecutor: administratorCommandExecutor,
             aiResponder: ai,
             automationPermissionCheck: { askUserIfNeeded in
                 automationPermissionChecks.append(askUserIfNeeded)
@@ -790,6 +818,71 @@ private struct ROBMessagesBridgeProductionFixtureTests {
                 ),
             ],
             "Concurrent production replies crossed chats, accounts, or expected participants"
+        )
+
+        _ = try database.addMessage(
+            guid: "administrator-shutdown-guid",
+            text: "Shutdown",
+            senderHandleRowID: messagesAdministrator,
+            chatRowID: administratorChat,
+            account: account
+        )
+        _ = try database.addMessage(
+            guid: "administrator-premature-confirmation-guid",
+            text: "YES",
+            senderHandleRowID: messagesAdministrator,
+            chatRowID: administratorChat,
+            account: account
+        )
+        bridge.reloadConfiguration()
+        try await waitUntil("The Shutdown confirmation question was not sent") {
+            replies.snapshot().count == 3
+        }
+        let confirmationReply = try require(
+            replies.snapshot().last,
+            "The administrator confirmation reply was missing"
+        )
+        try expect(
+            confirmationReply == .init(
+                text: ROBMessagesAdministratorCommand.shutdown.confirmationPrompt,
+                chatID: "fixture-administrator-chat",
+                account: account,
+                originatingAccountAliases: [account, "opaque-account-id"],
+                expectedSender: "mkierie@gmail.com"
+            ),
+            "The administrator confirmation was not correlated to its exact sender and chat"
+        )
+        try expect(
+            administratorCommandExecutor.snapshot().isEmpty,
+            "A confirmation already queued before ROB's question executed a command"
+        )
+        try expect(
+            ai.submissions.count == 2,
+            "The Shutdown trigger or its premature confirmation reached the AI"
+        )
+
+        _ = try database.addMessage(
+            guid: "administrator-confirmation-guid",
+            text: "yes",
+            senderHandleRowID: messagesAdministrator,
+            chatRowID: administratorChat,
+            account: account
+        )
+        try await waitUntil(
+            "The confirmed Shutdown script was not executed",
+            attempts: 2_000
+        ) {
+            administratorCommandExecutor.snapshot().count == 1
+        }
+        try expect(
+            administratorCommandExecutor.snapshot() == [
+                ROBMessagesAdministratorCommand.shutdown.script
+            ],
+            "The confirmed administrator command executed anything except its saved script"
+        )
+        try expect(
+            ai.submissions.count == 2,
+            "The confirmed administrator command was also submitted to the AI"
         )
 
         _ = try database.addMessage(
@@ -1131,6 +1224,53 @@ private struct ROBMessagesBridgeProductionFixtureTests {
         deniedAutomationBridge.stop()
 
         print("ROB production Messages bridge fixtures passed")
+    }
+
+    private static func testAdministratorCommandConfiguration() throws {
+        for sender in [
+            "orbitus@orbitusrobotics.com",
+            "+1 (925) 323-8322",
+            "mkierie@gmail.com",
+        ] {
+            try expect(
+                ROBMessagesAdministratorPolicy.isAdministrator(sender),
+                "A requested administrator handle was not recognized: \(sender)"
+            )
+        }
+        try expect(
+            !ROBMessagesAdministratorPolicy.isAdministrator("owner@example.com"),
+            "An ordinary approved sender was elevated to administrator"
+        )
+
+        UserDefaults.standard.removeObject(
+            forKey: ROBMessagesAdministratorCommandStore.defaultsKey
+        )
+        try expect(
+            ROBMessagesAdministratorCommandStore.load() == [.shutdown],
+            "The default Shutdown command was not available"
+        )
+        let custom = ROBMessagesAdministratorCommand(
+            id: "fixture",
+            isEnabled: true,
+            command: "Fixture Command",
+            confirmationPrompt: "Run fixture?",
+            confirmationResponse: "CONFIRM",
+            script: "echo fixture"
+        )
+        try ROBMessagesAdministratorCommandStore.save([custom])
+        try expect(
+            ROBMessagesAdministratorCommandStore.load() == [custom],
+            "A locally edited administrator command did not persist"
+        )
+        do {
+            try ROBMessagesAdministratorCommandStore.save([custom, custom])
+            throw ProductionFixtureFailure.failed("Duplicate command triggers were accepted")
+        } catch is ROBMessagesAdministratorCommandValidationError {
+            // Expected.
+        }
+        UserDefaults.standard.removeObject(
+            forKey: ROBMessagesAdministratorCommandStore.defaultsKey
+        )
     }
 
     private static func testAttributedBodyDecoder() throws {

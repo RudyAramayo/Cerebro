@@ -23,7 +23,7 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Cerebro uses the microphone for on-device speech recognition and, when Gemini Robotics is enabled, streams audio to Google Gemini.</string>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Cerebro sends text-only AI replies through Messages to the exact conversation that contacted ROB and controls Music playback when ROB is explicitly asked to play a song or playlist.</string>
+	<string>Cerebro sends text-only replies through Messages, controls Music when explicitly requested, and runs locally reviewed administrator-command scripts only after an exact Messages confirmation.</string>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>Cerebro controls Music playback only when you ask it to play a song or playlist.</string>
 	<key>NSBonjourServices</key>

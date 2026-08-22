@@ -29,6 +29,140 @@ extension Notification.Name {
     )
 }
 
+enum ROBMessagesAdministratorPolicy {
+    static let senderHandles: Set<String> = [
+        "orbitus@orbitusrobotics.com",
+        "+19253238322",
+        "mkierie@gmail.com",
+    ]
+
+    static func isAdministrator(_ value: String) -> Bool {
+        senderHandles.contains(ROBMessagesBridgeConfiguration.canonicalHandle(value))
+    }
+}
+
+struct ROBMessagesAdministratorCommand: Codable, Equatable, Sendable {
+    let id: String
+    var isEnabled: Bool
+    var command: String
+    var confirmationPrompt: String
+    var confirmationResponse: String
+    var script: String
+
+    static let shutdown = ROBMessagesAdministratorCommand(
+        id: "shutdown",
+        isEnabled: true,
+        command: "Shutdown",
+        confirmationPrompt: "Shut down ROB's computer? Reply YES within 90 seconds to confirm.",
+        confirmationResponse: "YES",
+        script: #"/usr/bin/osascript -e 'tell application id "com.apple.systemevents" to shut down'"#
+    )
+
+    func matches(_ text: String) -> Bool {
+        isEnabled && command.caseInsensitiveCompare(text) == .orderedSame
+    }
+
+    func confirms(_ text: String) -> Bool {
+        confirmationResponse.caseInsensitiveCompare(text) == .orderedSame
+    }
+}
+
+enum ROBMessagesAdministratorCommandValidationError: LocalizedError {
+    case tooMany
+    case invalidCommand
+    case duplicateCommand(String)
+    case invalidConfirmation(String)
+    case invalidScript(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .tooMany:
+            return "At most 32 administrator commands may be configured."
+        case .invalidCommand:
+            return "Each command must be a single line between 1 and 80 characters."
+        case .duplicateCommand(let command):
+            return "The administrator command \"\(command)\" is duplicated."
+        case .invalidConfirmation(let command):
+            return "\"\(command)\" needs a confirmation question and a single-line confirmation reply."
+        case .invalidScript(let command):
+            return "\"\(command)\" needs a UTF-8 shell script no larger than 32 KB."
+        }
+    }
+}
+
+enum ROBMessagesAdministratorCommandStore {
+    static let defaultsKey = "ROBMessagesBridgeAdministratorCommandsV1"
+    static let maximumCommands = 32
+    static let maximumCommandCharacters = 80
+    static let maximumPromptCharacters = 500
+    static let maximumResponseCharacters = 80
+    static let maximumScriptBytes = 32 * 1_024
+
+    static func load(defaults: UserDefaults = .standard) -> [ROBMessagesAdministratorCommand] {
+        guard let data = defaults.data(forKey: defaultsKey),
+              let decoded = try? JSONDecoder().decode(
+                  [ROBMessagesAdministratorCommand].self,
+                  from: data
+              ),
+              let validated = try? validate(decoded) else {
+            return [.shutdown]
+        }
+        return validated
+    }
+
+    static func save(
+        _ commands: [ROBMessagesAdministratorCommand],
+        defaults: UserDefaults = .standard
+    ) throws {
+        let validated = try validate(commands)
+        defaults.set(try JSONEncoder().encode(validated), forKey: defaultsKey)
+    }
+
+    static func validate(
+        _ commands: [ROBMessagesAdministratorCommand]
+    ) throws -> [ROBMessagesAdministratorCommand] {
+        guard commands.count <= maximumCommands else {
+            throw ROBMessagesAdministratorCommandValidationError.tooMany
+        }
+        var seen = Set<String>()
+        return try commands.map { candidate in
+            var command = candidate
+            command.command = command.command.trimmingCharacters(in: .whitespacesAndNewlines)
+            command.confirmationPrompt = command.confirmationPrompt
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            command.confirmationResponse = command.confirmationResponse
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            command.script = command.script.trimmingCharacters(in: .newlines)
+            guard !command.id.isEmpty,
+                  !command.command.isEmpty,
+                  command.command.count <= maximumCommandCharacters,
+                  !command.command.contains(where: { $0.isNewline }) else {
+                throw ROBMessagesAdministratorCommandValidationError.invalidCommand
+            }
+            let identity = command.command.lowercased()
+            guard seen.insert(identity).inserted else {
+                throw ROBMessagesAdministratorCommandValidationError
+                    .duplicateCommand(command.command)
+            }
+            guard !command.confirmationPrompt.isEmpty,
+                  command.confirmationPrompt.count <= maximumPromptCharacters,
+                  !command.confirmationResponse.isEmpty,
+                  command.confirmationResponse.count <= maximumResponseCharacters,
+                  !command.confirmationResponse.contains(where: { $0.isNewline }) else {
+                throw ROBMessagesAdministratorCommandValidationError
+                    .invalidConfirmation(command.command)
+            }
+            guard !command.script.isEmpty,
+                  command.script.utf8.count <= maximumScriptBytes,
+                  !command.script.unicodeScalars.contains(where: { $0.value == 0 }) else {
+                throw ROBMessagesAdministratorCommandValidationError
+                    .invalidScript(command.command)
+            }
+            return command
+        }
+    }
+}
+
 struct ROBMessagesBridgeConfiguration: Equatable, Sendable {
     let enabled: Bool
     let receivingAccount: String
@@ -327,7 +461,9 @@ private final class ROBMessagesReplyAuthorizationGate: @unchecked Sendable {
             receivingAccount == account &&
             !sender.isEmpty &&
             sender != receivingAccount &&
-            (allowAllSenders || allowedSenders.contains(sender))
+            (allowAllSenders ||
+                allowedSenders.contains(sender) ||
+                ROBMessagesAdministratorPolicy.isAdministrator(sender))
     }
 }
 
@@ -429,9 +565,12 @@ enum ROBMessagesBridgePolicy {
         guard !message.isFromMe, !sender.isEmpty, sender != configuredAccount else {
             return .outboundOrSelf
         }
-        // The receiving account is not sender authorization. An empty list is
-        // deliberately fail-closed, even for one-to-one chats, unless allowAllSenders is active.
-        guard configuration.allowAllSenders || configuration.allowedSenders.contains(sender) else {
+        // The receiving account is not sender authorization. Administrator
+        // handles are fixed local policy; every other sender needs the
+        // explicit allowlist or deliberately enabled public mode.
+        guard configuration.allowAllSenders ||
+                configuration.allowedSenders.contains(sender) ||
+                ROBMessagesAdministratorPolicy.isAdministrator(sender) else {
             return .senderNotAllowed
         }
         guard message.participantCount == 1 else { return .groupChat }
@@ -641,6 +780,75 @@ protocol ROBMessagesReplySending: AnyObject, Sendable {
         originatingAccountAliases: [String],
         expectedSender: String
     ) throws
+}
+
+protocol ROBMessagesAdministratorCommandExecuting: AnyObject, Sendable {
+    func execute(script: String) throws
+}
+
+enum ROBMessagesAdministratorCommandExecutionError: LocalizedError {
+    case invalidScript
+    case launchFailed(String)
+    case timedOut
+    case failed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidScript:
+            return "The administrator command script is empty or invalid."
+        case .launchFailed(let detail):
+            return "The administrator command could not start: \(detail)"
+        case .timedOut:
+            return "The administrator command exceeded its 30-second execution limit."
+        case .failed(let detail):
+            return "The administrator command failed: \(detail)"
+        }
+    }
+}
+
+final class ROBMessagesZshAdministratorCommandExecutor:
+    ROBMessagesAdministratorCommandExecuting, @unchecked Sendable {
+    private static let executionTimeout: DispatchTimeInterval = .seconds(30)
+
+    func execute(script: String) throws {
+        guard !script.isEmpty,
+              script.utf8.count <= ROBMessagesAdministratorCommandStore.maximumScriptBytes,
+              !script.unicodeScalars.contains(where: { $0.value == 0 }) else {
+            throw ROBMessagesAdministratorCommandExecutionError.invalidScript
+        }
+
+        // The operator-authored script is supplied on standard input to a fixed
+        // interpreter. Inbound Messages text is never interpolated into a shell
+        // command, environment variable, file path, or argument.
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-f", "-s"]
+        let inputPipe = Pipe()
+        process.standardInput = inputPipe
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        let completion = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in completion.signal() }
+
+        do {
+            try process.run()
+        } catch {
+            throw ROBMessagesAdministratorCommandExecutionError
+                .launchFailed(error.localizedDescription)
+        }
+        inputPipe.fileHandleForWriting.write(Data(("set -e\n" + script + "\n").utf8))
+        try? inputPipe.fileHandleForWriting.close()
+
+        if completion.wait(timeout: .now() + Self.executionTimeout) == .timedOut {
+            process.terminate()
+            throw ROBMessagesAdministratorCommandExecutionError.timedOut
+        }
+        guard process.terminationStatus == 0 else {
+            throw ROBMessagesAdministratorCommandExecutionError.failed(
+                "zsh exited with status \(process.terminationStatus)."
+            )
+        }
+    }
 }
 
 enum ROBMessagesInboxError: LocalizedError {
@@ -1391,10 +1599,27 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         let generation: UInt64
     }
 
+    private enum AdministratorConfirmationPhase: Equatable, Sendable {
+        case sendingQuestion
+        case awaitingResponse
+    }
+
+    private struct PendingAdministratorConfirmation: Sendable {
+        let command: ROBMessagesAdministratorCommand
+        let chatID: String
+        let sender: String
+        let receivingAccount: String
+        let originatingAccountAliases: [String]
+        let generation: UInt64
+        var phase: AdministratorConfirmationPhase
+        var expiresAt: Date
+    }
+
     private let inbox: ROBMessagesInboxReading
     private let imageLoader: ROBMessagesImageLoading
     private let transcriptStore: ROBMessagesTranscriptStoring
     private let replySender: ROBMessagesReplySending
+    private let administratorCommandExecutor: ROBMessagesAdministratorCommandExecuting
     private let aiResponder: ROBMessagesAIResponder
     private let automationPermissionCheck: (_ askUserIfNeeded: Bool) -> String?
     private let replyAuthorizationGate = ROBMessagesReplyAuthorizationGate()
@@ -1406,6 +1631,8 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
     private var cursor: Int64?
     private var recentGUIDs: [String]
     private var pendingRoutes: [String: PendingRoute] = [:]
+    private var pendingAdministratorConfirmations: [String: PendingAdministratorConfirmation] = [:]
+    private var administratorCommands: [ROBMessagesAdministratorCommand]
     private var recentSubmissionDates: [Date] = []
     private var state = "disabled"
     private var detail = "Messages replies are disabled."
@@ -1423,6 +1650,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             imageLoader: ROBMessagesImageLoader(),
             transcriptStore: ROBMessagesTranscriptStore.shared,
             replySender: ROBMessagesAppleScriptReplySender(),
+            administratorCommandExecutor: ROBMessagesZshAdministratorCommandExecutor(),
             aiResponder: ROBMessagesAIResponder(),
             automationPermissionCheck: { askUserIfNeeded in
                 ROBAppleEventAutomationPermission.errorDescription(
@@ -1439,6 +1667,8 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         imageLoader: ROBMessagesImageLoading = ROBMessagesImageLoader(),
         transcriptStore: ROBMessagesTranscriptStoring = ROBMessagesTranscriptStore.shared,
         replySender: ROBMessagesReplySending,
+        administratorCommandExecutor: ROBMessagesAdministratorCommandExecuting =
+            ROBMessagesZshAdministratorCommandExecutor(),
         aiResponder: ROBMessagesAIResponder,
         automationPermissionCheck: @escaping (_ askUserIfNeeded: Bool) -> String? = {
             askUserIfNeeded in
@@ -1453,9 +1683,11 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         self.imageLoader = imageLoader
         self.transcriptStore = transcriptStore
         self.replySender = replySender
+        self.administratorCommandExecutor = administratorCommandExecutor
         self.aiResponder = aiResponder
         self.automationPermissionCheck = automationPermissionCheck
         configuration = Self.loadConfiguration()
+        administratorCommands = ROBMessagesAdministratorCommandStore.load()
         let defaults = UserDefaults.standard
         cursor = (defaults.object(forKey: Self.cursorDefaultsKey) as? NSNumber)?.int64Value
         recentGUIDs = (defaults.array(forKey: Self.recentGUIDsDefaultsKey) as? [String]) ?? []
@@ -1531,6 +1763,18 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             )
         }
         postSettingsChange()
+    }
+
+    public static func configuredAdministratorSenderHandles() -> [String] {
+        ROBMessagesAdministratorPolicy.senderHandles.sorted()
+    }
+
+    public static func hasConfiguredAuthorizedSenders() -> Bool {
+        !ROBMessagesAdministratorPolicy.senderHandles.isEmpty ||
+            configuredAllowAllSenders() ||
+            !ROBMessagesBridgeConfiguration.parseAllowedSenders(
+                configuredAllowedSendersText()
+            ).isEmpty
     }
 
     public static func configuredAllowAllSenders() -> Bool {
@@ -1626,6 +1870,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         pollInFlight = false
         cancelPendingTranscriptTransactions()
         pendingRoutes.removeAll()
+        pendingAdministratorConfirmations.removeAll()
         aiResponder.shutdown()
         state = "stopped"
         detail = "Messages bridge stopped."
@@ -1726,14 +1971,15 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             state: state,
             detail: detail,
             configuredAccount: configuration.receivingAccount,
-            allowedSenderCount: configuration.allowedSenders.count,
+            allowedSenderCount: configuration.allowedSenders
+                .union(ROBMessagesAdministratorPolicy.senderHandles).count,
             allowAllSenders: configuration.allowAllSenders,
             allowsImages: configuration.allowsImages,
             allowsGeminiImages: configuration.allowsGeminiImages,
             archivesTranscripts: configuration.archivesTranscripts,
             archivedTransactionCount: archivedTransactionCount,
             lastTranscriptError: lastTranscriptError,
-            pendingReplyCount: pendingRoutes.count,
+            pendingReplyCount: pendingRoutes.count + pendingAdministratorConfirmations.count,
             activeAIChatCount: ai.activeChatCount,
             activeAIProvider: ai.activeProvider,
             lastAIProvider: ai.lastProvider,
@@ -1778,6 +2024,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         let updatedConfiguration = Self.loadConfiguration()
         let authorizationChanged = hasStarted && updatedConfiguration != previousConfiguration
         configuration = updatedConfiguration
+        administratorCommands = ROBMessagesAdministratorCommandStore.load()
         if !configuration.archivesTranscripts {
             lastTranscriptError = nil
         }
@@ -1806,14 +2053,16 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         // a chat whose configured receiving account has changed.
         cancelPendingTranscriptTransactions()
         pendingRoutes.removeAll()
+        pendingAdministratorConfirmations.removeAll()
         recentSubmissionDates.removeAll()
         aiResponder.shutdown()
 
         let hasAuthorizedConfiguration = hasStarted &&
             configuration.enabled &&
             !configuration.receivingAccount.isEmpty &&
-            (configuration.allowAllSenders || !configuration.allowedSenders.isEmpty) &&
-            aiResponder.statusSnapshot().isConfigured
+            (configuration.allowAllSenders ||
+                !configuration.allowedSenders.isEmpty ||
+                !ROBMessagesAdministratorPolicy.senderHandles.isEmpty)
         replyAuthorizationGate.update(
             generation: generation,
             configuration: configuration,
@@ -1834,15 +2083,11 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             publishStatus()
             return
         }
-        guard configuration.allowAllSenders || !configuration.allowedSenders.isEmpty else {
+        guard configuration.allowAllSenders ||
+                !configuration.allowedSenders.isEmpty ||
+                !ROBMessagesAdministratorPolicy.senderHandles.isEmpty else {
             state = "configuration required"
             detail = "Add at least one locally approved sender before enabling replies."
-            publishStatus()
-            return
-        }
-        guard aiResponder.statusSnapshot().isConfigured else {
-            state = "AI unavailable"
-            detail = "Neither Gemini nor an on-device local text provider is available for the isolated Messages AI profile."
             publishStatus()
             return
         }
@@ -1936,17 +2181,30 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             recentSubmissionDates.removeAll {
                 now.timeIntervalSince($0) > Self.rapidMessageWindow
             }
+            pendingAdministratorConfirmations = pendingAdministratorConfirmations.filter {
+                _, pending in
+                pending.generation == generation && pending.expiresAt > now
+            }
             let preservesDeliveryFailure = batch.messages.isEmpty && (
                 state == "Automation permission required" ||
                 state == "AI unavailable" ||
                 state == "Transcript archive error" ||
-                state == "error"
+                state == "error" ||
+                state == "running administrator command"
             )
             if !preservesDeliveryFailure {
                 if batch.messages.isEmpty,
                    recentSubmissionDates.count >= Self.maximumRapidMessages {
                     state = "rate limited"
                     detail = "Messages input is temporarily rate limited to prevent automated loops."
+                } else if !pendingAdministratorConfirmations.isEmpty {
+                    let isSending = pendingAdministratorConfirmations.values.contains {
+                        $0.phase == .sendingQuestion
+                    }
+                    state = isSending ? "processing" : "awaiting administrator confirmation"
+                    detail = isSending
+                        ? "Delivering an administrator command confirmation question."
+                        : "Waiting for an exact administrator command confirmation reply."
                 } else {
                     state = pendingRoutes.isEmpty ? "listening" : "processing"
                     detail = pendingRoutes.isEmpty
@@ -1987,6 +2245,21 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         rememberMessageGUID(message.guid)
         lastInboundAt = now
 
+        let canonicalSender = ROBMessagesBridgeConfiguration.canonicalHandle(message.sender)
+        if processAdministratorCommandIfPresent(
+            message,
+            sender: canonicalSender,
+            receivedAt: now
+        ) {
+            return
+        }
+
+        guard aiResponder.statusSnapshot().isConfigured else {
+            state = "AI unavailable"
+            detail = "Administrator commands remain active, but no isolated Messages AI provider is configured."
+            return
+        }
+
         let prompt = ROBMessagesPlainTextPolicy.normalized(message.text)
             ?? "Analyze this image and respond appropriately to the sender."
         let archivedInboundText = ROBMessagesPlainTextPolicy.normalized(message.text)
@@ -1995,7 +2268,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         let contextID = "messages:\(UUID().uuidString.lowercased())"
         let scope = ROBMessagesTranscriptScope(
             receivingAccount: configuration.receivingAccount,
-            sender: ROBMessagesBridgeConfiguration.canonicalHandle(message.sender),
+            sender: canonicalSender,
             chatID: message.chatID
         )
         pendingRoutes[contextID] = PendingRoute(
@@ -2080,6 +2353,188 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
                 case .failure(let error):
                     self.finishAIResponse(.failure(error), contextID: contextID)
                 }
+            }
+        }
+    }
+
+    private func processAdministratorCommandIfPresent(
+        _ message: ROBMessagesInboundMessage,
+        sender: String,
+        receivedAt now: Date
+    ) -> Bool {
+        guard ROBMessagesAdministratorPolicy.isAdministrator(sender),
+              message.attachmentCount == 0,
+              let text = ROBMessagesPlainTextPolicy.normalized(message.text) else {
+            return false
+        }
+
+        pendingAdministratorConfirmations = pendingAdministratorConfirmations.filter {
+            _, pending in
+            pending.generation == generation && pending.expiresAt > now
+        }
+        let key = administratorConfirmationKey(
+            account: configuration.receivingAccount,
+            sender: sender,
+            chatID: message.chatID
+        )
+        if let pending = pendingAdministratorConfirmations[key] {
+            switch pending.phase {
+            case .sendingQuestion:
+                state = "processing"
+                detail = "The administrator confirmation question is still being delivered."
+                return true
+            case .awaitingResponse:
+                pendingAdministratorConfirmations.removeValue(forKey: key)
+                if pending.command.confirms(text) {
+                    executeAdministratorCommand(pending)
+                    return true
+                }
+            }
+        }
+
+        guard let command = administratorCommands.first(where: { $0.matches(text) }) else {
+            return false
+        }
+        requestAdministratorConfirmation(
+            for: command,
+            message: message,
+            sender: sender,
+            key: key,
+            now: now
+        )
+        return true
+    }
+
+    private func administratorConfirmationKey(
+        account: String,
+        sender: String,
+        chatID: String
+    ) -> String {
+        [account, sender, chatID].joined(separator: "\u{1f}")
+    }
+
+    private func requestAdministratorConfirmation(
+        for command: ROBMessagesAdministratorCommand,
+        message: ROBMessagesInboundMessage,
+        sender: String,
+        key: String,
+        now: Date
+    ) {
+        let pending = PendingAdministratorConfirmation(
+            command: command,
+            chatID: message.chatID,
+            sender: sender,
+            receivingAccount: configuration.receivingAccount,
+            originatingAccountAliases: message.chatAccountCandidates,
+            generation: generation,
+            phase: .sendingQuestion,
+            expiresAt: now.addingTimeInterval(30)
+        )
+        pendingAdministratorConfirmations[key] = pending
+        state = "processing"
+        detail = "Sending the confirmation question for administrator command \"\(command.command)\"."
+        publishStatus()
+
+        let requestGeneration = generation
+        let replySender = replySender
+        let authorizationGate = replyAuthorizationGate
+        workerQueue.async { [weak self, replySender, authorizationGate] in
+            let result = Result<Void, Error> {
+                guard authorizationGate.authorizes(
+                    generation: requestGeneration,
+                    account: pending.receivingAccount,
+                    sender: pending.sender
+                ) else {
+                    throw ROBMessagesReplyError.failed(
+                        "Administrator command authorization changed before confirmation delivery."
+                    )
+                }
+                try replySender.send(
+                    text: command.confirmationPrompt,
+                    toChat: pending.chatID,
+                    account: pending.receivingAccount,
+                    originatingAccountAliases: pending.originatingAccountAliases,
+                    expectedSender: pending.sender
+                )
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.finishAdministratorConfirmationDelivery(
+                    result,
+                    key: key,
+                    commandID: command.id,
+                    generation: requestGeneration
+                )
+            }
+        }
+    }
+
+    private func finishAdministratorConfirmationDelivery(
+        _ result: Result<Void, Error>,
+        key: String,
+        commandID: String,
+        generation requestGeneration: UInt64
+    ) {
+        guard requestGeneration == generation,
+              var pending = pendingAdministratorConfirmations[key],
+              pending.command.id == commandID else {
+            return
+        }
+        switch result {
+        case .success:
+            pending.phase = .awaitingResponse
+            pending.expiresAt = Date().addingTimeInterval(90)
+            pendingAdministratorConfirmations[key] = pending
+            lastReplyAt = Date()
+            lastDeliveryError = nil
+            state = "awaiting administrator confirmation"
+            detail = "Waiting 90 seconds for the exact confirmation reply to \"\(pending.command.command)\"."
+        case .failure(let error):
+            pendingAdministratorConfirmations.removeValue(forKey: key)
+            if let replyError = error as? ROBMessagesReplyError {
+                lastDeliveryError = replyError.diagnosticDescription
+            } else {
+                lastDeliveryError = "Administrator confirmation delivery failed."
+            }
+            state = "error"
+            detail = error.localizedDescription
+        }
+        publishStatus()
+    }
+
+    private func executeAdministratorCommand(_ pending: PendingAdministratorConfirmation) {
+        state = "running administrator command"
+        detail = "Running confirmed administrator command \"\(pending.command.command)\"."
+        publishStatus()
+
+        let requestGeneration = generation
+        let executor = administratorCommandExecutor
+        let authorizationGate = replyAuthorizationGate
+        workerQueue.async { [weak self, executor, authorizationGate] in
+            let result = Result<Void, Error> {
+                guard authorizationGate.authorizes(
+                    generation: requestGeneration,
+                    account: pending.receivingAccount,
+                    sender: pending.sender
+                ) else {
+                    throw ROBMessagesAdministratorCommandExecutionError.failed(
+                        "authorization changed before execution"
+                    )
+                }
+                try executor.execute(script: pending.command.script)
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, requestGeneration == self.generation else { return }
+                switch result {
+                case .success:
+                    self.lastDeliveryError = nil
+                    self.state = "listening"
+                    self.detail = "Administrator command \"\(pending.command.command)\" completed."
+                case .failure(let error):
+                    self.lastDeliveryError = error.localizedDescription
+                    self.state = "error"
+                    self.detail = error.localizedDescription
+                }
+                self.publishStatus()
             }
         }
     }

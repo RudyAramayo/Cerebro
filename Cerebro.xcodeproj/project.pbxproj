@@ -99,6 +99,7 @@
 		C0B00C022F4C000C00000001 /* ROBMessagesTranscriptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B00C012F4C000C00000001 /* ROBMessagesTranscriptStore.swift */; };
 		C0B00D022F4C000D00000001 /* ROBMessagesVisionReplyPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B00D012F4C000D00000001 /* ROBMessagesVisionReplyPolicy.swift */; };
 		C0B00E022F4C000E00000001 /* ROBMessagesTranscriptWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B00E012F4C000E00000001 /* ROBMessagesTranscriptWindowController.swift */; };
+		C0B00F022F4C000F00000001 /* ROBMessagesAdministratorCommandWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B00F012F4C000F00000001 /* ROBMessagesAdministratorCommandWindowController.swift */; };
 		C0B005022F4C000500000001 /* ROBMessagesAIResponder.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B005012F4C000500000001 /* ROBMessagesAIResponder.swift */; };
 		C0B006022F4C000600000001 /* ROBMessagesBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B006012F4C000600000001 /* ROBMessagesBridge.swift */; };
 		C0B007032F4C000700000001 /* ROBBaseSerialConsoleWindowController.m in Sources */ = {isa = PBXBuildFile; fileRef = C0B007022F4C000700000001 /* ROBBaseSerialConsoleWindowController.m */; };
@@ -288,6 +289,7 @@
 		C0B00C012F4C000C00000001 /* ROBMessagesTranscriptStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBMessagesTranscriptStore.swift; sourceTree = "<group>"; };
 		C0B00D012F4C000D00000001 /* ROBMessagesVisionReplyPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBMessagesVisionReplyPolicy.swift; sourceTree = "<group>"; };
 		C0B00E012F4C000E00000001 /* ROBMessagesTranscriptWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBMessagesTranscriptWindowController.swift; sourceTree = "<group>"; };
+		C0B00F012F4C000F00000001 /* ROBMessagesAdministratorCommandWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBMessagesAdministratorCommandWindowController.swift; sourceTree = "<group>"; };
 		C0B005012F4C000500000001 /* ROBMessagesAIResponder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBMessagesAIResponder.swift; sourceTree = "<group>"; };
 		C0B006012F4C000600000001 /* ROBMessagesBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBMessagesBridge.swift; sourceTree = "<group>"; };
 		C0B007012F4C000700000001 /* ROBBaseSerialConsoleWindowController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBBaseSerialConsoleWindowController.h; sourceTree = "<group>"; };
@@ -488,6 +490,7 @@
 				C0B00C012F4C000C00000001 /* ROBMessagesTranscriptStore.swift */,
 				C0B00D012F4C000D00000001 /* ROBMessagesVisionReplyPolicy.swift */,
 				C0B00E012F4C000E00000001 /* ROBMessagesTranscriptWindowController.swift */,
+				C0B00F012F4C000F00000001 /* ROBMessagesAdministratorCommandWindowController.swift */,
 				C0B005012F4C000500000001 /* ROBMessagesAIResponder.swift */,
 				C0B006012F4C000600000001 /* ROBMessagesBridge.swift */,
 				C0B009012F4C000900000001 /* ROBAppleMusicService.swift */,
@@ -824,6 +827,7 @@
 				C0B00C022F4C000C00000001 /* ROBMessagesTranscriptStore.swift in Sources */,
 				C0B00D022F4C000D00000001 /* ROBMessagesVisionReplyPolicy.swift in Sources */,
 				C0B00E022F4C000E00000001 /* ROBMessagesTranscriptWindowController.swift in Sources */,
+				C0B00F022F4C000F00000001 /* ROBMessagesAdministratorCommandWindowController.swift in Sources */,
 				C0B005022F4C000500000001 /* ROBMessagesAIResponder.swift in Sources */,
 				C0B006022F4C000600000001 /* ROBMessagesBridge.swift in Sources */,
 				C0B009022F4C000900000001 /* ROBAppleMusicService.swift in Sources */,
