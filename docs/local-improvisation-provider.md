@@ -69,9 +69,9 @@ References:
 
 ## Configure Cerebro
 
-1. If the adaptive line should use live sight or sound, open **Gemini…**, connect
-   the session, enable the desired camera/microphone inputs, and verify the
-   video encoded/sent counters before opening the show.
+1. If the adaptive line should use live sight or sound, open **Settings →
+   Gemini**, connect the session, enable the desired camera/microphone inputs,
+   and verify the video encoded/sent counters before opening the show.
 2. Open **Show…** from the main window.
 3. Enable **Use local stage director**.
 4. Select **llama.cpp server**.

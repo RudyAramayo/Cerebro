@@ -11,6 +11,7 @@
 @interface AppDelegate : NSObject <NSApplicationDelegate>
 
 - (IBAction)showPythonSettings:(id)sender;
+- (IBAction)showGeminiSettings:(id)sender;
 - (IBAction)showInsta360Settings:(id)sender;
 - (IBAction)showSystemStatus:(id)sender;
 - (IBAction)toggleDevelopmentMode:(id)sender;

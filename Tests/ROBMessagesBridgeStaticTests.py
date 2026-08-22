@@ -32,6 +32,12 @@ ENTITLEMENTS = (ROOT / "Cerebro" / "Cerebro.entitlements").read_text(
 PROJECT = (ROOT / "Cerebro.xcodeproj" / "project.pbxproj").read_text(
     encoding="utf-8"
 )
+CURRENT_INFORMATION = (
+    ROOT / "Cerebro" / "ROBMessagesCurrentInformationService.swift"
+).read_text(encoding="utf-8")
+WEATHER = (
+    ROOT / "Cerebro" / "ROBWeatherSearchService.swift"
+).read_text(encoding="utf-8")
 
 
 def require(condition: bool, message: str) -> None:
@@ -175,14 +181,14 @@ def main() -> None:
         "streamsAudio: false",
         "streamsVideo: true",
         "exposesRobotActionTool: false",
-        "enablesGoogleSearch: false",
-        "enablesNewsSearch: false",
+        "enablesGoogleSearch: true",
+        "enablesNewsSearch: true",
         "enablesAppleMusic: false",
         'responseModality: "TEXT"',
     ]
     require(
         all(setting in RESPONDER for setting in isolated_configuration),
-        "The Messages AI profile lost bounded image input or re-enabled a tool/audio surface",
+        "The Messages AI profile lost bounded image input, read-only search, or isolation from action/audio surfaces",
     )
     require(
         "sessionsByChatID" in RESPONDER
@@ -229,6 +235,33 @@ def main() -> None:
         all(symbol in LOCAL_PROVIDER for symbol in local_provider_contract),
         "The isolated local Messages provider contract is incomplete",
     )
+    current_information_contract = [
+        "ROBMessagesCurrentInformationService.shared.context(",
+        "currentInformation?.modelContext",
+        "currentInformation.fallbackReply",
+        "read-only publisher-news and weather services",
+    ]
+    require(
+        all(symbol in LOCAL_PROVIDER for symbol in current_information_contract),
+        "Apple Foundation Models and Swift MLX no longer receive bounded current-information results",
+    )
+    require(
+        'case news(source: String, query: String?, limit: Int)' in CURRENT_INFORMATION
+        and 'case weather(location: String?, days: Int)' in CURRENT_INFORMATION
+        and '"source": source' in CURRENT_INFORMATION
+        and '"location": location' in CURRENT_INFORMATION
+        and "shouldReturnDirectly: allRequestsFailed" in CURRENT_INFORMATION,
+        "The local current-information router lost its deterministic news/weather boundary",
+    )
+    require(
+        'static let geocodingBaseURL = URL(' in WEATHER
+        and 'string: "https://geocoding-api.open-meteo.com/v1/search"' in WEATHER
+        and 'string: "https://api.open-meteo.com/v1/forecast"' in WEATHER
+        and 'request.httpMethod = "GET"' in WEATHER
+        and "willPerformHTTPRedirection" in WEATHER
+        and "completionHandler(nil)" in WEATHER,
+        "The weather service is no longer fixed-host, GET-only, bounded, and redirect rejecting",
+    )
     forbidden_local_dependencies = (
         "ROBMainViewController",
         "ROBScene",
@@ -255,6 +288,11 @@ def main() -> None:
     require(
         not any(symbol in combined_messages_sources for symbol in forbidden_output_symbols),
         "The Messages-only response path has acquired a speech dependency",
+    )
+    require(
+        "ROBWeatherSearchService.swift" in PROJECT
+        and "ROBMessagesCurrentInformationService.swift" in PROJECT,
+        "The Messages current-information services are not part of the app target",
     )
     require(
         "[[ROBMessagesBridge shared] start]" in MAIN

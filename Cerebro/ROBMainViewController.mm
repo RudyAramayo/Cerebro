@@ -159,7 +159,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 @property (readwrite, retain) AutoNetServer *autoNetServer;
 @property (readwrite, retain) ROBAI *robAI;
-@property (readwrite, retain) ROBGeminiDiagnosticsWindowController *geminiDiagnosticsWindowController;
+@property (readwrite, retain) ROBGeminiSettingsViewController *geminiSettingsViewController;
 @property (readwrite, retain) ROBInsta360DiagnosticsWindowController *insta360DiagnosticsWindowController;
 @property (readwrite, retain) ROBSystemStatusCoordinator *systemStatusCoordinator;
 @property (readwrite, retain) ROBStageShowWindowController *stageShowWindowController;
@@ -3029,15 +3029,23 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (IBAction)showGeminiDiagnostics:(id)sender
 {
+    id appDelegate = NSApp.delegate;
+    if ([appDelegate respondsToSelector:@selector(showGeminiSettings:)]) {
+        [appDelegate showGeminiSettings:sender];
+    }
+}
+
+- (NSViewController *)geminiProviderSettingsViewController
+{
     if (self.robAI == nil) {
-        return;
+        return nil;
     }
-    if (self.geminiDiagnosticsWindowController == nil) {
-        self.geminiDiagnosticsWindowController =
-            [[ROBGeminiDiagnosticsWindowController alloc] initWithRobAI:self.robAI];
-        self.geminiDiagnosticsWindowController.controlDelegate = self;
+    if (self.geminiSettingsViewController == nil) {
+        self.geminiSettingsViewController =
+            [[ROBGeminiSettingsViewController alloc] initWithRobAI:self.robAI];
+        self.geminiSettingsViewController.controlDelegate = self;
     }
-    [self.geminiDiagnosticsWindowController showWindow:sender];
+    return self.geminiSettingsViewController;
 }
 
 - (IBAction)showInsta360Diagnostics:(id)sender

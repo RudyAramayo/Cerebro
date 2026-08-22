@@ -83,8 +83,8 @@ No Gemini credential should be committed to source code, the application
 bundle, or an Xcode scheme. Cerebro reads a long-lived development key from the
 macOS login Keychain when no credential environment override is present.
 
-For a personal installation, open **AI Provider Control & Diagnostics**, paste
-the Gemini key into the secure field, and choose **Save in Keychain**. Relaunch
+For a personal installation, open **Settings → Gemini**, paste the Gemini key
+into the secure field, and choose **Save in Keychain**. Relaunch
 Cerebro once so `ROBAI` can create the live session. A key installed through
 this explicit in-app action enables Gemini without an Xcode scheme or launch
 script. The UI never reads the secret back into a visible field.
@@ -153,8 +153,8 @@ turn number without logging the prompt, credential, or media payload.
 
 ### Runtime controls and diagnostics
 
-Use the **Gemini…** button in Cerebro's main-window title bar to open a live,
-redacted control and diagnostics panel. It provides three independent switches:
+Open **Settings → Gemini** for the live, redacted controls and diagnostics. The
+tab provides three independent switches:
 
 - **Connect to Gemini** opens or closes the Live WebSocket. Off blocks new
   text, microphone, and camera input, clears queued media, and prevents
@@ -214,7 +214,7 @@ Google Search is enabled by default. To disable it for a launch, relaunch Cerebr
 GEMINI_GOOGLE_SEARCH_ENABLED=false
 ```
 
-The **Gemini…** diagnostics panel reports the launch-time setting. Search does
+The **Settings → Gemini** diagnostics report the launch-time setting. Search does
 not grant shell, filesystem, local-network, or robot-motion access; Gemini
 chooses queries and retrieves public web results on Google's servers. The
 configured Live model must support Google Search. If setup is rejected, disable
@@ -292,7 +292,7 @@ To hide the function for a launch:
 GEMINI_NEWS_SEARCH_ENABLED=false
 ```
 
-The **Gemini…** diagnostics panel reports whether it was declared. The function
+The **Settings → Gemini** diagnostics report whether it was declared. The function
 still needs a ready Gemini Live session to be invoked; Cerebro's Apple/MLX
 dialogue fallback has no function-calling path. Normal outbound HTTPS must also
 work. Neither condition is a ROBController permission. Configuration-bound
@@ -573,8 +573,8 @@ does not contact Gemini. **Run Adaptive** lets the local provider choose a
 bounded stage beat and delivery enum, then sends a trusted Cerebro-built brief to Gemini through the existing
 context-correlated text path, and lets Live add current camera/audio awareness.
 Camera/audio context is available only when its independent Gemini runtime
-switches are enabled; confirm encoded/sent frame counters in **Gemini…** before
-the show. The cue deadline is shared between local planning and Gemini. If
+switches are enabled; confirm encoded/sent frame counters in **Settings →
+Gemini** before the show. The cue deadline is shared between local planning and Gemini. If
 Gemini fails after a local plan, Cerebro uses that local line; otherwise it uses
 the authored fallback.
 

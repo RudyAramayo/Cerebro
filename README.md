@@ -279,7 +279,7 @@ current camera/audio awareness, and falls
 back to the validated local line when available, otherwise the mandatory
 authored line. Camera/audio awareness applies only when those Gemini runtime
 inputs are enabled; verify the effective switches and frame counters in
-**Gemini…** before a show. The implemented, contract-validated provider uses a loopback
+**Settings → Gemini** before a show. The implemented, contract-validated provider uses a loopback
 `llama.cpp` server; a model-neutral registry leaves a
 fail-safe seam for native MLX Swift guided generation. Show files can name a
 gesture but cannot contain raw joints, servo values, hosts, ports, or shell
@@ -334,8 +334,8 @@ transforms, complete four-axis neck mapping, joint feedback, IK, collision
 checking, and a verified grasp executor. The session and result protocols are
 in place for those capabilities as they are added.
 
-Use the main-window **Gemini…** control to disconnect the AI session or toggle
-Gemini microphone and sampled-camera input without restarting Cerebro. Local
+Use **Settings → Gemini** to disconnect the AI session or toggle Gemini
+microphone and sampled-camera input without restarting Cerebro. Local
 speech recognition, perception, and controller/Vision Pro video remain
 independent. See [Gemini Robotics Live integration](docs/gemini-robotics-live.md)
 for setup, runtime-control behavior, protocol details, safety boundaries, and

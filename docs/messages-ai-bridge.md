@@ -40,10 +40,12 @@ replaying that database as history.
 ## Isolation and authorization
 
 - Each active chat owns a separate Gemini Live session with text responses,
-  microphone and live-camera sources off, Google/news search off, and no
-  function or robot-action tools. Approved text is sent to Gemini. A normalized
-  still image is sent only when the separate Gemini-image setting is enabled;
-  no other Messages history or camera imagery is included.
+  microphone and live-camera sources off. It exposes only read-only publisher
+  news search and Gemini's server-side Google Search for current public facts
+  such as weather; robot-action, Music, file, and device tools remain off.
+  Approved text is sent to Gemini. A normalized still image is sent only when
+  the separate Gemini-image setting is enabled; no other Messages history or
+  camera imagery is included.
 - Messages replies never call `ROBSpeechBox` and do not appear in the room
   conversation transcript.
 - Only incoming plain text, or one JPEG/PNG/HEIC image with optional text, sent
@@ -77,6 +79,16 @@ Swift MLX Qwen2-VL model. Apple Foundation Models never receives pixels: it
 receives the bounded Swift MLX visual analysis as untrusted data and turns that
 analysis plus the sender's text into the final reply. If Apple Intelligence is
 unavailable, the bounded MLX response is used directly.
+
+For text requests that fall back locally, Cerebro recognizes explicit
+publisher-news and weather intents before inference. News uses the existing
+fixed publisher registry, including CNN's current-news sitemap. Weather uses
+fixed Open-Meteo geocoding and forecast endpoints and requires the sender to
+name a city, region, or postal code; Cerebro never supplies the Mac's location.
+The bounded result is passed to Apple Foundation Models and, if needed, Swift
+MLX as untrusted data. Neither model can choose an arbitrary URL. If both local
+models are unavailable after a successful lookup, Cerebro returns a bounded,
+deterministically formatted result instead of inventing current information.
 
 The Messages database and its legacy attributed-text archive are private macOS
 implementation details. Cerebro recognizes a narrow, bounded plain-text shape
@@ -125,6 +137,14 @@ xcrun swiftc -parse-as-library -swift-version 5 -warnings-as-errors \
   Tests/ROBMessagesBridgeFixtureTests.swift \
   -o /tmp/ROBMessagesBridgeFixtureTests
 /tmp/ROBMessagesBridgeFixtureTests
+
+xcrun swiftc -parse-as-library -swift-version 5 -warnings-as-errors \
+  Cerebro/ROBNewsSearchService.swift \
+  Cerebro/ROBWeatherSearchService.swift \
+  Cerebro/ROBMessagesCurrentInformationService.swift \
+  Tests/ROBMessagesCurrentInformationFixtureTests.swift \
+  -o /tmp/ROBMessagesCurrentInformationFixtureTests
+/tmp/ROBMessagesCurrentInformationFixtureTests
 
 python3 Tests/ROBMessagesBridgeStaticTests.py
 ```

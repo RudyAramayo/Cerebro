@@ -354,6 +354,15 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
     [self.pythonSettingsWindowController showInsta360Settings:sender];
 }
 
+- (IBAction)showGeminiSettings:(id)sender
+{
+    if (self.pythonSettingsWindowController == nil) {
+        self.pythonSettingsWindowController = [[ROBPythonSettingsWindowController alloc] init];
+    }
+    [NSApp activateIgnoringOtherApps:YES];
+    [self.pythonSettingsWindowController showGeminiSettings:sender];
+}
+
 - (IBAction)showSystemStatus:(id)sender
 {
     for (NSWindow *window in NSApp.windows) {

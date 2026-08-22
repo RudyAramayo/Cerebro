@@ -59,6 +59,7 @@
 - (IBAction)showSerialDebug:(id)sender;
 - (IBAction)showMainNavigation:(id)sender;
 - (IBAction)showGeminiDiagnostics:(id)sender;
+- (nullable NSViewController *)geminiProviderSettingsViewController;
 - (IBAction)showMainCameraDiagnostics:(id)sender;
 - (IBAction)showCameraDiagnostics:(id)sender;
 - (IBAction)showInsta360Diagnostics:(id)sender;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static regression checks for the Settings menu and Perception preferences."""
+"""Static regression checks for Settings, Gemini, and Perception preferences."""
 
 from pathlib import Path
 import re
@@ -17,6 +17,15 @@ PROCESSING_SETTINGS = (
 DIAGNOSTICS = (
     ROOT / "Cerebro" / "ROBInsta360DiagnosticsWindowController.swift"
 ).read_text(encoding="utf-8")
+GEMINI_SETTINGS = (
+    ROOT / "Cerebro" / "ROBGeminiDiagnosticsWindowController.swift"
+).read_text(encoding="utf-8")
+MAIN_WINDOW = (ROOT / "Cerebro" / "ROBMainWindowController.m").read_text(
+    encoding="utf-8"
+)
+MAIN_VIEW = (ROOT / "Cerebro" / "ROBMainViewController.mm").read_text(
+    encoding="utf-8"
+)
 
 
 def braced_declaration(source: str, signature: str) -> str:
@@ -122,6 +131,39 @@ def main() -> None:
     )
     assert_settings_action(app_settings[0], app_delegate_id)
 
+    # Gemini provider preferences belong in the shared Settings window, not in
+    # a one-off main-window title-bar panel.
+    require(
+        'buttonWithTitle:@"Gemini…"' not in MAIN_WINDOW
+        and "geminiDiagnosticsButton" not in MAIN_WINDOW,
+        "The main window regained a separate Gemini settings button",
+    )
+    require(
+        '@objcMembers public final class ROBGeminiSettingsViewController: NSViewController'
+        in GEMINI_SETTINGS
+        and 'checkboxWithTitle: "Connect to Gemini"' in GEMINI_SETTINGS
+        and 'checkboxWithTitle: "Send microphone audio to Gemini"'
+        in GEMINI_SETTINGS
+        and 'checkboxWithTitle: "Send sampled camera composite to Gemini"'
+        in GEMINI_SETTINGS,
+        "Gemini runtime controls are no longer hosted by a Settings view controller",
+    )
+    require(
+        'self.geminiSettingsTab.label = @"Gemini";' in SETTINGS_WINDOW
+        and "[mainViewController geminiProviderSettingsViewController]"
+        in SETTINGS_WINDOW
+        and "[self.settingsTabView selectTabViewItem:self.geminiSettingsTab];"
+        in SETTINGS_WINDOW,
+        "Cerebro Settings no longer owns and selects the Gemini provider tab",
+    )
+    show_legacy_gemini = braced_declaration(
+        MAIN_VIEW, "- (IBAction)showGeminiDiagnostics:"
+    )
+    require(
+        "showGeminiSettings:" in show_legacy_gemini,
+        "The legacy Gemini action no longer routes into Settings",
+    )
+
     # The Perception tab owns the processing controller, instead of cloning
     # controls into the diagnostics window.
     build_interface = braced_declaration(SETTINGS_WINDOW, "- (void)buildInterface")
@@ -222,7 +264,7 @@ def main() -> None:
         "Diagnostics gained an Insta360 analysis-geometry setter",
     )
 
-    print("Settings menu and Perception preference static checks passed")
+    print("Settings, Gemini, and Perception preference static checks passed")
 
 
 if __name__ == "__main__":

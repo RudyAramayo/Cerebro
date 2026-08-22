@@ -43,6 +43,7 @@
 @property (nonatomic, weak) ROBSerialBox *boundSerialBox;
 @property (nonatomic, strong) NSArray<NSButton *> *actionButtons;
 @property (nonatomic, strong) NSTabView *settingsTabView;
+@property (nonatomic, strong) NSTabViewItem *geminiSettingsTab;
 @property (nonatomic, strong) NSTabViewItem *insta360SettingsTab;
 @property (nonatomic, strong) ROBInsta360ProcessingSettingsViewController *insta360SettingsViewController;
 @property (nonatomic, assign) NSUInteger operationGeneration;
@@ -61,6 +62,7 @@
 - (void)refreshSerialHardwareSettings;
 - (void)updateSerialHardwareStatus;
 - (ROBMainViewController *)activeMainViewController;
+- (void)attachGeminiSettingsViewController;
 - (void)openPrivacySettings:(NSString *)sectionName;
 - (void)openFullDiskAccessSettings:(id)sender;
 - (void)openAutomationSettings:(id)sender;
@@ -147,6 +149,18 @@
     NSView *contentView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 680, 580)];
     runtimeTab.view = contentView;
     [tabView addTabViewItem:runtimeTab];
+
+    self.geminiSettingsTab = [NSTabViewItem
+        tabViewItemWithViewController:[[NSViewController alloc] init]];
+    self.geminiSettingsTab.label = @"Gemini";
+    NSView *geminiPlaceholderView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 680, 580)];
+    NSTextField *geminiPlaceholderLabel = [self labelWithString:
+        @"Open Cerebro's main robot window to configure Gemini."
+        frame:NSMakeRect(24, 530, 632, 28)];
+    geminiPlaceholderLabel.textColor = NSColor.secondaryLabelColor;
+    [geminiPlaceholderView addSubview:geminiPlaceholderLabel];
+    self.geminiSettingsTab.view = geminiPlaceholderView;
+    [tabView addTabViewItem:self.geminiSettingsTab];
 
     NSTabViewItem *controllersTab = [NSTabViewItem tabViewItemWithViewController:[[NSViewController alloc] init]];
     controllersTab.label = @"Controllers";
@@ -268,7 +282,7 @@
     [messagesView addSubview:messagesHeading];
 
     NSTextField *messagesExplanation = [self labelWithString:
-        @"Approved one-to-one text and optional still images use isolated AI sessions. Images can remain local or be explicitly allowed for Gemini. Replies return only to the originating chat; ROB never speaks them, and search and robot tools are unavailable."
+        @"Approved one-to-one text and optional still images use isolated AI sessions. Images can remain local or be explicitly allowed for Gemini. Read-only publisher news and weather lookup are available; robot, music, file, and action tools are not. Replies return only to the originating chat, and ROB never speaks them."
         frame:NSMakeRect(24, 472, 632, 50)];
     messagesExplanation.textColor = [NSColor secondaryLabelColor];
     [messagesView addSubview:messagesExplanation];
@@ -593,11 +607,33 @@
     [self refreshSystemDependencyStatus];
 }
 
+- (void)showGeminiSettings:(id)sender
+{
+    [self showWindow:sender];
+    [self.settingsTabView selectTabViewItem:self.geminiSettingsTab];
+    ROBGeminiSettingsViewController *settingsViewController =
+        (ROBGeminiSettingsViewController *)self.geminiSettingsTab.viewController;
+    if ([settingsViewController isKindOfClass:[ROBGeminiSettingsViewController class]]) {
+        [settingsViewController refreshSettings];
+    }
+}
+
 - (void)showInsta360Settings:(id)sender
 {
     [self showWindow:sender];
     [self.insta360SettingsViewController refreshSettings];
     [self.settingsTabView selectTabViewItem:self.insta360SettingsTab];
+}
+
+- (void)attachGeminiSettingsViewController
+{
+    ROBMainViewController *mainViewController = [self activeMainViewController];
+    NSViewController *settingsViewController =
+        [mainViewController geminiProviderSettingsViewController];
+    if (settingsViewController != nil &&
+        self.geminiSettingsTab.viewController != settingsViewController) {
+        self.geminiSettingsTab.viewController = settingsViewController;
+    }
 }
 
 - (ROBMainViewController *)mainViewControllerInViewController:(NSViewController *)viewController
@@ -734,6 +770,7 @@
 
 - (void)showWindow:(id)sender
 {
+    [self attachGeminiSettingsViewController];
     [super showWindow:sender];
     [self.window makeKeyAndOrderFront:sender];
     [[ROBSystemDependencyManager sharedManager] refreshSSHpassAvailability];

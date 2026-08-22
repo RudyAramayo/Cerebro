@@ -2,11 +2,15 @@
 //  ROBGeminiDiagnosticsWindowController.swift
 //  Cerebro
 //
-//  Runtime controls and redacted diagnostics for Gemini Robotics Live.
+//  Settings-hosted runtime controls and redacted diagnostics for Gemini Robotics Live.
 //
 
 import AppKit
 import Foundation
+
+private final class ROBFlippedGeminiSettingsDocumentView: NSView {
+    override var isFlipped: Bool { true }
+}
 
 @objc public protocol ROBGeminiRuntimeControlDelegate: AnyObject {
     func setGeminiConnectionEnabled(_ enabled: Bool)
@@ -15,7 +19,7 @@ import Foundation
 }
 
 @available(macOS 10.15, *)
-@objcMembers public final class ROBGeminiDiagnosticsWindowController: NSWindowController, NSWindowDelegate {
+@objcMembers public final class ROBGeminiSettingsViewController: NSViewController {
     private enum Row: CaseIterable {
         case configured
         case connectionRequested
@@ -84,46 +88,49 @@ import Foundation
 
     public init(robAI: ROBAI) {
         self.robAI = robAI
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 920),
-            styleMask: [.titled, .closable, .miniaturizable],
-            backing: .buffered,
-            defer: false
-        )
-        super.init(window: window)
-
-        window.title = "AI Provider Control & Diagnostics"
-        window.isReleasedWhenClosed = false
-        window.delegate = self
-        window.center()
-        configureContentView(for: window)
-        refresh()
+        super.init(nibName: nil, bundle: nil)
     }
 
     public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    public override func showWindow(_ sender: Any?) {
-        super.showWindow(sender)
-        window?.makeKeyAndOrderFront(sender)
-        refresh()
+    deinit {
+        stopRefreshTimer()
+    }
+
+    public override func loadView() {
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 680, height: 580))
+        view = content
+        configureContentView(in: content)
+    }
+
+    public override func viewWillAppear() {
+        super.viewWillAppear()
+        refreshSettings()
         startRefreshTimer()
     }
 
-    public func windowWillClose(_ notification: Notification) {
+    public override func viewDidDisappear() {
+        super.viewDidDisappear()
+        stopRefreshTimer()
+    }
+
+    public func refreshSettings() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.refreshSettings() }
+            return
+        }
+        loadViewIfNeeded()
+        refresh()
+    }
+
+    private func stopRefreshTimer() {
         refreshTimer?.invalidate()
         refreshTimer = nil
     }
 
-    private func configureContentView(for window: NSWindow) {
-        let contentView = NSView(frame: NSRect(
-            origin: .zero,
-            size: window.contentLayoutRect.size
-        ))
-        contentView.autoresizingMask = [.width, .height]
-        window.contentView = contentView
-
+    private func configureContentView(in contentView: NSView) {
         let heading = NSTextField(labelWithString: "Gemini Robotics runtime")
         heading.font = .boldSystemFont(ofSize: 17)
 
@@ -256,13 +263,31 @@ import Foundation
         stack.setCustomSpacing(16, after: explanation)
         stack.setCustomSpacing(14, after: controls)
         stack.setCustomSpacing(14, after: grid)
-        contentView.addSubview(stack)
+        let scrollView = NSScrollView()
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
+        scrollView.hasHorizontalScroller = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        let documentView = ROBFlippedGeminiSettingsDocumentView()
+        documentView.translatesAutoresizingMaskIntoConstraints = false
+        documentView.addSubview(stack)
+        scrollView.documentView = documentView
+        contentView.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
-            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 22),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -20),
+            scrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            documentView.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+            documentView.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+            documentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+            stack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: 24),
+            stack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor, constant: -24),
+            stack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 20),
+            stack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor, constant: -20),
             grid.widthAnchor.constraint(equalTo: stack.widthAnchor),
             controls.widthAnchor.constraint(equalTo: stack.widthAnchor),
             credentialControls.widthAnchor.constraint(equalTo: stack.widthAnchor),
@@ -274,6 +299,8 @@ import Foundation
             explanation.widthAnchor.constraint(equalTo: stack.widthAnchor),
             note.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
+
+        refresh()
     }
 
     private func wrappingLabel(_ text: String) -> NSTextField {

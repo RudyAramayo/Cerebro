@@ -94,6 +94,8 @@
 		D4CFB7D42287F01100F2403A /* CoreML.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D4CFB7D32287F01100F2403A /* CoreML.framework */; };
 		D4E000022F00000100000001 /* GeminiRoboticsProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E000012F00000100000001 /* GeminiRoboticsProtocol.swift */; };
 		C0B004022F4C000400000001 /* ROBNewsSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B004012F4C000400000001 /* ROBNewsSearchService.swift */; };
+		C0B00A022F4C000A00000001 /* ROBWeatherSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B00A012F4C000A00000001 /* ROBWeatherSearchService.swift */; };
+		C0B00B022F4C000B00000001 /* ROBMessagesCurrentInformationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B00B012F4C000B00000001 /* ROBMessagesCurrentInformationService.swift */; };
 		C0B005022F4C000500000001 /* ROBMessagesAIResponder.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B005012F4C000500000001 /* ROBMessagesAIResponder.swift */; };
 		C0B006022F4C000600000001 /* ROBMessagesBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B006012F4C000600000001 /* ROBMessagesBridge.swift */; };
 		C0B007032F4C000700000001 /* ROBBaseSerialConsoleWindowController.m in Sources */ = {isa = PBXBuildFile; fileRef = C0B007022F4C000700000001 /* ROBBaseSerialConsoleWindowController.m */; };
@@ -273,6 +275,8 @@
 		D4CFB7D32287F01100F2403A /* CoreML.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreML.framework; path = System/Library/Frameworks/CoreML.framework; sourceTree = SDKROOT; };
 		D4E000012F00000100000001 /* GeminiRoboticsProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiRoboticsProtocol.swift; sourceTree = "<group>"; };
 		C0B004012F4C000400000001 /* ROBNewsSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBNewsSearchService.swift; sourceTree = "<group>"; };
+		C0B00A012F4C000A00000001 /* ROBWeatherSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBWeatherSearchService.swift; sourceTree = "<group>"; };
+		C0B00B012F4C000B00000001 /* ROBMessagesCurrentInformationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBMessagesCurrentInformationService.swift; sourceTree = "<group>"; };
 		C0B005012F4C000500000001 /* ROBMessagesAIResponder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBMessagesAIResponder.swift; sourceTree = "<group>"; };
 		C0B006012F4C000600000001 /* ROBMessagesBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBMessagesBridge.swift; sourceTree = "<group>"; };
 		C0B007012F4C000700000001 /* ROBBaseSerialConsoleWindowController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBBaseSerialConsoleWindowController.h; sourceTree = "<group>"; };
@@ -463,6 +467,8 @@
 				D4A38F741FFC8BD300092A46 /* ROBSCNViewController.h */,
 				D4E000012F00000100000001 /* GeminiRoboticsProtocol.swift */,
 				C0B004012F4C000400000001 /* ROBNewsSearchService.swift */,
+				C0B00A012F4C000A00000001 /* ROBWeatherSearchService.swift */,
+				C0B00B012F4C000B00000001 /* ROBMessagesCurrentInformationService.swift */,
 				C0B005012F4C000500000001 /* ROBMessagesAIResponder.swift */,
 				C0B006012F4C000600000001 /* ROBMessagesBridge.swift */,
 				C0B009012F4C000900000001 /* ROBAppleMusicService.swift */,
@@ -789,6 +795,8 @@
 				D49D755B27FFD1BF00142E26 /* AutoNetDataTransferProtocol.swift in Sources */,
 				D4E000022F00000100000001 /* GeminiRoboticsProtocol.swift in Sources */,
 				C0B004022F4C000400000001 /* ROBNewsSearchService.swift in Sources */,
+				C0B00A022F4C000A00000001 /* ROBWeatherSearchService.swift in Sources */,
+				C0B00B022F4C000B00000001 /* ROBMessagesCurrentInformationService.swift in Sources */,
 				C0B005022F4C000500000001 /* ROBMessagesAIResponder.swift in Sources */,
 				C0B006022F4C000600000001 /* ROBMessagesBridge.swift in Sources */,
 				C0B009022F4C000900000001 /* ROBAppleMusicService.swift in Sources */,
