@@ -85,6 +85,10 @@ If the card remains unavailable:
   connectivity in Services.
 - **Listening but no response:** confirm the sender text exactly matches its
   Messages handle, the chat is one-to-one, and the message contains plain text.
+- **Services reports a delivery error:** expand **Messages AI Bridge** and read
+  **Last delivery error**. It distinguishes Automation denial, send timeout,
+  chat/account correlation changes, and Messages AppleScript failures without
+  displaying the message body.
 
 ## Validation
 

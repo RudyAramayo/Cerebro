@@ -33,7 +33,28 @@ struct ROBMessagesBridgeConfiguration: Equatable, Sendable {
     let allowAllSenders: Bool
 
     static func canonicalHandle(_ value: String) -> String {
-        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let trimmed = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard trimmed.hasPrefix("+") else { return trimmed }
+
+        // Messages stores phone handles in compact E.164 form even though its
+        // UI commonly displays spaces, parentheses, dots, or hyphens. Treat
+        // those presentation-only variants as the same explicit +country-code
+        // identity without guessing a country code for bare local numbers.
+        let allowedPhoneCharacters = CharacterSet(
+            charactersIn: "+0123456789 ()-."
+        ).union(.whitespaces)
+        guard trimmed.unicodeScalars.allSatisfy({
+            allowedPhoneCharacters.contains($0)
+        }) else {
+            return trimmed
+        }
+        let digits = trimmed.unicodeScalars.compactMap { scalar -> String? in
+            guard scalar.value >= 48, scalar.value <= 57 else { return nil }
+            return String(scalar)
+        }.joined()
+        return digits.count >= 7 ? "+\(digits)" : trimmed
     }
 
     static func parseAllowedSenders(_ value: String) -> Set<String> {
@@ -241,6 +262,7 @@ private final class ROBMessagesReplyAuthorizationGate: @unchecked Sendable {
     private var isActive = false
     private var receivingAccount = ""
     private var allowedSenders = Set<String>()
+    private var allowAllSenders = false
 
     func update(
         generation: UInt64,
@@ -252,6 +274,7 @@ private final class ROBMessagesReplyAuthorizationGate: @unchecked Sendable {
         self.isActive = isActive
         receivingAccount = configuration.receivingAccount
         allowedSenders = configuration.allowedSenders
+        allowAllSenders = configuration.allowAllSenders
         lock.unlock()
     }
 
@@ -265,7 +288,9 @@ private final class ROBMessagesReplyAuthorizationGate: @unchecked Sendable {
         return isActive &&
             self.generation == generation &&
             receivingAccount == account &&
-            allowedSenders.contains(sender)
+            !sender.isEmpty &&
+            sender != receivingAccount &&
+            (allowAllSenders || allowedSenders.contains(sender))
     }
 }
 
@@ -733,10 +758,40 @@ enum ROBMessagesReplyError: LocalizedError {
             return "Messages reply failed: \(detail)"
         }
     }
+
+    var diagnosticDescription: String {
+        switch self {
+        case .automationPermissionRequired:
+            return "Automation permission is required."
+        case .timedOut:
+            return "Messages send timed out."
+        case .failed(let detail):
+            let flattened = detail
+                .unicodeScalars
+                .map { CharacterSet.controlCharacters.contains($0) ? " " : String($0) }
+                .joined()
+                .split(whereSeparator: \.isWhitespace)
+                .joined(separator: " ")
+            guard !flattened.isEmpty else { return "Unknown Messages scripting error." }
+            return String(flattened.unicodeScalars.prefix(240).map(String.init).joined())
+        }
+    }
 }
 
 final class ROBMessagesAppleScriptReplySender: ROBMessagesReplySending, @unchecked Sendable {
     private static let script = """
+    on compactPhonePresentation(candidateValue, expectedValue)
+      set candidateText to candidateValue as text
+      set expectedText to expectedValue as text
+      if expectedText does not start with "+" then return candidateText
+      set compactText to ""
+      repeat with characterValue in characters of candidateText
+        set characterText to characterValue as text
+        if characterText is not in {" ", "(", ")", "-", "."} then set compactText to compactText & characterText
+      end repeat
+      return compactText
+    end compactPhonePresentation
+
     on run argv
       if (count of argv) is not 4 then error "Invalid Cerebro Messages arguments"
       set targetID to item 1 of argv
@@ -750,17 +805,22 @@ final class ROBMessagesAppleScriptReplySender: ROBMessagesReplySending, @uncheck
         set targetAccount to account of targetChat
         set accountDescription to description of targetAccount as text
         set accountID to id of targetAccount as text
-        set colonAccountSuffix to ":" & expectedAccount
-        set semicolonAccountSuffix to ";" & expectedAccount
+        set comparedExpectedAccount to my compactPhonePresentation(expectedAccount, expectedAccount)
+        set comparedAccountDescription to my compactPhonePresentation(accountDescription, expectedAccount)
+        set comparedAccountID to my compactPhonePresentation(accountID, expectedAccount)
+        set colonAccountSuffix to ":" & comparedExpectedAccount
+        set semicolonAccountSuffix to ";" & comparedExpectedAccount
         ignoring case
-          if accountDescription is not expectedAccount and accountID is not expectedAccount and accountID does not end with colonAccountSuffix and accountID does not end with semicolonAccountSuffix then error "Originating chat account changed"
+          if comparedAccountDescription is not comparedExpectedAccount and comparedAccountID is not comparedExpectedAccount and comparedAccountID does not end with colonAccountSuffix and comparedAccountID does not end with semicolonAccountSuffix then error "Originating chat account changed"
         end ignoring
         set targetParticipants to participants of targetChat
         if (count of targetParticipants) is not 1 then error "Originating chat is no longer one-to-one"
         set participantHandle to handle of item 1 of targetParticipants as text
+        set comparedParticipantHandle to my compactPhonePresentation(participantHandle, expectedSender)
+        set comparedExpectedSender to my compactPhonePresentation(expectedSender, expectedSender)
         ignoring case
-          if participantHandle is expectedAccount then error "Originating chat participant is the receiving account"
-          if participantHandle is not expectedSender then error "Originating chat participant changed"
+          if comparedParticipantHandle is comparedExpectedAccount then error "Originating chat participant is the receiving account"
+          if comparedParticipantHandle is not comparedExpectedSender then error "Originating chat participant changed"
         end ignoring
         send replyText to targetChat
       end tell
@@ -966,6 +1026,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
     public let activeAIProvider: String?
     public let lastAIProvider: String?
     public let lastAIError: String?
+    public let lastDeliveryError: String?
     public let lastInboundAt: Date?
     public let lastReplyAt: Date?
 }
@@ -1012,6 +1073,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
     private var detail = "Messages replies are disabled."
     private var lastInboundAt: Date?
     private var lastReplyAt: Date?
+    private var lastDeliveryError: String?
     private var hasStarted = false
     private var hasRequestedFullDiskAccessPermission = false
     private var hasOpenedFullDiskAccessSettings = false
@@ -1250,6 +1312,7 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             activeAIProvider: ai.activeProvider,
             lastAIProvider: ai.lastProvider,
             lastAIError: ai.lastError,
+            lastDeliveryError: lastDeliveryError,
             lastInboundAt: lastInboundAt,
             lastReplyAt: lastReplyAt
         )
@@ -1498,6 +1561,9 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             receivingAccount: configuration.receivingAccount,
             generation: generation
         )
+        state = "processing"
+        detail = "Waiting for \(pendingRoutes.count) isolated text reply\(pendingRoutes.count == 1 ? "" : "ies")."
+        publishStatus()
         guard let prompt = ROBMessagesPlainTextPolicy.normalized(message.text) else { return }
         aiResponder.submit(
             prompt: prompt,
@@ -1561,11 +1627,17 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
         switch result {
         case .success:
             lastReplyAt = Date()
+            lastDeliveryError = nil
             state = pendingRoutes.isEmpty ? "listening" : "processing"
             detail = pendingRoutes.isEmpty
                 ? "Last isolated AI reply was sent to its originating Messages chat."
                 : "Waiting for \(pendingRoutes.count) additional Messages replies."
         case .failure(let error):
+            if let replyError = error as? ROBMessagesReplyError {
+                lastDeliveryError = replyError.diagnosticDescription
+            } else {
+                lastDeliveryError = "Unexpected Messages delivery error."
+            }
             if case ROBMessagesReplyError.automationPermissionRequired = error {
                 state = "Automation permission required"
             } else {

@@ -335,6 +335,11 @@ private struct ROBMessagesBridgeProductionFixtureTests {
         )
         try testAttributedBodyDecoder()
         try testAttributedBodyInboxSelection()
+        try expect(
+            ROBMessagesBridgeConfiguration.canonicalHandle("+1 (925) 323-8322")
+                == "+19253238322",
+            "Formatted E.164 sender handles are not canonicalized"
+        )
         resetFixtureDefaults()
         defer { resetFixtureDefaults() }
 
@@ -415,6 +420,12 @@ private struct ROBMessagesBridgeProductionFixtureTests {
         try expect(listeningStatus.activeAIProvider == nil, "A fixture AI provider was reported active")
         try expect(listeningStatus.lastAIProvider == nil, "A fixture AI provider was reported as last")
         try expect(listeningStatus.lastAIError == nil, "A fixture AI error was reported")
+        try expect(listeningStatus.lastDeliveryError == nil, "A fixture delivery error was reported")
+        try expect(
+            ROBMessagesReplyError.failed("Originating chat participant changed\n")
+                .diagnosticDescription == "Originating chat participant changed",
+            "Messages delivery diagnostics were not flattened safely"
+        )
         try expect(
             ai.submissions.isEmpty,
             "First startup replayed an existing Messages history row into the AI"
@@ -744,6 +755,37 @@ private struct ROBMessagesBridgeProductionFixtureTests {
         try expect(
             ai.submissions.last?.prompt == "Allowed after re-enable",
             "The post-enable prompt was not the newly authorized message"
+        )
+
+        ROBMessagesBridge.setConfiguredAllowedSendersText("")
+        ROBMessagesBridge.setConfiguredAllowAllSenders(true)
+        try await waitUntil("Public mode did not become ready") {
+            bridge.statusSnapshot().state == "listening"
+                && bridge.statusSnapshot().allowAllSenders
+        }
+        _ = try database.addMessage(
+            guid: "public-reply-guid",
+            text: "Public sender reply",
+            senderHandleRowID: outsider,
+            chatRowID: outsiderChat,
+            account: account
+        )
+        bridge.reloadConfiguration()
+        try await waitUntil("A public sender did not reach the AI") {
+            ai.submissions.count == 6
+        }
+        let publicRequest = ai.submissions[5]
+        let repliesBeforePublicCompletion = replies.snapshot().count
+        try expect(
+            ai.complete(contextID: publicRequest.contextID, response: "Public reply"),
+            "The public sender AI request could not be completed"
+        )
+        try await waitUntil("The public sender reply was discarded by the final gate") {
+            replies.snapshot().count == repliesBeforePublicCompletion + 1
+        }
+        try expect(
+            replies.snapshot().last?.expectedSender == "outsider@example.com",
+            "The public reply lost its immutable originating sender"
         )
 
         var deniedAutomationChecks: [Bool] = []

@@ -367,6 +367,11 @@ def main() -> None:
         and "snapshot.detail" not in messages_card,
         "Messages status must not expose account handles or provider/message error payloads",
     )
+    require(
+        "snapshot.lastDeliveryError" in messages_card
+        and 'label: "Last delivery error"' in messages_card,
+        "Messages status must expose a bounded delivery-stage diagnostic",
+    )
     for state in (
         'normalized == "disabled"',
         'normalized.contains("configuration required")',

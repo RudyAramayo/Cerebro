@@ -86,6 +86,16 @@ def main() -> None:
         "The sender policy no longer distinguishes restricted and explicit public mode",
     )
     require(
+        "allowAllSenders = configuration.allowAllSenders" in BRIDGE
+        and "(allowAllSenders || allowedSenders.contains(sender))" in BRIDGE,
+        "The final reply gate no longer authorizes explicit public mode",
+    )
+    require(
+        'state = "processing"' in BRIDGE
+        and "Waiting for \\(pendingRoutes.count) isolated text reply" in BRIDGE,
+        "Accepted Messages no longer make processing visible in bridge status",
+    )
+    require(
         "message.participantCount == 1" in BRIDGE
         and "message.chatJoinCount == 1" in BRIDGE
         and "message.soleChatParticipant" in BRIDGE,
@@ -140,14 +150,15 @@ def main() -> None:
     require(
         "if (count of argv) is not 4" in BRIDGE
         and "set expectedSender to item 4 of argv" in BRIDGE
-        and 'set colonAccountSuffix to ":" & expectedAccount' in BRIDGE
-        and 'set semicolonAccountSuffix to ";" & expectedAccount' in BRIDGE
-        and "accountID does not end with colonAccountSuffix" in BRIDGE
-        and "accountID does not end with semicolonAccountSuffix" in BRIDGE
+        and "on compactPhonePresentation(candidateValue, expectedValue)" in BRIDGE
+        and 'set colonAccountSuffix to ":" & comparedExpectedAccount' in BRIDGE
+        and 'set semicolonAccountSuffix to ";" & comparedExpectedAccount' in BRIDGE
+        and "comparedAccountID does not end with colonAccountSuffix" in BRIDGE
+        and "comparedAccountID does not end with semicolonAccountSuffix" in BRIDGE
         and "accountID does not contain expectedAccount" not in BRIDGE
         and "set targetParticipants to participants of targetChat" in BRIDGE
         and "if (count of targetParticipants) is not 1" in BRIDGE
-        and "if participantHandle is not expectedSender" in BRIDGE,
+        and "if comparedParticipantHandle is not comparedExpectedSender" in BRIDGE,
         "The reply sender no longer revalidates the exact one-to-one participant before sending",
     )
 

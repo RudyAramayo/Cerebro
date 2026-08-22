@@ -280,9 +280,13 @@ import FoundationModels
             }
         } else if normalized.contains("rate limited") || normalized.contains("error") {
             state = .degraded
-            detail = normalized.contains("rate limited")
-                ? "Inbound Messages are temporarily rate limited to prevent reply loops."
-                : "The Messages bridge reported an error; check its settings and macOS permissions."
+            if normalized.contains("rate limited") {
+                detail = "Inbound Messages are temporarily rate limited to prevent reply loops."
+            } else if let deliveryError = snapshot.lastDeliveryError {
+                detail = "Messages reply delivery failed: \(bounded(deliveryError))"
+            } else {
+                detail = "The Messages bridge reported an error; check its settings and macOS permissions."
+            }
         } else {
             state = .unknown
             detail = "Cached bridge state: \(bounded(snapshot.state))."
@@ -300,6 +304,7 @@ import FoundationModels
             ?? snapshot.lastAIProvider
             ?? "None"
         let lastAIError = snapshot.lastAIError.map { bounded($0) } ?? "None"
+        let lastDeliveryError = snapshot.lastDeliveryError.map { bounded($0) } ?? "None"
         return ROBSystemServiceCardSnapshot(
             id: "messages-ai-bridge",
             displayName: "Messages AI Bridge",
@@ -313,6 +318,7 @@ import FoundationModels
                 .init(label: "Authorization", value: authorization),
                 .init(label: providerLabel, value: bounded(provider)),
                 .init(label: "Last AI error", value: lastAIError),
+                .init(label: "Last delivery error", value: lastDeliveryError),
                 .init(label: "Pending replies", value: "\(snapshot.pendingReplyCount)"),
                 .init(label: "AI chats", value: "\(snapshot.activeAIChatCount)"),
                 .init(label: "Output", value: "Messages only"),
