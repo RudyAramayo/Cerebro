@@ -31,6 +31,7 @@ enum ROBVideoTransport {
 
 enum ROBVideoTransportError: LocalizedError {
     case listenerUnavailable
+    case authenticationTimedOut
     case authenticationFailed
     case authorizationFailed
     case capacityReached
@@ -41,6 +42,8 @@ enum ROBVideoTransportError: LocalizedError {
         switch self {
         case .listenerUnavailable:
             return "The ROB video listener could not be created."
+        case .authenticationTimedOut:
+            return "The ROB video peer did not complete authentication before the timeout."
         case .authenticationFailed:
             return "The ROB video pairing proof was rejected."
         case .authorizationFailed:
@@ -243,6 +246,16 @@ private struct ROBVideoAuthAccepted {
         data.append(mac)
         return data
     }
+}
+
+/// One-byte failure codes are deliberately non-secret. They let a paired app
+/// distinguish resource pressure and stale authorization from an invalid HMAC
+/// without exposing any credential material.
+private enum ROBVideoAuthRejectionCode: UInt8 {
+    case proofRejected = 1
+    case notAuthorized = 2
+    case capacityReached = 3
+    case invalidMessage = 4
 }
 
 private enum ROBVideoAuthenticator {
@@ -1367,7 +1380,7 @@ private final class ROBVideoServerConnection {
     private func beginAuthentication() {
         authenticationState = .awaitingHello
         let timeout = DispatchWorkItem { [weak self] in
-            self?.stop(error: ROBVideoTransportError.authenticationFailed)
+            self?.stop(error: ROBVideoTransportError.authenticationTimedOut)
         }
         authenticationTimeout = timeout
         server?.queue.asyncAfter(
@@ -1406,32 +1419,51 @@ private final class ROBVideoServerConnection {
     private func handleAuthentication(type: ROBVideoMessageType, data: Data) {
         if case .awaitingHello = authenticationState {
             guard type == .authenticationHello,
-                  let hello = ROBVideoAuthHello(data),
-                  let peer = try? ROBControlPairing.activePeerAuthenticationRecord(
-                    for: hello.controllerID
-                  ),
-                  peer.role == .operatorController else {
-                rejectAuthentication()
+                  let hello = ROBVideoAuthHello(data) else {
+                rejectAuthentication(error: .invalidMessage, code: .invalidMessage)
                 return
             }
+            let peer: ROBControlPeerAuthenticationRecord
+            do {
+                guard let resolved = try ROBControlPairing.activePeerAuthenticationRecord(
+                    for: hello.controllerID
+                ) else {
+                    rejectAuthentication(error: .authorizationFailed, code: .notAuthorized)
+                    return
+                }
+                peer = resolved
+            } catch {
+                stop(error: error)
+                return
+            }
+            guard peer.role == .operatorController else {
+                rejectAuthentication(error: .authorizationFailed, code: .notAuthorized)
+                return
+            }
+            // Bind the challenge to the identity that opened this QUIC stream.
+            // The proof must repeat this ID as well as authenticate the transcript.
+            authenticatingControllerID = hello.controllerID
             sendAuthenticationChallenge()
             return
         }
         guard type == .authenticationProof,
               case .awaitingProof(let challenge) = authenticationState,
               let proof = ROBVideoAuthProof(data) else {
-            rejectAuthentication()
+            rejectAuthentication(error: .invalidMessage, code: .invalidMessage)
             return
         }
         authenticationState = .sendingAccepted
-        authenticatingControllerID = proof.controllerID
+        guard proof.controllerID == authenticatingControllerID else {
+            rejectAuthentication(error: .authenticationFailed, code: .proofRejected)
+            return
+        }
 
         let peer: ROBControlPeerAuthenticationRecord
         do {
             guard let resolved = try ROBControlPairing.activePeerAuthenticationRecord(
                 for: proof.controllerID
             ) else {
-                rejectAuthentication()
+                rejectAuthentication(error: .authorizationFailed, code: .notAuthorized)
                 return
             }
             peer = resolved
@@ -1439,20 +1471,23 @@ private final class ROBVideoServerConnection {
             stop(error: error)
             return
         }
-        guard peer.role == .operatorController,
-              ROBVideoAuthenticator.validate(
+        guard peer.role == .operatorController else {
+            rejectAuthentication(error: .authorizationFailed, code: .notAuthorized)
+            return
+        }
+        guard ROBVideoAuthenticator.validate(
                 proof,
                 challenge: challenge,
                 credential: peer.credential
               ) else {
-            rejectAuthentication()
+            rejectAuthentication(error: .authenticationFailed, code: .proofRejected)
             return
         }
         guard server?.reserveAuthenticatedConnection(
                 controllerID: proof.controllerID,
                 candidate: self
               ) == true else {
-            rejectAuthentication()
+            rejectAuthentication(error: .capacityReached, code: .capacityReached)
             return
         }
         hasAuthenticationReservation = true
@@ -1502,9 +1537,12 @@ private final class ROBVideoServerConnection {
         }
     }
 
-    private func rejectAuthentication() {
-        sendFrame(type: .authenticationRejected, data: Data([1])) { [weak self] _ in
-            self?.stop(error: ROBVideoTransportError.authenticationFailed)
+    private func rejectAuthentication(
+        error: ROBVideoTransportError,
+        code: ROBVideoAuthRejectionCode
+    ) {
+        sendFrame(type: .authenticationRejected, data: Data([code.rawValue])) { [weak self] _ in
+            self?.stop(error: error)
         }
     }
 

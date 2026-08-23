@@ -167,6 +167,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 @property (readwrite, retain) ROBAutonomyCoordinator *autonomyCoordinator;
 @property (readwrite, assign) NSUInteger saberChoreographyGeneration;
 - (void)speakConfiguredAcknowledgementIfNotQueued;
+- (void)publishControlAuthorityState;
 - (void)ensureMainCameraRuntime;
 - (void)synchronizeDevelopmentCameraDiagnostics;
 - (void)mainCameraDiagnosticsWindowWillClose:(NSNotification *)notification;
@@ -1781,6 +1782,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     }
     [self.serialBox stopBaseMotionAndDropHeartbeat];
     [self.serialBox switchToMasterControllerID:@"Brain"];
+    [self publishControlAuthorityState];
     NSLog(@"Priority software stop applied: %@. Amber hold is handled by the explicit arm stop lane.", reason);
 }
 
@@ -1913,6 +1915,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     [self.serialBox controllerId:@"Autonomous" controllerModelData:model];
     if (![self.serialBox.masterControllerID isEqualToString:@"Autonomous"]) {
         [self.serialBox switchToMasterControllerID:@"Autonomous"];
+        [self publishControlAuthorityState];
     }
 }
 
@@ -1921,6 +1924,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     [self.serialBox stopBaseMotionAndDropHeartbeat];
     if ([self.serialBox.masterControllerID isEqualToString:@"Autonomous"]) {
         [self.serialBox switchToMasterControllerID:@"Brain"];
+        [self publishControlAuthorityState];
     }
 }
 
@@ -2399,6 +2403,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         // approved. The Arduino tread heartbeat remains an independent deadman.
         [self.serialBox stopBaseMotionAndDropHeartbeat];
         [self.serialBox switchToMasterControllerID:@"Brain"];
+        [self publishControlAuthorityState];
         if (self.autonomyCoordinator.active) {
             [self.autonomyCoordinator stopWithReason:[NSString stringWithFormat:@"Operator device %@ was revoked", device.deviceName]];
         }
@@ -2478,6 +2483,29 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     dispatch_async(dispatch_get_main_queue(), ^{
         [self.autonomyCoordinator updateLidarPayload:scanPayload];
     });
+}
+
+- (void)publishControlAuthorityState
+{
+    NSString *activeControllerID = self.serialBox.masterControllerID;
+    if (activeControllerID.length == 0) {
+        activeControllerID = @"Brain";
+    }
+    NSDictionary *messageDictionary = @{
+        @"message": @"ROBControlAuthorityStateV1",
+        @"sender": @"Cerebro",
+        @"control.authority.version": @"1",
+        @"control.authority.controller_id": activeControllerID,
+    };
+    NSError *error = nil;
+    NSData *data = [NSKeyedArchiver archivedDataWithRootObject:messageDictionary
+                                         requiringSecureCoding:YES
+                                                         error:&error];
+    if (data == nil || error != nil) {
+        NSLog(@"Unable to publish ROB control authority state: %@", error.localizedDescription);
+        return;
+    }
+    [self.autoNetServer sendMessage:data];
 }
 
 - (void) didReceiveData:(NSData *)data {
@@ -2753,6 +2781,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             [self.autonomyCoordinator stopWithReason:@"Manual controller requested motion authority"];
         }
         [self.serialBox switchToMasterControllerID:sender];
+        [self publishControlAuthorityState];
         return;
     }
     if ([msg isEqualToString:@"ReleaseMasterController"])
@@ -2760,6 +2789,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         if ([self.serialBox.masterControllerID isEqualToString:sender]) {
             [self.serialBox stopBaseMotionAndDropHeartbeat];
             [self.serialBox switchToMasterControllerID:@"Brain"];
+            [self publishControlAuthorityState];
         }
         return;
     }
