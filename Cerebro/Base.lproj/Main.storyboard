@@ -38,7 +38,7 @@
                         <rect key="frame" x="0.0" y="0.0" width="1200" height="719"/>
                         <autoresizingMask key="autoresizingMask"/>
                         <subviews>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="2qg-8N-K1f">
+                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="2qg-8N-K1f" customClass="ROBMomentaryTreadButton">
                                 <rect key="frame" x="493" y="475" width="260" height="180"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES" flexibleMaxY="YES"/>
                                 <buttonCell key="cell" type="smallSquare" title="Forward" bezelStyle="smallSquare" alignment="center" continuous="YES" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="LUZ-1O-1aW">
@@ -50,7 +50,7 @@
                                     <action selector="forward:" target="aih-B6-FUW" id="3qD-u4-7iJ"/>
                                 </connections>
                             </button>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Mna-cO-FNS">
+                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Mna-cO-FNS" customClass="ROBMomentaryTreadButton">
                                 <rect key="frame" x="493" y="228" width="260" height="180"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES" flexibleMaxY="YES"/>
                                 <buttonCell key="cell" type="smallSquare" title="Backward" bezelStyle="smallSquare" alignment="center" continuous="YES" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="a0l-Ec-5rl">
@@ -62,7 +62,7 @@
                                     <action selector="backward:" target="aih-B6-FUW" id="B2I-Vq-S3u"/>
                                 </connections>
                             </button>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="VL9-5k-YtA">
+                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="VL9-5k-YtA" customClass="ROBMomentaryTreadButton">
                                 <rect key="frame" x="234" y="351" width="260" height="180"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES" flexibleMaxY="YES"/>
                                 <buttonCell key="cell" type="smallSquare" title="Left" bezelStyle="smallSquare" alignment="center" continuous="YES" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="3SU-qc-P76">
@@ -86,7 +86,7 @@
                                     <action selector="flipperForwardPush:" target="aih-B6-FUW" id="AEu-Ps-HKO"/>
                                 </connections>
                             </button>
-                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="xT8-H2-5BM">
+                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="xT8-H2-5BM" customClass="ROBMomentaryTreadButton">
                                 <rect key="frame" x="752" y="351" width="260" height="180"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES" flexibleMaxY="YES"/>
                                 <buttonCell key="cell" type="smallSquare" title="Right" bezelStyle="smallSquare" alignment="center" continuous="YES" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="yo3-nj-0Za">
