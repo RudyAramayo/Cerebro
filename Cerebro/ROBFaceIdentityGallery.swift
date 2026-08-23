@@ -27,8 +27,31 @@ public struct ROBFaceIdentitySample: Codable, Identifiable, Sendable {
     public let quality: Float
     public let yawRadians: Double?
     public let rollRadians: Double?
-    public let featurePrintArchive: Data
+    /// AdaFace's normalized 512-dimensional vector. Optional so galleries
+    /// created by the earlier Vision feature-print backend still decode.
+    public let embedding: [Float]?
+    public let featurePrintArchive: Data?
     public let encryptedImageFileName: String
+
+    public init(
+        id: UUID,
+        capturedAt: Date,
+        quality: Float,
+        yawRadians: Double?,
+        rollRadians: Double?,
+        embedding: [Float]? = nil,
+        featurePrintArchive: Data? = nil,
+        encryptedImageFileName: String
+    ) {
+        self.id = id
+        self.capturedAt = capturedAt
+        self.quality = quality
+        self.yawRadians = yawRadians
+        self.rollRadians = rollRadians
+        self.embedding = embedding
+        self.featurePrintArchive = featurePrintArchive
+        self.encryptedImageFileName = encryptedImageFileName
+    }
 }
 
 public struct ROBFaceIdentityProfile: Codable, Identifiable, Sendable {

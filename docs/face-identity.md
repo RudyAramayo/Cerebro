@@ -23,23 +23,51 @@ confirmation requirements.
 
 ## Recognition
 
-The current backend detects faces and landmarks with Vision, filters captures
-with Vision face quality, crops the face, and generates a versioned Vision
-feature print. It performs open-set nearest-sample matching across all retained
-examples. A match must pass an absolute distance threshold, beat the runner-up
-by a configurable margin, and remain the best candidate for three analyzed
-frames. Otherwise the person remains unknown.
+The backend detects faces and landmarks with Vision, filters captures with
+Vision face quality, and runs normalized square crops through a locally installed AdaFace
+IR-18 Core ML encoder. Choose **AdaFace R18 — WebFace4M** or **AdaFace R18 —
+VGGFace2** from the Face model menu. The selection persists across launches.
+Profiles are tagged with their encoder; a profile made with one model is never
+compared against vectors from the other model. Switch back to its model to use
+that profile, or delete it and enroll again with the preferred model.
 
-`ROBFaceIdentity.maximumDistance` and `ROBFaceIdentity.minimumMargin` are
-developer calibration defaults, initially 8.5 and 1.0. They must be calibrated
+WebFace4M is the recommended default when both are installed because its
+training set is broader. VGGFace2 is useful as a second option for evaluating
+which model performs better on ROB's camera and environment.
+
+`ROBFaceIdentity.maximumCosineDistance` and
+`ROBFaceIdentity.minimumCosineMargin` are developer calibration defaults,
+initially 0.35 and 0.06. They must be calibrated
 with separate enrollment and validation footage from ROB's actual camera before
 recognition is treated as reliable. Names enter scene context for only 15
 seconds and camera-derived identity remains untrusted sensor data.
 
-The gallery records its backend identifier. This provides the migration seam
-for a properly licensed MobileFaceNet/ArcFace or AdaFace Core ML encoder:
-retained, consented crops can be re-embedded into a new version without changing
-identity IDs or silently collecting new imagery.
+The gallery records its backend identifier and stores normalized 512-dimensional
+embeddings alongside retained, consented crops.
+
+## Installing AdaFace models
+
+The checkpoint files and converted model packages are intentionally kept out of
+Git. Place the official checkpoints in Cerebro's model directory using these
+exact names:
+
+```text
+~/Library/Application Support/Cerebro/Models/adaface_ir18_vgg2.ckpt
+~/Library/Application Support/Cerebro/Models/adaface_ir18_webface4m.ckpt
+```
+
+Then run the reproducible converter from the repository root:
+
+```sh
+python3 Scripts/install_adaface_models.py \
+  --source-root "$HOME/Library/Application Support/Cerebro/ModelTools/AdaFace" \
+  --checkpoint-dir "$HOME/Library/Application Support/Cerebro/Models" \
+  --output-dir "$HOME/Library/Application Support/Cerebro/Models"
+```
+
+The installer converts each IR-18 network to FP16 Core ML, validates its output
+against PyTorch, compiles it for runtime use, and writes SHA-256 provenance to
+`adaface-models.json`.
 
 ## Storage and deletion
 

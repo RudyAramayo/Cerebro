@@ -32,17 +32,18 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
     public let enrollmentTargetSamples: Int
     public let status: String
     public let lastRecognition: ROBFaceRecognitionResult?
+    public let selectedModel: ROBFaceEmbeddingModelOption
+    public let availableModels: [ROBFaceEmbeddingModelOption]
 }
 
-/// This first on-device backend uses Apple's feature-print representation over
-/// aligned face crops. The archive boundary is intentionally backend-versioned
-/// so a licensed ArcFace/AdaFace Core ML encoder can replace it and retained,
-/// consented images can be re-embedded without changing gallery ownership.
+/// Face crops are embedded locally by the selected AdaFace Core ML encoder.
+/// Profiles remain backend-versioned so vectors from different models are
+/// never compared as though they occupied the same embedding space.
 @objcMembers public final class ROBFaceRecognitionService: NSObject {
     public static let shared = ROBFaceRecognitionService()
 
-    public static let modelIdentifier = "vision-face-crop-featureprint-v1"
     public static let enrollmentTargetSamples = 24
+    private static let modelDefaultsKey = "ROBFaceIdentity.embeddingModel"
 
     private let gallery: ROBFaceIdentityGallery
     private let analysisQueue = DispatchQueue(
@@ -60,6 +61,8 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
     private var lastRecognitionValue: ROBFaceRecognitionResult?
     private var pendingCandidateID: UUID?
     private var pendingCandidateFrames = 0
+    private var encoders: [ROBFaceEmbeddingModelOption: ROBFaceCoreMLEncoder] = [:]
+    private var selectedModelValue: ROBFaceEmbeddingModelOption
 
     public var enabled: Bool {
         get {
@@ -83,8 +86,35 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
 
     init(gallery: ROBFaceIdentityGallery) {
         self.gallery = gallery
+        let saved = UserDefaults.standard.string(forKey: Self.modelDefaultsKey)
+            .flatMap(ROBFaceEmbeddingModelOption.init(rawValue:))
+        selectedModelValue = saved
+            ?? ROBFaceEmbeddingModelOption.allCases.first(where: \.isInstalled)
+            ?? .webFace4M
         super.init()
         analysisQueue.async { self.reloadProfiles() }
+    }
+
+    @nonobjc public func selectModel(_ model: ROBFaceEmbeddingModelOption, completion: @escaping (Error?) -> Void) {
+        analysisQueue.async {
+            do {
+                guard self.activeEnrollmentID == nil else {
+                    throw ROBFaceIdentityGalleryError.invalidInput("Finish or cancel enrollment before changing models.")
+                }
+                guard model.isInstalled else {
+                    throw ROBFaceIdentityGalleryError.storage("\(model.displayName) has not finished installing.")
+                }
+                _ = try self.encoder(for: model)
+                self.selectedModelValue = model
+                UserDefaults.standard.set(model.rawValue, forKey: Self.modelDefaultsKey)
+                self.resetTemporalCandidate()
+                self.statusText = "Using \(model.displayName). Enrollments made with another model remain stored but inactive."
+                self.publishState()
+                DispatchQueue.main.async { completion(nil) }
+            } catch {
+                DispatchQueue.main.async { completion(error) }
+            }
+        }
     }
 
     public func snapshot(completion: @escaping (ROBFaceIdentityServiceSnapshot) -> Void) {
@@ -135,7 +165,7 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
                     pronunciation: pronunciation,
                     role: role,
                     trustedEnrollmentReference: trust.isEmpty ? "local-consent" : trust,
-                    modelIdentifier: Self.modelIdentifier
+                    modelIdentifier: self.selectedModelValue.rawValue
                 )
                 self.cachedProfiles.append(profile)
                 self.activeEnrollmentID = profile.id
@@ -277,15 +307,11 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
             updateStatusWhileEnrolling("Could not align this face sample; please look toward ROB.")
             return
         }
-        let featurePrint = try featurePrint(for: crop)
-        guard sampleIsDiverse(featurePrint, profileID: profileID) else {
+        let embedding = try encoder(for: selectedModelValue).embedding(for: crop)
+        guard sampleIsDiverse(embedding, profileID: profileID) else {
             updateStatusWhileEnrolling("Good—now turn your head slightly for a different view.")
             return
         }
-        let archive = try NSKeyedArchiver.archivedData(
-            withRootObject: featurePrint,
-            requiringSecureCoding: true
-        )
         guard let jpeg = jpegData(crop) else {
             throw ROBFaceIdentityGalleryError.storage("The accepted face crop could not be encoded.")
         }
@@ -296,7 +322,7 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
             quality: quality,
             yawRadians: face.yaw?.doubleValue,
             rollRadians: face.roll?.doubleValue,
-            featurePrintArchive: archive,
+            embedding: embedding,
             encryptedImageFileName: "\(sampleID.uuidString.lowercased()).robface"
         )
         let updated = try gallery.appendSample(sample, encryptedImagePlaintext: jpeg, to: profileID)
@@ -312,19 +338,24 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
     }
 
     private func processRecognitionFaces(_ faces: [VNFaceObservation], source: CIImage) {
-        let candidates = cachedProfiles.filter(\.enrollmentIsComplete)
+        let candidates = cachedProfiles.filter {
+            $0.enrollmentIsComplete && $0.modelIdentifier == selectedModelValue.rawValue
+        }
         guard !candidates.isEmpty else { return }
+        guard let encoder = try? encoder(for: selectedModelValue) else {
+            statusText = "\(selectedModelValue.displayName) is not installed."
+            publishState()
+            return
+        }
         var best: (profile: ROBFaceIdentityProfile, distance: Float, second: Float)?
         for face in faces where Self.area(face.boundingBox) >= 0.025 {
             guard (face.faceCaptureQuality ?? 0) >= 0.35,
                   let crop = faceCrop(face.boundingBox, source: source),
-                  let probe = try? featurePrint(for: crop) else { continue }
+                  let probe = try? encoder.embedding(for: crop) else { continue }
             let ranked = candidates.compactMap { profile -> (ROBFaceIdentityProfile, Float)? in
                 let distances = profile.samples.compactMap { sample -> Float? in
-                    guard let enrolled = Self.unarchiveFeaturePrint(sample.featurePrintArchive) else { return nil }
-                    var distance: Float = 0
-                    guard (try? probe.computeDistance(&distance, to: enrolled)) != nil else { return nil }
-                    return distance
+                    guard let enrolled = sample.embedding else { return nil }
+                    return Self.cosineDistance(probe, enrolled)
                 }
                 guard let nearest = distances.min() else { return nil }
                 return (profile, nearest)
@@ -341,10 +372,9 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
             return
         }
 
-        // Feature-print distance is device/API dependent, so both controls are
-        // configurable and deliberately conservative. Unknown remains a valid result.
-        let threshold = configuredFloat("ROBFaceIdentity.maximumDistance", fallback: 8.5, range: 0.1...100)
-        let margin = configuredFloat("ROBFaceIdentity.minimumMargin", fallback: 1.0, range: 0...50)
+        // Conservative starting points; calibrate against ROB's actual camera.
+        let threshold = configuredFloat("ROBFaceIdentity.maximumCosineDistance", fallback: 0.35, range: 0.01...1)
+        let margin = configuredFloat("ROBFaceIdentity.minimumCosineMargin", fallback: 0.06, range: 0...0.5)
         guard best.distance <= threshold, best.second - best.distance >= margin else {
             resetTemporalCandidate()
             statusText = "A face is visible, but it is not confidently recognized."
@@ -388,40 +418,48 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
         }
     }
 
-    private func sampleIsDiverse(_ probe: VNFeaturePrintObservation, profileID: UUID) -> Bool {
+    private func sampleIsDiverse(_ probe: [Float], profileID: UUID) -> Bool {
         guard let profile = cachedProfiles.first(where: { $0.id == profileID }) else { return false }
         for sample in profile.samples.suffix(60) {
-            guard let enrolled = Self.unarchiveFeaturePrint(sample.featurePrintArchive) else { continue }
-            var distance: Float = 0
-            if (try? probe.computeDistance(&distance, to: enrolled)) != nil, distance < 0.45 {
+            guard let enrolled = sample.embedding else { continue }
+            if Self.cosineDistance(probe, enrolled) < 0.04 {
                 return false
             }
         }
         return true
     }
 
-    private func featurePrint(for image: CGImage) throws -> VNFeaturePrintObservation {
-        let request = VNGenerateImageFeaturePrintRequest()
-        try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
-        guard let result = request.results?.first else {
-            throw ROBFaceIdentityGalleryError.storage("Vision returned no face feature representation.")
-        }
-        return result
+    private func encoder(for option: ROBFaceEmbeddingModelOption) throws -> ROBFaceCoreMLEncoder {
+        if let cached = encoders[option] { return cached }
+        let encoder = try ROBFaceCoreMLEncoder(option: option)
+        encoders[option] = encoder
+        return encoder
     }
 
-    private static func unarchiveFeaturePrint(_ data: Data) -> VNFeaturePrintObservation? {
-        try? NSKeyedUnarchiver.unarchivedObject(ofClass: VNFeaturePrintObservation.self, from: data)
+    private static func cosineDistance(_ lhs: [Float], _ rhs: [Float]) -> Float {
+        guard lhs.count == rhs.count, !lhs.isEmpty else { return .greatestFiniteMagnitude }
+        return 1 - zip(lhs, rhs).reduce(Float.zero) { $0 + $1.0 * $1.1 }
     }
 
     private func faceCrop(_ normalized: CGRect, source: CIImage) -> CGImage? {
         let extent = source.extent
-        var rectangle = CGRect(
+        let faceRectangle = CGRect(
             x: extent.minX + normalized.minX * extent.width,
             y: extent.minY + normalized.minY * extent.height,
             width: normalized.width * extent.width,
             height: normalized.height * extent.height
         )
-        rectangle = rectangle.insetBy(dx: -rectangle.width * 0.18, dy: -rectangle.height * 0.18)
+        let side = min(
+            max(faceRectangle.width, faceRectangle.height) * 1.36,
+            min(extent.width, extent.height)
+        )
+        var origin = CGPoint(
+            x: faceRectangle.midX - side / 2,
+            y: faceRectangle.midY - side / 2
+        )
+        origin.x = min(max(origin.x, extent.minX), extent.maxX - side)
+        origin.y = min(max(origin.y, extent.minY), extent.maxY - side)
+        let rectangle = CGRect(origin: origin, size: CGSize(width: side, height: side))
             .intersection(extent)
             .integral
         guard rectangle.width >= 80, rectangle.height >= 80 else { return nil }
@@ -497,7 +535,9 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
             enrollmentAcceptedSamples: accepted,
             enrollmentTargetSamples: Self.enrollmentTargetSamples,
             status: statusText,
-            lastRecognition: lastRecognitionValue
+            lastRecognition: lastRecognitionValue,
+            selectedModel: selectedModelValue,
+            availableModels: ROBFaceEmbeddingModelOption.allCases
         )
     }
 

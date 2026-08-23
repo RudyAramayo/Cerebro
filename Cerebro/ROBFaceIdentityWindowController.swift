@@ -14,6 +14,7 @@ import Foundation
 
     private let service = ROBFaceRecognitionService.shared
     private let enabledCheckbox = NSButton(checkboxWithTitle: "Enable face recognition", target: nil, action: nil)
+    private let modelPopup = NSPopUpButton()
     private let nameField = NSTextField()
     private let pronunciationField = NSTextField()
     private let rolePopup = NSPopUpButton()
@@ -58,19 +59,24 @@ import Foundation
 
     private func buildWindow() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 760, height: 680),
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 680),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "People & Face Enrollment"
-        window.minSize = NSSize(width: 680, height: 580)
+        window.minSize = NSSize(width: 820, height: 580)
         window.isReleasedWhenClosed = false
         self.window = window
 
         enabledCheckbox.target = self
         enabledCheckbox.action = #selector(toggleEnabled(_:))
         enabledCheckbox.toolTip = "Recognition runs headlessly from the main camera when enabled."
+
+        modelPopup.addItems(withTitles: ROBFaceEmbeddingModelOption.allCases.map(\.menuTitle))
+        modelPopup.target = self
+        modelPopup.action = #selector(modelChanged(_:))
+        modelPopup.toolTip = "Choose the AdaFace embedding model used for new enrollment and recognition."
 
         nameField.placeholderString = "Name ROB should remember"
         pronunciationField.placeholderString = "Pronunciation (optional)"
@@ -104,6 +110,7 @@ import Foundation
         for (identifier, title, width) in [
             ("name", "Person", CGFloat(230)),
             ("role", "Role", CGFloat(130)),
+            ("model", "Model", CGFloat(170)),
             ("samples", "Samples", CGFloat(80)),
             ("confirmed", "Last confirmed", CGFloat(200))
         ] {
@@ -126,6 +133,7 @@ import Foundation
         scroll.documentView = table
 
         let enrollmentGrid = NSGridView(views: [
+            [NSTextField(labelWithString: "Face model"), modelPopup],
             [NSTextField(labelWithString: "Name"), nameField],
             [NSTextField(labelWithString: "Pronunciation"), pronunciationField],
             [NSTextField(labelWithString: "Role"), rolePopup],
@@ -190,6 +198,9 @@ import Foundation
         enabledCheckbox.state = snapshot.enabled ? .on : .off
         progress.doubleValue = Double(snapshot.enrollmentAcceptedSamples)
         statusLabel.stringValue = snapshot.status
+        if let index = snapshot.availableModels.firstIndex(of: snapshot.selectedModel) {
+            modelPopup.selectItem(at: index)
+        }
         table.reloadData()
         refreshControls()
     }
@@ -202,6 +213,7 @@ import Foundation
         nameField.isEnabled = !isEnrolling
         pronunciationField.isEnabled = !isEnrolling
         rolePopup.isEnabled = !isEnrolling
+        modelPopup.isEnabled = !isEnrolling
         trustField.isEnabled = !isEnrolling && selectedRole == .administrator
         consentCheckbox.isEnabled = !isEnrolling
     }
@@ -210,6 +222,18 @@ import Foundation
 
     @objc private func toggleEnabled(_ sender: NSButton) {
         service.enabled = sender.state == .on
+    }
+
+    @objc private func modelChanged(_ sender: NSPopUpButton) {
+        let index = sender.indexOfSelectedItem
+        guard ROBFaceEmbeddingModelOption.allCases.indices.contains(index) else { return }
+        let option = ROBFaceEmbeddingModelOption.allCases[index]
+        service.selectModel(option) { [weak self] error in
+            if let error {
+                self?.showError(error.localizedDescription)
+                self?.refresh()
+            }
+        }
     }
 
     @objc private func roleChanged(_ sender: NSPopUpButton) {
@@ -321,6 +345,10 @@ import Foundation
         switch tableColumn.identifier.rawValue {
         case "name": value = profile.displayName
         case "role": value = profile.role.displayName
+        case "model":
+            value = ROBFaceEmbeddingModelOption(rawValue: profile.modelIdentifier)?.displayName
+                .replacingOccurrences(of: "AdaFace R18 — ", with: "")
+                ?? "Legacy"
         case "samples": value = "\(profile.samples.count)"
         case "confirmed":
             value = profile.lastConfirmedAt.map { Self.dateFormatter.string(from: $0) } ?? "Never"

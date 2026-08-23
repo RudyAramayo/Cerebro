@@ -15,6 +15,7 @@ def text(name: str) -> str:
 gallery = text("ROBFaceIdentityGallery.swift")
 service = text("ROBFaceRecognitionService.swift")
 window = text("ROBFaceIdentityWindowController.swift")
+encoder = text("ROBFaceEmbeddingModel.swift")
 camera = text("CameraViewController.swift")
 scene = text("ROBSceneSnapshot.swift")
 app = text("AppDelegate.m")
@@ -29,7 +30,11 @@ assert "administratorAlreadyExists" in gallery
 assert "VNDetectFaceRectanglesRequest" in service
 assert "VNDetectFaceCaptureQualityRequest" in service
 assert "VNDetectFaceLandmarksRequest" in service
-assert "VNGenerateImageFeaturePrintRequest" in service
+assert "cosineDistance" in service and "sample.embedding" in service
+assert "ROBFaceIdentity.embeddingModel" in service
+assert "AdaFace-R18-WebFace4M.mlmodelc" in encoder
+assert "AdaFace-R18-VGGFace2.mlmodelc" in encoder
+assert "MLModel(contentsOf:" in encoder
 assert "pendingCandidateFrames >= 3" in service
 assert "best.second - best.distance >= margin" in service
 assert "consentConfirmed" in service
@@ -44,11 +49,13 @@ assert "People & Face Enrollment" in app
 assert "explicitly consents" in window
 assert "will not authorize robot motion" in window
 assert "Delete Selected Person" in window
+assert "Face model" in window and "modelChanged" in window
 
 for source in (
     "ROBFaceIdentityGallery.swift",
     "ROBFaceRecognitionService.swift",
     "ROBFaceIdentityWindowController.swift",
+    "ROBFaceEmbeddingModel.swift",
 ):
     assert f"{source} in Sources" in project
 
