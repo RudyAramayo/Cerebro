@@ -197,18 +197,32 @@ private struct ROBVideoAuthChallenge {
 }
 
 private struct ROBVideoAuthHello {
-    static let encodedSize = 17
+    static let legacyEncodedSize = 17
+    static let sessionBoundEncodedSize = 33
 
     let controllerID: UUID
+    let controlSessionID: UUID?
 
     init?(_ data: Data) {
         let bytes = Data(data)
-        guard bytes.count == Self.encodedSize,
+        let sizeIsSupported = bytes.count == Self.legacyEncodedSize
+            || bytes.count == Self.sessionBoundEncodedSize
+        guard sizeIsSupported,
               bytes[0] == ROBVideoTransport.protocolVersion,
               let controllerID = UUID(robVideoBytes: bytes.subdata(in: 1..<17)) else {
             return nil
         }
         self.controllerID = controllerID
+        if bytes.count == Self.sessionBoundEncodedSize {
+            guard let controlSessionID = UUID(
+                robVideoBytes: bytes.subdata(in: 17..<33)
+            ) else {
+                return nil
+            }
+            self.controlSessionID = controlSessionID
+        } else {
+            controlSessionID = nil
+        }
     }
 }
 
@@ -244,6 +258,23 @@ private struct ROBVideoAuthAccepted {
         data.append(channelID)
         data.append(controllerID.robVideoBytes)
         data.append(mac)
+        return data
+    }
+}
+
+/// A video connection may inherit authentication from the exact live control
+/// session that created it. TLS protects the random session UUID in transit,
+/// and the server rechecks the controller/session pair before accepting.
+private struct ROBVideoSessionAuthAccepted {
+    let channelID: Data
+    let controllerID: UUID
+    let controlSessionID: UUID
+
+    var encoded: Data {
+        var data = Data([ROBVideoTransport.protocolVersion])
+        data.append(channelID)
+        data.append(controllerID.robVideoBytes)
+        data.append(controlSessionID.robVideoBytes)
         return data
     }
 }
@@ -1268,6 +1299,7 @@ private final class ROBVideoServerConnection {
     private var streamLivenessCheck: DispatchWorkItem?
     private var mediaSendTimeout: DispatchWorkItem?
     private var authenticatingControllerID: UUID?
+    private var authenticatingControlSessionID: UUID?
     private var encoder: ROBCameraH264Encoder?
     private var subscriptionIsReady = false
     private var streamGeneration: UInt64 = 0
@@ -1440,9 +1472,19 @@ private final class ROBVideoServerConnection {
                 rejectAuthentication(error: .authorizationFailed, code: .notAuthorized)
                 return
             }
+            if let controlSessionID = hello.controlSessionID,
+               !ROBControlLiveSessionRegistry.isActiveOperator(
+                    controllerID: hello.controllerID,
+                    sessionID: controlSessionID
+               ) {
+                rejectAuthentication(error: .authorizationFailed, code: .notAuthorized)
+                return
+            }
             // Bind the challenge to the identity that opened this QUIC stream.
-            // The proof must repeat this ID as well as authenticate the transcript.
+            // The proof repeats this ID; authorization then comes from either
+            // the exact live control session or the legacy pairing-secret MAC.
             authenticatingControllerID = hello.controllerID
+            authenticatingControlSessionID = hello.controlSessionID
             sendAuthenticationChallenge()
             return
         }
@@ -1475,13 +1517,26 @@ private final class ROBVideoServerConnection {
             rejectAuthentication(error: .authorizationFailed, code: .notAuthorized)
             return
         }
-        guard ROBVideoAuthenticator.validate(
-                proof,
-                challenge: challenge,
-                credential: peer.credential
-              ) else {
+        let sessionAuthenticationIsValid = authenticatingControlSessionID.map {
+            ROBControlLiveSessionRegistry.isActiveOperator(
+                controllerID: proof.controllerID,
+                sessionID: $0
+            )
+        } ?? false
+        let pairingProofIsValid = ROBVideoAuthenticator.validate(
+            proof,
+            challenge: challenge,
+            credential: peer.credential
+        )
+        guard sessionAuthenticationIsValid || pairingProofIsValid else {
             rejectAuthentication(error: .authenticationFailed, code: .proofRejected)
             return
+        }
+        if sessionAuthenticationIsValid && !pairingProofIsValid {
+            print(
+                "ROBVideo connection \(id) authenticated through its live control session; "
+                    + "the legacy pairing proof did not validate."
+            )
         }
         guard server?.reserveAuthenticatedConnection(
                 controllerID: proof.controllerID,
@@ -1492,12 +1547,22 @@ private final class ROBVideoServerConnection {
         }
         hasAuthenticationReservation = true
 
-        let accepted = ROBVideoAuthenticator.accepted(
-            for: proof,
-            challenge: challenge,
-            credential: peer.credential
-        )
-        sendFrame(type: .authenticationAccepted, data: accepted.encoded) { [weak self] error in
+        let acceptedData: Data
+        if sessionAuthenticationIsValid,
+           let controlSessionID = authenticatingControlSessionID {
+            acceptedData = ROBVideoSessionAuthAccepted(
+                channelID: challenge.channelID,
+                controllerID: proof.controllerID,
+                controlSessionID: controlSessionID
+            ).encoded
+        } else {
+            acceptedData = ROBVideoAuthenticator.accepted(
+                for: proof,
+                challenge: challenge,
+                credential: peer.credential
+            ).encoded
+        }
+        sendFrame(type: .authenticationAccepted, data: acceptedData) { [weak self] error in
             guard let self, !self.stopped else { return }
             if let error {
                 self.stop(error: error)
@@ -1508,6 +1573,7 @@ private final class ROBVideoServerConnection {
             self.authenticationState = .authenticated
             self.authenticatedControllerID = proof.controllerID
             self.authenticatingControllerID = nil
+            self.authenticatingControlSessionID = nil
             self.sendCapabilities()
         }
     }
