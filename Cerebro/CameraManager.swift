@@ -140,13 +140,29 @@ protocol CameraManagerProtocol: AnyObject {
     /// Temporarily changes the hardware capture size for explicit footage
     /// recording. Nil restores the autonomy/default capture configuration.
     func setCaptureResolutionOverride(_ resolution: String?)
-    func bindCamera() throws
-    func bindCameraRebootSession() throws
+    /// Cameras eligible for the RGB-only AVFoundation fallback. DepthAI
+    /// devices stay on their dedicated RGB-D path unless legacy UVC mode is
+    /// explicitly enabled.
+    func availableAVFoundationCameras() -> [CameraDeviceOption]
+    var selectedAVFoundationCameraID: String? { get }
+    func selectAVFoundationCamera(uniqueID: String?)
 }
 
 enum CameraRole: String {
     case face
     case belly
+
+    var avFoundationCameraDefaultsKey: String {
+        switch self {
+        case .face: return "ROBAVFoundationCameraUniqueIDFace"
+        case .belly: return "ROBAVFoundationCameraUniqueIDBelly"
+        }
+    }
+}
+
+struct CameraDeviceOption: Equatable, Sendable {
+    let uniqueID: String
+    let localizedName: String
 }
 
 final class CameraManager: NSObject, CameraManagerProtocol {
@@ -204,7 +220,7 @@ final class CameraManager: NSObject, CameraManagerProtocol {
         self.deliveryQueue = DispatchQueue(label: "com.orbitusrobotics.Cerebro.camera.delivery.\(queueSuffix)")
         self.previewLayer = previewLayer
         self.deviceDiscoverySession = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.continuityCamera, .external],
+            deviceTypes: [.builtInWideAngleCamera, .continuityCamera, .external],
             mediaType: .video,
             position: .unspecified
         )
@@ -320,38 +336,31 @@ final class CameraManager: NSObject, CameraManagerProtocol {
         }
     }
 
-    func bindCamera() throws {
-        sessionQueue.async { [weak self] in
-            guard let self else { return }
-            if self.usesLegacyLuxonisUVCMode {
-                self.expectedDepthRunGeneration = nil
-                self.depthClient?.stop()
-            } else {
-                self.expectedDepthRunGeneration = self.depthClient?.start()
-                self.depthClient?.reconnectNow()
+    func availableAVFoundationCameras() -> [CameraDeviceOption] {
+        eligibleAVFoundationDevices
+            .map { CameraDeviceOption(uniqueID: $0.uniqueID, localizedName: $0.localizedName) }
+            .sorted {
+                $0.localizedName.localizedCaseInsensitiveCompare($1.localizedName) == .orderedAscending
             }
-            self.configureAVFoundationFallbackOnSessionQueue()
-            self.startFallbackIfAvailable()
-        }
     }
 
-    func bindCameraRebootSession() throws {
+    var selectedAVFoundationCameraID: String? {
+        let value = UserDefaults.standard.string(forKey: role.avFoundationCameraDefaultsKey)
+        return value?.isEmpty == false ? value : nil
+    }
+
+    func selectAVFoundationCamera(uniqueID: String?) {
+        let normalizedID = uniqueID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let normalizedID, !normalizedID.isEmpty {
+            UserDefaults.standard.set(normalizedID, forKey: role.avFoundationCameraDefaultsKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: role.avFoundationCameraDefaultsKey)
+        }
+
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            if self.usesLegacyLuxonisUVCMode {
-                self.expectedDepthRunGeneration = nil
-                self.depthClient?.stop()
-            } else {
-                self.expectedDepthRunGeneration = self.depthClient?.start()
-                self.depthClient?.reconnectNow()
-            }
-            if self.activeSource == .avFoundationRGB {
-                self.activeSource = nil
-                self.advanceDeliveryGeneration()
-            }
-            self.stopFallbackCaptureAndDrainCallbacks()
             self.configureAVFoundationFallbackOnSessionQueue()
-            self.startFallbackIfAvailable()
+            self.startFallbackIfAvailable(detail: "Using the selected AVFoundation RGB camera.")
         }
     }
 
@@ -647,18 +656,21 @@ final class CameraManager: NSObject, CameraManagerProtocol {
             return
         }
 
-        let availableDevices = deviceDiscoverySession.devices
-        let allowsLegacyLuxonisUVC = usesLegacyLuxonisUVCMode
-        let isLuxonisDevice: (AVCaptureDevice) -> Bool = { device in
-            let identity = "\(device.localizedName) \(device.manufacturer) \(device.modelID)".lowercased()
-            return identity.contains("luxonis") || identity.contains("oak")
-        }
-        let eligibleDevices = availableDevices.filter {
-            allowsLegacyLuxonisUVC || !isLuxonisDevice($0)
-        }
+        let eligibleDevices = eligibleAVFoundationDevices
         let defaultDevice = AVCaptureDevice.default(for: .video)
-        let preferredDevice = eligibleDevices.first ?? defaultDevice.flatMap {
-            allowsLegacyLuxonisUVC || !isLuxonisDevice($0) ? $0 : nil
+        let preferredDevice: AVCaptureDevice?
+        if let selectedID = selectedAVFoundationCameraID {
+            preferredDevice = eligibleDevices.first { $0.uniqueID == selectedID }
+            guard preferredDevice != nil else {
+                removeAVFoundationFallback(
+                    detail: "The selected AVFoundation camera is not currently connected."
+                )
+                return
+            }
+        } else {
+            preferredDevice = eligibleDevices.first ?? defaultDevice.flatMap {
+                isEligibleAVFoundationDevice($0) ? $0 : nil
+            }
         }
 
         guard let cameraDevice = preferredDevice else {
@@ -710,6 +722,16 @@ final class CameraManager: NSObject, CameraManagerProtocol {
                 detail: "RGB fallback could not bind: \(error.localizedDescription)"
             )
         }
+    }
+
+    private var eligibleAVFoundationDevices: [AVCaptureDevice] {
+        deviceDiscoverySession.devices.filter(isEligibleAVFoundationDevice)
+    }
+
+    private func isEligibleAVFoundationDevice(_ device: AVCaptureDevice) -> Bool {
+        guard !usesLegacyLuxonisUVCMode else { return true }
+        let identity = "\(device.localizedName) \(device.manufacturer) \(device.modelID)".lowercased()
+        return !identity.contains("luxonis") && !identity.contains("oak")
     }
 
     private func removeAVFoundationFallback(detail: String) {

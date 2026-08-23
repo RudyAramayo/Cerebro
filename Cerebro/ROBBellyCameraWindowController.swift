@@ -23,6 +23,8 @@ import AVFoundation
     private var hasSetAspectRatio = false
     private var isCalibrationRequested = false
     private let calibrateButton = NSButton()
+    private let avFoundationCameraLabel = NSTextField(labelWithString: "AVFoundation:")
+    private let avFoundationCameraSelector = NSPopUpButton()
     
     public init() {
         let window = NSWindow(
@@ -34,6 +36,7 @@ import AVFoundation
         super.init(window: window)
         
         window.title = "Belly Camera Diagnostics"
+        window.minSize = NSSize(width: 620, height: 360)
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()
@@ -82,19 +85,42 @@ import AVFoundation
         }
         self.bellyCameraManager = manager
         
-        // Setup Calibrate Button
+        // Keep source selection and calibration in one non-overlapping row.
         calibrateButton.title = "Calibrate Camera (Chessboard)"
         calibrateButton.bezelStyle = .rounded
         calibrateButton.target = self
         calibrateButton.action = #selector(calibrateButtonClicked(_:))
         calibrateButton.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(calibrateButton, positioned: .above, relativeTo: nil)
+
+        avFoundationCameraLabel.translatesAutoresizingMaskIntoConstraints = false
+        avFoundationCameraLabel.toolTip = "Camera used when the Belly RGB-D source is unavailable."
+        contentView.addSubview(avFoundationCameraLabel, positioned: .above, relativeTo: nil)
+
+        avFoundationCameraSelector.target = self
+        avFoundationCameraSelector.action = #selector(avFoundationCameraSelected(_:))
+        avFoundationCameraSelector.translatesAutoresizingMaskIntoConstraints = false
+        avFoundationCameraSelector.setAccessibilityLabel("Belly AVFoundation camera")
+        contentView.addSubview(avFoundationCameraSelector, positioned: .above, relativeTo: nil)
+        reloadAVFoundationCameraSelector()
         
         NSLayoutConstraint.activate([
             calibrateButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
             calibrateButton.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -20),
             calibrateButton.widthAnchor.constraint(equalToConstant: 220),
-            calibrateButton.heightAnchor.constraint(equalToConstant: 32)
+            calibrateButton.heightAnchor.constraint(equalToConstant: 32),
+            avFoundationCameraSelector.centerYAnchor.constraint(equalTo: calibrateButton.centerYAnchor),
+            avFoundationCameraSelector.trailingAnchor.constraint(
+                equalTo: calibrateButton.leadingAnchor,
+                constant: -12
+            ),
+            avFoundationCameraSelector.widthAnchor.constraint(equalToConstant: 220),
+            avFoundationCameraLabel.centerYAnchor.constraint(equalTo: calibrateButton.centerYAnchor),
+            avFoundationCameraLabel.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 20),
+            avFoundationCameraLabel.trailingAnchor.constraint(
+                equalTo: avFoundationCameraSelector.leadingAnchor,
+                constant: -8
+            )
         ])
         
         manager.setPreviewVisible(false)
@@ -110,6 +136,18 @@ import AVFoundation
             name: .robVideoCameraDemandDidChange,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(avFoundationDevicesDidChange(_:)),
+            name: AVCaptureDevice.wasConnectedNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(avFoundationDevicesDidChange(_:)),
+            name: AVCaptureDevice.wasDisconnectedNotification,
+            object: nil
+        )
         applyRecordingDemand()
         reconcileCameraSession()
     }
@@ -118,6 +156,51 @@ import AVFoundation
         isCalibrationRequested = true
         sender.isEnabled = false
         sender.title = "Calibrating..."
+    }
+
+    @objc private func avFoundationCameraSelected(_ sender: NSPopUpButton) {
+        bellyCameraManager?.selectAVFoundationCamera(
+            uniqueID: sender.selectedItem?.representedObject as? String
+        )
+        reloadAVFoundationCameraSelector()
+    }
+
+    @objc private func avFoundationDevicesDidChange(_ notification: Notification) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.reloadAVFoundationCameraSelector() }
+            return
+        }
+        reloadAVFoundationCameraSelector()
+    }
+
+    private func reloadAVFoundationCameraSelector() {
+        guard let bellyCameraManager else { return }
+        let cameras = bellyCameraManager.availableAVFoundationCameras()
+        let selectedID = bellyCameraManager.selectedAVFoundationCameraID
+
+        avFoundationCameraSelector.removeAllItems()
+        avFoundationCameraSelector.addItem(withTitle: "Automatic")
+        for camera in cameras {
+            avFoundationCameraSelector.addItem(withTitle: camera.localizedName)
+            avFoundationCameraSelector.lastItem?.representedObject = camera.uniqueID
+        }
+
+        if let selectedID {
+            if let item = avFoundationCameraSelector.itemArray.first(where: {
+                ($0.representedObject as? String) == selectedID
+            }) {
+                avFoundationCameraSelector.select(item)
+            } else {
+                avFoundationCameraSelector.addItem(withTitle: "Selected camera unavailable")
+                avFoundationCameraSelector.lastItem?.representedObject = selectedID
+                avFoundationCameraSelector.select(avFoundationCameraSelector.lastItem)
+            }
+        } else {
+            avFoundationCameraSelector.selectItem(at: 0)
+        }
+
+        avFoundationCameraSelector.isEnabled = !cameras.isEmpty || selectedID != nil
+        avFoundationCameraSelector.toolTip = "Belly-camera AVFoundation fallback: \(avFoundationCameraSelector.titleOfSelectedItem ?? "Automatic")"
     }
     
     public func setDiagnosticsPreviewVisible(_ isVisible: Bool) {
@@ -175,25 +258,6 @@ import AVFoundation
         } catch {
             print("Belly Camera session error: \(error.localizedDescription)")
         }
-    }
-    
-    public func toggleCamera() {
-        guard let bellyCameraManager else { return }
-        do {
-            try bellyCameraManager.stopSession()
-            try bellyCameraManager.startSession()
-            cameraSessionIsRequested = true
-        } catch {
-            print(error.localizedDescription)
-        }
-    }
-    
-    public func bindCamera() {
-        try? bellyCameraManager?.bindCamera()
-    }
-    
-    public func bindCameraRebootSession() {
-        try? bellyCameraManager?.bindCameraRebootSession()
     }
     
     // MARK: - CameraManagerDelegate

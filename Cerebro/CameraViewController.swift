@@ -7,6 +7,7 @@
 //
 
 import Cocoa
+import AVFoundation
 import Vision
 import CoreImage
 import SceneKit
@@ -515,6 +516,8 @@ final class CameraViewController: NSViewController {
     private var hasSetAspectRatio = false
     private var isCalibrationRequested = false
     private let calibrateButton = NSButton()
+    private let avFoundationCameraLabel = NSTextField(labelWithString: "AVFoundation:")
+    private let avFoundationCameraSelector = NSPopUpButton()
     private let processingSettings = ROBMainCameraProcessingSettings.shared
     private var latestHumanObservations: [VNHumanObservation] = []
     private var lastSceneSnapshotUpdate: CFTimeInterval = 0
@@ -568,7 +571,7 @@ final class CameraViewController: NSViewController {
         }
         cameraManager = manager
         
-        setupCalibrateButton()
+        setupCameraControls()
         
         NotificationCenter.default.addObserver(
             self,
@@ -618,6 +621,18 @@ final class CameraViewController: NSViewController {
             name: .robVideoCameraDemandDidChange,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(avFoundationDevicesDidChange(_:)),
+            name: AVCaptureDevice.wasConnectedNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(avFoundationDevicesDidChange(_:)),
+            name: AVCaptureDevice.wasDisconnectedNotification,
+            object: nil
+        )
 
         do {
             let videoServer = try ROBVideoServer()
@@ -641,36 +656,6 @@ final class CameraViewController: NSViewController {
         reconcileCameraSession()
     }
     
-    @IBAction func toggleCamera(_ sender: Any?) {
-        guard let cameraManager else { return }
-        do {
-            print("ToggleCamera")
-            try cameraManager.stopSession()
-            try cameraManager.startSession()
-            cameraSessionIsRequested = true
-        } catch {
-            print(error.localizedDescription)
-        }
-    }
-    
-    @IBAction func bindCamera(_ sender: Any?) {
-        guard let cameraManager else { return }
-        do {
-            try cameraManager.bindCamera()
-        } catch {
-            print(error.localizedDescription)
-        }
-    }
-    
-    @IBAction func bindCameaRebootSession(_ sender: Any?) {
-        guard let cameraManager else { return }
-        do {
-            try cameraManager.bindCameraRebootSession()
-        } catch {
-            print(error.localizedDescription)
-        }
-    }
-
     /// Adds Gemini as an independent camera consumer. Controller/Vision Pro
     /// video demand remains owned by ROBVideoServer and cannot be disabled by
     /// the Gemini runtime switch.
@@ -1073,20 +1058,88 @@ extension CameraViewController: CameraManagerDelegate {
         ])
     }
 
-    private func setupCalibrateButton() {
+    private func setupCameraControls() {
         calibrateButton.title = "Calibrate Camera (Chessboard)"
         calibrateButton.bezelStyle = .rounded
         calibrateButton.target = self
         calibrateButton.action = #selector(calibrateButtonClicked(_:))
         calibrateButton.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(calibrateButton, positioned: .above, relativeTo: nil)
+
+        avFoundationCameraLabel.translatesAutoresizingMaskIntoConstraints = false
+        avFoundationCameraLabel.toolTip = "Camera used when the main RGB-D source is unavailable."
+        view.addSubview(avFoundationCameraLabel, positioned: .above, relativeTo: nil)
+
+        avFoundationCameraSelector.target = self
+        avFoundationCameraSelector.action = #selector(avFoundationCameraSelected(_:))
+        avFoundationCameraSelector.translatesAutoresizingMaskIntoConstraints = false
+        avFoundationCameraSelector.setAccessibilityLabel("Main AVFoundation camera")
+        view.addSubview(avFoundationCameraSelector, positioned: .above, relativeTo: nil)
+        reloadAVFoundationCameraSelector()
         
         NSLayoutConstraint.activate([
             calibrateButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
             calibrateButton.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -20),
             calibrateButton.widthAnchor.constraint(equalToConstant: 220),
-            calibrateButton.heightAnchor.constraint(equalToConstant: 32)
+            calibrateButton.heightAnchor.constraint(equalToConstant: 32),
+            avFoundationCameraSelector.centerYAnchor.constraint(equalTo: calibrateButton.centerYAnchor),
+            avFoundationCameraSelector.trailingAnchor.constraint(
+                equalTo: calibrateButton.leadingAnchor,
+                constant: -12
+            ),
+            avFoundationCameraSelector.widthAnchor.constraint(equalToConstant: 220),
+            avFoundationCameraLabel.centerYAnchor.constraint(equalTo: calibrateButton.centerYAnchor),
+            avFoundationCameraLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 20),
+            avFoundationCameraLabel.trailingAnchor.constraint(
+                equalTo: avFoundationCameraSelector.leadingAnchor,
+                constant: -8
+            )
         ])
+    }
+
+    @objc private func avFoundationCameraSelected(_ sender: NSPopUpButton) {
+        cameraManager?.selectAVFoundationCamera(
+            uniqueID: sender.selectedItem?.representedObject as? String
+        )
+        reloadAVFoundationCameraSelector()
+    }
+
+    @objc private func avFoundationDevicesDidChange(_ notification: Notification) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.reloadAVFoundationCameraSelector() }
+            return
+        }
+        reloadAVFoundationCameraSelector()
+    }
+
+    private func reloadAVFoundationCameraSelector() {
+        guard let cameraManager else { return }
+        let cameras = cameraManager.availableAVFoundationCameras()
+        let selectedID = cameraManager.selectedAVFoundationCameraID
+
+        avFoundationCameraSelector.removeAllItems()
+        avFoundationCameraSelector.addItem(withTitle: "Automatic")
+        for camera in cameras {
+            avFoundationCameraSelector.addItem(withTitle: camera.localizedName)
+            avFoundationCameraSelector.lastItem?.representedObject = camera.uniqueID
+        }
+
+        if let selectedID {
+            if let item = avFoundationCameraSelector.itemArray.first(where: {
+                ($0.representedObject as? String) == selectedID
+            }) {
+                avFoundationCameraSelector.select(item)
+            } else {
+                avFoundationCameraSelector.addItem(withTitle: "Selected camera unavailable")
+                avFoundationCameraSelector.lastItem?.representedObject = selectedID
+                avFoundationCameraSelector.select(avFoundationCameraSelector.lastItem)
+            }
+        } else {
+            avFoundationCameraSelector.selectItem(at: 0)
+        }
+
+        avFoundationCameraSelector.isEnabled = !cameras.isEmpty || selectedID != nil
+        avFoundationCameraSelector.toolTip = "Main-camera AVFoundation fallback: \(avFoundationCameraSelector.titleOfSelectedItem ?? "Automatic")"
     }
     
     @objc private func calibrateButtonClicked(_ sender: NSButton) {
