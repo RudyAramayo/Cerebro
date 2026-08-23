@@ -68,6 +68,18 @@ struct ROBControlServerStatusSnapshot: Sendable {
     private var credentialRevocationObserver: NSObjectProtocol?
     private var listenerStatus = "stopped"
     private var listenerStatusDetail: String?
+    @nonobjc private lazy var localLidarIPCServer = ROBLidarLocalIPCServer(
+        stateDidChange: { ready in
+            if ready {
+                print("RPLidar local IPC fast path is ready")
+            }
+        },
+        receiveScan: { [weak self] data in
+            DispatchQueue.main.async {
+                self?.receiveLocalLidarTelemetry(data)
+            }
+        }
+    )
     private lazy var armControllerBridge = ROBArmControllerBridge(server: self)
     private lazy var gripperControllerBridge = ROBGripperControllerBridge(server: self)
 
@@ -150,6 +162,7 @@ struct ROBControlServerStatusSnapshot: Sendable {
         listenerStatusDetail = nil
         armControllerBridge.start()
         gripperControllerBridge.start()
+        localLidarIPCServer.start()
         listener.stateUpdateHandler = { [weak self] state in
             self?.stateDidChange(to: state)
         }
@@ -336,12 +349,24 @@ struct ROBControlServerStatusSnapshot: Sendable {
         nowMilliseconds: UInt64
     ) -> Bool {
         guard connection.authenticatedRole == .lidarPublisher,
-              let deviceID = connection.authenticatedDeviceID,
-              message.validationError(
-                authenticatedDeviceID: deviceID,
-                lastAcceptedSequence: lastLidarSequenceByDeviceID[deviceID] ?? 0,
-                nowMilliseconds: nowMilliseconds
-              ) == nil else { return false }
+              let deviceID = connection.authenticatedDeviceID else { return false }
+        return acceptLidarTelemetry(
+            message,
+            authenticatedDeviceID: deviceID,
+            nowMilliseconds: nowMilliseconds
+        )
+    }
+
+    private func acceptLidarTelemetry(
+        _ message: ROBLidarScanFrame,
+        authenticatedDeviceID deviceID: UUID,
+        nowMilliseconds: UInt64
+    ) -> Bool {
+        guard message.validationError(
+            authenticatedDeviceID: deviceID,
+            lastAcceptedSequence: lastLidarSequenceByDeviceID[deviceID] ?? 0,
+            nowMilliseconds: nowMilliseconds
+        ) == nil else { return false }
 
         let nowUptime = ProcessInfo.processInfo.systemUptime
         if let last = lastLidarScanUptimeByDeviceID[deviceID], nowUptime - last < 0.100 {
@@ -350,6 +375,44 @@ struct ROBControlServerStatusSnapshot: Sendable {
         lastLidarScanUptimeByDeviceID[deviceID] = nowUptime
         lastLidarSequenceByDeviceID[deviceID] = message.sequence
         return true
+    }
+
+    private func receiveLocalLidarTelemetry(_ envelope: Data) {
+        precondition(Thread.isMainThread, "RPLidar authorization is owned by the main queue")
+        guard !paused,
+              let unverifiedScanData = ROBLidarLocalIPCEnvelope.scanData(from: envelope),
+              let message = try? ROBLidarScanFrame.decode(unverifiedScanData) else { return }
+
+        let record: ROBControlPeerAuthenticationRecord?
+        do {
+            record = try ROBControlPairing.activePeerAuthenticationRecord(for: message.deviceID)
+        } catch {
+            NSLog("Discarded local RPLidar scan because the pairing registry is unavailable: %@",
+                  error.localizedDescription)
+            return
+        }
+        guard let record, record.role == .lidarPublisher else {
+            NSLog("Discarded local RPLidar scan from an unauthorized publisher")
+            return
+        }
+        guard let scanData = ROBLidarLocalIPCEnvelope.open(
+            envelope,
+            sharedSecret: record.credential.sharedSecret
+        ) else {
+            NSLog("Discarded local RPLidar scan with an invalid pairing authentication code")
+            return
+        }
+
+        let nowMilliseconds = UInt64(max(0, Date().timeIntervalSince1970 * 1_000))
+        guard acceptLidarTelemetry(
+            message,
+            authenticatedDeviceID: message.deviceID,
+            nowMilliseconds: nowMilliseconds
+        ) else { return }
+        dataDelegate?.didReceiveLidarTelemetry?(
+            scanData,
+            deviceID: message.deviceID.uuidString.lowercased()
+        )
     }
 
     public func stateDidChange(to state: NWListener.State) {
@@ -485,6 +548,7 @@ struct ROBControlServerStatusSnapshot: Sendable {
         }
         armControllerBridge.stop()
         gripperControllerBridge.stop()
+        localLidarIPCServer.stop()
         listener?.stateUpdateHandler = nil
         listener?.newConnectionHandler = nil
         listener?.cancel()

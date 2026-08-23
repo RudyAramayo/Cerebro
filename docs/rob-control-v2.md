@@ -95,16 +95,43 @@ ROB_CONTROL_ALLOW_LEGACY_AUTONET=1
 ROBControlAllowLegacyAutoNet=true   # UserDefaults
 ```
 
-There is no automatic fallback from v2. Production call sites request only
-`_robctl._udp`. `_roboNet._tcp` remains in Bonjour declarations solely so a
-deliberately selected compatibility build can browse it.
+There is no automatic fallback from v2 to the legacy plaintext protocol.
+Production call sites request only `_robctl._udp`. `_roboNet._tcp` remains in
+Bonjour declarations solely so a deliberately selected compatibility build
+can browse it.
 
-The RPLidar publisher uses `_robctl._udp` and must be provisioned with its own
-`lidarPublisher` credential before it can feed the unified production
-connection. Do not give the publisher an `operatorController`
-credential. The RPLidar app must filter Bonjour results by the `robot_id` in
-its installed credential, pin Cerebro's certificate, complete the reciprocal
-pairing proof, and only then publish telemetry.
+The RPLidar publisher must be provisioned with its own `lidarPublisher`
+credential before it can feed Cerebro. Do not give the publisher an
+`operatorController` credential. The RPLidar app filters Bonjour results by
+the `robot_id` in its installed credential, pins Cerebro's certificate, and
+completes the reciprocal pairing proof.
+
+When RPLidar and Cerebro run on the same Mac, scan payloads prefer an App
+Group-protected Unix-domain IPC socket in
+`group.com.orbitusrobotics.rob`. This keeps the high-rate data off every IP
+interface and avoids QUIC/TLS framing and network-stack overhead. The
+authenticated QUIC connection stays active for identity, probes, and immediate
+fallback. If the local container or listener is unavailable, a local send is
+rejected, or an accepted local send later fails, the newest undelivered scan is
+published as frame kind `7` over QUIC. The local client reconnects in the
+background and resumes the fast path when Cerebro is ready.
+
+The local path carries the same `RLS1` bytes as QUIC plus a 32-byte HMAC-SHA256
+made with that publisher's existing pairing secret. Cerebro decodes the
+claimed device UUID, resolves it against the server-owned pairing registry,
+and verifies the HMAC on every sample; only a current `lidarPublisher` record
+proceeds to the shared sequence, freshness, and rate checks. Revocation
+therefore applies to both paths, and another process cannot impersonate a
+paired publisher merely by learning its UUID. Both signed app identifiers must have the
+`group.com.orbitusrobotics.rob` App Group enabled in the Apple Developer portal
+and in their provisioning profiles. Without it, the apps safely remain on
+QUIC.
+
+This is intentionally local Unix IPC rather than an NSXPC Mach service. The
+SlamwareSDK makes RPLidar an iPhoneOS/Designed-for-iPad app, and Mach-service
+XPC APIs are unavailable to iOS targets. A true NSXPC implementation would
+first require a native macOS or Mac Catalyst SlamwareSDK build; naming another
+transport XPC would not change that platform restriction.
 
 Lidar uses `ROBLidarScanFrame` in v2 frame kind `7`, not JSON, decimal text, or
 generic keyed-archive controller data. Its network-order `RLS1` layout has a
@@ -119,11 +146,11 @@ monotonically increasing publisher sequence, capture time, finite pose, and
 every point before delivering a sample. Replayed, stale, mismatched, or
 malformed telemetry is rejected. Samples more than two seconds old or more
 than five seconds in the future are rejected. The publisher keeps only one
-unsent latest scan while QUIC is busy, so congestion drops superseded sensor
-state instead of accumulating stale frames. Occupancy/composite map rasters
-remain local to the RPLidar app and are never transmitted. Loss of fresh Lidar
-input continues to make roaming stop and wait; a sensor credential cannot
-directly drive the treads.
+unsent latest scan while either local IPC or QUIC is busy, so congestion drops
+superseded sensor state instead of accumulating stale frames.
+Occupancy/composite map rasters remain local to the RPLidar app and are never
+transmitted. Loss of fresh Lidar input continues to make roaming stop and wait;
+a sensor credential cannot directly drive the treads.
 
 During migration, run the legacy adapter only as an explicit compatibility
 session. Role and revocation guarantees apply to the v2 path, so legacy mode

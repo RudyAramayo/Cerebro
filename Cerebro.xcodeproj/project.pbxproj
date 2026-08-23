@@ -1059,6 +1059,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.orbitusrobotics.Cerebro;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
+				REGISTER_APP_GROUPS = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "Cerebro/Cerebro-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -1105,6 +1106,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.orbitusrobotics.Cerebro;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
+				REGISTER_APP_GROUPS = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "Cerebro/Cerebro-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 			};
