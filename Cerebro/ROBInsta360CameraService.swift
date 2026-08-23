@@ -29,6 +29,7 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
     let state: String
     let streamURL: String
     let lastError: String?
+    let localNetworkPermissionDenied: Bool
     let desiredRunning: Bool
     let decoderActive: Bool
     let diagnosticsPreviewVisible: Bool
@@ -74,6 +75,8 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
     private var activeDecoderURL: String?
     private var lastFrameAt: Date?
     private var observedPreviewConfigurationIdentity = ""
+    private var localNetworkPermissionDeniedOnQueue = false
+    private var openedLocalNetworkSettingsForCurrentDenial = false
 
     public private(set) var state = "Stopped"
     public private(set) var streamURL = "rtmp://10.0.0.18:1935/live/preview"
@@ -82,6 +85,7 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
     public private(set) var decodedBytes: UInt64 = 0
     public private(set) var framesPerSecond: Double = 0
     public private(set) var lastError: String?
+    public private(set) var localNetworkPermissionDenied = false
     public private(set) var previewSettingsPending = false
     // This reference is read only from `queue`. Keeping registration on that
     // same queue prevents the decoder callback from racing startup/shutdown.
@@ -323,6 +327,35 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
         queue.async { self.reevaluateDecoderDemand() }
     }
 
+    /// Local Network privacy is controlled by macOS and cannot be granted by
+    /// Cerebro. This opens the narrowest available System Settings pane and
+    /// falls back to the Privacy & Security page or System Settings itself.
+    @discardableResult
+    public func openLocalNetworkPrivacySettings() -> Bool {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async {
+                _ = self.openLocalNetworkPrivacySettings()
+            }
+            return true
+        }
+        let candidates = [
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_LocalNetwork",
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork",
+            "x-apple.systempreferences:com.apple.preference.security.extension?Privacy_LocalNetwork"
+        ]
+        for candidate in candidates {
+            if let url = URL(string: candidate), NSWorkspace.shared.open(url) {
+                return true
+            }
+        }
+        let settingsApplication = URL(
+            fileURLWithPath: "/System/Applications/System Settings.app"
+        )
+        return FileManager.default.fileExists(atPath: settingsApplication.path)
+            && NSWorkspace.shared.open(settingsApplication)
+    }
+
     /// A lock-consistent, observational snapshot for the service grid. It
     /// never starts the camera, decoder, diagnostics UI, or a network request.
     @nonobjc func statusSnapshot() -> ROBInsta360ServiceStatusSnapshot {
@@ -330,11 +363,13 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
         let displayedState = state
         let displayedURL = streamURL
         let displayedError = lastError
+        let displayedLocalNetworkPermissionDenied = localNetworkPermissionDenied
         return queue.sync {
             ROBInsta360ServiceStatusSnapshot(
                 state: displayedState,
                 streamURL: displayedURL,
                 lastError: displayedError,
+                localNetworkPermissionDenied: displayedLocalNetworkPermissionDenied,
                 desiredRunning: desiredRunning,
                 decoderActive: decoder != nil,
                 diagnosticsPreviewVisible: diagnosticsPreviewVisible,
@@ -558,11 +593,18 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
         session.dataTask(with: request) { data, response, error in
             self.queue.async {
                 guard self.desiredRunning, generation == self.generation else { return }
+                if error == nil, response is HTTPURLResponse {
+                    self.clearLocalNetworkPermissionDenial()
+                }
                 guard error == nil,
                       let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
                       let data,
                       let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    self.failAndRetry(error?.localizedDescription ?? "Camera HTTP request failed", generation: generation)
+                    self.failAndRetry(
+                        error?.localizedDescription ?? "Camera HTTP request failed",
+                        underlyingError: error,
+                        generation: generation
+                    )
                     return
                 }
                 guard object["state"] as? String == "done" else {
@@ -600,7 +642,11 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
                 let healthy = error == nil && data != nil && ((response as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? false)
                 self.heartbeatFailures = healthy ? 0 : self.heartbeatFailures + 1
                 if self.heartbeatFailures >= 3 {
-                    self.failAndRetry(error?.localizedDescription ?? "Camera heartbeat failed", generation: generation)
+                    self.failAndRetry(
+                        error?.localizedDescription ?? "Camera heartbeat failed",
+                        underlyingError: error,
+                        generation: generation
+                    )
                 }
             }
         }.resume()
@@ -777,8 +823,21 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
         return components.url?.absoluteString ?? "rtmp://\(cameraHost):1935/live/preview"
     }
 
-    private func failAndRetry(_ message: String, generation: UInt64) {
+    private func failAndRetry(
+        _ message: String,
+        underlyingError: Error? = nil,
+        generation: UInt64
+    ) {
         guard desiredRunning, generation == self.generation else { return }
+        let localNetworkPermissionWasDenied = underlyingError.map {
+            Self.isLocalNetworkPermissionDenied($0)
+        } ?? false
+        let reportedMessage = localNetworkPermissionWasDenied
+            ? "Local Network access is denied. Enable Cerebro in System Settings → Privacy & Security → Local Network."
+            : message
+        if localNetworkPermissionWasDenied {
+            handleLocalNetworkPermissionDenial()
+        }
         let relinquishingOwnedSession = fingerprint != nil
         if relinquishingOwnedSession {
             // Best effort. Even if this request fails, stopping heartbeats
@@ -790,16 +849,64 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
         cancelRuntime()
         // Never race our own old fingerprint. The camera calls that expired
         // lease "another client" until its 10-second heartbeat timeout passes.
-        let cameraReportsOwner = message.localizedCaseInsensitiveContains("already connected")
-            || message.localizedCaseInsensitiveContains("another client")
+        let cameraReportsOwner = reportedMessage.localizedCaseInsensitiveContains("already connected")
+            || reportedMessage.localizedCaseInsensitiveContains("another client")
         let delay = max((relinquishingOwnedSession || cameraReportsOwner) ? 11.0 : 0.0,
                         min(pow(2.0, Double(retryAttempt)), 30.0))
         retryAttempt = min(retryAttempt + 1, 6)
-        NSLog("Insta360 service error: %@; retrying in %.0f seconds", message, delay)
-        publish(state: String(format: "Retrying in %.0f seconds", delay), error: message)
+        NSLog("Insta360 service error: %@; retrying in %.0f seconds", reportedMessage, delay)
+        publish(state: String(format: "Retrying in %.0f seconds", delay), error: reportedMessage)
         let work = DispatchWorkItem { [weak self] in self?.connect(generation: nextGeneration) }
         retryWorkItem = work
         queue.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private static func isLocalNetworkPermissionDenied(_ error: Error) -> Bool {
+        var current: NSError? = error as NSError
+        for _ in 0..<8 {
+            guard let candidate = current else { return false }
+            let diagnostic = [
+                candidate.localizedDescription,
+                candidate.debugDescription,
+                String(describing: candidate.userInfo)
+            ].joined(separator: " ").lowercased()
+            if diagnostic.contains("local network prohibited")
+                || diagnostic.contains("local network denied")
+                || diagnostic.contains("localnetworkdenied") {
+                return true
+            }
+            current = candidate.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return false
+    }
+
+    private func handleLocalNetworkPermissionDenial() {
+        localNetworkPermissionDeniedOnQueue = true
+        guard !openedLocalNetworkSettingsForCurrentDenial else { return }
+        openedLocalNetworkSettingsForCurrentDenial = true
+        DispatchQueue.main.async {
+            self.localNetworkPermissionDenied = true
+            NotificationCenter.default.post(
+                name: .robInsta360CameraServiceDidChange,
+                object: self
+            )
+            if !self.openLocalNetworkPrivacySettings() {
+                NSLog("Unable to open System Settings Privacy & Security → Local Network")
+            }
+        }
+    }
+
+    private func clearLocalNetworkPermissionDenial() {
+        guard localNetworkPermissionDeniedOnQueue else { return }
+        localNetworkPermissionDeniedOnQueue = false
+        openedLocalNetworkSettingsForCurrentDenial = false
+        DispatchQueue.main.async {
+            self.localNetworkPermissionDenied = false
+            NotificationCenter.default.post(
+                name: .robInsta360CameraServiceDidChange,
+                object: self
+            )
+        }
     }
 
     private func stopOwnedPreview(generation: UInt64) {

@@ -15,6 +15,13 @@ STATUS_WINDOW = (
 AUTO_NET = (
     ROOT / "Cerebro" / "AutoNet" / "AutoNetServer" / "AutoNetServer.swift"
 ).read_text(encoding="utf-8")
+AUTO_NET_CONNECTION = (
+    ROOT
+    / "Cerebro"
+    / "AutoNet"
+    / "AutoNetServer"
+    / "AutoNetServerConnection.swift"
+).read_text(encoding="utf-8")
 VIDEO_SERVER = (ROOT / "Cerebro" / "ROBVideoServer.swift").read_text(
     encoding="utf-8"
 )
@@ -243,6 +250,39 @@ def main() -> None:
     ):
         require(token in control_snapshot, f"Controller status mapping/sort lost: {token}")
 
+    # Each authenticated session reports a passive rolling traffic meter and
+    # an opt-in, low-rate echo test. Reserved probe traffic is consumed before
+    # command dispatch and never reaches or relays through the legacy parser.
+    for token in (
+        'Data("ROBNET-PROBE-CAP-V1".utf8)',
+        'Data("ROBNET-PROBE-V1:".utf8)',
+        "receivedApplicationBytes",
+        "sentApplicationBytes",
+        "receivedMessagesPerSecond",
+        "roundTripMilliseconds",
+        "consecutiveProbeMisses",
+        "scheduleNextNetworkProbe(after: 0.25)",
+    ):
+        require(token in AUTO_NET_CONNECTION, f"Controller network telemetry lost: {token}")
+    receive_application = braced_declaration(AUTO_NET, "func receiveApplicationMessage(")
+    require(
+        "sendingConnection.consumeNetworkProbeMessage(data)" in receive_application
+        and receive_application.index("sendingConnection.consumeNetworkProbeMessage(data)")
+        < receive_application.index("dataDelegate?.didReceiveData(data)"),
+        "Reserved network probes can leak into command dispatch",
+    )
+    for token in (
+        "network: connection.networkStatusSnapshot()",
+        'label: "RX"',
+        'label: "TX"',
+        'label: "Round trip"',
+        'label: "Traffic total"',
+    ):
+        require(
+            token in control_snapshot + "\n" + COORDINATOR,
+            f"Services lost controller network metric: {token}",
+        )
+
     rebuild = braced_declaration(STATUS_WINDOW, "private func rebuildCards(")
     require(
         "if controllers.isEmpty" in rebuild
@@ -251,6 +291,14 @@ def main() -> None:
         in rebuild
         and 'cardViews["controller:\\(controller.stableID)"] = card' in rebuild,
         "Controller grid no longer handles zero/one/many dynamic sessions",
+    )
+    require(
+        "ROBSystemStatusRowListView(rows: cards)" in STATUS_WINDOW
+        and "private final class ROBSystemStatusRowListView" in STATUS_WINDOW
+        and "private static let cardHeight" not in STATUS_WINDOW
+        and "@objc private func toggleExpanded" in STATUS_WINDOW
+        and "summaryLabel.stringValue = metrics.prefix(3)" in STATUS_WINDOW,
+        "Services no longer uses compact full-width expandable rows",
     )
     require(
         'labelWithString: "No active controller connections"' in STATUS_WINDOW,

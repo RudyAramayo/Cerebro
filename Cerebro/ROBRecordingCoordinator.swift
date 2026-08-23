@@ -327,11 +327,11 @@ private final class ROBTrainingSession {
         }
     }
 
-    func recordLidar(payload: String, x: Double, y: Double, yaw: Double, uptime: TimeInterval, pointCount: Int) {
+    func recordLidar(data: Data, x: Double, y: Double, yaw: Double, uptime: TimeInterval, pointCount: Int) {
         lidarScanCount &+= 1
         let scanID = String(format: "scan-%012llu", lidarScanCount)
-        let relativePath = "lidar/\(scanID).txt"
-        try? payload.data(using: .utf8)?.write(
+        let relativePath = "lidar/\(scanID).rscan"
+        try? data.write(
             to: rootURL.appendingPathComponent(relativePath),
             options: .atomic
         )
@@ -346,7 +346,7 @@ private final class ROBTrainingSession {
         appendEvent(type: "lidar_pose_odometry", uptime: uptime, body: [
             "scan_id": scanID,
             "scan_file": relativePath,
-            "scan_encoding": "cerebro-rplidar-polar-text-v1",
+            "scan_encoding": "rob-lidar-scan-binary-v1",
             "point_count": pointCount,
             "pose_and_odometry": odometry
         ])
@@ -852,10 +852,10 @@ private final class ROBFootageSession {
         }
     }
 
-    public func recordLidarPayload(_ payload: String, x: Double, y: Double, yaw: Double, receivedAtUptime: TimeInterval, pointCount: Int) {
+    public func recordLidarScanData(_ data: Data, x: Double, y: Double, yaw: Double, receivedAtUptime: TimeInterval, pointCount: Int) {
         queue.async {
             self.trainingSession?.recordLidar(
-                payload: payload,
+                data: data,
                 x: x,
                 y: y,
                 yaw: yaw,

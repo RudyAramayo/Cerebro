@@ -1,5 +1,32 @@
 import Foundation
 
+#if os(macOS)
+import Network
+
+enum ROBVideoTransport {
+    static let applicationProtocol = "robvideo/1"
+}
+
+@available(macOS 12.0, *)
+final class ROBVideoFramer: NWProtocolFramerImplementation {
+    static let definition = NWProtocolFramer.Definition(implementation: ROBVideoFramer.self)
+    static var label: String { "ROBVideoActionFixture" }
+
+    required init(framer: NWProtocolFramer.Instance) {}
+    func start(framer: NWProtocolFramer.Instance) -> NWProtocolFramer.StartResult { .ready }
+    func wakeup(framer: NWProtocolFramer.Instance) {}
+    func stop(framer: NWProtocolFramer.Instance) -> Bool { true }
+    func cleanup(framer: NWProtocolFramer.Instance) {}
+    func handleInput(framer: NWProtocolFramer.Instance) -> Int { 0 }
+    func handleOutput(
+        framer: NWProtocolFramer.Instance,
+        message: NWProtocolFramer.Message,
+        messageLength: Int,
+        isComplete: Bool
+    ) {}
+}
+#endif
+
 // The standalone fixture deliberately avoids loading Vision/camera code. These
 // two no-op scene types satisfy ROBAutonomyCoordinator's diagnostic publishing
 // seam while the tests exercise only its bounded Lidar/session decisions.
@@ -64,6 +91,18 @@ final class ROBTraversabilityRuntime {
     func setAutonomousMotionActive(_ active: Bool) {}
     func updateLocalPose(x: Double, y: Double, yaw: Double, receivedAtUptime: TimeInterval) {}
     func snapshot() -> ROBTraversabilitySnapshot? { nil }
+}
+
+final class ROBRecordingCoordinator {
+    static let shared = ROBRecordingCoordinator()
+    func recordLidarScanData(
+        _ data: Data,
+        x: Double,
+        y: Double,
+        yaw: Double,
+        receivedAtUptime: TimeInterval,
+        pointCount: Int
+    ) {}
 }
 
 private enum FixtureFailure: Error, CustomStringConvertible {
@@ -501,11 +540,21 @@ struct ROBRobotActionProtocolFixtureTests {
         let delegate = AutonomyDelegate()
         let coordinator = ROBAutonomyCoordinator(robotID: "cerebro-1")
         coordinator.delegate = delegate
-        coordinator.updateLidarPayload(
-            "0:0:0\n0:0:0\n" +
-            ["2.0:-1.2", "2.0:-0.8", "2.0:-0.4", "2.0:-0.1", "2.0:0.1", "2.0:0.4", "2.0:0.8", "2.0:1.2"]
-                .joined(separator: "\n")
+        let lidarFrame = ROBLidarScanFrame(
+            deviceID: UUID(),
+            sequence: 1,
+            sentAtMilliseconds: UInt64(Date().timeIntervalSince1970 * 1_000),
+            x: 0,
+            y: 0,
+            z: 0,
+            yaw: 0,
+            pitch: 0,
+            roll: 0,
+            points: [-1.2, -0.8, -0.4, -0.1, 0.1, 0.4, 0.8, 1.2].map {
+                ROBLidarWirePoint(distanceMeters: 2, angleRadians: Float($0))
+            }
         )
+        coordinator.updateLidarScanData(try lidarFrame.encoded())
         let start = ROBAutonomySessionMessage.start(
             sessionID: "autonomy-coordinator",
             sequence: 1,

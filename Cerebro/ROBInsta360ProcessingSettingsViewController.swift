@@ -77,6 +77,8 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         checkboxWithTitle: "Gyro stabilization", target: nil, action: nil)
     private let applyPreviewSettingsButton = NSButton(
         title: "Apply Preview Settings", target: nil, action: nil)
+    private let openLocalNetworkSettingsButton = NSButton(
+        title: "Local Network Access…", target: nil, action: nil)
     private let previewStatusLabel = NSTextField(labelWithString: "")
     private let modelStatusLabel = NSTextField(labelWithString: "")
 
@@ -268,6 +270,16 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
             ? "Apply Preview Settings"
             : "Preview Settings Applied"
 
+        openLocalNetworkSettingsButton.title = service.localNetworkPermissionDenied
+            ? "Enable Local Network…"
+            : "Local Network Access…"
+        openLocalNetworkSettingsButton.contentTintColor = service.localNetworkPermissionDenied
+            ? .systemRed
+            : nil
+        openLocalNetworkSettingsButton.toolTip = service.localNetworkPermissionDenied
+            ? "Cerebro cannot reach local cameras until Local Network access is enabled in System Settings."
+            : "Open Cerebro's Local Network privacy setting in System Settings."
+
         if let error = service.lastError, !error.isEmpty {
             previewStatusLabel.stringValue = "\(service.state) — \(error)"
         } else {
@@ -402,7 +414,10 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         previewStatusLabel.lineBreakMode = .byTruncatingMiddle
         previewStatusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let previewRow = row([
-            stabilizationToggle, applyPreviewSettingsButton, previewStatusLabel
+            stabilizationToggle,
+            applyPreviewSettingsButton,
+            openLocalNetworkSettingsButton,
+            previewStatusLabel
         ])
         previewBox.contentView?.addSubview(previewRow)
         if let previewContent = previewBox.contentView {
@@ -625,6 +640,12 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         applyPreviewSettingsButton.target = self
         applyPreviewSettingsButton.action = #selector(applyPreviewSettings(_:))
         applyPreviewSettingsButton.bezelStyle = .rounded
+        openLocalNetworkSettingsButton.target = self
+        openLocalNetworkSettingsButton.action = #selector(openLocalNetworkSettings(_:))
+        openLocalNetworkSettingsButton.bezelStyle = .rounded
+        openLocalNetworkSettingsButton.setAccessibilityLabel(
+            "Open Local Network privacy settings"
+        )
 
         rudyGreetingPopup.addItems(withTitles: ROBMLXRuntime.rudyGreetingTitles)
         rudyGreetingPopup.target = self
@@ -828,6 +849,12 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
     @objc private func applyPreviewSettings(_ sender: Any?) {
         guard service.previewSettingsPending else { return }
         service.restart()
+    }
+
+    @objc private func openLocalNetworkSettings(_ sender: Any?) {
+        if !service.openLocalNetworkPrivacySettings() {
+            NSSound.beep()
+        }
     }
 
     @objc private func addCoreMLModel(_ sender: Any?) {

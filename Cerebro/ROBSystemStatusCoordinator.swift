@@ -445,6 +445,12 @@ import FoundationModels
                 .init(label: "Decode rate", value: String(format: "%.1f FPS", status.framesPerSecond)),
                 .init(label: "Analysis", value: status.analysisNeedsFrames && needsFrames ? geometry : "Disabled"),
                 .init(label: "Gemini composite", value: status.geminiVideoDemandActive ? "Active" : "Inactive"),
+                .init(
+                    label: "Local Network",
+                    value: status.localNetworkPermissionDenied
+                        ? "Permission denied"
+                        : "No denial detected"
+                ),
                 .init(label: "Robot-relative orientation", value: orientation),
                 .init(label: "Fresh people", value: "\(people)"),
             ]
@@ -531,7 +537,29 @@ import FoundationModels
         let exactMedia = media?.subscriptions.first {
             $0.controllerID == connection.deviceID && $0.sessionID == connection.sessionID
         }
-        var metrics: [ROBSystemStatusMetric] = []
+        let network = connection.network
+        var metrics: [ROBSystemStatusMetric] = [
+            .init(
+                label: "RX",
+                value: "\(networkRate(network.receivedBytesPerSecond)) · \(messageRate(network.receivedMessagesPerSecond))"
+            ),
+            .init(
+                label: "TX",
+                value: "\(networkRate(network.sentBytesPerSecond)) · \(messageRate(network.sentMessagesPerSecond))"
+            ),
+            .init(
+                label: "Round trip",
+                value: networkRoundTrip(connection)
+            ),
+            .init(
+                label: "Traffic total",
+                value: "RX \(byteCount(network.totalReceivedBytes)) · TX \(byteCount(network.totalSentBytes))"
+            ),
+            .init(
+                label: "Probe replies",
+                value: "\(network.probeReplies)/\(network.probesSent) · \(network.consecutiveProbeMisses) consecutive misses"
+            ),
+        ]
         if connection.usesLegacyTransport {
             metrics.append(.init(label: "Security", value: "Legacy plaintext compatibility"))
         } else {
@@ -543,17 +571,58 @@ import FoundationModels
         let roleName = connection.role == "operatorController"
             ? "Operator Controller"
             : connection.role == "lidarPublisher" ? "Lidar Publisher" : "Controller Connection"
+        let probeDegraded = network.probeSupported && network.consecutiveProbeMisses >= 2
+        let detail: String
+        if probeDegraded {
+            detail = "Network test is missing replies; live RX/TX counters remain active."
+        } else if exactMedia != nil {
+            detail = "Control and media sessions are both active."
+        } else if network.probeSupported {
+            detail = "Authenticated transport is active with a live echo and throughput test."
+        } else {
+            detail = "Authenticated transport state: \(connection.state); negotiating network test support."
+        }
         return ROBControllerSessionCardSnapshot(
             stableID: connection.stableID,
             displayName: connection.deviceName ?? roleName,
-            state: connection.state == "ready" ? .healthy : .working,
-            detail: exactMedia == nil
-                ? "Authenticated transport state: \(connection.state)."
-                : "Control and media sessions are both active.",
+            state: probeDegraded ? .degraded : (connection.state == "ready" ? .healthy : .working),
+            detail: detail,
             role: connection.role,
             deviceIdentifier: shortID(connection.deviceID),
             sessionIdentifier: shortID(connection.sessionID),
+            age: network.lastReceiveAge,
             metrics: metrics
+        )
+    }
+
+    private func networkRoundTrip(_ connection: ROBControlConnectionStatusSnapshot) -> String {
+        let network = connection.network
+        if let milliseconds = network.roundTripMilliseconds {
+            return String(format: "%.1f ms", milliseconds)
+        }
+        if connection.usesLegacyTransport {
+            return "Unavailable on legacy transport"
+        }
+        return network.probeSupported ? "Waiting for echo" : "Negotiating"
+    }
+
+    private func networkRate(_ bytesPerSecond: Double) -> String {
+        guard bytesPerSecond.isFinite, bytesPerSecond >= 0 else { return "Unknown" }
+        return ByteCountFormatter.string(
+            fromByteCount: Int64(bytesPerSecond.rounded()),
+            countStyle: .file
+        ) + "/s"
+    }
+
+    private func messageRate(_ messagesPerSecond: Double) -> String {
+        guard messagesPerSecond.isFinite, messagesPerSecond >= 0 else { return "Unknown" }
+        return String(format: "%.1f msg/s", messagesPerSecond)
+    }
+
+    private func byteCount(_ bytes: UInt64) -> String {
+        ByteCountFormatter.string(
+            fromByteCount: Int64(min(bytes, UInt64(Int64.max))),
+            countStyle: .file
         )
     }
 

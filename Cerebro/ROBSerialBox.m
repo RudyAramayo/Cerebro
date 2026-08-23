@@ -218,6 +218,7 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 @property (readwrite, assign) float actualSpeedL;
 @property (readwrite, assign) float actualSpeedR;
 @property (readwrite, assign) BOOL masterControllerInputWasFresh;
+@property (readwrite, assign) NSTimeInterval lastControllerRenderUptime;
 @property (readwrite, assign) int lastVisionNeckPanTarget;
 @property (readwrite, assign) int lastVisionNeckTiltTarget;
 @property (readwrite, assign) NSInteger commandedNeckPanTarget;
@@ -265,6 +266,7 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 
 @property (readwrite, retain) NSString *tempTextInput;
 @property (readwrite, retain) NSMutableDictionary *controlModelDataDictionary;
+@property (readwrite, retain) NSMutableDictionary *treadControlModelDataDictionary;
 @property (readwrite, retain) NSMutableData* receivedData_R11_Core;
 @property (readwrite, retain) NSMutableData* receivedData_R11_log;
 @property (readwrite, retain) NSMutableData* receivedData_L10_Core;
@@ -322,6 +324,7 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 - (BOOL)probeBaseFirmwareAtPath:(NSString *)path fileDescriptor:(int *)matchedFileDescriptor;
 - (void)consumeBaseSerialBytes:(const void *)bytes length:(NSUInteger)length;
 - (void)handleBaseSerialLine:(NSString *)line;
+- (void)renderControllerPrioritized:(BOOL)urgent;
 
 - (void)appendToIncomingText_base: (id) text;
 
@@ -731,12 +734,18 @@ typedef enum : NSUInteger {
     [self refreshSerialList_base:@"Detecting Base firmware…"];
     [self refreshSerialList_maestro:@"Discovering Maestro by USB identity…"];
     self.controlModelDataDictionary = [NSMutableDictionary new];
+    self.treadControlModelDataDictionary = [NSMutableDictionary new];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         [self connectToDetectedBase];
     });
     [self connectMaestro];
     
-    self.controllerTimer = [NSTimer scheduledTimerWithTimeInterval:0.1 target:self selector:@selector(renderController) userInfo:nil repeats:YES];
+    self.controllerTimer = [NSTimer timerWithTimeInterval:0.1
+                                                  target:self
+                                                selector:@selector(renderController)
+                                                userInfo:nil
+                                                 repeats:YES];
+    [[NSRunLoop mainRunLoop] addTimer:self.controllerTimer forMode:NSRunLoopCommonModes];
     
     //give the master controller a few seconds to boot up first
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -3622,50 +3631,66 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
 
 
 
-- (void) renderController
+- (void)renderController
+{
+    [self renderControllerPrioritized:NO];
+}
+
+- (void)renderControllerPrioritized:(BOOL)urgent
 {
     //render should fire the code [below here:]
     ROBBaseControllerModel *controllerModelData = [self.controlModelDataDictionary valueForKey:self.masterControllerID];
+    ROBBaseControllerModel *treadModelData = [self.treadControlModelDataDictionary valueForKey:self.masterControllerID];
     
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (!urgent && self.lastControllerRenderUptime > 0
+        && now - self.lastControllerRenderUptime < 0.075) {
+        return;
+    }
     BOOL snapshotIsFresh = controllerModelData != nil &&
         controllerModelData.receivedAtUptime > 0 &&
         now - controllerModelData.receivedAtUptime <= kControllerSnapshotFreshnessSeconds;
+    BOOL treadSnapshotIsFresh = treadModelData != nil &&
+        treadModelData.receivedAtUptime > 0 &&
+        now - treadModelData.receivedAtUptime <= kControllerSnapshotFreshnessSeconds;
 
-    if (snapshotIsFresh)
+    if (snapshotIsFresh || treadSnapshotIsFresh)
     {
+        ROBBaseControllerModel *treads = treadSnapshotIsFresh ? treadModelData : controllerModelData;
         //MasterControllerId data should go through
-        [self controllerPassthrough:controllerModelData.touchPadPointL
-                     touchPadPointR:controllerModelData.touchPadPointR
-                                Lat:controllerModelData.Lat
-                               Long:controllerModelData.Long
-                      tredBrakeLock:controllerModelData.tredBrakeLock
-               flipperForwardIsDown:controllerModelData.flipperForwardIsDown
-                  flipperRelaxBrake:controllerModelData.flipperRelaxBrake
-              flipperBackwardIsDown:controllerModelData.flipperBackwardIsDown
-                   flipperBrakeLock:controllerModelData.flipperBrakeLock
-                              lact1:controllerModelData.lact1
-                              lact2:controllerModelData.lact2
-                              lact3:controllerModelData.lact3
-                              speed:controllerModelData.speed
-                    speed_playPause:controllerModelData.speed_playPause
-              speed_forward_reverse:controllerModelData.speed_forward_reverse
-                          textInput:controllerModelData.textInput];
-        if (controllerModelData.neckControlActive) {
+        [self controllerPassthrough:treads.touchPadPointL
+                     touchPadPointR:treads.touchPadPointR
+                                Lat:snapshotIsFresh ? controllerModelData.Lat : 0
+                               Long:snapshotIsFresh ? controllerModelData.Long : 0
+                      tredBrakeLock:treads.tredBrakeLock
+               flipperForwardIsDown:snapshotIsFresh ? controllerModelData.flipperForwardIsDown : false
+                  flipperRelaxBrake:snapshotIsFresh ? controllerModelData.flipperRelaxBrake : false
+              flipperBackwardIsDown:snapshotIsFresh ? controllerModelData.flipperBackwardIsDown : false
+                   flipperBrakeLock:snapshotIsFresh ? controllerModelData.flipperBrakeLock : true
+                              lact1:snapshotIsFresh ? controllerModelData.lact1 : false
+                              lact2:snapshotIsFresh ? controllerModelData.lact2 : false
+                              lact3:snapshotIsFresh ? controllerModelData.lact3 : false
+                              speed:treads.speed
+                    speed_playPause:treads.speed_playPause
+              speed_forward_reverse:treads.speed_forward_reverse
+                          textInput:snapshotIsFresh ? controllerModelData.textInput : @""];
+        if (snapshotIsFresh && controllerModelData.neckControlActive) {
             [self applyVisionNeckPan:controllerModelData.neckPan tilt:controllerModelData.neckTilt];
         }
         // Mirror legacy gripper intent into render compatibility state only;
         // this method deliberately has no actuator authority.
-        [self applyVisionGrippersActive:controllerModelData.gripperControlActive
-                             leftClosed:controllerModelData.leftGripperClosed
-                            rightClosed:controllerModelData.rightGripperClosed];
-        [self applyVisionTorsoActive:controllerModelData.torsoControlActive
-                           rotation:controllerModelData.torsoRotation];
+        [self applyVisionGrippersActive:snapshotIsFresh && controllerModelData.gripperControlActive
+                             leftClosed:snapshotIsFresh && controllerModelData.leftGripperClosed
+                            rightClosed:snapshotIsFresh && controllerModelData.rightGripperClosed];
+        [self applyVisionTorsoActive:snapshotIsFresh && controllerModelData.torsoControlActive
+                           rotation:snapshotIsFresh ? controllerModelData.torsoRotation : 0];
         self.masterControllerInputWasFresh = YES;
+        self.lastControllerRenderUptime = now;
     }
     else if (self.masterControllerInputWasFresh)
     {
         [self stopBaseMotionAndDropHeartbeat];
+        self.lastControllerRenderUptime = now;
     }
 }
 
@@ -3714,6 +3739,45 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         recordTreadCommandWithControllerID:controllerId
                                      model:controllerModelData
                               activeMaster:[self.masterControllerID isEqualToString:controllerId]];
+}
+
+- (void)controllerId:(NSString *)controllerId
+        treadPointL:(CGPoint)treadPointL
+        treadPointR:(CGPoint)treadPointR
+      tredBrakeLock:(bool)tredBrakeLock
+               speed:(float)speed
+     speedPlayPause:(bool)speedPlayPause
+ speedForwardReverse:(bool)speedForwardReverse
+{
+    ROBBaseControllerModel *previous = [self.treadControlModelDataDictionary valueForKey:controllerId];
+    BOOL previousLeftActive = previous != nil && previous.touchPadPointL.x > -999.0
+        && previous.touchPadPointL.y > -999.0;
+    BOOL previousRightActive = previous != nil && previous.touchPadPointR.x > -999.0
+        && previous.touchPadPointR.y > -999.0;
+    BOOL leftActive = treadPointL.x > -999.0 && treadPointL.y > -999.0;
+    BOOL rightActive = treadPointR.x > -999.0 && treadPointR.y > -999.0;
+    BOOL urgent = previous == nil
+        || previousLeftActive != leftActive
+        || previousRightActive != rightActive
+        || previous.tredBrakeLock != tredBrakeLock
+        || previous.speed_playPause != speedPlayPause
+        || previous.speed_forward_reverse != speedForwardReverse;
+    ROBBaseControllerModel *treadModel = [ROBBaseControllerModel new];
+    treadModel.touchPadPointL = treadPointL;
+    treadModel.touchPadPointR = treadPointR;
+    treadModel.tredBrakeLock = tredBrakeLock;
+    treadModel.speed = speed;
+    treadModel.speed_playPause = speedPlayPause;
+    treadModel.speed_forward_reverse = speedForwardReverse;
+    treadModel.receivedAtUptime = NSProcessInfo.processInfo.systemUptime;
+    [self.treadControlModelDataDictionary setValue:treadModel forKey:controllerId];
+    [[ROBRecordingCoordinator shared]
+        recordTreadCommandWithControllerID:controllerId
+                                     model:treadModel
+                              activeMaster:[self.masterControllerID isEqualToString:controllerId]];
+    if ([self.masterControllerID isEqualToString:controllerId]) {
+        [self renderControllerPrioritized:urgent];
+    }
 }
 
 

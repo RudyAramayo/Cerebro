@@ -101,43 +101,23 @@ import Foundation
         }
     }
 
-    public func updateLidarPayload(_ payload: String) {
-        let lines = payload
-            .components(separatedBy: .newlines)
-            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        guard lines.count >= 3 else { return }
-
-        let position = lines[0].split(separator: ":").compactMap { Double($0) }
-        let pose = lines[1].split(separator: ":").compactMap { Double($0) }
-        guard position.count >= 2, pose.count >= 1,
-              position[0].isFinite, position[1].isFinite, pose[0].isFinite else {
-            return
+    public func updateLidarScanData(_ data: Data) {
+        precondition(Thread.isMainThread, "Lidar state must be serialized on the main thread")
+        guard let frame = try? ROBLidarScanFrame.decode(data) else { return }
+        let points = frame.points.map {
+            LidarPoint(distance: Double($0.distanceMeters), angle: Double($0.angleRadians))
         }
-
-        var points: [LidarPoint] = []
-        points.reserveCapacity(lines.count - 2)
-        for line in lines.dropFirst(2) {
-            let values = line.split(separator: ":").compactMap { Double($0) }
-            guard values.count == 2,
-                  values[0].isFinite, values[1].isFinite,
-                  (0.03 ... 30.0).contains(values[0]),
-                  (-Double.pi * 2 ... Double.pi * 2).contains(values[1]) else {
-                continue
-            }
-            points.append(LidarPoint(distance: values[0], angle: values[1]))
-        }
-        guard points.count >= 8 else { return }
 
         let snapshot = LidarSnapshot(
-            x: position[0],
-            y: position[1],
-            yaw: pose[0],
+            x: Double(frame.x),
+            y: Double(frame.y),
+            yaw: Double(frame.yaw),
             points: points,
             receivedAtUptime: ProcessInfo.processInfo.systemUptime
         )
         latestLidar = snapshot
-        ROBRecordingCoordinator.shared.recordLidarPayload(
-            payload,
+        ROBRecordingCoordinator.shared.recordLidarScanData(
+            data,
             x: snapshot.x,
             y: snapshot.y,
             yaw: snapshot.yaw,

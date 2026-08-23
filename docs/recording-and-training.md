@@ -31,8 +31,9 @@ Each enabled face/belly camera gets:
 
 `events.jsonl` aligns RPLidar scans, local pose and pose-derived odometry,
 manual/autonomous tread requests, controller authority, session boundaries,
-write failures, and traversability labels. Raw valid RPLidar payloads are kept
-separately under `lidar/` so a future parser can reproduce the original scan.
+write failures, and traversability labels. Each validated compact binary scan
+is kept unchanged as `lidar/*.rscan` with encoding
+`rob-lidar-scan-binary-v1`, so replay uses the exact received measurements.
 
 The automatic labeler is deliberately conservative. Only a fresh command from
 the active **manual** controller can open a label window. Measured displacement

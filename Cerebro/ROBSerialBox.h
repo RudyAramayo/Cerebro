@@ -171,6 +171,16 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 - (IBAction)energizeToggle:(id)sender;
 
 - (void) controllerId:(NSString *)controllerId controllerModelData:(ROBBaseControllerModel *)controllerModelData;
+/// Updates only the latency-sensitive tread lane. Other actuator state keeps
+/// its independent freshness deadline and is never prolonged by a joystick
+/// heartbeat.
+- (void)controllerId:(NSString *)controllerId
+        treadPointL:(CGPoint)treadPointL
+        treadPointR:(CGPoint)treadPointR
+      tredBrakeLock:(bool)tredBrakeLock
+               speed:(float)speed
+     speedPlayPause:(bool)speedPlayPause
+ speedForwardReverse:(bool)speedForwardReverse;
 - (void)applyVisionNeckPan:(float)pan tilt:(float)tilt;
 /// Typed ingress for autonomous neck gestures. Pan is calibrated degrees;
 /// lower/upper are Maestro command targets because those axes do not yet have

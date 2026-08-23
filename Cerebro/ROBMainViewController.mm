@@ -2464,24 +2464,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void)didReceiveLidarTelemetry:(NSData *)data deviceID:(NSString *)deviceID
 {
-    NSError *error = nil;
-    id decodedObject = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
-    if (error != nil || ![decodedObject isKindOfClass:NSDictionary.class]) {
-        NSLog(@"Ignoring malformed authenticated RPLidar telemetry from %@", deviceID);
-        return;
-    }
-    NSDictionary *message = (NSDictionary *)decodedObject;
-    if (![[message objectForKey:@"kind"] isEqualToString:@"scan"]) {
-        // Map frames are authenticated and bounded by the server, but Cerebro's
-        // current local planner consumes the scan representation only.
-        return;
-    }
-    NSString *scanPayload = [message objectForKey:@"scanPayload"];
-    if (![scanPayload isKindOfClass:NSString.class]) {
-        return;
-    }
     dispatch_async(dispatch_get_main_queue(), ^{
-        [self.autonomyCoordinator updateLidarPayload:scanPayload];
+        [self.autonomyCoordinator updateLidarScanData:data];
     });
 }
 
@@ -2535,6 +2519,89 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                                                                                           fromData:data error:&error];
     NSString *msg = [messageDictionary valueForKey:@"message"];
     NSString *sender = [messageDictionary valueForKey:@"sender"];
+
+    if ([msg isEqualToString:@"ROBControllerTreadSnapshotV1"])
+    {
+        BOOL (^parseFiniteTreadDouble)(id, double *) = ^BOOL(id rawValue, double *output) {
+            if (![rawValue isKindOfClass:NSString.class] || [(NSString *)rawValue length] == 0) {
+                return NO;
+            }
+            NSScanner *scanner = [NSScanner scannerWithString:(NSString *)rawValue];
+            double parsed = 0;
+            if (![scanner scanDouble:&parsed] || !scanner.isAtEnd || !isfinite(parsed)) {
+                return NO;
+            }
+            *output = parsed;
+            return YES;
+        };
+        BOOL (^isWireBoolean)(id) = ^BOOL(id value) {
+            return [value isEqualToString:@"0"] || [value isEqualToString:@"1"];
+        };
+
+        double leftX = 0;
+        double leftY = 0;
+        double rightX = 0;
+        double rightY = 0;
+        double speed = 0;
+        NSString *leftActiveText = messageDictionary[@"controller.tread.left.active"];
+        NSString *rightActiveText = messageDictionary[@"controller.tread.right.active"];
+        NSString *brakeText = messageDictionary[@"controller.tread.brake_lock"];
+        NSString *playText = messageDictionary[@"controller.tread.play"];
+        NSString *forwardText = messageDictionary[@"controller.tread.forward"];
+        NSString *sequenceText = messageDictionary[@"controller.tread.sequence"];
+        NSString *sentAtText = messageDictionary[@"controller.tread.sent_at_ms"];
+        unsigned long long sequence = 0;
+        unsigned long long sentAtMilliseconds = 0;
+        NSScanner *sequenceScanner = [sequenceText isKindOfClass:NSString.class]
+            ? [NSScanner scannerWithString:sequenceText]
+            : nil;
+        NSScanner *sentAtScanner = [sentAtText isKindOfClass:NSString.class]
+            ? [NSScanner scannerWithString:sentAtText]
+            : nil;
+        BOOL sequenceIsValid = sequenceScanner != nil
+            && [sequenceScanner scanUnsignedLongLong:&sequence]
+            && sequenceScanner.isAtEnd
+            && sequence > 0;
+        BOOL timestampIsValid = sentAtScanner != nil
+            && [sentAtScanner scanUnsignedLongLong:&sentAtMilliseconds]
+            && sentAtScanner.isAtEnd
+            && sentAtMilliseconds > 0;
+        BOOL valid = error == nil
+            && [messageDictionary[@"controller.tread.version"] isEqualToString:@"1"]
+            && [sender isKindOfClass:NSString.class] && sender.length > 0 && sender.length <= 128
+            && sequenceIsValid && timestampIsValid
+            && isWireBoolean(leftActiveText) && isWireBoolean(rightActiveText)
+            && isWireBoolean(brakeText) && isWireBoolean(playText) && isWireBoolean(forwardText)
+            && parseFiniteTreadDouble(messageDictionary[@"controller.tread.left.x"], &leftX)
+            && parseFiniteTreadDouble(messageDictionary[@"controller.tread.left.y"], &leftY)
+            && parseFiniteTreadDouble(messageDictionary[@"controller.tread.right.x"], &rightX)
+            && parseFiniteTreadDouble(messageDictionary[@"controller.tread.right.y"], &rightY)
+            && parseFiniteTreadDouble(messageDictionary[@"controller.tread.speed"], &speed)
+            && leftX >= -1.0 && leftX <= 1.0 && leftY >= -1.0 && leftY <= 1.0
+            && rightX >= -1.0 && rightX <= 1.0 && rightY >= -1.0 && rightY <= 1.0
+            && speed >= 0.0 && speed <= 100.0;
+        if (!valid) {
+            NSLog(@"Ignoring malformed prioritized tread snapshot");
+            return;
+        }
+
+        BOOL leftActive = [leftActiveText isEqualToString:@"1"];
+        BOOL rightActive = [rightActiveText isEqualToString:@"1"];
+        CGPoint leftPoint = leftActive
+            ? CGPointMake(leftX, leftY)
+            : CGPointMake(-1000.0, -1000.0);
+        CGPoint rightPoint = rightActive
+            ? CGPointMake(rightX, rightY)
+            : CGPointMake(-1000.0, -1000.0);
+        [self.serialBox controllerId:sender
+                         treadPointL:leftPoint
+                         treadPointR:rightPoint
+                       tredBrakeLock:[brakeText isEqualToString:@"1"]
+                                speed:(float)speed
+                      speedPlayPause:[playText isEqualToString:@"1"]
+                  speedForwardReverse:[forwardText isEqualToString:@"1"]];
+        return;
+    }
 
     BOOL (^parseControllerPose)(id, double[8]) = ^BOOL(id rawValue, double output[8]) {
         if (![rawValue isKindOfClass:NSString.class]) {
@@ -2795,11 +2862,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     }
     
     if ([sender isEqualToString:@"rpLidar"]){
-        if (self.autoNetServer.legacyCompatibilityIsActive) {
-            [self.autonomyCoordinator updateLidarPayload:msg];
-        } else {
-            NSLog(@"Ignoring spoofable legacy RPLidar envelope on the v2 control path");
-        }
+        NSLog(@"Ignoring obsolete text RPLidar envelope; binary frame 7 is required");
         return;
     }
     /*

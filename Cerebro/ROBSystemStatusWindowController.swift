@@ -285,7 +285,7 @@ public final class ROBSystemStatusWindowController: NSWindowController, NSWindow
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         contentStack.orientation = .vertical
         contentStack.alignment = .leading
-        contentStack.spacing = 18
+        contentStack.spacing = 12
 
         let documentView = ROBSystemStatusFlippedView()
         documentView.translatesAutoresizingMaskIntoConstraints = false
@@ -443,12 +443,12 @@ public final class ROBSystemStatusWindowController: NSWindowController, NSWindow
 
     private func addSection(title: String, count: Int, cards: [ROBSystemStatusCardView]) {
         let heading = sectionHeading(title: title, count: count)
-        let grid = ROBSystemStatusCardGridView(cards: cards)
+        let rows = ROBSystemStatusRowListView(rows: cards)
         contentStack.addArrangedSubview(heading)
-        contentStack.addArrangedSubview(grid)
-        contentStack.setCustomSpacing(8, after: heading)
+        contentStack.addArrangedSubview(rows)
+        contentStack.setCustomSpacing(5, after: heading)
         heading.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
-        grid.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
+        rows.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
     }
 
     private func sectionHeading(title: String, count: Int) -> NSView {
@@ -530,95 +530,79 @@ private final class ROBSystemStatusFlippedView: NSView {
     override var isFlipped: Bool { true }
 }
 
-/// A small custom layout keeps cards in two or three columns on wide windows
-/// and wraps them into one column as the operator narrows the panel.
-private final class ROBSystemStatusCardGridView: NSView {
-    private static let minimumCardWidth: CGFloat = 270
-    private static let cardHeight: CGFloat = 164
-    private static let spacing: CGFloat = 12
-    private let cards: [ROBSystemStatusCardView]
-
-    init(cards: [ROBSystemStatusCardView]) {
-        self.cards = cards
+/// Full-width rows use the panel's horizontal space and stay compact until the
+/// operator asks for detail. This makes live throughput visible without a grid
+/// of mostly empty fixed-height cards.
+private final class ROBSystemStatusRowListView: NSStackView {
+    init(rows: [ROBSystemStatusCardView]) {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        for card in cards { addSubview(card) }
+        orientation = .vertical
+        alignment = .leading
+        distribution = .fill
+        spacing = 6
+        for row in rows {
+            addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: widthAnchor).isActive = true
+        }
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
-
-    override var isFlipped: Bool { true }
-
-    override var intrinsicContentSize: NSSize {
-        let columns = columnCount(for: max(bounds.width, Self.minimumCardWidth))
-        let rows = Int(ceil(Double(cards.count) / Double(columns)))
-        let height = CGFloat(rows) * Self.cardHeight + CGFloat(max(0, rows - 1)) * Self.spacing
-        return NSSize(width: NSView.noIntrinsicMetric, height: height)
-    }
-
-    override func setFrameSize(_ newSize: NSSize) {
-        let widthChanged = abs(newSize.width - frame.width) > 0.5
-        super.setFrameSize(newSize)
-        if widthChanged { invalidateIntrinsicContentSize() }
-    }
-
-    override func layout() {
-        super.layout()
-        let columns = columnCount(for: bounds.width)
-        let totalSpacing = CGFloat(max(0, columns - 1)) * Self.spacing
-        let width = floor(max(0, bounds.width - totalSpacing) / CGFloat(columns))
-
-        for (index, card) in cards.enumerated() {
-            let row = index / columns
-            let column = index % columns
-            card.frame = NSRect(
-                x: CGFloat(column) * (width + Self.spacing),
-                y: CGFloat(row) * (Self.cardHeight + Self.spacing),
-                width: width,
-                height: Self.cardHeight
-            )
-        }
-    }
-
-    private func columnCount(for width: CGFloat) -> Int {
-        guard !cards.isEmpty else { return 1 }
-        let fit = Int(floor((max(0, width) + Self.spacing) / (Self.minimumCardWidth + Self.spacing)))
-        return min(cards.count, max(1, fit))
-    }
 }
 
 private final class ROBSystemStatusCardView: NSView {
     private let accent = NSView()
+    private let disclosureButton = NSButton()
     private let nameLabel = NSTextField(labelWithString: "")
     private let stateDot = NSView()
     private let stateLabel = NSTextField(labelWithString: "")
+    private let summaryLabel = NSTextField(labelWithString: "")
     private let detailLabel = NSTextField(wrappingLabelWithString: "")
     private let metadataLabel = NSTextField(wrappingLabelWithString: "")
     private let footerLabel = NSTextField(wrappingLabelWithString: "")
+    private let detailStack = NSStackView()
     private var state: ROBSystemServiceState = .unknown
+    private var isExpanded = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
-        layer?.cornerRadius = 10
+        layer?.cornerRadius = 7
         layer?.borderWidth = 1
         layer?.masksToBounds = true
 
         accent.translatesAutoresizingMaskIntoConstraints = false
         accent.wantsLayer = true
 
-        nameLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        disclosureButton.title = "▸"
+        disclosureButton.isBordered = false
+        disclosureButton.font = .systemFont(ofSize: 13, weight: .semibold)
+        disclosureButton.target = self
+        disclosureButton.action = #selector(toggleExpanded(_:))
+        disclosureButton.toolTip = "Show service details"
+        disclosureButton.setAccessibilityLabel("Show details")
+
+        nameLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         nameLabel.lineBreakMode = .byTruncatingTail
         nameLabel.usesSingleLineMode = true
-        nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        nameLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
         stateDot.translatesAutoresizingMaskIntoConstraints = false
         stateDot.wantsLayer = true
         stateDot.layer?.cornerRadius = 4
 
-        stateLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
+        stateLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        stateLabel.usesSingleLineMode = true
+
+        summaryLabel.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+        summaryLabel.textColor = .secondaryLabelColor
+        summaryLabel.lineBreakMode = .byTruncatingMiddle
+        summaryLabel.usesSingleLineMode = true
+        summaryLabel.alignment = .right
+        summaryLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         detailLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         detailLabel.textColor = .secondaryLabelColor
@@ -634,16 +618,27 @@ private final class ROBSystemStatusCardView: NSView {
 
         footerLabel.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
         footerLabel.textColor = .tertiaryLabelColor
-        footerLabel.maximumNumberOfLines = 2
-        footerLabel.lineBreakMode = .byTruncatingTail
+        footerLabel.maximumNumberOfLines = 0
+        footerLabel.lineBreakMode = .byWordWrapping
         footerLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let stateRow = NSStackView(views: [stateDot, stateLabel, NSView()])
+        let stateRow = NSStackView(views: [stateDot, stateLabel])
         stateRow.orientation = .horizontal
         stateRow.alignment = .centerY
-        stateRow.spacing = 6
+        stateRow.spacing = 5
 
-        let stack = NSStackView(views: [nameLabel, stateRow, detailLabel, metadataLabel, footerLabel])
+        let header = NSStackView(views: [disclosureButton, nameLabel, stateRow, summaryLabel])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = 8
+
+        detailStack.setViews([detailLabel, metadataLabel, footerLabel], in: .top)
+        detailStack.orientation = .vertical
+        detailStack.alignment = .leading
+        detailStack.spacing = 4
+        detailStack.isHidden = true
+
+        let stack = NSStackView(views: [header, detailStack])
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -652,19 +647,24 @@ private final class ROBSystemStatusCardView: NSView {
         addSubview(accent)
         addSubview(stack)
         NSLayoutConstraint.activate([
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 42),
             accent.leadingAnchor.constraint(equalTo: leadingAnchor),
             accent.topAnchor.constraint(equalTo: topAnchor),
             accent.bottomAnchor.constraint(equalTo: bottomAnchor),
-            accent.widthAnchor.constraint(equalToConstant: 4),
+            accent.widthAnchor.constraint(equalToConstant: 3),
 
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            stack.topAnchor.constraint(equalTo: topAnchor, constant: 12),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -10),
-            stateRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            detailLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            metadataLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            footerLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
+            header.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            detailStack.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            detailLabel.widthAnchor.constraint(equalTo: detailStack.widthAnchor),
+            metadataLabel.widthAnchor.constraint(equalTo: detailStack.widthAnchor),
+            footerLabel.widthAnchor.constraint(equalTo: detailStack.widthAnchor),
+            disclosureButton.widthAnchor.constraint(equalToConstant: 18),
+            nameLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 150),
+            stateRow.widthAnchor.constraint(greaterThanOrEqualToConstant: 78),
             stateDot.widthAnchor.constraint(equalToConstant: 8),
             stateDot.heightAnchor.constraint(equalToConstant: 8)
         ])
@@ -696,6 +696,9 @@ private final class ROBSystemStatusCardView: NSView {
         stateLabel.stringValue = state.displayName
         detailLabel.stringValue = detail.isEmpty ? "No detail reported." : detail
         metadataLabel.stringValue = formatted(metadata)
+        summaryLabel.stringValue = metrics.prefix(3)
+            .map { "\($0.label) \($0.value)" }
+            .joined(separator: "  •  ")
 
         var footerParts = metrics.map { "\($0.label) \($0.value)" }
         if let age {
@@ -709,6 +712,20 @@ private final class ROBSystemStatusCardView: NSView {
         setAccessibilityValue(detailLabel.stringValue)
         setAccessibilityHelp((metadata + metrics).map { "\($0.label): \($0.value)" }.joined(separator: ", "))
         updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        toggleExpanded(self)
+    }
+
+    @objc private func toggleExpanded(_ sender: Any?) {
+        isExpanded.toggle()
+        detailStack.isHidden = !isExpanded
+        disclosureButton.title = isExpanded ? "▾" : "▸"
+        disclosureButton.toolTip = isExpanded ? "Hide service details" : "Show service details"
+        disclosureButton.setAccessibilityLabel(isExpanded ? "Hide details" : "Show details")
+        invalidateIntrinsicContentSize()
+        superview?.needsLayout = true
     }
 
     private func formatted(_ values: [ROBSystemStatusMetric]) -> String {
@@ -765,7 +782,7 @@ private final class ROBSystemStatusEmptyControllersView: NSView {
         addSubview(stack)
 
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(greaterThanOrEqualToConstant: 84),
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 64),
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             stack.topAnchor.constraint(equalTo: topAnchor, constant: 13),

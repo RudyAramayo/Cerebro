@@ -6,6 +6,23 @@
 import Foundation
 import Network
 
+struct ROBControlNetworkStatusSnapshot: Sendable {
+    let receivedBytesPerSecond: Double
+    let sentBytesPerSecond: Double
+    let receivedMessagesPerSecond: Double
+    let sentMessagesPerSecond: Double
+    let totalReceivedBytes: UInt64
+    let totalSentBytes: UInt64
+    let lastReceiveAge: TimeInterval?
+    let lastSendAge: TimeInterval?
+    let probeSupported: Bool
+    let roundTripMilliseconds: Double?
+    let probesSent: UInt64
+    let probeReplies: UInt64
+    let consecutiveProbeMisses: UInt64
+    let lastProbeResponseAge: TimeInterval?
+}
+
 struct ROBControlConnectionStatusSnapshot: Sendable {
     let stableID: String
     let state: String
@@ -14,6 +31,7 @@ struct ROBControlConnectionStatusSnapshot: Sendable {
     let deviceName: String?
     let sessionID: String?
     let usesLegacyTransport: Bool
+    let network: ROBControlNetworkStatusSnapshot
 }
 
 struct ROBControlServerStatusSnapshot: Sendable {
@@ -25,8 +43,8 @@ struct ROBControlServerStatusSnapshot: Sendable {
 
 @objc public protocol AutoNetServerDataDelegate: AnyObject {
     func didReceiveData(_ data: Data)
-    /// Lidar bytes cross this callback only after a frame-7 message has been
-    /// authenticated as a lidarPublisher and its typed envelope validated.
+    /// Binary scan bytes cross this callback only after a frame-7 message has
+    /// been authenticated as a lidarPublisher and fully validated.
     @objc optional func didReceiveLidarTelemetry(_ data: Data, deviceID: String)
 }
 
@@ -47,7 +65,6 @@ struct ROBControlServerStatusSnapshot: Sendable {
     private var connectionsByID: [Int: AutoNetServerConnection] = [:]
     private var lastLidarSequenceByDeviceID: [UUID: UInt64] = [:]
     private var lastLidarScanUptimeByDeviceID: [UUID: TimeInterval] = [:]
-    private var lastLidarMapUptimeByDeviceID: [UUID: TimeInterval] = [:]
     private var credentialRevocationObserver: NSObjectProtocol?
     private var listenerStatus = "stopped"
     private var listenerStatusDetail: String?
@@ -223,6 +240,16 @@ struct ROBControlServerStatusSnapshot: Sendable {
         guard !paused, !data.isEmpty, sendingConnection.isReady else { return }
         switch type {
         case .sendData:
+            if sendingConnection.consumeNetworkProbeMessage(data) {
+                return
+            }
+            // lidarPublisher sendData is reserved exclusively for negotiated
+            // probe capability/echo payloads. Generic commands remain an
+            // authorization failure and never reach the historical parser.
+            if sendingConnection.authenticatedRole == .lidarPublisher {
+                sendingConnection.stop(error: AutoNetTransportError.authorizationFailed)
+                return
+            }
             if armControllerBridge.claimsArmControlProtocol(data) {
                 if sendingConnection.authenticatedRole == .operatorController,
                    let controllerID = sendingConnection.authenticatedDeviceID,
@@ -304,7 +331,7 @@ struct ROBControlServerStatusSnapshot: Sendable {
     /// Performs sequence and rate authorization with state that survives a QUIC
     /// reconnect. The message has already passed its structural/device checks.
     func acceptLidarTelemetry(
-        _ message: ROBLidarTelemetryMessage,
+        _ message: ROBLidarScanFrame,
         from connection: AutoNetServerConnection,
         nowMilliseconds: UInt64
     ) -> Bool {
@@ -317,18 +344,10 @@ struct ROBControlServerStatusSnapshot: Sendable {
               ) == nil else { return false }
 
         let nowUptime = ProcessInfo.processInfo.systemUptime
-        switch message.kind {
-        case .scan:
-            if let last = lastLidarScanUptimeByDeviceID[deviceID], nowUptime - last < 0.100 {
-                return false
-            }
-            lastLidarScanUptimeByDeviceID[deviceID] = nowUptime
-        case .map:
-            if let last = lastLidarMapUptimeByDeviceID[deviceID], nowUptime - last < 1.0 {
-                return false
-            }
-            lastLidarMapUptimeByDeviceID[deviceID] = nowUptime
+        if let last = lastLidarScanUptimeByDeviceID[deviceID], nowUptime - last < 0.100 {
+            return false
         }
+        lastLidarScanUptimeByDeviceID[deviceID] = nowUptime
         lastLidarSequenceByDeviceID[deviceID] = message.sequence
         return true
     }
@@ -401,7 +420,6 @@ struct ROBControlServerStatusSnapshot: Sendable {
         }
         lastLidarSequenceByDeviceID.removeValue(forKey: deviceID)
         lastLidarScanUptimeByDeviceID.removeValue(forKey: deviceID)
-        lastLidarMapUptimeByDeviceID.removeValue(forKey: deviceID)
     }
 
     public func connectionList() -> String {
@@ -432,7 +450,8 @@ struct ROBControlServerStatusSnapshot: Sendable {
                 deviceID: connection.authenticatedDeviceID?.uuidString.lowercased(),
                 deviceName: connection.authenticatedDeviceName,
                 sessionID: connection.authenticatedSessionUUID?.uuidString.lowercased(),
-                usesLegacyTransport: usesLegacyTransport
+                usesLegacyTransport: usesLegacyTransport,
+                network: connection.networkStatusSnapshot()
             )
         }.sorted {
             let lhsName = $0.deviceName ?? $0.deviceID ?? $0.stableID

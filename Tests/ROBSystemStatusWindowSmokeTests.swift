@@ -18,7 +18,12 @@ private struct ROBSystemStatusWindowSmokeTests {
                         displayName: "Smoke Service",
                         category: .other,
                         state: .healthy,
-                        detail: "Available"
+                        detail: "Available",
+                        metrics: [
+                            .init(label: "RX", value: "12 KB/s"),
+                            .init(label: "TX", value: "2 KB/s"),
+                            .init(label: "Round trip", value: "8.4 ms"),
+                        ]
                     )
                 ],
                 controllers: []
@@ -38,7 +43,36 @@ private struct ROBSystemStatusWindowSmokeTests {
         )
         precondition(snapshotRequests > 0, "Services window did not request its cached snapshot")
 
+        window.contentView?.layoutSubtreeIfNeeded()
+        let views = descendants(of: window.contentView)
+        guard let serviceRow = views.first(where: {
+            String(describing: type(of: $0)) == "ROBSystemStatusCardView"
+        }) else {
+            fatalError("Services did not render a compact status row")
+        }
+        precondition(serviceRow.frame.width > 800, "Service row did not expand across the panel")
+        let collapsedHeight = serviceRow.frame.height
+        precondition(collapsedHeight <= 54, "Collapsed service row is still unnecessarily tall")
+
+        guard let disclosure = views.compactMap({ $0 as? NSButton }).first(where: {
+            $0.accessibilityLabel() == "Show details"
+        }) else {
+            fatalError("Service row has no accessible disclosure control")
+        }
+        disclosure.performClick(nil)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        window.contentView?.layoutSubtreeIfNeeded()
+        precondition(
+            serviceRow.frame.height > collapsedHeight,
+            "Expanding a service row did not reveal its detail and metrics"
+        )
+
         controller.close()
         print("Programmatic Services window creation and presentation smoke test passed")
+    }
+
+    private static func descendants(of root: NSView?) -> [NSView] {
+        guard let root else { return [] }
+        return [root] + root.subviews.flatMap { descendants(of: $0) }
     }
 }

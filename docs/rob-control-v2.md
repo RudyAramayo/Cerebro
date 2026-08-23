@@ -99,24 +99,31 @@ There is no automatic fallback from v2. Production call sites request only
 `_robctl._udp`. `_roboNet._tcp` remains in Bonjour declarations solely so a
 deliberately selected compatibility build can browse it.
 
-Old RPLidar publishers must be migrated to `_robctl._udp` and provisioned with
-their own `lidarPublisher` credential before they can feed the unified
-production connection. Do not give a publisher an `operatorController`
+The RPLidar publisher uses `_robctl._udp` and must be provisioned with its own
+`lidarPublisher` credential before it can feed the unified production
+connection. Do not give the publisher an `operatorController`
 credential. The RPLidar app must filter Bonjour results by the `robot_id` in
 its installed credential, pin Cerebro's certificate, complete the reciprocal
 pairing proof, and only then publish telemetry.
 
-Lidar scan/map data uses the versioned `ROBLidarTelemetryMessage` envelope and
-v2 frame kind `7`, not generic keyed-archive controller data. Cerebro validates
-the schema, authenticated device UUID, monotonically increasing publisher
-sequence, capture time, payload kind, and payload bounds before delivering a
-sample. The publisher UUID in the envelope is never a substitute for the
-authenticated connection identity. Replayed, stale, mismatched, or malformed
-telemetry is rejected. Scans are limited to 1 MiB and ten samples per second;
-maps are limited to 3,100,000 bytes, 16,384 cells per dimension, and one sample
-per second. Samples more than two seconds old or more than five seconds in the
-future are rejected. Loss of fresh Lidar input continues to make roaming stop
-and wait; a sensor credential cannot directly drive the treads.
+Lidar uses `ROBLidarScanFrame` in v2 frame kind `7`, not JSON, decimal text, or
+generic keyed-archive controller data. Its network-order `RLS1` layout has a
+68-byte header containing the publisher UUID, sequence, capture time, xyz, and
+yaw/pitch/roll. Each valid return adds four bytes: UInt16 millimeters and a
+UInt16 fraction of a full turn. A normal 720-point scan is therefore 2,948
+bytes, or about 14.7 KB/s at the publisher's 5 Hz rate before transport
+overhead. The hard bound is 8,192 points and 32,836 bytes.
+
+Cerebro validates the binary version, exact length, authenticated device UUID,
+monotonically increasing publisher sequence, capture time, finite pose, and
+every point before delivering a sample. Replayed, stale, mismatched, or
+malformed telemetry is rejected. Samples more than two seconds old or more
+than five seconds in the future are rejected. The publisher keeps only one
+unsent latest scan while QUIC is busy, so congestion drops superseded sensor
+state instead of accumulating stale frames. Occupancy/composite map rasters
+remain local to the RPLidar app and are never transmitted. Loss of fresh Lidar
+input continues to make roaming stop and wait; a sensor credential cannot
+directly drive the treads.
 
 During migration, run the legacy adapter only as an explicit compatibility
 session. Role and revocation guarantees apply to the v2 path, so legacy mode
@@ -242,7 +249,7 @@ fallbacks.
    disconnect, persistent tombstone rejection after restart, and no effect on
    other independently paired devices.
 7. Test device-ID mismatch, duplicate sequence, stale timestamp, malformed
-   payload, and valid scan/map telemetry fixtures.
+   length/header/points, and the valid compact binary scan fixture.
 8. Test Wi-Fi loss while driving: Cerebro must expire the last controller model,
    write one neutral/braked frame, then cease the USB heartbeat before the
    Arduino deadman interval.

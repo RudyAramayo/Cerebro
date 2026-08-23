@@ -660,6 +660,7 @@ Run the standalone `ROBRobotActionProtocol` v1 envelope fixtures:
 
 ```bash
 swiftc \
+  Cerebro/AutoNet/AutoNetShared/AutoNetDataTransferProtocol.swift \
   Cerebro/ROBRobotActionProtocol.swift \
   Cerebro/ROBAutonomyCoordinator.swift \
   Tests/ROBRobotActionProtocolFixtureTests.swift \
@@ -778,7 +779,7 @@ responses, and response-size bounds without starting a server.
 - V2 provisions a unique Keychain-backed credential for each device. Cerebro's
   registry assigns either `operatorController` or `lidarPublisher`, treats that
   server-side role as authoritative, and keeps persistent revocation
-  tombstones. RPLidar credentials can publish only typed scan/map telemetry;
+  tombstones. RPLidar credentials can publish only compact binary scan telemetry;
   they cannot send controller frames or receive controller broadcasts.
 
 See [ROB control transport v2](rob-control-v2.md) and

@@ -19,6 +19,9 @@ public final class AutoNetServerConnection {
 
     private static var nextID = 0
     private static let authenticationTimeout: TimeInterval = 5
+    private static let networkProbeCapability = Data("ROBNET-PROBE-CAP-V1".utf8)
+    private static let networkProbePrefix = Data("ROBNET-PROBE-V1:".utf8)
+    private static let networkProbeInterval: TimeInterval = 2
 
     weak var serverDelegate: AutoNetServer?
     let connection: NWConnection
@@ -34,6 +37,26 @@ public final class AutoNetServerConnection {
     private var authenticationState: AuthenticationState = .transportConnecting
     private var authenticationTimeoutWorkItem: DispatchWorkItem?
     private var didStop = false
+    private var networkProbeWorkItem: DispatchWorkItem?
+    private var pendingNetworkProbe: Data?
+    private var pendingNetworkProbeSentUptime: TimeInterval?
+    private var networkProbeSupported = false
+    private var lastNetworkRoundTripMilliseconds: Double?
+    private var lastNetworkProbeResponseUptime: TimeInterval?
+    private var networkProbesSent: UInt64 = 0
+    private var networkProbeReplies: UInt64 = 0
+    private var consecutiveNetworkProbeMisses: UInt64 = 0
+    private var receivedApplicationBytes: UInt64 = 0
+    private var sentApplicationBytes: UInt64 = 0
+    private var receivedApplicationMessages: UInt64 = 0
+    private var sentApplicationMessages: UInt64 = 0
+    private var lastApplicationReceiveUptime: TimeInterval?
+    private var lastApplicationSendUptime: TimeInterval?
+    private var throughputSampleUptime = ProcessInfo.processInfo.systemUptime
+    private var throughputSampleReceivedBytes: UInt64 = 0
+    private var throughputSampleSentBytes: UInt64 = 0
+    private var throughputSampleReceivedMessages: UInt64 = 0
+    private var throughputSampleSentMessages: UInt64 = 0
 
     init(
         nwConnection: NWConnection,
@@ -74,6 +97,7 @@ public final class AutoNetServerConnection {
                 authenticationState = .authenticated
                 authenticatedRole = .operatorController
                 isReady = true
+                serverDelegate?.authenticatedConnectionDidBecomeReady(self)
                 print("ROBControl legacy connection \(id) ready (plaintext compatibility mode)")
                 receiveNextMessage()
             case .v2:
@@ -165,6 +189,8 @@ public final class AutoNetServerConnection {
                     return
                 }
             }
+
+            self.noteReceivedApplicationPayload(byteCount: data.count)
 
             switch type {
             case .sendData:
@@ -302,7 +328,7 @@ public final class AutoNetServerConnection {
     private func validateLidarTelemetry(_ data: Data) -> Bool {
         guard authenticatedRole == .lidarPublisher,
               let authenticatedDeviceID,
-              let message = try? JSONDecoder().decode(ROBLidarTelemetryMessage.self, from: data) else {
+              let message = try? ROBLidarScanFrame.decode(data) else {
             stop(error: AutoNetTransportError.authorizationFailed)
             return false
         }
@@ -343,7 +369,135 @@ public final class AutoNetServerConnection {
     func send(type: DataMessageType, data: Data) -> Bool {
         guard canReceiveApplicationMessage(type: type), !data.isEmpty else { return false }
         sendFrame(type: type, data: data) { [weak self] error in
-            if let error { self?.stop(error: error) }
+            guard let self else { return }
+            if let error {
+                self.stop(error: error)
+            } else {
+                self.noteSentApplicationPayload(byteCount: data.count)
+            }
+        }
+        return true
+    }
+
+    /// Claims the reserved capability/echo payloads before they can reach the
+    /// historical command parser. A publisher's generic sendData authority is
+    /// limited to this exact protocol by AutoNetServer.
+    func consumeNetworkProbeMessage(_ data: Data) -> Bool {
+        precondition(Thread.isMainThread, "ROBControl probes are owned by the main queue")
+        if data == Self.networkProbeCapability {
+            enableNetworkProbeSupport()
+            return true
+        }
+        guard data.starts(with: Self.networkProbePrefix) else { return false }
+
+        let now = ProcessInfo.processInfo.systemUptime
+        if data == pendingNetworkProbe, let sentAt = pendingNetworkProbeSentUptime {
+            lastNetworkRoundTripMilliseconds = max(0, now - sentAt) * 1_000
+            lastNetworkProbeResponseUptime = now
+            networkProbeReplies &+= 1
+            consecutiveNetworkProbeMisses = 0
+            pendingNetworkProbe = nil
+            pendingNetworkProbeSentUptime = nil
+        }
+        // A malformed, replayed, or late reserved probe is consumed but never
+        // promoted into application data or forwarded to another controller.
+        return true
+    }
+
+    func networkStatusSnapshot() -> ROBControlNetworkStatusSnapshot {
+        precondition(Thread.isMainThread, "ROBControl status is owned by the main queue")
+        let now = ProcessInfo.processInfo.systemUptime
+        let interval = max(0.001, now - throughputSampleUptime)
+        let receivedBytesPerSecond = Double(receivedApplicationBytes &- throughputSampleReceivedBytes) / interval
+        let sentBytesPerSecond = Double(sentApplicationBytes &- throughputSampleSentBytes) / interval
+        let receivedMessagesPerSecond = Double(receivedApplicationMessages &- throughputSampleReceivedMessages) / interval
+        let sentMessagesPerSecond = Double(sentApplicationMessages &- throughputSampleSentMessages) / interval
+
+        throughputSampleUptime = now
+        throughputSampleReceivedBytes = receivedApplicationBytes
+        throughputSampleSentBytes = sentApplicationBytes
+        throughputSampleReceivedMessages = receivedApplicationMessages
+        throughputSampleSentMessages = sentApplicationMessages
+
+        return ROBControlNetworkStatusSnapshot(
+            receivedBytesPerSecond: receivedBytesPerSecond,
+            sentBytesPerSecond: sentBytesPerSecond,
+            receivedMessagesPerSecond: receivedMessagesPerSecond,
+            sentMessagesPerSecond: sentMessagesPerSecond,
+            totalReceivedBytes: receivedApplicationBytes,
+            totalSentBytes: sentApplicationBytes,
+            lastReceiveAge: lastApplicationReceiveUptime.map { max(0, now - $0) },
+            lastSendAge: lastApplicationSendUptime.map { max(0, now - $0) },
+            probeSupported: networkProbeSupported,
+            roundTripMilliseconds: lastNetworkRoundTripMilliseconds,
+            probesSent: networkProbesSent,
+            probeReplies: networkProbeReplies,
+            consecutiveProbeMisses: consecutiveNetworkProbeMisses,
+            lastProbeResponseAge: lastNetworkProbeResponseUptime.map { max(0, now - $0) }
+        )
+    }
+
+    private func noteReceivedApplicationPayload(byteCount: Int) {
+        receivedApplicationBytes &+= UInt64(max(0, byteCount))
+        receivedApplicationMessages &+= 1
+        lastApplicationReceiveUptime = ProcessInfo.processInfo.systemUptime
+    }
+
+    private func noteSentApplicationPayload(byteCount: Int) {
+        sentApplicationBytes &+= UInt64(max(0, byteCount))
+        sentApplicationMessages &+= 1
+        lastApplicationSendUptime = ProcessInfo.processInfo.systemUptime
+    }
+
+    private func enableNetworkProbeSupport() {
+        guard !networkProbeSupported else { return }
+        networkProbeSupported = true
+        scheduleNextNetworkProbe(after: 0.25)
+    }
+
+    private func scheduleNextNetworkProbe(after delay: TimeInterval = networkProbeInterval) {
+        guard networkProbeSupported, !didStop, networkProbeWorkItem == nil else { return }
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.networkProbeWorkItem = nil
+            self.sendNetworkProbe()
+        }
+        networkProbeWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
+    private func sendNetworkProbe() {
+        guard networkProbeSupported, isReady, !didStop else { return }
+        if pendingNetworkProbe != nil {
+            consecutiveNetworkProbeMisses &+= 1
+        }
+
+        var payload = Self.networkProbePrefix
+        payload.append(Data(UUID().uuidString.lowercased().utf8))
+        pendingNetworkProbe = payload
+        pendingNetworkProbeSentUptime = ProcessInfo.processInfo.systemUptime
+        if sendReservedNetworkProbe(payload) {
+            networkProbesSent &+= 1
+        } else {
+            pendingNetworkProbe = nil
+            pendingNetworkProbeSentUptime = nil
+        }
+        scheduleNextNetworkProbe()
+    }
+
+    private func sendReservedNetworkProbe(_ data: Data) -> Bool {
+        guard networkProbeSupported, isReady, !didStop, !data.isEmpty else { return false }
+        if case .v2 = transportMode {
+            guard let authenticatedRole,
+                  registryAuthorizationIsCurrent(role: authenticatedRole) else { return false }
+        }
+        sendFrame(type: .sendData, data: data) { [weak self] error in
+            guard let self else { return }
+            if let error {
+                self.stop(error: error)
+            } else {
+                self.noteSentApplicationPayload(byteCount: data.count)
+            }
         }
         return true
     }
@@ -369,6 +523,10 @@ public final class AutoNetServerConnection {
         authenticationState = .stopped
         authenticationTimeoutWorkItem?.cancel()
         authenticationTimeoutWorkItem = nil
+        networkProbeWorkItem?.cancel()
+        networkProbeWorkItem = nil
+        pendingNetworkProbe = nil
+        pendingNetworkProbeSentUptime = nil
         isReady = false
         authenticatedControllerID = nil
         authenticatedRole = nil

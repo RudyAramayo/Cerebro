@@ -216,8 +216,8 @@ struct ROBControlTransportIntegrationTests {
             "A Lidar publisher was denied typed telemetry"
         )
         try expect(
-            !ROBControlAuthorizationPolicy.allowsInbound(.sendData, for: .lidarPublisher),
-            "A Lidar publisher was allowed to send controller data"
+            ROBControlAuthorizationPolicy.allowsInbound(.sendData, for: .lidarPublisher),
+            "A Lidar publisher was denied the reserved network-probe response lane"
         )
         try expect(
             ROBControlAuthorizationPolicy.allowsOutbound(.sendData, to: .operatorController),
@@ -232,19 +232,35 @@ struct ROBControlTransportIntegrationTests {
     private static func testLidarTelemetry() throws {
         let deviceID = UUID()
         let now: UInt64 = 1_725_000_010_000
-        let scan = ROBLidarTelemetryMessage(
-            kind: .scan,
-            messageID: UUID(),
+        let points = (0..<8).map {
+            ROBLidarWirePoint(
+                distanceMeters: 0.4 + Float($0) * 0.01,
+                angleRadians: -0.3 + Float($0) * 0.08
+            )
+        }
+        let scan = ROBLidarScanFrame(
             deviceID: deviceID,
             sequence: 41,
             sentAtMilliseconds: now - 100,
-            scanPayload: "0:0:0\n0:0:0\n0.4:0.1\n0.5:-0.2\n"
+            x: 1,
+            y: -2,
+            z: 0.25,
+            yaw: 0.2,
+            pitch: -0.1,
+            roll: 0.05,
+            points: points
         )
-        let decodedScan = try JSONDecoder().decode(
-            ROBLidarTelemetryMessage.self,
-            from: JSONEncoder().encode(scan)
+        let encodedScan = try scan.encoded()
+        let decodedScan = try ROBLidarScanFrame.decode(encodedScan)
+        try expect(
+            Data(encodedScan.prefix(4)) == Data([0x52, 0x4C, 0x53, 0x31])
+                && encodedScan.count == ROBLidarScanFrame.headerLength
+                    + scan.points.count * ROBLidarScanFrame.pointStride
+                && decodedScan.deviceID == scan.deviceID
+                && decodedScan.sequence == scan.sequence
+                && decodedScan.points.count == scan.points.count,
+            "A typed Lidar scan did not round-trip"
         )
-        try expect(decodedScan == scan, "A typed Lidar scan did not round-trip")
         try expect(
             decodedScan.validationError(
                 authenticatedDeviceID: deviceID,
@@ -270,12 +286,17 @@ struct ROBControlTransportIntegrationTests {
             "A duplicate Lidar sequence was accepted"
         )
 
-        let staleScan = ROBLidarTelemetryMessage(
-            kind: .scan,
+        let staleScan = ROBLidarScanFrame(
             deviceID: deviceID,
             sequence: 42,
-            sentAtMilliseconds: now - ROBLidarTelemetryMessage.maximumMessageAgeMilliseconds - 1,
-            scanPayload: "0:0:0\n0:0:0\n0.4:0.1\n"
+            sentAtMilliseconds: now - ROBLidarScanFrame.maximumMessageAgeMilliseconds - 1,
+            x: 0,
+            y: 0,
+            z: 0,
+            yaw: 0,
+            pitch: 0,
+            roll: 0,
+            points: points
         )
         try expect(
             staleScan.validationError(
@@ -286,47 +307,41 @@ struct ROBControlTransportIntegrationTests {
             "Stale Lidar telemetry was accepted"
         )
 
-        let map = ROBLidarTelemetryMessage(
-            kind: .map,
+        let shortScan = ROBLidarScanFrame(
             deviceID: deviceID,
             sequence: 43,
             sentAtMilliseconds: now,
-            mapData: Data(repeating: 0x7F, count: 6),
-            mapWidth: 3,
-            mapHeight: 2
+            x: 0,
+            y: 0,
+            z: 0,
+            yaw: 0,
+            pitch: 0,
+            roll: 0,
+            points: Array(points.prefix(7))
         )
-        let decodedMap = try JSONDecoder().decode(
-            ROBLidarTelemetryMessage.self,
-            from: JSONEncoder().encode(map)
-        )
-        try expect(decodedMap == map, "A typed Lidar map did not round-trip")
         try expect(
-            decodedMap.validationError(
+            shortScan.validationError(
                 authenticatedDeviceID: deviceID,
                 lastAcceptedSequence: 42,
                 nowMilliseconds: now
-            ) == nil,
-            "A valid typed Lidar map failed validation"
+            ) != nil,
+            "A scan below the minimum point count was accepted"
         )
 
-        let mixedPayload = ROBLidarTelemetryMessage(
-            kind: .scan,
-            deviceID: deviceID,
-            sequence: 44,
-            sentAtMilliseconds: now,
-            scanPayload: "0:0:0\n0:0:0\n0.4:0.1\n",
-            mapData: Data([0]),
-            mapWidth: 1,
-            mapHeight: 1
-        )
-        try expect(
-            mixedPayload.validationError(
-                authenticatedDeviceID: deviceID,
-                lastAcceptedSequence: 43,
-                nowMilliseconds: now
-            ) != nil,
-            "A scan mixed with map data was accepted"
-        )
+        var unsupportedHeader = encodedScan
+        unsupportedHeader[5] = 1
+        do {
+            _ = try ROBLidarScanFrame.decode(unsupportedHeader)
+            throw TransportFixtureError.failed("Reserved Lidar header flags were accepted")
+        } catch ROBLidarTelemetryEncodingError.invalid {
+            // Expected: version 1 reserves all header flag bits.
+        }
+        do {
+            _ = try ROBLidarScanFrame.decode(Data("{\"kind\":\"scan\"}".utf8))
+            throw TransportFixtureError.failed("Removed JSON Lidar telemetry was accepted")
+        } catch {
+            // Expected: there is deliberately no compatibility decoder.
+        }
     }
 
     #if ROB_CONTROL_IDENTITY_FIXTURE && os(macOS)

@@ -324,8 +324,9 @@ Bonjour. Bonjour advertises only the protocol version, ALPN, and non-secret
 robot ID, so each client selects its paired robot rather than the first
 discovered service.
 
-The RPLidar app accepts only a `lidarPublisher` credential and sends typed scan
-and map frames. Cerebro resolves the role from its own Keychain registry, so
+The RPLidar app accepts only a `lidarPublisher` credential and sends compact
+binary scan frames. Full occupancy maps stay local to the RPLidar app instead
+of consuming the control link. Cerebro resolves the role from its own Keychain registry, so
 editing the role in a copied pairing payload cannot grant control authority.
 Revoking a device persists a tombstone, disconnects its live session, and does
 not disturb unrelated paired devices.
