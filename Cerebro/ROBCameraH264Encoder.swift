@@ -165,7 +165,7 @@ final class ROBCameraH264Encoder {
 
         let imageAttributes: [CFString: Any] = [
             kCVPixelBufferPixelFormatTypeKey:
-                NSNumber(value: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange),
+                NSNumber(value: kCVPixelFormatType_32BGRA),
             kCVPixelBufferWidthKey: width,
             kCVPixelBufferHeightKey: height,
             kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary,

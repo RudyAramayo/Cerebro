@@ -604,18 +604,20 @@ final class CameraViewController: NSViewController {
             name: .robRecordingDemandDidChange,
             object: ROBRecordingCoordinator.shared
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(remoteVideoDemandDidChange(_:)),
+            name: .robVideoCameraDemandDidChange,
+            object: nil
+        )
 
         do {
             let videoServer = try ROBVideoServer()
-            videoServer.subscriptionActivityDidChange = { [weak self] isActive in
-                guard let self else { return }
-                self.remoteVideoIsActive = isActive
-                self.reconcileCameraSession()
-            }
             try videoServer.start()
             self.videoServer = videoServer
+            ROBVideoServerRegistry.shared.install(videoServer)
             manager.videoSampleHandler = { [weak videoServer] sampleBuffer in
-                videoServer?.offer(sampleBuffer)
+                videoServer?.offer(cameraID: "front", sampleBuffer: sampleBuffer)
             }
         } catch {
             // Perception remains available if the optional media service fails.
@@ -716,6 +718,7 @@ final class CameraViewController: NSViewController {
 
     deinit {
         NotificationCenter.default.removeObserver(self)
+        if let videoServer { ROBVideoServerRegistry.shared.remove(videoServer) }
         videoServer?.stop()
     }
 
@@ -743,6 +746,16 @@ final class CameraViewController: NSViewController {
         } catch {
             print(error.localizedDescription)
         }
+    }
+
+    @objc private func remoteVideoDemandDidChange(_ notification: Notification) {
+        guard notification.userInfo?[ROBVideoCameraDemandNotification.cameraIDKey]
+                as? String == "front",
+              let isActive = notification.userInfo?[
+                ROBVideoCameraDemandNotification.isActiveKey
+              ] as? Bool else { return }
+        remoteVideoIsActive = isActive
+        reconcileCameraSession()
     }
 
     private var automaticProcessingNeedsFrames: Bool {

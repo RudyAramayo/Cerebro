@@ -68,6 +68,7 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
     private var displayDeliveryScheduled = false
     private var diagnosticsPreviewVisible = false
     private var geminiVideoDemandActive = false
+    private var remoteVideoDemandActive = false
     private var recordingVideoDemandActive = false
     private var recordingPreviewResolution: String?
     private var activeDecoderURL: String?
@@ -162,6 +163,12 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
             name: UserDefaults.didChangeNotification,
             object: UserDefaults.standard
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(remoteVideoDemandDidChange(_:)),
+            name: .robVideoCameraDemandDidChange,
+            object: nil
+        )
     }
 
     deinit {
@@ -170,6 +177,18 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
 
     @objc private func perceptionSettingsDidChange(_ notification: Notification) {
         refreshDecoderDemand()
+    }
+
+    @objc private func remoteVideoDemandDidChange(_ notification: Notification) {
+        guard notification.userInfo?[ROBVideoCameraDemandNotification.cameraIDKey]
+                as? String == "insta360",
+              let active = notification.userInfo?[
+                ROBVideoCameraDemandNotification.isActiveKey
+              ] as? Bool else { return }
+        queue.async {
+            self.remoteVideoDemandActive = active
+            self.reevaluateDecoderDemand()
+        }
     }
 
     /// Also catches an externally edited camera host. Calibration is cleared
@@ -330,7 +349,10 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
     }
 
     private var analysisNeedsFrames: Bool {
-        geminiVideoDemandActive || recordingVideoDemandActive || localAnalysisNeedsFrames
+        geminiVideoDemandActive
+            || recordingVideoDemandActive
+            || remoteVideoDemandActive
+            || localAnalysisNeedsFrames
     }
 
     private var localAnalysisNeedsFrames: Bool {
@@ -679,6 +701,9 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
                     capturedAt: capturedAt,
                     capturedAtUptime: capturedAtUptime
                 )
+            }
+            if remoteVideoDemandActive, #available(macOS 12.0, *) {
+                ROBVideoServerRegistry.shared.offerInsta360JPEG(jpeg)
             }
 
             // AppKit and local perception remain latest-only consumers on the

@@ -1,6 +1,8 @@
 import AVFoundation
+import CoreGraphics
 import CryptoKit
 import Foundation
+import ImageIO
 import Network
 import Security
 
@@ -9,7 +11,10 @@ enum ROBVideoTransport {
     static let applicationProtocol = "robvideo/1"
     static let protocolVersion: UInt8 = 1
     static let defaultPort: UInt16 = 12_346
-    static let maximumConnections = 2
+    /// One isolated QUIC connection per camera keeps a slow panorama from
+    /// adding head-of-line pressure to the driving cameras.
+    static let maximumConnections = 8
+    static let maximumConnectionsPerController = 3
     static let authenticationTimeout: TimeInterval = 5
     static let cameraFrameStallTimeout: TimeInterval = 15
     static let mediaSendTimeout: TimeInterval = 10
@@ -86,6 +91,14 @@ extension Notification.Name {
     static let robControlLiveSessionDidEnd = Notification.Name(
         "com.orbitusrobotics.robctl.v2.live-session-ended"
     )
+    static let robVideoCameraDemandDidChange = Notification.Name(
+        "com.orbitusrobotics.robvideo.camera-demand-changed"
+    )
+}
+
+enum ROBVideoCameraDemandNotification {
+    static let cameraIDKey = "cameraID"
+    static let isActiveKey = "isActive"
 }
 
 enum ROBControlLiveSessionNotification {
@@ -487,6 +500,49 @@ private extension UUID {
 }
 
 @available(macOS 12.0, *)
+final class ROBVideoServerRegistry {
+    static let shared = ROBVideoServerRegistry()
+
+    private let lock = NSLock()
+    private weak var server: ROBVideoServer?
+
+    private init() {}
+
+    func install(_ server: ROBVideoServer) {
+        lock.lock()
+        self.server = server
+        lock.unlock()
+    }
+
+    func remove(_ candidate: ROBVideoServer) {
+        lock.lock()
+        if server === candidate { server = nil }
+        lock.unlock()
+    }
+
+    func offer(cameraID: String, sampleBuffer: CMSampleBuffer) {
+        lock.lock()
+        let server = server
+        lock.unlock()
+        server?.offer(cameraID: cameraID, sampleBuffer: sampleBuffer)
+    }
+
+    func offerInsta360JPEG(_ data: Data) {
+        lock.lock()
+        let server = server
+        lock.unlock()
+        server?.offerJPEG(cameraID: "insta360", data: data)
+    }
+
+    func updateCameraState(_ state: CameraSourceState, cameraID: String) {
+        lock.lock()
+        let server = server
+        lock.unlock()
+        server?.updateCameraState(state, cameraID: cameraID)
+    }
+}
+
+@available(macOS 12.0, *)
 final class ROBVideoServer {
     private enum CameraAvailability {
         case unknown
@@ -500,19 +556,18 @@ final class ROBVideoServer {
         qos: .userInitiated
     )
 
-    /// Delivered on the main queue whenever demand-driven camera ownership
-    /// changes between zero and at least one accepted subscription.
-    var subscriptionActivityDidChange: ((Bool) -> Void)?
-
     private let credential: ROBControlCredential
     private var listener: NWListener?
     private var connectionsByID: [UUID: ROBVideoServerConnection] = [:]
-    private var reservedControllerIDs: Set<UUID> = []
+    private var reservedConnectionCountByControllerID: [UUID: Int] = [:]
     private var subscriptionOwners: [UUID: UUID] = [:]
     private var readySubscriptionIDs: Set<UUID> = []
     private var started = false
+    private var wantsStarted = false
+    private var listenerRestartAttempt = 0
+    private var listenerRestartWorkItem: DispatchWorkItem?
     private var cameraAvailability: CameraAvailability = .unknown
-    private var lastReportedCameraDemand = false
+    private var lastReportedCameraDemand: Set<String> = []
     private var credentialRevocationObserver: NSObjectProtocol?
     private var controlSessionObserver: NSObjectProtocol?
     private let statusLock = NSLock()
@@ -528,9 +583,16 @@ final class ROBVideoServer {
     private var listenerStatusDetail: String?
 
     private let offeredSampleLock = NSLock()
-    private var latestOfferedSample: CMSampleBuffer?
+    private var latestOfferedSamples: [String: CMSampleBuffer] = [:]
     private var sampleDrainScheduled = false
-    private var acceptsCameraSamples = false
+    private var acceptedCameraIDs: Set<String> = []
+    private let jpegConversionQueue = DispatchQueue(
+        label: "com.orbitusrobotics.robvideo.jpeg-conversion",
+        qos: .userInitiated
+    )
+    private let jpegLock = NSLock()
+    private var latestJPEGByCameraID: [String: Data] = [:]
+    private var jpegDrainScheduled = false
 
     init(port: UInt16 = ROBVideoTransport.defaultPort) throws {
         guard let endpointPort = NWEndpoint.Port(rawValue: port) else {
@@ -538,7 +600,17 @@ final class ROBVideoServer {
         }
         self.port = endpointPort
         credential = try ROBControlPairing.serverAuthenticationMaterial()
+        listener = try Self.makeListener(
+            endpointPort: endpointPort,
+            credential: credential
+        )
+        installCredentialObservers()
+    }
 
+    private static func makeListener(
+        endpointPort: NWEndpoint.Port,
+        credential: ROBControlCredential
+    ) throws -> NWListener {
         let parameters = try ROBControlPairing.makeVideoServerParameters()
         let listener = try NWListener(using: parameters, on: endpointPort)
         let txtRecord = NetService.data(fromTXTRecord: [
@@ -554,8 +626,10 @@ final class ROBVideoServer {
             domain: nil,
             txtRecord: txtRecord
         )
-        self.listener = listener
+        return listener
+    }
 
+    private func installCredentialObservers() {
         credentialRevocationObserver = NotificationCenter.default.addObserver(
             forName: .robControlCredentialWasRevoked,
             object: nil,
@@ -586,6 +660,7 @@ final class ROBVideoServer {
     }
 
     deinit {
+        listenerRestartWorkItem?.cancel()
         if let credentialRevocationObserver {
             NotificationCenter.default.removeObserver(credentialRevocationObserver)
         }
@@ -598,14 +673,26 @@ final class ROBVideoServer {
     }
 
     func start() throws {
-        guard let listener else { throw ROBVideoTransportError.listenerUnavailable }
-        guard !started else { return }
+        try queue.sync {
+            guard !wantsStarted else { return }
+            wantsStarted = true
+            if listener == nil {
+                listener = try Self.makeListener(endpointPort: port, credential: credential)
+            }
+            guard let listener else { throw ROBVideoTransportError.listenerUnavailable }
+            startListener(listener)
+            publishStatus()
+        }
+    }
+
+    private func startListener(_ listener: NWListener) {
+        dispatchPrecondition(condition: .onQueue(queue))
         started = true
         listenerStatus = "starting"
         listenerStatusDetail = nil
-        queue.async { [weak self] in self?.publishStatus() }
-        listener.stateUpdateHandler = { [weak self] state in
-            self?.listenerStateDidChange(state)
+        listener.stateUpdateHandler = { [weak self, weak listener] state in
+            guard let listener else { return }
+            self?.listenerStateDidChange(state, source: listener)
         }
         listener.newConnectionHandler = { [weak self] connection in
             self?.accept(connection)
@@ -625,6 +712,10 @@ final class ROBVideoServer {
     /// Stopped/connecting/reconnecting are intentionally "unknown": accepting a
     /// subscription is what starts demand-driven capture.
     func updateCameraState(_ state: CameraSourceState) {
+        updateCameraState(state, cameraID: "front")
+    }
+
+    func updateCameraState(_ state: CameraSourceState, cameraID: String) {
         let availability: CameraAvailability
         switch state {
         case .streamingRGB, .streamingRGBD:
@@ -636,11 +727,11 @@ final class ROBVideoServer {
         }
         queue.async { [weak self] in
             guard let self else { return }
-            self.cameraAvailability = availability
+            if cameraID == "front" { self.cameraAvailability = availability }
             self.publishStatus()
             guard availability == .unavailable else { return }
             for connection in Array(self.connectionsByID.values) {
-                connection.cameraDidBecomeUnavailable()
+                connection.cameraDidBecomeUnavailable(cameraID: cameraID)
             }
         }
     }
@@ -648,12 +739,16 @@ final class ROBVideoServer {
     /// Offers the latest real camera sample without allowing capture to wait
     /// behind scaling, encoding, or a stalled network peer.
     func offer(_ sampleBuffer: CMSampleBuffer) {
+        offer(cameraID: "front", sampleBuffer: sampleBuffer)
+    }
+
+    func offer(cameraID: String, sampleBuffer: CMSampleBuffer) {
         offeredSampleLock.lock()
-        guard acceptsCameraSamples else {
+        guard acceptedCameraIDs.contains(cameraID) else {
             offeredSampleLock.unlock()
             return
         }
-        latestOfferedSample = sampleBuffer
+        latestOfferedSamples[cameraID] = sampleBuffer
         let shouldSchedule = !sampleDrainScheduled
         if shouldSchedule { sampleDrainScheduled = true }
         offeredSampleLock.unlock()
@@ -663,16 +758,36 @@ final class ROBVideoServer {
         }
     }
 
+    /// Converts the Insta360 service's stitched JPEG output away from its
+    /// capture queue. Only the newest panorama is retained while conversion or
+    /// encoding is busy.
+    func offerJPEG(cameraID: String, data: Data) {
+        offeredSampleLock.lock()
+        let isAccepted = acceptedCameraIDs.contains(cameraID)
+        offeredSampleLock.unlock()
+        guard isAccepted else { return }
+
+        jpegLock.lock()
+        latestJPEGByCameraID[cameraID] = data
+        let shouldSchedule = !jpegDrainScheduled
+        if shouldSchedule { jpegDrainScheduled = true }
+        jpegLock.unlock()
+        if shouldSchedule {
+            jpegConversionQueue.async { [weak self] in self?.drainLatestJPEG() }
+        }
+    }
+
     fileprivate func reserveAuthenticatedConnection(
         controllerID: UUID,
         candidate: ROBVideoServerConnection
     ) -> Bool {
         guard connectionsByID[candidate.id] === candidate,
               connectionsByID.count <= ROBVideoTransport.maximumConnections,
-              !reservedControllerIDs.contains(controllerID) else {
+              reservedConnectionCountByControllerID[controllerID, default: 0]
+                < ROBVideoTransport.maximumConnectionsPerController else {
             return false
         }
-        reservedControllerIDs.insert(controllerID)
+        reservedConnectionCountByControllerID[controllerID, default: 0] += 1
         publishStatus()
         return true
     }
@@ -710,7 +825,12 @@ final class ROBVideoServer {
         connectionsByID.removeValue(forKey: connection.id)
         if connection.hasAuthenticationReservation,
            let controllerID = connection.referencedControllerID {
-            reservedControllerIDs.remove(controllerID)
+            let remaining = reservedConnectionCountByControllerID[controllerID, default: 1] - 1
+            if remaining > 0 {
+                reservedConnectionCountByControllerID[controllerID] = remaining
+            } else {
+                reservedConnectionCountByControllerID.removeValue(forKey: controllerID)
+            }
         }
         if let stream = connection.activeStream,
            let controllerID = connection.referencedControllerID {
@@ -719,27 +839,46 @@ final class ROBVideoServer {
         publishStatus()
     }
 
-    fileprivate var cameraIsUnavailable: Bool {
-        cameraAvailability == .unavailable
-    }
-
     fileprivate func advertisedCameras() -> [ROBVideoCameraDescriptor] {
-        guard !cameraIsUnavailable else { return [] }
-        return [ROBVideoCameraDescriptor(
-            id: "front",
-            name: "Cerebro Front Camera",
-            supportedCodecs: [.h264],
-            supportedDeliveryModes: [.reliableStream],
-            maximumWidth: ROBVideoTransport.maximumWidth,
-            maximumHeight: ROBVideoTransport.maximumHeight,
-            maximumFramesPerSecond: ROBVideoTransport.maximumFramesPerSecond,
-            maximumBitrate: ROBVideoTransport.maximumBitrate
-        )]
+        return [
+            ROBVideoCameraDescriptor(
+                id: "front",
+                name: "Main Camera",
+                supportedCodecs: [.h264],
+                supportedDeliveryModes: [.reliableStream],
+                maximumWidth: ROBVideoTransport.maximumWidth,
+                maximumHeight: ROBVideoTransport.maximumHeight,
+                maximumFramesPerSecond: ROBVideoTransport.maximumFramesPerSecond,
+                maximumBitrate: ROBVideoTransport.maximumBitrate
+            ),
+            ROBVideoCameraDescriptor(
+                id: "belly",
+                name: "Belly Camera",
+                supportedCodecs: [.h264],
+                supportedDeliveryModes: [.reliableStream],
+                maximumWidth: ROBVideoTransport.maximumWidth,
+                maximumHeight: ROBVideoTransport.maximumHeight,
+                maximumFramesPerSecond: ROBVideoTransport.maximumFramesPerSecond,
+                maximumBitrate: ROBVideoTransport.maximumBitrate
+            ),
+            ROBVideoCameraDescriptor(
+                id: "insta360",
+                name: "Insta360 Pro (Equirectangular 360°)",
+                supportedCodecs: [.h264],
+                supportedDeliveryModes: [.reliableStream],
+                maximumWidth: ROBVideoTransport.maximumWidth,
+                maximumHeight: 480,
+                maximumFramesPerSecond: ROBVideoTransport.maximumFramesPerSecond,
+                maximumBitrate: ROBVideoTransport.maximumBitrate
+            ),
+        ]
     }
 
-    private func listenerStateDidChange(_ state: NWListener.State) {
+    private func listenerStateDidChange(_ state: NWListener.State, source: NWListener) {
+        guard listener === source else { return }
         switch state {
         case .ready:
+            listenerRestartAttempt = 0
             listenerStatus = "ready"
             listenerStatusDetail = "QUIC/TLS media listener"
             print(
@@ -751,18 +890,64 @@ final class ROBVideoServer {
             listenerStatusDetail = error.localizedDescription
             print("ROBVideo listener waiting: \(error.localizedDescription)")
         case .failed(let error):
-            listenerStatus = "failed"
+            listenerStatus = "reconnecting"
             listenerStatusDetail = error.localizedDescription
             print("ROBVideo listener failed: \(error.localizedDescription)")
-            stopOnQueue()
+            retireFailedListener(source)
+            scheduleListenerRestart()
         case .cancelled:
             started = false
-            if listenerStatus != "failed" {
+            if wantsStarted {
+                listener = nil
+                listenerStatus = "reconnecting"
+                listenerStatusDetail = "The media listener stopped unexpectedly."
+                scheduleListenerRestart()
+            } else if listenerStatus != "failed" {
                 listenerStatus = "stopped"
                 listenerStatusDetail = nil
             }
         default:
             break
+        }
+        publishStatus()
+    }
+
+    private func retireFailedListener(_ failedListener: NWListener) {
+        failedListener.stateUpdateHandler = nil
+        failedListener.newConnectionHandler = nil
+        failedListener.cancel()
+        if listener === failedListener {
+            listener = nil
+        }
+        started = false
+        for connection in Array(connectionsByID.values) {
+            connection.stop(error: ROBVideoTransportError.listenerUnavailable)
+        }
+    }
+
+    private func scheduleListenerRestart() {
+        guard wantsStarted, listenerRestartWorkItem == nil else { return }
+        listenerRestartAttempt += 1
+        let delay = min(10.0, Double(1 << min(listenerRestartAttempt - 1, 3)))
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.restartListenerOnQueue()
+        }
+        listenerRestartWorkItem = workItem
+        queue.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
+    private func restartListenerOnQueue() {
+        listenerRestartWorkItem = nil
+        guard wantsStarted, listener == nil else { return }
+        do {
+            let replacement = try Self.makeListener(endpointPort: port, credential: credential)
+            listener = replacement
+            startListener(replacement)
+        } catch {
+            started = false
+            listenerStatus = "reconnecting"
+            listenerStatusDetail = error.localizedDescription
+            scheduleListenerRestart()
         }
         publishStatus()
     }
@@ -794,18 +979,18 @@ final class ROBVideoServer {
 
     private func drainLatestSample() {
         offeredSampleLock.lock()
-        let sample = latestOfferedSample
-        latestOfferedSample = nil
+        let samples = latestOfferedSamples
+        latestOfferedSamples.removeAll(keepingCapacity: true)
         offeredSampleLock.unlock()
 
-        if let sample {
+        for (cameraID, sample) in samples {
             for connection in connectionsByID.values {
-                connection.offer(sample)
+                connection.offer(cameraID: cameraID, sampleBuffer: sample)
             }
         }
 
         offeredSampleLock.lock()
-        if latestOfferedSample == nil {
+        if latestOfferedSamples.isEmpty {
             sampleDrainScheduled = false
             offeredSampleLock.unlock()
         } else {
@@ -814,20 +999,125 @@ final class ROBVideoServer {
         }
     }
 
+    private func drainLatestJPEG() {
+        jpegLock.lock()
+        let frames = latestJPEGByCameraID
+        latestJPEGByCameraID.removeAll(keepingCapacity: true)
+        jpegLock.unlock()
+
+        for (cameraID, data) in frames {
+            if let sampleBuffer = Self.makeSampleBuffer(fromJPEG: data) {
+                offer(cameraID: cameraID, sampleBuffer: sampleBuffer)
+            }
+        }
+
+        jpegLock.lock()
+        if latestJPEGByCameraID.isEmpty {
+            jpegDrainScheduled = false
+            jpegLock.unlock()
+        } else {
+            jpegLock.unlock()
+            jpegConversionQueue.async { [weak self] in self?.drainLatestJPEG() }
+        }
+    }
+
+    private static func makeSampleBuffer(fromJPEG data: Data) -> CMSampleBuffer? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
+              image.width > 0,
+              image.height > 0 else { return nil }
+
+        let attributes: [CFString: Any] = [
+            kCVPixelBufferPixelFormatTypeKey: NSNumber(value: kCVPixelFormatType_32BGRA),
+            kCVPixelBufferWidthKey: image.width,
+            kCVPixelBufferHeightKey: image.height,
+            kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary,
+        ]
+        var pixelBuffer: CVPixelBuffer?
+        guard CVPixelBufferCreate(
+            kCFAllocatorDefault,
+            image.width,
+            image.height,
+            kCVPixelFormatType_32BGRA,
+            attributes as CFDictionary,
+            &pixelBuffer
+        ) == kCVReturnSuccess,
+              let pixelBuffer else { return nil }
+
+        CVPixelBufferLockBaseAddress(pixelBuffer, [])
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
+        guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer),
+              let context = CGContext(
+                data: baseAddress,
+                width: image.width,
+                height: image.height,
+                bitsPerComponent: 8,
+                bytesPerRow: CVPixelBufferGetBytesPerRow(pixelBuffer),
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue
+                    | CGImageAlphaInfo.premultipliedFirst.rawValue
+              ) else { return nil }
+        context.translateBy(x: 0, y: CGFloat(image.height))
+        context.scaleBy(x: 1, y: -1)
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+
+        var formatDescription: CMVideoFormatDescription?
+        guard CMVideoFormatDescriptionCreateForImageBuffer(
+            allocator: kCFAllocatorDefault,
+            imageBuffer: pixelBuffer,
+            formatDescriptionOut: &formatDescription
+        ) == noErr,
+              let formatDescription else { return nil }
+        var timing = CMSampleTimingInfo(
+            duration: .invalid,
+            presentationTimeStamp: CMClockGetTime(CMClockGetHostTimeClock()),
+            decodeTimeStamp: .invalid
+        )
+        var sampleBuffer: CMSampleBuffer?
+        guard CMSampleBufferCreateReadyWithImageBuffer(
+            allocator: kCFAllocatorDefault,
+            imageBuffer: pixelBuffer,
+            formatDescription: formatDescription,
+            sampleTiming: &timing,
+            sampleBufferOut: &sampleBuffer
+        ) == noErr else { return nil }
+        return sampleBuffer
+    }
+
     private func updateCameraDemand() {
-        let isActive = !readySubscriptionIDs.isEmpty
+        let activeCameraIDs = Set(connectionsByID.values.compactMap { connection -> String? in
+            guard let stream = connection.activeStream,
+                  readySubscriptionIDs.contains(stream.id) else { return nil }
+            return stream.cameraID
+        })
         offeredSampleLock.lock()
-        acceptsCameraSamples = isActive
-        if !isActive { latestOfferedSample = nil }
+        acceptedCameraIDs = activeCameraIDs
+        latestOfferedSamples = latestOfferedSamples.filter {
+            activeCameraIDs.contains($0.key)
+        }
         offeredSampleLock.unlock()
-        guard isActive != lastReportedCameraDemand else { return }
-        lastReportedCameraDemand = isActive
-        DispatchQueue.main.async { [weak self] in
-            self?.subscriptionActivityDidChange?(isActive)
+        let changedCameraIDs = activeCameraIDs.symmetricDifference(lastReportedCameraDemand)
+        guard !changedCameraIDs.isEmpty else { return }
+        lastReportedCameraDemand = activeCameraIDs
+        DispatchQueue.main.async {
+            for cameraID in changedCameraIDs {
+                NotificationCenter.default.post(
+                    name: .robVideoCameraDemandDidChange,
+                    object: nil,
+                    userInfo: [
+                        ROBVideoCameraDemandNotification.cameraIDKey: cameraID,
+                        ROBVideoCameraDemandNotification.isActiveKey:
+                            activeCameraIDs.contains(cameraID),
+                    ]
+                )
+            }
         }
     }
 
     private func stopOnQueue() {
+        wantsStarted = false
+        listenerRestartWorkItem?.cancel()
+        listenerRestartWorkItem = nil
         started = false
         if listenerStatus != "failed" {
             listenerStatus = "stopped"
@@ -850,7 +1140,7 @@ final class ROBVideoServer {
             connection.stop(error: nil)
         }
         connectionsByID.removeAll()
-        reservedControllerIDs.removeAll()
+        reservedConnectionCountByControllerID.removeAll()
         subscriptionOwners.removeAll()
         readySubscriptionIDs.removeAll()
         updateCameraDemand()
@@ -881,7 +1171,7 @@ final class ROBVideoServer {
                 stableID: stream.id.uuidString.lowercased(),
                 controllerID: controllerID.uuidString.lowercased(),
                 sessionID: stream.sessionID.uuidString.lowercased(),
-                profile: "\(stream.width)×\(stream.height) @ \(stream.framesPerSecond) FPS"
+                profile: "\(stream.cameraID) · \(stream.width)×\(stream.height) @ \(stream.framesPerSecond) FPS"
             )
         }.sorted { $0.stableID < $1.stableID }
         let snapshot = ROBVideoServerStatusSnapshot(
@@ -981,9 +1271,9 @@ private final class ROBVideoServerConnection {
         connection.start(queue: server.queue)
     }
 
-    func offer(_ sampleBuffer: CMSampleBuffer) {
+    func offer(cameraID: String, sampleBuffer: CMSampleBuffer) {
         guard !stopped,
-              activeStream != nil,
+              activeStream?.cameraID == cameraID,
               subscriptionIsReady,
               let encoder else { return }
         guard !mediaSendInFlight, !encoderOutputPending else {
@@ -1233,8 +1523,15 @@ private final class ROBVideoServerConnection {
             return
         }
 
-        let width = min(request.constraints.maximumWidth, ROBVideoTransport.maximumWidth) & ~1
-        let height = min(request.constraints.maximumHeight, ROBVideoTransport.maximumHeight) & ~1
+        let camera = server?.advertisedCameras().first { $0.id == request.cameraID }
+        let width = min(
+            request.constraints.maximumWidth,
+            camera?.maximumWidth ?? ROBVideoTransport.maximumWidth
+        ) & ~1
+        let height = min(
+            request.constraints.maximumHeight,
+            camera?.maximumHeight ?? ROBVideoTransport.maximumHeight
+        ) & ~1
         let framesPerSecond = min(
             request.constraints.maximumFramesPerSecond,
             ROBVideoTransport.maximumFramesPerSecond
@@ -1332,8 +1629,8 @@ private final class ROBVideoServerConnection {
             || !request.constraints.isValid {
             return .invalidConstraints
         }
-        if request.cameraID != "front" { return .cameraUnavailable }
-        if server?.cameraIsUnavailable == true { return .cameraUnavailable }
+        let availableCameraIDs = Set(server?.advertisedCameras().map(\.id) ?? [])
+        if !availableCameraIDs.contains(request.cameraID) { return .cameraUnavailable }
         if !request.preferredCodecs.contains(.h264) { return .codecUnavailable }
         if request.delivery != .reliableStream { return .deliveryUnavailable }
         return nil
@@ -1554,8 +1851,8 @@ private final class ROBVideoServerConnection {
         }
     }
 
-    func cameraDidBecomeUnavailable() {
-        guard activeStream != nil else { return }
+    func cameraDidBecomeUnavailable(cameraID: String) {
+        guard activeStream?.cameraID == cameraID else { return }
         endStream(reason: "camera unavailable", notifyPeer: true)
     }
 

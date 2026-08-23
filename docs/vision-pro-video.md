@@ -100,9 +100,11 @@ frame rate in response to camera capability or encoder load.
 
 ### Authenticated video negotiation
 
-- `ROBVideoCapabilities` describes the current `front` camera and its supported
-  H.264 reliable-stream limits. Cerebro sends it immediately after video
-  authentication.
+- `ROBVideoCapabilities` describes `front` (main), `belly`, and `insta360`
+  camera sources and their H.264 reliable-stream limits. `insta360` is the
+  camera's stitched 2:1 equirectangular preview, capped at 960 x 480 so its
+  spherical projection is preserved. Cerebro sends capabilities immediately
+  after every video authentication.
 - `ROBVideoSubscriptionRequest` carries plain UUID `sessionID` and `id` fields,
   a camera ID, ordered codec preferences, delivery mode, and maximum width,
   height, frame rate, and bitrate.
@@ -159,8 +161,9 @@ unit; codec value `2` is H.264 and flag bit zero marks a key frame.
 
 ## Backpressure and safety
 
-Cerebro retains only the latest offered raw camera sample while server work is
-pending. Each subscribed connection permits one encoder output pending and
+Cerebro retains only the latest offered raw sample for each camera while server
+work is pending. Insta360 JPEG decoding is also latest-only and runs away from
+the camera service queue. Each subscribed connection permits one encoder output pending and
 exactly one media send in flight; there is no encoded-access-unit backlog.
 Camera capture and encoding never wait for network capacity.
 
@@ -180,30 +183,34 @@ stream until that bounded send has drained.
 
 Video listener, connection, encoder, and feedback work run on queues separate
 from the main and control queues. There is no synchronous dispatch from video to
-control. The total configured video bitrate remains capped because both QUIC
-connections still share the physical network.
+control. Each enabled camera uses its own authenticated QUIC connection, so a
+slow panorama cannot head-of-line block either driving view. All media
+connections still share the physical network, so enabling three 1.5 Mbit/s
+profiles requires capacity for their aggregate bitrate.
 
 ## Lifecycle
 
-The video listener may remain available for the Cerebro application lifetime,
-but camera encoding is demand-driven and starts only for an accepted, bound
-subscription. The camera capture owner must be independent of camera-window
+The video listener remains available for the Cerebro application lifetime and
+recreates its QUIC listener with bounded backoff after a terminal listener
+failure, restoring the `_robvideo._udp` advertisement without restarting robot
+control. Camera encoding is demand-driven and starts only for an accepted,
+bound subscription. The camera capture owner must be independent of camera-window
 visibility: Cerebro keeps capture running while either the preview is visible
 or at least one remote subscription is active, without restarting capture for
 redundant demand notifications. Camera callbacks are bound to their DepthAI or
 AVFoundation capture run; queued callbacks are invalidated and drained across
 stop/restart so a frame produced by a retired run cannot enter a new stream.
 
-While the camera manager's current state is `unavailable`, a newly authenticated
-connection's one-time capabilities message omits the camera, new subscriptions
-receive `cameraUnavailable`, and an active stream is ended. Cerebro treats
-`stopped`, `connecting`, and `reconnecting` as unknown availability: it may
-advertise and accept a subscription so demand can restart capture. Capability
-changes are not pushed on an already authenticated connection. A newly accepted
-subscription has 15 seconds to produce its first encoded frame, and no later
-encoded-frame gap may exceed 15 seconds. Cerebro sends `ROBVideoStreamEnded` and
-releases camera demand after either startup or mid-stream camera stalls instead
-of reserving an indefinite black stream.
+Cerebro always includes all three configured sources in the authenticated
+capabilities message. Demand is tracked independently by camera ID: disabling
+one stream releases only that capture/decoder consumer and leaves the other
+feeds running. A subscription creates camera demand even while its camera
+manager is stopped, connecting, reconnecting, or temporarily unavailable, so
+demand can restart capture instead of deadlocking behind an idle camera. A
+newly accepted subscription has 15 seconds to produce its first encoded frame,
+and no later encoded-frame gap may exceed 15 seconds. Cerebro sends
+`ROBVideoStreamEnded` and releases camera demand after either startup or
+mid-stream camera stalls instead of reserving an indefinite black stream.
 
 Shutdown stops new subscriptions, ends active streams best-effort, discards
 queued media, invalidates encoders, closes video connections and the video
@@ -237,9 +244,12 @@ xcodebuild -quiet -project Cerebro.xcodeproj -scheme Cerebro \
   CODE_SIGNING_ALLOWED=NO build
 ```
 
-The encoder smoke test creates a synthetic BGRA camera sample, scales it to
-NV12, asks VideoToolbox for H.264, and validates the resulting IDR, SPS/PPS, and
-AVCC access unit through the same wire model used by the server.
+The encoder smoke test creates an IOSurface-backed synthetic BGRA camera sample,
+scales it into the encoder's BGRA pool, asks VideoToolbox to perform the supported
+H.264 color conversion, and validates the resulting IDR, SPS/PPS, and AVCC access
+unit through the same wire model used by the server. Keeping the pixel-transfer
+stage in BGRA avoids the Metal `uchar4 -> float4` conversion failure produced by
+some live camera IOSurfaces.
 
 ## Initial limitations
 

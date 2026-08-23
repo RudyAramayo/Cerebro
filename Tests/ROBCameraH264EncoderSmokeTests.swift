@@ -20,7 +20,7 @@ private enum ROBCameraH264EncoderSmokeRunner {
             640,
             480,
             kCVPixelFormatType_32BGRA,
-            nil,
+            [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary,
             &sourceBuffer
         )
         guard pixelStatus == kCVReturnSuccess, let sourceBuffer else {

@@ -17,6 +17,7 @@ import AVFoundation
     private var cameraViewIsVisible = false
     private var navigationDemandActive = false
     private var recordingDemandActive = false
+    private var remoteVideoDemandActive = false
     private var cameraSessionIsRequested = false
     private var overlayManager: CameraOverlayManager?
     private var hasSetAspectRatio = false
@@ -71,6 +72,14 @@ import AVFoundation
         manager.recordingFrameHandler = { frameSet in
             ROBRecordingCoordinator.shared.offerCameraFrame(role: .belly, frameSet: frameSet)
         }
+        manager.videoSampleHandler = { sampleBuffer in
+            if #available(macOS 12.0, *) {
+                ROBVideoServerRegistry.shared.offer(
+                    cameraID: "belly",
+                    sampleBuffer: sampleBuffer
+                )
+            }
+        }
         self.bellyCameraManager = manager
         
         // Setup Calibrate Button
@@ -94,6 +103,12 @@ import AVFoundation
             selector: #selector(recordingDemandDidChange(_:)),
             name: .robRecordingDemandDidChange,
             object: ROBRecordingCoordinator.shared
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(remoteVideoDemandDidChange(_:)),
+            name: .robVideoCameraDemandDidChange,
+            object: nil
         )
         applyRecordingDemand()
         reconcileCameraSession()
@@ -127,6 +142,16 @@ import AVFoundation
         reconcileCameraSession()
     }
 
+    @objc private func remoteVideoDemandDidChange(_ notification: Notification) {
+        guard notification.userInfo?[ROBVideoCameraDemandNotification.cameraIDKey]
+                as? String == "belly",
+              let active = notification.userInfo?[
+                ROBVideoCameraDemandNotification.isActiveKey
+              ] as? Bool else { return }
+        remoteVideoDemandActive = active
+        reconcileCameraSession()
+    }
+
     private func applyRecordingDemand() {
         let demand = ROBRecordingCoordinator.shared.cameraCaptureDemand(for: .belly)
         recordingDemandActive = demand.active
@@ -135,7 +160,10 @@ import AVFoundation
     
     private func reconcileCameraSession() {
         guard let bellyCameraManager else { return }
-        let shouldRun = cameraViewIsVisible || navigationDemandActive || recordingDemandActive
+        let shouldRun = cameraViewIsVisible
+            || navigationDemandActive
+            || recordingDemandActive
+            || remoteVideoDemandActive
         guard shouldRun != cameraSessionIsRequested else { return }
         do {
             if shouldRun {
@@ -169,6 +197,16 @@ import AVFoundation
     }
     
     // MARK: - CameraManagerDelegate
+
+    func cameraManager(
+        _ manager: CameraManagerProtocol,
+        didChange state: CameraSourceState,
+        detail: String?
+    ) {
+        if #available(macOS 12.0, *) {
+            ROBVideoServerRegistry.shared.updateCameraState(state, cameraID: "belly")
+        }
+    }
     
     func cameraManager(_ manager: CameraManagerProtocol, didOutput frameSet: CameraFrameSet) {
         ROBTraversabilityRuntime.shared.offer(frameSet: frameSet)
