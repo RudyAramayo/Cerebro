@@ -72,6 +72,7 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification
 {
     [self installRecordingMenu];
+    [self installFaceIdentityMenu];
     [self installDevelopmentMenu];
     [[[NSWorkspace sharedWorkspace] notificationCenter]
         addObserver:self
@@ -108,6 +109,28 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self rpLidarCheck];
     });
+}
+
+- (void)installFaceIdentityMenu
+{
+    NSMenu *submenu = [[NSMenu alloc] initWithTitle:@"People"];
+    NSMenuItem *openItem = [[NSMenuItem alloc]
+        initWithTitle:@"People & Face Enrollment…"
+               action:@selector(showFaceIdentityControl:)
+        keyEquivalent:@""];
+    openItem.target = self;
+    [submenu addItem:openItem];
+
+    NSMenuItem *peopleItem = [[NSMenuItem alloc] initWithTitle:@"People"
+                                                        action:nil
+                                                 keyEquivalent:@""];
+    peopleItem.submenu = submenu;
+    [NSApp.mainMenu addItem:peopleItem];
+}
+
+- (IBAction)showFaceIdentityControl:(id)sender
+{
+    [[ROBFaceIdentityWindowController shared] showWindow:sender];
 }
 
 - (void)installRecordingMenu

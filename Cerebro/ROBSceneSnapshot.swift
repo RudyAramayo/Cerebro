@@ -415,6 +415,12 @@ public final class ROBSceneSnapshotStore: @unchecked Sendable {
     }
 
     public func updateMLXIdentifiedPeople(_ people: [String]) {
+        updateIdentifiedPeople(people)
+    }
+
+    /// Updates names established by a dedicated identity recognizer. Names are
+    /// short-lived sensor context and never an authorization signal.
+    public func updateIdentifiedPeople(_ people: [String]) {
         lock.lock()
         sequence &+= 1
         mlxIdentifiedPeople = people

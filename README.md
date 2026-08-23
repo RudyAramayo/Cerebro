@@ -374,6 +374,10 @@ offline-model architecture.
 See [local improvisation provider](docs/local-improvisation-provider.md) for
 llama.cpp launch/setup, runtime modes, schema and fallback behavior, diagnostics,
 validation commands, and the native MLX Swift adapter seam.
+See [local face identity](docs/face-identity.md) for consent-based enrollment,
+encrypted biometric storage, headless recognition, name recall, deletion, and
+the strict separation between an administrator identity label and controller
+authorization.
 See [ROB control transport v2](docs/rob-control-v2.md) for pairing and migration,
 and [controller-activated autonomy](docs/controller-activated-autonomy.md) for
 the current behavior and the arm/servo integration roadmap.

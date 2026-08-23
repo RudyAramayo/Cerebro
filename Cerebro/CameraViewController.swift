@@ -1230,6 +1230,9 @@ extension CameraViewController: CameraManagerDelegate {
         // MLX applies a separate >=3 second sampling gate and performs VLM
         // inference on its actor. This call never enters the motor loop.
         ROBMLXRuntime.shared.offerCameraSampleBuffer(sampleBuffer)
+        // Face identity owns its own newest-frame admission gate and continues
+        // to operate when this diagnostic preview is hidden.
+        ROBFaceRecognitionService.shared.offer(sampleBuffer)
         ROBDynamicDetectorRegistry.shared.offer(sampleBuffer, source: .mainCamera)
         if swordTrackerEnabled {
             swordWristLock.lock(); let wrists = swordWristAnchors; swordWristLock.unlock()

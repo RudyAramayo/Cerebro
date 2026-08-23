@@ -114,6 +114,9 @@
 		C0A112022F4C011200000001 /* ROBTraversabilityRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A112012F4C011200000001 /* ROBTraversabilityRuntime.swift */; };
 		C0A120022F4C012000000001 /* ROBRecordingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A120012F4C012000000001 /* ROBRecordingCoordinator.swift */; };
 		C0A121022F4C012100000001 /* ROBRecordingWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A121012F4C012100000001 /* ROBRecordingWindowController.swift */; };
+		C0A130022F4C013000000001 /* ROBFaceIdentityGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A130012F4C013000000001 /* ROBFaceIdentityGallery.swift */; };
+		C0A131022F4C013100000001 /* ROBFaceRecognitionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A131012F4C013100000001 /* ROBFaceRecognitionService.swift */; };
+		C0A132022F4C013200000001 /* ROBFaceIdentityWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A132012F4C013200000001 /* ROBFaceIdentityWindowController.swift */; };
 		D4E3000E2F00000100000001 /* CameraOverlayManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E3000D2F00000100000001 /* CameraOverlayManager.swift */; };
 		C03600022F36000100000001 /* ROBInsta360DiagnosticsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03600012F36000100000001 /* ROBInsta360DiagnosticsWindowController.swift */; };
 		C03600122F36000100000001 /* ROBInsta360CameraService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03600112F36000100000001 /* ROBInsta360CameraService.swift */; };
@@ -304,6 +307,9 @@
 		C0A112012F4C011200000001 /* ROBTraversabilityRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBTraversabilityRuntime.swift; sourceTree = "<group>"; };
 		C0A120012F4C012000000001 /* ROBRecordingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRecordingCoordinator.swift; sourceTree = "<group>"; };
 		C0A121012F4C012100000001 /* ROBRecordingWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRecordingWindowController.swift; sourceTree = "<group>"; };
+		C0A130012F4C013000000001 /* ROBFaceIdentityGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBFaceIdentityGallery.swift; sourceTree = "<group>"; };
+		C0A131012F4C013100000001 /* ROBFaceRecognitionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBFaceRecognitionService.swift; sourceTree = "<group>"; };
+		C0A132012F4C013200000001 /* ROBFaceIdentityWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBFaceIdentityWindowController.swift; sourceTree = "<group>"; };
 		D4E3000D2F00000100000001 /* CameraOverlayManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraOverlayManager.swift; sourceTree = "<group>"; };
 		C03600012F36000100000001 /* ROBInsta360DiagnosticsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBInsta360DiagnosticsWindowController.swift; sourceTree = "<group>"; };
 		C03600112F36000100000001 /* ROBInsta360CameraService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBInsta360CameraService.swift; sourceTree = "<group>"; };
@@ -503,6 +509,9 @@
 				C0A112012F4C011200000001 /* ROBTraversabilityRuntime.swift */,
 				C0A120012F4C012000000001 /* ROBRecordingCoordinator.swift */,
 				C0A121012F4C012100000001 /* ROBRecordingWindowController.swift */,
+				C0A130012F4C013000000001 /* ROBFaceIdentityGallery.swift */,
+				C0A131012F4C013100000001 /* ROBFaceRecognitionService.swift */,
+				C0A132012F4C013200000001 /* ROBFaceIdentityWindowController.swift */,
 				D4E3000D2F00000100000001 /* CameraOverlayManager.swift */,
 				C03600012F36000100000001 /* ROBInsta360DiagnosticsWindowController.swift */,
 				C03600112F36000100000001 /* ROBInsta360CameraService.swift */,
@@ -840,6 +849,9 @@
 				C0A112022F4C011200000001 /* ROBTraversabilityRuntime.swift in Sources */,
 				C0A120022F4C012000000001 /* ROBRecordingCoordinator.swift in Sources */,
 				C0A121022F4C012100000001 /* ROBRecordingWindowController.swift in Sources */,
+				C0A130022F4C013000000001 /* ROBFaceIdentityGallery.swift in Sources */,
+				C0A131022F4C013100000001 /* ROBFaceRecognitionService.swift in Sources */,
+				C0A132022F4C013200000001 /* ROBFaceIdentityWindowController.swift in Sources */,
 				D4E3000E2F00000100000001 /* CameraOverlayManager.swift in Sources */,
 				C03600022F36000100000001 /* ROBInsta360DiagnosticsWindowController.swift in Sources */,
 				C03600122F36000100000001 /* ROBInsta360CameraService.swift in Sources */,
