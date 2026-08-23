@@ -30,7 +30,10 @@ import Vision
             // Conversion occurs only for an admitted frame and never on AppKit's
             // main thread. MLX retains its own actor/in-flight protection.
             Task { await ROBMLXEngine.shared.offerVisionFrame(
-                CIImage(cgImage: cgImage), source: "insta360-preview", minimumInterval: 1 / fps) }
+                CIImage(cgImage: cgImage),
+                source: ROBMLXVisionSource.insta360Preview,
+                minimumInterval: 1 / fps
+            ) }
 
             guard ROBDynamicDetectorRegistry.shared.enabled("generic-objects", source: .insta360),
                   !self.classificationInFlight,

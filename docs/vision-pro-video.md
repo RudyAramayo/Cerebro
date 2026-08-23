@@ -64,6 +64,7 @@ version byte `1` and use these fixed layouts:
 
 | RVID message | Bytes after version | Total bytes |
 |---|---|---:|
+| `authenticationHello` | controller ID (16) | 17 |
 | `authenticationChallenge` | channel ID (16), server nonce (32), robot ID (16) | 65 |
 | `authenticationProof` | channel ID (16), controller ID (16), client nonce (32), client MAC (32) | 97 |
 | `authenticationAccepted` | channel ID (16), controller ID (16), server MAC (32) | 65 |
@@ -156,7 +157,10 @@ zero bytes, monotonic connection sequence (8), and eight reserved zero bytes.
 Message-kind values are `1` challenge, `2` proof, `3` accepted, `4` rejected,
 `5` capabilities, `6` subscribe, `7` subscription response, `8` unsubscribe,
 `9` feedback, `10` codec configuration, `11` access unit, and `12` stream
-ended. Media kind values inside `RBVD` are `1` configuration and `2` access
+ended. Value `13` is the controller authentication hello; its appended value
+preserves the original v1 message assignments. The controller sends this hello
+first so it owns the bidirectional QUIC stream before Cerebro replies with the
+challenge. Media kind values inside `RBVD` are `1` configuration and `2` access
 unit; codec value `2` is H.264 and flag bit zero marks a key frame.
 
 ## Backpressure and safety

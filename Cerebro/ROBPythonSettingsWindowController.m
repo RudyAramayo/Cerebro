@@ -415,28 +415,29 @@
     messagesPermissionsBox.title = @"Required macOS Permissions";
     [messagesView addSubview:messagesPermissionsBox];
     NSTextField *messagesPermissions = [self labelWithString:
-        @"Inbound: add Cerebro in System Settings → Privacy & Security → Full Disk Access, then restart Cerebro so it can read the local Messages inbox.\n\nOutbound and scripted automation: allow Cerebro to control Messages and any application named by a locally reviewed command script when macOS prompts. The receiving account must be signed in and enabled in Messages."
-        frame:NSMakeRect(14, 88, 604, 44)];
+        @"Full Disk Access: reads the local Messages inbox; restart Cerebro after granting access.\nAutomation: sends replies and controls apps used by reviewed scripts; sign in to Messages first."
+        frame:NSMakeRect(14, 82, 604, 32)];
     messagesPermissions.textColor = [NSColor secondaryLabelColor];
     messagesPermissions.selectable = YES;
+    messagesPermissions.maximumNumberOfLines = 2;
     [messagesPermissionsBox.contentView addSubview:messagesPermissions];
     self.openFullDiskAccessSettingsButton = [self buttonWithTitle:@"Open Full Disk Access Settings"
-                                                          frame:NSMakeRect(14, 54, 250, 28)
+                                                          frame:NSMakeRect(14, 48, 250, 28)
                                                          action:@selector(openFullDiskAccessSettings:)];
     self.openFullDiskAccessSettingsButton.toolTip = @"Open System Settings → Privacy & Security → Full Disk Access.";
     self.openAutomationSettingsButton = [self buttonWithTitle:@"Open Automation Settings"
-                                                      frame:NSMakeRect(276, 54, 250, 28)
+                                                      frame:NSMakeRect(276, 48, 250, 28)
                                                      action:@selector(openAutomationSettings:)];
     self.openAutomationSettingsButton.toolTip = @"Open System Settings → Privacy & Security → Automation.";
     [messagesPermissionsBox.contentView addSubview:self.openFullDiskAccessSettingsButton];
     [messagesPermissionsBox.contentView addSubview:self.openAutomationSettingsButton];
     self.requestMessagesAutomationPermissionButton = [self buttonWithTitle:@"Request Messages Automation Access"
-                                                                   frame:NSMakeRect(14, 19, 250, 28)
+                                                                   frame:NSMakeRect(14, 13, 250, 28)
                                                                   action:@selector(requestMessagesAutomationPermission:)];
     self.requestMessagesAutomationPermissionButton.toolTip =
         @"Check Cerebro's current Messages Automation authorization and request macOS consent when it has not been decided.";
     self.requestMusicAutomationPermissionButton = [self buttonWithTitle:@"Request Music Automation Access"
-                                                                frame:NSMakeRect(276, 19, 250, 28)
+                                                                frame:NSMakeRect(276, 13, 250, 28)
                                                                action:@selector(requestMusicAutomationPermission:)];
     self.requestMusicAutomationPermissionButton.toolTip =
         @"Run a lightweight Music AppleScript call to trigger the local automation permission prompt.";

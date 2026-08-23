@@ -85,6 +85,10 @@ enum ROBVideoMessageType: UInt16 {
     case codecConfiguration = 10
     case accessUnit = 11
     case streamEnded = 12
+    /// Opens the controller-initiated bidirectional QUIC stream before the
+    /// server writes its challenge. Appended to preserve every existing v1
+    /// message value.
+    case authenticationHello = 13
 }
 
 extension Notification.Name {
@@ -186,6 +190,22 @@ private struct ROBVideoAuthChallenge {
         self.channelID = channelID
         self.serverNonce = serverNonce
         self.robotID = robotID
+    }
+}
+
+private struct ROBVideoAuthHello {
+    static let encodedSize = 17
+
+    let controllerID: UUID
+
+    init?(_ data: Data) {
+        let bytes = Data(data)
+        guard bytes.count == Self.encodedSize,
+              bytes[0] == ROBVideoTransport.protocolVersion,
+              let controllerID = UUID(robVideoBytes: bytes.subdata(in: 1..<17)) else {
+            return nil
+        }
+        self.controllerID = controllerID
     }
 }
 
@@ -1212,6 +1232,7 @@ private final class ROBVideoSendCompletionGate {
 private final class ROBVideoServerConnection {
     private enum AuthenticationState {
         case connecting
+        case awaitingHello
         case awaitingProof(ROBVideoAuthChallenge)
         case sendingAccepted
         case authenticated
@@ -1344,27 +1365,16 @@ private final class ROBVideoServerConnection {
     }
 
     private func beginAuthentication() {
-        do {
-            let challenge = try ROBVideoAuthenticator.makeChallenge(robotID: serverCredential.robotID)
-            authenticationState = .awaitingProof(challenge)
-            let timeout = DispatchWorkItem { [weak self] in
-                self?.stop(error: ROBVideoTransportError.authenticationFailed)
-            }
-            authenticationTimeout = timeout
-            server?.queue.asyncAfter(
-                deadline: .now() + ROBVideoTransport.authenticationTimeout,
-                execute: timeout
-            )
-            sendFrame(type: .authenticationChallenge, data: challenge.encoded) { [weak self] error in
-                if let error {
-                    self?.stop(error: error)
-                } else {
-                    self?.receiveNextMessage()
-                }
-            }
-        } catch {
-            stop(error: error)
+        authenticationState = .awaitingHello
+        let timeout = DispatchWorkItem { [weak self] in
+            self?.stop(error: ROBVideoTransportError.authenticationFailed)
         }
+        authenticationTimeout = timeout
+        server?.queue.asyncAfter(
+            deadline: .now() + ROBVideoTransport.authenticationTimeout,
+            execute: timeout
+        )
+        receiveNextMessage()
     }
 
     private func receiveNextMessage() {
@@ -1383,7 +1393,7 @@ private final class ROBVideoServerConnection {
             }
             let type = metadata.robVideoMessageType
             switch self.authenticationState {
-            case .awaitingProof:
+            case .awaitingHello, .awaitingProof:
                 self.handleAuthentication(type: type, data: data)
             case .authenticated:
                 self.handleApplicationMessage(type: type, data: data)
@@ -1394,6 +1404,19 @@ private final class ROBVideoServerConnection {
     }
 
     private func handleAuthentication(type: ROBVideoMessageType, data: Data) {
+        if case .awaitingHello = authenticationState {
+            guard type == .authenticationHello,
+                  let hello = ROBVideoAuthHello(data),
+                  let peer = try? ROBControlPairing.activePeerAuthenticationRecord(
+                    for: hello.controllerID
+                  ),
+                  peer.role == .operatorController else {
+                rejectAuthentication()
+                return
+            }
+            sendAuthenticationChallenge()
+            return
+        }
         guard type == .authenticationProof,
               case .awaitingProof(let challenge) = authenticationState,
               let proof = ROBVideoAuthProof(data) else {
@@ -1451,6 +1474,31 @@ private final class ROBVideoServerConnection {
             self.authenticatedControllerID = proof.controllerID
             self.authenticatingControllerID = nil
             self.sendCapabilities()
+        }
+    }
+
+    /// Waiting for the hello is essential with Network.framework QUIC: the
+    /// first application write determines which peer opens the stream. If the
+    /// server writes first, it creates stream 1, which a plain client
+    /// `NWConnection` cannot accept without an `NWConnectionGroup` listener.
+    private func sendAuthenticationChallenge() {
+        do {
+            let challenge = try ROBVideoAuthenticator.makeChallenge(
+                robotID: serverCredential.robotID
+            )
+            authenticationState = .awaitingProof(challenge)
+            sendFrame(
+                type: .authenticationChallenge,
+                data: challenge.encoded
+            ) { [weak self] error in
+                if let error {
+                    self?.stop(error: error)
+                } else {
+                    self?.receiveNextMessage()
+                }
+            }
+        } catch {
+            stop(error: error)
         }
     }
 

@@ -250,7 +250,10 @@ private final class ROBDepthPointCloudRenderer {
         let cx = Float(width - 1) / 2
         let cy = Float(height - 1) / 2
         var vertices: [SIMD3<Float>] = []
-        var colors: [SIMD4<UInt8>] = []
+        // SceneKit's Metal point shader consumes the color semantic as float4.
+        // Advertising uchar4 made SceneKit attempt an unsupported uchar4 ->
+        // float4 conversion for every depth-cloud render on macOS 26.
+        var colors: [SIMD4<Float>] = []
         vertices.reserveCapacity((width / stride) * (height / stride))
         colors.reserveCapacity(vertices.capacity)
 
@@ -272,9 +275,14 @@ private final class ROBDepthPointCloudRenderer {
                     vertices.append(SIMD3((Float(x) - cx) * z / fx, -(Float(y) - cy) * z / fy, -z))
                     if let rgbBase, x < rgbWidth, y < rgbHeight {
                         let pixel = rgbBase.advanced(by: y * rgbRowBytes + x * 4)
-                        colors.append(SIMD4(pixel[2], pixel[1], pixel[0], 255))
+                        colors.append(SIMD4(
+                            Float(pixel[2]) / 255,
+                            Float(pixel[1]) / 255,
+                            Float(pixel[0]) / 255,
+                            1
+                        ))
                     } else {
-                        colors.append(SIMD4(80, 210, 255, 255))
+                        colors.append(SIMD4(80 / 255, 210 / 255, 1, 1))
                     }
                 }
             }
@@ -290,9 +298,9 @@ private final class ROBDepthPointCloudRenderer {
         )
         let colorSource = SCNGeometrySource(
             data: colorData, semantic: .color, vectorCount: colors.count,
-            usesFloatComponents: false, componentsPerVector: 4,
-            bytesPerComponent: 1, dataOffset: 0,
-            dataStride: MemoryLayout<SIMD4<UInt8>>.stride
+            usesFloatComponents: true, componentsPerVector: 4,
+            bytesPerComponent: MemoryLayout<Float>.size, dataOffset: 0,
+            dataStride: MemoryLayout<SIMD4<Float>>.stride
         )
         var indices = (0..<vertices.count).map(UInt32.init)
         let indexData = indices.withUnsafeMutableBytes { Data($0) }
@@ -1277,7 +1285,7 @@ extension CameraViewController: CameraManagerDelegate {
             )
         }
         calibrationBarcodeRequest.symbologies = [.qr]
-        let trajectoriesRequest = VNDetectTrajectoriesRequest(frameAnalysisSpacing: CMTime(value: 1, timescale: 60), trajectoryLength: 1, completionHandler: { request, error in
+        let trajectoriesRequest = VNDetectTrajectoriesRequest(frameAnalysisSpacing: CMTime(value: 1, timescale: 60), trajectoryLength: 5, completionHandler: { request, error in
             for observation in request.results as! [VNTrajectoryObservation] {
                 print("trajectoriesRequest = \(observation)")
             }
