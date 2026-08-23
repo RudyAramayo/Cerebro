@@ -2674,9 +2674,16 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
             return;
         }
         NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+        // EOF only guarantees that ticcmd closed its output descriptors. The
+        // process can still be running briefly, and terminationStatus raises
+        // NSInvalidArgumentException until NSTask has observed its exit.
+        // Drain first to avoid a full-pipe deadlock, then establish the
+        // termination barrier before inspecting process status.
+        [ticcmd waitUntilExit];
         NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
-        if (ticcmd.terminationStatus != 0 || output.length > 0) {
-            NSLog(@"Pololu ticcmd: %@", output);
+        int terminationStatus = ticcmd.terminationStatus;
+        if (terminationStatus != 0 || output.length > 0) {
+            NSLog(@"Pololu ticcmd exited with status %d: %@", terminationStatus, output);
         }
     });
 }
