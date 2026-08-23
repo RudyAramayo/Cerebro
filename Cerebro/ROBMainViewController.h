@@ -35,7 +35,6 @@
 {
     
 }
-@property (readwrite, retain) IBOutlet NSImageView *cameraImageView;
 @property (readwrite, assign) IBOutlet NSTextView *speechTextView;
 @property (readwrite, assign) IBOutlet NSTextView *speechTranscriptTextView;
 @property (readwrite, retain) ROBSerialBox *serialBox;
@@ -59,6 +58,7 @@
 - (IBAction)showSerialDebug:(id)sender;
 - (IBAction)showMainNavigation:(id)sender;
 - (IBAction)showGeminiDiagnostics:(id)sender;
+- (IBAction)showSettings:(id)sender;
 - (nullable NSViewController *)geminiProviderSettingsViewController;
 - (IBAction)showMainCameraDiagnostics:(id)sender;
 - (IBAction)showCameraDiagnostics:(id)sender;

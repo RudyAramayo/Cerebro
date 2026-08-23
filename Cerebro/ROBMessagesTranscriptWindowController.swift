@@ -57,9 +57,25 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
     private struct Person {
         let key: PersonKey
         let records: [ROBMessagesTranscriptRecord]
+        let operatorReplies: [ROBMessagesOperatorReplyRecord]
 
         var lastActivity: Date {
-            records.map(\.receivedAt).max() ?? .distantPast
+            max(
+                records.map(\.receivedAt).max() ?? .distantPast,
+                operatorReplies.map(\.createdAt).max() ?? .distantPast
+            )
+        }
+    }
+
+    private enum ConversationEvent {
+        case transaction(ROBMessagesTranscriptRecord)
+        case operatorReply(ROBMessagesOperatorReplyRecord)
+
+        var date: Date {
+            switch self {
+            case .transaction(let record): return record.receivedAt
+            case .operatorReply(let record): return record.createdAt
+            }
         }
     }
 
@@ -188,8 +204,8 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
             cell.identifier = identifier
         }
         let person = people[row]
-        let count = person.records.count
-        let detail = "\(count) transaction\(count == 1 ? "" : "s") • \(dateFormatter.string(from: person.lastActivity))"
+        let count = person.records.count + person.operatorReplies.count
+        let detail = "\(count) turn\(count == 1 ? "" : "s") • \(dateFormatter.string(from: person.lastActivity))"
         cell.configure(sender: person.key.sender, detail: detail)
         return cell
     }
@@ -419,20 +435,36 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
 
     private func rebuildPeople() {
         let previousSelection = selectedKey
-        let grouped = Dictionary(grouping: snapshot.records) { record in
+        let groupedRecords = Dictionary(grouping: snapshot.records) { record in
+            PersonKey(
+                receivingAccount: record.receivingAccount,
+                sender: record.sender
+            )
+        }
+        let groupedOperatorReplies = Dictionary(grouping: snapshot.operatorReplies) { record in
             PersonKey(
                 receivingAccount: record.receivingAccount,
                 sender: record.sender
             )
         }
         let query = normalizedSearch
-        people = grouped.compactMap { key, records in
+        let keys = Set(groupedRecords.keys).union(groupedOperatorReplies.keys)
+        people = keys.compactMap { key in
+            let records = groupedRecords[key] ?? []
+            let operatorReplies = groupedOperatorReplies[key] ?? []
             guard query.isEmpty || key.sender.localizedCaseInsensitiveContains(query) ||
                     key.receivingAccount.localizedCaseInsensitiveContains(query) ||
-                    records.contains(where: { recordMatches($0, query: query) }) else {
+                    records.contains(where: { recordMatches($0, query: query) }) ||
+                    operatorReplies.contains(where: {
+                        $0.text.localizedCaseInsensitiveContains(query)
+                    }) else {
                 return nil
             }
-            return Person(key: key, records: records)
+            return Person(
+                key: key,
+                records: records,
+                operatorReplies: operatorReplies
+            )
         }.sorted { left, right in
             if left.lastActivity == right.lastActivity {
                 return left.key.sender.localizedCaseInsensitiveCompare(right.key.sender)
@@ -457,18 +489,19 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
     }
 
     private func renderSelection() {
+        let totalCount = snapshot.records.count + snapshot.operatorReplies.count
         guard let selectedKey,
               let person = people.first(where: { $0.key == selectedKey }) else {
-            personHeading.stringValue = snapshot.records.isEmpty
+            personHeading.stringValue = totalCount == 0
                 ? "No archived conversations"
                 : "No matching conversations"
-            accountLabel.stringValue = snapshot.records.isEmpty
+            accountLabel.stringValue = totalCount == 0
                 ? "Enable encrypted transcript memory to retain future Messages replies."
                 : "Try a different search."
             if statusLabel.stringValue.hasPrefix("Opening") == false {
                 statusLabel.stringValue = snapshot.isTruncated
                     ? "Showing the newest archived transactions."
-                    : "\(snapshot.records.count) archived transaction\(snapshot.records.count == 1 ? "" : "s")"
+                    : "\(totalCount) archived turn\(totalCount == 1 ? "" : "s")"
             }
             transcriptTextView.textStorage?.setAttributedString(NSAttributedString(string: ""))
             return
@@ -481,13 +514,18 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
         let displayed = person.records.filter {
             identityMatches || recordMatches($0, query: query)
         }.sorted { $0.receivedAt < $1.receivedAt }
+        let displayedOperatorReplies = person.operatorReplies.filter {
+            identityMatches || $0.text.localizedCaseInsensitiveContains(query)
+        }.sorted { $0.createdAt < $1.createdAt }
 
         personHeading.stringValue = selectedKey.sender
         accountLabel.stringValue = "Receiving account: \(selectedKey.receivingAccount)"
         let truncation = snapshot.isTruncated ? " • newest archive segment" : ""
-        statusLabel.stringValue = "\(displayed.count) displayed of \(person.records.count) transaction\(person.records.count == 1 ? "" : "s")\(truncation)"
+        let displayedCount = displayed.count + displayedOperatorReplies.count
+        let personCount = person.records.count + person.operatorReplies.count
+        statusLabel.stringValue = "\(displayedCount) displayed of \(personCount) turn\(personCount == 1 ? "" : "s")\(truncation)"
         transcriptTextView.textStorage?.setAttributedString(
-            transcript(for: displayed)
+            transcript(for: displayed, operatorReplies: displayedOperatorReplies)
         )
         transcriptTextView.scrollToBeginningOfDocument(nil)
     }
@@ -508,54 +546,79 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
     }
 
     private func transcript(
-        for records: [ROBMessagesTranscriptRecord]
+        for records: [ROBMessagesTranscriptRecord],
+        operatorReplies: [ROBMessagesOperatorReplyRecord]
     ) -> NSAttributedString {
         let output = NSMutableAttributedString()
-        for (index, record) in records.enumerated() {
+        let events = records.map(ConversationEvent.transaction) +
+            operatorReplies.map(ConversationEvent.operatorReply)
+        for (index, event) in events.sorted(by: { $0.date < $1.date }).enumerated() {
             if index > 0 {
                 output.append(NSAttributedString(
                     string: "\n────────────────────────────────────────\n\n",
                     attributes: [.foregroundColor: NSColor.separatorColor]
                 ))
             }
-            output.append(styled(
-                "\(dateFormatter.string(from: record.receivedAt))  •  \(deliveryLabel(record.deliveryStatus))\n",
-                font: .monospacedSystemFont(ofSize: 11, weight: .regular),
-                color: deliveryColor(record.deliveryStatus)
-            ))
-            output.append(styled(
-                "Sender\n",
-                font: .systemFont(ofSize: 13, weight: .semibold),
-                color: .systemBlue
-            ))
-            output.append(styled("\(record.inboundText)\n", font: .systemFont(ofSize: 14)))
-            if record.hasImage {
+            switch event {
+            case .transaction(let record):
                 output.append(styled(
-                    "Image attached — pixels are not stored in the transcript archive.\n",
-                    font: .systemFont(ofSize: 11),
-                    color: .secondaryLabelColor
+                    "\(dateFormatter.string(from: record.receivedAt))  •  \(deliveryLabel(record.deliveryStatus))\n",
+                    font: .monospacedSystemFont(ofSize: 11, weight: .regular),
+                    color: deliveryColor(record.deliveryStatus)
                 ))
-            }
-            if let reply = record.replyText {
                 output.append(styled(
-                    "\nROB\n",
+                    "Sender\n",
                     font: .systemFont(ofSize: 13, weight: .semibold),
-                    color: .systemGreen
+                    color: .systemBlue
                 ))
-                output.append(styled("\(reply)\n", font: .systemFont(ofSize: 14)))
-            } else {
+                output.append(styled("\(record.inboundText)\n", font: .systemFont(ofSize: 14)))
+                if record.hasImage {
+                    output.append(styled(
+                        "Image attached — pixels are not stored in the transcript archive.\n",
+                        font: .systemFont(ofSize: 11),
+                        color: .secondaryLabelColor
+                    ))
+                }
+                if let reply = record.replyText {
+                    output.append(styled(
+                        "\nROB\n",
+                        font: .systemFont(ofSize: 13, weight: .semibold),
+                        color: .systemGreen
+                    ))
+                    output.append(styled("\(reply)\n", font: .systemFont(ofSize: 14)))
+                } else {
+                    output.append(styled(
+                        "\nNo reply was recorded.\n",
+                        font: .systemFont(ofSize: 12, weight: .medium),
+                        color: .secondaryLabelColor
+                    ))
+                }
+                if let error = record.deliveryError {
+                    output.append(styled(
+                        "\nDelivery error: \(error)\n",
+                        font: .systemFont(ofSize: 11),
+                        color: .systemRed
+                    ))
+                }
+            case .operatorReply(let record):
                 output.append(styled(
-                    "\nNo reply was recorded.\n",
-                    font: .systemFont(ofSize: 12, weight: .medium),
-                    color: .secondaryLabelColor
+                    "\(dateFormatter.string(from: record.createdAt))  •  \(deliveryLabel(record.deliveryStatus))\n",
+                    font: .monospacedSystemFont(ofSize: 11, weight: .regular),
+                    color: deliveryColor(record.deliveryStatus)
                 ))
-            }
-            if let error = record.deliveryError {
                 output.append(styled(
-                    "\nDelivery error: \(error)\n",
-                    font: .systemFont(ofSize: 11),
-                    color: .systemRed
+                    "You (operator)\n",
+                    font: .systemFont(ofSize: 13, weight: .semibold),
+                    color: .systemPurple
                 ))
+                output.append(styled("\(record.text)\n", font: .systemFont(ofSize: 14)))
+                if let error = record.deliveryError {
+                    output.append(styled(
+                        "\nDelivery error: \(error)\n",
+                        font: .systemFont(ofSize: 11),
+                        color: .systemRed
+                    ))
+                }
             }
         }
         return output
@@ -603,5 +666,582 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
         alert.informativeText = detail
         alert.addButton(withTitle: "OK")
         alert.beginSheetModal(for: window)
+    }
+}
+
+/// Compact, interactive Messages workspace embedded in Cerebro's main window.
+/// It intentionally reads only the encrypted archive and sends through the
+/// bridge's immutable-route authorization gate.
+@MainActor
+@objcMembers public final class ROBMessagesWorkspaceViewController: NSViewController,
+    NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
+
+    private struct PersonKey: Hashable {
+        let receivingAccount: String
+        let sender: String
+    }
+
+    private struct Person {
+        let key: PersonKey
+        let records: [ROBMessagesTranscriptRecord]
+        let operatorReplies: [ROBMessagesOperatorReplyRecord]
+
+        var lastActivity: Date {
+            latestPreviewEvent?.date ?? .distantPast
+        }
+
+        var latestRecord: ROBMessagesTranscriptRecord? {
+            records.max { $0.receivedAt < $1.receivedAt }
+        }
+
+        var preview: String {
+            let text = latestPreviewEvent?.text ?? "No incoming message"
+            return String(text.replacingOccurrences(of: "\n", with: " ").prefix(72))
+        }
+
+        private var latestPreviewEvent: (date: Date, text: String)? {
+            var events = records.map { ($0.receivedAt, $0.inboundText) }
+            events += records.compactMap { record in
+                guard let reply = record.replyText else { return nil }
+                return (record.replyCreatedAt ?? record.receivedAt, "ROB: \(reply)")
+            }
+            events += operatorReplies.map { ($0.createdAt, "You: \($0.text)") }
+            return events.max { $0.0 < $1.0 }
+        }
+    }
+
+    private enum TimelineEvent {
+        case inbound(Date, String, Bool)
+        case robot(Date, String, String)
+        case operatorReply(Date, String, String, String?)
+
+        var date: Date {
+            switch self {
+            case .inbound(let date, _, _),
+                 .robot(let date, _, _),
+                 .operatorReply(let date, _, _, _):
+                return date
+            }
+        }
+    }
+
+    private let store = ROBMessagesTranscriptStore.shared
+    private let bridge = ROBMessagesBridge.shared
+    private let peopleTable = NSTableView()
+    private let personHeading = NSTextField(labelWithString: "Select a conversation")
+    private let accountLabel = NSTextField(labelWithString: "")
+    private let transcriptTextView = NSTextView()
+    private let replyField = NSTextField()
+    private let sendButton = NSButton()
+    private let stateDot = NSTextField(labelWithString: "●")
+    private let stateLabel = NSTextField(labelWithString: "Messages unavailable")
+    private let activityLabel = NSTextField(labelWithString: "")
+    private let historyButton = NSButton()
+    private let refreshButton = NSButton()
+    private var snapshot = ROBMessagesTranscriptBrowseSnapshot(
+        records: [],
+        isTruncated: false
+    )
+    private var people: [Person] = []
+    private var selectedKey: PersonKey?
+    private var loadGeneration: UInt64 = 0
+    private var isSending = false
+    private var bridgeEnabled = false
+
+    private let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
+    public override func loadView() {
+        view = NSView()
+        configureContent()
+    }
+
+    public override func viewDidLoad() {
+        super.viewDidLoad()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(bridgeDidChange(_:)),
+            name: .robMessagesBridgeDidChange,
+            object: bridge
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(bridgeDidChange(_:)),
+            name: .robMessagesBridgeSettingsDidChange,
+            object: nil
+        )
+        updateBridgeStatus()
+        refresh()
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    public func numberOfRows(in tableView: NSTableView) -> Int {
+        people.count
+    }
+
+    public func tableView(
+        _ tableView: NSTableView,
+        viewFor tableColumn: NSTableColumn?,
+        row: Int
+    ) -> NSView? {
+        guard people.indices.contains(row) else { return nil }
+        let identifier = NSUserInterfaceItemIdentifier("MainMessagesPerson")
+        let cell: ROBMessagesTranscriptPersonCell
+        if let reused = tableView.makeView(
+            withIdentifier: identifier,
+            owner: self
+        ) as? ROBMessagesTranscriptPersonCell {
+            cell = reused
+        } else {
+            cell = ROBMessagesTranscriptPersonCell()
+            cell.identifier = identifier
+        }
+        let person = people[row]
+        cell.configure(sender: person.key.sender, detail: person.preview)
+        return cell
+    }
+
+    public func tableViewSelectionDidChange(_ notification: Notification) {
+        guard people.indices.contains(peopleTable.selectedRow) else {
+            selectedKey = nil
+            renderSelection()
+            return
+        }
+        selectedKey = people[peopleTable.selectedRow].key
+        renderSelection()
+    }
+
+    public func controlTextDidChange(_ obj: Notification) {
+        updateComposerState()
+    }
+
+    @objc private func bridgeDidChange(_ notification: Notification) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.bridgeDidChange(notification) }
+            return
+        }
+        updateBridgeStatus()
+        refresh()
+    }
+
+    @objc private func refreshClicked(_ sender: Any?) {
+        refresh()
+    }
+
+    @objc private func showFullHistory(_ sender: Any?) {
+        ROBMessagesTranscriptWindowController.shared.showWindow(sender)
+    }
+
+    @objc private func sendReply(_ sender: Any?) {
+        guard !isSending,
+              let person = selectedPerson,
+              let route = person.latestRecord else {
+            NSSound.beep()
+            return
+        }
+        let text = replyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            NSSound.beep()
+            return
+        }
+
+        isSending = true
+        updateComposerState()
+        activityLabel.stringValue = "Sending to \(person.key.sender)…"
+        bridge.sendOperatorReply(text: text, to: route) { [weak self] result in
+            guard let self else { return }
+            self.isSending = false
+            switch result {
+            case .success:
+                self.replyField.stringValue = ""
+                self.activityLabel.stringValue = "Reply delivered"
+                self.refresh()
+            case .failure(let error):
+                self.activityLabel.stringValue = error.localizedDescription
+                NSSound.beep()
+            }
+            self.updateBridgeStatus()
+            self.updateComposerState()
+        }
+    }
+
+    private func configureContent() {
+        view.wantsLayer = true
+        view.layer?.cornerRadius = 14
+        view.layer?.borderWidth = 1
+        view.layer?.borderColor = NSColor.separatorColor.cgColor
+        view.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+
+        let title = NSTextField(labelWithString: "Messages")
+        title.font = .systemFont(ofSize: 17, weight: .semibold)
+        let subtitle = NSTextField(labelWithString: "Reply as ROB to approved conversations")
+        subtitle.font = .systemFont(ofSize: 11)
+        subtitle.textColor = .secondaryLabelColor
+        let titleStack = NSStackView(views: [title, subtitle])
+        titleStack.orientation = .vertical
+        titleStack.alignment = .leading
+        titleStack.spacing = 1
+
+        stateDot.font = .systemFont(ofSize: 9, weight: .bold)
+        stateLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        stateLabel.lineBreakMode = .byTruncatingTail
+        let stateStack = NSStackView(views: [stateDot, stateLabel])
+        stateStack.orientation = .horizontal
+        stateStack.alignment = .centerY
+        stateStack.spacing = 5
+
+        historyButton.title = "History"
+        historyButton.image = NSImage(
+            systemSymbolName: "clock.arrow.circlepath",
+            accessibilityDescription: "Open full Messages history"
+        )
+        historyButton.imagePosition = .imageLeading
+        historyButton.bezelStyle = .texturedRounded
+        historyButton.target = self
+        historyButton.action = #selector(showFullHistory(_:))
+        historyButton.toolTip = "Open the searchable encrypted Messages archive"
+
+        refreshButton.title = ""
+        refreshButton.image = NSImage(
+            systemSymbolName: "arrow.clockwise",
+            accessibilityDescription: "Refresh Messages"
+        )
+        refreshButton.bezelStyle = .texturedRounded
+        refreshButton.target = self
+        refreshButton.action = #selector(refreshClicked(_:))
+        refreshButton.toolTip = "Refresh Messages conversations"
+
+        let headerActions = NSStackView(views: [historyButton, refreshButton])
+        headerActions.orientation = .horizontal
+        headerActions.spacing = 6
+        let header = NSStackView(views: [titleStack, NSView(), stateStack, headerActions])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = 10
+
+        let peopleColumn = NSTableColumn(identifier: .init("people"))
+        peopleColumn.resizingMask = .autoresizingMask
+        peopleTable.addTableColumn(peopleColumn)
+        peopleTable.headerView = nil
+        peopleTable.rowHeight = 54
+        peopleTable.intercellSpacing = NSSize(width: 0, height: 2)
+        peopleTable.dataSource = self
+        peopleTable.delegate = self
+        peopleTable.allowsEmptySelection = true
+        peopleTable.backgroundColor = .clear
+        peopleTable.setAccessibilityLabel("Recent Messages conversations")
+        let peopleScroll = NSScrollView()
+        peopleScroll.hasVerticalScroller = true
+        peopleScroll.autohidesScrollers = true
+        peopleScroll.drawsBackground = false
+        peopleScroll.documentView = peopleTable
+
+        personHeading.font = .systemFont(ofSize: 14, weight: .semibold)
+        personHeading.lineBreakMode = .byTruncatingMiddle
+        accountLabel.font = .systemFont(ofSize: 10)
+        accountLabel.textColor = .tertiaryLabelColor
+        accountLabel.lineBreakMode = .byTruncatingMiddle
+        let personHeader = NSStackView(views: [personHeading, accountLabel])
+        personHeader.orientation = .vertical
+        personHeader.alignment = .leading
+        personHeader.spacing = 1
+
+        transcriptTextView.isEditable = false
+        transcriptTextView.isSelectable = true
+        transcriptTextView.isRichText = true
+        transcriptTextView.isAutomaticLinkDetectionEnabled = true
+        transcriptTextView.isVerticallyResizable = true
+        transcriptTextView.isHorizontallyResizable = false
+        transcriptTextView.autoresizingMask = [.width]
+        transcriptTextView.textContainer?.widthTracksTextView = true
+        transcriptTextView.textContainerInset = NSSize(width: 12, height: 10)
+        transcriptTextView.backgroundColor = NSColor.textBackgroundColor.withAlphaComponent(0.72)
+        transcriptTextView.setAccessibilityLabel("Selected Messages conversation")
+        let transcriptScroll = NSScrollView()
+        transcriptScroll.hasVerticalScroller = true
+        transcriptScroll.autohidesScrollers = true
+        transcriptScroll.borderType = .noBorder
+        transcriptScroll.wantsLayer = true
+        transcriptScroll.layer?.cornerRadius = 9
+        transcriptScroll.layer?.masksToBounds = true
+        transcriptScroll.documentView = transcriptTextView
+
+        replyField.placeholderString = "Reply to selected conversation"
+        replyField.font = .systemFont(ofSize: 13)
+        replyField.delegate = self
+        replyField.target = self
+        replyField.action = #selector(sendReply(_:))
+        replyField.setAccessibilityLabel("Messages reply")
+        sendButton.title = "Reply"
+        sendButton.bezelStyle = .rounded
+        sendButton.target = self
+        sendButton.action = #selector(sendReply(_:))
+        sendButton.setAccessibilityLabel("Send Messages reply")
+        let composer = NSStackView(views: [replyField, sendButton])
+        composer.orientation = .horizontal
+        composer.alignment = .centerY
+        composer.spacing = 8
+
+        activityLabel.font = .systemFont(ofSize: 10)
+        activityLabel.textColor = .secondaryLabelColor
+        activityLabel.lineBreakMode = .byTruncatingTail
+
+        let detail = NSView()
+        [personHeader, transcriptScroll, composer, activityLabel].forEach {
+            $0.translatesAutoresizingMaskIntoConstraints = false
+            detail.addSubview($0)
+        }
+        NSLayoutConstraint.activate([
+            personHeader.topAnchor.constraint(equalTo: detail.topAnchor),
+            personHeader.leadingAnchor.constraint(equalTo: detail.leadingAnchor),
+            personHeader.trailingAnchor.constraint(equalTo: detail.trailingAnchor),
+            transcriptScroll.topAnchor.constraint(equalTo: personHeader.bottomAnchor, constant: 8),
+            transcriptScroll.leadingAnchor.constraint(equalTo: detail.leadingAnchor),
+            transcriptScroll.trailingAnchor.constraint(equalTo: detail.trailingAnchor),
+            composer.topAnchor.constraint(equalTo: transcriptScroll.bottomAnchor, constant: 8),
+            composer.leadingAnchor.constraint(equalTo: detail.leadingAnchor),
+            composer.trailingAnchor.constraint(equalTo: detail.trailingAnchor),
+            activityLabel.topAnchor.constraint(equalTo: composer.bottomAnchor, constant: 4),
+            activityLabel.leadingAnchor.constraint(equalTo: detail.leadingAnchor, constant: 2),
+            activityLabel.trailingAnchor.constraint(equalTo: detail.trailingAnchor),
+            activityLabel.bottomAnchor.constraint(equalTo: detail.bottomAnchor),
+        ])
+
+        let split = NSSplitView()
+        split.isVertical = true
+        split.dividerStyle = .thin
+        split.addArrangedSubview(peopleScroll)
+        split.addArrangedSubview(detail)
+        split.setHoldingPriority(.defaultHigh, forSubviewAt: 0)
+        peopleScroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 145).isActive = true
+        peopleScroll.widthAnchor.constraint(lessThanOrEqualToConstant: 205).isActive = true
+        detail.widthAnchor.constraint(greaterThanOrEqualToConstant: 235).isActive = true
+
+        [header, split].forEach {
+            $0.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview($0)
+        }
+        NSLayoutConstraint.activate([
+            header.topAnchor.constraint(equalTo: view.topAnchor, constant: 14),
+            header.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            header.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            split.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 12),
+            split.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 14),
+            split.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -14),
+            split.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
+        ])
+    }
+
+    private func refresh() {
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        refreshButton.isEnabled = false
+        let store = store
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                Result { try store.browseSnapshot(maximumRecords: 2_000) }
+            }.value
+            guard let self, generation == self.loadGeneration else { return }
+            self.refreshButton.isEnabled = true
+            switch result {
+            case .success(let snapshot):
+                self.snapshot = snapshot
+                self.rebuildPeople()
+            case .failure(let error):
+                self.snapshot = ROBMessagesTranscriptBrowseSnapshot(
+                    records: [],
+                    isTruncated: false
+                )
+                self.people = []
+                self.peopleTable.reloadData()
+                self.activityLabel.stringValue = error.localizedDescription
+                self.renderSelection()
+            }
+        }
+    }
+
+    private func rebuildPeople() {
+        let previousSelection = selectedKey
+        let records = Dictionary(grouping: snapshot.records) {
+            PersonKey(receivingAccount: $0.receivingAccount, sender: $0.sender)
+        }
+        let replies = Dictionary(grouping: snapshot.operatorReplies) {
+            PersonKey(receivingAccount: $0.receivingAccount, sender: $0.sender)
+        }
+        people = Set(records.keys).union(replies.keys).map { key in
+            Person(
+                key: key,
+                records: records[key] ?? [],
+                operatorReplies: replies[key] ?? []
+            )
+        }.sorted { $0.lastActivity > $1.lastActivity }
+        peopleTable.reloadData()
+
+        if let previousSelection,
+           let row = people.firstIndex(where: { $0.key == previousSelection }) {
+            selectedKey = previousSelection
+            peopleTable.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        } else if !people.isEmpty {
+            selectedKey = people[0].key
+            peopleTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        } else {
+            selectedKey = nil
+            peopleTable.deselectAll(nil)
+        }
+        renderSelection()
+    }
+
+    private var selectedPerson: Person? {
+        guard let selectedKey else { return nil }
+        return people.first { $0.key == selectedKey }
+    }
+
+    private func renderSelection() {
+        guard let person = selectedPerson else {
+            personHeading.stringValue = "No archived conversations"
+            accountLabel.stringValue = "Enable transcript memory in Settings to use the Messages workspace."
+            transcriptTextView.string = ""
+            updateComposerState()
+            return
+        }
+
+        personHeading.stringValue = person.key.sender
+        accountLabel.stringValue = "via \(person.key.receivingAccount)"
+        var events: [TimelineEvent] = []
+        for record in person.records {
+            events.append(.inbound(record.receivedAt, record.inboundText, record.hasImage))
+            if let reply = record.replyText {
+                events.append(.robot(
+                    record.replyCreatedAt ?? record.receivedAt,
+                    reply,
+                    record.deliveryStatus
+                ))
+            }
+        }
+        for reply in person.operatorReplies {
+            events.append(.operatorReply(
+                reply.createdAt,
+                reply.text,
+                reply.deliveryStatus,
+                reply.deliveryError
+            ))
+        }
+        transcriptTextView.textStorage?.setAttributedString(
+            transcript(events.sorted { $0.date < $1.date })
+        )
+        transcriptTextView.scrollToEndOfDocument(nil)
+        updateComposerState()
+    }
+
+    private func transcript(_ events: [TimelineEvent]) -> NSAttributedString {
+        let output = NSMutableAttributedString()
+        for event in events {
+            let sender: String
+            let body: String
+            let color: NSColor
+            let status: String?
+            let hasImage: Bool
+            let error: String?
+            switch event {
+            case .inbound(_, let text, let image):
+                sender = "Sender"
+                body = text
+                color = .systemBlue
+                status = nil
+                hasImage = image
+                error = nil
+            case .robot(_, let text, let deliveryStatus):
+                sender = "ROB AI"
+                body = text
+                color = .systemGreen
+                status = deliveryStatus
+                hasImage = false
+                error = nil
+            case .operatorReply(_, let text, let deliveryStatus, let deliveryError):
+                sender = "You"
+                body = text
+                color = .systemPurple
+                status = deliveryStatus
+                hasImage = false
+                error = deliveryError
+            }
+
+            output.append(NSAttributedString(
+                string: "\(sender)  \(dateFormatter.string(from: event.date))\n",
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                    .foregroundColor: color,
+                ]
+            ))
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.paragraphSpacing = 10
+            paragraph.lineSpacing = 2
+            output.append(NSAttributedString(
+                string: body + "\n",
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 13),
+                    .foregroundColor: NSColor.labelColor,
+                    .paragraphStyle: paragraph,
+                ]
+            ))
+            if hasImage {
+                output.append(secondary("Image attached — not retained in transcript.\n"))
+            }
+            if let status, status != "delivered" {
+                output.append(secondary("Status: \(status)\n"))
+            }
+            if let error {
+                output.append(NSAttributedString(
+                    string: "Delivery error: \(error)\n",
+                    attributes: [
+                        .font: NSFont.systemFont(ofSize: 10),
+                        .foregroundColor: NSColor.systemRed,
+                    ]
+                ))
+            }
+        }
+        return output
+    }
+
+    private func secondary(_ text: String) -> NSAttributedString {
+        NSAttributedString(
+            string: text,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 10),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ]
+        )
+    }
+
+    private func updateBridgeStatus() {
+        let status = bridge.statusSnapshot()
+        bridgeEnabled = status.enabled
+        stateLabel.stringValue = status.enabled ? status.state.capitalized : "Off"
+        let healthyStates = ["listening", "processing", "starting"]
+        stateDot.textColor = status.enabled && healthyStates.contains(status.state)
+            ? .systemGreen
+            : (status.enabled ? .systemOrange : .secondaryLabelColor)
+        stateLabel.toolTip = status.detail
+        if !status.archivesTranscripts {
+            activityLabel.stringValue = "Turn on encrypted transcript memory in Settings to list chats."
+        } else if activityLabel.stringValue.hasPrefix("Turn on") {
+            activityLabel.stringValue = ""
+        }
+        updateComposerState()
+    }
+
+    private func updateComposerState() {
+        let canReply = !isSending && bridgeEnabled && selectedPerson?.latestRecord != nil
+        replyField.isEnabled = canReply
+        sendButton.isEnabled = canReply && !replyField.stringValue
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        sendButton.title = isSending ? "Sending…" : "Reply"
     }
 }

@@ -1607,6 +1607,20 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
     public let lastReplyAt: Date?
 }
 
+enum ROBMessagesOperatorReplyError: LocalizedError {
+    case unavailable(String)
+    case archiveFailedAfterDelivery(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .unavailable(let detail):
+            return detail
+        case .archiveFailedAfterDelivery(let detail):
+            return "The reply was sent, but its encrypted archive entry failed: \(detail)"
+        }
+    }
+}
+
 @MainActor
 @objcMembers public final class ROBMessagesBridge: NSObject {
     public static let shared = ROBMessagesBridge()
@@ -2025,6 +2039,132 @@ public struct ROBMessagesBridgeStatusSnapshot: Sendable {
             lastInboundAt: lastInboundAt,
             lastReplyAt: lastReplyAt
         )
+    }
+
+    /// Sends an explicit operator-authored reply to the immutable one-to-one
+    /// route recovered from the encrypted transcript. The current bridge
+    /// generation and sender policy are rechecked on the serial worker
+    /// immediately before Messages is invoked.
+    @nonobjc func sendOperatorReply(
+        text rawText: String,
+        to record: ROBMessagesTranscriptRecord,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        guard hasStarted, configuration.enabled else {
+            completion(.failure(ROBMessagesOperatorReplyError.unavailable(
+                "Messages replies are disabled. Enable Messages in Settings first."
+            )))
+            return
+        }
+        guard let text = ROBMessagesPlainTextPolicy.normalized(rawText) else {
+            completion(.failure(ROBMessagesOperatorReplyError.unavailable(
+                "Enter a plain-text reply between 1 and \(ROBMessagesPlainTextPolicy.maximumCharacters) characters."
+            )))
+            return
+        }
+        let account = ROBMessagesBridgeConfiguration.canonicalHandle(
+            record.receivingAccount
+        )
+        let sender = ROBMessagesBridgeConfiguration.canonicalHandle(record.sender)
+        guard account == configuration.receivingAccount,
+              !record.chatID.isEmpty,
+              replyAuthorizationGate.authorizes(
+                generation: generation,
+                account: account,
+                sender: sender
+              ) else {
+            completion(.failure(ROBMessagesOperatorReplyError.unavailable(
+                "This conversation is no longer authorized by the current Messages settings."
+            )))
+            return
+        }
+
+        let requestGeneration = generation
+        let contextID = "operator:\(UUID().uuidString.lowercased())"
+        let createdAt = Date()
+        let shouldArchive = configuration.archivesTranscripts
+        let scope = ROBMessagesTranscriptScope(
+            receivingAccount: account,
+            sender: sender,
+            chatID: record.chatID
+        )
+        let replySender = replySender
+        let authorizationGate = replyAuthorizationGate
+        let transcriptStore = transcriptStore
+        workerQueue.async { [weak self, replySender, authorizationGate, transcriptStore] in
+            var result: Result<Void, Error>
+            do {
+                guard authorizationGate.authorizes(
+                    generation: requestGeneration,
+                    account: account,
+                    sender: sender
+                ) else {
+                    throw ROBMessagesOperatorReplyError.unavailable(
+                        "Messages authorization changed before the reply was sent."
+                    )
+                }
+                try replySender.send(
+                    text: text,
+                    toChat: record.chatID,
+                    account: account,
+                    originatingAccountAliases: [account],
+                    expectedSender: sender
+                )
+                if shouldArchive {
+                    do {
+                        try transcriptStore.recordOperatorReply(
+                            contextID: contextID,
+                            scope: scope,
+                            text: text,
+                            createdAt: createdAt,
+                            deliveryStatus: "delivered",
+                            deliveryError: nil
+                        )
+                    } catch {
+                        throw ROBMessagesOperatorReplyError.archiveFailedAfterDelivery(
+                            error.localizedDescription
+                        )
+                    }
+                }
+                result = .success(())
+            } catch {
+                if shouldArchive,
+                   !(error is ROBMessagesOperatorReplyError) {
+                    try? transcriptStore.recordOperatorReply(
+                        contextID: contextID,
+                        scope: scope,
+                        text: text,
+                        createdAt: createdAt,
+                        deliveryStatus: "failed",
+                        deliveryError: error.localizedDescription
+                    )
+                }
+                result = .failure(error)
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { completion(result); return }
+                // Authorization is checked on the worker immediately before
+                // Messages is invoked. A later settings reload must not turn a
+                // reply that already completed into a misleading failure.
+                guard requestGeneration == self.generation else {
+                    completion(result)
+                    return
+                }
+                switch result {
+                case .success:
+                    self.lastReplyAt = Date()
+                    self.lastDeliveryError = nil
+                    self.state = "listening"
+                    self.detail = "Operator reply delivered to \(sender)."
+                case .failure(let error):
+                    self.lastDeliveryError = error.localizedDescription
+                    self.state = "error"
+                    self.detail = error.localizedDescription
+                }
+                self.publishStatus()
+                completion(result)
+            }
+        }
     }
 
     @objc private func settingsDidChange(_ notification: Notification) {

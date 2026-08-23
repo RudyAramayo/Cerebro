@@ -4013,10 +4013,9 @@ Brake
                     <window key="window" title="Cerebro" allowsToolTipsWhenApplicationIsInactive="NO" autorecalculatesKeyViewLoop="NO" releasedWhenClosed="NO" animationBehavior="default" id="IQv-IB-iLA">
                         <windowStyleMask key="styleMask" titled="YES" closable="YES" miniaturizable="YES" resizable="YES"/>
                         <windowPositionMask key="initialPositionMask" leftStrut="YES" rightStrut="YES" topStrut="YES" bottomStrut="YES"/>
-                        <rect key="contentRect" x="480" y="227" width="1200" height="800"/>
+                        <rect key="contentRect" x="480" y="227" width="1200" height="760"/>
                         <rect key="screenRect" x="0.0" y="0.0" width="1680" height="1027"/>
-                        <value key="minSize" type="size" width="1200" height="720"/>
-                        <value key="maxSize" type="size" width="1200" height="720"/>
+                        <value key="minSize" type="size" width="1050" height="650"/>
                         <connections>
                             <outlet property="delegate" destination="B8D-0N-5wS" id="k2e-pw-aVG"/>
                         </connections>
@@ -4034,7 +4033,7 @@ Brake
             <objects>
                 <viewController id="XfG-lQ-9wD" customClass="ROBMainViewController" sceneMemberID="viewController">
                     <customView key="view" id="nht-s4-M9V">
-                        <rect key="frame" x="0.0" y="0.0" width="1200" height="720"/>
+                        <rect key="frame" x="0.0" y="0.0" width="1200" height="760"/>
                         <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                         <subviews>
                             <scrollView fixedFrame="YES" horizontalLineScroll="10" horizontalPageScroll="10" verticalLineScroll="10" verticalPageScroll="10" hasHorizontalScroller="NO" usesPredominantAxisScrolling="NO" translatesAutoresizingMaskIntoConstraints="NO" id="enw-AR-f0t" userLabel="ROB AI Message Composer">
@@ -4086,11 +4085,6 @@ Brake
                                     </connections>
                                 </buttonCell>
                             </button>
-                            <imageView horizontalHuggingPriority="251" verticalHuggingPriority="251" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="dUS-eA-60P">
-                                <rect key="frame" x="746" y="5" width="450" height="101"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                <imageCell key="cell" refusesFirstResponder="YES" alignment="left" imageScaling="proportionallyDown" id="aR2-1F-nNe"/>
-                            </imageView>
                             <scrollView fixedFrame="YES" horizontalLineScroll="10" horizontalPageScroll="10" verticalLineScroll="10" verticalPageScroll="10" hasHorizontalScroller="NO" usesPredominantAxisScrolling="NO" translatesAutoresizingMaskIntoConstraints="NO" id="DdU-mp-KmQ" userLabel="ROB AI Conversation">
                                 <rect key="frame" x="747" y="258" width="454" height="458"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
@@ -4124,7 +4118,8 @@ Brake
                         </subviews>
                     </customView>
                     <connections>
-                        <outlet property="cameraImageView" destination="dUS-eA-60P" id="Ybp-fq-9Wb"/>
+                        <outlet property="mainAISendButton" destination="ROB-AI-SendButton" id="ROB-Main-AI-Send-Outlet"/>
+                        <outlet property="resetConversationButton" destination="7HI-vj-ZUW" id="ROB-Main-AI-Reset-Outlet"/>
                         <outlet property="speechTextView" destination="kiU-Nb-ukE" id="hwk-81-LFt"/>
                         <outlet property="speechTranscriptTextView" destination="ZRv-UE-sIL" id="ULg-CS-qbh"/>
                     </connections>

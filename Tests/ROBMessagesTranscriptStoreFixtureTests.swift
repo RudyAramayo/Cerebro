@@ -119,6 +119,14 @@ struct ROBMessagesTranscriptStoreFixtureTests {
             error: "Fixture delivery failure",
             at: start.addingTimeInterval(22)
         )
+        try store.recordOperatorReply(
+            contextID: "operator:alice-1",
+            scope: alice,
+            text: "I am following up personally from the Cerebro console.",
+            createdAt: start.addingTimeInterval(30),
+            deliveryStatus: "delivered",
+            deliveryError: nil
+        )
 
         let aliceMemory = try require(
             store.memoryContext(
@@ -129,6 +137,10 @@ struct ROBMessagesTranscriptStoreFixtureTests {
             "Alice memory context was empty"
         )
         try expect(aliceMemory.contains("Zephyr"), "Relevant same-sender fact was not retrieved")
+        try expect(
+            aliceMemory.contains("following up personally"),
+            "A delivered operator follow-up was not included in same-sender memory"
+        )
         try expect(
             !aliceMemory.contains("cobalt lighthouse")
                 && !aliceMemory.contains("bob@example.com")
@@ -141,8 +153,8 @@ struct ROBMessagesTranscriptStoreFixtureTests {
         )
 
         let statistics = try store.statistics()
-        try expect(statistics.transactionCount == 4, "Archive transaction count is wrong")
-        try expect(statistics.deliveredCount == 3, "Archive delivered count is wrong")
+        try expect(statistics.transactionCount == 5, "Archive transaction count is wrong")
+        try expect(statistics.deliveredCount == 4, "Archive delivered count is wrong")
 
         let browser = try store.browseSnapshot()
         try expect(
@@ -161,6 +173,16 @@ struct ROBMessagesTranscriptStoreFixtureTests {
                 && browserAlice.deliveryStatus == "delivered",
             "The readable transcript snapshot decrypted the wrong fields"
         )
+        let operatorReply = try require(
+            browser.operatorReplies.first(where: { $0.contextID == "operator:alice-1" }),
+            "The readable transcript snapshot omitted the operator reply"
+        )
+        try expect(
+            operatorReply.sender == "alice@example.com"
+                && operatorReply.text.contains("following up personally")
+                && operatorReply.deliveryStatus == "delivered",
+            "The readable transcript snapshot decrypted the wrong operator reply"
+        )
         let boundedBrowser = try store.browseSnapshot(maximumRecords: 2)
         try expect(
             boundedBrowser.records.count == 2 && boundedBrowser.isTruncated,
@@ -169,7 +191,8 @@ struct ROBMessagesTranscriptStoreFixtureTests {
 
         let privateNeedles = [
             "alice@example.com", "bob@example.com", "Zephyr",
-            "cobalt lighthouse", "saffron comet", "Fixture delivery failure"
+            "cobalt lighthouse", "saffron comet", "Fixture delivery failure",
+            "following up personally"
         ]
         for url in [
             databaseURL,
@@ -190,7 +213,8 @@ struct ROBMessagesTranscriptStoreFixtureTests {
         try expect(
             exported.contains("alice@example.com")
                 && exported.contains("Zephyr")
-                && exported.contains("Fixture delivery failure"),
+                && exported.contains("Fixture delivery failure")
+                && exported.contains("following up personally"),
             "Explicit decrypted export omitted transcript content"
         )
         let permissions = try FileManager.default.attributesOfItem(atPath: exportURL.path)[
@@ -206,7 +230,7 @@ struct ROBMessagesTranscriptStoreFixtureTests {
         )
         let clearedBrowser = try store.browseSnapshot()
         try expect(
-            clearedBrowser.records.isEmpty,
+            clearedBrowser.records.isEmpty && clearedBrowser.operatorReplies.isEmpty,
             "The readable transcript browser retained cleared transactions"
         )
         print("ROB encrypted Messages transcript fixtures passed")

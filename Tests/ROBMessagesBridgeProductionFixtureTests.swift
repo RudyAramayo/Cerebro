@@ -16,6 +16,18 @@ private enum ProductionFixtureFailure: Error, CustomStringConvertible {
     }
 }
 
+private extension Result {
+    var fixtureIsSuccess: Bool {
+        if case .success = self { return true }
+        return false
+    }
+
+    var fixtureIsFailure: Bool {
+        if case .failure = self { return true }
+        return false
+    }
+}
+
 // Test double compiled in place of Cerebro/ROBMessagesAIResponder.swift. This
 // lets the real bridge and inbox run without opening Gemini or Messages.
 struct ROBMessagesAIStatusSnapshot: Sendable {
@@ -101,11 +113,20 @@ final class ROBMessagesAIResponder: NSObject {
 }
 
 private final class FixtureTranscriptStore: ROBMessagesTranscriptStoring, @unchecked Sendable {
+    struct OperatorReply {
+        let contextID: String
+        let scope: ROBMessagesTranscriptScope
+        let text: String
+        let deliveryStatus: String
+        let deliveryError: String?
+    }
+
     private let lock = NSLock()
     private var inboundContextIDs: [String] = []
     private var replyContextIDs: [String] = []
     private var deliveredContextIDs: [String] = []
     private var cancelledContextIDs: [String] = []
+    private var operatorReplies: [OperatorReply] = []
     private var rejectsReplies = false
     var suppliedMemory = "Same-sender fixture memory: favorite constellation is Orion."
 
@@ -154,6 +175,25 @@ private final class FixtureTranscriptStore: ROBMessagesTranscriptStoring, @unche
         lock.unlock()
     }
 
+    func recordOperatorReply(
+        contextID: String,
+        scope: ROBMessagesTranscriptScope,
+        text: String,
+        createdAt: Date,
+        deliveryStatus: String,
+        deliveryError: String?
+    ) throws {
+        lock.lock()
+        operatorReplies.append(.init(
+            contextID: contextID,
+            scope: scope,
+            text: text,
+            deliveryStatus: deliveryStatus,
+            deliveryError: deliveryError
+        ))
+        lock.unlock()
+    }
+
     func statistics() throws -> ROBMessagesTranscriptStatistics {
         lock.lock()
         defer { lock.unlock() }
@@ -188,6 +228,12 @@ private final class FixtureTranscriptStore: ROBMessagesTranscriptStoring, @unche
         lock.lock()
         rejectsReplies = value
         lock.unlock()
+    }
+
+    func operatorReplySnapshot() -> [OperatorReply] {
+        lock.lock()
+        defer { lock.unlock() }
+        return operatorReplies
     }
 }
 
@@ -1215,6 +1261,75 @@ private struct ROBMessagesBridgeProductionFixtureTests {
             archiveStatus.archivedTransactionCount == 1 &&
                 archiveStatus.lastTranscriptError == nil,
             "The bridge did not report the encrypted archive transaction"
+        )
+
+        let operatorRoute = ROBMessagesTranscriptRecord(
+            contextID: archivedRequest.contextID,
+            receivingAccount: account,
+            sender: "owner@example.com",
+            chatID: "fixture-chat-A",
+            receivedAt: Date(),
+            inboundText: "What is my favorite constellation?",
+            hasImage: false,
+            replyText: "Orion",
+            replyCreatedAt: Date(),
+            deliveryStatus: "delivered",
+            deliveryFinishedAt: Date(),
+            deliveryError: nil
+        )
+        let repliesBeforeOperator = replies.snapshot().count
+        var operatorResult: Result<Void, Error>?
+        bridge.sendOperatorReply(
+            text: "An operator-authored follow-up",
+            to: operatorRoute
+        ) { result in
+            operatorResult = result
+        }
+        try await waitUntil("The operator reply did not finish") {
+            operatorResult != nil
+        }
+        try expect(
+            replies.snapshot().count == repliesBeforeOperator + 1 &&
+                replies.snapshot().last == .init(
+                    text: "An operator-authored follow-up",
+                    chatID: "fixture-chat-A",
+                    account: account,
+                    originatingAccountAliases: [account],
+                    expectedSender: "owner@example.com"
+                ),
+            "An operator reply lost its exact archived Messages route"
+        )
+        try expect(
+            operatorResult?.fixtureIsSuccess == true &&
+                transcriptStore.operatorReplySnapshot().last?.text
+                    == "An operator-authored follow-up" &&
+                transcriptStore.operatorReplySnapshot().last?.deliveryStatus == "delivered",
+            "A delivered operator reply was not committed to encrypted transcript storage"
+        )
+
+        let repliesBeforeRejectedOperator = replies.snapshot().count
+        var rejectedOperatorResult: Result<Void, Error>?
+        let mismatchedRoute = ROBMessagesTranscriptRecord(
+            contextID: operatorRoute.contextID,
+            receivingAccount: "other@example.com",
+            sender: operatorRoute.sender,
+            chatID: operatorRoute.chatID,
+            receivedAt: operatorRoute.receivedAt,
+            inboundText: operatorRoute.inboundText,
+            hasImage: operatorRoute.hasImage,
+            replyText: operatorRoute.replyText,
+            replyCreatedAt: operatorRoute.replyCreatedAt,
+            deliveryStatus: operatorRoute.deliveryStatus,
+            deliveryFinishedAt: operatorRoute.deliveryFinishedAt,
+            deliveryError: operatorRoute.deliveryError
+        )
+        bridge.sendOperatorReply(text: "Must not send", to: mismatchedRoute) { result in
+            rejectedOperatorResult = result
+        }
+        try expect(
+            rejectedOperatorResult?.fixtureIsFailure == true &&
+                replies.snapshot().count == repliesBeforeRejectedOperator,
+            "An operator reply bypassed receiving-account authorization"
         )
 
         transcriptStore.setRejectsReplies(true)

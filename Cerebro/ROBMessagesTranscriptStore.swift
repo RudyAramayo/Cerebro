@@ -41,9 +41,31 @@ struct ROBMessagesTranscriptRecord: Sendable {
     let deliveryError: String?
 }
 
+struct ROBMessagesOperatorReplyRecord: Sendable {
+    let contextID: String
+    let receivingAccount: String
+    let sender: String
+    let chatID: String
+    let createdAt: Date
+    let text: String
+    let deliveryStatus: String
+    let deliveryError: String?
+}
+
 struct ROBMessagesTranscriptBrowseSnapshot: Sendable {
     let records: [ROBMessagesTranscriptRecord]
+    let operatorReplies: [ROBMessagesOperatorReplyRecord]
     let isTruncated: Bool
+
+    init(
+        records: [ROBMessagesTranscriptRecord],
+        operatorReplies: [ROBMessagesOperatorReplyRecord] = [],
+        isTruncated: Bool
+    ) {
+        self.records = records
+        self.operatorReplies = operatorReplies
+        self.isTruncated = isTruncated
+    }
 }
 
 protocol ROBMessagesTranscriptStoring: AnyObject, Sendable {
@@ -64,6 +86,14 @@ protocol ROBMessagesTranscriptStoring: AnyObject, Sendable {
     func markDelivered(contextID: String, at date: Date) throws
     func markFailed(contextID: String, error: String, at date: Date) throws
     func markCancelled(contextIDs: [String], at date: Date) throws
+    func recordOperatorReply(
+        contextID: String,
+        scope: ROBMessagesTranscriptScope,
+        text: String,
+        createdAt: Date,
+        deliveryStatus: String,
+        deliveryError: String?
+    ) throws
     func statistics() throws -> ROBMessagesTranscriptStatistics
     func exportDecryptedJSON(to url: URL) throws
     func deleteAll() throws
@@ -242,6 +272,42 @@ final class ROBMessagesTranscriptStore: ROBMessagesTranscriptStoring, @unchecked
                     reply: reply
                 ))
             }
+
+            let operatorStatement = try prepare(
+                """
+                SELECT context_id, created_at, reply_cipher
+                  FROM operator_replies
+                 WHERE account_hash = ? AND sender_hash = ?
+                   AND delivery_status = 'delivered'
+                 ORDER BY created_at DESC
+                 LIMIT \(Self.maximumMemoryRows)
+                """,
+                database: database
+            )
+            defer { sqlite3_finalize(operatorStatement) }
+            bind(authenticationHash(account, key: key), to: 1, statement: operatorStatement)
+            bind(authenticationHash(sender, key: key), to: 2, statement: operatorStatement)
+            while sqlite3_step(operatorStatement) == SQLITE_ROW {
+                guard let contextID = text(operatorStatement, column: 0),
+                      let replyData = data(operatorStatement, column: 2) else {
+                    throw ROBMessagesTranscriptError.database(
+                        "An operator reply memory row is incomplete."
+                    )
+                }
+                rows.append(MemoryRow(
+                    contextID: contextID,
+                    receivedAt: Date(
+                        timeIntervalSince1970: sqlite3_column_double(operatorStatement, 1)
+                    ),
+                    inbound: nil,
+                    reply: try decrypt(
+                        replyData,
+                        contextID: contextID,
+                        field: "reply",
+                        key: key
+                    )
+                ))
+            }
             guard !rows.isEmpty else { return nil }
             return Self.renderMemory(rows: rows, query: query)
         }
@@ -316,14 +382,83 @@ final class ROBMessagesTranscriptStore: ROBMessagesTranscriptStoring, @unchecked
         }
     }
 
+    func recordOperatorReply(
+        contextID: String,
+        scope: ROBMessagesTranscriptScope,
+        text: String,
+        createdAt: Date,
+        deliveryStatus: String,
+        deliveryError: String?
+    ) throws {
+        try queue.sync {
+            let contextID = try boundedRequired(contextID, maximum: 128, label: "context ID")
+            let account = try boundedRequired(
+                scope.receivingAccount,
+                maximum: 512,
+                label: "receiving account"
+            )
+            let sender = try boundedRequired(scope.sender, maximum: 512, label: "sender")
+            let chatID = try boundedRequired(scope.chatID, maximum: 1_024, label: "chat ID")
+            let text = try boundedRequired(text, maximum: 4_000, label: "operator reply")
+            guard deliveryStatus == "delivered" || deliveryStatus == "failed" else {
+                throw ROBMessagesTranscriptError.invalidInput(
+                    "The operator reply delivery status is invalid."
+                )
+            }
+            let boundedError = deliveryError.map { String($0.prefix(1_000)) }
+            let key = try encryptionKey()
+            let database = try openDatabase()
+            let statement = try prepare(
+                """
+                INSERT INTO operator_replies (
+                    context_id, account_hash, sender_hash, chat_hash,
+                    account_cipher, sender_cipher, chat_cipher, created_at,
+                    reply_cipher, delivery_status, delivery_error_cipher
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                database: database
+            )
+            defer { sqlite3_finalize(statement) }
+            bind(contextID, to: 1, statement: statement)
+            bind(authenticationHash(account, key: key), to: 2, statement: statement)
+            bind(authenticationHash(sender, key: key), to: 3, statement: statement)
+            bind(authenticationHash(chatID, key: key), to: 4, statement: statement)
+            bind(try encrypt(account, contextID: contextID, field: "account", key: key), to: 5, statement: statement)
+            bind(try encrypt(sender, contextID: contextID, field: "sender", key: key), to: 6, statement: statement)
+            bind(try encrypt(chatID, contextID: contextID, field: "chat", key: key), to: 7, statement: statement)
+            sqlite3_bind_double(statement, 8, createdAt.timeIntervalSince1970)
+            bind(try encrypt(text, contextID: contextID, field: "reply", key: key), to: 9, statement: statement)
+            bind(deliveryStatus, to: 10, statement: statement)
+            if let boundedError {
+                bind(
+                    try encrypt(
+                        boundedError,
+                        contextID: contextID,
+                        field: "delivery_error",
+                        key: key
+                    ),
+                    to: 11,
+                    statement: statement
+                )
+            } else {
+                sqlite3_bind_null(statement, 11)
+            }
+            try stepDone(statement, database: database)
+        }
+    }
+
     func statistics() throws -> ROBMessagesTranscriptStatistics {
         try queue.sync {
             let database = try openDatabase()
             let statement = try prepare(
                 """
-                SELECT COUNT(*),
-                       SUM(CASE WHEN delivery_status = 'delivered' THEN 1 ELSE 0 END)
-                  FROM message_transactions
+                SELECT
+                    (SELECT COUNT(*) FROM message_transactions) +
+                    (SELECT COUNT(*) FROM operator_replies),
+                    (SELECT COUNT(*) FROM message_transactions
+                      WHERE delivery_status = 'delivered') +
+                    (SELECT COUNT(*) FROM operator_replies
+                      WHERE delivery_status = 'delivered')
                 """,
                 database: database
             )
@@ -429,10 +564,84 @@ final class ROBMessagesTranscriptStore: ROBMessagesTranscriptStoring, @unchecked
                     deliveryError: deliveryError
                 ))
             }
-            let isTruncated = records.count > boundedLimit
+            var isTruncated = records.count > boundedLimit
             if isTruncated { records.removeLast(records.count - boundedLimit) }
+
+            let operatorStatement = try prepare(
+                """
+                SELECT context_id, account_cipher, sender_cipher, chat_cipher,
+                       created_at, reply_cipher, delivery_status,
+                       delivery_error_cipher
+                  FROM operator_replies
+                 ORDER BY created_at DESC
+                 LIMIT \(boundedLimit + 1)
+                """,
+                database: database
+            )
+            defer { sqlite3_finalize(operatorStatement) }
+            var operatorReplies: [ROBMessagesOperatorReplyRecord] = []
+            while sqlite3_step(operatorStatement) == SQLITE_ROW {
+                guard let contextID = text(operatorStatement, column: 0),
+                      let accountData = data(operatorStatement, column: 1),
+                      let senderData = data(operatorStatement, column: 2),
+                      let chatData = data(operatorStatement, column: 3),
+                      let replyData = data(operatorStatement, column: 5),
+                      let status = text(operatorStatement, column: 6) else {
+                    throw ROBMessagesTranscriptError.database(
+                        "An operator reply archive row is incomplete."
+                    )
+                }
+                let deliveryError: String?
+                if let errorData = data(operatorStatement, column: 7) {
+                    deliveryError = try decrypt(
+                        errorData,
+                        contextID: contextID,
+                        field: "delivery_error",
+                        key: key
+                    )
+                } else {
+                    deliveryError = nil
+                }
+                operatorReplies.append(ROBMessagesOperatorReplyRecord(
+                    contextID: contextID,
+                    receivingAccount: try decrypt(
+                        accountData,
+                        contextID: contextID,
+                        field: "account",
+                        key: key
+                    ),
+                    sender: try decrypt(
+                        senderData,
+                        contextID: contextID,
+                        field: "sender",
+                        key: key
+                    ),
+                    chatID: try decrypt(
+                        chatData,
+                        contextID: contextID,
+                        field: "chat",
+                        key: key
+                    ),
+                    createdAt: Date(
+                        timeIntervalSince1970: sqlite3_column_double(operatorStatement, 4)
+                    ),
+                    text: try decrypt(
+                        replyData,
+                        contextID: contextID,
+                        field: "reply",
+                        key: key
+                    ),
+                    deliveryStatus: status,
+                    deliveryError: deliveryError
+                ))
+            }
+            if operatorReplies.count > boundedLimit {
+                isTruncated = true
+                operatorReplies.removeLast(operatorReplies.count - boundedLimit)
+            }
             return ROBMessagesTranscriptBrowseSnapshot(
                 records: records,
+                operatorReplies: operatorReplies,
                 isTruncated: isTruncated
             )
         }
@@ -468,12 +677,28 @@ final class ROBMessagesTranscriptStore: ROBMessagesTranscriptStoring, @unchecked
                 if let error = record.deliveryError { row["delivery_error"] = error }
                 return row
             }
+        let operatorRows: [[String: Any]] = snapshot.operatorReplies
+            .sorted { $0.createdAt < $1.createdAt }
+            .map { record in
+                var row: [String: Any] = [
+                    "context_id": record.contextID,
+                    "receiving_account": record.receivingAccount,
+                    "sender": record.sender,
+                    "chat_id": record.chatID,
+                    "created_at": Self.internetDate(record.createdAt),
+                    "reply_text": record.text,
+                    "delivery_status": record.deliveryStatus,
+                ]
+                if let error = record.deliveryError { row["delivery_error"] = error }
+                return row
+            }
 
         do {
             let export = [
                 "format": "Cerebro Messages transcript v1",
                 "exported_at": Self.internetDate(Date()),
-                "transactions": rows
+                "transactions": rows,
+                "operator_replies": operatorRows,
             ] as [String: Any]
             let json = try JSONSerialization.data(
                 withJSONObject: export,
@@ -495,6 +720,7 @@ final class ROBMessagesTranscriptStore: ROBMessagesTranscriptStoring, @unchecked
         try queue.sync {
             let database = try openDatabase()
             try execute("DELETE FROM message_transactions", database: database)
+            try execute("DELETE FROM operator_replies", database: database)
             _ = sqlite3_wal_checkpoint_v2(
                 database,
                 nil,
@@ -509,7 +735,7 @@ final class ROBMessagesTranscriptStore: ROBMessagesTranscriptStoring, @unchecked
     private struct MemoryRow {
         let contextID: String
         let receivedAt: Date
-        let inbound: String
+        let inbound: String?
         let reply: String?
     }
 
@@ -622,6 +848,34 @@ final class ROBMessagesTranscriptStore: ROBMessagesTranscriptStoring, @unchecked
                 """
                 CREATE INDEX IF NOT EXISTS message_transactions_sender_time
                     ON message_transactions(account_hash, sender_hash, received_at DESC)
+                """,
+                database: opened
+            )
+            try execute(
+                """
+                CREATE TABLE IF NOT EXISTS operator_replies (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    context_id TEXT NOT NULL UNIQUE,
+                    account_hash BLOB NOT NULL,
+                    sender_hash BLOB NOT NULL,
+                    chat_hash BLOB NOT NULL,
+                    account_cipher BLOB NOT NULL,
+                    sender_cipher BLOB NOT NULL,
+                    chat_cipher BLOB NOT NULL,
+                    created_at REAL NOT NULL,
+                    reply_cipher BLOB NOT NULL,
+                    delivery_status TEXT NOT NULL CHECK(delivery_status IN (
+                        'delivered', 'failed'
+                    )),
+                    delivery_error_cipher BLOB
+                )
+                """,
+                database: opened
+            )
+            try execute(
+                """
+                CREATE INDEX IF NOT EXISTS operator_replies_sender_time
+                    ON operator_replies(account_hash, sender_hash, created_at DESC)
                 """,
                 database: opened
             )
@@ -788,16 +1042,17 @@ final class ROBMessagesTranscriptStore: ROBMessagesTranscriptStoring, @unchecked
     }
 
     private static func renderMemory(rows: [MemoryRow], query: String) -> String? {
+        let newestFirst = rows.sorted { $0.receivedAt > $1.receivedAt }
         let queryTerms = searchableTerms(query)
         var selectedIDs = Set<String>()
         var selected: [MemoryRow] = []
 
-        for row in rows.prefix(12) {
+        for row in newestFirst.prefix(12) {
             selected.append(row)
             selectedIDs.insert(row.contextID)
         }
-        let relevant = rows.map { row -> (MemoryRow, Int) in
-            let candidate = "\(row.inbound) \(row.reply ?? "")".lowercased()
+        let relevant = newestFirst.map { row -> (MemoryRow, Int) in
+            let candidate = "\(row.inbound ?? "") \(row.reply ?? "")".lowercased()
             let candidateTerms = searchableTerms(candidate)
             var score = queryTerms.intersection(candidateTerms).count * 10
             if !query.isEmpty && candidate.contains(query.lowercased()) { score += 100 }
@@ -819,10 +1074,15 @@ final class ROBMessagesTranscriptStore: ROBMessagesTranscriptStoring, @unchecked
         reveal them to another sender.
         """
         for row in selected {
-            let inbound = boundedMemoryText(row.inbound)
+            let inbound = row.inbound.map(boundedMemoryText)
             let reply = row.reply.map(boundedMemoryText)
-            let block = "\n[\(internetDate(row.receivedAt))]\nSender: \(inbound)" +
-                (reply.map { "\nROB: \($0)" } ?? "")
+            let block: String
+            if let inbound {
+                block = "\n[\(internetDate(row.receivedAt))]\nSender: \(inbound)" +
+                    (reply.map { "\nROB: \($0)" } ?? "")
+            } else {
+                block = "\n[\(internetDate(row.receivedAt))]\nOperator (as ROB): \(reply ?? "")"
+            }
             guard output.count + block.count <= maximumMemoryCharacters else { break }
             output += block
         }

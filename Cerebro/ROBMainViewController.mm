@@ -161,6 +161,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 @property (readwrite, retain) ROBAI *robAI;
 @property (readwrite, retain) ROBGeminiSettingsViewController *geminiSettingsViewController;
 @property (readwrite, retain) ROBInsta360DiagnosticsWindowController *insta360DiagnosticsWindowController;
+@property (readwrite, retain) ROBMessagesWorkspaceViewController *messagesWorkspaceViewController;
 @property (readwrite, retain) ROBSystemStatusCoordinator *systemStatusCoordinator;
 @property (readwrite, retain) ROBStageShowWindowController *stageShowWindowController;
 @property (readwrite, retain) ROBStageShowCoordinator *stageShowCoordinator;
@@ -230,6 +231,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 @property (readwrite, retain) NSMutableArray<ROBConversationMessage *> *conversationMessages;
 @property (readwrite, copy) NSString *lastConversationUserText;
 @property (readwrite, retain) NSDate *lastConversationUserDate;
+@property (readwrite, retain) IBOutlet NSButton *mainAISendButton;
+@property (readwrite, retain) IBOutlet NSButton *resetConversationButton;
 - (void)applicationWillTerminate:(NSNotification *)notification;
 - (void)shutdownCerebroRuntime;
 - (BOOL)sendRobotActionMessage:(ROBRobotActionMessage *)message;
@@ -249,12 +252,14 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void)updateGeminiCameraDemand;
 - (void)geminiVideoSourceSettingsDidChange:(NSNotification *)notification;
 - (void)configureConversationTranscript;
+- (void)configureMainWorkspace;
 - (void)appendConversationText:(NSString *)text fromUser:(BOOL)fromUser;
 - (void)loadConversationLog;
 - (void)saveConversationLog;
 - (void)pruneConversationLog;
 - (NSURL *)conversationLogURL;
 - (IBAction)sendROBChatText:(id)sender;
+- (IBAction)showSettings:(id)sender;
 @end
 
 @implementation ROBMainViewController
@@ -271,7 +276,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     column.width = scrollView.contentSize.width;
     [tableView addTableColumn:column];
     tableView.headerView = nil;
-    tableView.backgroundColor = [NSColor colorWithCalibratedWhite:0.075 alpha:1.0];
+    tableView.backgroundColor = NSColor.clearColor;
     tableView.gridStyleMask = NSTableViewGridNone;
     tableView.intercellSpacing = NSMakeSize(0, 4);
     tableView.selectionHighlightStyle = NSTableViewSelectionHighlightStyleNone;
@@ -281,8 +286,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     tableView.columnAutoresizingStyle = NSTableViewUniformColumnAutoresizingStyle;
     tableView.autoresizingMask = NSViewWidthSizable;
     scrollView.documentView = tableView;
-    scrollView.drawsBackground = YES;
-    scrollView.backgroundColor = tableView.backgroundColor;
+    scrollView.drawsBackground = NO;
     scrollView.hasVerticalScroller = YES;
     self.conversationTableView = tableView;
 
@@ -297,6 +301,218 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     self.speechTextView.automaticDashSubstitutionEnabled = NO;
 
     [self loadConversationLog];
+}
+
+- (NSView *)workspaceCardView
+{
+    NSView *card = [[NSView alloc] initWithFrame:NSZeroRect];
+    card.wantsLayer = YES;
+    card.layer.cornerRadius = 14;
+    card.layer.borderWidth = 1;
+    card.layer.borderColor = NSColor.separatorColor.CGColor;
+    card.layer.backgroundColor = NSColor.controlBackgroundColor.CGColor;
+    return card;
+}
+
+- (void)configureMainWorkspace
+{
+    NSScrollView *conversationScrollView = self.speechTranscriptTextView.enclosingScrollView;
+    NSScrollView *composerScrollView = self.speechTextView.enclosingScrollView;
+    if (conversationScrollView == nil || composerScrollView == nil ||
+        self.mainAISendButton == nil || self.resetConversationButton == nil) {
+        return;
+    }
+
+    [conversationScrollView removeFromSuperview];
+    [composerScrollView removeFromSuperview];
+    [self.mainAISendButton removeFromSuperview];
+    [self.resetConversationButton removeFromSuperview];
+
+    self.view.wantsLayer = YES;
+    self.view.layer.backgroundColor = NSColor.windowBackgroundColor.CGColor;
+
+    NSVisualEffectView *background = [[NSVisualEffectView alloc] initWithFrame:NSZeroRect];
+    background.material = NSVisualEffectMaterialUnderWindowBackground;
+    background.blendingMode = NSVisualEffectBlendingModeBehindWindow;
+    background.state = NSVisualEffectStateActive;
+    background.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:background positioned:NSWindowBelow relativeTo:nil];
+
+    NSImageView *appIcon = [[NSImageView alloc] initWithFrame:NSZeroRect];
+    appIcon.image = [NSImage imageWithSystemSymbolName:@"brain.head.profile"
+                             accessibilityDescription:@"Cerebro"];
+    appIcon.contentTintColor = NSColor.controlAccentColor;
+    appIcon.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:31
+                                                                                  weight:NSFontWeightMedium];
+    [appIcon.widthAnchor constraintEqualToConstant:42].active = YES;
+    [appIcon.heightAnchor constraintEqualToConstant:42].active = YES;
+
+    NSTextField *titleLabel = [NSTextField labelWithString:@"Cerebro"];
+    titleLabel.font = [NSFont systemFontOfSize:24 weight:NSFontWeightSemibold];
+    NSTextField *subtitleLabel = [NSTextField
+        labelWithString:@"Robot communication center"];
+    subtitleLabel.font = [NSFont systemFontOfSize:12];
+    subtitleLabel.textColor = NSColor.secondaryLabelColor;
+    NSStackView *titleStack = [NSStackView stackViewWithViews:@[titleLabel, subtitleLabel]];
+    titleStack.orientation = NSUserInterfaceLayoutOrientationVertical;
+    titleStack.alignment = NSLayoutAttributeLeading;
+    titleStack.spacing = 1;
+
+    NSButton *insta360Button = [NSButton buttonWithTitle:@"360° Live View"
+                                                  target:self
+                                                  action:@selector(showInsta360Diagnostics:)];
+    insta360Button.image = [NSImage imageWithSystemSymbolName:@"viewfinder"
+                                     accessibilityDescription:@"Open Insta360 live diagnostics"];
+    insta360Button.imagePosition = NSImageLeading;
+    insta360Button.bezelStyle = NSBezelStyleTexturedRounded;
+    insta360Button.toolTip = @"Open the live stitched panorama, orientation guide, and 360° diagnostics";
+    [insta360Button setAccessibilityIdentifier:@"ROB.MainWorkspace.Insta360"];
+
+    NSButton *settingsButton = [NSButton buttonWithTitle:@"Settings"
+                                                  target:self
+                                                  action:@selector(showSettings:)];
+    settingsButton.image = [NSImage imageWithSystemSymbolName:@"gearshape.fill"
+                                     accessibilityDescription:@"Open Cerebro Settings"];
+    settingsButton.imagePosition = NSImageLeading;
+    settingsButton.bezelStyle = NSBezelStyleTexturedRounded;
+    settingsButton.toolTip = @"Configure AI providers, Messages, cameras, and robot services";
+    [settingsButton setAccessibilityIdentifier:@"ROB.MainWorkspace.Settings"];
+
+    NSView *headerSpacer = [[NSView alloc] initWithFrame:NSZeroRect];
+    NSStackView *header = [NSStackView stackViewWithViews:@[
+        appIcon, titleStack, headerSpacer, insta360Button, settingsButton
+    ]];
+    header.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    header.alignment = NSLayoutAttributeCenterY;
+    header.spacing = 10;
+    [headerSpacer setContentHuggingPriority:NSLayoutPriorityDefaultLow
+                             forOrientation:NSLayoutConstraintOrientationHorizontal];
+    [settingsButton setContentHuggingPriority:NSLayoutPriorityRequired
+                               forOrientation:NSLayoutConstraintOrientationHorizontal];
+    [insta360Button setContentHuggingPriority:NSLayoutPriorityRequired
+                               forOrientation:NSLayoutConstraintOrientationHorizontal];
+
+    self.messagesWorkspaceViewController = [[ROBMessagesWorkspaceViewController alloc] init];
+    [self addChildViewController:self.messagesWorkspaceViewController];
+    NSView *messagesView = self.messagesWorkspaceViewController.view;
+    messagesView.translatesAutoresizingMaskIntoConstraints = NO;
+
+    NSView *aiCard = [self workspaceCardView];
+    aiCard.translatesAutoresizingMaskIntoConstraints = NO;
+    NSTextField *aiTitle = [NSTextField labelWithString:@"Main AI"];
+    aiTitle.font = [NSFont systemFontOfSize:17 weight:NSFontWeightSemibold];
+    NSTextField *aiSubtitle = [NSTextField
+        labelWithString:@"Talk directly with ROB’s primary intelligence"];
+    aiSubtitle.font = [NSFont systemFontOfSize:11];
+    aiSubtitle.textColor = NSColor.secondaryLabelColor;
+    NSStackView *aiTitleStack = [NSStackView stackViewWithViews:@[aiTitle, aiSubtitle]];
+    aiTitleStack.orientation = NSUserInterfaceLayoutOrientationVertical;
+    aiTitleStack.alignment = NSLayoutAttributeLeading;
+    aiTitleStack.spacing = 1;
+
+    self.resetConversationButton.title = @"Clear";
+    self.resetConversationButton.image = [NSImage imageWithSystemSymbolName:@"trash"
+                                                   accessibilityDescription:@"Clear Main AI conversation"];
+    self.resetConversationButton.imagePosition = NSImageLeading;
+    self.resetConversationButton.bezelStyle = NSBezelStyleTexturedRounded;
+    self.resetConversationButton.toolTip = @"Clear the local Main AI conversation history";
+    NSView *aiHeaderSpacer = [[NSView alloc] initWithFrame:NSZeroRect];
+    NSStackView *aiHeader = [NSStackView stackViewWithViews:@[
+        aiTitleStack, aiHeaderSpacer, self.resetConversationButton
+    ]];
+    aiHeader.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    aiHeader.alignment = NSLayoutAttributeCenterY;
+    aiHeader.spacing = 8;
+
+    conversationScrollView.translatesAutoresizingMaskIntoConstraints = NO;
+    conversationScrollView.borderType = NSNoBorder;
+    conversationScrollView.wantsLayer = YES;
+    conversationScrollView.layer.cornerRadius = 10;
+    conversationScrollView.layer.masksToBounds = YES;
+    conversationScrollView.layer.backgroundColor =
+        [NSColor.textBackgroundColor colorWithAlphaComponent:0.72].CGColor;
+
+    composerScrollView.translatesAutoresizingMaskIntoConstraints = NO;
+    composerScrollView.borderType = NSNoBorder;
+    composerScrollView.drawsBackground = NO;
+    composerScrollView.wantsLayer = YES;
+    composerScrollView.layer.cornerRadius = 10;
+    composerScrollView.layer.borderWidth = 1;
+    composerScrollView.layer.borderColor = NSColor.separatorColor.CGColor;
+    self.speechTextView.backgroundColor = NSColor.clearColor;
+
+    self.mainAISendButton.title = @"Send to ROB";
+    self.mainAISendButton.bezelStyle = NSBezelStyleRounded;
+    self.mainAISendButton.keyEquivalent = @"\r";
+    self.mainAISendButton.keyEquivalentModifierMask = NSEventModifierFlagCommand;
+    self.mainAISendButton.toolTip = @"Send to the Main AI (Command-Return)";
+    [self.mainAISendButton setAccessibilityIdentifier:@"ROB.MainWorkspace.SendAI"];
+
+    NSStackView *composerRow = [NSStackView stackViewWithViews:@[
+        composerScrollView, self.mainAISendButton
+    ]];
+    composerRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    composerRow.alignment = NSLayoutAttributeCenterY;
+    composerRow.spacing = 10;
+    NSTextField *composerHint = [NSTextField
+        labelWithString:@"Command-Return sends • Return adds a new line"];
+    composerHint.font = [NSFont systemFontOfSize:10];
+    composerHint.textColor = NSColor.tertiaryLabelColor;
+
+    for (NSView *subview in @[aiHeader, conversationScrollView, composerRow, composerHint]) {
+        subview.translatesAutoresizingMaskIntoConstraints = NO;
+        [aiCard addSubview:subview];
+    }
+    [NSLayoutConstraint activateConstraints:@[
+        [aiHeader.topAnchor constraintEqualToAnchor:aiCard.topAnchor constant:14],
+        [aiHeader.leadingAnchor constraintEqualToAnchor:aiCard.leadingAnchor constant:16],
+        [aiHeader.trailingAnchor constraintEqualToAnchor:aiCard.trailingAnchor constant:-16],
+        [conversationScrollView.topAnchor constraintEqualToAnchor:aiHeader.bottomAnchor constant:12],
+        [conversationScrollView.leadingAnchor constraintEqualToAnchor:aiCard.leadingAnchor constant:12],
+        [conversationScrollView.trailingAnchor constraintEqualToAnchor:aiCard.trailingAnchor constant:-12],
+        [composerRow.topAnchor constraintEqualToAnchor:conversationScrollView.bottomAnchor constant:10],
+        [composerRow.leadingAnchor constraintEqualToAnchor:aiCard.leadingAnchor constant:12],
+        [composerRow.trailingAnchor constraintEqualToAnchor:aiCard.trailingAnchor constant:-12],
+        [composerScrollView.heightAnchor constraintEqualToConstant:76],
+        [self.mainAISendButton.widthAnchor constraintEqualToConstant:108],
+        [composerHint.topAnchor constraintEqualToAnchor:composerRow.bottomAnchor constant:5],
+        [composerHint.leadingAnchor constraintEqualToAnchor:composerRow.leadingAnchor constant:4],
+        [composerHint.trailingAnchor constraintLessThanOrEqualToAnchor:aiCard.trailingAnchor constant:-12],
+        [composerHint.bottomAnchor constraintEqualToAnchor:aiCard.bottomAnchor constant:-11]
+    ]];
+
+    NSStackView *workspace = [NSStackView stackViewWithViews:@[messagesView, aiCard]];
+    workspace.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    workspace.alignment = NSLayoutAttributeTop;
+    workspace.distribution = NSStackViewDistributionFill;
+    workspace.spacing = 14;
+    workspace.translatesAutoresizingMaskIntoConstraints = NO;
+    [messagesView.heightAnchor constraintEqualToAnchor:workspace.heightAnchor].active = YES;
+    [aiCard.heightAnchor constraintEqualToAnchor:workspace.heightAnchor].active = YES;
+    [messagesView.widthAnchor constraintGreaterThanOrEqualToConstant:440].active = YES;
+    NSLayoutConstraint *preferredMessagesWidth =
+        [messagesView.widthAnchor constraintEqualToConstant:490];
+    preferredMessagesWidth.priority = NSLayoutPriorityDefaultHigh;
+    preferredMessagesWidth.active = YES;
+    [aiCard.widthAnchor constraintGreaterThanOrEqualToConstant:500].active = YES;
+
+    header.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:header];
+    [self.view addSubview:workspace];
+    [NSLayoutConstraint activateConstraints:@[
+        [background.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [background.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [background.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [background.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+        [header.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:18],
+        [header.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:24],
+        [header.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-24],
+        [header.heightAnchor constraintGreaterThanOrEqualToConstant:44],
+        [workspace.topAnchor constraintEqualToAnchor:header.bottomAnchor constant:14],
+        [workspace.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:24],
+        [workspace.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-24],
+        [workspace.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor constant:-20]
+    ]];
 }
 
 - (NSURL *)conversationLogURL
@@ -1546,6 +1762,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 {
     [super viewDidLoad];
     [self configureConversationTranscript];
+    [self configureMainWorkspace];
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(applicationWillTerminate:)
                                                  name:NSApplicationWillTerminateNotification
@@ -2519,6 +2736,21 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                                                                                           fromData:data error:&error];
     NSString *msg = [messageDictionary valueForKey:@"message"];
     NSString *sender = [messageDictionary valueForKey:@"sender"];
+    NSString *motionVersion = messageDictionary[@"controller.motion.version"];
+    NSString *motionState = messageDictionary[@"controller.motion.state"];
+    NSString *motionInhibitReason = messageDictionary[@"controller.motion.inhibit_reason"];
+    NSSet<NSString *> *validMotionInhibitReasons = [NSSet setWithArray:@[
+        @"disconnected", @"operatorDisarmed", @"deadManReleased", @"inputExpired",
+        @"sceneInactive", @"controllerDisconnected", @"emergencyStop",
+        @"transportFailure", @"userRequested", @"robotWatchdog"
+    ]];
+    BOOL hasMotionMetadata = motionVersion != nil || motionState != nil || motionInhibitReason != nil;
+    BOOL motionMetadataValid = !hasMotionMetadata || (
+        [motionVersion isEqualToString:@"1"]
+        && ([motionState isEqualToString:@"drive"] || [motionState isEqualToString:@"stopped"])
+        && (motionInhibitReason == nil || [validMotionInhibitReasons containsObject:motionInhibitReason])
+        && (![motionState isEqualToString:@"drive"] || motionInhibitReason == nil)
+    );
 
     if ([msg isEqualToString:@"ROBControllerTreadSnapshotV1"])
     {
@@ -2918,6 +3150,12 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         float Long = [geoPosition_array[1] floatValue];
         
         bool tredBrakeLock = [[command_components[9] componentsSeparatedByString:@"tredBrakeLock="][1] boolValue];
+        if (!motionMetadataValid
+            || ([motionState isEqualToString:@"drive"] && tredBrakeLock)
+            || ([motionState isEqualToString:@"stopped"] && !tredBrakeLock)) {
+            NSLog(@"Ignoring controller snapshot with contradictory motion metadata");
+            return;
+        }
         NSArray *flipper1_array = [[command_components[10] componentsSeparatedByString:@"flipper="][1] componentsSeparatedByString:@","];
         
         bool flipperForwardIsDown = [flipper1_array[0] boolValue];
@@ -2946,6 +3184,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         controllerModelData.Lat = Lat;
         controllerModelData.Long = Long;
         controllerModelData.tredBrakeLock = tredBrakeLock;
+        controllerModelData.motionInhibitReason = motionInhibitReason;
         controllerModelData.flipperForwardIsDown = flipperForwardIsDown;
         controllerModelData.flipperRelaxBrake = flipperRelaxBrake;
         controllerModelData.flipperBackwardIsDown = flipperBackwardIsDown;
@@ -3128,6 +3367,14 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     id appDelegate = NSApp.delegate;
     if ([appDelegate respondsToSelector:@selector(showGeminiSettings:)]) {
         [appDelegate showGeminiSettings:sender];
+    }
+}
+
+- (IBAction)showSettings:(id)sender
+{
+    id appDelegate = NSApp.delegate;
+    if ([appDelegate respondsToSelector:@selector(showPythonSettings:)]) {
+        [appDelegate showPythonSettings:sender];
     }
 }
 

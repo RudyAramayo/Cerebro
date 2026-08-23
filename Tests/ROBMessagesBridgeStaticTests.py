@@ -354,6 +354,8 @@ def main() -> None:
         "account_hash = ? AND sender_hash = ?",
         "maximumMemoryCharacters = 8_000",
         '"has_image":',
+        "CREATE TABLE IF NOT EXISTS operator_replies",
+        "try encrypt(text, contextID: contextID, field: \"reply\"",
     ]
     require(
         all(symbol in TRANSCRIPT for symbol in transcript_contract),
@@ -420,6 +422,33 @@ def main() -> None:
         and "record.replyText" in TRANSCRIPT_WINDOW
         and "Image attached — pixels are not stored" in TRANSCRIPT_WINDOW,
         "The local Messages transcript browser lost search, readable turns, or image privacy labeling",
+    )
+    require(
+        "ROBMessagesWorkspaceViewController" in TRANSCRIPT_WINDOW
+        and 'labelWithString: "Messages"' in TRANSCRIPT_WINDOW
+        and 'sendButton.title = "Reply"' in TRANSCRIPT_WINDOW
+        and "bridge.sendOperatorReply(" in TRANSCRIPT_WINDOW
+        and 'sender = "You"' in TRANSCRIPT_WINDOW
+        and "operatorReplies.map" in TRANSCRIPT_WINDOW,
+        "The main Messages workspace lost conversation browsing, replies, or operator history",
+    )
+    require(
+        "func sendOperatorReply(" in BRIDGE
+        and "authorizationGate.authorizes(" in BRIDGE
+        and "toChat: record.chatID" in BRIDGE
+        and "expectedSender: sender" in BRIDGE
+        and "try transcriptStore.recordOperatorReply(" in BRIDGE,
+        "Operator Messages replies lost authorization, immutable routing, or encrypted history",
+    )
+    require(
+        "[self configureMainWorkspace]" in MAIN
+        and '@"Main AI"' in MAIN
+        and '@"360° Live View"' in MAIN
+        and '@"Settings"' in MAIN
+        and "ROBMessagesWorkspaceViewController" in MAIN
+        and "@selector(showInsta360Diagnostics:)" in MAIN
+        and "@selector(showSettings:)" in MAIN,
+        "The polished main communication workspace lost Messages, Main AI, Settings, or 360 access",
     )
     require(
         'window.title = "Messages Administrator Commands"' in COMMAND_WINDOW
