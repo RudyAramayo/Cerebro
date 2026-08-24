@@ -75,7 +75,6 @@ import Foundation
     private var motionState: MotionState = .silent
     private var lastPublishedDetail: String?
     private var lastStatusUptime: TimeInterval = 0
-    private var lastGreetedTimes: [String: TimeInterval] = [:]
 
     private static let plannerInterval: TimeInterval = 0.2
     private static let lidarFreshness: TimeInterval = 0.75
@@ -530,36 +529,9 @@ import Foundation
 
     private func maybeRequestConversation(now: TimeInterval) {
         guard active, behaviors.contains("talk") else { return }
-
-        // 1. Check for newly recognized identified people to greet pro-actively
-        let snapshot = ROBSceneSnapshotStore.shared.snapshot()
-        let identifiedPeople = snapshot.mlxIdentifiedPeople
-        var personToGreet: String? = nil
-
-        for person in identifiedPeople {
-            let lastGreeted = lastGreetedTimes[person] ?? 0
-            if now - lastGreeted >= 300 { // 5-minute cooldown
-                lastGreetedTimes[person] = now
-                personToGreet = person
-                break
-            }
-        }
-
-        if let person = personToGreet {
-            // Push next regular conversation interval forward so we don't immediately talk again
-            nextConversationUptime = now + Double.random(in: 45 ... 90)
-            var greetingName = person
-            if person.lowercased().contains("rudy") {
-                let title = ROBMLXRuntime.shared.rudyGreetingTitle
-                greetingName = "Rudy (\(title))"
-            }
-            NSLog("[Autonomy] Triggering proactive greeting for: \(greetingName)")
-            let prompt = "Autonomy context: you have just recognized \(greetingName) in the camera frame! You have not greeted them recently. Briefly and naturally greet them by name/description, welcome them, and start a friendly, polite conversation."
-            delegate?.autonomyCoordinator(self, requestConversationPrompt: prompt)
-            return
-        }
-
-        // 2. Regular periodic conversation request
+        // Face recognition owns its always-on greeting cooldown. Keeping that
+        // outside autonomy means stationary/manual show operation also greets
+        // known people and avoids duplicate prompts when autonomy is active.
         guard now >= nextConversationUptime else { return }
         nextConversationUptime = now + Double.random(in: 45 ... 90)
         let prompt: String

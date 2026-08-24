@@ -37,6 +37,7 @@ static NSString * const ROBDevelopmentModeDefaultsKey = @"ROBDevelopmentMode";
 static NSString * const ROBShowControllerInputDiagnosticsNotification = @"ROBShowControllerInputDiagnostics";
 static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopmentModeDidChange";
 static NSString * const ROBGeminiVideoSourceSettingsDidChangeNotification = @"ROBGeminiVideoSourceSettingsDidChange";
+static NSString * const ROBFaceIdentityConversationCueNotification = @"ROBFaceIdentityConversationCue";
 
 #import "AVFoundation/AVFoundation.h"
 #import "Cerebro-Swift.h"
@@ -250,6 +251,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void)finishControllerApprovedAmberGestureCallID:(NSString *)callID
                                              result:(NSDictionary *)result;
 - (void)updateGeminiCameraDemand;
+- (void)faceIdentityConversationCue:(NSNotification *)notification;
 - (void)geminiVideoSourceSettingsDidChange:(NSNotification *)notification;
 - (void)configureConversationTranscript;
 - (void)configureMainWorkspace;
@@ -710,6 +712,27 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     [self.speechBox sayIt:responseText];
 }
 
+- (void)faceIdentityConversationCue:(NSNotification *)notification
+{
+    NSString *kind = [notification.userInfo[@"kind"] isKindOfClass:NSString.class]
+        ? notification.userInfo[@"kind"] : @"";
+    NSString *text = [notification.userInfo[@"text"] isKindOfClass:NSString.class]
+        ? notification.userInfo[@"text"] : @"";
+    if (text.length == 0) { return; }
+
+    if ([kind isEqualToString:@"speak"]) {
+        [self appendConversationText:text fromUser:NO];
+        [self didRespond:text];
+        return;
+    }
+    if ([kind isEqualToString:@"prompt"]) {
+        NSInteger wordiness = self.torsoControlsViewController.speechWordinessChoice.selectedSegment;
+        if (![self.robAI sendText:text speechWordiness:wordiness]) {
+            NSLog(@"Face identity conversation cue could not be submitted: %@", text);
+        }
+    }
+}
+
 #pragma mark - ROBAIDelegate
 
 - (void)robAI:(ROBAI *)robAI didReceiveResponseText:(NSString *)text
@@ -744,6 +767,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     // the separate on-device Apple speech-recognition transcript.
     NSLog(@"Gemini Robotics heard: %@", text);
     [self appendConversationText:text fromUser:YES];
+    if ([[ROBFaceRecognitionService shared] noteConversationTranscript:text]) {
+        return;
+    }
     [self speakConfiguredAcknowledgementIfNotQueued];
 }
 
@@ -1683,6 +1709,14 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         return;
     }
 
+    if ([[ROBFaceRecognitionService shared] noteConversationTranscript:textInput]) {
+        [self appendConversationText:textInput fromUser:YES];
+        self.audioInputTaskController.textView.string =
+            [self.audioInputTaskController.textView.string
+                stringByAppendingString:[NSString stringWithFormat:@"\n%@\n", textInput]];
+        return;
+    }
+
     if (addressesROB)
     {
         self.ignoreText = false;
@@ -1775,6 +1809,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                                              selector:@selector(developmentModeDidChange:)
                                                  name:ROBDevelopmentModeDidChangeNotification
                                                object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(faceIdentityConversationCue:)
+                                                 name:ROBFaceIdentityConversationCueNotification
+                                               object:[ROBFaceRecognitionService shared]];
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(geminiVideoSourceSettingsDidChange:)
                                                  name:ROBGeminiVideoSourceSettingsDidChangeNotification
@@ -2610,11 +2648,21 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         return;
     }
     NSError *error = nil;
-    if (![ROBControlPairing revokeDeviceWithDeviceID:device.deviceID error:&error]) {
+    if (![self revokePairedControlDevice:device error:&error]) {
         [self showPairingFailure:error];
         return;
     }
+}
 
+- (BOOL)revokePairedControlDevice:(ROBControlPairedDevice *)device
+                            error:(NSError **)error
+{
+    if (device == nil || device.isRevoked) {
+        return YES;
+    }
+    if (![ROBControlPairing revokeDeviceWithDeviceID:device.deviceID error:error]) {
+        return NO;
+    }
     if ([device.roleName isEqualToString:@"operatorController"]) {
         // Revoking control authority ends motion and any session that authority
         // approved. The Arduino tread heartbeat remains an independent deadman.
@@ -2638,6 +2686,38 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         // continue after its obstacle source is revoked.
         [self.autonomyCoordinator stopWithReason:[NSString stringWithFormat:@"RPLidar device %@ was revoked", device.deviceName]];
     }
+    return YES;
+}
+
+- (void)issueControlPairingCredentialForLidar:(BOOL)isLidar
+{
+    NSString *deviceName = [self pairingDeviceNameWithDefault:(isLidar ? @"RPLidar" : @"ROBController")
+                                                         role:(isLidar ? @"RPLidar publisher" : @"ROBController")];
+    if (deviceName == nil) {
+        return;
+    }
+
+    NSError *error = nil;
+    NSString *pairingCode = isLidar
+        ? [ROBControlPairing issueLidarPairingCodeWithDeviceName:deviceName error:&error]
+        : [ROBControlPairing issueOperatorPairingCodeWithDeviceName:deviceName error:&error];
+    if (pairingCode.length == 0) {
+        [self showPairingFailure:error];
+        return;
+    }
+    [self showPairingCode:pairingCode
+                    title:(isLidar ? @"Pair RPLidar" : @"Pair ROBController")
+              destination:(isLidar ? @"the RPLidar publisher" : @"ROBController")];
+}
+
+- (void)pairOperatorControlDevice:(id)sender
+{
+    [self issueControlPairingCredentialForLidar:NO];
+}
+
+- (void)pairLidarControlDevice:(id)sender
+{
+    [self issueControlPairingCredentialForLidar:YES];
 }
 
 - (IBAction)showControlPairingCode:(id)sender
@@ -2659,24 +2739,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         return;
     }
 
-    BOOL isLidar = choice == NSAlertSecondButtonReturn;
-    NSString *deviceName = [self pairingDeviceNameWithDefault:(isLidar ? @"RPLidar" : @"ROBController")
-                                                         role:(isLidar ? @"RPLidar publisher" : @"ROBController")];
-    if (deviceName == nil) {
-        return;
-    }
-
-    NSError *error = nil;
-    NSString *pairingCode = isLidar
-        ? [ROBControlPairing issueLidarPairingCodeWithDeviceName:deviceName error:&error]
-        : [ROBControlPairing issueOperatorPairingCodeWithDeviceName:deviceName error:&error];
-    if (pairingCode.length == 0) {
-        [self showPairingFailure:error];
-        return;
-    }
-    [self showPairingCode:pairingCode
-                    title:(isLidar ? @"Pair RPLidar" : @"Pair ROBController")
-              destination:(isLidar ? @"the RPLidar publisher" : @"ROBController")];
+    [self issueControlPairingCredentialForLidar:(choice == NSAlertSecondButtonReturn)];
 }
 
 - (void)didReceiveLidarTelemetry:(NSData *)data deviceID:(NSString *)deviceID

@@ -29,6 +29,8 @@ enum ROBFaceIdentityGalleryFixtureTests {
         let imagePlaintext = Data("private-face-image-fixture".utf8)
         let updated = try gallery.appendSample(sample, encryptedImagePlaintext: imagePlaintext, to: profile.id)
         precondition(updated.samples.count == 1)
+        precondition(ROBFaceIdentityProfile.requiredEnrollmentSamples == 24)
+        precondition(!updated.enrollmentIsComplete)
 
         let loaded = try gallery.profiles()
         precondition(loaded.count == 1)

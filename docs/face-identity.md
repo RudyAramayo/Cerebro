@@ -45,6 +45,28 @@ seconds and camera-derived identity remains untrusted sensor data.
 The gallery records its backend identifier and stores normalized 512-dimensional
 embeddings alongside retained, consented crops.
 
+## Conversation and hands-free friend enrollment
+
+Recognition now publishes an always-on conversation cue, independent of an
+authorized autonomy session. ROB greets a newly recalled person by name once,
+then observes a five-minute per-person greeting cooldown. The same short-lived
+recognized names are included in cloud and local conversation context as
+untrusted personalization data; they never grant administrator or robot-control
+authority.
+
+When recognition is enabled and an unfamiliar face remains stable for several
+quality-gated frames, ROB offers hands-free friend enrollment. No image is
+persisted before consent. ROB asks the visitor to say **“ROB, yes, remember me,
+my name is …”** and reminds children to get a grown-up's permission. A name
+without an affirmative answer triggers a separate confirmation question. A
+decline stores nothing. After consent, ROB creates only a `knownPerson` profile,
+binds capture to the face that gave permission, collects the same 24 varied
+samples, gives spoken pose prompts, and announces completion. A different
+person stepping into the camera is rejected rather than enrolled.
+**“ROB, cancel enrollment”** stops the capture and deletes its
+partial profile and samples. Unknown-person invitations have a five-minute
+cooldown so ROB does not repeatedly ask the same nearby audience.
+
 ## Installing AdaFace models
 
 The checkpoint files and converted model packages are intentionally kept out of
@@ -92,6 +114,8 @@ Run the storage fixture and static wiring checks with:
 ```sh
 swiftc Cerebro/ROBFaceIdentityGallery.swift Tests/ROBFaceIdentityGalleryFixtureTests.swift -o /tmp/rob-face-gallery-tests
 /tmp/rob-face-gallery-tests
+swiftc Cerebro/ROBFaceConversationPolicy.swift Tests/ROBFaceConversationPolicyFixtureTests.swift -o /tmp/rob-face-conversation-tests
+/tmp/rob-face-conversation-tests
 python3 Tests/ROBFaceIdentityStaticTests.py
 ```
 

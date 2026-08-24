@@ -11,6 +11,9 @@
 #import "ROBSpeechBox.h"
 #import "Cerebro-Swift.h"
 
+static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
+    @"com.orbitusrobotics.robctl.v2.paired-devices-changed";
+
 @interface ROBPythonSettingsWindowController () <NSTextFieldDelegate, NSTextViewDelegate>
 @property (nonatomic, strong) NSTextField *pythonPathField;
 @property (nonatomic, strong) NSTextField *statusLabel;
@@ -44,6 +47,10 @@
 @property (nonatomic, strong) NSTextField *maestroSerialStatusLabel;
 @property (nonatomic, strong) NSButton *openBaseConsoleButton;
 @property (nonatomic, strong) NSButton *reconnectMaestroButton;
+@property (nonatomic, strong) NSScrollView *pairedDevicesScrollView;
+@property (nonatomic, strong) NSView *pairedDevicesListView;
+@property (nonatomic, strong) NSTextField *pairedDevicesSummaryLabel;
+@property (nonatomic, strong) NSArray<ROBControlPairedDevice *> *pairedControlDevices;
 @property (nonatomic, weak) ROBSerialBox *boundSerialBox;
 @property (nonatomic, strong) NSArray<NSButton *> *actionButtons;
 @property (nonatomic, strong) NSTabView *settingsTabView;
@@ -65,6 +72,7 @@
 - (void)refreshMessagesSettings;
 - (void)refreshSerialHardwareSettings;
 - (void)updateSerialHardwareStatus;
+- (void)refreshPairedControlDevices;
 - (ROBMainViewController *)activeMainViewController;
 - (void)attachGeminiSettingsViewController;
 - (void)openPrivacySettings:(NSString *)sectionName;
@@ -111,6 +119,10 @@
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(serialHardwareDidChange:)
                                                      name:ROBSerialHardwareDidChangeNotification
+                                                   object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(pairedDeviceRegistryDidChange:)
+                                                     name:ROBControlPairedDevicesDidChangeNotification
                                                    object:nil];
     }
     return self;
@@ -521,20 +533,50 @@
     [controllersView addSubview:controllersHeading];
 
     NSTextField *controllersExplanation = [self labelWithString:
-        @"Manage the devices authorized to send remote control commands to ROB. Pair a new controller, review active pairings, or revoke a device that should no longer have access."
-        frame:NSMakeRect(24, 470, 632, 48)];
+        @"Review every device credential that Cerebro has issued. Control devices can operate ROB; Lidar publishers can send telemetry only. Delete a pairing to remove its access immediately."
+        frame:NSMakeRect(24, 478, 632, 44)];
     controllersExplanation.textColor = [NSColor secondaryLabelColor];
     [controllersView addSubview:controllersExplanation];
 
-    NSBox *pairingBox = [[NSBox alloc] initWithFrame:NSMakeRect(24, 350, 632, 100)];
-    pairingBox.title = @"Controller Pairing";
-    [controllersView addSubview:pairingBox];
+    NSButton *pairControllerButton = [self buttonWithTitle:@"Pair ROBController…"
+                                                     frame:NSMakeRect(20, 432, 190, 34)
+                                                    action:@selector(pairOperatorControlDevice:)];
+    pairControllerButton.accessibilityIdentifier = @"ROB.Controllers.PairOperator";
+    pairControllerButton.accessibilityHelp = @"Issue a unique full-control credential for one ROBController device.";
+    [controllersView addSubview:pairControllerButton];
 
-    NSButton *managePairingButton = [self buttonWithTitle:@"Manage Paired Devices…"
-                                                    frame:NSMakeRect(18, 36, 220, 34)
-                                                   action:@selector(managePairedDevices:)];
-    managePairingButton.accessibilityHelp = @"Open pairing codes and manage controllers authorized to control ROB.";
-    [pairingBox.contentView addSubview:managePairingButton];
+    NSButton *pairLidarButton = [self buttonWithTitle:@"Pair RPLidar…"
+                                                frame:NSMakeRect(216, 432, 160, 34)
+                                               action:@selector(pairLidarControlDevice:)];
+    pairLidarButton.accessibilityIdentifier = @"ROB.Controllers.PairLidar";
+    pairLidarButton.accessibilityHelp = @"Issue a telemetry-only credential for one RPLidar publisher.";
+    [controllersView addSubview:pairLidarButton];
+
+    NSButton *refreshPairingsButton = [self buttonWithTitle:@"Refresh"
+                                                      frame:NSMakeRect(548, 432, 108, 34)
+                                                     action:@selector(refreshPairedControlDevices:)];
+    refreshPairingsButton.accessibilityIdentifier = @"ROB.Controllers.Refresh";
+    [controllersView addSubview:refreshPairingsButton];
+
+    self.pairedDevicesSummaryLabel = [self labelWithString:@"Loading paired devices…"
+                                                       frame:NSMakeRect(24, 402, 632, 22)];
+    self.pairedDevicesSummaryLabel.font = [NSFont systemFontOfSize:12 weight:NSFontWeightSemibold];
+    self.pairedDevicesSummaryLabel.textColor = NSColor.secondaryLabelColor;
+    [controllersView addSubview:self.pairedDevicesSummaryLabel];
+
+    self.pairedDevicesScrollView = [[NSScrollView alloc] initWithFrame:NSMakeRect(24, 20, 632, 374)];
+    self.pairedDevicesScrollView.borderType = NSBezelBorder;
+    self.pairedDevicesScrollView.hasVerticalScroller = YES;
+    self.pairedDevicesScrollView.autohidesScrollers = YES;
+    self.pairedDevicesScrollView.drawsBackground = YES;
+    self.pairedDevicesScrollView.backgroundColor = NSColor.controlBackgroundColor;
+    self.pairedDevicesScrollView.accessibilityLabel = @"Paired control devices";
+    self.pairedDevicesScrollView.accessibilityIdentifier = @"ROB.Controllers.DeviceList";
+    self.pairedDevicesListView = [[NSView alloc]
+        initWithFrame:NSMakeRect(0, 0, self.pairedDevicesScrollView.contentSize.width, 374)];
+    self.pairedDevicesScrollView.documentView = self.pairedDevicesListView;
+    [controllersView addSubview:self.pairedDevicesScrollView];
+    [self refreshPairedControlDevices];
 
     NSTextField *heading = [self labelWithString:@"Python Environment" frame:NSMakeRect(24, 530, 632, 28)];
     heading.font = [NSFont boldSystemFontOfSize:20.0];
@@ -811,6 +853,241 @@
     [alert beginSheetModalForWindow:self.window completionHandler:nil];
 }
 
+- (NSString *)displayRoleForPairedDevice:(ROBControlPairedDevice *)device
+{
+    if ([device.roleName isEqualToString:@"operatorController"]) {
+        return @"Full robot control";
+    }
+    if ([device.roleName isEqualToString:@"lidarPublisher"]) {
+        return @"Lidar telemetry only";
+    }
+    return device.roleName.length > 0 ? device.roleName : @"Unknown role";
+}
+
+- (void)refreshPairedControlDevices:(id)sender
+{
+    [self refreshPairedControlDevices];
+}
+
+- (void)refreshPairedControlDevices
+{
+    if (self.pairedDevicesListView == nil) {
+        return;
+    }
+
+    NSArray<ROBControlPairedDevice *> *devices = [ROBControlPairing pairedDevices];
+    self.pairedControlDevices = devices;
+    NSUInteger activeCount = 0;
+    for (ROBControlPairedDevice *device in devices) {
+        if (!device.isRevoked) { activeCount += 1; }
+    }
+    NSUInteger removedCount = devices.count - activeCount;
+    NSString *activeLabel = activeCount == 1 ? @"1 active pairing" :
+        [NSString stringWithFormat:@"%lu active pairings", (unsigned long)activeCount];
+    self.pairedDevicesSummaryLabel.stringValue = removedCount > 0
+        ? [NSString stringWithFormat:@"%@  •  %lu removed credential%@ retained for security",
+            activeLabel, (unsigned long)removedCount, removedCount == 1 ? @"" : @"s"]
+        : activeLabel;
+
+    for (NSView *view in self.pairedDevicesListView.subviews.copy) {
+        [view removeFromSuperview];
+    }
+
+    const CGFloat inset = 8.0;
+    const CGFloat cardHeight = 112.0;
+    const CGFloat gap = 9.0;
+    CGFloat viewportHeight = self.pairedDevicesScrollView.contentSize.height;
+    CGFloat documentWidth = self.pairedDevicesScrollView.contentSize.width;
+    CGFloat requiredHeight = devices.count == 0
+        ? viewportHeight
+        : inset * 2.0 + devices.count * cardHeight + (devices.count - 1) * gap;
+    CGFloat documentHeight = MAX(viewportHeight, requiredHeight);
+    self.pairedDevicesListView.frame = NSMakeRect(0, 0, documentWidth, documentHeight);
+
+    if (devices.count == 0) {
+        NSTextField *emptyTitle = [self labelWithString:@"No paired control devices"
+                                                  frame:NSMakeRect(24, documentHeight / 2.0 + 4, documentWidth - 48, 24)];
+        emptyTitle.alignment = NSTextAlignmentCenter;
+        emptyTitle.font = [NSFont boldSystemFontOfSize:15.0];
+        [self.pairedDevicesListView addSubview:emptyTitle];
+        NSTextField *emptyHelp = [self labelWithString:
+            @"Pair a ROBController or RPLidar publisher using the buttons above."
+                                                 frame:NSMakeRect(24, documentHeight / 2.0 - 30, documentWidth - 48, 34)];
+        emptyHelp.alignment = NSTextAlignmentCenter;
+        emptyHelp.textColor = NSColor.secondaryLabelColor;
+        [self.pairedDevicesListView addSubview:emptyHelp];
+        return;
+    }
+
+    CGFloat cardWidth = documentWidth - inset * 2.0;
+    CGFloat y = documentHeight - inset - cardHeight;
+    for (ROBControlPairedDevice *device in devices) {
+        NSBox *card = [[NSBox alloc] initWithFrame:NSMakeRect(inset, y, cardWidth, cardHeight)];
+        card.boxType = NSBoxCustom;
+        card.borderType = NSLineBorder;
+        card.borderWidth = 1.0;
+        card.cornerRadius = 8.0;
+        card.borderColor = device.isRevoked
+            ? [NSColor.separatorColor colorWithAlphaComponent:0.65]
+            : NSColor.separatorColor;
+        card.fillColor = device.isRevoked
+            ? [NSColor.controlBackgroundColor colorWithAlphaComponent:0.55]
+            : NSColor.textBackgroundColor;
+        NSView *content = card.contentView;
+
+        NSTextField *name = [self labelWithString:device.deviceName
+                                            frame:NSMakeRect(14, 76, cardWidth - 180, 23)];
+        name.font = [NSFont systemFontOfSize:15.0 weight:NSFontWeightSemibold];
+        name.lineBreakMode = NSLineBreakByTruncatingMiddle;
+        name.accessibilityLabel = [NSString stringWithFormat:@"Device name: %@", device.deviceName];
+        [content addSubview:name];
+
+        NSTextField *status = [self labelWithString:(device.isRevoked ? @"REMOVED" : @"ACTIVE")
+                                              frame:NSMakeRect(cardWidth - 142, 79, 116, 18)];
+        status.alignment = NSTextAlignmentRight;
+        status.font = [NSFont systemFontOfSize:11.0 weight:NSFontWeightBold];
+        status.textColor = device.isRevoked ? NSColor.secondaryLabelColor : NSColor.systemGreenColor;
+        [content addSubview:status];
+
+        NSString *roleText = [NSString stringWithFormat:@"Access: %@", [self displayRoleForPairedDevice:device]];
+        NSTextField *role = [self labelWithString:roleText frame:NSMakeRect(14, 49, 235, 20)];
+        role.textColor = NSColor.secondaryLabelColor;
+        role.lineBreakMode = NSLineBreakByTruncatingTail;
+        [content addSubview:role];
+
+        NSString *issuedText = [NSString stringWithFormat:@"Paired: %@",
+            [NSDateFormatter localizedStringFromDate:device.issuedAt
+                                           dateStyle:NSDateFormatterMediumStyle
+                                           timeStyle:NSDateFormatterShortStyle]];
+        NSTextField *issued = [self labelWithString:issuedText frame:NSMakeRect(255, 49, cardWidth - 275, 20)];
+        issued.textColor = NSColor.secondaryLabelColor;
+        issued.lineBreakMode = NSLineBreakByTruncatingTail;
+        [content addSubview:issued];
+
+        NSTextField *identifier = [self labelWithString:[NSString stringWithFormat:@"Device ID  %@", device.deviceID]
+                                                   frame:NSMakeRect(14, 17, cardWidth - 225, 22)];
+        identifier.font = [NSFont monospacedSystemFontOfSize:10.5 weight:NSFontWeightRegular];
+        identifier.textColor = NSColor.tertiaryLabelColor;
+        identifier.lineBreakMode = NSLineBreakByTruncatingMiddle;
+        identifier.selectable = YES;
+        identifier.accessibilityLabel = [NSString stringWithFormat:@"Device identifier: %@", device.deviceID];
+        [content addSubview:identifier];
+
+        if (!device.isRevoked) {
+            NSButton *deleteButton = [self buttonWithTitle:@"Delete Pairing…"
+                                                     frame:NSMakeRect(cardWidth - 160, 11, 140, 32)
+                                                    action:@selector(deletePairedControlDevice:)];
+            deleteButton.identifier = device.deviceID;
+            deleteButton.contentTintColor = NSColor.systemRedColor;
+            deleteButton.accessibilityIdentifier = [NSString stringWithFormat:@"ROB.Controllers.Delete.%@", device.deviceID];
+            deleteButton.accessibilityHelp = [NSString stringWithFormat:
+                @"Immediately revoke %@ and disconnect its authorized sessions.", device.deviceName];
+            [content addSubview:deleteButton];
+        } else if (device.revokedAt != nil) {
+            NSString *removedText = [NSString stringWithFormat:@"Removed %@",
+                [NSDateFormatter localizedStringFromDate:device.revokedAt
+                                               dateStyle:NSDateFormatterMediumStyle
+                                               timeStyle:NSDateFormatterShortStyle]];
+            NSTextField *removed = [self labelWithString:removedText
+                                                   frame:NSMakeRect(cardWidth - 190, 17, 170, 20)];
+            removed.alignment = NSTextAlignmentRight;
+            removed.textColor = NSColor.tertiaryLabelColor;
+            removed.lineBreakMode = NSLineBreakByTruncatingTail;
+            [content addSubview:removed];
+        }
+
+        [self.pairedDevicesListView addSubview:card];
+        y -= cardHeight + gap;
+    }
+}
+
+- (void)pairedDeviceRegistryDidChange:(NSNotification *)notification
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self refreshPairedControlDevices];
+    });
+}
+
+- (void)showControllerPairingUnavailable
+{
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = @"Controller pairing is unavailable";
+    alert.informativeText = @"Open Cerebro's main robot window, then try again.";
+    [alert addButtonWithTitle:@"OK"];
+    [alert beginSheetModalForWindow:self.window completionHandler:nil];
+}
+
+- (void)pairOperatorControlDevice:(id)sender
+{
+    ROBMainViewController *mainViewController = [self activeMainViewController];
+    if (mainViewController == nil) {
+        [self showControllerPairingUnavailable];
+        return;
+    }
+    [mainViewController pairOperatorControlDevice:sender];
+}
+
+- (void)pairLidarControlDevice:(id)sender
+{
+    ROBMainViewController *mainViewController = [self activeMainViewController];
+    if (mainViewController == nil) {
+        [self showControllerPairingUnavailable];
+        return;
+    }
+    [mainViewController pairLidarControlDevice:sender];
+}
+
+- (void)deletePairedControlDevice:(NSButton *)sender
+{
+    ROBControlPairedDevice *selectedDevice = nil;
+    for (ROBControlPairedDevice *device in self.pairedControlDevices) {
+        if ([device.deviceID isEqualToString:sender.identifier]) {
+            selectedDevice = device;
+            break;
+        }
+    }
+    if (selectedDevice == nil || selectedDevice.isRevoked) {
+        NSBeep();
+        [self refreshPairedControlDevices];
+        return;
+    }
+
+    ROBControlPairedDevice *device = selectedDevice;
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.alertStyle = NSAlertStyleWarning;
+    alert.messageText = [NSString stringWithFormat:@"Delete the pairing for “%@”?", device.deviceName];
+    alert.informativeText = [NSString stringWithFormat:
+        @"%@ will lose %@ immediately and must be paired again with a new credential. Cerebro keeps only a revoked identity record so this device’s old pairing code cannot be reused.",
+        device.deviceName, [self displayRoleForPairedDevice:device].lowercaseString];
+    [alert addButtonWithTitle:@"Delete Pairing"];
+    [alert addButtonWithTitle:@"Cancel"];
+
+    __weak typeof(self) weakSelf = self;
+    [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
+        if (response != NSAlertFirstButtonReturn) {
+            return;
+        }
+        __strong typeof(weakSelf) self = weakSelf;
+        if (self == nil) { return; }
+        ROBMainViewController *mainViewController = [self activeMainViewController];
+        if (mainViewController == nil) {
+            [self showControllerPairingUnavailable];
+            return;
+        }
+        NSError *error = nil;
+        if (![mainViewController revokePairedControlDevice:device error:&error]) {
+            NSAlert *failure = [[NSAlert alloc] init];
+            failure.alertStyle = NSAlertStyleCritical;
+            failure.messageText = @"The pairing could not be deleted";
+            failure.informativeText = error.localizedDescription ?: @"Cerebro could not update its secure pairing registry.";
+            [failure addButtonWithTitle:@"OK"];
+            [failure beginSheetModalForWindow:self.window completionHandler:nil];
+            return;
+        }
+        [self refreshPairedControlDevices];
+    }];
+}
+
 - (void)showWindow:(id)sender
 {
     [self attachGeminiSettingsViewController];
@@ -823,6 +1100,7 @@
     [self refreshAcknowledgementPhrasesTextView];
     [self refreshMessagesSettings];
     [self refreshSerialHardwareSettings];
+    [self refreshPairedControlDevices];
 }
 
 - (NSString *)qualityNameForVoice:(AVSpeechSynthesisVoice *)voice

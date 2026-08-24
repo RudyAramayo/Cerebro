@@ -55,6 +55,8 @@ public struct ROBFaceIdentitySample: Codable, Identifiable, Sendable {
 }
 
 public struct ROBFaceIdentityProfile: Codable, Identifiable, Sendable {
+    public static let requiredEnrollmentSamples = 24
+
     public let id: UUID
     public var displayName: String
     public var pronunciation: String?
@@ -65,7 +67,9 @@ public struct ROBFaceIdentityProfile: Codable, Identifiable, Sendable {
     public var samples: [ROBFaceIdentitySample]
     public var lastConfirmedAt: Date?
 
-    public var enrollmentIsComplete: Bool { samples.count >= 12 }
+    public var enrollmentIsComplete: Bool {
+        samples.count >= Self.requiredEnrollmentSamples
+    }
 }
 
 public enum ROBFaceIdentityGalleryError: LocalizedError {

@@ -118,6 +118,11 @@ struct GeminiRoboticsProtocolFixtureTests {
             GeminiRoboticsConfiguration.defaultSystemInstruction.contains("never complete a recognized user turn silently"),
             "The default Live instruction must require a spoken acknowledgement"
         )
+        try expect(
+            GeminiRoboticsConfiguration.faceIdentityConversationContract.contains("greet that person by name once") &&
+                GeminiRoboticsConfiguration.faceIdentityConversationContract.contains("never as authorization"),
+            "The embodied prompt must acknowledge consented face identity without granting authority"
+        )
         let prompt = GeminiRoboticsPrompt.spokenText("Hey Rob, look at this", speechWordiness: 0)
         try expect(prompt.contains("Hey Rob"), "Text fallback must preserve ROB's wake phrase")
         try expect(prompt.hasPrefix("Answer in one concise spoken sentence:"), "Wordiness guidance is missing")
@@ -237,9 +242,10 @@ struct GeminiRoboticsProtocolFixtureTests {
             "Overridden setup did not include a system instruction"
         )
         try expect(
-            overriddenInstruction.contains("Managed deployment instruction") &&
-                overriddenInstruction.contains("INSTA360 STITCHED 360 PANORAMA"),
-            "A managed prompt override must not remove the camera provenance contract"
+                overriddenInstruction.contains("Managed deployment instruction") &&
+                overriddenInstruction.contains("INSTA360 STITCHED 360 PANORAMA") &&
+                overriddenInstruction.contains("Local face identity event"),
+            "A managed prompt override must not remove camera or face-identity context contracts"
         )
 
         let explicitlyDisabledTools = try require(

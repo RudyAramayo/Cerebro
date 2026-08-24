@@ -30,6 +30,7 @@
 
 
 @class ROBSerialBox;
+@class ROBControlPairedDevice;
 
 @interface ROBMainViewController : NSViewController <ROBSpeechDelegate>
 {
@@ -68,6 +69,10 @@
 - (IBAction)showBaseSerialConsole:(id)sender;
 
 - (IBAction)showControlPairingCode:(id)sender;
+- (void)pairOperatorControlDevice:(id)sender;
+- (void)pairLidarControlDevice:(id)sender;
+- (BOOL)revokePairedControlDevice:(ROBControlPairedDevice *)device
+                            error:(NSError **)error;
 
 //Speech
 - (void) makeTextViewFirstResponder:(NSTextView *)textView;

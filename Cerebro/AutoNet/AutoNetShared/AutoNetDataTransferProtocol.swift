@@ -863,12 +863,24 @@ final class ROBLidarLocalIPCServer {
   public let deviceName: String
   public let roleName: String
   public let isRevoked: Bool
+  public let issuedAt: Date
+  public let revokedAt: Date?
 
-  init(deviceID: UUID, deviceName: String, role: ROBControlPeerRole, isRevoked: Bool) {
+  init(
+    deviceID: UUID,
+    deviceName: String,
+    role: ROBControlPeerRole,
+    issuedAtMilliseconds: UInt64,
+    revokedAtMilliseconds: UInt64?
+  ) {
     self.deviceID = deviceID.uuidString.lowercased()
     self.deviceName = deviceName
     self.roleName = role.rawValue
-    self.isRevoked = isRevoked
+    self.isRevoked = revokedAtMilliseconds != nil
+    self.issuedAt = Date(timeIntervalSince1970: TimeInterval(issuedAtMilliseconds) / 1_000)
+    self.revokedAt = revokedAtMilliseconds.map {
+      Date(timeIntervalSince1970: TimeInterval($0) / 1_000)
+    }
     super.init()
   }
 }
@@ -876,6 +888,8 @@ final class ROBLidarLocalIPCServer {
 extension Notification.Name {
   static let robControlCredentialWasRevoked = Notification.Name(
     "com.orbitusrobotics.robctl.v2.credential-revoked")
+  static let robControlPairedDevicesDidChange = Notification.Name(
+    "com.orbitusrobotics.robctl.v2.paired-devices-changed")
 }
 
 enum ROBControlCredentialNotification {
@@ -1006,7 +1020,8 @@ private struct ROBControlStoredPeerRegistry: Codable {
               deviceID: $0.deviceID,
               deviceName: $0.deviceName,
               role: $0.role,
-              isRevoked: $0.isRevoked
+              issuedAtMilliseconds: $0.issuedAtMilliseconds,
+              revokedAtMilliseconds: $0.revokedAtMilliseconds
             )
           }
       }
@@ -1038,6 +1053,7 @@ private struct ROBControlStoredPeerRegistry: Codable {
       object: nil,
       userInfo: [ROBControlCredentialNotification.deviceIDKey: identifier]
     )
+    NotificationCenter.default.post(name: .robControlPairedDevicesDidChange, object: nil)
   }
 
   /// Installs a code transferred directly from Cerebro. Replacing a code
@@ -1351,6 +1367,7 @@ private struct ROBControlStoredPeerRegistry: Codable {
       try storePeerRegistry(registry)
     }
 
+    NotificationCenter.default.post(name: .robControlPairedDevicesDidChange, object: nil)
     let payload = try JSONEncoder().encode(credential)
     return pairingPrefix + payload.base64EncodedString()
   }

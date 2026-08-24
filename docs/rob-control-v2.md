@@ -158,9 +158,12 @@ must remain disabled during normal multi-device operation.
 
 ## Revocation and rotation
 
-Cerebro's paired-device UI lists device name, UUID, role, and status without
-showing secrets. Revoking a device creates a persistent tombstone instead of
-silently deleting its identity. The server rejects that UUID during future
+Cerebro Settings → Controllers shows every credential as a device card with its
+name, UUID, role-limited access, issue date, and active or removed status; it
+never shows pairing secrets. **Delete Pairing…** confirms the selected physical
+device by name, revokes its access, and refreshes the list immediately. Revoking
+a device creates a persistent tombstone instead of silently deleting its
+identity. The server rejects that UUID during future
 proof validation and immediately cancels every live connection authenticated
 as that device. Every application frame is checked against the role bound from
 the registry during authentication; the revocation notification closes the

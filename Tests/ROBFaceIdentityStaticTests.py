@@ -16,9 +16,12 @@ gallery = text("ROBFaceIdentityGallery.swift")
 service = text("ROBFaceRecognitionService.swift")
 window = text("ROBFaceIdentityWindowController.swift")
 encoder = text("ROBFaceEmbeddingModel.swift")
+conversation = text("ROBFaceConversationPolicy.swift")
 camera = text("CameraViewController.swift")
 scene = text("ROBSceneSnapshot.swift")
 app = text("AppDelegate.m")
+main = text("ROBMainViewController.mm")
+gemini = text("GeminiRoboticsProtocol.swift")
 project = (ROOT / "Cerebro.xcodeproj" / "project.pbxproj").read_text(encoding="utf-8")
 
 assert "AES.GCM.seal" in gallery and "AES.GCM.open" in gallery
@@ -37,6 +40,16 @@ assert "AdaFace-R18-VGGFace2.mlmodelc" in encoder
 assert "MLModel(contentsOf:" in encoder
 assert "pendingCandidateFrames >= 3" in service
 assert "best.second - best.distance >= margin" in service
+assert "robFaceIdentityConversationCue" in service
+assert "noteUnknownFace" in service and "pendingUnknownFrames >= 5" in service
+assert "spoken-consent-maker-faire" in service and "role: .knownPerson" in service
+assert "handsFreeEnrollmentReferenceEmbeddings" in service
+assert "I can only enroll the person who gave permission" in service
+assert "noteConversationTranscript" in service
+assert "adult, or your grown-up says it's okay" in service
+assert "cancelled enrollment and deleted those face samples" in service
+assert "ROBFaceConversationPolicy.action" in service
+assert "case enroll(String)" in conversation and "case cancelEnrollment" in conversation
 assert "consentConfirmed" in service
 assert "trustedEnrollmentReference" in service
 assert "ROBControlPairing.pairedDevices()" in service
@@ -50,12 +63,18 @@ assert "explicitly consents" in window
 assert "will not authorize robot motion" in window
 assert "Delete Selected Person" in window
 assert "Face model" in window and "modelChanged" in window
+assert "faceIdentityConversationCue:" in main
+assert "noteConversationTranscript:text" in main
+assert "noteConversationTranscript:textInput" in main
+assert "faceIdentityConversationContract" in gemini
+assert "naturally acknowledge or greet that person by name once" in gemini
 
 for source in (
     "ROBFaceIdentityGallery.swift",
     "ROBFaceRecognitionService.swift",
     "ROBFaceIdentityWindowController.swift",
     "ROBFaceEmbeddingModel.swift",
+    "ROBFaceConversationPolicy.swift",
 ):
     assert f"{source} in Sources" in project
 
