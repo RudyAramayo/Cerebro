@@ -2456,6 +2456,54 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     }
 }
 
+- (BOOL)prepareNeckForPersonFollow
+{
+    if (![NSThread isMainThread]
+        || !self.maestroConnectionValid
+        || !self.neckSafetyCalibrationConfirmed
+        || !self.neckCommandStateKnown
+        || self.commandedNeckPanTarget == ROBNeckSafetyTargetOff
+        || self.commandedLowerNeckTiltTarget == ROBNeckSafetyTargetOff
+        || self.commandedUpperNeckTiltTarget == ROBNeckSafetyTargetOff) {
+        self.neckCommandSafetyStatus =
+            @"Follow tracking pose is waiting for a connected, calibrated, known active neck state.";
+        return NO;
+    }
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (now < self.manualNeckOverrideUntil || now < self.gestureNeckAuthorityUntil) {
+        self.neckCommandSafetyStatus =
+            @"Follow tracking pose is waiting for the current manual or gesture neck lease to end.";
+        return NO;
+    }
+
+    ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
+    if (self.commandedLowerNeckTiltTarget >= configuration.lowerFullPanLowTarget
+        && self.commandedLowerNeckTiltTarget <= configuration.lowerFullPanHighTarget) {
+        return YES;
+    }
+
+    // The policy may first recenter pan, then move lower tilt, then settle.
+    // Repeated calls are intentional and remain fully mediated by the shared
+    // collision gateway. Upper tilt is preserved so "upright" camera pose is
+    // not confused with the old, restricted lower-neck crouch value.
+    int lowerReference = (int)lround(ROBNeckSafetyReferenceLowerTarget(&configuration));
+    int upperTarget = self.lastDesiredUpperNeckTargetIsKnown
+        ? self.lastDesiredUpperNeckTarget
+        : (int)self.commandedUpperNeckTiltTarget;
+    ROBNeckCommandDisposition disposition = [self
+        applySafeNeckPanTarget:configuration.panCenterTarget
+        lowerTiltTarget:lowerReference
+        desiredUpperTarget:upperTarget
+        includeLower:YES
+        allowSupervisedLowerRecovery:NO
+        source:@"Follow tracking pose"];
+    if (disposition == ROBNeckCommandDispositionRejected) {
+        return NO;
+    }
+    return self.commandedLowerNeckTiltTarget >= configuration.lowerFullPanLowTarget
+        && self.commandedLowerNeckTiltTarget <= configuration.lowerFullPanHighTarget;
+}
+
 - (ROBNeckCommandDisposition)requestNeckGesturePanDegrees:(double)panDegrees
                                       lowerTiltRawTarget:(NSInteger)lowerTiltRawTarget
                                      cameraTiltRawTarget:(NSInteger)cameraTiltRawTarget

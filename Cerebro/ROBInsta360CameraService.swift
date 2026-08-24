@@ -69,6 +69,7 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
     private var displayDeliveryScheduled = false
     private var diagnosticsPreviewVisible = false
     private var geminiVideoDemandActive = false
+    private var followVideoDemandActive = false
     private var remoteVideoDemandActive = false
     private var recordingVideoDemandActive = false
     private var recordingPreviewResolution: String?
@@ -90,6 +91,7 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
     // This reference is read only from `queue`. Keeping registration on that
     // same queue prevents the decoder callback from racing startup/shutdown.
     private weak var geminiFrameConsumer: ROBInsta360VideoFrameConsumer?
+    private weak var followFrameConsumer: ROBInsta360VideoFrameConsumer?
     private weak var recordingFrameConsumer: ROBInsta360VideoFrameConsumer?
 
     /// The unstabilized host/projection that was successfully applied in this
@@ -273,6 +275,14 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
         }
     }
 
+    /// Registers the local follow coordinator. Its delayed panorama frames are
+    /// isolated from Gemini and may only be used for coarse target reacquisition.
+    public func setFollowFrameConsumer(_ consumer: ROBInsta360VideoFrameConsumer?) {
+        queue.async {
+            self.followFrameConsumer = consumer
+        }
+    }
+
     /// Registers the footage recorder independently from Gemini and AppKit.
     public func setRecordingFrameConsumer(_ consumer: ROBInsta360VideoFrameConsumer?) {
         queue.async {
@@ -295,6 +305,14 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
                     object: self
                 )
             }
+        }
+    }
+
+    public func setFollowVideoDemandActive(_ active: Bool) {
+        queue.async {
+            guard self.followVideoDemandActive != active else { return }
+            self.followVideoDemandActive = active
+            self.reevaluateDecoderDemand()
         }
     }
 
@@ -385,6 +403,7 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
 
     private var analysisNeedsFrames: Bool {
         geminiVideoDemandActive
+            || followVideoDemandActive
             || recordingVideoDemandActive
             || remoteVideoDemandActive
             || localAnalysisNeedsFrames
@@ -736,6 +755,13 @@ struct ROBInsta360ServiceStatusSnapshot: Sendable {
             // or by optional NSImage decoding for diagnostics.
             if geminiVideoDemandActive {
                 geminiFrameConsumer?.consumeInsta360JPEGFrame(
+                    jpeg,
+                    capturedAt: capturedAt,
+                    capturedAtUptime: capturedAtUptime
+                )
+            }
+            if followVideoDemandActive {
+                followFrameConsumer?.consumeInsta360JPEGFrame(
                     jpeg,
                     capturedAt: capturedAt,
                     capturedAtUptime: capturedAtUptime

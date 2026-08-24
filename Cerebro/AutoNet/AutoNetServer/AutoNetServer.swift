@@ -249,6 +249,28 @@ struct ROBControlServerStatusSnapshot: Sendable {
         return didQueue
     }
 
+    /// Follow previews and state are returned only to the authenticated
+    /// controller session that requested them. Camera stills are never
+    /// broadcast to other paired controllers or compatibility transports.
+    @objc(sendFollowTargetMessage:toDeviceID:sessionID:)
+    @discardableResult public func sendFollowTargetMessage(
+        _ data: NSData,
+        toDeviceID deviceID: UUID,
+        sessionID: UUID
+    ) -> Bool {
+        guard !paused, !data.isEmpty,
+              data.count <= ROBFollowTargetProtocol.maximumMessageBytes else { return false }
+        for connection in connectionsByID.values
+            where connection.isReady
+                && connection.canReceiveApplicationMessage(type: .sendData)
+                && connection.authenticatedRole == .operatorController
+                && connection.authenticatedDeviceID == deviceID
+                && connection.authenticatedSessionUUID == sessionID {
+            return connection.send(type: .sendData, data: data as Data)
+        }
+        return false
+    }
+
     /// PTY output is returned only to the exact authenticated controller
     /// session that most recently attached the terminal. It is never broadcast.
     @discardableResult func sendAdministratorTerminalMessage(
@@ -303,6 +325,29 @@ struct ROBControlServerStatusSnapshot: Sendable {
             // authorization failure and never reach the historical parser.
             if sendingConnection.authenticatedRole == .lidarPublisher {
                 sendingConnection.stop(error: AutoNetTransportError.authorizationFailed)
+                return
+            }
+            if ROBFollowTargetProtocol.claimsProtocol(data) {
+                guard sendingConnection.authenticatedRole == .operatorController,
+                      let controllerID = sendingConnection.authenticatedDeviceID,
+                      let sessionID = sendingConnection.authenticatedSessionUUID,
+                      let message = try? ROBFollowTargetProtocol.decode(data),
+                      message.controllerID == controllerID,
+                      message.sessionID == sessionID,
+                      message.kind == .previewRequest
+                        || message.kind == .authorize
+                        || message.kind == .stop,
+                      (message.kind == .stop || ROBFollowTargetProtocol.isFresh(
+                        message,
+                        nowMilliseconds: UInt64(Date().timeIntervalSince1970 * 1_000)
+                      )) else {
+                    NSLog("Discarded invalid follow-target data outside its authenticated operator session")
+                    return
+                }
+                // This exact wire data has passed structural, role, device,
+                // session, kind, and freshness checks. The deterministic
+                // coordinator consumes it through the existing data delegate.
+                dataDelegate?.didReceiveData(data)
                 return
             }
             if administratorTerminalCoordinator.claimsProtocol(data) {

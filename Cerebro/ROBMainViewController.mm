@@ -295,7 +295,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 @end
 
 
-@interface ROBMainViewController () <HumanTrackingDelegate, TrackingDelegate, AutoNetServerDataDelegate, NSTextViewDelegate, NSTableViewDataSource, NSTableViewDelegate, ROBAIDelegate, ROBAutonomyCoordinatorDelegate, ROBStageShowCoordinatorDelegate, ROBGeminiRuntimeControlDelegate>
+@interface ROBMainViewController () <HumanTrackingDelegate, TrackingDelegate, AutoNetServerDataDelegate, NSTextViewDelegate, NSTableViewDataSource, NSTableViewDelegate, ROBAIDelegate, ROBAutonomyCoordinatorDelegate, ROBFollowPersonCoordinatorDelegate, ROBStageShowCoordinatorDelegate, ROBGeminiRuntimeControlDelegate>
 
 @property (readwrite, retain) ROBSCNViewController *scnViewController;
 @property (readwrite, retain) NSWindowController *controllerDiagnosticsWindowController;
@@ -324,6 +324,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 @property (readwrite, retain) ROBStageShowWindowController *stageShowWindowController;
 @property (readwrite, retain) ROBStageShowCoordinator *stageShowCoordinator;
 @property (readwrite, retain) ROBAutonomyCoordinator *autonomyCoordinator;
+@property (nonatomic, readwrite, strong) ROBFollowPersonCoordinator *followPersonCoordinator;
 @property (readwrite, assign) NSUInteger saberChoreographyGeneration;
 - (void)speakConfiguredAcknowledgementIfNotQueued;
 - (void)publishControlAuthorityState;
@@ -2606,6 +2607,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     self.robotActionSenderID = [NSString stringWithFormat:@"Cerebro:%@", hostName];
     self.autonomyCoordinator = [[ROBAutonomyCoordinator alloc] initWithRobotID:self.robotActionSenderID];
     self.autonomyCoordinator.delegate = self;
+    self.followPersonCoordinator = [[ROBFollowPersonCoordinator alloc] initWithRobotID:self.robotActionSenderID];
+    self.followPersonCoordinator.delegate = self;
     self.stageShowCoordinator = [[ROBStageShowCoordinator alloc] init];
     self.stageShowCoordinator.delegate = self;
     [self.stageShowCoordinator reloadLocalImprovisationProvider];
@@ -2786,6 +2789,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         [self.stageShowCoordinator cancelWithReason:@"Cerebro is shutting down"];
     }
     [self.autonomyCoordinator shutdown];
+    [self.followPersonCoordinator shutdown];
     [self.bellyCameraWindowController setNavigationDemandActive:NO];
     [self.speechBox shutdown];
 }
@@ -2799,6 +2803,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     [self.speechBox stopIt:nil];
     if (self.autonomyCoordinator.active) {
         [self.autonomyCoordinator stopWithReason:reason];
+    }
+    if (self.followPersonCoordinator.active) {
+        [self.followPersonCoordinator stopWithReason:reason];
     }
     [self.serialBox stopBaseMotionAndDropHeartbeat];
     [self.serialBox switchToMasterControllerID:@"Brain"];
@@ -2999,6 +3006,92 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         [self.serialBox switchToMasterControllerID:@"Autonomous"];
         [self publishControlAuthorityState];
     }
+}
+
+#pragma mark - Controller-authorized person follow
+
+- (BOOL)followPersonCoordinatorPrepareTrackingPose:(ROBFollowPersonCoordinator *)coordinator
+{
+    if (!coordinator.active || self.serialBox == nil) {
+        return NO;
+    }
+    if (self.autonomyCoordinator.active) {
+        [self.autonomyCoordinator stopWithReason:@"Visual follow mode was authorized"];
+    }
+    return [self.serialBox prepareNeckForPersonFollow];
+}
+
+- (void)followPersonCoordinator:(ROBFollowPersonCoordinator *)coordinator
+                 applyLeftTread:(double)leftTread
+                     rightTread:(double)rightTread
+                     speedScale:(double)speedScale
+{
+    if (!coordinator.active || self.serialBox == nil) {
+        return;
+    }
+    ROBBaseControllerModel *model = [ROBBaseControllerModel new];
+    model.touchPadPointL = CGPointMake(0.0, MAX(-0.20, MIN(0.20, leftTread)));
+    model.touchPadPointR = CGPointMake(0.0, MAX(-0.20, MIN(0.20, rightTread)));
+    model.Lat = 0;
+    model.Long = 0;
+    model.tredBrakeLock = false;
+    model.flipperForwardIsDown = false;
+    model.flipperRelaxBrake = false;
+    model.flipperBackwardIsDown = false;
+    model.flipperBrakeLock = true;
+    model.lact1 = false;
+    model.lact2 = false;
+    model.lact3 = false;
+    model.speed = MAX(5.0, MIN(20.0, speedScale * 100.0));
+    model.speed_playPause = false;
+    model.speed_forward_reverse = true;
+    model.textInput = @"";
+    [self.serialBox controllerId:@"Follow" controllerModelData:model];
+    if (![self.serialBox.masterControllerID isEqualToString:@"Follow"]) {
+        [self.serialBox switchToMasterControllerID:@"Follow"];
+        [self publishControlAuthorityState];
+    }
+}
+
+- (void)followPersonCoordinatorDidRequestBaseStop:(ROBFollowPersonCoordinator *)coordinator
+{
+    if ([self.serialBox.masterControllerID isEqualToString:@"Follow"]) {
+        [self.serialBox stopBaseMotionAndDropHeartbeat];
+        [self.serialBox switchToMasterControllerID:@"Brain"];
+        [self publishControlAuthorityState];
+    }
+}
+
+- (void)followPersonCoordinator:(ROBFollowPersonCoordinator *)coordinator
+                    applyNeckPan:(float)pan
+                            tilt:(float)tilt
+{
+    if (coordinator.active) {
+        [self.serialBox applyVisionNeckPan:pan tilt:tilt];
+    }
+}
+
+- (void)followPersonCoordinator:(ROBFollowPersonCoordinator *)coordinator
+             applyTorsoRotation:(float)rotation
+{
+    if (coordinator.active) {
+        [self.serialBox applyVisionTorsoActive:YES rotation:rotation];
+    }
+}
+
+- (void)followPersonCoordinatorDidRequestActuatorRelease:(ROBFollowPersonCoordinator *)coordinator
+{
+    [self.serialBox applyVisionTorsoActive:NO rotation:0];
+}
+
+- (void)followPersonCoordinator:(ROBFollowPersonCoordinator *)coordinator
+                    publishData:(NSData *)data
+                   controllerID:(NSUUID *)controllerID
+                      sessionID:(NSUUID *)sessionID
+{
+    [self.autoNetServer sendFollowTargetMessage:data
+                                     toDeviceID:controllerID
+                                       sessionID:sessionID];
 }
 
 - (void)autonomyCoordinatorDidRequestBaseStop:(ROBAutonomyCoordinator *)coordinator
@@ -3501,6 +3594,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         if (self.autonomyCoordinator.active) {
             [self.autonomyCoordinator stopWithReason:[NSString stringWithFormat:@"Operator device %@ was revoked", device.deviceName]];
         }
+        if (self.followPersonCoordinator.active) {
+            [self.followPersonCoordinator stopWithReason:[NSString stringWithFormat:@"Operator device %@ was revoked", device.deviceName]];
+        }
         self.robotActionControllerAcceptsActions = NO;
         self.robotActionControllerLastSeen = nil;
         self.robotActionControllerID = nil;
@@ -3514,6 +3610,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         // A manual controller remains usable, but autonomous motion must not
         // continue after its obstacle source is revoked.
         [self.autonomyCoordinator stopWithReason:[NSString stringWithFormat:@"RPLidar device %@ was revoked", device.deviceName]];
+    } else if (self.followPersonCoordinator.active) {
+        [self.followPersonCoordinator stopWithReason:[NSString stringWithFormat:@"RPLidar device %@ was revoked", device.deviceName]];
     }
     return YES;
 }
@@ -3575,6 +3673,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 {
     dispatch_async(dispatch_get_main_queue(), ^{
         [self.autonomyCoordinator updateLidarScanData:data];
+        [self.followPersonCoordinator updateLidarScanData:data];
     });
 }
 
@@ -3602,6 +3701,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 }
 
 - (void) didReceiveData:(NSData *)data {
+    if ([self.followPersonCoordinator handleWireData:data]) {
+        return;
+    }
     ROBAutonomySessionMessage *autonomyMessage = [ROBAutonomySessionWireCodec decodeEnvelopeData:data];
     if (autonomyMessage != nil) {
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -3970,6 +4072,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     {
         if (self.autonomyCoordinator.active) {
             [self.autonomyCoordinator stopWithReason:@"Manual controller requested motion authority"];
+        }
+        if (self.followPersonCoordinator.active) {
+            [self.followPersonCoordinator stopWithReason:@"Manual controller requested motion authority"];
         }
         [self.serialBox switchToMasterControllerID:sender];
         [self publishControlAuthorityState];

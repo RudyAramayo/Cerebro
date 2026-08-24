@@ -182,6 +182,11 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
      speedPlayPause:(bool)speedPlayPause
  speedForwardReverse:(bool)speedForwardReverse;
 - (void)applyVisionNeckPan:(float)pan tilt:(float)tilt;
+/// Safely stages the calibrated lower-neck axis into the existing full-pan
+/// band before person tracking starts. This never bypasses collision policy;
+/// false means the caller must keep the base stopped and retry or wait for an
+/// operator to recover an unknown/off neck state.
+- (BOOL)prepareNeckForPersonFollow;
 /// Typed ingress for autonomous neck gestures. Pan is calibrated degrees;
 /// lower/upper are Maestro command targets because those axes do not yet have
 /// verified degree calibration. Acceptance reports a commanded (unverified)

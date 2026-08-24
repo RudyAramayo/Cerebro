@@ -1462,6 +1462,13 @@ extension CameraViewController: CameraManagerDelegate {
         // to operate when this diagnostic preview is hidden.
         ROBFaceRecognitionService.shared.offer(sampleBuffer)
         ROBDynamicDetectorRegistry.shared.offer(sampleBuffer, source: .mainCamera)
+        // Follow tracking gets the low-latency main-camera RGB and its exact
+        // aligned depth pair. The coordinator owns its own frame admission and
+        // stops the base as soon as either the visual lock or depth goes stale.
+        robMainViewController?.followPersonCoordinator.offerMainCameraFrame(
+            sampleBuffer,
+            depth: frameSet.alignedDepth
+        )
         if swordTrackerEnabled {
             swordWristLock.lock(); let wrists = swordWristAnchors; swordWristLock.unlock()
             swordTracker.offer(sampleBuffer, wrists: wrists, maximumFPS: swordTrackerFPS) { [weak self] track in

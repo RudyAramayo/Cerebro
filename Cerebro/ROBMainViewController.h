@@ -31,6 +31,7 @@
 
 @class ROBSerialBox;
 @class ROBControlPairedDevice;
+@class ROBFollowPersonCoordinator;
 
 @interface ROBMainViewController : NSViewController <ROBSpeechDelegate>
 {
@@ -54,6 +55,10 @@
 /// Immutable latest depth snapshot aligned to RGB. UInt16 little-endian
 /// millimeters; zero is invalid. Nil whenever RGB-D is not live.
 @property (atomic, readonly, strong) ROBAlignedDepthFrame *latestAlignedDepthFrame;
+/// Low-latency, visually authorized person-follow coordinator. Camera capture
+/// feeds it the RGB-D pair directly; actuator writes still route through this
+/// view controller and ROBSerialBox's safety gateways.
+@property (nonatomic, readonly, strong) ROBFollowPersonCoordinator *followPersonCoordinator;
 
 - (IBAction)showControls:(id)sender;
 - (IBAction)showSerialDebug:(id)sender;

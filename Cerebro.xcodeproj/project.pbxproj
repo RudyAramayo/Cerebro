@@ -115,6 +115,7 @@
 		C0A110022F4C011000000001 /* ROBOpenStreetMapService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A110012F4C011000000001 /* ROBOpenStreetMapService.swift */; };
 		C0A111022F4C011100000001 /* ROBNavigationRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A111012F4C011100000001 /* ROBNavigationRuntime.swift */; };
 		C0A112022F4C011200000001 /* ROBTraversabilityRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A112012F4C011200000001 /* ROBTraversabilityRuntime.swift */; };
+		C0F011022F6A011000000001 /* ROBFollowPersonCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0F011012F6A011000000001 /* ROBFollowPersonCoordinator.swift */; };
 		C0A120022F4C012000000001 /* ROBRecordingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A120012F4C012000000001 /* ROBRecordingCoordinator.swift */; };
 		C0A121022F4C012100000001 /* ROBRecordingWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A121012F4C012100000001 /* ROBRecordingWindowController.swift */; };
 		C0A130022F4C013000000001 /* ROBFaceIdentityGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A130012F4C013000000001 /* ROBFaceIdentityGallery.swift */; };
@@ -313,6 +314,7 @@
 		C0A110012F4C011000000001 /* ROBOpenStreetMapService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBOpenStreetMapService.swift; sourceTree = "<group>"; };
 		C0A111012F4C011100000001 /* ROBNavigationRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBNavigationRuntime.swift; sourceTree = "<group>"; };
 		C0A112012F4C011200000001 /* ROBTraversabilityRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBTraversabilityRuntime.swift; sourceTree = "<group>"; };
+		C0F011012F6A011000000001 /* ROBFollowPersonCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBFollowPersonCoordinator.swift; sourceTree = "<group>"; };
 		C0A120012F4C012000000001 /* ROBRecordingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRecordingCoordinator.swift; sourceTree = "<group>"; };
 		C0A121012F4C012100000001 /* ROBRecordingWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRecordingWindowController.swift; sourceTree = "<group>"; };
 		C0A130012F4C013000000001 /* ROBFaceIdentityGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBFaceIdentityGallery.swift; sourceTree = "<group>"; };
@@ -518,6 +520,7 @@
 				C0A110012F4C011000000001 /* ROBOpenStreetMapService.swift */,
 				C0A111012F4C011100000001 /* ROBNavigationRuntime.swift */,
 				C0A112012F4C011200000001 /* ROBTraversabilityRuntime.swift */,
+				C0F011012F6A011000000001 /* ROBFollowPersonCoordinator.swift */,
 				C0A120012F4C012000000001 /* ROBRecordingCoordinator.swift */,
 				C0A121012F4C012100000001 /* ROBRecordingWindowController.swift */,
 				C0A130012F4C013000000001 /* ROBFaceIdentityGallery.swift */,
@@ -863,6 +866,7 @@
 				C0A110022F4C011000000001 /* ROBOpenStreetMapService.swift in Sources */,
 				C0A111022F4C011100000001 /* ROBNavigationRuntime.swift in Sources */,
 				C0A112022F4C011200000001 /* ROBTraversabilityRuntime.swift in Sources */,
+				C0F011022F6A011000000001 /* ROBFollowPersonCoordinator.swift in Sources */,
 				C0A120022F4C012000000001 /* ROBRecordingCoordinator.swift in Sources */,
 				C0A121022F4C012100000001 /* ROBRecordingWindowController.swift in Sources */,
 				C0A130022F4C013000000001 /* ROBFaceIdentityGallery.swift in Sources */,

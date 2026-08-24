@@ -209,6 +209,193 @@ enum ROBAdministratorTerminalProtocol {
   }
 }
 
+// MARK: - Visually authorized person following
+
+enum ROBFollowTargetKind: String, Codable, CaseIterable {
+  case previewRequest
+  case preview
+  case authorize
+  case stop
+  case status
+}
+
+enum ROBFollowTargetState: String, Codable, CaseIterable {
+  case idle
+  case previewReady
+  case following
+  case targetLost
+  case blocked
+  case stopped
+}
+
+struct ROBFollowTargetCandidate: Codable, Equatable {
+  let id: UUID
+  /// Vision-normalized rectangle, encoded as 0...10,000 fixed-point values.
+  let x: UInt16
+  let y: UInt16
+  let width: UInt16
+  let height: UInt16
+  let confidencePermille: UInt16
+  let distanceMillimeters: UInt16?
+}
+
+struct ROBFollowTargetMessage: Codable, Equatable {
+  let kind: ROBFollowTargetKind
+  let requestID: UUID
+  let controllerID: UUID
+  let sessionID: UUID
+  let sequence: UInt64
+  let sentAtMilliseconds: UInt64
+  let state: ROBFollowTargetState?
+  let detail: String?
+  let previewJPEG: Data?
+  let candidates: [ROBFollowTargetCandidate]
+  let selectedCandidateID: UUID?
+  let minimumDistanceCentimeters: UInt16
+  let preferredDistanceCentimeters: UInt16
+  let maximumDistanceCentimeters: UInt16
+  let maximumSpeedPermille: UInt16
+
+  init(
+    kind: ROBFollowTargetKind,
+    requestID: UUID,
+    controllerID: UUID,
+    sessionID: UUID,
+    sequence: UInt64,
+    sentAtMilliseconds: UInt64,
+    state: ROBFollowTargetState? = nil,
+    detail: String? = nil,
+    previewJPEG: Data? = nil,
+    candidates: [ROBFollowTargetCandidate] = [],
+    selectedCandidateID: UUID? = nil,
+    minimumDistanceCentimeters: UInt16 = 120,
+    preferredDistanceCentimeters: UInt16 = 180,
+    maximumDistanceCentimeters: UInt16 = 280,
+    maximumSpeedPermille: UInt16 = 120
+  ) {
+    self.kind = kind
+    self.requestID = requestID
+    self.controllerID = controllerID
+    self.sessionID = sessionID
+    self.sequence = sequence
+    self.sentAtMilliseconds = sentAtMilliseconds
+    self.state = state
+    self.detail = detail
+    self.previewJPEG = previewJPEG
+    self.candidates = candidates
+    self.selectedCandidateID = selectedCandidateID
+    self.minimumDistanceCentimeters = minimumDistanceCentimeters
+    self.preferredDistanceCentimeters = preferredDistanceCentimeters
+    self.maximumDistanceCentimeters = maximumDistanceCentimeters
+    self.maximumSpeedPermille = maximumSpeedPermille
+  }
+}
+
+enum ROBFollowTargetProtocolError: LocalizedError {
+  case invalid(String)
+
+  var errorDescription: String? {
+    switch self {
+    case .invalid(let detail): return "Invalid follow-target message: \(detail)"
+    }
+  }
+}
+
+enum ROBFollowTargetProtocol {
+  static let maximumMessageBytes = 524_288
+  static let previewLifetimeMilliseconds: UInt64 = 15_000
+  private static let magic = Data("ROBFOLLOW1".utf8)
+
+  static func claimsProtocol(_ data: Data) -> Bool {
+    data.count >= magic.count && data.prefix(magic.count) == magic
+  }
+
+  static func encode(_ message: ROBFollowTargetMessage) throws -> Data {
+    try validate(message)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    let body = try encoder.encode(message)
+    guard magic.count + body.count <= maximumMessageBytes else {
+      throw ROBFollowTargetProtocolError.invalid("length")
+    }
+    return magic + body
+  }
+
+  static func decode(_ data: Data) throws -> ROBFollowTargetMessage {
+    guard claimsProtocol(data), data.count <= maximumMessageBytes else {
+      throw ROBFollowTargetProtocolError.invalid("discriminator or length")
+    }
+    let message: ROBFollowTargetMessage
+    do {
+      message = try JSONDecoder().decode(
+        ROBFollowTargetMessage.self,
+        from: Data(data.dropFirst(magic.count))
+      )
+    } catch {
+      throw ROBFollowTargetProtocolError.invalid("JSON")
+    }
+    try validate(message)
+    return message
+  }
+
+  static func isFresh(_ message: ROBFollowTargetMessage, nowMilliseconds: UInt64) -> Bool {
+    nowMilliseconds >= message.sentAtMilliseconds
+      && nowMilliseconds - message.sentAtMilliseconds <= previewLifetimeMilliseconds
+  }
+
+  private static func validate(_ message: ROBFollowTargetMessage) throws {
+    guard message.sequence > 0,
+          message.minimumDistanceCentimeters >= 100,
+          message.minimumDistanceCentimeters <= 180,
+          message.preferredDistanceCentimeters >= message.minimumDistanceCentimeters + 20,
+          message.maximumDistanceCentimeters >= message.preferredDistanceCentimeters + 20,
+          message.maximumDistanceCentimeters <= 400,
+          message.maximumSpeedPermille >= 40,
+          message.maximumSpeedPermille <= 200,
+          (message.detail?.utf8.count ?? 0) <= 1_024,
+          message.candidates.count <= 8,
+          (message.previewJPEG?.count ?? 0) <= 360_000 else {
+      throw ROBFollowTargetProtocolError.invalid("bounds")
+    }
+    for candidate in message.candidates {
+      guard candidate.x <= 10_000, candidate.y <= 10_000,
+            candidate.width > 0, candidate.height > 0,
+            Int(candidate.x) + Int(candidate.width) <= 10_000,
+            Int(candidate.y) + Int(candidate.height) <= 10_000,
+            candidate.confidencePermille <= 1_000 else {
+        throw ROBFollowTargetProtocolError.invalid("candidate")
+      }
+    }
+    switch message.kind {
+    case .previewRequest:
+      guard message.previewJPEG == nil, message.candidates.isEmpty,
+            message.selectedCandidateID == nil, message.state == nil else {
+        throw ROBFollowTargetProtocolError.invalid("preview request")
+      }
+    case .preview:
+      guard message.previewJPEG?.isEmpty == false, !message.candidates.isEmpty,
+            message.selectedCandidateID == nil, message.state == .previewReady else {
+        throw ROBFollowTargetProtocolError.invalid("preview")
+      }
+    case .authorize:
+      guard message.previewJPEG == nil, message.candidates.isEmpty,
+            message.selectedCandidateID != nil, message.state == nil else {
+        throw ROBFollowTargetProtocolError.invalid("authorization")
+      }
+    case .stop:
+      guard message.previewJPEG == nil, message.candidates.isEmpty,
+            message.selectedCandidateID == nil else {
+        throw ROBFollowTargetProtocolError.invalid("stop")
+      }
+    case .status:
+      guard message.previewJPEG == nil, message.candidates.isEmpty,
+            message.selectedCandidateID == nil, message.state != nil else {
+        throw ROBFollowTargetProtocolError.invalid("status")
+      }
+    }
+  }
+}
+
 // MARK: - Administrator remote desktop input
 
 enum ROBRemoteDesktopControlKind: String, Codable, CaseIterable {
