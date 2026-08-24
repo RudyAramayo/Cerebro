@@ -14,6 +14,8 @@
 #import "ROBKeyboardControlsViewController.h"
 #import "ROBTorsoControlsViewController.h"
 #import "ROBSCNViewController.h"
+#import "ROBPythonRuntime.h"
+#import "ROBSystemDependencyManager.h"
 
 #import "ROBNiTEManager.h"
 #import "ROBConsciousness.h"
@@ -33,11 +35,14 @@
 static NSTimeInterval const kRobotActionControllerFreshnessSeconds = 3.5;
 static NSTimeInterval const kRobotActionApprovalLifetimeSeconds = 30.0;
 static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
+static NSTimeInterval const kROBConversationContinuationWindowSeconds = 15.0;
 static NSString * const ROBDevelopmentModeDefaultsKey = @"ROBDevelopmentMode";
 static NSString * const ROBShowControllerInputDiagnosticsNotification = @"ROBShowControllerInputDiagnostics";
 static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopmentModeDidChange";
 static NSString * const ROBGeminiVideoSourceSettingsDidChangeNotification = @"ROBGeminiVideoSourceSettingsDidChange";
 static NSString * const ROBFaceIdentityConversationCueNotification = @"ROBFaceIdentityConversationCue";
+static NSString * const ROBStageShowStateDidChangeNotification = @"ROBStageShowStateDidChange";
+static NSString * const ROBHeadlessLiveStartupStopRequestedNotification = @"ROBHeadlessLiveStartupStopRequested";
 
 #import "AVFoundation/AVFoundation.h"
 #import "Cerebro-Swift.h"
@@ -79,6 +84,158 @@ static const CGFloat ROBConversationBubbleHorizontalTextInset = 16.0;
 // Moving the whole label down 8pt preserves selection geometry and places
 // the text another 5pt lower while leaving the rounded bubble fixed.
 static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
+
+/// A compact, native AppKit action tile for the main workspace header. The
+/// symbol carries the meaning at a glance while the restrained accent fill
+/// keeps the communication workspace visually dominant.
+@interface ROBWorkspaceHeaderButton : NSButton
+@property (nonatomic, strong) NSColor *robAccentColor;
+@property (nonatomic, assign) BOOL robEmphasized;
+@property (nonatomic, assign) BOOL robCircular;
+@property (nonatomic, assign) BOOL robPointerInside;
+@property (nonatomic, strong) NSTrackingArea *robTrackingArea;
+- (instancetype)initWithTitle:(NSString *)title
+                    symbolName:(NSString *)symbolName
+                fallbackSymbol:(NSString *)fallbackSymbol
+                   accentColor:(NSColor *)accentColor
+                    emphasized:(BOOL)emphasized
+                        target:(id)target
+                        action:(SEL)action;
+- (void)refreshContentAppearance;
+@end
+
+@implementation ROBWorkspaceHeaderButton
+
+- (instancetype)initWithTitle:(NSString *)title
+                    symbolName:(NSString *)symbolName
+                fallbackSymbol:(NSString *)fallbackSymbol
+                   accentColor:(NSColor *)accentColor
+                    emphasized:(BOOL)emphasized
+                        target:(id)target
+                        action:(SEL)action
+{
+    self = [super initWithFrame:NSZeroRect];
+    if (self) {
+        self.title = title;
+        self.target = target;
+        self.action = action;
+        self.robAccentColor = accentColor;
+        self.robEmphasized = emphasized;
+        self.bordered = NO;
+        self.wantsLayer = YES;
+        self.focusRingType = NSFocusRingTypeExterior;
+        self.font = [NSFont systemFontOfSize:13 weight:NSFontWeightSemibold];
+        self.imageScaling = NSImageScaleProportionallyDown;
+        self.imagePosition = title.length > 0 ? NSImageLeading : NSImageOnly;
+        self.imageHugsTitle = YES;
+        [self setButtonType:NSButtonTypeMomentaryChange];
+
+        NSImage *symbol = [NSImage imageWithSystemSymbolName:symbolName
+                                   accessibilityDescription:title];
+        if (symbol == nil && fallbackSymbol.length > 0) {
+            symbol = [NSImage imageWithSystemSymbolName:fallbackSymbol
+                               accessibilityDescription:title];
+        }
+        NSImageSymbolConfiguration *symbolConfiguration = [NSImageSymbolConfiguration
+            configurationWithPointSize:title.length > 0 ? 14 : 25
+                                  weight:NSFontWeightSemibold];
+        symbol = [symbol imageWithSymbolConfiguration:symbolConfiguration];
+        self.image = symbol;
+        [self refreshContentAppearance];
+    }
+    return self;
+}
+
+- (BOOL)wantsUpdateLayer
+{
+    return YES;
+}
+
+- (void)refreshContentAppearance
+{
+    NSColor *foreground = self.robEmphasized ? NSColor.whiteColor : NSColor.labelColor;
+    if (self.title.length > 0) {
+        self.attributedTitle = [[NSAttributedString alloc]
+            initWithString:self.title
+                attributes:@{
+                    NSFontAttributeName: self.font,
+                    NSForegroundColorAttributeName: foreground
+                }];
+    }
+    self.contentTintColor = self.robEmphasized
+        ? NSColor.whiteColor
+        : (self.robAccentColor ?: NSColor.controlAccentColor);
+    [self setNeedsDisplay:YES];
+}
+
+- (void)updateTrackingAreas
+{
+    [super updateTrackingAreas];
+    if (self.robTrackingArea != nil) {
+        [self removeTrackingArea:self.robTrackingArea];
+    }
+    self.robTrackingArea = [[NSTrackingArea alloc]
+        initWithRect:NSZeroRect
+             options:(NSTrackingMouseEnteredAndExited |
+                      NSTrackingActiveInActiveApp |
+                      NSTrackingInVisibleRect)
+               owner:self
+            userInfo:nil];
+    [self addTrackingArea:self.robTrackingArea];
+}
+
+- (void)mouseEntered:(NSEvent *)event
+{
+    self.robPointerInside = YES;
+    [self setNeedsDisplay:YES];
+}
+
+- (void)mouseExited:(NSEvent *)event
+{
+    self.robPointerInside = NO;
+    [self setNeedsDisplay:YES];
+}
+
+- (void)setHighlighted:(BOOL)highlighted
+{
+    [super setHighlighted:highlighted];
+    [self setNeedsDisplay:YES];
+}
+
+- (void)viewDidChangeEffectiveAppearance
+{
+    [super viewDidChangeEffectiveAppearance];
+    [self refreshContentAppearance];
+}
+
+- (void)updateLayer
+{
+    [super updateLayer];
+    NSColor *accent = self.robAccentColor ?: NSColor.controlAccentColor;
+    CGFloat fillAlpha;
+    if (!self.enabled) {
+        fillAlpha = 0.06;
+    } else if (self.highlighted) {
+        fillAlpha = self.robEmphasized ? 0.62 : 0.22;
+    } else if (self.robPointerInside) {
+        fillAlpha = self.robEmphasized ? 0.96 : 0.18;
+    } else {
+        fillAlpha = self.robEmphasized ? 0.82 : 0.11;
+    }
+    self.layer.backgroundColor = [accent colorWithAlphaComponent:fillAlpha].CGColor;
+    self.layer.borderWidth = 1;
+    self.layer.borderColor = [accent colorWithAlphaComponent:
+        self.robEmphasized ? 0.95 : 0.30].CGColor;
+    self.layer.cornerRadius = self.robCircular
+        ? MIN(NSWidth(self.bounds), NSHeight(self.bounds)) / 2.0
+        : 10.0;
+    self.layer.shadowColor = accent.CGColor;
+    self.layer.shadowOpacity = self.robEmphasized ? 0.20 : 0.06;
+    self.layer.shadowRadius = self.robPointerInside ? 7 : 4;
+    self.layer.shadowOffset = CGSizeMake(0, -1);
+}
+
+@end
 
 @interface ROBConversationBubbleView : NSTableCellView
 @property (nonatomic, strong) NSTextField *senderLabel;
@@ -198,6 +355,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 @property (readwrite, copy) NSString *localAmberGestureCallID;
 @property (readwrite, copy) NSString *controllerApprovedAmberGestureCallID;
 @property (readwrite, retain) ROBRobotActionMessage *controllerApprovedAmberGestureExecutingStatus;
+@property (readwrite, copy) NSString *controllerApprovedLiveStartupCallID;
+@property (readwrite, retain) ROBRobotActionMessage *controllerApprovedLiveStartupExecutingStatus;
 
 @property (readwrite, retain) SimpleUserTrackerTaskController *simpleUserTrackerTaskController;
 @property (readwrite, retain) AudioInputTaskController *audioInputTaskController;
@@ -234,6 +393,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 @property (readwrite, retain) NSDate *lastConversationUserDate;
 @property (readwrite, retain) IBOutlet NSButton *mainAISendButton;
 @property (readwrite, retain) IBOutlet NSButton *resetConversationButton;
+@property (readwrite, retain) ROBWorkspaceHeaderButton *workspaceSettingsButton;
 - (void)applicationWillTerminate:(NSNotification *)notification;
 - (void)shutdownCerebroRuntime;
 - (BOOL)sendRobotActionMessage:(ROBRobotActionMessage *)message;
@@ -250,6 +410,16 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                                            timedOut:(BOOL)timedOut;
 - (void)finishControllerApprovedAmberGestureCallID:(NSString *)callID
                                              result:(NSDictionary *)result;
+- (void)requestArmedHeadlessLiveStartupIfReady;
+- (void)startControllerApprovedLiveStartupForRequest:(ROBRobotActionMessage *)request;
+- (void)cancelControllerApprovedLiveStartupCallID:(NSString *)callID
+                                             reason:(NSString *)reason
+                                           timedOut:(BOOL)timedOut;
+- (void)finishControllerApprovedLiveStartupCallID:(NSString *)callID
+                                             state:(ROBRobotActionState)state
+                                            detail:(NSString *)detail;
+- (void)stageShowStateDidChange:(NSNotification *)notification;
+- (void)headlessLiveStartupStopRequested:(NSNotification *)notification;
 - (void)updateGeminiCameraDemand;
 - (void)faceIdentityConversationCue:(NSNotification *)notification;
 - (void)geminiVideoSourceSettingsDidChange:(NSNotification *)notification;
@@ -262,6 +432,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (NSURL *)conversationLogURL;
 - (IBAction)sendROBChatText:(id)sender;
 - (IBAction)showSettings:(id)sender;
+- (void)workspaceDependencyStatusDidChange:(NSNotification *)notification;
+- (void)updateWorkspaceSettingsButton;
 @end
 
 @implementation ROBMainViewController
@@ -407,14 +579,20 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     background.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:background positioned:NSWindowBelow relativeTo:nil];
 
-    NSImageView *appIcon = [[NSImageView alloc] initWithFrame:NSZeroRect];
-    appIcon.image = [NSImage imageWithSystemSymbolName:@"brain.head.profile"
-                             accessibilityDescription:@"Cerebro"];
-    appIcon.contentTintColor = NSColor.controlAccentColor;
-    appIcon.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:31
-                                                                                  weight:NSFontWeightMedium];
-    [appIcon.widthAnchor constraintEqualToConstant:42].active = YES;
-    [appIcon.heightAnchor constraintEqualToConstant:42].active = YES;
+    ROBWorkspaceHeaderButton *servicesButton = [[ROBWorkspaceHeaderButton alloc]
+        initWithTitle:@""
+             symbolName:@"brain.head.profile"
+         fallbackSymbol:@"cpu"
+            accentColor:NSColor.systemBlueColor
+             emphasized:YES
+                 target:self
+                 action:@selector(showSystemStatus:)];
+    servicesButton.robCircular = YES;
+    servicesButton.toolTip = @"System Services — inspect AI, cameras, perception, media, and controllers";
+    [servicesButton setAccessibilityLabel:@"System Services"];
+    [servicesButton setAccessibilityIdentifier:@"ROB.MainWorkspace.SystemServices"];
+    [servicesButton.widthAnchor constraintEqualToConstant:46].active = YES;
+    [servicesButton.heightAnchor constraintEqualToConstant:46].active = YES;
 
     NSTextField *titleLabel = [NSTextField labelWithString:@"Cerebro"];
     titleLabel.font = [NSFont systemFontOfSize:24 weight:NSFontWeightSemibold];
@@ -427,51 +605,78 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     titleStack.alignment = NSLayoutAttributeLeading;
     titleStack.spacing = 1;
 
-    NSButton *insta360Button = [NSButton buttonWithTitle:@"360° Live View"
-                                                  target:self
-                                                  action:@selector(showInsta360Diagnostics:)];
-    insta360Button.image = [NSImage imageWithSystemSymbolName:@"viewfinder"
-                                     accessibilityDescription:@"Open Insta360 live diagnostics"];
-    insta360Button.imagePosition = NSImageLeading;
-    insta360Button.bezelStyle = NSBezelStyleTexturedRounded;
+    ROBWorkspaceHeaderButton *showModeButton = [[ROBWorkspaceHeaderButton alloc]
+        initWithTitle:@"Show Mode"
+             symbolName:@"theatermasks.fill"
+         fallbackSymbol:@"play.rectangle.fill"
+            accentColor:NSColor.systemPurpleColor
+             emphasized:YES
+                 target:self
+                 action:@selector(showStageShow:)];
+    showModeButton.toolTip = @"Open Show Mode to validate, rehearse, and run a stage show";
+    [showModeButton setAccessibilityIdentifier:@"ROB.MainWorkspace.ShowMode"];
+
+    ROBWorkspaceHeaderButton *insta360Button = [[ROBWorkspaceHeaderButton alloc]
+        initWithTitle:@"360° Live View"
+             symbolName:@"pano.fill"
+         fallbackSymbol:@"viewfinder"
+            accentColor:NSColor.systemTealColor
+             emphasized:NO
+                 target:self
+                 action:@selector(showInsta360Diagnostics:)];
     insta360Button.toolTip = @"Open the live stitched panorama, orientation guide, and 360° diagnostics";
     [insta360Button setAccessibilityIdentifier:@"ROB.MainWorkspace.Insta360"];
 
-    NSButton *cameraCaptureButton = [NSButton buttonWithTitle:@"Camera Capture"
-                                                       target:self
-                                                       action:@selector(showCameraCapture:)];
-    cameraCaptureButton.image = [NSImage imageWithSystemSymbolName:@"camera.viewfinder"
-                                           accessibilityDescription:@"Open camera capture"];
-    cameraCaptureButton.imagePosition = NSImageLeading;
-    cameraCaptureButton.bezelStyle = NSBezelStyleTexturedRounded;
+    ROBWorkspaceHeaderButton *cameraCaptureButton = [[ROBWorkspaceHeaderButton alloc]
+        initWithTitle:@"Camera Capture"
+             symbolName:@"camera.viewfinder"
+         fallbackSymbol:@"camera.fill"
+            accentColor:NSColor.systemBlueColor
+             emphasized:NO
+                 target:self
+                 action:@selector(showCameraCapture:)];
     cameraCaptureButton.toolTip = @"Open the main RGB-D camera, hologram capture, recording, and camera controls";
     [cameraCaptureButton setAccessibilityIdentifier:@"ROB.MainWorkspace.CameraCapture"];
 
-    NSButton *settingsButton = [NSButton buttonWithTitle:@"Settings"
-                                                  target:self
-                                                  action:@selector(showSettings:)];
-    settingsButton.image = [NSImage imageWithSystemSymbolName:@"gearshape.fill"
-                                     accessibilityDescription:@"Open Cerebro Settings"];
-    settingsButton.imagePosition = NSImageLeading;
-    settingsButton.bezelStyle = NSBezelStyleTexturedRounded;
-    settingsButton.toolTip = @"Configure AI providers, Messages, cameras, and robot services";
-    [settingsButton setAccessibilityIdentifier:@"ROB.MainWorkspace.Settings"];
+    self.workspaceSettingsButton = [[ROBWorkspaceHeaderButton alloc]
+        initWithTitle:@"Settings"
+             symbolName:@"gearshape.fill"
+         fallbackSymbol:@"gearshape"
+            accentColor:NSColor.systemGrayColor
+             emphasized:NO
+                 target:self
+                 action:@selector(showSettings:)];
+    [self.workspaceSettingsButton setAccessibilityIdentifier:@"ROB.MainWorkspace.Settings"];
+    [self updateWorkspaceSettingsButton];
 
     NSView *headerSpacer = [[NSView alloc] initWithFrame:NSZeroRect];
     NSStackView *header = [NSStackView stackViewWithViews:@[
-        appIcon, titleStack, headerSpacer, cameraCaptureButton, insta360Button, settingsButton
+        servicesButton, titleStack, headerSpacer, showModeButton,
+        cameraCaptureButton, insta360Button, self.workspaceSettingsButton
     ]];
     header.orientation = NSUserInterfaceLayoutOrientationHorizontal;
     header.alignment = NSLayoutAttributeCenterY;
     header.spacing = 10;
     [headerSpacer setContentHuggingPriority:NSLayoutPriorityDefaultLow
                              forOrientation:NSLayoutConstraintOrientationHorizontal];
-    [settingsButton setContentHuggingPriority:NSLayoutPriorityRequired
+    [self.workspaceSettingsButton setContentHuggingPriority:NSLayoutPriorityRequired
+                                             forOrientation:NSLayoutConstraintOrientationHorizontal];
+    [showModeButton setContentHuggingPriority:NSLayoutPriorityRequired
                                forOrientation:NSLayoutConstraintOrientationHorizontal];
     [insta360Button setContentHuggingPriority:NSLayoutPriorityRequired
                                forOrientation:NSLayoutConstraintOrientationHorizontal];
     [cameraCaptureButton setContentHuggingPriority:NSLayoutPriorityRequired
                                     forOrientation:NSLayoutConstraintOrientationHorizontal];
+    [NSLayoutConstraint activateConstraints:@[
+        [showModeButton.heightAnchor constraintEqualToConstant:36],
+        [showModeButton.widthAnchor constraintGreaterThanOrEqualToConstant:126],
+        [cameraCaptureButton.heightAnchor constraintEqualToConstant:36],
+        [cameraCaptureButton.widthAnchor constraintGreaterThanOrEqualToConstant:138],
+        [insta360Button.heightAnchor constraintEqualToConstant:36],
+        [insta360Button.widthAnchor constraintGreaterThanOrEqualToConstant:138],
+        [self.workspaceSettingsButton.heightAnchor constraintEqualToConstant:36],
+        [self.workspaceSettingsButton.widthAnchor constraintGreaterThanOrEqualToConstant:104]
+    ]];
 
     self.messagesWorkspaceViewController = [[ROBMessagesWorkspaceViewController alloc] init];
     [self addChildViewController:self.messagesWorkspaceViewController];
@@ -600,6 +805,48 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         [workspace.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-24],
         [workspace.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor constant:-20]
     ]];
+}
+
+- (void)workspaceDependencyStatusDidChange:(NSNotification *)notification
+{
+    [self updateWorkspaceSettingsButton];
+}
+
+- (void)updateWorkspaceSettingsButton
+{
+    if (self.workspaceSettingsButton == nil) { return; }
+
+    BOOL pythonNeedsAttention = [ROBPythonRuntime sharedRuntime].effectivePythonPath.length == 0;
+    ROBSystemDependencyManager *dependencyManager = [ROBSystemDependencyManager sharedManager];
+    BOOL systemDependencyNeedsAttention = dependencyManager.sshpassPath.length == 0;
+    BOOL unresolvedSystemDependency =
+        systemDependencyNeedsAttention && !dependencyManager.isInstallingSSHpass;
+    BOOL needsAttention = pythonNeedsAttention || unresolvedSystemDependency;
+
+    self.workspaceSettingsButton.title = needsAttention ? @"Settings  ⚠" : @"Settings";
+    if (dependencyManager.isInstallingSSHpass && pythonNeedsAttention) {
+        NSString *packageManager = ROBSystemPackageManagerDisplayName(
+            dependencyManager.installingPackageManager);
+        self.workspaceSettingsButton.toolTip = [NSString stringWithFormat:
+            @"Python needs attention; installing sshpass with %@…", packageManager];
+    } else if (dependencyManager.isInstallingSSHpass) {
+        NSString *packageManager = ROBSystemPackageManagerDisplayName(
+            dependencyManager.installingPackageManager);
+        self.workspaceSettingsButton.toolTip = [NSString stringWithFormat:
+            @"Installing sshpass with %@…", packageManager];
+    } else if (pythonNeedsAttention && systemDependencyNeedsAttention) {
+        self.workspaceSettingsButton.toolTip = @"Python and sshpass dependencies need attention";
+    } else if (pythonNeedsAttention) {
+        self.workspaceSettingsButton.toolTip = @"The Python environment needs attention";
+    } else if (systemDependencyNeedsAttention) {
+        self.workspaceSettingsButton.toolTip = @"sshpass is unavailable; open Settings for installation status";
+    } else {
+        self.workspaceSettingsButton.toolTip =
+            @"Configure AI providers, Messages, cameras, and robot services";
+    }
+    [self.workspaceSettingsButton refreshContentAppearance];
+    [self.workspaceSettingsButton setAccessibilityValue:
+        needsAttention ? @"Attention required" : @"Ready"];
 }
 
 - (NSURL *)conversationLogURL
@@ -822,7 +1069,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void)robAI:(ROBAI *)robAI didReceiveResponseText:(NSString *)text
 {
-    NSLog(@"Gemini Robotics response: %@", text);
+    // This delegate is shared by Gemini and the private on-device fallback;
+    // provider-specific correlation is logged by ROBAI before delivery.
+    NSLog(@"ROB AI response: %@", text);
     [self appendConversationText:text fromUser:NO];
     if (self.audioInputTaskController.textView != nil) {
         self.audioInputTaskController.textView.string =
@@ -850,7 +1099,12 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 {
     // This is server-originated confirmation of what Gemini understood, not
     // the separate on-device Apple speech-recognition transcript.
+    if (!robAI.isMicrophoneConversationActive) {
+        NSLog(@"Gemini Robotics transcript ignored outside ROB wake window: %@", text);
+        return;
+    }
     NSLog(@"Gemini Robotics heard: %@", text);
+    [self resetSpeechResponseAttentionTimer];
     [self appendConversationText:text fromUser:YES];
     if ([[ROBFaceRecognitionService shared] noteConversationTranscript:text]) {
         return;
@@ -930,7 +1184,13 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void)cancelPendingGeminiRobotActionsWithReason:(NSString *)reason
 {
-    NSArray<NSString *> *callIDs = [self.pendingRobotActionRequests.allKeys copy];
+    NSMutableArray<NSString *> *geminiCallIDs = [NSMutableArray array];
+    for (NSString *callID in self.pendingRobotActionRequests.allKeys) {
+        if (self.pendingRobotToolCalls[callID] != nil) {
+            [geminiCallIDs addObject:callID];
+        }
+    }
+    NSArray<NSString *> *callIDs = [geminiCallIDs copy];
     BOOL hasLocalAmberGesture = self.localAmberGestureCallID.length > 0;
     if (callIDs.count == 0 && !hasLocalAmberGesture) {
         return;
@@ -1010,6 +1270,15 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                                    result:@{
                                        @"status": @"rejected",
                                        @"reason": @"robot_action requires an action"
+                                   }];
+        return;
+    }
+    if ([action isEqualToString:@"run_startup_test"]) {
+        [robAI sendToolResponseWithCallID:call.callID
+                                     name:call.name
+                                   result:@{
+                                       @"status": @"rejected",
+                                       @"reason": @"run_startup_test is reserved for Cerebro's locally armed, controller-authorized one-shot workflow"
                                    }];
         return;
     }
@@ -1290,7 +1559,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     if (request.recipientID.length == 0 ||
         ![request.recipientID isEqualToString:self.robotActionControllerID] ||
         !self.robotActionControllerAcceptsActions ||
-        ![self.robotActionControllerCapabilities containsObject:@"play_gesture"] ||
+        request.action.length == 0 ||
+        ![self.robotActionControllerCapabilities containsObject:request.action] ||
         self.robotActionControllerLastSeen == nil) {
         return NO;
     }
@@ -1496,6 +1766,304 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     }
 }
 
+- (void)requestArmedHeadlessLiveStartupIfReady
+{
+    ROBHeadlessLiveStartupAuthorization *authorization =
+        [ROBHeadlessLiveStartupAuthorization shared];
+    if (!authorization.isArmed || self.runtimeIsShuttingDown ||
+        self.pendingRobotActionRequests.count > 0 ||
+        self.stageShowCoordinator.isRunning ||
+        [ROBAmberGestureExecutor shared].isExecuting) {
+        return;
+    }
+
+    NSString *gesture = authorization.gestureName;
+    BOOL controllerIsFresh = self.robotActionControllerLastSeen != nil &&
+        [[NSDate date] timeIntervalSinceDate:self.robotActionControllerLastSeen] <
+            kRobotActionControllerFreshnessSeconds;
+    if (gesture.length == 0 || !controllerIsFresh ||
+        !self.robotActionControllerAcceptsActions ||
+        self.robotActionControllerID.length == 0 ||
+        ![self.robotActionControllerCapabilities containsObject:@"run_startup_test"]) {
+        return;
+    }
+
+    NSDictionary *preflight = [[ROBAmberGestureExecutor shared]
+        preflightLocallyConfirmedGesture:gesture];
+    NSArray *arms = [preflight[@"arms"] isKindOfClass:NSArray.class]
+        ? preflight[@"arms"] : @[];
+    BOOL coversBothArms = [[NSSet setWithArray:arms]
+        isEqualToSet:[NSSet setWithArray:@[@"left", @"right"]]];
+    if (![preflight[@"status"] isEqualToString:@"ready"] || !coversBothArms) {
+        NSString *detail = [preflight[@"detail"] isKindOfClass:NSString.class]
+            ? preflight[@"detail"]
+            : @"The selected gesture is not a ready two-arm Amber gesture.";
+        [authorization updateStatus:[NSString stringWithFormat:
+            @"Remote startup remains armed but hardware preflight is blocked: %@", detail]];
+        return;
+    }
+
+    NSString *callID = [NSString stringWithFormat:@"headless-startup:%@",
+                        NSUUID.UUID.UUIDString];
+    ROBRobotActionMessage *request = [ROBRobotActionMessage
+        actionRequestWithCallID:callID
+                         action:@"run_startup_test"
+                      arguments:@{@"gesture": gesture}
+                       senderID:self.robotActionSenderID
+                    recipientID:self.robotActionControllerID
+                      expiresAt:[NSDate dateWithTimeIntervalSinceNow:
+                          kRobotActionApprovalLifetimeSeconds]];
+    if (request.validationError.length > 0) {
+        [authorization updateStatus:[NSString stringWithFormat:
+            @"Remote startup request failed validation: %@", request.validationError]];
+        return;
+    }
+
+    self.controllerApprovedLiveStartupCallID = callID;
+    self.pendingRobotActionRequests[callID] = request;
+    if (![self sendRobotActionMessage:request]) {
+        self.controllerApprovedLiveStartupCallID = nil;
+        [self.pendingRobotActionRequests removeObjectForKey:callID];
+        [authorization updateStatus:
+            @"Could not send the remote startup request; the one-shot latch remains armed."];
+        return;
+    }
+
+    if (![authorization consumeIfGestureNameMatches:gesture]) {
+        // The persisted latch changed while this request was being assembled.
+        // Cancel the exact request and never permit it to become authority.
+        ROBRobotActionMessage *cancellation = [ROBRobotActionMessage
+            actionCancelWithCallID:callID
+                            reason:@"Remote startup arming changed before request submission"
+                          senderID:self.robotActionSenderID
+                       recipientID:request.recipientID];
+        self.pendingRobotActionCancellations[callID] = cancellation;
+        [self sendRobotActionMessage:cancellation];
+        return;
+    }
+    NSLog(@"Monitorless live startup %@ is awaiting controller approval", callID);
+}
+
+- (void)finishControllerApprovedLiveStartupCallID:(NSString *)callID
+                                             state:(ROBRobotActionState)state
+                                            detail:(NSString *)detail
+{
+    ROBRobotActionMessage *request = self.pendingRobotActionRequests[callID];
+    if (request == nil || ![request.action isEqualToString:@"run_startup_test"] ||
+        ![self.controllerApprovedLiveStartupCallID isEqualToString:callID]) {
+        return;
+    }
+    NSString *gesture = [request.arguments[@"gesture"] isKindOfClass:NSString.class]
+        ? request.arguments[@"gesture"] : @"";
+    BOOL completed = state == ROBRobotActionStateCompleted;
+    NSDictionary *result = @{
+        @"status": [self robotActionStateString:state],
+        @"gesture": gesture,
+        @"arms": @[@"left", @"right"],
+        @"measured": @(completed),
+        @"execution_owner": @"Cerebro",
+        @"authorization": @"controller_approved_one_shot"
+    };
+
+    self.controllerApprovedLiveStartupCallID = nil;
+    self.controllerApprovedLiveStartupExecutingStatus = nil;
+    [self.pendingRobotActionRequests removeObjectForKey:callID];
+    [self.pendingRobotActionCancellations removeObjectForKey:callID];
+    [self.robotActionExecutionDeadlines removeObjectForKey:callID];
+    [self.timedOutRobotToolCallIDs removeObject:callID];
+
+    ROBRobotActionMessage *terminal = [ROBRobotActionMessage
+        actionStatusWithCallID:callID
+                        state:state
+                       detail:detail
+                       result:result
+                     senderID:self.robotActionSenderID
+                  recipientID:request.recipientID];
+    [self sendRobotActionMessage:terminal];
+    [[ROBHeadlessLiveStartupAuthorization shared]
+        updateStatus:[NSString stringWithFormat:@"Remote startup %@: %@",
+                      [self robotActionStateString:state], detail]];
+}
+
+- (void)cancelControllerApprovedLiveStartupCallID:(NSString *)callID
+                                             reason:(NSString *)reason
+                                           timedOut:(BOOL)timedOut
+{
+    if (![self.controllerApprovedLiveStartupCallID isEqualToString:callID]) {
+        return;
+    }
+    ROBRobotActionMessage *request = self.pendingRobotActionRequests[callID];
+    if (request == nil) {
+        return;
+    }
+    if (timedOut) {
+        [self.timedOutRobotToolCallIDs addObject:callID];
+    }
+    ROBRobotActionMessage *cancellation = self.pendingRobotActionCancellations[callID];
+    if (cancellation == nil) {
+        cancellation = [ROBRobotActionMessage
+            actionCancelWithCallID:callID
+                            reason:reason
+                          senderID:self.robotActionSenderID
+                       recipientID:request.recipientID];
+        self.pendingRobotActionCancellations[callID] = cancellation;
+    }
+    [self sendRobotActionMessage:cancellation];
+
+    if (self.stageShowCoordinator.isRunning &&
+        self.stageShowCoordinator.liveStartupIsControllerAuthorized) {
+        [self.stageShowCoordinator cancelWithReason:reason];
+        return;
+    }
+    (void)[[ROBAmberGestureExecutor shared] cancelCurrentGestureWithReason:reason];
+    (void)[[ROBAmberGestureExecutor shared] requestPriorityHold];
+    [self finishControllerApprovedLiveStartupCallID:callID
+                                              state:(timedOut
+                                                  ? ROBRobotActionStateExpired
+                                                  : ROBRobotActionStateCancelled)
+                                             detail:reason];
+}
+
+- (void)startControllerApprovedLiveStartupForRequest:(ROBRobotActionMessage *)request
+{
+    NSString *callID = request.callID;
+    if (callID.length == 0 ||
+        ![self.controllerApprovedLiveStartupCallID isEqualToString:callID] ||
+        self.pendingRobotActionRequests[callID] != request) {
+        return;
+    }
+    if (request.isExpired) {
+        [self finishControllerApprovedLiveStartupCallID:callID
+                                                  state:ROBRobotActionStateExpired
+                                                 detail:@"Controller approval arrived after the startup deadline; no motion was submitted."];
+        return;
+    }
+    if (self.pendingRobotActionCancellations[callID] != nil) {
+        [self finishControllerApprovedLiveStartupCallID:callID
+                                                  state:ROBRobotActionStateCancelled
+                                                 detail:@"The startup request was cancelled before any motion was submitted."];
+        return;
+    }
+    if (![self robotActionControllerIsFreshForRequest:request]) {
+        [self finishControllerApprovedLiveStartupCallID:callID
+                                                  state:ROBRobotActionStateRejected
+                                                 detail:@"The approving controller is no longer fresh and current; no motion was submitted."];
+        return;
+    }
+    if (self.stageShowCoordinator.isRunning || [ROBAmberGestureExecutor shared].isExecuting) {
+        [self finishControllerApprovedLiveStartupCallID:callID
+                                                  state:ROBRobotActionStateFailed
+                                                 detail:@"Another show or Amber gesture already owns physical execution."];
+        return;
+    }
+
+    NSString *gesture = [request.arguments[@"gesture"] isKindOfClass:NSString.class]
+        ? request.arguments[@"gesture"] : nil;
+    NSDictionary *preflight = gesture.length > 0
+        ? [[ROBAmberGestureExecutor shared] preflightLocallyConfirmedGesture:gesture]
+        : @{};
+    NSArray *arms = [preflight[@"arms"] isKindOfClass:NSArray.class]
+        ? preflight[@"arms"] : @[];
+    BOOL coversBothArms = [[NSSet setWithArray:arms]
+        isEqualToSet:[NSSet setWithArray:@[@"left", @"right"]]];
+    if (![preflight[@"status"] isEqualToString:@"ready"] || !coversBothArms) {
+        NSString *failure = [preflight[@"detail"] isKindOfClass:NSString.class]
+            ? preflight[@"detail"]
+            : @"The approved startup gesture failed its final two-arm preflight.";
+        [self finishControllerApprovedLiveStartupCallID:callID
+                                                  state:ROBRobotActionStateRejected
+                                                 detail:failure];
+        return;
+    }
+
+    self.robotActionExecutionDeadlines[callID] =
+        [NSDate dateWithTimeIntervalSinceNow:kRobotActionExecutionLifetimeSeconds];
+    self.controllerApprovedLiveStartupExecutingStatus = [ROBRobotActionMessage
+        actionStatusWithCallID:callID
+                        state:ROBRobotActionStateExecuting
+                       detail:@"Cerebro owns the fixed startup sequence and will report terminal state only after measured two-arm completion or a safe stop."
+                       result:@{
+                           @"gesture": gesture,
+                           @"execution_owner": @"Cerebro",
+                           @"authorization": @"controller_approved_one_shot"
+                       }
+                     senderID:self.robotActionSenderID
+                  recipientID:request.recipientID];
+
+    NSError *error = nil;
+    if (![self.stageShowCoordinator
+            startControllerAuthorizedLiveStartupTestWithGestureName:gesture
+                                                              error:&error]) {
+        [self finishControllerApprovedLiveStartupCallID:callID
+                                                  state:ROBRobotActionStateFailed
+                                                 detail:error.localizedDescription
+                                                     ?: @"The fixed controller-authorized startup sequence could not start."];
+        return;
+    }
+    [self sendRobotActionMessage:self.controllerApprovedLiveStartupExecutingStatus];
+    [[ROBHeadlessLiveStartupAuthorization shared]
+        updateStatus:[NSString stringWithFormat:
+            @"Controller approved %@; fixed LIVE startup is executing.", gesture]];
+}
+
+- (void)stageShowStateDidChange:(NSNotification *)notification
+{
+    if (notification.object != self.stageShowCoordinator ||
+        self.controllerApprovedLiveStartupCallID.length == 0) {
+        return;
+    }
+    NSString *state = [notification.userInfo[@"state"] isKindOfClass:NSString.class]
+        ? notification.userInfo[@"state"] : self.stageShowCoordinator.state;
+    NSString *detail = [notification.userInfo[@"detail"] isKindOfClass:NSString.class]
+        ? notification.userInfo[@"detail"] : self.stageShowCoordinator.detail;
+    if ([state isEqualToString:@"completed"]) {
+        [self finishControllerApprovedLiveStartupCallID:self.controllerApprovedLiveStartupCallID
+                                                  state:ROBRobotActionStateCompleted
+                                                 detail:@"The controller-authorized LIVE startup passed with measured completion on both Amber arms."];
+    } else if ([state isEqualToString:@"failed"]) {
+        [self finishControllerApprovedLiveStartupCallID:self.controllerApprovedLiveStartupCallID
+                                                  state:ROBRobotActionStateFailed
+                                                 detail:detail];
+    } else if ([state isEqualToString:@"cancelled"]) {
+        BOOL timedOut = [self.timedOutRobotToolCallIDs
+            containsObject:self.controllerApprovedLiveStartupCallID];
+        [self finishControllerApprovedLiveStartupCallID:self.controllerApprovedLiveStartupCallID
+                                                  state:(timedOut
+                                                      ? ROBRobotActionStateExpired
+                                                      : ROBRobotActionStateCancelled)
+                                                 detail:detail];
+    }
+}
+
+- (void)headlessLiveStartupStopRequested:(NSNotification *)notification
+{
+    NSString *callID = self.controllerApprovedLiveStartupCallID;
+    if (callID.length == 0) {
+        return;
+    }
+    NSString *reason = [notification.userInfo[@"reason"] isKindOfClass:NSString.class]
+        ? notification.userInfo[@"reason"]
+        : @"STOP + HOLD requested; stop and hold safely";
+    if (self.controllerApprovedLiveStartupExecutingStatus != nil) {
+        [self cancelControllerApprovedLiveStartupCallID:callID
+                                                  reason:reason
+                                                timedOut:NO];
+        return;
+    }
+    ROBRobotActionMessage *request = self.pendingRobotActionRequests[callID];
+    if (request != nil) {
+        ROBRobotActionMessage *cancellation = [ROBRobotActionMessage
+            actionCancelWithCallID:callID
+                            reason:reason
+                          senderID:self.robotActionSenderID
+                       recipientID:request.recipientID];
+        [self sendRobotActionMessage:cancellation];
+        [self finishControllerApprovedLiveStartupCallID:callID
+                                                  state:ROBRobotActionStateCancelled
+                                                 detail:reason];
+    }
+}
+
 - (void)handleRobotActionMessage:(ROBRobotActionMessage *)message
 {
     if (![self robotActionMessageIsAddressedToCerebro:message]) {
@@ -1530,7 +2098,63 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     ROBAIRobotToolCall *call = self.pendingRobotToolCalls[message.callID];
     BOOL senderMatchesRequest = request.recipientID.length > 0 &&
         [message.senderID isEqualToString:request.recipientID];
-    if (request == nil || call == nil || !senderMatchesRequest) {
+    BOOL isHeadlessLiveStartup =
+        [self.controllerApprovedLiveStartupCallID isEqualToString:message.callID] &&
+        [request.action isEqualToString:@"run_startup_test"];
+    if (request == nil || (!isHeadlessLiveStartup && call == nil) || !senderMatchesRequest) {
+        return;
+    }
+
+    if (isHeadlessLiveStartup) {
+        BOOL isExecuting = self.controllerApprovedLiveStartupExecutingStatus != nil;
+        if (message.kind == ROBRobotActionMessageKindActionCancel) {
+            [self cancelControllerApprovedLiveStartupCallID:message.callID
+                                                      reason:message.detail.length > 0
+                                                          ? message.detail
+                                                          : @"Controller cancelled the LIVE startup; stop and hold safely"
+                                                    timedOut:NO];
+            return;
+        }
+        if (message.kind != ROBRobotActionMessageKindActionStatus) {
+            return;
+        }
+        if (message.state == ROBRobotActionStateAccepted) {
+            if (isExecuting) {
+                // Approval replay after packet loss: report the existing run,
+                // never create a second startup sequence.
+                [self sendRobotActionMessage:self.controllerApprovedLiveStartupExecutingStatus];
+            } else {
+                [self startControllerApprovedLiveStartupForRequest:request];
+            }
+            return;
+        }
+        if (message.isTerminal) {
+            if (isExecuting) {
+                NSString *reason = [NSString stringWithFormat:
+                    @"Controller reported %@ during LIVE startup; stop and hold safely",
+                    [self robotActionStateString:message.state]];
+                [self cancelControllerApprovedLiveStartupCallID:message.callID
+                                                          reason:reason
+                                                        timedOut:(message.state == ROBRobotActionStateExpired)];
+            } else {
+                ROBRobotActionState terminalState =
+                    [self.timedOutRobotToolCallIDs containsObject:message.callID]
+                        ? ROBRobotActionStateExpired
+                        : message.state;
+                [self finishControllerApprovedLiveStartupCallID:message.callID
+                                                          state:terminalState
+                                                         detail:message.detail.length > 0
+                                                             ? message.detail
+                                                             : @"The controller closed the startup request before execution."];
+            }
+            return;
+        }
+        if (message.state == ROBRobotActionStateExecuting ||
+            message.state == ROBRobotActionStateCompleted) {
+            [self finishControllerApprovedLiveStartupCallID:message.callID
+                                                      state:ROBRobotActionStateFailed
+                                                     detail:@"The controller must send one Accepted decision and let Cerebro own the fixed startup run and measured completion."];
+        }
         return;
     }
 
@@ -1672,6 +2296,31 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         BOOL deadlineExpired = executionDeadline != nil
             ? [now compare:executionDeadline] != NSOrderedAscending
             : request.isExpired;
+        if ([self.controllerApprovedLiveStartupCallID isEqualToString:callID] &&
+            self.controllerApprovedLiveStartupExecutingStatus != nil) {
+            if (existingCancellation != nil) {
+                [self cancelControllerApprovedLiveStartupCallID:callID
+                                                          reason:existingCancellation.detail.length > 0
+                                                              ? existingCancellation.detail
+                                                              : @"The controller-authorized startup was cancelled; stop and hold safely"
+                                                        timedOut:[self.timedOutRobotToolCallIDs containsObject:callID]];
+                continue;
+            }
+            if (deadlineExpired) {
+                [self cancelControllerApprovedLiveStartupCallID:callID
+                                                          reason:@"The controller-authorized startup deadline expired; stop and hold safely"
+                                                        timedOut:YES];
+                continue;
+            }
+            if (![self robotActionControllerIsFreshForRequest:request]) {
+                [self cancelControllerApprovedLiveStartupCallID:callID
+                                                          reason:@"The approving controller is no longer fresh or current; stop and hold safely"
+                                                        timedOut:NO];
+                continue;
+            }
+            [self sendRobotActionMessage:self.controllerApprovedLiveStartupExecutingStatus];
+            continue;
+        }
         if ([self.controllerApprovedAmberGestureCallID isEqualToString:callID]) {
             if (existingCancellation != nil) {
                 [self cancelControllerApprovedAmberGestureCallID:callID
@@ -1731,6 +2380,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     if (!controllerIsFresh) {
         self.robotActionControllerAcceptsActions = NO;
     }
+    [self requestArmedHeadlessLiveStartupIfReady];
 }
 
 #pragma mark - ROBSpeechDelegate
@@ -1762,10 +2412,12 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void) inputText:(NSString *)textInput
 {
     textInput = [[textInput stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
+    NSLog(@"Apple Speech heard: %@", textInput);
     // Only suppress duplicate local transcript turns while the raw-audio Live
     // session is actually ready. During reconnects, realtime text remains a
     // useful bounded fallback and is queued by ROBAI until setup completes.
-    BOOL geminiOwnsMicrophone = self.robAI.isLiveSessionReady && self.robAI.streamsMicrophoneAudio;
+    BOOL geminiMicrophoneAvailable = self.robAI.isLiveSessionReady && self.robAI.streamsMicrophoneAudio;
+    BOOL rawConversationWasActive = self.robAI.isMicrophoneConversationActive;
     NSArray<NSString *> *addressTokens = [textInput componentsSeparatedByCharactersInSet:
         [[NSCharacterSet alphanumericCharacterSet] invertedSet]];
     BOOL addressesROB = [addressTokens containsObject:@"robbie"] ||
@@ -1805,6 +2457,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     if (addressesROB)
     {
         self.ignoreText = false;
+        [self.robAI setMicrophoneConversationActive:YES];
         NSLog(@"Listening for spoken input");
         [self resetSpeechResponseAttentionTimer];
         
@@ -1822,7 +2475,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             shouldAcknowledgeAcceptedTurn = YES;
         }
     }
-    if (!geminiOwnsMicrophone && [textInput containsString:@"follow"])
+    if (!geminiMicrophoneAvailable && [textInput containsString:@"follow"])
     {
         // Do not let the fallback transcript path become a second motion
         // authority. Following must be requested through the future validated
@@ -1832,17 +2485,22 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         return;
     }
     if (!self.ignoreText) {
-        if (geminiOwnsMicrophone) {
+        BOOL submitAddressedWakeTurnAsText = addressesROB && !rawConversationWasActive;
+        if (geminiMicrophoneAvailable && !submitAddressedWakeTurnAsText) {
             // Do not resend the transcript. It is only a local signal that a
             // raw-audio turn should receive a bounded Gemini response.
             if (!self.speechBox.isSpeaking) {
+                [self resetSpeechResponseAttentionTimer];
                 [self.robAI noteMicrophoneTurnAwaitingResponseForTranscript:textInput];
                 [self speakConfiguredAcknowledgementIfNotQueued];
             }
         } else {
+            // Raw provider audio was closed before the wake phrase, so submit
+            // the complete recognized request once as text. The newly opened
+            // gate handles only subsequent conversational turns.
             NSLog(@"textInput = %@", textInput);
             NSInteger speechWordiness = self.torsoControlsViewController.speechWordinessChoice.selectedSegment;
-            BOOL accepted = [self.robAI sendText:textInput speechWordiness:speechWordiness];
+            BOOL accepted = [self.robAI sendRecognizedSpeechText:textInput speechWordiness:speechWordiness];
             if (accepted) {
                 [self appendConversationText:textInput fromUser:YES];
             }
@@ -1862,9 +2520,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     if (self.speechResponseAttentionTimer) {
         [self.speechResponseAttentionTimer invalidate];
     }
-    self.speechResponseAttentionTimer = [NSTimer scheduledTimerWithTimeInterval:60 repeats:NO block:^(NSTimer * _Nonnull timer) {
+    self.speechResponseAttentionTimer = [NSTimer scheduledTimerWithTimeInterval:kROBConversationContinuationWindowSeconds repeats:NO block:^(NSTimer * _Nonnull timer) {
         NSLog(@"Ignoring spoken input");
         self.ignoreText = true;
+        [self.robAI setMicrophoneConversationActive:NO];
     }];
 }
 
@@ -1902,6 +2561,26 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                                              selector:@selector(geminiVideoSourceSettingsDidChange:)
                                                  name:ROBGeminiVideoSourceSettingsDidChangeNotification
                                                object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(workspaceDependencyStatusDidChange:)
+                                                 name:ROBPythonRuntimeDidChangeNotification
+                                               object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(workspaceDependencyStatusDidChange:)
+                                                 name:ROBPythonRuntimeConfigurationRequiredNotification
+                                               object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(workspaceDependencyStatusDidChange:)
+                                                 name:ROBSystemDependenciesDidChangeNotification
+                                               object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(stageShowStateDidChange:)
+                                                 name:ROBStageShowStateDidChangeNotification
+                                               object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(headlessLiveStartupStopRequested:)
+                                                 name:ROBHeadlessLiveStartupStopRequestedNotification
+                                               object:[ROBHeadlessLiveStartupAuthorization shared]];
     //-----------------------------
     //---- Setup User Defaults ----
     if (![[NSUserDefaults standardUserDefaults] valueForKey:@"inputLanguage"])
@@ -1956,6 +2635,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     //Initilze R.O.B.
     self.robAI = [[ROBAI alloc] init];
     self.robAI.delegate = self;
+    [self.robAI setMicrophoneConversationActive:NO];
     [[ROBInsta360CameraService shared] setGeminiFrameConsumer:self.robAI];
     
     self.serialBox = [ROBSerialBox new];
@@ -2168,6 +2848,65 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                        cueID:(NSString *)cueID
                      timeout:(NSTimeInterval)timeout
 {
+    // Only the fixed Show Mode startup builder can set this one-shot context.
+    // Ordinary loaded show documents continue through the separate, explicitly
+    // armed saber catalog below and cannot invoke approved Amber keyframes.
+    if ([coordinator.liveStartupGestureName isEqualToString:name]) {
+        NSDictionary *preflight = [[ROBAmberGestureExecutor shared]
+            preflightLocallyConfirmedGesture:name];
+        NSArray *preflightArms = [preflight[@"arms"] isKindOfClass:NSArray.class]
+            ? preflight[@"arms"] : @[];
+        BOOL coversBothArms = [[NSSet setWithArray:preflightArms]
+            isEqualToSet:[NSSet setWithArray:@[@"left", @"right"]]];
+        if (![preflight[@"status"] isEqualToString:@"ready"] || !coversBothArms) {
+            NSString *detail = [preflight[@"detail"] isKindOfClass:NSString.class]
+                ? preflight[@"detail"]
+                : @"The locally confirmed wake gesture did not pass its final two-arm preflight.";
+            (void)[coordinator completeGestureWithSuccess:NO detail:detail];
+            return;
+        }
+
+        __weak ROBStageShowCoordinator *weakCoordinator = coordinator;
+        NSString *expectedGesture = [name copy];
+        void (^completion)(NSDictionary *) = ^(NSDictionary *result) {
+            ROBStageShowCoordinator *strongCoordinator = weakCoordinator;
+            if (strongCoordinator == nil ||
+                ![strongCoordinator.liveStartupGestureName isEqualToString:expectedGesture]) {
+                return;
+            }
+            NSString *status = [result[@"status"] isKindOfClass:NSString.class]
+                ? result[@"status"] : @"failed";
+            BOOL measured = [result[@"measured"] boolValue];
+            NSArray *arms = [result[@"arms"] isKindOfClass:NSArray.class]
+                ? result[@"arms"] : @[];
+            BOOL measuredBothArms = [[NSSet setWithArray:arms]
+                isEqualToSet:[NSSet setWithArray:@[@"left", @"right"]]];
+            BOOL success = [status isEqualToString:@"completed"]
+                && measured && measuredBothArms;
+            NSString *detail = [result[@"detail"] isKindOfClass:NSString.class]
+                ? result[@"detail"] : nil;
+            if (detail.length == 0 && success) {
+                NSNumber *maximumError = result[@"maximum_tracking_error_rad"];
+                detail = [NSString stringWithFormat:
+                    @"Two-arm wake gesture reached measured completion (maximum error %@ rad).",
+                    maximumError ?: @"unknown"];
+            } else if (detail.length == 0) {
+                detail = @"The two-arm wake gesture did not produce a measured terminal result.";
+            }
+            (void)[strongCoordinator completeGestureWithSuccess:success detail:detail];
+        };
+        if (coordinator.liveStartupIsControllerAuthorized) {
+            [[ROBAmberGestureExecutor shared]
+                executeControllerApprovedGesture:name
+                completion:completion];
+        } else {
+            [[ROBAmberGestureExecutor shared]
+                executeLocallyConfirmedGesture:name
+                completion:completion];
+        }
+        return;
+    }
+
     NSArray<ROBSaberTransform *> *transforms =
         [[ROBSaberChoreographyCatalog shared] transformsForGesture:name];
     if (transforms == nil) {
@@ -2223,6 +2962,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 {
     self.saberChoreographyGeneration += 1;
     [ROBSaberSafetyGate shared].isArmed = NO;
+    (void)[[ROBAmberGestureExecutor shared]
+        cancelCurrentGestureWithReason:@"Stage show stopped; hold the measured arm pose"];
+    (void)[[ROBAmberGestureExecutor shared] requestPriorityHold];
     [self applyPrioritySoftwareStopWithReason:@"Stage show stopped"];
 }
 
@@ -2289,6 +3031,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void) startListeningAgain
 {
     self.ignoreText = NO;
+    [self.robAI setMicrophoneConversationActive:YES];
     [self.speechBox startRecognizer];
     [self resetSpeechResponseAttentionTimer];
 }
@@ -2297,6 +3040,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void) beginToIgnore
 {
     self.ignoreText = YES;
+    [self.robAI setMicrophoneConversationActive:NO];
 }
 
 - (void) didSeeNewPeople:(NSArray *)observations {

@@ -209,6 +209,202 @@ enum ROBAdministratorTerminalProtocol {
   }
 }
 
+// MARK: - Administrator remote desktop input
+
+enum ROBRemoteDesktopControlKind: String, Codable, CaseIterable {
+  case start
+  case stop
+  case pointerMoved
+  case primaryDown
+  case primaryUp
+  case secondaryClick
+  case scroll
+  case text
+  case key
+  case status
+}
+
+enum ROBRemoteDesktopKey: String, Codable, CaseIterable {
+  case returnKey
+  case tab
+  case delete
+  case escape
+  case leftArrow
+  case rightArrow
+  case upArrow
+  case downArrow
+  case letterA
+  case letterC
+  case letterV
+}
+
+struct ROBRemoteDesktopControlMessage: Codable, Equatable {
+  let kind: ROBRemoteDesktopControlKind
+  let sequence: UInt64
+  let normalizedX: UInt16
+  let normalizedY: UInt16
+  let scrollX: Int16
+  let scrollY: Int16
+  let modifiers: UInt8
+  let key: ROBRemoteDesktopKey?
+  let payload: Data
+
+  init(
+    kind: ROBRemoteDesktopControlKind,
+    sequence: UInt64,
+    normalizedX: UInt16 = 0,
+    normalizedY: UInt16 = 0,
+    scrollX: Int16 = 0,
+    scrollY: Int16 = 0,
+    modifiers: UInt8 = 0,
+    key: ROBRemoteDesktopKey? = nil,
+    payload: Data = Data()
+  ) {
+    self.kind = kind
+    self.sequence = sequence
+    self.normalizedX = normalizedX
+    self.normalizedY = normalizedY
+    self.scrollX = scrollX
+    self.scrollY = scrollY
+    self.modifiers = modifiers
+    self.key = key
+    self.payload = payload
+  }
+
+  private enum CodingKeys: String, CodingKey, CaseIterable {
+    case kind
+    case sequence
+    case normalizedX
+    case normalizedY
+    case scrollX
+    case scrollY
+    case modifiers
+    case key
+    case payload
+  }
+
+  init(from decoder: Decoder) throws {
+    let dynamic = try decoder.container(keyedBy: ROBRemoteDesktopCodingKey.self)
+    let allowed = Set(CodingKeys.allCases.map(\.stringValue))
+    guard dynamic.allKeys.allSatisfy({ allowed.contains($0.stringValue) }) else {
+      throw ROBRemoteDesktopProtocolError.invalid("unexpected field")
+    }
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    kind = try values.decode(ROBRemoteDesktopControlKind.self, forKey: .kind)
+    sequence = try values.decode(UInt64.self, forKey: .sequence)
+    normalizedX = try values.decode(UInt16.self, forKey: .normalizedX)
+    normalizedY = try values.decode(UInt16.self, forKey: .normalizedY)
+    scrollX = try values.decode(Int16.self, forKey: .scrollX)
+    scrollY = try values.decode(Int16.self, forKey: .scrollY)
+    modifiers = try values.decode(UInt8.self, forKey: .modifiers)
+    key = try values.decodeIfPresent(ROBRemoteDesktopKey.self, forKey: .key)
+    payload = try values.decode(Data.self, forKey: .payload)
+  }
+}
+
+private struct ROBRemoteDesktopCodingKey: CodingKey {
+  let stringValue: String
+  let intValue: Int?
+  init?(stringValue: String) { self.stringValue = stringValue; intValue = nil }
+  init?(intValue: Int) { stringValue = String(intValue); self.intValue = intValue }
+}
+
+enum ROBRemoteDesktopProtocolError: LocalizedError {
+  case invalid(String)
+
+  var errorDescription: String? {
+    switch self {
+    case .invalid(let detail): return "Invalid administrator remote-desktop message: \(detail)"
+    }
+  }
+}
+
+enum ROBRemoteDesktopControlProtocol {
+  static let maximumTextBytes = 4_096
+  static let maximumStatusBytes = 1_024
+  static let maximumMessageBytes = 8_192
+  static let modifierShift: UInt8 = 1 << 0
+  static let modifierControl: UInt8 = 1 << 1
+  static let modifierOption: UInt8 = 1 << 2
+  static let modifierCommand: UInt8 = 1 << 3
+
+  private static let magic = Data("ROBDESK1".utf8)
+
+  static func claimsProtocol(_ data: Data) -> Bool {
+    data.count >= magic.count && data.prefix(magic.count) == magic
+  }
+
+  static func encode(_ message: ROBRemoteDesktopControlMessage) throws -> Data {
+    try validate(message)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    let body = try encoder.encode(message)
+    guard magic.count + body.count <= maximumMessageBytes else {
+      throw ROBRemoteDesktopProtocolError.invalid("length")
+    }
+    return magic + body
+  }
+
+  static func decode(_ data: Data) throws -> ROBRemoteDesktopControlMessage {
+    guard claimsProtocol(data), data.count <= maximumMessageBytes else {
+      throw ROBRemoteDesktopProtocolError.invalid("discriminator or length")
+    }
+    let message: ROBRemoteDesktopControlMessage
+    do {
+      message = try JSONDecoder().decode(
+        ROBRemoteDesktopControlMessage.self,
+        from: Data(data.dropFirst(magic.count))
+      )
+    } catch let error as ROBRemoteDesktopProtocolError {
+      throw error
+    } catch {
+      throw ROBRemoteDesktopProtocolError.invalid("JSON")
+    }
+    try validate(message)
+    return message
+  }
+
+  private static func validate(_ message: ROBRemoteDesktopControlMessage) throws {
+    guard message.sequence > 0, message.modifiers & 0xf0 == 0 else {
+      throw ROBRemoteDesktopProtocolError.invalid("sequence or modifiers")
+    }
+    let noKey = message.key == nil
+    let noPayload = message.payload.isEmpty
+    let noScroll = message.scrollX == 0 && message.scrollY == 0
+    switch message.kind {
+    case .start, .stop:
+      guard noKey, noPayload, noScroll, message.modifiers == 0 else {
+        throw ROBRemoteDesktopProtocolError.invalid("lifecycle message")
+      }
+    case .pointerMoved, .primaryDown, .primaryUp, .secondaryClick:
+      guard noKey, noPayload, noScroll, message.modifiers == 0 else {
+        throw ROBRemoteDesktopProtocolError.invalid("pointer message")
+      }
+    case .scroll:
+      guard noKey, noPayload, message.modifiers == 0,
+            message.scrollX != 0 || message.scrollY != 0 else {
+        throw ROBRemoteDesktopProtocolError.invalid("scroll message")
+      }
+    case .text:
+      guard noKey, !noPayload, message.payload.count <= maximumTextBytes,
+            noScroll, message.modifiers == 0,
+            String(data: message.payload, encoding: .utf8) != nil else {
+        throw ROBRemoteDesktopProtocolError.invalid("text message")
+      }
+    case .key:
+      guard message.key != nil, noPayload, noScroll else {
+        throw ROBRemoteDesktopProtocolError.invalid("key message")
+      }
+    case .status:
+      guard noKey, message.payload.count <= maximumStatusBytes, noScroll,
+            message.modifiers == 0,
+            String(data: message.payload, encoding: .utf8) != nil else {
+        throw ROBRemoteDesktopProtocolError.invalid("status message")
+      }
+    }
+  }
+}
+
 enum AutoNetTransportError: LocalizedError {
   case unsupportedService(String)
   case legacyDisabled

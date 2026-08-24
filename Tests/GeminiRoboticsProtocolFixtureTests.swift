@@ -24,6 +24,9 @@ struct GeminiRoboticsProtocolFixtureTests {
         try testDiagnosticsStateAndRedaction()
         try testIndependentTranscriptionParsing()
         try testTranscriptionAggregation()
+        try testLearnObjectRequestGate()
+        try testLearnObjectIntentEvidencePolicy()
+        try testLocalFallbackDeduplication()
         try testMicrophoneTurnAssociationOrdering()
         try testTurnDeadlineTracking()
         try testFailureCircuitBreakerThresholdAndCooldownBoundary()
@@ -975,6 +978,134 @@ struct GeminiRoboticsProtocolFixtureTests {
         try expect(accumulator.text == "gogo.", "Ordered transcription deltas were deduplicated or reordered")
         accumulator.reset()
         try expect(accumulator.text.isEmpty, "Transcription reset retained a prior turn")
+    }
+
+    private static func testLearnObjectRequestGate() throws {
+        let learn = try require(
+            ROBLearnObjectRequestGate.candidate(for: "ROB, learn this object as blue mug"),
+            "An explicit addressed learn-object request was rejected"
+        )
+        try expect(learn.targetName == "blue mug", "Learn-object target text was not normalized")
+        try expect(learn.normalizedTargetID == "blue_mug", "Learn-object target ID was not normalized")
+
+        let teach = try require(
+            ROBLearnObjectRequestGate.candidate(for: "Robbie, teach this chess piece as black rook"),
+            "An explicit addressed chess teaching request was rejected"
+        )
+        try expect(teach.normalizedTargetID == "black_rook", "Chess teaching target changed")
+
+        let remember = try require(
+            ROBLearnObjectRequestGate.candidate(for: "Robot, remember this object as white queen"),
+            "A narrowly scoped remember-this-object request was rejected"
+        )
+        try expect(remember.normalizedTargetID == "white_queen", "Remember-object target changed")
+
+        let observedFalsePositives = [
+            "draußen",
+            "Abre.",
+            "Yes, that's correct.",
+            "Well, one thing I would like to know is after school, what time will you want me home?",
+            "pretty much the same",
+            "rare",
+            "¿Qué es eso? ¿Es de un banco?",
+            "ROB, remember that my appointment is tomorrow",
+            "I wish I could keep this forever.",
+            "learn black rook",
+            "ROB, this is a white queen",
+            "ROB, teach this object"
+        ]
+        for phrase in observedFalsePositives {
+            try expect(
+                ROBLearnObjectRequestGate.candidate(for: phrase) == nil,
+                "Ordinary or incomplete speech entered object learning: \(phrase)"
+            )
+        }
+    }
+
+    private static func testLearnObjectIntentEvidencePolicy() throws {
+        let candidate = try require(
+            ROBLearnObjectRequestGate.candidate(for: "ROB, teach this object as red cup"),
+            "Evidence-policy fixture request did not pass deterministic admission"
+        )
+        try expect(
+            ROBLearnObjectRequestGate.acceptsLearnObjectIntent(
+                candidate: candidate,
+                action: "learnObject",
+                targetID: "red_cup",
+                requiresHumanConfirmation: true,
+                confidence: 0.85,
+                hasFreshPointing: true
+            ),
+            "A fully validated learn-object intent was rejected"
+        )
+        try expect(
+            !ROBLearnObjectRequestGate.acceptsLearnObjectIntent(
+                candidate: candidate,
+                action: "learnObject",
+                targetID: "red_cup",
+                requiresHumanConfirmation: true,
+                confidence: 0.849,
+                hasFreshPointing: true
+            ),
+            "A low-confidence learn-object intent was accepted"
+        )
+        try expect(
+            !ROBLearnObjectRequestGate.acceptsLearnObjectIntent(
+                candidate: candidate,
+                action: "learnObject",
+                targetID: "red_cup",
+                requiresHumanConfirmation: true,
+                confidence: 0.99,
+                hasFreshPointing: false
+            ),
+            "A learn-object intent without fresh pointing was accepted"
+        )
+        try expect(
+            !ROBLearnObjectRequestGate.acceptsLearnObjectIntent(
+                candidate: candidate,
+                action: "learnObject",
+                targetID: "blue_cup",
+                requiresHumanConfirmation: true,
+                confidence: 0.99,
+                hasFreshPointing: true
+            ),
+            "A model target that disagreed with the spoken target was accepted"
+        )
+        try expect(
+            !ROBLearnObjectRequestGate.acceptsLearnObjectIntent(
+                candidate: candidate,
+                action: "learnObject",
+                targetID: "red_cup",
+                requiresHumanConfirmation: false,
+                confidence: 0.99,
+                hasFreshPointing: true
+            ),
+            "A learn-object intent without explicit confirmation was accepted"
+        )
+    }
+
+    private static func testLocalFallbackDeduplication() throws {
+        var deduplicator = ROBLocalFallbackDeduplicator()
+        try expect(
+            deduplicator.admission(for: "Where is it?", now: 100) == .accept,
+            "The first local fallback was suppressed"
+        )
+        try expect(
+            deduplicator.admission(for: " where IS it ", now: 100.4) == .suppressExactDuplicate,
+            "A normalized duplicate fallback was not suppressed"
+        )
+        try expect(
+            deduplicator.admission(for: "Pretty much the same", now: 100.5) == .suppressBurst,
+            "A simultaneous second-recognizer fallback burst was not suppressed"
+        )
+        try expect(
+            deduplicator.admission(for: "A genuinely later request", now: 101.1) == .accept,
+            "A later distinct fallback remained suppressed at the burst boundary"
+        )
+        try expect(
+            deduplicator.admission(for: "Where is it?", now: 109) == .accept,
+            "An exact transcript remained suppressed after the duplicate window"
+        )
     }
 
     private static func testMicrophoneTurnAssociationOrdering() throws {

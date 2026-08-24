@@ -78,26 +78,46 @@ def assert_observational(name: str, declaration: str) -> None:
 
 
 def main() -> None:
-    # The titlebar Services button must use the same application-level route
-    # as the Window menu item. Looking only at NSWindowController's immediate
-    # contentViewController silently drops clicks when the storyboard wraps
-    # the real ROBMainViewController in a container.
-    require(
-        '[NSButton buttonWithTitle:@"Services…"' in MAIN_WINDOW
-        and "action:@selector(openSystemStatus:)" in MAIN_WINDOW
-        and "[accessoryView addSubview:self.systemStatusButton]" in MAIN_WINDOW,
-        "The titlebar Services button is no longer installed with its action",
-    )
-    open_status = braced_declaration(MAIN_WINDOW, "- (void)openSystemStatus:")
-    require(
-        "id appDelegate = NSApp.delegate;" in open_status
-        and "[appDelegate respondsToSelector:@selector(showSystemStatus:)]" in open_status
-        and "[appDelegate showSystemStatus:sender]" in open_status,
-        "The Services button must forward through AppDelegate's container-aware route",
+    # Main-window actions are consolidated in the content header. The brain is
+    # the graphical Services control, Show Mode has a stage symbol, and the old
+    # titlebar copies of 360° and Settings stay removed.
+    main_implementation = MAIN_CONTROLLER[
+        MAIN_CONTROLLER.index("@implementation ROBMainViewController") :
+    ]
+    configure_workspace = braced_declaration(
+        main_implementation, "- (void)configureMainWorkspace"
     )
     require(
-        "self.contentViewController" not in open_status,
-        "The Services button must not silently depend on an immediate content controller",
+        "NSTitlebarAccessoryViewController" not in MAIN_WINDOW
+        and 'buttonWithTitle:@"360°…"' not in MAIN_WINDOW
+        and 'buttonWithTitle:@"Settings…"' not in MAIN_WINDOW,
+        "The cleared titlebar regained duplicate workspace actions",
+    )
+    require(
+        'symbolName:@"brain.head.profile"' in configure_workspace
+        and "action:@selector(showSystemStatus:)" in configure_workspace
+        and 'setAccessibilityLabel:@"System Services"' in configure_workspace,
+        "The graphical brain no longer opens the accessible Services panel",
+    )
+    require(
+        'initWithTitle:@"Show Mode"' in configure_workspace
+        and 'symbolName:@"theatermasks.fill"' in configure_workspace
+        and "action:@selector(showStageShow:)" in configure_workspace,
+        "The main workspace lost its graphical Show Mode action",
+    )
+    require(
+        configure_workspace.count('initWithTitle:@"360° Live View"') == 1
+        and configure_workspace.count('initWithTitle:@"Settings"') == 1,
+        "The content header no longer has exactly one 360° and one Settings action",
+    )
+    update_settings = braced_declaration(
+        main_implementation, "- (void)updateWorkspaceSettingsButton"
+    )
+    require(
+        "ROBPythonRuntime sharedRuntime" in update_settings
+        and "ROBSystemDependencyManager sharedManager" in update_settings
+        and 'Settings  ⚠' in update_settings,
+        "Consolidating Settings discarded its dependency-attention indicator",
     )
     show_window = braced_declaration(STATUS_WINDOW, "public override func showWindow")
     require(

@@ -19,6 +19,7 @@ import UniformTypeIdentifiers
     }
 
     private let stageShowCoordinator: ROBStageShowCoordinator
+    private let wakeUpCalibration = ROBWakeUpCalibrationWindowController.shared
     private let showTable = NSTableView()
     private var showCatalog: [CatalogEntry] = []
     private let editor = NSTextView()
@@ -38,7 +39,14 @@ import UniformTypeIdentifiers
     private let mlxMemoryField = NSTextField()
     private let mlxTelemetryLabel = NSTextField(labelWithString: "MLX is idle; models load on first test.")
     private let saberArmButton = NSButton(checkboxWithTitle: "Arm supervised saber choreography", target: nil, action: nil)
+    private let startupGesturePopup = NSPopUpButton()
+    private let startupStatusLabel = NSTextField(labelWithString: "Wake-up preflight has not been evaluated.")
+    private let runLiveStartupButton = NSButton()
+    private let headlessStartupButton = NSButton()
+    private let stopAndHoldButton = NSButton()
     private var stateObserver: NSObjectProtocol?
+    private var gestureCatalogObserver: NSObjectProtocol?
+    private var headlessAuthorizationObserver: NSObjectProtocol?
     private var localRefreshTimer: Timer?
     private var localTemperature = ROBLocalImprovisationConfiguration.defaultTemperature
     private var localOperationInProgress = false
@@ -60,6 +68,8 @@ import UniformTypeIdentifiers
         buildInterface()
         loadLocalProviderSettings()
         loadShowCatalog()
+        refreshStartupGestureCatalog()
+        refreshStartupControls()
         observeCoordinator()
     }
 
@@ -71,6 +81,12 @@ import UniformTypeIdentifiers
         if let stateObserver {
             NotificationCenter.default.removeObserver(stateObserver)
         }
+        if let gestureCatalogObserver {
+            NotificationCenter.default.removeObserver(gestureCatalogObserver)
+        }
+        if let headlessAuthorizationObserver {
+            NotificationCenter.default.removeObserver(headlessAuthorizationObserver)
+        }
     }
 
     public override func showWindow(_ sender: Any?) {
@@ -79,6 +95,8 @@ import UniformTypeIdentifiers
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(sender)
         startLocalRefreshTimer()
+        refreshStartupGestureCatalog()
+        refreshStartupControls()
     }
 
     public func windowWillClose(_ notification: Notification) {
@@ -97,10 +115,13 @@ import UniformTypeIdentifiers
         let safetyLabel = NSTextField(wrappingLabelWithString:
             "Shows may contain speech, waits, checkpoints, optional Gemini turns, and named gestures. " +
             "The optional local director produces dialogue only and cannot authorize motion. " +
-            "Shows cannot contain servo values, joint angles, SSH commands, hosts, or ports. Dry Run emits no speech, model request, or hardware request."
+            "Shows cannot contain servo values, joint angles, SSH commands, hosts, or ports. Dry Run emits no speech, model request, or hardware request. " +
+            "The Live Startup Test below is a separate, fixed operator-confirmed sequence."
         )
         safetyLabel.font = .systemFont(ofSize: 12)
         safetyLabel.textColor = .secondaryLabelColor
+
+        let startupPanel = makeStartupPanel()
 
         let openButton = makeButton("Open…", action: #selector(openShow(_:)))
         let sampleButton = makeButton("Load Selected", action: #selector(loadSelectedShow(_:)))
@@ -250,7 +271,7 @@ import UniformTypeIdentifiers
         statusLabel.font = .systemFont(ofSize: 12, weight: .medium)
         statusLabel.lineBreakMode = .byTruncatingTail
 
-        for view in [safetyLabel, buttonStack, localStack, mlxStack, showScroll, editorScroll, statusLabel, logScroll] {
+        for view in [safetyLabel, startupPanel, buttonStack, localStack, mlxStack, showScroll, editorScroll, statusLabel, logScroll] {
             view.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview(view)
         }
@@ -260,7 +281,11 @@ import UniformTypeIdentifiers
             safetyLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             safetyLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
 
-            buttonStack.topAnchor.constraint(equalTo: safetyLabel.bottomAnchor, constant: 12),
+            startupPanel.topAnchor.constraint(equalTo: safetyLabel.bottomAnchor, constant: 10),
+            startupPanel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            startupPanel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+
+            buttonStack.topAnchor.constraint(equalTo: startupPanel.bottomAnchor, constant: 10),
             buttonStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             buttonStack.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -16),
 
@@ -291,6 +316,113 @@ import UniformTypeIdentifiers
             logScroll.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -16),
             logScroll.heightAnchor.constraint(equalToConstant: 130)
         ])
+    }
+
+    private func makeStartupPanel() -> NSView {
+        let heading = NSTextField(labelWithString: "WAKE-UP CALIBRATION & LIVE STARTUP")
+        heading.font = .systemFont(ofSize: 12, weight: .bold)
+        heading.textColor = .systemPurple
+
+        let explanation = NSTextField(wrappingLabelWithString:
+            "Review the first five wake-up gates, then run one immutable two-arm wake gesture with live speech, leased motion, and measured completion. Local runs use a final on-screen checkpoint. Monitorless runs use one fresh approval tap on an authenticated ROBController; they never wait for keyboard input on the droid. Grippers and legacy open-loop mechanisms remain excluded."
+        )
+        explanation.font = .systemFont(ofSize: 10)
+        explanation.textColor = .secondaryLabelColor
+
+        let openCalibrationButton = makeButton(
+            "Open Wake-Up Calibration…",
+            action: #selector(openWakeUpCalibration(_:))
+        )
+        openCalibrationButton.toolTip = "Open the ordered calibration/readiness checklist from Show Mode."
+        openCalibrationButton.setAccessibilityIdentifier("ROB.ShowMode.OpenWakeUpCalibration")
+
+        startupGesturePopup.target = self
+        startupGesturePopup.action = #selector(startupGestureSelectionChanged(_:))
+        startupGesturePopup.toolTip = "Choose an immutable locally approved gesture that contains both Amber arms."
+        startupGesturePopup.setAccessibilityIdentifier("ROB.ShowMode.StartupGesture")
+        startupGesturePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 220).isActive = true
+
+        runLiveStartupButton.title = "Run LIVE Startup Test…"
+        runLiveStartupButton.target = self
+        runLiveStartupButton.action = #selector(runLiveStartupTest(_:))
+        runLiveStartupButton.bezelStyle = .rounded
+        runLiveStartupButton.contentTintColor = .systemOrange
+        runLiveStartupButton.toolTip = "Requires completed wake-up review and a preflighted two-arm approved gesture. This can physically move ROB."
+        runLiveStartupButton.setAccessibilityIdentifier("ROB.ShowMode.RunLiveStartup")
+
+        headlessStartupButton.title = "Arm Remote Start (one-shot)…"
+        headlessStartupButton.target = self
+        headlessStartupButton.action = #selector(toggleHeadlessStartupArming(_:))
+        headlessStartupButton.bezelStyle = .rounded
+        headlessStartupButton.contentTintColor = .systemPurple
+        headlessStartupButton.toolTip = "Persist one startup proposal across launch. A fresh authenticated controller must still tap Approve before physical motion begins."
+        headlessStartupButton.setAccessibilityIdentifier("ROB.ShowMode.ArmHeadlessStartup")
+
+        stopAndHoldButton.title = "STOP + HOLD"
+        stopAndHoldButton.target = self
+        stopAndHoldButton.action = #selector(stopAndHoldStartup(_:))
+        stopAndHoldButton.bezelStyle = .rounded
+        stopAndHoldButton.contentTintColor = .systemRed
+        stopAndHoldButton.toolTip = "Stop the show and request the existing priority measured-position hold. Use the physical E-stop for an emergency."
+        stopAndHoldButton.setAccessibilityIdentifier("ROB.ShowMode.StopAndHold")
+
+        let controls = NSStackView(views: [
+            openCalibrationButton,
+            NSTextField(labelWithString: "Approved two-arm wake gesture"),
+            startupGesturePopup,
+            runLiveStartupButton,
+        ])
+        controls.orientation = .horizontal
+        controls.alignment = .centerY
+        controls.spacing = 8
+        if let gestureLabel = controls.arrangedSubviews[1] as? NSTextField {
+            gestureLabel.font = .systemFont(ofSize: 10, weight: .medium)
+            gestureLabel.textColor = .secondaryLabelColor
+        }
+
+        let headlessControls = NSStackView(views: [
+            headlessStartupButton,
+            stopAndHoldButton,
+            NSTextField(wrappingLabelWithString:
+                "Arm once before removing the monitor. When Cerebro next sees a fresh authenticated controller, it sends one 30-second request. Approve starts the fixed test after an audible warning; Reject, expiry, disconnect, Cancel and Hold, or STOP + HOLD prevent or stop motion."
+            ),
+        ])
+        headlessControls.orientation = .horizontal
+        headlessControls.alignment = .centerY
+        headlessControls.spacing = 8
+        if let note = headlessControls.arrangedSubviews.last as? NSTextField {
+            note.font = .systemFont(ofSize: 10)
+            note.textColor = .secondaryLabelColor
+        }
+
+        startupStatusLabel.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
+        startupStatusLabel.lineBreakMode = .byTruncatingMiddle
+        startupStatusLabel.usesSingleLineMode = true
+
+        let stack = NSStackView(views: [heading, explanation, controls, headlessControls, startupStatusLabel])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 5
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        for view in [explanation, controls, headlessControls, startupStatusLabel] {
+            view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+
+        let box = NSBox()
+        box.boxType = .custom
+        box.cornerRadius = 8
+        box.borderWidth = 1
+        box.borderColor = NSColor.systemPurple.withAlphaComponent(0.45)
+        box.fillColor = NSColor.systemPurple.withAlphaComponent(0.06)
+        guard let content = box.contentView else { return box }
+        content.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
+            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 9),
+            stack.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -9),
+        ])
+        return box
     }
 
     private func makeButton(_ title: String, action: Selector) -> NSButton {
@@ -405,7 +537,255 @@ import UniformTypeIdentifiers
             self.statusLabel.stringValue = "\(state): \(detail)"
             self.appendLog("[\(state)] \(detail)")
             self.refreshLocalStatus()
+            self.refreshStartupControls()
         }
+        gestureCatalogObserver = NotificationCenter.default.addObserver(
+            forName: .ROBAmberGestureCatalogDidChange,
+            object: ROBAmberGestureCatalog.shared,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshStartupGestureCatalog()
+            self?.refreshStartupControls()
+        }
+        headlessAuthorizationObserver = NotificationCenter.default.addObserver(
+            forName: .ROBHeadlessLiveStartupAuthorizationDidChange,
+            object: ROBHeadlessLiveStartupAuthorization.shared,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshStartupControls()
+        }
+    }
+
+    @objc private func openWakeUpCalibration(_ sender: Any?) {
+        wakeUpCalibration.showWindow(sender)
+        appendLog("[startup] opened Wake-Up Calibration from Show Mode")
+        refreshStartupControls()
+    }
+
+    @objc private func startupGestureSelectionChanged(_ sender: Any?) {
+        refreshStartupControls()
+    }
+
+    private func refreshStartupGestureCatalog() {
+        let previous = selectedStartupGestureName
+        let names = ROBAmberGestureCatalog.shared.approvedGestureNames
+        startupGesturePopup.removeAllItems()
+        guard !names.isEmpty else {
+            startupGesturePopup.addItem(withTitle: "No approved wake gestures")
+            startupGesturePopup.isEnabled = false
+            return
+        }
+        startupGesturePopup.addItems(withTitles: names)
+        startupGesturePopup.isEnabled = true
+        if let previous, names.contains(previous) {
+            startupGesturePopup.selectItem(withTitle: previous)
+        }
+    }
+
+    private var selectedStartupGestureName: String? {
+        guard startupGesturePopup.isEnabled,
+              let name = startupGesturePopup.selectedItem?.title,
+              ROBAmberGestureCatalog.shared.approvedGestureNames.contains(name) else {
+            return nil
+        }
+        return name
+    }
+
+    private func startupGesturePreflight(_ name: String) -> (
+        ready: Bool, arms: [String], detail: String
+    ) {
+        let result = ROBAmberGestureExecutor.shared.preflightLocallyConfirmedGesture(name)
+        let status = (result["status"] as? String ?? "blocked").lowercased()
+        let arms = result["arms"] as? [String] ?? []
+        let detail = result["detail"] as? String ?? "Gesture preflight returned no detail."
+        return (status == "ready", arms, detail)
+    }
+
+    private func refreshStartupControls() {
+        precondition(Thread.isMainThread, "Startup controls must be refreshed on the main thread")
+        let wake = wakeUpCalibration.liveStartupReadinessSnapshot()
+        let gestureName = selectedStartupGestureName
+        let preflight = gestureName.map(startupGesturePreflight)
+        let coversBothArms = Set(preflight?.arms ?? []) == Set(["left", "right"])
+        let liveRun = stageShowCoordinator.liveStartupGestureName != nil
+        let headlessAuthorization = ROBHeadlessLiveStartupAuthorization.shared
+
+        let summary: String
+        let color: NSColor
+        if liveRun {
+            summary = "LIVE STARTUP ACTIVE • \(stageShowCoordinator.detail) • STOP + HOLD remains available"
+            color = .systemOrange
+        } else if stageShowCoordinator.isRunning {
+            summary = "Another show is running. Stop it before starting the live startup test."
+            color = .systemOrange
+        } else if headlessAuthorization.isArmed {
+            summary = "ARMED FOR REMOTE AUTHORIZATION • \(headlessAuthorization.gestureName ?? "unknown gesture") • no droid keyboard/display required • no motion until fresh controller approval"
+            color = .systemPurple
+        } else if !wake.isReady {
+            summary = wake.summary
+            color = .systemOrange
+        } else if gestureName == nil {
+            summary = "Wake-up preflight ready • approve and select an immutable two-arm wake gesture in Amber Diagnostics."
+            color = .systemOrange
+        } else if preflight?.ready != true {
+            summary = "Wake-up preflight ready • gesture blocked: \(preflight?.detail ?? "preflight unavailable")"
+            color = .systemRed
+        } else if !coversBothArms {
+            summary = "Gesture \(gestureName ?? "") is only approved for \((preflight?.arms ?? []).joined(separator: ", ")); a full live startup requires left and right arms."
+            color = .systemOrange
+        } else {
+            summary = "READY FOR LIVE TEST • \(gestureName ?? "") • speech + final checkpoint + leased two-arm motion + measured settle"
+            color = .systemGreen
+        }
+
+        startupStatusLabel.stringValue = summary
+        startupStatusLabel.textColor = color
+        startupStatusLabel.toolTip = ([wake.summary, headlessAuthorization.status]
+            + wake.blockers + [preflight?.detail].compactMap { $0 })
+            .joined(separator: "\n")
+        runLiveStartupButton.isEnabled = wake.isReady
+            && gestureName != nil
+            && preflight?.ready == true
+            && coversBothArms
+            && !stageShowCoordinator.isRunning
+            && !ROBAmberGestureExecutor.shared.isExecuting
+        headlessStartupButton.title = headlessAuthorization.isArmed
+            ? "Disarm Remote Start"
+            : "Arm Remote Start (one-shot)…"
+        headlessStartupButton.isEnabled = headlessAuthorization.isArmed
+            || (gestureName != nil
+                && preflight?.ready == true
+                && coversBothArms
+                && !stageShowCoordinator.isRunning
+                && !ROBAmberGestureExecutor.shared.isExecuting)
+        // Never disable an explicit stop lane. If no verified position-mode arm
+        // exists the executor safely reports that no hold command was available.
+        stopAndHoldButton.isEnabled = true
+    }
+
+    @objc private func runLiveStartupTest(_ sender: Any?) {
+        refreshStartupControls()
+        let wake = wakeUpCalibration.liveStartupReadinessSnapshot()
+        guard wake.isReady, !stageShowCoordinator.isRunning,
+              !ROBAmberGestureExecutor.shared.isExecuting,
+              let gestureName = selectedStartupGestureName else {
+            NSSound.beep()
+            appendLog("[startup] live start rejected by current wake-up or ownership preflight")
+            return
+        }
+        let preflight = startupGesturePreflight(gestureName)
+        guard preflight.ready, Set(preflight.arms) == Set(["left", "right"]) else {
+            NSSound.beep()
+            appendLog("[startup] live start rejected: \(preflight.detail)")
+            return
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Run ROB's LIVE startup test?"
+        alert.informativeText =
+            "This will speak aloud and can physically move BOTH Amber arms through the immutable “\(gestureName)” pose. "
+            + "Keep the physical E-stop in hand, support ROB as needed, and clear the full exclusion zone. "
+            + "Grippers, head/neck, waist, treads, flippers, lean, and legacy Maestro mechanisms will remain excluded because they do not yet expose measured completion and a bounded stop."
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "Run Physical Startup Test")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            appendLog("[startup] operator cancelled live startup before submission")
+            refreshStartupControls()
+            return
+        }
+        // Re-evaluate after the modal confirmation. The executor repeats the
+        // same safety checks again immediately before reserving and dispatching.
+        let finalWake = wakeUpCalibration.liveStartupReadinessSnapshot()
+        let finalPreflight = startupGesturePreflight(gestureName)
+        guard finalWake.isReady, finalPreflight.ready,
+              Set(finalPreflight.arms) == Set(["left", "right"]),
+              !stageShowCoordinator.isRunning,
+              !ROBAmberGestureExecutor.shared.isExecuting else {
+            NSSound.beep()
+            appendLog("[startup] state changed during confirmation; no live sequence was started")
+            refreshStartupControls()
+            return
+        }
+
+        do {
+            let startupShow = ROBStageShowSamples.liveStartupTest(gestureName: gestureName)
+            editor.string = String(decoding: try ROBStageShowCodec.encode(startupShow), as: UTF8.self)
+            try stageShowCoordinator.startLiveStartupTest(gestureName: gestureName)
+            appendLog("[startup] LIVE sequence started with locally confirmed two-arm gesture “\(gestureName)”")
+        } catch {
+            report(error)
+        }
+        refreshStartupControls()
+    }
+
+    @objc private func toggleHeadlessStartupArming(_ sender: Any?) {
+        let authorization = ROBHeadlessLiveStartupAuthorization.shared
+        if authorization.isArmed {
+            authorization.disarm()
+            appendLog("[startup] disarmed one-shot remote startup authorization")
+            refreshStartupControls()
+            return
+        }
+
+        guard !stageShowCoordinator.isRunning,
+              !ROBAmberGestureExecutor.shared.isExecuting,
+              let gestureName = selectedStartupGestureName else {
+            NSSound.beep()
+            return
+        }
+        let preflight = startupGesturePreflight(gestureName)
+        guard preflight.ready, Set(preflight.arms) == Set(["left", "right"]) else {
+            NSSound.beep()
+            appendLog("[startup] remote arming rejected: \(preflight.detail)")
+            return
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Arm one monitorless LIVE startup request?"
+        alert.informativeText =
+            "This stores the immutable two-arm gesture “\(gestureName)” across launch. It does not move ROB. "
+            + "When a fresh authenticated controller is accepting startup tests, Cerebro will send exactly one expiring request and consume this latch. "
+            + "The controller's Approve button is the final safety checkpoint and starts the physical test after an audible warning. Keep the exclusion zone clear and physical E-stop ready."
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "Arm One Remote Request")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        // Repeat the deterministic preflight after the modal. The main runtime
+        // and executor will repeat it again before request and dispatch.
+        let finalPreflight = startupGesturePreflight(gestureName)
+        guard finalPreflight.ready,
+              Set(finalPreflight.arms) == Set(["left", "right"]),
+              !stageShowCoordinator.isRunning,
+              !ROBAmberGestureExecutor.shared.isExecuting else {
+            NSSound.beep()
+            appendLog("[startup] state changed during remote arming; nothing was armed")
+            refreshStartupControls()
+            return
+        }
+        authorization.arm(gestureName: gestureName)
+        appendLog("[startup] armed one monitorless controller request for “\(gestureName)”")
+        refreshStartupControls()
+    }
+
+    @objc private func stopAndHoldStartup(_ sender: Any?) {
+        let authorization = ROBHeadlessLiveStartupAuthorization.shared
+        if authorization.isArmed {
+            authorization.disarm()
+        }
+        authorization.requestStop(reason: "STOP + HOLD requested by the stage operator")
+        if stageShowCoordinator.isRunning {
+            appendLog("[startup] operator pressed STOP + HOLD")
+            stageShowCoordinator.cancel(reason: "STOP + HOLD pressed by the stage operator")
+        } else {
+            let cancelled = ROBAmberGestureExecutor.shared.cancelCurrentGesture(
+                reason: "STOP + HOLD pressed by the stage operator"
+            )
+            let hold = ROBAmberGestureExecutor.shared.requestPriorityHold()
+            appendLog("[startup] STOP + HOLD requested • cancel \(cancelled) • priority hold \(hold)")
+        }
+        refreshStartupControls()
     }
 
     @objc private func openShow(_ sender: Any?) {
@@ -641,6 +1021,7 @@ import UniformTypeIdentifiers
         localRefreshTimer?.invalidate()
         let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.refreshLocalStatus()
+            self?.refreshStartupControls()
         }
         localRefreshTimer = timer
         RunLoop.main.add(timer, forMode: .common)

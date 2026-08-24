@@ -279,6 +279,11 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
         defer { statusLock.unlock() }
         return liveSessionReady && !geminiConversationCircuitIsOpen
     }
+    public var isMicrophoneConversationActive: Bool {
+        statusLock.lock()
+        defer { statusLock.unlock() }
+        return microphoneConversationIsActive
+    }
 
     private let configuration: GeminiRoboticsConfiguration?
     private let userDefaults: UserDefaults
@@ -306,6 +311,8 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
     private var geminiFailureCircuitBreaker = GeminiFailureCircuitBreaker()
     private var geminiConversationCircuitIsOpen = false
     private var geminiCircuitResetGeneration: UInt64 = 0
+    private var microphoneConversationIsActive = false
+    private var nextLocalFallbackTurnID: UInt64 = 0
 
     public override convenience init() {
         self.init(
@@ -432,6 +439,7 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
     }
 
     public func disconnect() {
+        setMicrophoneConversationActive(false)
         localAppleMusicToolTasks.cancelAll()
         hasRequestedMusicAutomationPermission = false
         videoAuthorizationGate.revoke()
@@ -461,6 +469,7 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
         }
 
         if !enabled {
+            setMicrophoneConversationActive(false)
             localAppleMusicToolTasks.cancelAll()
             statusLock.lock()
             liveSessionReady = false
@@ -481,6 +490,9 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
     }
 
     public func setMicrophoneStreamingEnabled(_ enabled: Bool) {
+        if !enabled {
+            setMicrophoneConversationActive(false)
+        }
         guard configuration != nil,
               let policy = updateRuntimeSettings(
                   domain: .audio,
@@ -490,6 +502,34 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
         }
         audioEncoder?.reset()
         applyRuntimePolicy(policy)
+    }
+
+    /// Raw provider audio is admitted only during the controller-owned wake
+    /// and continuation window. Apple Speech remains active locally while this
+    /// gate is closed so it can recognize an explicit ROB address.
+    @objc(setMicrophoneConversationActive:)
+    public func setMicrophoneConversationActive(_ active: Bool) {
+        statusLock.lock()
+        let changed = microphoneConversationIsActive != active
+        microphoneConversationIsActive = active
+        let generation = audioGeneration
+        let canEndStream = liveSessionReady &&
+            runtimeSettings.connectionEnabled &&
+            runtimeSettings.streamsAudio
+        statusLock.unlock()
+        guard changed else { return }
+
+        NSLog("ROB microphone conversation gate: %@", active ? "active" : "wake_required")
+        if !active && canEndStream {
+            audioEncoder?.endStream(generation: generation)
+        }
+        let session = liveSession
+        Task {
+            await session?.setMicrophoneConversationAuthorized(
+                active,
+                generation: generation
+            )
+        }
     }
 
     public func setCameraStreamingEnabled(_ enabled: Bool) {
@@ -564,6 +604,7 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
         let shouldSend = liveSessionReady &&
             runtimeSettings.connectionEnabled &&
             runtimeSettings.streamsAudio &&
+            microphoneConversationIsActive &&
             !geminiConversationCircuitIsOpen
         let generation = audioGeneration
         statusLock.unlock()
@@ -588,6 +629,13 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
     public func noteMicrophoneTurnAwaitingResponse(forTranscript transcript: String) {
         let fallbackPrompt = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !fallbackPrompt.isEmpty else { return }
+        guard isMicrophoneConversationActive else {
+            NSLog(
+                "Apple Speech ignored outside ROB wake window: %@",
+                Self.boundedLoggedTranscript(fallbackPrompt)
+            )
+            return
+        }
         let policy = runtimePolicySnapshot()
         guard isLiveSessionReady,
               policy.settings.connectionEnabled,
@@ -595,7 +643,8 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
             performLocalFallback(
                 prompt: fallbackPrompt,
                 failureDetail: "Gemini microphone streaming is unavailable; using on-device conversation.",
-                recordGeminiFailure: false
+                recordGeminiFailure: false,
+                source: .appleSpeech
             )
             return
         }
@@ -603,7 +652,8 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
         Task {
             await session?.noteMicrophoneTurnAwaitingResponse(
                 transcript: fallbackPrompt,
-                generation: policy.audioGeneration
+                generation: policy.audioGeneration,
+                source: .appleSpeech
             )
         }
     }
@@ -665,7 +715,12 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
 
     @discardableResult
     public func sendText(_ text: String) -> Bool {
-        submitText(text, contextID: nil, localFallbackPrompt: text)
+        submitText(
+            text,
+            contextID: nil,
+            localFallbackPrompt: text,
+            fallbackSource: .typedText
+        )
     }
 
     @objc(sendText:contextID:)
@@ -674,7 +729,8 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
         submitText(
             text,
             contextID: contextID,
-            localFallbackPrompt: contextID == nil ? text : nil
+            localFallbackPrompt: contextID == nil ? text : nil,
+            fallbackSource: .typedText
         )
     }
 
@@ -712,6 +768,7 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
                 imageJPEG: jpegData,
                 contextID: contextID,
                 localFallbackPrompt: nil,
+                fallbackSource: .typedText,
                 generation: policy.connectionGeneration,
                 minimumPolicyRevision: policy.revision
             )
@@ -723,7 +780,8 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
     private func submitText(
         _ text: String,
         contextID: String?,
-        localFallbackPrompt: String?
+        localFallbackPrompt: String?,
+        fallbackSource: GeminiConversationTranscriptSource
     ) -> Bool {
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty else { return false }
@@ -742,7 +800,8 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
                     failureDetail: policy.settings.connectionEnabled
                         ? "Gemini Live is not ready; using on-device conversation."
                         : "Gemini is turned off; using on-device conversation.",
-                    recordGeminiFailure: false
+                    recordGeminiFailure: false,
+                    source: fallbackSource
                 )
                 return true
             }
@@ -760,6 +819,7 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
                 trimmedText,
                 contextID: contextID,
                 localFallbackPrompt: localFallbackPrompt,
+                fallbackSource: fallbackSource,
                 generation: policy.connectionGeneration,
                 minimumPolicyRevision: policy.revision
             )
@@ -791,30 +851,73 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
         return submitText(
             sceneContext.map { "\(spokenPrompt)\n\n\($0)" } ?? spokenPrompt,
             contextID: nil,
-            localFallbackPrompt: spokenPrompt
+            localFallbackPrompt: spokenPrompt,
+            fallbackSource: .typedText
+        )
+    }
+
+    @objc(sendRecognizedSpeechText:speechWordiness:)
+    @discardableResult
+    public func sendRecognizedSpeechText(_ text: String, speechWordiness: Int) -> Bool {
+        let spokenPrompt = GeminiRoboticsPrompt.spokenText(text, speechWordiness: speechWordiness)
+        let sceneContext = try? ROBSceneSnapshotStore.shared.snapshot().languageModelContext()
+        return submitText(
+            sceneContext.map { "\(spokenPrompt)\n\n\($0)" } ?? spokenPrompt,
+            contextID: nil,
+            localFallbackPrompt: spokenPrompt,
+            fallbackSource: .appleSpeech
         )
     }
 
     private func performLocalFallback(
         prompt: String,
         failureDetail: String,
-        recordGeminiFailure: Bool
+        recordGeminiFailure: Bool,
+        source: GeminiConversationTranscriptSource,
+        providerTurnID: UInt64? = nil
     ) {
         if recordGeminiFailure {
             noteGeminiFailure(failureDetail)
         }
+        statusLock.lock()
+        nextLocalFallbackTurnID &+= 1
+        let fallbackTurnID = nextLocalFallbackTurnID
+        statusLock.unlock()
+        let loggedTranscript = Self.boundedLoggedTranscript(prompt)
+        NSLog(
+            "ROB local fallback turn %@ admitted source=%@ provider_turn=%@ transcript=%@",
+            String(fallbackTurnID),
+            source.rawValue,
+            providerTurnID.map(String.init) ?? "none",
+            loggedTranscript
+        )
         let fallback = ROBLocalConversationFallback.shared
         Task { [weak self] in
-            let reply = await fallback.respond(to: prompt)
+            guard let reply = await fallback.respond(
+                to: prompt,
+                suppressRecognitionDuplicate: source != .typedText
+            ) else {
+                NSLog(
+                    "ROB local fallback turn %@ suppressed as a duplicate recognition burst",
+                    String(fallbackTurnID)
+                )
+                return
+            }
             guard let self else { return }
             NSLog(
-                "ROB conversation answered by %@ after Gemini detail: %@",
+                "ROB local fallback turn %@ answered provider=%@ source=%@ after Gemini detail: %@",
+                String(fallbackTurnID),
                 reply.provider.rawValue,
+                source.rawValue,
                 failureDetail
             )
             self.diagnosticsStore.noteLocalFallback(provider: reply.provider.rawValue)
             self.deliverUncorrelatedResponse(reply.text)
         }
+    }
+
+    private static func boundedLoggedTranscript(_ prompt: String) -> String {
+        ROBConversationLog.boundedTranscript(prompt)
     }
 
     private func deliverUncorrelatedResponse(_ text: String) {
@@ -1089,11 +1192,13 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
         case .requestFailed(let detail, let contextID, let localFallbackPrompt):
             if contextID == nil,
                let localFallbackPrompt,
-               !localFallbackPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+               !localFallbackPrompt.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 performLocalFallback(
-                    prompt: localFallbackPrompt,
+                    prompt: localFallbackPrompt.text,
                     failureDetail: detail,
-                    recordGeminiFailure: true
+                    recordGeminiFailure: true,
+                    source: localFallbackPrompt.source,
+                    providerTurnID: localFallbackPrompt.providerTurnID
                 )
                 return
             }
@@ -1256,7 +1361,11 @@ private actor GeminiRoboticsLiveSession {
         case runtimePolicyApplied(GeminiRoboticsRuntimePolicy)
         case completedText(String, contextID: String?)
         case inputTranscription(String)
-        case requestFailed(String, contextID: String?, localFallbackPrompt: String?)
+        case requestFailed(
+            String,
+            contextID: String?,
+            localFallbackPrompt: GeminiLocalFallbackPrompt?
+        )
         case interrupted
         case toolCalls([GeminiRoboticsAttributedToolCall])
         case cancelledToolCalls([String])
@@ -1283,6 +1392,7 @@ private actor GeminiRoboticsLiveSession {
         let imageJPEG: Data?
         let contextID: String?
         let localFallbackPrompt: String?
+        let fallbackSource: GeminiConversationTranscriptSource
         let minimumPolicyRevision: UInt64
     }
 
@@ -1321,6 +1431,7 @@ private actor GeminiRoboticsLiveSession {
     private var responseText = ""
     private var outputTranscription = GeminiTranscriptionAccumulator()
     private var microphoneTurnAssociation = GeminiMicrophoneTurnAssociation()
+    private var microphoneConversationAuthorized = false
     private var audioQueue: [AudioQueueItem] = []
     private var pendingTextTurns: [TextTurn] = []
     private var cancelledTextContextIDs: Set<String> = []
@@ -1341,6 +1452,7 @@ private actor GeminiRoboticsLiveSession {
     private var microphoneTurnCompletionDeadlineTask: Task<Void, Never>?
     private var inFlightMicrophoneTurnID: UInt64?
     private var inFlightMicrophoneTranscript: String?
+    private var inFlightMicrophoneTranscriptSource: GeminiConversationTranscriptSource = .unknown
     private var nextMicrophoneTurnID: UInt64 = 0
     private var microphoneTurnHasResponse = false
     private var activeTurnUsedTool = false
@@ -1377,6 +1489,22 @@ private actor GeminiRoboticsLiveSession {
         audioGeneration = runtimePolicy.audioGeneration
         videoGeneration = runtimePolicy.videoGeneration
         self.eventHandler = eventHandler
+    }
+
+    func setMicrophoneConversationAuthorized(_ authorized: Bool, generation: UInt64) {
+        guard generation == audioGeneration else { return }
+        microphoneConversationAuthorized = authorized
+        guard !authorized else { return }
+
+        audioQueue.removeAll()
+        // Closing input admission must not cancel a response to a turn that
+        // was already admitted. Keep its correlation and deadlines alive;
+        // only discard unowned provider state.
+        if !textTurnIsInFlight, inFlightMicrophoneTurnID == nil {
+            microphoneTurnAssociation.reset()
+            resetResponseBuffers()
+            activeTurnUsedTool = false
+        }
     }
 
     func applyRuntimePolicy(_ policy: GeminiRoboticsRuntimePolicy) async {
@@ -1515,6 +1643,7 @@ private actor GeminiRoboticsLiveSession {
         )
         inFlightMicrophoneTurnID = nil
         inFlightMicrophoneTranscript = nil
+        inFlightMicrophoneTranscriptSource = .unknown
         microphoneTurnHasResponse = false
         activeTurnUsedTool = false
         lastModelTurnCompletionTime = nil
@@ -1544,6 +1673,7 @@ private actor GeminiRoboticsLiveSession {
     func enqueueAudioPCM16(_ data: Data, generation: UInt64) {
         guard generation == audioGeneration,
               audioStreamingEnabled,
+              microphoneConversationAuthorized,
               shouldRun,
               setupIsComplete,
               !data.isEmpty else {
@@ -1599,6 +1729,7 @@ private actor GeminiRoboticsLiveSession {
         imageJPEG: Data? = nil,
         contextID: String? = nil,
         localFallbackPrompt: String?,
+        fallbackSource: GeminiConversationTranscriptSource,
         generation: UInt64,
         minimumPolicyRevision: UInt64
     ) async {
@@ -1614,7 +1745,13 @@ private actor GeminiRoboticsLiveSession {
             eventHandler(.requestFailed(
                 "Gemini was turned off before Cerebro could submit the request.",
                 contextID: contextID,
-                localFallbackPrompt: localFallbackPrompt
+                localFallbackPrompt: localFallbackPrompt.map {
+                    GeminiLocalFallbackPrompt(
+                        text: $0,
+                        source: fallbackSource,
+                        providerTurnID: nil
+                    )
+                }
             ))
             return
         }
@@ -1632,7 +1769,13 @@ private actor GeminiRoboticsLiveSession {
             eventHandler(.requestFailed(
                 "Gemini's request queue is full. Please try again after the current response.",
                 contextID: contextID,
-                localFallbackPrompt: localFallbackPrompt
+                localFallbackPrompt: localFallbackPrompt.map {
+                    GeminiLocalFallbackPrompt(
+                        text: $0,
+                        source: fallbackSource,
+                        providerTurnID: nil
+                    )
+                }
             ))
             return
         }
@@ -1641,6 +1784,7 @@ private actor GeminiRoboticsLiveSession {
             imageJPEG: imageJPEG,
             contextID: contextID,
             localFallbackPrompt: localFallbackPrompt,
+            fallbackSource: fallbackSource,
             minimumPolicyRevision: minimumPolicyRevision
         ))
         await sendNextTextTurnIfPossible()
@@ -1690,11 +1834,13 @@ private actor GeminiRoboticsLiveSession {
     func noteMicrophoneTurnAwaitingResponse(
         transcript: String,
         generation: UInt64,
-        transcriptIsCumulative: Bool = true
+        transcriptIsCumulative: Bool = true,
+        source: GeminiConversationTranscriptSource = .appleSpeech
     ) {
         guard setupIsComplete,
               generation == audioGeneration,
-              audioStreamingEnabled else {
+              audioStreamingEnabled,
+              (microphoneConversationAuthorized || inFlightMicrophoneTurnID != nil) else {
             return
         }
 
@@ -1724,7 +1870,11 @@ private actor GeminiRoboticsLiveSession {
             eventHandler(.requestFailed(
                 "Gemini completed the microphone turn without a usable spoken response.",
                 contextID: nil,
-                localFallbackPrompt: transcript
+                localFallbackPrompt: GeminiLocalFallbackPrompt(
+                    text: transcript,
+                    source: source,
+                    providerTurnID: nil
+                )
             ))
             return
         }
@@ -1732,7 +1882,14 @@ private actor GeminiRoboticsLiveSession {
             guard !microphoneTurnHasResponse else { return }
             retainMicrophoneTranscript(
                 transcript,
-                isCumulative: transcriptIsCumulative
+                isCumulative: transcriptIsCumulative,
+                source: source
+            )
+            NSLog(
+                "ROB microphone turn %@ transcript source=%@ text=%@",
+                String(turnID),
+                inFlightMicrophoneTranscriptSource.rawValue,
+                ROBConversationLog.boundedTranscript(inFlightMicrophoneTranscript ?? transcript)
             )
             microphoneTurnDeadlineTracker.begin(turnID: turnID, now: now)
             if responseAlreadyStarted {
@@ -1750,7 +1907,11 @@ private actor GeminiRoboticsLiveSession {
         let turnID = nextMicrophoneTurnID
         retiredTextContextIDForSocket = nil
         inFlightMicrophoneTurnID = turnID
-        retainMicrophoneTranscript(transcript, isCumulative: transcriptIsCumulative)
+        retainMicrophoneTranscript(
+            transcript,
+            isCumulative: transcriptIsCumulative,
+            source: source
+        )
         microphoneTurnHasResponse = false
         microphoneTurnDeadlineTracker.begin(turnID: turnID, now: now)
         if responseAlreadyStarted {
@@ -1761,22 +1922,35 @@ private actor GeminiRoboticsLiveSession {
             turnID: turnID,
             responseAlreadyStarted: microphoneTurnHasResponse
         )
-        NSLog("Gemini Robotics microphone turn %@ detected", String(turnID))
+        NSLog(
+            "ROB microphone turn %@ detected transcript_source=%@ transcript=%@",
+            String(turnID),
+            inFlightMicrophoneTranscriptSource.rawValue,
+            ROBConversationLog.boundedTranscript(inFlightMicrophoneTranscript ?? transcript)
+        )
     }
 
-    private func retainMicrophoneTranscript(_ transcript: String, isCumulative: Bool) {
+    private func retainMicrophoneTranscript(
+        _ transcript: String,
+        isCumulative: Bool,
+        source: GeminiConversationTranscriptSource
+    ) {
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         guard !isCumulative,
               let existing = inFlightMicrophoneTranscript,
               !existing.isEmpty else {
             inFlightMicrophoneTranscript = trimmed
+            inFlightMicrophoneTranscriptSource = source
             return
         }
         if trimmed.hasPrefix(existing) {
             inFlightMicrophoneTranscript = trimmed
         } else if !existing.hasSuffix(trimmed) {
             inFlightMicrophoneTranscript = "\(existing) \(trimmed)"
+        }
+        if inFlightMicrophoneTranscriptSource != source {
+            inFlightMicrophoneTranscriptSource = .mixedRecognizers
         }
     }
 
@@ -1950,21 +2124,49 @@ private actor GeminiRoboticsLiveSession {
                 resumptionHandleDate = nil
             }
 
+            let hasAuthorizedConversationOwner = textTurnIsInFlight ||
+                retiredTextContextIDForSocket != nil ||
+                microphoneConversationAuthorized ||
+                inFlightMicrophoneTurnID != nil
+            let hasConversationPayload = serverEvent.inputTranscription != nil ||
+                serverEvent.outputTranscription != nil ||
+                !serverEvent.textFragments.isEmpty ||
+                !serverEvent.toolCalls.isEmpty ||
+                serverEvent.generationComplete ||
+                serverEvent.turnComplete ||
+                serverEvent.interrupted
+            if !hasAuthorizedConversationOwner && hasConversationPayload {
+                NSLog("Gemini conversation payload ignored outside ROB wake window")
+                if !serverEvent.cancelledToolCallIDs.isEmpty {
+                    handleToolCallCancellations(serverEvent.cancelledToolCallIDs)
+                }
+                resetResponseState()
+                continue
+            }
+
             if let inputTranscription = serverEvent.inputTranscription,
                !inputTranscription.isEmpty {
                 diagnosticsStore.noteServerInputTranscription(
                     characterCount: inputTranscription.count
                 )
-                // Server transcription is an independent turn signal when
-                // Apple's on-device recognizer is unavailable for the locale.
-                // It is retained only for this active turn and is never sent
-                // back to Gemini as duplicate text.
-                noteMicrophoneTurnAwaitingResponse(
-                    transcript: inputTranscription,
-                    generation: audioGeneration,
-                    transcriptIsCumulative: false
-                )
-                eventHandler(.inputTranscription(inputTranscription))
+                if microphoneConversationAuthorized || inFlightMicrophoneTurnID != nil {
+                    // Server transcription is an independent turn signal when
+                    // Apple's on-device recognizer is unavailable for the locale.
+                    // It is retained only for this active turn and is never sent
+                    // back to Gemini as duplicate text.
+                    noteMicrophoneTurnAwaitingResponse(
+                        transcript: inputTranscription,
+                        generation: audioGeneration,
+                        transcriptIsCumulative: false,
+                        source: .geminiServer
+                    )
+                    eventHandler(.inputTranscription(inputTranscription))
+                } else {
+                    NSLog(
+                        "Gemini server transcript ignored outside ROB wake window: %@",
+                        ROBConversationLog.boundedTranscript(inputTranscription)
+                    )
+                }
             }
 
             // Live may deliver `interrupted` and the old turn's `turnComplete`
@@ -2144,11 +2346,23 @@ private actor GeminiRoboticsLiveSession {
         let hadTextTurn = textTurnIsInFlight
         let hadMicrophoneTurn = inFlightMicrophoneTurnID != nil
         let textContextID = inFlightTextTurn?.contextID
-        let localFallbackPrompt = activeTurnUsedTool
+        let localFallbackPrompt: GeminiLocalFallbackPrompt? = activeTurnUsedTool
             ? nil
             : (hadTextTurn
-                ? inFlightTextTurn?.localFallbackPrompt
-                : inFlightMicrophoneTranscript)
+                ? inFlightTextTurn?.localFallbackPrompt.map {
+                    GeminiLocalFallbackPrompt(
+                        text: $0,
+                        source: inFlightTextTurn?.fallbackSource ?? .typedText,
+                        providerTurnID: inFlightTextTurnID
+                    )
+                }
+                : inFlightMicrophoneTranscript.map {
+                    GeminiLocalFallbackPrompt(
+                        text: $0,
+                        source: inFlightMicrophoneTranscriptSource,
+                        providerTurnID: inFlightMicrophoneTurnID
+                    )
+                })
         if hadTextTurn {
             // Keep attribution after turnComplete in case Gemini sends a tool
             // tail in a following envelope. A new input turn clears it.
@@ -2199,7 +2413,13 @@ private actor GeminiRoboticsLiveSession {
             eventHandler(.requestFailed(
                 detail,
                 contextID: turn.contextID,
-                localFallbackPrompt: turn.localFallbackPrompt
+                localFallbackPrompt: turn.localFallbackPrompt.map {
+                    GeminiLocalFallbackPrompt(
+                        text: $0,
+                        source: turn.fallbackSource,
+                        providerTurnID: nil
+                    )
+                }
             ))
         }
     }
@@ -2302,9 +2522,15 @@ private actor GeminiRoboticsLiveSession {
     private func failInFlightTextTurn(detail: String) -> Bool {
         guard textTurnIsInFlight else { return false }
         let contextID = inFlightTextTurn?.contextID
-        let localFallbackPrompt = activeTurnUsedTool
+        let localFallbackPrompt: GeminiLocalFallbackPrompt? = activeTurnUsedTool
             ? nil
-            : inFlightTextTurn?.localFallbackPrompt
+            : inFlightTextTurn?.localFallbackPrompt.map {
+                GeminiLocalFallbackPrompt(
+                    text: $0,
+                    source: inFlightTextTurn?.fallbackSource ?? .typedText,
+                    providerTurnID: inFlightTextTurnID
+                )
+            }
         retiredTextContextIDForSocket = contextID
         let contextWasCancelled = contextID.map {
             cancelledTextContextIDs.contains($0)
@@ -2363,6 +2589,7 @@ private actor GeminiRoboticsLiveSession {
         retiredTextContextIDForSocket = nil
         inFlightMicrophoneTurnID = turnID
         inFlightMicrophoneTranscript = nil
+        inFlightMicrophoneTranscriptSource = .unknown
         microphoneTurnHasResponse = false
         activeTurnUsedTool = false
         microphoneTurnDeadlineTracker.begin(turnID: turnID, now: now)
@@ -2385,6 +2612,7 @@ private actor GeminiRoboticsLiveSession {
         cancelMicrophoneTurnDeadlines()
         inFlightMicrophoneTurnID = nil
         inFlightMicrophoneTranscript = nil
+        inFlightMicrophoneTranscriptSource = .unknown
         microphoneTurnHasResponse = false
     }
 
@@ -2420,10 +2648,16 @@ private actor GeminiRoboticsLiveSession {
 
     @discardableResult
     private func failInFlightMicrophoneTurn(detail: String) -> Bool {
-        guard inFlightMicrophoneTurnID != nil else { return false }
-        let localFallbackPrompt = activeTurnUsedTool
+        guard let turnID = inFlightMicrophoneTurnID else { return false }
+        let localFallbackPrompt: GeminiLocalFallbackPrompt? = activeTurnUsedTool
             ? nil
-            : inFlightMicrophoneTranscript
+            : inFlightMicrophoneTranscript.map {
+                GeminiLocalFallbackPrompt(
+                    text: $0,
+                    source: inFlightMicrophoneTranscriptSource,
+                    providerTurnID: turnID
+                )
+            }
         completeInFlightMicrophoneTurnDeadline()
         resetResponseState()
         activeTurnUsedTool = false
@@ -3995,9 +4229,20 @@ private actor ROBLocalConversationFallback {
 
     private var pendingRequests: [PendingRequest] = []
     private var isDraining = false
+    private var deduplicator = ROBLocalFallbackDeduplicator()
 
-    func respond(to prompt: String) async -> ROBLocalConversationReply {
-        await withCheckedContinuation { continuation in
+    func respond(
+        to prompt: String,
+        suppressRecognitionDuplicate: Bool
+    ) async -> ROBLocalConversationReply? {
+        if suppressRecognitionDuplicate {
+            let admission = deduplicator.admission(
+                for: prompt,
+                now: ProcessInfo.processInfo.systemUptime
+            )
+            guard admission == .accept else { return nil }
+        }
+        return await withCheckedContinuation { continuation in
             pendingRequests.append(PendingRequest(prompt: prompt, continuation: continuation))
             guard !isDraining else { return }
             isDraining = true
@@ -4017,15 +4262,35 @@ private actor ROBLocalConversationFallback {
     private func generateReply(to rawPrompt: String) async -> ROBLocalConversationReply {
         let prompt = Self.boundedPrompt(rawPrompt)
 
-        if #available(macOS 26.0, *) {
-            if let intent = try? await ROBFoundationSceneInterpreter().interpret(request: prompt) {
-                if intent.action == .learnObject {
-                    return ROBLocalConversationReply(
-                        text: "Learning a new object requires explicit confirmation in the supervised controller. Please start and confirm the capture there. I have not captured or saved a photo.",
-                        provider: .appleFoundationModels
-                    )
-                }
+        if let candidate = ROBLearnObjectRequestGate.candidate(for: prompt) {
+            let hasFreshPointing = ROBSceneSnapshotStore.shared.hasFreshIndexFingerPoint()
+            guard hasFreshPointing else {
+                return ROBLocalConversationReply(
+                    text: "I heard the request to teach me \(candidate.targetName), but I need a fresh pointing gesture and supervised confirmation. I have not captured or saved a photo.",
+                    provider: .deterministic
+                )
             }
+
+            if #available(macOS 26.0, *),
+               let intent = try? await ROBFoundationSceneInterpreter().interpret(request: prompt),
+               ROBLearnObjectRequestGate.acceptsLearnObjectIntent(
+                   candidate: candidate,
+                   action: intent.action.rawValue,
+                   targetID: intent.targetID,
+                   requiresHumanConfirmation: intent.requiresHumanConfirmation,
+                   confidence: intent.confidence,
+                   hasFreshPointing: hasFreshPointing
+               ) {
+                return ROBLocalConversationReply(
+                    text: "Learning \(candidate.targetName) requires explicit confirmation in the supervised controller. Please start and confirm the capture there. I have not captured or saved a photo.",
+                    provider: .appleFoundationModels
+                )
+            }
+
+            return ROBLocalConversationReply(
+                text: "I heard an object-teaching request for \(candidate.targetName), but I could not validate it confidently. I have not captured or saved a photo.",
+                provider: .deterministic
+            )
         }
 
         let snapshot = try? ROBSceneSnapshotStore.shared.snapshot()

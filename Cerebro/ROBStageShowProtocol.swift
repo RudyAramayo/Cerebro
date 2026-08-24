@@ -365,6 +365,74 @@ public enum ROBStageShowCodec {
 }
 
 public enum ROBStageShowSamples {
+    /// Fixed, locally constructed sequence used by Show Mode after its critical
+    /// live-motion confirmation. The only variable is an immutable gesture name
+    /// selected from Cerebro's local approved catalog; no joint or timing values
+    /// come from a show file, model, or network peer.
+    public static func liveStartupTest(gestureName: String) -> ROBStageShow {
+        ROBStageShow(
+            showID: "rob-live-startup-test-v1",
+            title: "ROB Live Startup Test",
+            summary: "Operator-confirmed speech, checkpoint, and measured two-arm wake-gesture test. Unsupported open-loop mechanisms remain excluded.",
+            cues: [
+                ROBStageCue(
+                    id: "startup-audio",
+                    kind: .speak,
+                    text: "Live startup test is armed. I will wait for your final safety check before moving my approved wake pose."
+                ),
+                ROBStageCue(
+                    id: "startup-final-checkpoint",
+                    kind: .checkpoint,
+                    text: "Keep the physical E-stop in hand, verify both arms are supported as needed, clear the exclusion zone, then press Continue."
+                ),
+                ROBStageCue(
+                    id: "startup-measured-wake",
+                    kind: .playGesture,
+                    durationSeconds: 15,
+                    gesture: gestureName,
+                    required: true
+                ),
+                ROBStageCue(
+                    id: "startup-complete",
+                    kind: .speak,
+                    text: "Live startup test passed. Both Amber arms reached the approved wake pose with measured completion."
+                ),
+            ]
+        )
+    }
+
+    /// Fixed monitorless counterpart. The authenticated controller's fresh
+    /// approval tap is the final physical safety checkpoint, so this sequence
+    /// contains no local GUI checkpoint that could strand a headless droid.
+    public static func controllerAuthorizedLiveStartupTest(
+        gestureName: String
+    ) -> ROBStageShow {
+        ROBStageShow(
+            showID: "rob-controller-authorized-live-startup-test-v1",
+            title: "ROB Controller-Authorized Live Startup Test",
+            summary: "Fresh remote operator authorization, live speech, and measured two-arm wake-gesture test. Unsupported open-loop mechanisms remain excluded.",
+            cues: [
+                ROBStageCue(
+                    id: "startup-remote-authorization-audio",
+                    kind: .speak,
+                    text: "Remote startup authorization received. Beginning my approved measured wake pose now."
+                ),
+                ROBStageCue(
+                    id: "startup-remote-measured-wake",
+                    kind: .playGesture,
+                    durationSeconds: 15,
+                    gesture: gestureName,
+                    required: true
+                ),
+                ROBStageCue(
+                    id: "startup-remote-complete",
+                    kind: .speak,
+                    text: "Live startup test passed. Both Amber arms reached the approved wake pose with measured completion."
+                ),
+            ]
+        )
+    }
+
     public static let makerFaireOpening = ROBStageShow(
         showID: "maker-faire-opening",
         title: "Maker Faire Opening",

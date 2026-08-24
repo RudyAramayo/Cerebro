@@ -348,7 +348,7 @@ Foundation-only stage fixtures:
 swiftc -module-cache-path /tmp/cerebro-swift-module-cache \
   -parse-as-library \
   Cerebro/ROBLocalImprovisationProtocol.swift \
-  Cerebro/ROBLlamaCppImprovisationProvider.swift \
+  Tests/ROBImprovisationProviderFixtureStubs.swift \
   Cerebro/ROBStageShowProtocol.swift \
   Cerebro/ROBStageShowCoordinator.swift \
   Tests/ROBStageShowFixtureTests.swift \

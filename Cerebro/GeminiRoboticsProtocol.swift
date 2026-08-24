@@ -1019,6 +1019,165 @@ struct GeminiTranscriptionAccumulator {
     }
 }
 
+struct ROBLearnObjectRequestCandidate: Equatable, Sendable {
+    let targetName: String
+    let normalizedTargetID: String
+}
+
+/// Deterministic admission boundary in front of the semantic scene
+/// interpreter. A generative classifier is never allowed to turn ordinary
+/// dialogue, ambient speech, or a generic memory request into object capture.
+enum ROBLearnObjectRequestGate {
+    private static let addressWords: Set<String> = ["rob", "robbie", "robot"]
+    private static let teachingWords: Set<String> = ["learn", "teach"]
+    private static let leadingTargetFillers: Set<String> = [
+        "please", "this", "the", "a", "an", "object", "chess", "piece",
+        "as", "called", "named", "is", "to", "be"
+    ]
+    private static let trailingTargetFillers: Set<String> = ["please"]
+
+    static func addressesROB(_ rawText: String) -> Bool {
+        !addressWords.isDisjoint(with: Set(words(in: rawText)))
+    }
+
+    static func candidate(for rawText: String) -> ROBLearnObjectRequestCandidate? {
+        let tokens = words(in: rawText)
+        guard !tokens.isEmpty,
+              !addressWords.isDisjoint(with: Set(tokens)) else {
+            return nil
+        }
+
+        let targetTokens: ArraySlice<String>
+        if let teachingIndex = tokens.firstIndex(where: teachingWords.contains) {
+            targetTokens = tokens.suffix(from: tokens.index(after: teachingIndex))
+        } else if let rememberIndex = tokens.firstIndex(of: "remember") {
+            let suffix = tokens.suffix(from: tokens.index(after: rememberIndex))
+            let mentionsConcreteObject = suffix.starts(with: ["this", "object"]) ||
+                suffix.starts(with: ["this", "chess", "piece"]) ||
+                suffix.starts(with: ["this", "piece"])
+            guard mentionsConcreteObject,
+                  let namingIndex = suffix.firstIndex(where: { token in
+                      token == "as" || token == "called" || token == "named"
+                  }) else {
+                return nil
+            }
+            targetTokens = suffix.suffix(from: suffix.index(after: namingIndex))
+        } else {
+            return nil
+        }
+
+        var cleaned = Array(targetTokens)
+        while let first = cleaned.first, leadingTargetFillers.contains(first) {
+            cleaned.removeFirst()
+        }
+        while let last = cleaned.last, trailingTargetFillers.contains(last) {
+            cleaned.removeLast()
+        }
+        cleaned.removeAll(where: addressWords.contains)
+
+        guard (1...8).contains(cleaned.count) else { return nil }
+        let targetName = cleaned.joined(separator: " ")
+        let normalizedTargetID = cleaned.joined(separator: "_")
+        guard (2...80).contains(targetName.count) else { return nil }
+        return ROBLearnObjectRequestCandidate(
+            targetName: targetName,
+            normalizedTargetID: normalizedTargetID
+        )
+    }
+
+    static func acceptsLearnObjectIntent(
+        candidate: ROBLearnObjectRequestCandidate,
+        action: String,
+        targetID: String?,
+        requiresHumanConfirmation: Bool,
+        confidence: Double,
+        hasFreshPointing: Bool,
+        minimumConfidence: Double = 0.85
+    ) -> Bool {
+        guard action == "learnObject",
+              requiresHumanConfirmation,
+              confidence >= minimumConfidence,
+              hasFreshPointing,
+              let targetID else {
+            return false
+        }
+        return normalizedTargetID(from: targetID) == candidate.normalizedTargetID
+    }
+
+    private static func normalizedTargetID(from value: String) -> String {
+        words(in: value).joined(separator: "_")
+    }
+
+    private static func words(in value: String) -> [String] {
+        value.lowercased().split(whereSeparator: { character in
+            !character.isLetter && !character.isNumber
+        }).map(String.init)
+    }
+}
+
+struct ROBLocalFallbackDeduplicator {
+    enum Admission: Equatable {
+        case accept
+        case suppressExactDuplicate
+        case suppressBurst
+    }
+
+    let exactDuplicateWindow: TimeInterval
+    let burstWindow: TimeInterval
+    private var lastAcceptedAt: TimeInterval?
+    private var lastAcceptedPrompt = ""
+
+    init(exactDuplicateWindow: TimeInterval = 8, burstWindow: TimeInterval = 1) {
+        self.exactDuplicateWindow = max(0, exactDuplicateWindow)
+        self.burstWindow = max(0, burstWindow)
+    }
+
+    mutating func admission(for prompt: String, now: TimeInterval) -> Admission {
+        let normalized = Self.normalized(prompt)
+        guard !normalized.isEmpty else { return .suppressExactDuplicate }
+        if let lastAcceptedAt {
+            let elapsed = max(0, now - lastAcceptedAt)
+            if normalized == lastAcceptedPrompt && elapsed <= exactDuplicateWindow {
+                return .suppressExactDuplicate
+            }
+            if elapsed <= burstWindow {
+                return .suppressBurst
+            }
+        }
+        lastAcceptedAt = now
+        lastAcceptedPrompt = normalized
+        return .accept
+    }
+
+    private static func normalized(_ prompt: String) -> String {
+        prompt.lowercased().split(whereSeparator: { character in
+            !character.isLetter && !character.isNumber
+        }).joined(separator: " ")
+    }
+}
+
+enum GeminiConversationTranscriptSource: String, Sendable {
+    case appleSpeech = "apple_speech"
+    case geminiServer = "gemini_server"
+    case mixedRecognizers = "mixed_recognizers"
+    case typedText = "typed_text"
+    case unknown
+}
+
+struct GeminiLocalFallbackPrompt: Sendable {
+    let text: String
+    let source: GeminiConversationTranscriptSource
+    let providerTurnID: UInt64?
+}
+
+enum ROBConversationLog {
+    static func boundedTranscript(_ prompt: String, maximumLength: Int = 240) -> String {
+        let singleLine = prompt.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        let limit = max(1, maximumLength)
+        return String(singleLine.prefix(limit)) + (singleLine.count > limit ? "…" : "")
+    }
+}
+
 struct GeminiMicrophoneTurnAssociation {
     enum TranscriptDisposition: Equatable {
         case beginAwaitingResponse

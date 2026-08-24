@@ -2,9 +2,9 @@
 //  ROBWakeUpCalibrationWindowController.swift
 //  Cerebro
 //
-//  A non-actuating, operator-supervised startup checklist. This window only
-//  reads existing state snapshots and records local review acknowledgements.
-//  No actuator command API is referenced from this file.
+//  A non-actuating, operator-supervised startup checklist and Amber reference
+//  gate. This window reads snapshots, stores surveyed park geometry, and
+//  derives a memory-only session offset. No actuator command API is referenced.
 //
 
 import AppKit
@@ -141,6 +141,26 @@ struct ROBWakeUpCalibrationPlan {
     }
 }
 
+/// A compact, side-effect-free handoff from the calibration checklist to Show
+/// Mode. Only mechanisms used by the supported live startup sequence are
+/// included here; mechanisms without bounded stop and measured-completion
+/// adapters remain explicitly excluded.
+struct ROBWakeUpLiveStartupReadiness {
+    let isReady: Bool
+    let reviewedCount: Int
+    let requiredReviewCount: Int
+    let excludedMechanismCount: Int
+    let blockers: [String]
+
+    var summary: String {
+        if isReady {
+            return "Wake-up preflight ready • \(reviewedCount)/\(requiredReviewCount) live steps reviewed • \(excludedMechanismCount) unsupported mechanism groups excluded"
+        }
+        let firstBlocker = blockers.first ?? "Wake-up preflight is incomplete."
+        return "Wake-up preflight blocked • \(reviewedCount)/\(requiredReviewCount) live steps reviewed • \(firstBlocker)"
+    }
+}
+
 private enum ROBWakeUpReadinessLevel {
     case ready
     case attention
@@ -189,6 +209,8 @@ private final class ROBWakeUpFlippedDocumentView: NSView {
     private let maximumAuditLines = 300
 
     private let summaryLabel = NSTextField(labelWithString: "")
+    private let referenceArmPopup = NSPopUpButton()
+    private let referenceStatusLabel = NSTextField(labelWithString: "")
     private let auditView = NSTextView()
     private let formatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -209,6 +231,7 @@ private final class ROBWakeUpFlippedDocumentView: NSView {
         super.init(window: window)
         window.delegate = self
         window.center()
+        referenceArmPopup.addItems(withTitles: ["Left arm", "Right arm"])
         buildInterface()
         installObservers()
         appendAudit("Created immutable dry-run plan \(plan.id.uuidString); zero actuator commands sent")
@@ -250,7 +273,7 @@ private final class ROBWakeUpFlippedDocumentView: NSView {
 
         let descriptionLabel = NSTextField(wrappingLabelWithString:
             "This ordered checklist evaluates existing snapshots and records local operator review. "
-            + "It never starts automatically, never derives actuator values from a model, and cannot move ROB."
+            + "The reference gate can store surveyed park geometry and derive a session-only encoder mapping; it never sends a command and cannot move ROB."
         )
         descriptionLabel.textColor = .secondaryLabelColor
 
@@ -265,6 +288,35 @@ private final class ROBWakeUpFlippedDocumentView: NSView {
         toolbar.orientation = .horizontal
         toolbar.alignment = .centerY
         toolbar.spacing = 8
+
+        referenceArmPopup.toolTip = "Select the physical arm whose park geometry or current controller-session reference will be recorded."
+        let commissionButton = makeButton(
+            "Commission Park Geometry…",
+            action: #selector(commissionParkGeometry(_:))
+        )
+        commissionButton.toolTip = "Stores surveyed URDF park angles and joint direction signs. It sends no actuator command."
+        let establishButton = makeButton(
+            "Establish Session Reference…",
+            action: #selector(establishSessionReference(_:))
+        )
+        establishButton.toolTip = "After local fixture confirmation, derives the boot-session encoder offset from fresh telemetry and deterministic camera evidence. It sends no actuator command."
+        referenceStatusLabel.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
+        referenceStatusLabel.lineBreakMode = .byTruncatingTail
+        let referenceBar = NSStackView(views: [
+            NSTextField(labelWithString: "AMBER REFERENCE GATE"),
+            referenceArmPopup,
+            commissionButton,
+            establishButton,
+            NSView(),
+            referenceStatusLabel,
+        ])
+        referenceBar.orientation = .horizontal
+        referenceBar.alignment = .centerY
+        referenceBar.spacing = 8
+        if let heading = referenceBar.arrangedSubviews.first as? NSTextField {
+            heading.font = .monospacedSystemFont(ofSize: 11, weight: .bold)
+            heading.textColor = .systemOrange
+        }
 
         let planStack = NSStackView()
         planStack.orientation = .vertical
@@ -330,7 +382,7 @@ private final class ROBWakeUpFlippedDocumentView: NSView {
         footer.textColor = .systemOrange
 
         let root = NSStackView(views: [
-            titleLabel, dryRunBadge, descriptionLabel, toolbar, planScroll,
+            titleLabel, dryRunBadge, descriptionLabel, toolbar, referenceBar, planScroll,
             auditHeader, auditScroll, footer,
         ])
         root.orientation = .vertical
@@ -338,7 +390,10 @@ private final class ROBWakeUpFlippedDocumentView: NSView {
         root.spacing = 8
         root.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(root)
-        for view in [descriptionLabel, toolbar, planScroll, auditHeader, auditScroll, footer] {
+        for view in [
+            descriptionLabel, toolbar, referenceBar, planScroll,
+            auditHeader, auditScroll, footer,
+        ] {
             view.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
         }
         NSLayoutConstraint.activate([
@@ -463,6 +518,13 @@ private final class ROBWakeUpFlippedDocumentView: NSView {
                 DispatchQueue.main.async { self?.refreshReadiness(logEvent: false) }
             })
         }
+        observers.append(center.addObserver(
+            forName: .ROBAmberArmReferenceDidChange,
+            object: ROBAmberArmReferenceStore.shared,
+            queue: nil
+        ) { [weak self] _ in
+            DispatchQueue.main.async { self?.refreshReadiness(logEvent: false) }
+        })
     }
 
     private func startRefreshTimer() {
@@ -495,6 +557,60 @@ private final class ROBWakeUpFlippedDocumentView: NSView {
             let unavailable = next.values.filter { $0.level == .unavailable }.count
             appendAudit("Refreshed in-process readiness: \(ready) ready, \(unavailable) excluded/unavailable; zero commands sent")
         }
+    }
+
+    /// Re-evaluates the exact readiness gates consumed by Show Mode's live
+    /// startup sequence. This is still a read-only operation: it neither starts
+    /// a service nor sends an actuator command.
+    @nonobjc func liveStartupReadinessSnapshot() -> ROBWakeUpLiveStartupReadiness {
+        precondition(Thread.isMainThread, "Wake-up readiness must be captured on the main thread")
+        refreshReadiness(logEvent: false)
+
+        let requiredIDs: [ROBWakeUpCalibrationStepID] = [
+            .operatorSafety,
+            .amberGateway,
+            .leftAmberArm,
+            .rightAmberArm,
+            .visualArmRegistration,
+        ]
+        var blockers: [String] = []
+        for id in requiredIDs {
+            guard let step = plan.steps.first(where: { $0.id == id }) else { continue }
+            if !confirmedStepIDs.contains(id) {
+                blockers.append("Review \(step.title) in Wake-Up Calibration.")
+                continue
+            }
+            guard evaluations[id]?.level == .ready else {
+                blockers.append(evaluations[id]?.summary ?? "\(step.title) is not ready.")
+                continue
+            }
+        }
+
+        // The measured gesture executor requires verified position mode and
+        // rechecks this immediately before transmitting its leased trajectory.
+        for arm in ["left", "right"] {
+            let reference = ROBAmberArmReferenceStore.shared.readiness(forArm: arm)
+            if !reference.isReady {
+                blockers.append("The \(arm) Amber reference gate is closed: \(reference.detail)")
+            }
+            let modes = gateway.modes(forArm: arm).map(\.intValue)
+            if modes.count != 7 || !modes.allSatisfy({ $0 == 2 }) {
+                blockers.append("The \(arm) Amber arm is not verified in position mode.")
+            }
+        }
+
+        let reviewedCount = requiredIDs.filter(confirmedStepIDs.contains).count
+        let excludedCount = plan.steps.filter {
+            $0.adapterClass == .dispatchAcknowledgementOnly
+                || $0.adapterClass == .missingBoundedSafetyContract
+        }.count
+        return ROBWakeUpLiveStartupReadiness(
+            isReady: blockers.isEmpty,
+            reviewedCount: reviewedCount,
+            requiredReviewCount: requiredIDs.count,
+            excludedMechanismCount: excludedCount,
+            blockers: blockers
+        )
     }
 
     private func evaluate(
@@ -678,11 +794,19 @@ private final class ROBWakeUpFlippedDocumentView: NSView {
         let modeDetail = modes.count == 7
             ? "mode snapshot [\(modes.map(String.init).joined(separator: ", "))]"
             : "mode snapshot unavailable"
+        let reference = ROBAmberArmReferenceStore.shared.readiness(forArm: arm)
+        guard reference.isReady else {
+            return .init(
+                level: .attention,
+                summary: "Session reference gate closed",
+                detail: "\(reference.detail) • \(modeDetail) • no movement"
+            )
+        }
         return .init(
             level: .ready,
-            summary: "Fresh seven-joint feedback",
-            detail: String(format: "Sequence %llu • effective age %.1f ms • %@ • execution remains disabled.",
-                           telemetry.sequence, age, modeDetail)
+            summary: "Fresh feedback + physical reference",
+            detail: String(format: "Sequence %llu • effective age %.1f ms • %@ • %@",
+                           telemetry.sequence, age, modeDetail, reference.detail)
         )
     }
 
@@ -780,6 +904,168 @@ private final class ROBWakeUpFlippedDocumentView: NSView {
         let unavailable = evaluations.values.filter { $0.level == .unavailable }.count
         summaryLabel.stringValue = "\(confirmedStepIDs.count)/\(plan.steps.count) reviewed • \(ready) ready • \(unavailable) excluded • commands sent: 0"
         summaryLabel.textColor = .secondaryLabelColor
+        let leftReference = ROBAmberArmReferenceStore.shared.readiness(forArm: "left")
+        let rightReference = ROBAmberArmReferenceStore.shared.readiness(forArm: "right")
+        let readyReferenceCount = [leftReference, rightReference].filter(\.isReady).count
+        referenceStatusLabel.stringValue = "\(readyReferenceCount)/2 session references ready"
+        referenceStatusLabel.textColor = readyReferenceCount == 2 ? .systemGreen : .systemOrange
+        referenceStatusLabel.toolTip = "Left: \(leftReference.detail) Right: \(rightReference.detail)"
+    }
+
+    @objc private func commissionParkGeometry(_ sender: Any?) {
+        let arm = selectedReferenceArm
+        let existing = ROBAmberArmReferenceStore.shared.calibrationSnapshot(forArm: arm)
+        let anglesField = NSTextField(string: existing?.parkModelRadians.map {
+            String(format: "%.6f", $0)
+        }.joined(separator: ", ") ?? "")
+        let directionsField = NSTextField(string: existing?.direction.map(String.init)
+            .joined(separator: ", ") ?? "+1, +1, +1, +1, +1, +1, +1")
+        let visualLimitField = NSTextField(string: String(
+            format: "%.3f",
+            existing?.maximumVisualErrorRadians
+                ?? ROBAmberArmReferenceStore.defaultMaximumVisualErrorRadians
+        ))
+        let confirmationField = NSTextField(string: "")
+        let accessory = labeledFields([
+            ("Park model angles (rad)", anglesField),
+            ("Joint directions (+1/-1)", directionsField),
+            ("Maximum camera error (rad)", visualLimitField),
+            ("Type COMMISSION \(arm.uppercased())", confirmationField),
+        ])
+        let alert = NSAlert()
+        alert.messageText = "Commission \(arm.capitalized) Arm Park Geometry?"
+        alert.informativeText =
+            "Enter independently surveyed physical URDF angles for the supported power-off park fixture and verified encoder direction signs. A single stationary pose cannot prove the signs. Saving invalidates this arm's current session reference. No command will be sent."
+        alert.alertStyle = .critical
+        alert.accessoryView = accessory
+        alert.addButton(withTitle: "Store Surveyed Geometry")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            appendAudit("Cancelled \(arm) park-geometry commissioning")
+            return
+        }
+        guard confirmationField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                == "COMMISSION \(arm.uppercased())" else {
+            presentReferenceError("Typed commissioning confirmation did not match.")
+            return
+        }
+        guard let angles = commaSeparatedDoubles(anglesField.stringValue, count: 7),
+              let directionValues = commaSeparatedIntegers(
+                directionsField.stringValue,
+                count: 7
+              ),
+              let visualLimit = Double(visualLimitField.stringValue.trimmingCharacters(
+                in: .whitespacesAndNewlines
+              )) else {
+            presentReferenceError(ROBAmberArmReferenceError.invalidCalibration.localizedDescription)
+            return
+        }
+        do {
+            try ROBAmberArmReferenceStore.shared.commission(
+                arm: arm,
+                parkModelRadians: angles,
+                direction: directionValues,
+                maximumVisualErrorRadians: visualLimit
+            )
+            confirmedStepIDs.remove(arm == "left" ? .leftAmberArm : .rightAmberArm)
+            appendAudit("Commissioned surveyed \(arm) park geometry; session reference invalidated; zero commands sent")
+            refreshReadiness(logEvent: false)
+        } catch {
+            presentReferenceError(error.localizedDescription)
+        }
+    }
+
+    @objc private func establishSessionReference(_ sender: Any?) {
+        let arm = selectedReferenceArm
+        guard ROBAmberArmReferenceStore.shared.calibrationSnapshot(forArm: arm) != nil else {
+            presentReferenceError(
+                "Commission the \(arm) arm's surveyed physical park geometry first."
+            )
+            return
+        }
+        let confirmationField = NSTextField(string: "")
+        let accessory = labeledFields([
+            ("Type REFERENCE \(arm.uppercased())", confirmationField),
+        ])
+        let alert = NSAlert()
+        alert.messageText = "Establish \(arm.capitalized) Session Reference?"
+        alert.informativeText =
+            "Personally verify that this arm is stationary, fully seated and supported in its commissioned physical park fixture, the workspace is clear, and the E-stop is reachable. Cerebro will read fresh telemetry and deterministic camera geometry to derive a memory-only offset for this authenticated controller session. It will not move the arm."
+        alert.alertStyle = .critical
+        alert.accessoryView = accessory
+        alert.addButton(withTitle: "Establish Read-Only Reference")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            appendAudit("Cancelled \(arm) session reference")
+            return
+        }
+        guard confirmationField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                == "REFERENCE \(arm.uppercased())" else {
+            presentReferenceError("Typed reference confirmation did not match.")
+            return
+        }
+        do {
+            try ROBAmberArmReferenceStore.shared.establishSessionReference(
+                forArm: arm,
+                operatorConfirmedPark: true
+            )
+            confirmedStepIDs.remove(arm == "left" ? .leftAmberArm : .rightAmberArm)
+            appendAudit("Established read-only \(arm) reference for the active authenticated gateway session; zero commands sent")
+            refreshReadiness(logEvent: false)
+        } catch {
+            presentReferenceError(error.localizedDescription)
+        }
+    }
+
+    private var selectedReferenceArm: String {
+        referenceArmPopup.indexOfSelectedItem == 1 ? "right" : "left"
+    }
+
+    private func labeledFields(_ fields: [(String, NSTextField)]) -> NSView {
+        let grid = NSGridView(numberOfColumns: 2, rows: fields.count)
+        grid.column(at: 0).xPlacement = .trailing
+        grid.column(at: 1).width = 400
+        grid.rowSpacing = 7
+        grid.columnSpacing = 8
+        for (index, field) in fields.enumerated() {
+            grid.cell(atColumnIndex: 0, rowIndex: index).contentView = NSTextField(
+                labelWithString: field.0
+            )
+            grid.cell(atColumnIndex: 1, rowIndex: index).contentView = field.1
+        }
+        grid.frame.size = grid.fittingSize
+        return grid
+    }
+
+    private func commaSeparatedDoubles(_ text: String, count: Int) -> [Double]? {
+        let values = text.split(separator: ",", omittingEmptySubsequences: false).map {
+            Double($0.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        guard values.count == count, values.allSatisfy({ $0?.isFinite == true }) else {
+            return nil
+        }
+        return values.compactMap { $0 }
+    }
+
+    private func commaSeparatedIntegers(_ text: String, count: Int) -> [Int]? {
+        let values = text.split(separator: ",", omittingEmptySubsequences: false).map {
+            Int($0.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        guard values.count == count, values.allSatisfy({ $0 == -1 || $0 == 1 }) else {
+            return nil
+        }
+        return values.compactMap { $0 }
+    }
+
+    private func presentReferenceError(_ detail: String) {
+        let alert = NSAlert()
+        alert.messageText = "Amber Reference Gate Remains Closed"
+        alert.informativeText = detail
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+        appendAudit("Reference gate rejected input: \(detail)")
+        refreshReadiness(logEvent: false)
     }
 
     @objc private func confirmStep(_ sender: NSButton) {

@@ -10,6 +10,83 @@ import Foundation
 
 public extension Notification.Name {
     static let ROBStageShowStateDidChange = Notification.Name("ROBStageShowStateDidChange")
+    static let ROBHeadlessLiveStartupAuthorizationDidChange = Notification.Name(
+        "ROBHeadlessLiveStartupAuthorizationDidChange"
+    )
+    static let ROBHeadlessLiveStartupStopRequested = Notification.Name(
+        "ROBHeadlessLiveStartupStopRequested"
+    )
+}
+
+/// Persistent, one-shot arming state for a monitorless startup run. Arming is
+/// not motion authority: Cerebro still waits for a fresh authenticated
+/// controller to approve the exact expiring request, and the executor repeats
+/// every hardware preflight immediately before dispatch.
+@objcMembers public final class ROBHeadlessLiveStartupAuthorization: NSObject {
+    public static let shared = ROBHeadlessLiveStartupAuthorization()
+
+    private let defaults = UserDefaults.standard
+    private let armedKey = "ROBHeadlessLiveStartupArmed"
+    private let gestureKey = "ROBHeadlessLiveStartupGestureName"
+    private let statusKey = "ROBHeadlessLiveStartupStatus"
+
+    public var isArmed: Bool { defaults.bool(forKey: armedKey) }
+    public var gestureName: String? {
+        guard isArmed else { return nil }
+        let value = defaults.string(forKey: gestureKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty ? nil : value
+    }
+    public var status: String {
+        defaults.string(forKey: statusKey)
+            ?? "Remote startup is disarmed."
+    }
+
+    @objc(armWithGestureName:)
+    public func arm(gestureName: String) {
+        let name = gestureName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        defaults.set(name, forKey: gestureKey)
+        defaults.set(true, forKey: armedKey)
+        updateStatus("Armed one-shot remote startup for \(name); waiting for an authenticated controller.")
+    }
+
+    public func disarm() {
+        defaults.set(false, forKey: armedKey)
+        defaults.removeObject(forKey: gestureKey)
+        updateStatus("Remote startup is disarmed.")
+    }
+
+    /// Consumes the persisted arming latch only after the exact request has
+    /// been encoded and handed to the authenticated transport. A rejected or
+    /// expired request is never silently replaced with a second physical run.
+    @objc(consumeIfGestureNameMatches:)
+    public func consumeIfGestureNameMatches(_ gestureName: String) -> Bool {
+        guard isArmed, self.gestureName == gestureName else { return false }
+        defaults.set(false, forKey: armedKey)
+        defaults.removeObject(forKey: gestureKey)
+        updateStatus("Remote authorization requested for \(gestureName); this one-shot arming latch is consumed.")
+        return true
+    }
+
+    public func updateStatus(_ status: String) {
+        let bounded = String(status.prefix(1_024))
+        guard self.status != bounded else { return }
+        defaults.set(bounded, forKey: statusKey)
+        NotificationCenter.default.post(
+            name: .ROBHeadlessLiveStartupAuthorizationDidChange,
+            object: self
+        )
+    }
+
+    public func requestStop(reason: String) {
+        updateStatus(reason)
+        NotificationCenter.default.post(
+            name: .ROBHeadlessLiveStartupStopRequested,
+            object: self,
+            userInfo: ["reason": reason]
+        )
+    }
 }
 
 @objc public enum ROBStageShowRunMode: Int {
@@ -57,6 +134,13 @@ public extension Notification.Name {
     public private(set) var detail = "Load a show to begin."
     public private(set) var currentCueID: String?
     public private(set) var loadedShowTitle: String?
+    /// Non-nil only for the fixed, locally constructed startup sequence after
+    /// Show Mode's critical operator confirmation. Ordinary loaded show files
+    /// can never set this one-shot execution context.
+    public private(set) var liveStartupGestureName: String?
+    /// True only when the fixed startup sequence was released by an expiring,
+    /// authenticated controller approval rather than the local critical alert.
+    public private(set) var liveStartupIsControllerAuthorized = false
     @nonobjc public private(set) var localImprovisationConfiguration: ROBLocalImprovisationConfiguration?
     @nonobjc public private(set) var localImprovisationStatus = "Disabled"
     @nonobjc public var localImprovisationProvider: ROBLocalImprovisationProviding?
@@ -199,6 +283,8 @@ public extension Notification.Name {
         }
         try ROBStageShowCodec.validate(show)
         self.show = show
+        liveStartupGestureName = nil
+        liveStartupIsControllerAuthorized = false
         loadedShowTitle = show.title
         cueIndex = 0
         currentCueID = nil
@@ -216,6 +302,38 @@ public extension Notification.Name {
 
     @objc(startWithMode:)
     public func start(mode: ROBStageShowRunMode) {
+        start(mode: mode, liveStartupGestureName: nil, controllerAuthorized: false)
+    }
+
+    /// Starts Cerebro's fixed operator-confirmed live startup sequence. This is
+    /// intentionally not an Objective-C entry point and does not accept an
+    /// arbitrary show document.
+    @nonobjc public func startLiveStartupTest(gestureName: String) throws {
+        precondition(Thread.isMainThread, "Stage-show state must be serialized on the main thread")
+        let startupShow = ROBStageShowSamples.liveStartupTest(gestureName: gestureName)
+        try load(startupShow)
+        start(mode: .speechOnly, liveStartupGestureName: gestureName, controllerAuthorized: false)
+    }
+
+    /// Starts the separate fixed sequence whose final physical checkpoint was
+    /// the fresh approval tap on the authenticated remote controller. This
+    /// entry point accepts only the immutable gesture name already bound into
+    /// that request; arbitrary show documents cannot acquire this context.
+    @objc(startControllerAuthorizedLiveStartupTestWithGestureName:error:)
+    public func startControllerAuthorizedLiveStartupTest(gestureName: String) throws {
+        precondition(Thread.isMainThread, "Stage-show state must be serialized on the main thread")
+        let startupShow = ROBStageShowSamples.controllerAuthorizedLiveStartupTest(
+            gestureName: gestureName
+        )
+        try load(startupShow)
+        start(mode: .speechOnly, liveStartupGestureName: gestureName, controllerAuthorized: true)
+    }
+
+    private func start(
+        mode: ROBStageShowRunMode,
+        liveStartupGestureName: String?,
+        controllerAuthorized: Bool
+    ) {
         precondition(Thread.isMainThread, "Stage-show state must be serialized on the main thread")
         guard let show else {
             publish(state: "failed", detail: "No validated show is loaded.")
@@ -227,6 +345,8 @@ public extension Notification.Name {
 
         generation &+= 1
         self.mode = mode
+        self.liveStartupGestureName = liveStartupGestureName
+        liveStartupIsControllerAuthorized = controllerAuthorized
         cueIndex = 0
         currentCueID = nil
         clearGeminiTurn(cancelRequest: true)
@@ -255,6 +375,8 @@ public extension Notification.Name {
         let stoppedCue = currentCueID
         currentCueID = nil
         delegate?.stageShowCoordinatorDidRequestStop(self)
+        liveStartupGestureName = nil
+        liveStartupIsControllerAuthorized = false
         let suffix = stoppedCue.map { " at cue \($0)" } ?? ""
         publish(state: "cancelled", detail: "\(reason)\(suffix).")
     }
@@ -581,6 +703,8 @@ public extension Notification.Name {
         adaptiveDeadlineUptime = nil
         isRunning = false
         currentCueID = nil
+        liveStartupGestureName = nil
+        liveStartupIsControllerAuthorized = false
         publish(state: "completed", detail: "Show completed without an outstanding cue.")
     }
 
@@ -594,6 +718,8 @@ public extension Notification.Name {
         adaptiveDeadlineUptime = nil
         isRunning = false
         delegate?.stageShowCoordinatorDidRequestStop(self)
+        liveStartupGestureName = nil
+        liveStartupIsControllerAuthorized = false
         publish(state: "failed", detail: failureDetail)
     }
 

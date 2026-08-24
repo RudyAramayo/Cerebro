@@ -540,6 +540,43 @@ private func testHEVCHeaderValidation() throws {
     }
 }
 
+private func testJPEGDesktopAccessUnitFixture() throws {
+    let jpeg = Data([0xff, 0xd8, 0xff, 0xd9])
+    let unit = try ROBVideoEncodedAccessUnit(
+        sessionID: sessionID,
+        id: streamID,
+        codec: .jpeg,
+        sequence: 12,
+        captureTimestampUnixMilliseconds: 1_700_000_000_000,
+        presentationTimestamp: 1_700_000_000_000,
+        duration: 1,
+        timescale: 6,
+        isKeyFrame: true,
+        codecConfigurationGeneration: 0,
+        nalLengthFieldBytes: 0,
+        payload: jpeg
+    )
+    let decoded = try ROBVideoEncodedAccessUnit(binary: unit.encodedBinary())
+    try expect(decoded == unit, "JPEG desktop access unit changed during round-trip")
+
+    try expectProtocolError(.invalidAccessUnit, "JPEG accepted H.264 configuration fields") {
+        _ = try ROBVideoEncodedAccessUnit(
+            sessionID: sessionID,
+            id: streamID,
+            codec: .jpeg,
+            sequence: 13,
+            captureTimestampUnixMilliseconds: 1,
+            presentationTimestamp: 1,
+            duration: 1,
+            timescale: 6,
+            isKeyFrame: true,
+            codecConfigurationGeneration: 1,
+            nalLengthFieldBytes: 4,
+            payload: jpeg
+        )
+    }
+}
+
 @main
 private enum ROBVideoProtocolFixtureRunner {
     static func main() {
@@ -549,6 +586,7 @@ private enum ROBVideoProtocolFixtureRunner {
             try testH264AccessUnitBinaryFixture()
             try testHardLimitsAndMalformedFrames()
             try testHEVCHeaderValidation()
+            try testJPEGDesktopAccessUnitFixture()
             print("ROBVideoProtocol fixtures passed")
         } catch {
             fputs("ROBVideoProtocol fixture failure: \(error)\n", stderr)

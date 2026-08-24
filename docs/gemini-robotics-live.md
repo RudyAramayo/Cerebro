@@ -9,9 +9,12 @@ The media and response path is:
 
 ```text
 ROBSpeechBox microphone tap
-  -> copied hardware PCM
-  -> bounded serial conversion to mono PCM16 at 16 kHz
-  -> Gemini realtimeInput.audio
+  -> Apple Speech local wake/stop recognition
+  -> explicit "ROB" address opens a 15-second conversation window
+     -> first addressed utterance is sent once as text
+     -> subsequent in-window PCM is converted to mono PCM16 at 16 kHz
+        -> Gemini realtimeInput.audio
+  -> outside the window, raw PCM is not admitted to Gemini
 
 CameraManager main-camera sample buffer ─┐
                                          ├─> latest fresh views, fixed labeled 1024x1024 composite
@@ -31,9 +34,15 @@ already queued microphone frames. This prevents the robot's synthesized voice
 from being sent back to Gemini before acoustic echo cancellation is available.
 
 The existing on-device Apple speech recognizer remains active for local
-transcription, wake handling, and local stop phrases. Its transcript is not
-submitted again while the Gemini raw-audio session is ready, preventing
-duplicate turns. When raw audio is disabled, the local transcript uses
+transcription, wake handling, and local stop phrases. Raw Gemini audio stays
+closed until Apple Speech hears an explicit ROB address. That first addressed
+utterance is submitted once as text because its pre-wake audio was withheld;
+follow-up speech can use raw audio during the 15-second continuation window.
+Each admitted transcript refreshes the window, and timeout, disconnect,
+microphone disablement, or ROB's ignore transition closes it and flushes queued
+audio. While an admitted raw-audio turn is already in flight, Apple's
+transcript is retained only as a correlated local fallback and is not submitted
+again. When raw audio is disabled, the local transcript uses
 `realtimeInput.text` immediately. Cerebro enables server-side input
 transcription so `Gemini Robotics heard:` in the Xcode console confirms what
 Gemini understood independently of Apple's local transcript.
@@ -73,6 +82,16 @@ Swift MLX, then a deterministic spoken recovery response. Local providers have
 no robot-action tools and cannot enter a tread, servo, arm, or controller path.
 Stage-show turns keep their existing authored/local cue fallback, and any turn
 that produced a Gemini tool call is never replayed through a dialogue model.
+
+Object-learning fallback is narrower than ordinary dialogue. Cerebro calls the
+scene-intent interpreter only after a deterministic gate finds an explicit ROB
+address, a learn/teach command (or the narrow phrase "remember this object"),
+and a concrete target name. Accepting the result additionally requires human
+confirmation, confidence of at least 0.85, an exact normalized target match,
+and a fresh pointing observation. Missing evidence produces a specific spoken
+explanation and cannot capture or save an object. Ordinary questions,
+fragments, background speech, generic memory requests, and confirmation phrases
+bypass the scene-intent interpreter.
 Two provider failures inside 60 seconds temporarily divert new conversation to
 local models for 90 seconds; a successful Gemini response or an operator
 reconnect resets the circuit.
@@ -164,7 +183,9 @@ tab provides three independent switches:
   Turning it off flushes Gemini's cached audio with `audioStreamEnd`; Apple's
   local recognizer remains active and provides text fallback while connected.
   A fallback text turn is held until the actor has completed that audio-off
-  transition, so it cannot overtake `audioStreamEnd` on the WebSocket.
+  transition, so it cannot overtake `audioStreamEnd` on the WebSocket. When the
+  switch is on, raw PCM is still admitted only inside the explicit-address
+  15-second conversation window.
 - **Send sampled camera composite to Gemini** gates JPEG encoding and WebSocket
   forwarding as the privacy master. It does not turn off Cerebro perception or
   ROBController/Vision Pro video subscriptions, which are separate camera
@@ -220,14 +241,17 @@ chooses queries and retrieves public web results on Google's servers. The
 configured Live model must support Google Search. If setup is rejected, disable
 the flag or select a Search-capable Live model with `GEMINI_ROBOTICS_MODEL`.
 
-The active path is **Raw microphone audio** only after the Live-session actor
-has applied the requested raw-audio policy and the session is ready. It changes
-to **Local speech recognition -> text** while raw audio is disabled, still
-waiting to be applied, or the session is reconnecting, matching the fallback
-Cerebro actually uses. It changes to **Disabled** when the Gemini connection
-switch is off. The requested microphone and camera rows show `true (waiting)`
-until the actor acknowledges the transition, then `true (effective)`. Static
-environment or credential changes still require a full Cerebro relaunch.
+The configured active path is **Raw microphone audio** only after the
+Live-session actor has applied the requested raw-audio policy and the session is
+ready; the conversation gate then determines whether microphone frames are
+currently admitted. It changes to **Local speech recognition -> text** while
+raw audio is disabled, still waiting to be applied, or the session is
+reconnecting, matching the fallback Cerebro actually uses. It changes to
+**Disabled** when the Gemini connection switch is off. The requested microphone
+and camera rows show `true (waiting)` until the actor acknowledges the
+transition, then `true (effective)`. Gate transitions are logged as `active` or
+`wake_required`. Static environment or credential changes still require a full
+Cerebro relaunch.
 
 The panel also reports JPEG frames encoded, frames whose local WebSocket send
 completed, the last-send time, a redacted category summary of the last server
@@ -239,6 +263,13 @@ receipt or semantic-vision acknowledgement from Gemini. Counters reset when
 the `ROBAI` instance is recreated. The diagnostics state never retains
 credentials, media, transcript text, tool arguments, raw server JSON, or
 session-resumption handles.
+
+For live debugging, bounded console entries identify Apple Speech versus Gemini
+server transcripts and correlate local-fallback admission, provider turn ID,
+source, suppression, and response. An exact transcript is suppressed for eight
+seconds and any second fallback inside a one-second burst is suppressed, so a
+single utterance cannot produce both Apple- and Gemini-derived fallback replies.
+The persistent diagnostics snapshot remains transcript-free.
 
 The off switches guarantee that Cerebro stops admitting and sending the
 corresponding inputs after the runtime transition. Provider-side usage and
@@ -682,7 +713,7 @@ Run the Foundation-only stage-show fixtures:
 swiftc -module-cache-path /tmp/cerebro-swift-module-cache \
   -parse-as-library \
   Cerebro/ROBLocalImprovisationProtocol.swift \
-  Cerebro/ROBLlamaCppImprovisationProvider.swift \
+  Tests/ROBImprovisationProviderFixtureStubs.swift \
   Cerebro/ROBStageShowProtocol.swift \
   Cerebro/ROBStageShowCoordinator.swift \
   Tests/ROBStageShowFixtureTests.swift \
@@ -752,11 +783,11 @@ responses, and response-size bounds without starting a server.
   but this acknowledgement is a local egress boundary rather than a provider
   billing receipt.
 - The diagnostics counters cover video frames, not provider token usage.
-- The raw-microphone response-start watchdog accepts either Apple's on-device
-  transcript or Gemini's server input transcription as its non-resending turn
-  signal. If neither recognizer yields text for an utterance, Cerebro has no
-  trustworthy words to give a local dialogue model; wake-only handling and
-  safety stop phrases remain local.
+- Inside an active conversation window, the raw-microphone response-start
+  watchdog accepts either Apple's on-device transcript or Gemini's server input
+  transcription as its non-resending turn signal. If neither recognizer yields
+  text for an utterance, Cerebro has no trustworthy words to give a local
+  dialogue model; wake handling and safety stop phrases remain local.
 - The synthetic PCM round trip validates Gemini and the wire protocol, not the
   physical microphone or `AVAudioEngine` conversion on a particular Mac.
 - Camera input is semantic context at one FPS. It is not a visual-servoing or

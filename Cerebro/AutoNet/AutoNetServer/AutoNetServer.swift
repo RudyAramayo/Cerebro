@@ -4,6 +4,7 @@
 //
 
 import Darwin
+import ApplicationServices
 import Foundation
 import Network
 
@@ -84,6 +85,7 @@ struct ROBControlServerStatusSnapshot: Sendable {
     private lazy var armControllerBridge = ROBArmControllerBridge(server: self)
     private lazy var gripperControllerBridge = ROBGripperControllerBridge(server: self)
     private lazy var administratorTerminalCoordinator = ROBAdministratorTerminalCoordinator(server: self)
+    private lazy var remoteDesktopInputCoordinator = ROBRemoteDesktopInputCoordinator(server: self)
 
     public var legacyCompatibilityIsActive: Bool {
         if case .legacy? = transportMode { return true }
@@ -267,6 +269,24 @@ struct ROBControlServerStatusSnapshot: Sendable {
         return false
     }
 
+    @discardableResult func sendRemoteDesktopControlMessage(
+        _ data: Data,
+        to deviceID: UUID,
+        sessionID: UUID
+    ) -> Bool {
+        guard !paused, !data.isEmpty,
+              data.count <= ROBRemoteDesktopControlProtocol.maximumMessageBytes else { return false }
+        for connection in connectionsByID.values
+            where connection.isReady
+                && connection.canReceiveApplicationMessage(type: .sendData)
+                && connection.authenticatedRole == .operatorController
+                && connection.authenticatedDeviceID == deviceID
+                && connection.authenticatedSessionUUID == sessionID {
+            return connection.send(type: .sendData, data: data)
+        }
+        return false
+    }
+
     func receiveApplicationMessage(
         type: DataMessageType,
         data: Data,
@@ -299,6 +319,20 @@ struct ROBControlServerStatusSnapshot: Sendable {
                 }
                 // Claimed terminal messages, including malformed ones, never
                 // reach motion parsing and are never relayed to observers.
+                return
+            }
+            if remoteDesktopInputCoordinator.claimsProtocol(data) {
+                if sendingConnection.authenticatedRole == .operatorController,
+                   let controllerID = sendingConnection.authenticatedDeviceID,
+                   let sessionID = sendingConnection.authenticatedSessionUUID {
+                    remoteDesktopInputCoordinator.consumeInbound(
+                        data,
+                        authenticatedControllerID: controllerID,
+                        authenticatedSessionID: sessionID
+                    )
+                } else {
+                    NSLog("Discarded remote-desktop input outside an authenticated v2 operator session")
+                }
                 return
             }
             if armControllerBridge.claimsArmControlProtocol(data) {
@@ -520,6 +554,7 @@ struct ROBControlServerStatusSnapshot: Sendable {
             connection.stop(error: AutoNetTransportError.credentialRevoked)
         }
         administratorTerminalCoordinator.closeSessions(for: deviceID)
+        remoteDesktopInputCoordinator.stop(controllerID: deviceID)
         lastLidarSequenceByDeviceID.removeValue(forKey: deviceID)
         lastLidarScanUptimeByDeviceID.removeValue(forKey: deviceID)
     }
@@ -588,6 +623,7 @@ struct ROBControlServerStatusSnapshot: Sendable {
         armControllerBridge.stop()
         gripperControllerBridge.stop()
         administratorTerminalCoordinator.stop()
+        remoteDesktopInputCoordinator.stop()
         localLidarIPCServer.stop()
         listener?.stateUpdateHandler = nil
         listener?.newConnectionHandler = nil
@@ -598,6 +634,340 @@ struct ROBControlServerStatusSnapshot: Sendable {
             connection.stop()
         }
         connectionsByID.removeAll()
+    }
+}
+
+// MARK: - Administrator authorization and remote desktop input
+
+enum ROBAdministratorControllerAuthorization {
+    static func isAuthorized(_ controllerID: UUID) -> Bool {
+        let expectedReference = controllerID.uuidString.lowercased()
+        do {
+            return try ROBFaceIdentityGallery.shared.profiles().contains { profile in
+                profile.role == .administrator
+                    && profile.enrollmentIsComplete
+                    && profile.trustedEnrollmentReference
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .lowercased() == expectedReference
+            }
+        } catch {
+            NSLog("Administrator authorization failed because the encrypted face gallery was unavailable: %@",
+                  error.localizedDescription)
+            return false
+        }
+    }
+}
+
+@available(macOS 12.0, *)
+private final class ROBRemoteDesktopInputCoordinator {
+    private struct ControllerState {
+        var networkSessionID: UUID
+        var lastSequence: UInt64
+        var primaryButtonIsDown: Bool
+    }
+
+    private weak var server: AutoNetServer?
+    private var states: [UUID: ControllerState] = [:]
+    private var authorizationCache: [UUID: (allowed: Bool, checkedAt: TimeInterval)] = [:]
+    private var controlSessionObserver: NSObjectProtocol?
+
+    init(server: AutoNetServer) {
+        self.server = server
+        controlSessionObserver = NotificationCenter.default.addObserver(
+            forName: .robControlLiveSessionDidEnd,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let controllerID = notification.userInfo?[
+                ROBControlLiveSessionNotification.controllerIDKey
+            ] as? UUID,
+                  let sessionID = notification.userInfo?[
+                    ROBControlLiveSessionNotification.sessionIDKey
+                  ] as? UUID else { return }
+            self?.stop(controllerID: controllerID, sessionID: sessionID)
+        }
+    }
+
+    deinit {
+        if let controlSessionObserver {
+            NotificationCenter.default.removeObserver(controlSessionObserver)
+        }
+    }
+
+    func claimsProtocol(_ data: Data) -> Bool {
+        ROBRemoteDesktopControlProtocol.claimsProtocol(data)
+    }
+
+    func consumeInbound(
+        _ data: Data,
+        authenticatedControllerID controllerID: UUID,
+        authenticatedSessionID networkSessionID: UUID
+    ) {
+        precondition(Thread.isMainThread, "remote desktop input is main-queue isolated")
+        guard let message = try? ROBRemoteDesktopControlProtocol.decode(data) else {
+            NSLog("Discarded malformed remote-desktop input from %@", controllerID.uuidString)
+            return
+        }
+        guard message.kind != .status else {
+            sendStatus(
+                "DENIED|The controller sent a server-only desktop status message.",
+                sequence: message.sequence,
+                controllerID: controllerID,
+                networkSessionID: networkSessionID
+            )
+            return
+        }
+        guard isAuthorizedAdministrator(controllerID) else {
+            releasePrimaryButton(for: controllerID)
+            states.removeValue(forKey: controllerID)
+            sendStatus(
+                "DENIED|Remote desktop requires a completed Administrator enrollment bound to this paired controller.",
+                sequence: message.sequence,
+                controllerID: controllerID,
+                networkSessionID: networkSessionID
+            )
+            return
+        }
+
+        if message.kind == .start {
+            releasePrimaryButton(for: controllerID)
+            states[controllerID] = ControllerState(
+                networkSessionID: networkSessionID,
+                lastSequence: message.sequence,
+                primaryButtonIsDown: false
+            )
+            requestPermissionsAndReport(
+                sequence: message.sequence,
+                controllerID: controllerID,
+                networkSessionID: networkSessionID
+            )
+            return
+        }
+
+        guard var state = states[controllerID],
+              state.networkSessionID == networkSessionID,
+              message.sequence > state.lastSequence else {
+            sendStatus(
+                "DENIED|Open Admin > Desktop again to establish its authenticated input session.",
+                sequence: message.sequence,
+                controllerID: controllerID,
+                networkSessionID: networkSessionID
+            )
+            return
+        }
+        state.lastSequence = message.sequence
+
+        if message.kind == .stop {
+            states[controllerID] = state
+            releasePrimaryButton(for: controllerID)
+            states.removeValue(forKey: controllerID)
+            return
+        }
+        guard AXIsProcessTrusted() else {
+            states[controllerID] = state
+            sendStatus(
+                "VIEW_ONLY|Grant Cerebro Accessibility access in System Settings to use the mouse and keyboard.",
+                sequence: message.sequence,
+                controllerID: controllerID,
+                networkSessionID: networkSessionID
+            )
+            return
+        }
+
+        let location = desktopPoint(x: message.normalizedX, y: message.normalizedY)
+        switch message.kind {
+        case .pointerMoved:
+            postMouse(
+                state.primaryButtonIsDown ? .leftMouseDragged : .mouseMoved,
+                at: location,
+                button: .left
+            )
+        case .primaryDown:
+            state.primaryButtonIsDown = true
+            postMouse(.leftMouseDown, at: location, button: .left)
+        case .primaryUp:
+            postMouse(.leftMouseUp, at: location, button: .left)
+            state.primaryButtonIsDown = false
+        case .secondaryClick:
+            postMouse(.rightMouseDown, at: location, button: .right)
+            postMouse(.rightMouseUp, at: location, button: .right)
+        case .scroll:
+            postMouse(.mouseMoved, at: location, button: .left)
+            CGEvent(
+                scrollWheelEvent2Source: eventSource(),
+                units: .pixel,
+                wheelCount: 2,
+                wheel1: Int32(message.scrollY),
+                wheel2: Int32(message.scrollX),
+                wheel3: 0
+            )?.post(tap: .cghidEventTap)
+        case .text:
+            if let text = String(data: message.payload, encoding: .utf8) {
+                typeUnicode(text)
+            }
+        case .key:
+            if let key = message.key { postKey(key, modifiers: message.modifiers) }
+        case .start, .stop, .status:
+            break
+        }
+        states[controllerID] = state
+    }
+
+    func stop(controllerID: UUID) {
+        precondition(Thread.isMainThread, "remote desktop input is main-queue isolated")
+        releasePrimaryButton(for: controllerID)
+        states.removeValue(forKey: controllerID)
+        authorizationCache.removeValue(forKey: controllerID)
+    }
+
+    private func stop(controllerID: UUID, sessionID: UUID) {
+        precondition(Thread.isMainThread, "remote desktop input is main-queue isolated")
+        guard states[controllerID]?.networkSessionID == sessionID else { return }
+        releasePrimaryButton(for: controllerID)
+        states.removeValue(forKey: controllerID)
+        authorizationCache.removeValue(forKey: controllerID)
+    }
+
+    func stop() {
+        precondition(Thread.isMainThread, "remote desktop input is main-queue isolated")
+        for controllerID in Array(states.keys) { releasePrimaryButton(for: controllerID) }
+        states.removeAll()
+        authorizationCache.removeAll()
+    }
+
+    private func requestPermissionsAndReport(
+        sequence: UInt64,
+        controllerID: UUID,
+        networkSessionID: UUID
+    ) {
+        let screenCapture = CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess()
+        let prompt = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        let accessibility = AXIsProcessTrusted() || AXIsProcessTrustedWithOptions(prompt)
+        let status: String
+        if screenCapture && accessibility {
+            status = "READY|Cerebro desktop viewing and input control are available."
+        } else if screenCapture {
+            status = "VIEW_ONLY|Screen viewing is available. Grant Cerebro Accessibility access for mouse and keyboard input."
+        } else {
+            status = "DENIED|Grant Cerebro Screen Recording access in System Settings, then restart Cerebro."
+        }
+        sendStatus(
+            status,
+            sequence: sequence,
+            controllerID: controllerID,
+            networkSessionID: networkSessionID
+        )
+    }
+
+    private func isAuthorizedAdministrator(_ controllerID: UUID) -> Bool {
+        let now = ProcessInfo.processInfo.systemUptime
+        if let cached = authorizationCache[controllerID], now - cached.checkedAt < 5 {
+            return cached.allowed
+        }
+        let allowed = ROBAdministratorControllerAuthorization.isAuthorized(controllerID)
+        authorizationCache[controllerID] = (allowed, now)
+        return allowed
+    }
+
+    private func sendStatus(
+        _ text: String,
+        sequence: UInt64,
+        controllerID: UUID,
+        networkSessionID: UUID
+    ) {
+        let message = ROBRemoteDesktopControlMessage(
+            kind: .status,
+            sequence: max(1, sequence),
+            payload: Data(text.prefix(ROBRemoteDesktopControlProtocol.maximumStatusBytes).utf8)
+        )
+        guard let data = try? ROBRemoteDesktopControlProtocol.encode(message) else { return }
+        _ = server?.sendRemoteDesktopControlMessage(
+            data,
+            to: controllerID,
+            sessionID: networkSessionID
+        )
+    }
+
+    private func desktopPoint(x: UInt16, y: UInt16) -> CGPoint {
+        let bounds = CGDisplayBounds(CGMainDisplayID())
+        return CGPoint(
+            x: bounds.minX + CGFloat(x) / CGFloat(UInt16.max) * bounds.width,
+            y: bounds.minY + CGFloat(y) / CGFloat(UInt16.max) * bounds.height
+        )
+    }
+
+    private func eventSource() -> CGEventSource? {
+        CGEventSource(stateID: .combinedSessionState)
+    }
+
+    private func postMouse(_ type: CGEventType, at point: CGPoint, button: CGMouseButton) {
+        CGEvent(
+            mouseEventSource: eventSource(),
+            mouseType: type,
+            mouseCursorPosition: point,
+            mouseButton: button
+        )?.post(tap: .cghidEventTap)
+    }
+
+    private func releasePrimaryButton(for controllerID: UUID) {
+        guard states[controllerID]?.primaryButtonIsDown == true else { return }
+        let point = CGEvent(source: nil)?.location ?? CGPoint.zero
+        postMouse(.leftMouseUp, at: point, button: .left)
+    }
+
+    private func typeUnicode(_ text: String) {
+        let utf16 = Array(text.utf16.prefix(ROBRemoteDesktopControlProtocol.maximumTextBytes))
+        var offset = 0
+        while offset < utf16.count {
+            let end = min(offset + 20, utf16.count)
+            let chunk = Array(utf16[offset..<end])
+            for isDown in [true, false] {
+                guard let event = CGEvent(keyboardEventSource: eventSource(), virtualKey: 0, keyDown: isDown) else {
+                    continue
+                }
+                chunk.withUnsafeBufferPointer { buffer in
+                    if let baseAddress = buffer.baseAddress {
+                        event.keyboardSetUnicodeString(
+                            stringLength: buffer.count,
+                            unicodeString: baseAddress
+                        )
+                    }
+                }
+                event.post(tap: .cghidEventTap)
+            }
+            offset = end
+        }
+    }
+
+    private func postKey(_ key: ROBRemoteDesktopKey, modifiers: UInt8) {
+        let virtualKey: CGKeyCode
+        switch key {
+        case .returnKey: virtualKey = 36
+        case .tab: virtualKey = 48
+        case .delete: virtualKey = 51
+        case .escape: virtualKey = 53
+        case .letterA: virtualKey = 0
+        case .letterC: virtualKey = 8
+        case .letterV: virtualKey = 9
+        case .leftArrow: virtualKey = 123
+        case .rightArrow: virtualKey = 124
+        case .downArrow: virtualKey = 125
+        case .upArrow: virtualKey = 126
+        }
+        var flags: CGEventFlags = []
+        if modifiers & ROBRemoteDesktopControlProtocol.modifierShift != 0 { flags.insert(.maskShift) }
+        if modifiers & ROBRemoteDesktopControlProtocol.modifierControl != 0 { flags.insert(.maskControl) }
+        if modifiers & ROBRemoteDesktopControlProtocol.modifierOption != 0 { flags.insert(.maskAlternate) }
+        if modifiers & ROBRemoteDesktopControlProtocol.modifierCommand != 0 { flags.insert(.maskCommand) }
+        for isDown in [true, false] {
+            guard let event = CGEvent(
+                keyboardEventSource: eventSource(),
+                virtualKey: virtualKey,
+                keyDown: isDown
+            ) else { continue }
+            event.flags = flags
+            event.post(tap: .cghidEventTap)
+        }
     }
 }
 
@@ -928,23 +1298,9 @@ private final class ROBAdministratorTerminalCoordinator {
         if let cached = authorizationCache[controllerID], now - cached.checkedAt < 5 {
             return cached.allowed
         }
-        let expectedReference = controllerID.uuidString.lowercased()
-        do {
-            let allowed = try ROBFaceIdentityGallery.shared.profiles().contains { profile in
-                profile.role == .administrator
-                    && profile.enrollmentIsComplete
-                    && profile.trustedEnrollmentReference
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                        .lowercased() == expectedReference
-            }
-            authorizationCache[controllerID] = (allowed, now)
-            return allowed
-        } catch {
-            NSLog("Administrator terminal denied because the encrypted face gallery was unavailable: %@",
-                  error.localizedDescription)
-            authorizationCache[controllerID] = (false, now)
-            return false
-        }
+        let allowed = ROBAdministratorControllerAuthorization.isAuthorized(controllerID)
+        authorizationCache[controllerID] = (allowed, now)
+        return allowed
     }
 }
 

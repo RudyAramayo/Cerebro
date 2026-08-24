@@ -15,10 +15,13 @@
 		C0D4A0012F00000100000001 /* ROBVideoProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D4B0012F00000100000001 /* ROBVideoProtocol.swift */; };
 		C0D4A0022F00000100000001 /* ROBCameraH264Encoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D4B0022F00000100000001 /* ROBCameraH264Encoder.swift */; };
 		C0D4A0032F00000100000001 /* ROBVideoServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D4B0032F00000100000001 /* ROBVideoServer.swift */; };
+		D4AE00012F51000100000001 /* ROBRemoteDesktopCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4AE00022F51000100000001 /* ROBRemoteDesktopCaptureService.swift */; };
 		C0D5A0012F00000100000001 /* ROBSceneSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D5B0012F00000100000001 /* ROBSceneSnapshot.swift */; };
 		C0D6A0012F00000100000001 /* ROBVisualCalibration.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D6B0012F00000100000001 /* ROBVisualCalibration.swift */; };
 		C0D6A0022F00000100000001 /* ROBChessboardCalibration.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D6B0022F00000100000001 /* ROBChessboardCalibration.swift */; };
 		C0D7A0012F00000100000001 /* ROBAmberB1Kinematics.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D7B0012F00000100000001 /* ROBAmberB1Kinematics.swift */; };
+		C0D8A0012F00000100000001 /* ROBAmberArmReference.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D8B0012F00000100000001 /* ROBAmberArmReference.swift */; };
+		C0D9A0012F00000100000001 /* ROBAmberArmReferenceTransform.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D9B0012F00000100000001 /* ROBAmberArmReferenceTransform.swift */; };
 		C0A8A0012F48000100000001 /* ROBArmControlProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A8B0012F48000100000001 /* ROBArmControlProtocol.swift */; };
 		C0A8A0022F48000100000001 /* ROBArmControllerBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A8B0022F48000100000001 /* ROBArmControllerBridge.swift */; };
 		C0AD01022F49000100000001 /* ROBAmberDiagnosticsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0AD01012F49000100000001 /* ROBAmberDiagnosticsWindowController.swift */; };
@@ -201,10 +204,13 @@
 		C0D4B0012F00000100000001 /* ROBVideoProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBVideoProtocol.swift; sourceTree = "<group>"; };
 		C0D4B0022F00000100000001 /* ROBCameraH264Encoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBCameraH264Encoder.swift; sourceTree = "<group>"; };
 		C0D4B0032F00000100000001 /* ROBVideoServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBVideoServer.swift; sourceTree = "<group>"; };
+		D4AE00022F51000100000001 /* ROBRemoteDesktopCaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRemoteDesktopCaptureService.swift; sourceTree = "<group>"; };
 		C0D5B0012F00000100000001 /* ROBSceneSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBSceneSnapshot.swift; sourceTree = "<group>"; };
 		C0D6B0012F00000100000001 /* ROBVisualCalibration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBVisualCalibration.swift; sourceTree = "<group>"; };
 		C0D6B0022F00000100000001 /* ROBChessboardCalibration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBChessboardCalibration.swift; sourceTree = "<group>"; };
 		C0D7B0012F00000100000001 /* ROBAmberB1Kinematics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAmberB1Kinematics.swift; sourceTree = "<group>"; };
+		C0D8B0012F00000100000001 /* ROBAmberArmReference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAmberArmReference.swift; sourceTree = "<group>"; };
+		C0D9B0012F00000100000001 /* ROBAmberArmReferenceTransform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAmberArmReferenceTransform.swift; sourceTree = "<group>"; };
 		D4066C5622828DA4002ACAD1 /* AudioInputTaskController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = AudioInputTaskController.h; sourceTree = "<group>"; };
 		D4066C5722828DA5002ACAD1 /* AudioInputTaskController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = AudioInputTaskController.m; sourceTree = "<group>"; };
 		D4066C5922828E5F002ACAD1 /* AudioInputTaskController.command */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.sh; path = AudioInputTaskController.command; sourceTree = "<group>"; };
@@ -487,6 +493,7 @@
 				C0D4B0012F00000100000001 /* ROBVideoProtocol.swift */,
 				C0D4B0022F00000100000001 /* ROBCameraH264Encoder.swift */,
 				C0D4B0032F00000100000001 /* ROBVideoServer.swift */,
+				D4AE00022F51000100000001 /* ROBRemoteDesktopCaptureService.swift */,
 				D4A2E9092E7A1D32002B5299 /* KeyframeAnimationManager.swift */,
 				D4A38F5F1FFC06CF00092A46 /* dictation_start.scpt */,
 				D49D755727FFD1AE00142E26 /* AutoNetServer.swift */,
@@ -557,6 +564,8 @@
 				C0D6B0012F00000100000001 /* ROBVisualCalibration.swift */,
 				C0D6B0022F00000100000001 /* ROBChessboardCalibration.swift */,
 				C0D7B0012F00000100000001 /* ROBAmberB1Kinematics.swift */,
+				C0D8B0012F00000100000001 /* ROBAmberArmReference.swift */,
+				C0D9B0012F00000100000001 /* ROBAmberArmReferenceTransform.swift */,
 				D4A38F751FFC8BD300092A46 /* ROBSCNViewController.m */,
 				D4C5252220A65FDD00290BF5 /* ROBConsciousness.h */,
 				D4C5252320A65FDD00290BF5 /* ROBConsciousness.m */,
@@ -832,6 +841,7 @@
 				C0D4A0012F00000100000001 /* ROBVideoProtocol.swift in Sources */,
 				C0D4A0022F00000100000001 /* ROBCameraH264Encoder.swift in Sources */,
 				C0D4A0032F00000100000001 /* ROBVideoServer.swift in Sources */,
+				D4AE00012F51000100000001 /* ROBRemoteDesktopCaptureService.swift in Sources */,
 				D4F642E62325E17F00DF71AE /* ROBNiTEManager.mm in Sources */,
 				D4A38F411FFB2AED00092A46 /* AppDelegate.m in Sources */,
 				D49D755B27FFD1BF00142E26 /* AutoNetDataTransferProtocol.swift in Sources */,
@@ -892,6 +902,8 @@
 				C0D6A0012F00000100000001 /* ROBVisualCalibration.swift in Sources */,
 				C0D6A0022F00000100000001 /* ROBChessboardCalibration.swift in Sources */,
 				C0D7A0012F00000100000001 /* ROBAmberB1Kinematics.swift in Sources */,
+				C0D8A0012F00000100000001 /* ROBAmberArmReference.swift in Sources */,
+				C0D9A0012F00000100000001 /* ROBAmberArmReferenceTransform.swift in Sources */,
 				D4066C5822828DA5002ACAD1 /* AudioInputTaskController.m in Sources */,
 				D4F136752325E39A0084A302 /* VideoEncoder.m in Sources */,
 				D49D755927FFD1AF00142E26 /* AutoNetServer.swift in Sources */,

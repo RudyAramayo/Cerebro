@@ -14,7 +14,7 @@ enum ROBVideoTransport {
     /// One isolated QUIC connection per camera keeps a slow panorama from
     /// adding head-of-line pressure to the driving cameras.
     static let maximumConnections = 8
-    static let maximumConnectionsPerController = 3
+    static let maximumConnectionsPerController = 4
     static let authenticationTimeout: TimeInterval = 5
     static let cameraFrameStallTimeout: TimeInterval = 15
     static let mediaSendTimeout: TimeInterval = 10
@@ -27,6 +27,7 @@ enum ROBVideoTransport {
     static let maximumFramesPerSecond: UInt16 = 20
     static let maximumBitrate: UInt32 = 1_500_000
     static let minimumBitrate: UInt32 = 250_000
+    static let desktopMaximumBitrate: UInt32 = 1_500_000
 }
 
 enum ROBVideoTransportError: LocalizedError {
@@ -646,6 +647,12 @@ final class ROBVideoServer {
     private var listenerStatus = "stopped"
     private var listenerStatusDetail: String?
 
+    private lazy var desktopCapture = ROBRemoteDesktopCaptureService { [weak self] sample, jpeg, width, height in
+        self?.queue.async { [weak self] in
+            self?.offerDesktopFrame(sample, jpeg: jpeg, width: width, height: height)
+        }
+    }
+
     private let offeredSampleLock = NSLock()
     private var latestOfferedSamples: [String: CMSampleBuffer] = [:]
     private var sampleDrainScheduled = false
@@ -935,6 +942,16 @@ final class ROBVideoServer {
                 maximumFramesPerSecond: ROBVideoTransport.maximumFramesPerSecond,
                 maximumBitrate: ROBVideoTransport.maximumBitrate
             ),
+            ROBVideoCameraDescriptor(
+                id: ROBRemoteDesktopCaptureService.cameraID,
+                name: "Cerebro Desktop",
+                supportedCodecs: [.jpeg, .h264],
+                supportedDeliveryModes: [.jpegFrames, .reliableStream],
+                maximumWidth: UInt16(ROBRemoteDesktopCaptureService.maximumWidth),
+                maximumHeight: UInt16(ROBRemoteDesktopCaptureService.maximumHeight),
+                maximumFramesPerSecond: UInt16(ROBRemoteDesktopCaptureService.framesPerSecond),
+                maximumBitrate: ROBVideoTransport.desktopMaximumBitrate
+            ),
         ]
     }
 
@@ -1085,6 +1102,30 @@ final class ROBVideoServer {
         }
     }
 
+    private func offerDesktopFrame(
+        _ sampleBuffer: CMSampleBuffer,
+        jpeg data: Data,
+        width: Int,
+        height: Int
+    ) {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard acceptedCameraIDs.contains(ROBRemoteDesktopCaptureService.cameraID),
+              !data.isEmpty,
+              data.count <= ROBVideoWireLimits.maximumAccessUnitBytes else { return }
+        for connection in connectionsByID.values {
+            connection.offer(
+                cameraID: ROBRemoteDesktopCaptureService.cameraID,
+                sampleBuffer: sampleBuffer
+            )
+            connection.offerJPEG(
+                cameraID: ROBRemoteDesktopCaptureService.cameraID,
+                data: data,
+                width: width,
+                height: height
+            )
+        }
+    }
+
     private static func makeSampleBuffer(fromJPEG data: Data) -> CMSampleBuffer? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
@@ -1163,6 +1204,7 @@ final class ROBVideoServer {
         let changedCameraIDs = activeCameraIDs.symmetricDifference(lastReportedCameraDemand)
         guard !changedCameraIDs.isEmpty else { return }
         lastReportedCameraDemand = activeCameraIDs
+        desktopCapture.setActive(activeCameraIDs.contains(ROBRemoteDesktopCaptureService.cameraID))
         DispatchQueue.main.async {
             for cameraID in changedCameraIDs {
                 NotificationCenter.default.post(
@@ -1208,6 +1250,7 @@ final class ROBVideoServer {
         subscriptionOwners.removeAll()
         readySubscriptionIDs.removeAll()
         updateCameraDemand()
+        desktopCapture.setActive(false)
         publishStatus()
     }
 
@@ -1314,6 +1357,7 @@ private final class ROBVideoServerConnection {
     private var streamLivenessStartedUptime: TimeInterval?
     private var lastProducedFrameUptime: TimeInterval?
     private var lastFeedbackUptime: TimeInterval = 0
+    private var nextJPEGSequence: UInt64 = 1
     private var stopped = false
 
     init(
@@ -1355,6 +1399,46 @@ private final class ROBVideoServerConnection {
             }
         } catch {
             encoderOutputPending = false
+            endStream(reason: error.localizedDescription, notifyPeer: true)
+        }
+    }
+
+    func offerJPEG(cameraID: String, data: Data, width: Int, height: Int) {
+        guard !stopped,
+              let stream = activeStream,
+              stream.cameraID == cameraID,
+              stream.codec == .jpeg,
+              stream.delivery == .jpegFrames,
+              subscriptionIsReady,
+              !mediaSendInFlight,
+              nextJPEGSequence < UInt64.max,
+              width == Int(stream.width),
+              height == Int(stream.height) else { return }
+        do {
+            let nowMilliseconds = Int64(max(0, Date().timeIntervalSince1970 * 1_000))
+            let unit = try ROBVideoEncodedAccessUnit(
+                sessionID: stream.sessionID,
+                id: stream.id,
+                codec: .jpeg,
+                sequence: nextJPEGSequence,
+                captureTimestampUnixMilliseconds: nowMilliseconds,
+                presentationTimestamp: nowMilliseconds,
+                duration: 1,
+                timescale: Int32(stream.framesPerSecond),
+                isKeyFrame: true,
+                codecConfigurationGeneration: 0,
+                nalLengthFieldBytes: 0,
+                payload: data
+            )
+            nextJPEGSequence &+= 1
+            let mediaSendID = beginMediaSend()
+            recordProducedFrame(streamGeneration: streamGeneration)
+            sendAccessUnit(
+                try unit.encodedBinary(),
+                streamGeneration: streamGeneration,
+                mediaSendID: mediaSendID
+            )
+        } catch {
             endStream(reason: error.localizedDescription, notifyPeer: true)
         }
     }
@@ -1676,19 +1760,46 @@ private final class ROBVideoServerConnection {
         }
 
         let camera = server?.advertisedCameras().first { $0.id == request.cameraID }
-        let width = min(
-            request.constraints.maximumWidth,
-            camera?.maximumWidth ?? ROBVideoTransport.maximumWidth
-        ) & ~1
-        let height = min(
-            request.constraints.maximumHeight,
-            camera?.maximumHeight ?? ROBVideoTransport.maximumHeight
-        ) & ~1
+        let isDesktop = request.cameraID == ROBRemoteDesktopCaptureService.cameraID
+        let usesDesktopJPEG = isDesktop && request.delivery == .jpegFrames
+        let width: UInt16
+        let height: UInt16
+        if usesDesktopJPEG {
+            let sourceWidth = max(1, CGDisplayPixelsWide(CGMainDisplayID()))
+            let sourceHeight = max(1, CGDisplayPixelsHigh(CGMainDisplayID()))
+            let maximumWidth = min(
+                Int(request.constraints.maximumWidth),
+                Int(camera?.maximumWidth ?? UInt16(ROBRemoteDesktopCaptureService.maximumWidth))
+            )
+            let maximumHeight = min(
+                Int(request.constraints.maximumHeight),
+                Int(camera?.maximumHeight ?? UInt16(ROBRemoteDesktopCaptureService.maximumHeight))
+            )
+            let scale = min(
+                1,
+                min(Double(maximumWidth) / Double(sourceWidth),
+                    Double(maximumHeight) / Double(sourceHeight))
+            )
+            width = UInt16(max(2, Int(Double(sourceWidth) * scale)) & ~1)
+            height = UInt16(max(2, Int(Double(sourceHeight) * scale)) & ~1)
+        } else {
+            width = min(
+                request.constraints.maximumWidth,
+                camera?.maximumWidth ?? ROBVideoTransport.maximumWidth
+            ) & ~1
+            height = min(
+                request.constraints.maximumHeight,
+                camera?.maximumHeight ?? ROBVideoTransport.maximumHeight
+            ) & ~1
+        }
         let framesPerSecond = min(
             request.constraints.maximumFramesPerSecond,
-            ROBVideoTransport.maximumFramesPerSecond
+            camera?.maximumFramesPerSecond ?? ROBVideoTransport.maximumFramesPerSecond
         )
-        let bitrate = min(request.constraints.maximumBitrate, ROBVideoTransport.maximumBitrate)
+        let bitrate = min(
+            request.constraints.maximumBitrate,
+            camera?.maximumBitrate ?? ROBVideoTransport.maximumBitrate
+        )
         guard width >= 160,
               height >= 90,
               bitrate >= ROBVideoTransport.minimumBitrate else {
@@ -1719,25 +1830,31 @@ private final class ROBVideoServerConnection {
                 sessionID: request.sessionID,
                 id: request.id,
                 cameraID: request.cameraID,
-                codec: .h264,
+                codec: usesDesktopJPEG ? .jpeg : .h264,
                 width: width,
                 height: height,
                 framesPerSecond: framesPerSecond,
                 bitrate: bitrate,
-                delivery: .reliableStream
+                delivery: usesDesktopJPEG ? .jpegFrames : .reliableStream
             )
-            let encoder = try ROBCameraH264Encoder(
-                width: Int(width),
-                height: Int(height),
-                framesPerSecond: Int(framesPerSecond),
-                averageBitrate: bitrate
-            ) { [weak self] output in
-                guard let self, let server = self.server else { return }
-                server.queue.async { [weak self] in
-                    self?.handleEncoderOutput(
-                        output,
-                        streamGeneration: newStreamGeneration
-                    )
+            let encoder: ROBCameraH264Encoder?
+            if usesDesktopJPEG {
+                encoder = nil
+                nextJPEGSequence = 1
+            } else {
+                encoder = try ROBCameraH264Encoder(
+                    width: Int(width),
+                    height: Int(height),
+                    framesPerSecond: Int(framesPerSecond),
+                    averageBitrate: bitrate
+                ) { [weak self] output in
+                    guard let self, let server = self.server else { return }
+                    server.queue.async { [weak self] in
+                        self?.handleEncoderOutput(
+                            output,
+                            streamGeneration: newStreamGeneration
+                        )
+                    }
                 }
             }
             self.encoder = encoder
@@ -1783,8 +1900,24 @@ private final class ROBVideoServerConnection {
         }
         let availableCameraIDs = Set(server?.advertisedCameras().map(\.id) ?? [])
         if !availableCameraIDs.contains(request.cameraID) { return .cameraUnavailable }
-        if !request.preferredCodecs.contains(.h264) { return .codecUnavailable }
-        if request.delivery != .reliableStream { return .deliveryUnavailable }
+        if request.cameraID == ROBRemoteDesktopCaptureService.cameraID {
+            guard let controllerID = authenticatedControllerID,
+                  ROBAdministratorControllerAuthorization.isAuthorized(controllerID),
+                  ROBRemoteDesktopCaptureService.hasScreenCaptureAccess else {
+                return .cameraUnavailable
+            }
+            switch request.delivery {
+            case .jpegFrames:
+                if !request.preferredCodecs.contains(.jpeg) { return .codecUnavailable }
+            case .reliableStream:
+                if !request.preferredCodecs.contains(.h264) { return .codecUnavailable }
+            case .quicDatagrams:
+                return .deliveryUnavailable
+            }
+        } else {
+            if !request.preferredCodecs.contains(.h264) { return .codecUnavailable }
+            if request.delivery != .reliableStream { return .deliveryUnavailable }
+        }
         return nil
     }
 

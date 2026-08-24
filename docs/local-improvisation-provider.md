@@ -175,7 +175,7 @@ Protocol and llama.cpp envelope fixtures:
 swiftc -module-cache-path /tmp/cerebro-swift-module-cache \
   -parse-as-library \
   Cerebro/ROBLocalImprovisationProtocol.swift \
-  Cerebro/ROBLlamaCppImprovisationProvider.swift \
+  Tests/ROBImprovisationProviderFixtureStubs.swift \
   Tests/ROBLocalImprovisationFixtureTests.swift \
   -o /tmp/ROBLocalImprovisationFixtureTests
 

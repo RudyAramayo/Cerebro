@@ -291,12 +291,14 @@ let holdID = ROBAmberGatewayClient.shared.holdCurrentPosition(forArm: "right")
 let deactivateID = ROBAmberGatewayClient.shared.deactivateArm("right")
 ```
 
-Supervised Vision and named-gesture execution use the gateway-owned lease APIs:
+Supervised Vision and named-gesture execution use the referenced,
+gateway-owned lease API. `targetModelRadians` contains physical B1 URDF/model
+angles; both arms' session reference gates must already be ready:
 
 ```swift
-let moveID = ROBAmberGatewayClient.shared.sendLeasedTrajectory(
+let moveID = ROBAmberGatewayClient.shared.sendReferencedLeasedTrajectory(
     arm: "right",
-    positionsRadians: target.map(NSNumber.init(value:)),
+    modelPositionsRadians: targetModelRadians,
     duration: 0.65,
     leaseMilliseconds: 1_000
 )
@@ -425,21 +427,22 @@ authoritative stop.
 The native supervised call is:
 
 ```swift
-let commandID = ROBAmberGatewayClient.shared.sendLeasedTrajectory(
+let commandID = ROBAmberGatewayClient.shared.sendReferencedLeasedTrajectory(
     arm: "right",
-    positionsRadians: target.map(NSNumber.init(value:)),
+    modelPositionsRadians: targetModelRadians,
     duration: 0.65,
     leaseMilliseconds: 1_000
 )
 ```
 
 A return value of zero means the client rejected the request locally. The
-gateway independently enforces seven finite positions, robot-specific joint
-bounds (J1 ±2.4435, J2 ±2.3213, J3–J6 ±2.2863, and J7 ±3.05 radians), a duration
-from 0.65 through 10 seconds, a 700–1,500 ms gateway lease, monotonic command IDs,
-and a fresh heartbeat. The Amber core then applies its own limits and Ruckig
-profile. The non-leased `sendTrajectory` API remains a local diagnostics primitive;
-Vision and approved gestures must use leased execution.
+client first requires a generation-bound physical reference with fresh
+camera/model agreement, validates the seven finite model positions against the
+B1 outer limits, and translates them into the current vendor frame. The gateway
+then independently enforces its raw bounds, a duration from 0.65 through 10
+seconds, a 700–1,500 ms lease, monotonic command IDs, and a fresh heartbeat. The
+Amber core applies its own limits and Ruckig profile. Cerebro intentionally
+exposes no raw-position trajectory method to application code.
 
 ## 11. Characterize speed before modifying limits
 

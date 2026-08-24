@@ -815,21 +815,33 @@ struct ROBVideoEncodedAccessUnit: Equatable {
     }
 
     private func validate() throws {
-        guard codec == .h264 || codec == .hevc,
-              sequence > 0,
+        guard sequence > 0,
               captureTimestampUnixMilliseconds >= 0,
               presentationTimestamp >= 0,
               duration > 0,
               timescale > 0,
               timescale <= 1_000_000_000,
               duration <= Int64(timescale) * 10,
-              codecConfigurationGeneration > 0,
-              [1, 2, 4].contains(nalLengthFieldBytes),
               !payload.isEmpty else {
             throw ROBVideoProtocolError.invalidAccessUnit
         }
         guard payload.count <= ROBVideoWireLimits.maximumAccessUnitBytes else {
             throw ROBVideoProtocolError.oversizedAccessUnit
+        }
+        if codec == .jpeg {
+            guard isKeyFrame,
+                  codecConfigurationGeneration == 0,
+                  nalLengthFieldBytes == 0,
+                  payload.count >= 4,
+                  payload.prefix(2) == Data([0xff, 0xd8]),
+                  payload.suffix(2) == Data([0xff, 0xd9]) else {
+                throw ROBVideoProtocolError.invalidAccessUnit
+            }
+            return
+        }
+        guard codecConfigurationGeneration > 0,
+              [1, 2, 4].contains(nalLengthFieldBytes) else {
+            throw ROBVideoProtocolError.invalidAccessUnit
         }
         let nalTypes = try parseNALUnitTypes()
         let containsKeyFrame: Bool

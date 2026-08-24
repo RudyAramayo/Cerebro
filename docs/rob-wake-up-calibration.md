@@ -12,6 +12,66 @@ local checklist acknowledgements, and sends zero actuator commands. It is the
 place to develop the WALL-E-like timing and personality while each physical
 adapter is being made independently verifiable.
 
+The same workflow is now available from the **Show Mode** window. Its
+**Wake-Up Calibration & Live Startup** card shows the current preflight result,
+opens the full ordered checklist, selects a locally approved two-arm wake
+gesture, and exposes the separate **Run LIVE Startup Test…** action.
+
+## Supported live startup test
+
+The live action is deliberately narrower than the full checklist. It exercises
+everything Cerebro can currently prove through a bounded adapter:
+
+1. Review the first five Wake-Up Calibration steps: physical operator/E-stop
+   safety, authenticated exclusive Amber session, fresh left/right B1
+   telemetry, and fresh deterministic OAK-D/QR visual registration.
+2. Verify both arms are already in position mode. The live workflow never
+   activates an arm or changes its control mode.
+3. In Amber Diagnostics, approve one immutable keyframe containing both arms as
+   the wake gesture. Its targets and durations are copied into the local
+   approved catalog.
+4. Select that gesture in Show Mode. Cerebro preflights gateway state, current
+   modes, telemetry freshness, the 0.35-radian per-joint step limit, and the
+   0.25-radian/second average-speed limit without moving anything.
+5. Choose **Run LIVE Startup Test…**, read the critical warning, and choose the
+   physical-run button. No keyboard entry is required. Cerebro repeats
+   preflight after the modal confirmation.
+6. ROB speaks the live-test announcement and pauses at a final checkpoint.
+   Keep the physical E-stop in hand, clear the exclusion zone, and choose
+   **Continue**.
+7. The fixed sequence submits only the selected immutable two-arm gesture using
+   gateway leases. Completion requires three distinct fresh telemetry samples
+   inside position and velocity tolerances. Only then does ROB speak the passed
+   message.
+
+For a droid with no attached monitor, use **Arm Remote Start (one-shot)…**
+while the same two-arm preflight is ready. This stores only the approved
+gesture name; it is not motion authority. When Cerebro sees a fresh
+authenticated ROBController or ROBControllerVision session advertising
+`run_startup_test`, it sends one immutable request with a 30-second approval
+deadline and consumes the persisted latch. On the controller, explicitly
+enable action proposals and tap **Approve** with the exclusion zone clear and
+the physical E-stop ready. That fresh tap replaces the local GUI checkpoint;
+ROB gives an audible warning and runs the same leased, measured two-arm motion.
+No droid keyboard or display is needed.
+
+Reject, deadline expiry, loss of the approving controller, **Cancel and Hold**
+on the controller, or **STOP + HOLD** in Show Mode prevents or cancels the run
+and requests the existing measured-position hold. The request call ID is
+one-shot and replay-safe: retransmission reports existing state and cannot
+start a second sequence. A rejected or expired request is not automatically
+re-armed.
+
+**STOP + HOLD** cancels the sequence, cancels an active Amber gesture, requests
+the priority measured-position hold for verified position-mode arms, and uses
+the existing Stage Show stop path for speech, autonomy, and base motion. The
+physical E-stop remains the emergency control.
+
+This is not a generic “live” mode for loaded `.robshow.json` documents. Only the
+fixed locally constructed startup sequence receives the one-shot local operator
+context needed to invoke an approved Amber wake gesture. Normal show files
+cannot acquire it.
+
 ## What works now
 
 ### Amber grippers
@@ -48,10 +108,12 @@ a stop.
 Cerebro can verify fresh seven-joint Amber feedback, actuator modes, bounded
 joint targets, gateway leases, and measured settling. Its approved named
 gesture executor is the only current motion adapter that has all of those
-properties. The wake-up dry run therefore checks both B1 telemetry streams and
-the deterministic OAK-D/QR visual-registration snapshot. Camera-frame,
-camera-pose, and arm-pose producer ages must each be no more than 500 ms. The
-workflow does not invent or execute a resting pose.
+properties. It now also has a fail-closed physical reference gate between
+Amber's boot-relative encoder values and Cerebro's B1 URDF angles. The wake-up
+window checks both B1 telemetry streams and the deterministic OAK-D/QR
+visual-registration snapshot. Camera-frame, camera-pose, and arm-pose producer
+ages must each be no more than 500 ms. Reference commissioning and capture are
+read-only; the window does not invent or execute a resting pose.
 
 The repository photo of the current robot shows the B1 arms hanging almost
 vertically beside the torso. Before telemetry arrives, Amber Diagnostics draws
@@ -60,11 +122,21 @@ labeled as a photo-derived visual reference and is never used as feedback or an
 actuator target. There is no checked-in measured seven-angle resting pose, and
 the vendor all-zero command pose is not evidence of ROB's physical rest pose.
 
-To create a real wake pose, place and support each arm in the intended resting
-configuration, use **Capture Left Measured → Keyframe** and
-**Capture Right Measured → Keyframe** in Amber Diagnostics, validate the
-calibrated mount transform and tool endpoint, and approve the result as an
-immutable named gesture. Gemini may
+Before creating a real wake pose, use **Commission Park Geometry…** in Wake-Up
+Calibration to record independently surveyed park angles and verified joint
+direction signs for each arm. Then seat and support one arm in that physical
+fixture and use **Establish Session Reference…**. Cerebro requires a fresh
+authenticated session, a stopped seven-joint sample, uniform verified modes,
+aligned OAK-D/QR geometry, and at least three camera-observed joint angles
+within the commissioned error bound. The derived encoder offset is memory-only
+and expires on reconnect or relaunch.
+
+Once both reference gates are ready, use **Capture Left Measured → Keyframe**
+and **Capture Right Measured → Keyframe** in Amber Diagnostics. Those captures
+are now stored as physical model angles; legacy boot-relative approved gestures
+are isolated under the old catalog version and cannot be executed as referenced
+poses. Validate the calibrated mount transform and tool endpoint, and approve
+the result as an immutable named gesture. Gemini may
 select that local name and narrate the motion; it may not supply joint arrays
 or decide that visual registration succeeded.
 
@@ -72,7 +144,7 @@ or decide that visual registration succeeded.
 
 | Mechanism | Current observation | Bounded stop and measured outcome | Wake-up behavior today |
 | --- | --- | --- | --- |
-| Amber B1 left/right | Seven positions, velocities, currents, statuses, and modes | Available through the named Amber gesture executor | Snapshot/readiness check only until a measured rest/wake gesture is locally approved |
+| Amber B1 left/right | Seven positions, velocities, currents, statuses, modes, session generation, and deterministic visual pose | Available through the referenced, leased named Amber gesture executor | The Show Mode live startup test remains blocked until both per-arm session references pass. A local run uses click-only critical confirmation plus a GUI checkpoint; a monitorless run uses one fresh authenticated controller approval. Both repeat preflight. |
 | Amber grippers | Vendor-core dispatch acknowledgement | No jaw, force, completion, or stop feedback | Calibrate one at a time in Amber Diagnostics; Vision control is then allowed for that gateway session |
 | Tread L/R and brake | Legacy open-loop serial/PWM state | Not available | Listed and execution-disabled |
 | Flipper arm and brake | Legacy open-loop command; feedback path is incomplete | Not available | Listed and execution-disabled |
@@ -95,7 +167,7 @@ adapter defines and tests all of the following:
 - startup, disconnect, stale-feedback, and E-stop behavior; and
 - operator confirmation, audit events, and an offline fake test.
 
-## Proposed Amber B1 reference and startup design
+## Amber B1 reference implementation and remaining startup design
 
 The arm commissioning procedure and the normal power-on procedure are two
 different workflows. Discovering direction, zero, and range is a supervised
@@ -104,11 +176,45 @@ invalidation. A normal power-on must only restore a previously approved
 calibration and run small proof motions. It must never rediscover a hard stop or
 sweep the full arm.
 
-Until this reference gate is implemented and commissioned, the existing Show
-Mode live startup action must remain dry-run for arm motion. Gateway leases,
-fresh telemetry, and measured settling can bound a trajectory in Amber's
-reported coordinate frame, but they cannot prove that the frame corresponds to
-the physical URDF pose.
+The software reference gate is implemented and the existing Show Mode live
+startup action now remains motion-disabled until both arms are commissioned and
+referenced for the current authenticated controller session. Gateway leases,
+fresh telemetry, and measured settling alone are not sufficient. Immediately
+before dispatch, model targets are translated into the current vendor frame;
+measured completion is translated back into the model frame. The executor
+continues checking deterministic camera/model agreement and requests the
+existing priority hold if the gate closes during motion.
+
+This does not claim that missing hardware has been installed. Today the local
+operator's typed fixture confirmation is the primary park-datum assertion, and
+the existing camera fit observes at least three joints but cannot observe the
+final wrist rotation. Commissioned joint directions must therefore come from an
+independent survey and supervised micro-proof, not from one stationary capture.
+Cradle/index switches, orientation-observable wrist markers, signed operating
+ranges, collision checking, and the one-degree joint-proof runner below remain
+required before treating the broader startup sequence as fully commissioned.
+
+### Implemented reference-gate workflow
+
+1. Open **Wake-Up Calibration** and select one arm.
+2. Choose **Commission Park Geometry…**. Enter seven surveyed physical URDF
+   park angles, seven verified `+1`/`-1` encoder signs, a camera disagreement
+   limit, and the typed commissioning phrase. Editing this record invalidates
+   the current session reference.
+3. Seat and support the selected arm in its commissioned physical park fixture,
+   clear the workspace, keep the E-stop reachable, then choose **Establish
+   Session Reference…** and type the arm-specific reference phrase.
+4. Cerebro accepts the reference only with a ready/exclusive authenticated
+   gateway generation, telemetry no older than 250 ms, all seven joints moving
+   no faster than 0.05 rad/s, seven uniformly inactive or position modes, fresh
+   aligned RGB-D/QR geometry, and at least three deterministic joint angles
+   inside the commissioned visual error.
+5. Repeat for the other arm. A reconnect or process restart changes/loses the
+   generation-bound memory-only reference and closes the live-startup gate.
+6. Capture and reapprove the intended gesture after referencing. The executor
+   admits only model-frame targets inside the checked-in B1 outer limits and
+   still enforces its 0.35-radian step, 0.25-rad/s average speed, gateway lease,
+   verified position modes, fresh telemetry, measured settle, and camera veto.
 
 Amber's published B1 instructions require the arm to be at its zero or safe
 posture before power-on. ROB cannot currently satisfy that assumption: without
@@ -362,11 +468,12 @@ stale state, uncalibrated limits, unsafe paths, excessive step/speed, and
 concurrent owners before translating to the current vendor frame. This is what
 prevents a manual joint packet from bypassing over-rotation protection.
 
-## Intended character sequence
+## Character sequence and expansion boundary
 
-The future physical sequence should reuse Cerebro's stage-show coordinator for
-timing, speech, checkpoints, cancellation, and dry runs, while each movement is
-delegated to a typed local adapter:
+The supported live sequence now reuses Cerebro's stage-show coordinator for
+timing, speech, its final checkpoint, cancellation, and dry runs, while the
+physical movement is delegated to the measured Amber gesture adapter. Future
+mechanisms must follow the same shape:
 
 1. ROB greets the operator and waits at a physical E-stop/workspace checkpoint.
 2. Cerebro verifies controller identity, feedback freshness, and subsystem
@@ -386,9 +493,9 @@ own actuation and measured completion.
 
 ## First physical validation
 
-Keep the wake-up plan in dry-run mode until each requested mechanism has its
-adapter. Then validate one mechanism and one small movement at a time with the
-robot supported, the exclusion zone clear, and the physical E-stop in hand.
+Keep each unsupported wake-up mechanism in dry-run/excluded mode until it has
+its adapter. Validate one new mechanism and one small movement at a time with
+the robot supported, the exclusion zone clear, and the physical E-stop in hand.
 Record commanded values, measured values, settle time, cancellation behavior,
 and restart behavior. Only after those tests should a locally approved adapter
 be added to the opt-in character sequence.

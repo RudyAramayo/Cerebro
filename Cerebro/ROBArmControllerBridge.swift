@@ -340,6 +340,20 @@ final class ROBArmControllerBridge {
             )
             return
         }
+        let reference = ROBAmberArmReferenceStore.shared.readiness(
+            forArm: intent.arm.rawValue
+        )
+        guard reference.isReady else {
+            sendAuthorityState(
+                for: intent,
+                recipientID: authenticatedControllerID,
+                sessionID: authenticatedSessionID,
+                state: .rejected,
+                grant: nil,
+                detail: "The physical arm reference gate is closed: \(reference.detail)"
+            )
+            return
+        }
 
         // Never grant a replacement while an earlier authority, trajectory,
         // or named-gesture owner is still present. An asynchronous hold from a
@@ -396,12 +410,21 @@ final class ROBArmControllerBridge {
             && grant?.controllerID == authenticatedControllerID
             && grant?.sessionID == authenticatedSessionID
             && (grant?.expiresAtUptime ?? 0) > uptime
+        let reference = ROBAmberArmReferenceStore.shared.readiness(
+            forArm: target.arm.rawValue
+        )
+        let measuredModelPositions = telemetry.flatMap {
+            ROBAmberArmReferenceStore.shared.modelPositions(
+                fromVendor: $0.positionsRadians,
+                forArm: target.arm.rawValue
+            )
+        }
         let executionContext = ROBArmTargetExecutionContext(
             authenticatedSessionIsCurrent: ROBControlLiveSessionRegistry.isActiveOperator(
                 controllerID: authenticatedControllerID,
                 sessionID: authenticatedSessionID
             ),
-            measuredPositionsRadians: telemetry?.positionsRadians,
+            measuredPositionsRadians: reference.isReady ? measuredModelPositions : nil,
             effectiveTelemetryAgeMilliseconds: telemetry?.effectiveAgeMilliseconds,
             modes: gatewayModes(for: target.arm),
             armHasInFlightTarget: runs[target.arm] != nil
@@ -424,6 +447,14 @@ final class ROBArmControllerBridge {
                 passedExecutionPreflight: false
             )
         }
+        if decision.passedExecutionPreflight, !reference.isReady {
+            decision = ROBArmTargetGateDecision(
+                disposition: .rejectedInvalid,
+                detail: "The physical arm reference gate is closed: \(reference.detail)",
+                advancesSequence: true,
+                passedExecutionPreflight: false
+            )
+        }
         if decision.advancesSequence { lastInboundSequence[key] = target.sequence }
 
         guard decision.passedExecutionPreflight,
@@ -442,9 +473,9 @@ final class ROBArmControllerBridge {
             return
         }
 
-        let commandID = ROBAmberGatewayClient.shared.sendLeasedTrajectory(
+        let commandID = ROBAmberGatewayClient.shared.sendReferencedLeasedTrajectory(
             arm: target.arm.rawValue,
-            positionsRadians: target.positionsRadians.map(NSNumber.init(value:)),
+            modelPositionsRadians: target.positionsRadians,
             duration: target.durationSeconds,
             leaseMilliseconds: target.leaseMilliseconds
         )
@@ -563,15 +594,25 @@ final class ROBArmControllerBridge {
         }
         guard lastTelemetrySequence[arm] != telemetry.sequence else { return }
         let age = telemetry.effectiveSampleAgeMilliseconds
-        guard age.isFinite, age >= 0 else { return }
+        let reference = ROBAmberArmReferenceStore.shared.readiness(forArm: arm.rawValue)
+        guard age.isFinite, age >= 0,
+              reference.isReady,
+              let modelPositions = ROBAmberArmReferenceStore.shared.modelPositions(
+                fromVendor: positions,
+                forArm: arm.rawValue
+              ),
+              let modelVelocities = ROBAmberArmReferenceStore.shared.modelVelocities(
+                fromVendor: velocities,
+                forArm: arm.rawValue
+              ) else { return }
         let now = ROBArmControlWireCodec.currentUnixMilliseconds()
         let message = ROBArmMeasuredState(
             arm: arm,
             sequence: telemetry.sequence,
             sampledAtUnixMilliseconds: now - Int64(age.rounded()),
             sampleAgeMilliseconds: age,
-            positionsRadians: positions,
-            velocitiesRadiansPerSecond: velocities,
+            positionsRadians: modelPositions,
+            velocitiesRadiansPerSecond: modelVelocities,
             currents: telemetry.currents.map(\.doubleValue),
             statuses: telemetry.statuses.map(\.doubleValue),
             modes: gatewayModes(for: arm)
@@ -588,7 +629,21 @@ final class ROBArmControllerBridge {
               telemetry.sequence != run.lastEvaluatedTelemetrySequence,
               telemetry.effectiveAgeMilliseconds <= 250 else { return }
         run.lastEvaluatedTelemetrySequence = telemetry.sequence
-        let errors = zip(telemetry.positionsRadians, run.target.positionsRadians)
+        let reference = ROBAmberArmReferenceStore.shared.readiness(forArm: arm.rawValue)
+        guard reference.isReady,
+              let measuredModel = ROBAmberArmReferenceStore.shared.modelPositions(
+                fromVendor: telemetry.positionsRadians,
+                forArm: arm.rawValue
+              ) else {
+            requestRunHold(
+                arm: arm,
+                run: run,
+                disposition: .failed,
+                detail: "The physical arm reference gate closed during motion: \(reference.detail)"
+            )
+            return
+        }
+        let errors = zip(measuredModel, run.target.positionsRadians)
             .map { abs($0 - $1) }
         let maximumError = errors.max() ?? .infinity
         run.largestObservedError = max(run.largestObservedError, maximumError)
@@ -607,7 +662,7 @@ final class ROBArmControllerBridge {
             executionEligible: true,
             terminal: true,
             detail: "Amber reached the requested pose and settled in fresh measured feedback.",
-            measuredPositionsRadians: telemetry.positionsRadians,
+            measuredPositionsRadians: measuredModel,
             maximumErrorRadians: maximumError
         )
         finishRun(arm, expectedOwnerID: run.ownerID)
@@ -651,8 +706,14 @@ final class ROBArmControllerBridge {
 
         guard operation == "priority_hold",
               let pending = pendingHolds.removeValue(forKey: commandID) else { return }
-        let positions = (notification.userInfo?["capturedPositionsRadians"] as? [Double])
+        let vendorPositions = (notification.userInfo?["capturedPositionsRadians"] as? [Double])
             ?? latestTelemetry[pending.arm]?.positionsRadians
+        let positions = vendorPositions.flatMap {
+            ROBAmberArmReferenceStore.shared.modelPositions(
+                fromVendor: $0,
+                forArm: pending.arm.rawValue
+            )
+        }
         let holdConfirmed = notification.userInfo?["holdConfirmed"] as? Bool == true
         if accepted && holdConfirmed {
             sendDisposition(
@@ -706,16 +767,21 @@ final class ROBArmControllerBridge {
                 controllerID: grant.controllerID,
                 sessionID: grant.sessionID
             )
-            guard uptime >= grant.expiresAtUptime || !sessionActive else { continue }
+            let reference = ROBAmberArmReferenceStore.shared.readiness(forArm: arm.rawValue)
+            guard uptime >= grant.expiresAtUptime || !sessionActive || !reference.isReady else {
+                continue
+            }
             grants.removeValue(forKey: arm)
             if let run = runs[arm] {
                 requestRunHold(
                     arm: arm,
                     run: run,
                     disposition: .cancelledHeld,
-                    detail: sessionActive
-                        ? "Vision arm authority expired; Amber held the measured pose."
-                        : "The authenticated Vision session ended; Amber held the measured pose."
+                    detail: !reference.isReady
+                        ? "The physical arm reference gate closed; Amber held the measured pose: \(reference.detail)"
+                        : sessionActive
+                            ? "Vision arm authority expired; Amber held the measured pose."
+                            : "The authenticated Vision session ended; Amber held the measured pose."
                 )
             } else {
                 _ = ROBAmberGatewayClient.shared.priorityHold(forArm: arm.rawValue)
@@ -741,6 +807,16 @@ final class ROBArmControllerBridge {
                     run: run,
                     disposition: .cancelledHeld,
                     detail: "The authenticated Vision session ended; Amber held the measured pose."
+                )
+                continue
+            }
+            let reference = ROBAmberArmReferenceStore.shared.readiness(forArm: arm.rawValue)
+            guard reference.isReady else {
+                requestRunHold(
+                    arm: arm,
+                    run: run,
+                    disposition: .cancelledHeld,
+                    detail: "The physical arm reference gate closed; Amber hold requested: \(reference.detail)"
                 )
                 continue
             }
@@ -827,6 +903,12 @@ final class ROBArmControllerBridge {
         detail: String
     ) {
         let telemetry = latestTelemetry[intent.arm]
+        let baseline = telemetry.flatMap {
+            ROBAmberArmReferenceStore.shared.modelPositions(
+                fromVendor: $0.positionsRadians,
+                forArm: intent.arm.rawValue
+            )
+        }
         let message = ROBArmAuthorityStateEnvelope(
             requestMessageID: intent.messageID,
             recipientID: recipientID,
@@ -836,7 +918,7 @@ final class ROBArmControllerBridge {
             authorityID: grant?.id,
             expiresAtUnixMilliseconds: grant?.expiresAtUnixMilliseconds ?? 0,
             detail: detail,
-            baselinePositionsRadians: grant == nil ? [] : telemetry?.positionsRadians ?? [],
+            baselinePositionsRadians: grant == nil ? [] : baseline ?? [],
             baselineSequence: grant == nil ? 0 : telemetry?.sequence ?? 0,
             modes: grant == nil ? [] : gatewayModes(for: intent.arm)
         )

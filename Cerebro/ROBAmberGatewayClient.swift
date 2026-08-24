@@ -410,6 +410,10 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
     public private(set) var rightTargetPositionsRadians: [NSNumber] = []
     public private(set) var exclusiveControllerSession = false
 
+    // Monotonic process-local identity for authenticated controller sessions.
+    // A reference captured before reconnect must never authorize a later boot.
+    private var authenticatedSessionGeneration: UInt64 = 0
+
     private static let protocolName = "rob-amber-gateway/1"
     private static let maximumLineBytes = 16_384
     private static let heartbeatInterval: TimeInterval = 1
@@ -477,41 +481,54 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         queue.async { self.disconnectOnQueue(detail: "Disconnected") }
     }
 
-    @discardableResult
-    public func sendTrajectory(arm: String, positionsRadians: [NSNumber],
-                               duration: TimeInterval) -> UInt64 {
-        let commandID = queue.sync { () -> UInt64 in
-            guard state == .ready, ["left", "right"].contains(arm),
-                  positionsRadians.count == 7,
-                  zip(positionsRadians, Self.jointBoundsRadians).allSatisfy({ value, bounds in
-                      value.doubleValue.isFinite && bounds.contains(value.doubleValue)
-                  }),
-                  nextCommandID <= UInt64(UInt32.max),
-                  duration.isFinite, (0.65 ... 10).contains(duration) else { return 0 }
-            let commandID = nextCommandID
-            nextCommandID &+= 1
-            send(ROBAmberGatewayMessage(
-                type: "trajectory", commandID: commandID, arm: arm,
-                positionsRadians: positionsRadians.map(\.doubleValue), durationSeconds: duration
-            ))
-            return commandID
-        }
-        return commandID
-    }
-
     /// Sends a controller trajectory guarded by the Ubuntu gateway's own
-    /// monotonic lease. This is the only trajectory API used by Vision Pro;
-    /// expiry or loss of Cerebro's gateway session independently requests a
-    /// measured-position hold on the Ubuntu host.
+    /// monotonic lease. Callers supply physical B1 model angles; the active
+    /// reference gate performs the only permitted conversion to Amber's raw
+    /// boot frame. No raw-position trajectory API is exposed to app code.
     @discardableResult
-    public func sendLeasedTrajectory(
+    public func sendReferencedLeasedTrajectory(
         arm: String,
-        positionsRadians: [NSNumber],
+        modelPositionsRadians: [Double],
         duration: TimeInterval,
         leaseMilliseconds: UInt32
     ) -> UInt64 {
+        guard Thread.isMainThread else {
+            return DispatchQueue.main.sync {
+                sendReferencedLeasedTrajectory(
+                    arm: arm,
+                    modelPositionsRadians: modelPositionsRadians,
+                    duration: duration,
+                    leaseMilliseconds: leaseMilliseconds
+                )
+            }
+        }
+        let reference = ROBAmberArmReferenceStore.shared.readiness(forArm: arm)
+        guard reference.isReady,
+              let vendorTarget = ROBAmberArmReferenceStore.shared.vendorTargetSnapshot(
+                fromModel: modelPositionsRadians,
+                forArm: arm
+              ) else { return 0 }
+        return sendVendorLeasedTrajectory(
+            arm: arm,
+            positionsRadians: vendorTarget.positionsRadians.map(NSNumber.init(value:)),
+            duration: duration,
+            leaseMilliseconds: leaseMilliseconds,
+            expectedSessionGeneration: vendorTarget.gatewaySessionGeneration
+        )
+    }
+
+    @discardableResult
+    private func sendVendorLeasedTrajectory(
+        arm: String,
+        positionsRadians: [NSNumber],
+        duration: TimeInterval,
+        leaseMilliseconds: UInt32,
+        expectedSessionGeneration: UInt64
+    ) -> UInt64 {
         queue.sync {
             guard state == .ready, ["left", "right"].contains(arm),
+                  expectedSessionGeneration > 0,
+                  authenticatedSessionGeneration == expectedSessionGeneration,
                   positionsRadians.count == 7,
                   zip(positionsRadians, Self.jointBoundsRadians).allSatisfy({ value, bounds in
                       value.doubleValue.isFinite && bounds.contains(value.doubleValue)
@@ -640,6 +657,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                 "state": NSNumber(value: state.rawValue),
                 "detail": stateDetail,
                 "exclusiveControllerSession": NSNumber(value: exclusiveControllerSession),
+                "sessionGeneration": NSNumber(value: authenticatedSessionGeneration),
             ]
         }
     }
@@ -988,6 +1006,10 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                 return
             }
             exclusiveControllerSession = true
+            authenticatedSessionGeneration &+= 1
+            if authenticatedSessionGeneration == 0 {
+                authenticatedSessionGeneration = 1
+            }
             resetGripperStates(
                 detail: "Gateway ready; calibration is required for this session"
             )

@@ -58,7 +58,7 @@ def main() -> None:
     # The main workspace has a permanent link. Development-mode camera
     # diagnostics may reuse it, but the link itself must remain unrestricted.
     require(
-        'buttonWithTitle:@"Camera Capture"' in MAIN
+        'initWithTitle:@"Camera Capture"' in MAIN
         and "action:@selector(showCameraCapture:)" in MAIN
         and 'setAccessibilityIdentifier:@"ROB.MainWorkspace.CameraCapture"' in MAIN,
         "Main workspace no longer links to Camera Capture",

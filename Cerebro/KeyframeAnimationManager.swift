@@ -108,12 +108,18 @@ extension Notification.Name {
     public func captureCurrentAmberPose(forArm arm: String) -> Bool {
         let normalizedArm = arm.lowercased()
         guard ["left", "right"].contains(normalizedArm) else { return false }
+        guard ROBAmberArmReferenceStore.shared.readiness(forArm: normalizedArm).isReady else {
+            return false
+        }
         let telemetry = ROBAmberGatewayClient.shared.telemetry(forArm: normalizedArm)
         guard let telemetry,
               telemetry.effectiveSampleAgeMilliseconds.isFinite,
               telemetry.effectiveSampleAgeMilliseconds <= 250,
               telemetry.positionsRadians.count == 7 else { return false }
-        let positions = telemetry.positionsRadians.map(\.doubleValue)
+        guard let positions = ROBAmberArmReferenceStore.shared.modelPositions(
+            fromVendor: telemetry.positionsRadians.map(\.doubleValue),
+            forArm: normalizedArm
+        ) else { return false }
         guard positions.allSatisfy(\.isFinite), let keyframe = currentAnimation?.currentKeyframe else {
             return false
         }
@@ -160,7 +166,9 @@ private struct ROBAmberApprovedGesture: Codable {
 @objcMembers public final class ROBAmberGestureCatalog: NSObject {
     public static let shared = ROBAmberGestureCatalog()
 
-    private static let defaultsKey = "ROBAmberApprovedGestureCatalog.v1"
+    // v2 positions are physical URDF/model angles. v1 stored boot-relative
+    // vendor values and must never be reinterpreted after a session reference.
+    private static let defaultsKey = "ROBAmberApprovedGestureCatalog.v2"
     private let lock = NSLock()
     private var gestures: [String: ROBAmberApprovedGesture] = [:]
 
@@ -328,6 +336,7 @@ private struct ROBAmberApprovedGesture: Codable {
 private enum ROBAmberGestureAuthoritySource {
     case geminiDebug
     case controllerApprovedOneShot
+    case localOperatorConfirmedOneShot
 
     var requiresGeminiDebugAuthority: Bool {
         self == .geminiDebug
@@ -371,9 +380,10 @@ private final class ROBAmberGestureRun {
 }
 
 /// Executes only immutable named poses copied into ROBAmberGestureCatalog.
-/// Gemini never supplies joint values. Both the Gemini-debug and controller-
-/// approved one-shot lanes deliberately limit each joint to a small step and
-/// verify the physical outcome using measured telemetry before completion.
+/// Gemini never supplies joint values. The Gemini-debug, controller-approved,
+/// and locally confirmed startup lanes deliberately limit each joint to a small
+/// step and verify the physical outcome using measured telemetry before
+/// completion.
 @objcMembers public final class ROBAmberGestureExecutor: NSObject {
     public static let shared = ROBAmberGestureExecutor()
 
@@ -454,6 +464,66 @@ private final class ROBAmberGestureRun {
             authoritySource: .controllerApprovedOneShot,
             completion: completion
         )
+    }
+
+    /// Executes one immutable gesture under the authority of a local, critical
+    /// operator confirmation. Callers must not expose this as a generic show
+    /// runner: it exists for Cerebro's fixed live startup sequence, and all
+    /// gateway, mode, freshness, step, speed, lease, stop, and measured-outcome
+    /// checks remain active.
+    @objc(executeLocallyConfirmedGesture:completion:)
+    public func executeLocallyConfirmedGesture(
+        _ name: String,
+        completion: @escaping (NSDictionary) -> Void
+    ) {
+        executeGesture(
+            name,
+            authoritySource: .localOperatorConfirmedOneShot,
+            completion: completion
+        )
+    }
+
+    /// Performs every deterministic start check available before arm ownership
+    /// is reserved. Execution repeats these checks immediately before dispatch,
+    /// closing the operator-confirmation race without turning preflight into
+    /// authority.
+    @objc(preflightLocallyConfirmedGesture:)
+    public func preflightLocallyConfirmedGesture(_ name: String) -> NSDictionary {
+        if !Thread.isMainThread {
+            return DispatchQueue.main.sync { preflightLocallyConfirmedGesture(name) }
+        }
+        guard run == nil else {
+            return [
+                "status": "blocked",
+                "detail": "Another Amber gesture is already executing.",
+            ]
+        }
+        guard ROBAmberGatewayClient.shared.isReady() else {
+            return [
+                "status": "blocked",
+                "detail": "The authenticated Amber gateway is not ready.",
+            ]
+        }
+        guard let gesture = ROBAmberGestureCatalog.shared.snapshot(named: name) else {
+            return [
+                "status": "blocked",
+                "detail": "Select an immutable locally approved wake gesture.",
+            ]
+        }
+        var targets: [String: ROBAmberApprovedArmTarget] = [:]
+        if let left = gesture.left { targets["left"] = left }
+        if let right = gesture.right { targets["right"] = right }
+        for (arm, target) in targets.sorted(by: { $0.key < $1.key }) {
+            if let rejection = validateStart(arm: arm, target: target) {
+                return ["status": "blocked", "detail": rejection]
+            }
+        }
+        return [
+            "status": "ready",
+            "detail": "The immutable gesture passed the per-session arm reference, camera agreement, gateway, mode, telemetry, step, and speed checks. Execution will recheck them.",
+            "gesture": gesture.name,
+            "arms": targets.keys.sorted(),
+        ]
     }
 
     private func executeGesture(
@@ -551,9 +621,17 @@ private final class ROBAmberGestureRun {
                 ], requestHold: true)
                 return
             }
-            let commandID = ROBAmberGatewayClient.shared.sendLeasedTrajectory(
+            let reference = ROBAmberArmReferenceStore.shared.readiness(forArm: arm)
+            guard reference.isReady else {
+                finish([
+                    "status": "failed",
+                    "detail": "The \(arm) arm reference gate closed before transmission: \(reference.detail)",
+                ], requestHold: true)
+                return
+            }
+            let commandID = ROBAmberGatewayClient.shared.sendReferencedLeasedTrajectory(
                 arm: arm,
-                positionsRadians: target.positionsRadians.map(NSNumber.init(value:)),
+                modelPositionsRadians: target.positionsRadians,
                 duration: target.durationSeconds,
                 leaseMilliseconds: Self.gatewayLeaseMilliseconds
             )
@@ -627,6 +705,10 @@ private final class ROBAmberGestureRun {
         target: ROBAmberApprovedArmTarget
     ) -> String? {
         let client = ROBAmberGatewayClient.shared
+        let reference = ROBAmberArmReferenceStore.shared.readiness(forArm: arm)
+        guard reference.isReady else {
+            return "The \(arm) arm reference gate is closed: \(reference.detail)"
+        }
         guard let telemetry = client.telemetry(forArm: arm),
               telemetry.sequence > 0,
               telemetry.effectiveSampleAgeMilliseconds.isFinite,
@@ -638,7 +720,12 @@ private final class ROBAmberGestureRun {
         guard modes.count == 7, modes.allSatisfy({ $0 == 2 }) else {
             return "The \(arm) arm is not verified in position mode."
         }
-        let measured = telemetry.positionsRadians.map(\.doubleValue)
+        guard let measured = ROBAmberArmReferenceStore.shared.modelPositions(
+            fromVendor: telemetry.positionsRadians.map(\.doubleValue),
+            forArm: arm
+        ) else {
+            return "The \(arm) telemetry could not be mapped through the active session reference."
+        }
         let deltas = zip(measured, target.positionsRadians).map { abs($0 - $1) }
         guard let largestDelta = deltas.max(),
               largestDelta <= Self.maximumStepRadians else {
@@ -746,6 +833,14 @@ private final class ROBAmberGestureRun {
         guard current.acknowledgedCommands.count == current.commandArms.count else { return }
 
         for arm in current.targets.keys {
+            let reference = ROBAmberArmReferenceStore.shared.readiness(forArm: arm)
+            guard reference.isReady else {
+                finish([
+                    "status": "failed",
+                    "detail": "The \(arm) arm reference gate closed during motion: \(reference.detail)",
+                ], requestHold: true)
+                return
+            }
             let modes = ROBAmberGatewayClient.shared.modes(forArm: arm).map(\.intValue)
             guard modes.count == 7, modes.allSatisfy({ $0 == 2 }) else {
                 finish([
@@ -780,10 +875,17 @@ private final class ROBAmberGestureRun {
                 return
             }
             observedSequences[arm] = telemetry.sequence
-            let errors = zip(
-                telemetry.positionsRadians.map(\.doubleValue),
-                target.positionsRadians
-            ).map { abs($0 - $1) }
+            guard let measuredModel = ROBAmberArmReferenceStore.shared.modelPositions(
+                fromVendor: telemetry.positionsRadians.map(\.doubleValue),
+                forArm: arm
+            ) else {
+                finish([
+                    "status": "failed",
+                    "detail": "The \(arm) telemetry lost its active session reference.",
+                ], requestHold: true)
+                return
+            }
+            let errors = zip(measuredModel, target.positionsRadians).map { abs($0 - $1) }
             let velocities = telemetry.velocitiesRadiansPerSecond.map { abs($0.doubleValue) }
             currentMaximumError = max(currentMaximumError, errors.max() ?? .infinity)
             if !errors.allSatisfy({ $0 <= Self.positionToleranceRadians }) ||

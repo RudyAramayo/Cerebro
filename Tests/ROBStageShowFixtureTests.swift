@@ -141,6 +141,7 @@ struct ROBStageShowFixtureTests {
         try testUnknownHardwareFieldsAreRejected()
         try testCueValidationAndLimits()
         try testDryRunHasNoSideEffects()
+        try testOperatorConfirmedLiveStartupSequence()
         try testOfflineAndAdaptiveFallbacks()
         try testLocalProviderPreflight()
         try testLocalDirectorRoutes()
@@ -246,6 +247,86 @@ struct ROBStageShowFixtureTests {
         try expect(delegate.geminiPrompts.isEmpty, "Dry run emitted a Gemini request")
         try expect(delegate.gestures.isEmpty, "Dry run emitted a gesture request")
         try expect(localProvider.requestCount == 0, "Dry run emitted a local model request")
+    }
+
+    private static func testOperatorConfirmedLiveStartupSequence() throws {
+        let gestureName = "startup.wake-both"
+        let sample = ROBStageShowSamples.liveStartupTest(gestureName: gestureName)
+        try ROBStageShowCodec.validate(sample)
+        try expect(
+            sample.cues.map(\.kind) == [.speak, .checkpoint, .playGesture, .speak],
+            "Live startup lost its speech/checkpoint/measured-gesture sequence"
+        )
+        try expect(
+            sample.cues[2].gesture == gestureName && sample.cues[2].required,
+            "Live startup did not bind its one required immutable gesture"
+        )
+
+        let coordinator = ROBStageShowCoordinator()
+        let delegate = FakeStageDelegate()
+        delegate.gestureSucceeds = true
+        coordinator.delegate = delegate
+        try coordinator.startLiveStartupTest(gestureName: gestureName)
+        try expect(coordinator.isRunning, "Live startup did not pause for its final checkpoint")
+        try expect(coordinator.state == "paused", "Live startup bypassed its final checkpoint")
+        try expect(
+            coordinator.liveStartupGestureName == gestureName,
+            "Fixed live startup did not carry its one-shot gesture context"
+        )
+        try expect(delegate.gestures.isEmpty, "Live gesture was requested before checkpoint release")
+
+        coordinator.continueAfterCheckpoint()
+        try expect(!coordinator.isRunning, "Successful live startup did not complete")
+        try expect(coordinator.state == "completed", "Successful live startup was not terminal")
+        try expect(delegate.gestures == [gestureName], "Live startup requested the wrong gesture")
+        try expect(delegate.spoken.count == 2, "Live startup did not exercise audible start and completion")
+        try expect(
+            coordinator.liveStartupGestureName == nil,
+            "Live startup one-shot context survived completion"
+        )
+
+        let cancelledCoordinator = ROBStageShowCoordinator()
+        let cancelledDelegate = FakeStageDelegate()
+        cancelledCoordinator.delegate = cancelledDelegate
+        try cancelledCoordinator.startLiveStartupTest(gestureName: gestureName)
+        cancelledCoordinator.cancel(reason: "fixture live stop")
+        try expect(cancelledDelegate.stopCount == 1, "Live startup cancellation did not request stop")
+        try expect(
+            cancelledCoordinator.liveStartupGestureName == nil,
+            "Live startup one-shot context survived cancellation"
+        )
+
+        let remoteSample = ROBStageShowSamples.controllerAuthorizedLiveStartupTest(
+            gestureName: gestureName
+        )
+        try ROBStageShowCodec.validate(remoteSample)
+        try expect(
+            remoteSample.cues.map(\.kind) == [.speak, .playGesture, .speak],
+            "Controller-authorized startup must not wait on a droid GUI checkpoint"
+        )
+        let remoteCoordinator = ROBStageShowCoordinator()
+        let remoteDelegate = FakeStageDelegate()
+        remoteDelegate.gestureSucceeds = true
+        remoteCoordinator.delegate = remoteDelegate
+        try remoteCoordinator.startControllerAuthorizedLiveStartupTest(
+            gestureName: gestureName
+        )
+        try expect(!remoteCoordinator.isRunning, "Remote fixed startup did not complete")
+        try expect(remoteCoordinator.state == "completed", "Remote startup was not terminal")
+        try expect(remoteDelegate.gestures == [gestureName], "Remote startup requested the wrong gesture")
+        try expect(remoteDelegate.spoken.count == 2, "Remote startup lost an audible boundary")
+        try expect(
+            remoteCoordinator.liveStartupGestureName == nil
+                && !remoteCoordinator.liveStartupIsControllerAuthorized,
+            "Remote one-shot authority survived completion"
+        )
+
+        try cancelledCoordinator.load(sample)
+        cancelledCoordinator.start(mode: .dryRun)
+        try expect(
+            cancelledCoordinator.liveStartupGestureName == nil,
+            "An ordinary loaded show acquired live-startup gesture authority"
+        )
     }
 
     private static func testOfflineAndAdaptiveFallbacks() throws {

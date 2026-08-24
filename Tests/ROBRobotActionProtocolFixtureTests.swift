@@ -328,6 +328,32 @@ struct ROBRobotActionProtocolFixtureTests {
             stopWithUnknownKey.validationError != nil,
             "stop_motion accepted an unknown argument"
         )
+
+        let startup = ROBRobotActionMessage.actionRequest(
+            callID: "headless-startup-1",
+            action: "run_startup_test",
+            arguments: ["gesture": "startup.wake-both"],
+            senderID: "cerebro-1",
+            recipientID: "controller-1",
+            expiresAt: Date(timeIntervalSinceNow: 30)
+        )
+        try expect(startup.validationError == nil, "Fixed startup request was rejected")
+        let startupDecoded = try roundTrip(startup)
+        try expect(
+            startupDecoded.action == "run_startup_test"
+                && startupDecoded.arguments["gesture"] as? String == "startup.wake-both",
+            "Fixed startup request changed across the wire"
+        )
+
+        let unsafeStartup = ROBRobotActionMessage.actionRequest(
+            callID: "headless-startup-unsafe",
+            action: "run_startup_test",
+            arguments: ["gesture": "startup.wake-both", "positions_rad": [0.0]],
+            senderID: "cerebro-1",
+            recipientID: "controller-1",
+            expiresAt: Date(timeIntervalSinceNow: 30)
+        )
+        try expect(unsafeStartup.validationError != nil, "Startup accepted raw joint data")
     }
 
     private static func testOversizedPayloadsAreRejected() throws {
@@ -385,7 +411,8 @@ struct ROBRobotActionProtocolFixtureTests {
             #"{"action":"stop_motion","arguments":{},"comment":"please"}"#,
             #"{"action":"stop_motion","arguments":{"surprise":true}}"#,
             #"```json\n{"action":"stop_motion","arguments":{}}\n```"#,
-            #"{"action":"navigate_relative","arguments":{"distance_m":8,"yaw_rad":0,"speed_scale":1}}"#
+            #"{"action":"navigate_relative","arguments":{"distance_m":8,"yaw_rad":0,"speed_scale":1}}"#,
+            #"{"action":"run_startup_test","arguments":{"gesture":"startup.wake-both"}}"#
         ]
         for document in rejected {
             var wasRejected = false
