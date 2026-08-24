@@ -121,8 +121,8 @@ static BOOL ROBNeckConservativeUnknownPanBounds(
 {
     if (configuration == NULL || boundsOut == NULL) return NO;
     ROBNeckSafetyPanBounds unknownBounds = {0};
-    ROBNeckSafetyPanBounds backwardBounds = {0};
-    ROBNeckSafetyPanBounds forwardBounds = {0};
+    ROBNeckSafetyPanBounds restrictedBounds = {0};
+    ROBNeckSafetyPanBounds fullBounds = {0};
     if (!ROBNeckSafetyAllowedPanBounds(
             configuration,
             ROBNeckSafetyTargetOff,
@@ -131,19 +131,19 @@ static BOOL ROBNeckConservativeUnknownPanBounds(
         || !ROBNeckSafetyAllowedPanBounds(
             configuration,
             configuration->lowerMinimumTarget,
-            &backwardBounds
+            &restrictedBounds
         )
         || !ROBNeckSafetyAllowedPanBounds(
             configuration,
-            configuration->lowerForwardRestrictedTarget,
-            &forwardBounds
+            ROBNeckSafetyFullPanLowerThresholdTarget,
+            &fullBounds
         )) {
         return NO;
     }
     ROBNeckSafetyPanBounds knownExtremes = {0};
     if (!ROBNeckPanBoundsIntersect(
-            backwardBounds,
-            forwardBounds,
+            restrictedBounds,
+            fullBounds,
             &knownExtremes
         )) {
         return NO;
@@ -466,9 +466,9 @@ typedef enum : NSUInteger {
         configuration.cameraLevelingEnabled =
             [saved[@"cameraLevelingEnabled"] boolValue];
     } else {
-        // V3 widens the verified full-pan band. Adopt it for migrated settings
-        // only when it fits the preserved lower hard stops; otherwise retain
-        // the legacy band and let normal validation decide its safety.
+        // Preserve V3's widened legacy band for migrated settings when it fits
+        // the lower hard stops. Upright leveling now uses the fixed Maestro 24
+        // target in ROBNeckSafetyPolicy.
         const int32_t shippedFullPanLowTarget = 5300;
         const int32_t shippedFullPanHighTarget = 6822;
         BOOL shippedFullPanBandFits =
@@ -480,9 +480,9 @@ typedef enum : NSUInteger {
             configuration.lowerFullPanHighTarget = shippedFullPanHighTarget;
         }
 
-        // Any lower target above 6822 must use the tight forward envelope.
-        // Adopt that boundary when it fits the preserved hard stops, or use
-        // the forward hard stop as a final valid transition endpoint.
+        // Preserve V3's serialized legacy anchor when it fits the hard stops.
+        // Known-position pan clearance now uses the fixed Maestro 24 threshold
+        // in ROBNeckSafetyPolicy; this value remains for V3 compatibility.
         const int32_t shippedForwardAnchor = 6823;
         configuration.lowerForwardRestrictedTarget =
             shippedForwardAnchor > configuration.lowerFullPanHighTarget
@@ -495,7 +495,7 @@ typedef enum : NSUInteger {
         self.neckSafetyCalibrationConfirmed = NO;
         return ROBNeckSafetyDefaultConfig();
     }
-    // V1/V2 never confirmed the widened full-pan band or leveling toggle.
+    // V1/V2 never confirmed the widened legacy band or leveling toggle.
     // Preserve compatible calibration fields, but require V3 confirmation.
     self.neckSafetyCalibrationConfirmed = storedVersion == 3
         && [saved[@"calibrationConfirmed"] boolValue];
@@ -716,7 +716,7 @@ typedef enum : NSUInteger {
     self.actualSpeedL = 0;
     self.actualSpeedR = 0;
     self.lastVisionNeckPanTarget = 6000;
-    self.lastVisionNeckTiltTarget = 6045;
+    self.lastVisionNeckTiltTarget = ROBNeckSafetyUprightUpperTarget;
     self.activeNeckSafetyConfiguration = [self loadNeckSafetyConfiguration];
     [self invalidateNeckCommandStateWithStatus:@"No neck target has been sent; physical pose is unknown."];
     self.neckCommandSource = @"None";
@@ -2412,7 +2412,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         } else if (self.commandedUpperNeckTiltTarget != ROBNeckSafetyTargetOff) {
             self.lastVisionNeckTiltTarget = (int)self.commandedUpperNeckTiltTarget;
         } else {
-            self.lastVisionNeckTiltTarget = 6045;
+            self.lastVisionNeckTiltTarget = ROBNeckSafetyUprightUpperTarget;
         }
     }
     self.visionNeckAuthorityUntil = now + kROBNeckVisionAuthoritySeconds;
@@ -2434,7 +2434,13 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         return;
     }
     int requestedPan = requestedPanTarget;
-    int requestedTilt = (int)lroundf(6045.0f - boundedTilt * 1745.0f);
+    double uprightUpper = (double)ROBNeckSafetyUprightUpperTarget;
+    double tiltTargetSpan = boundedTilt >= 0.0f
+        ? uprightUpper - (double)configuration.upperMinimumTarget
+        : (double)configuration.upperMaximumTarget - uprightUpper;
+    int requestedTilt = (int)lround(
+        uprightUpper - (double)boundedTilt * tiltTargetSpan
+    );
     // renderController runs at 10 Hz. Limit each accepted step so a tracking
     // discontinuity or rapid head turn cannot command a full-range servo jump.
     int maximumStep = 80;
@@ -2477,8 +2483,8 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     }
 
     ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
-    if (self.commandedLowerNeckTiltTarget >= configuration.lowerFullPanLowTarget
-        && self.commandedLowerNeckTiltTarget <= configuration.lowerFullPanHighTarget) {
+    if (self.commandedLowerNeckTiltTarget
+        >= ROBNeckSafetyFullPanLowerThresholdTarget) {
         return YES;
     }
 
@@ -2500,8 +2506,8 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     if (disposition == ROBNeckCommandDispositionRejected) {
         return NO;
     }
-    return self.commandedLowerNeckTiltTarget >= configuration.lowerFullPanLowTarget
-        && self.commandedLowerNeckTiltTarget <= configuration.lowerFullPanHighTarget;
+    return self.commandedLowerNeckTiltTarget
+        >= ROBNeckSafetyFullPanLowerThresholdTarget;
 }
 
 - (ROBNeckCommandDisposition)requestNeckGesturePanDegrees:(double)panDegrees

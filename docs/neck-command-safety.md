@@ -37,10 +37,11 @@ physical build.
 
 | Field | Shipped suggestion | Meaning |
 | --- | ---: | --- |
-| Backward pan | ±30° | symmetric pan limit at the backward lower-tilt extreme |
-| Forward restriction starts | 6823 | first lower-tilt raw target in front of the arm-clearance boundary |
-| Forward pan window | −15° to +2.1° | exact asymmetric pan limits at target 6823 and farther forward |
-| Full-pan lower band | 5300–6822 | inclusive lower-tilt target band with arm clearance for full pan |
+| Below-5000 pan | ±30° | symmetric pan limit for a known lower-tilt target below the e-stop clearance boundary |
+| Full pan starts | 5000 | fixed Maestro 24 lower-tilt boundary; this target and every greater known target permit full pan |
+| Unknown/off pan | −15° to +2.1° | fail-safe asymmetric pan limits when lower tilt has no known active command |
+| Lower upright | 6011 | fixed lower-neck camera-leveling reference and startup slider target |
+| Upper upright | 6073 | fixed neutral upper-neck camera target and Vision tracking center |
 | Pan center | 6000 | raw target treated as 0° |
 | Pan targets per degree | 33.3333 | raw-target-to-degree scale |
 | Camera counter gain | -1.0 | upper-target correction per lower-target unit |
@@ -52,7 +53,8 @@ smaller distance from pan center to either pan bound, divided by targets per
 degree; the shipped suggestions therefore describe ±60°.
 
 Before selecting **Apply**, physically confirm the pan center and scale, the
-entire lower-tilt clearance band, both hard ranges, and the counter-gain sign.
+`5000` lower-tilt clearance boundary, upright targets `6011`/`6073`, both hard
+ranges, and the counter-gain sign.
 Command all three neck channels off and confirm the readouts show
 `P OFF`, `L OFF`, and `U OFF`; Cerebro rejects live calibration changes while
 any target is nonzero or any readout is `UNKNOWN`. A reconnect changes all
@@ -61,10 +63,12 @@ before Apply is accepted. Applying only validates and saves one versioned
 configuration object; it does not submit any neck or arm motion.
 
 Existing V1 and V2 settings retain their common calibration values on upgrade.
-V3 adopts the 5300–6822 inclusive full-pan band when it fits the saved lower
-hard range, starts the forward window at 6823 (or the saved lower maximum when
-necessary), clips −15.0°…+2.1° inward to the saved pan range, and defaults
-**Keep camera upright** to on. Every migration is marked unconfirmed, so the
+Their old 5300–6822 band and the old serialized `6823` forward anchor remain
+only for V3 settings compatibility; neither limits a known lower-neck pose nor
+defines the upright reference. The fixed Maestro 24 clearance boundary is
+`5000`, and the fixed lower/upper upright targets are `6011`/`6073`. Migration
+still clips −15.0°…+2.1° inward to the saved pan range and defaults **Keep
+camera upright** to on. Every V1/V2 migration is marked unconfirmed, so the
 operator must verify all fields and Apply again with all three channels known
 OFF.
 
@@ -78,24 +82,20 @@ autonomously.
 
 ## Dynamic pan envelope
 
-The pan window is an asymmetric envelope over the commanded lower-tilt target:
+The pan window is selected from the commanded lower-tilt target:
 
 - When lower pose is off or unknown, the gateway cannot know which extreme the
-  mechanism occupies, so it uses the intersection of every configured window.
-  With the shipped values, that fail-closed window is −15.0°…+2.1°.
-- At the backward lower hard bound, the same symmetric restriction applies.
-- Between the lower minimum and the start of the full-pan band, the allowance
-  increases linearly from the symmetric restriction to full pan.
-- Inside the full-pan band, full symmetric pan is allowed.
-- Between the end of the full-pan band and the configured forward anchor, the
-  negative and positive bounds each interpolate toward their independently
-  configured forward values. In the shipped configuration those integer
-  targets are adjacent: `6822` still permits full pan, while `6823` immediately
-  applies the forward window.
-- At lower target `6823` and farther forward—including the example target
-  `7277`—the shipped configuration clamps pan to exactly −15.0°…+2.1°.
-  With the shipped center and scale, those degree endpoints correspond to raw
-  pan targets 5500 and 6070.
+  mechanism occupies, so it uses the fail-closed unknown/off window. With the
+  shipped values, that window is −15.0°…+2.1° (raw pan 5500…6070).
+- A known active lower target below `5000` uses the configured symmetric
+  restriction. With the shipped values, that is ±30°.
+- A known active lower target at exactly `5000` or any greater value gets the
+  complete calibrated pan range. With the shipped values this is ±60°, so
+  every integer target from `5000` through `6823`—including upright `6011`—is
+  full-pan. Higher known targets such as `7277` are not restricted either.
+- There is no interpolation at the collision boundary: `4999` is restricted
+  and `5000` is full-pan. The gateway's settle interlock controls when a
+  widening becomes active.
 
 A request toward a more restrictive lower pose tightens the envelope
 immediately. If needed, Cerebro holds lower tilt while it brings pan inside the
@@ -139,15 +139,16 @@ upper target = desired upper target
              + counter gain × (lower target − reference lower target)
 ```
 
-The reference is the midpoint of the configured full-pan lower band. Changing
-the checkbox adopts the currently applied upper-camera command as the new
-camera demand, takes a short manual neck lease, and rebases the current lower
-target. This prevents the mode change itself from jumping a known active neck
-pose and does not submit any arm commands. If any neck command is `OFF` or
-`UNKNOWN`, the mode is saved without energizing it. Subsequent lower motion
-shifts the upper-camera target in the configured counter direction and clamps
-it to the upper hard range. When **Keep upright** is off, the upper target is
-still hard-clamped but is not adjusted in response to lower motion.
+The configured reference is the calibrated lower upright target `6011`; the
+neutral upper-camera target is `6073`. Changing the checkbox adopts the
+currently applied upper-camera command as the new camera demand, takes a short
+manual neck lease, and rebases the current lower target. This prevents the mode
+change itself from jumping a known active neck pose and does not submit any arm
+commands. If any neck command is `OFF` or `UNKNOWN`, the mode is saved without
+energizing it. Subsequent lower motion shifts the upper-camera target in the
+configured counter direction and clamps it to the upper hard range. When
+**Keep upright** is off, the upper target is still hard-clamped but is not
+adjusted in response to lower motion.
 
 The gain sign is mounting-specific. A sign that counter-rotates one physical
 installation can amplify tilt on another. Confirm under direct supervision

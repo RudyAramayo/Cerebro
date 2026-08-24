@@ -122,19 +122,25 @@ bool ROBNeckSafetyConfigIsValid(const ROBNeckSafetyConfig *config) {
             config->lowerMinimumTarget,
             config->lowerMaximumTarget
         )
+        || config->lowerMinimumTarget
+            >= ROBNeckSafetyFullPanLowerThresholdTarget
+        || config->lowerMaximumTarget
+            < ROBNeckSafetyUprightLowerTarget
         || config->lowerFullPanLowTarget <= config->lowerMinimumTarget
         || config->lowerFullPanHighTarget <= config->lowerFullPanLowTarget
+        || config->lowerFullPanHighTarget >= config->lowerMaximumTarget
+        || config->lowerForwardRestrictedTarget <= ROBNeckSafetyTargetOff
         || config->lowerForwardRestrictedTarget
-            <= config->lowerFullPanHighTarget
-        || config->lowerForwardRestrictedTarget > config->lowerMaximumTarget
-        || config->lowerFullPanHighTarget >= config->lowerMaximumTarget) {
+            > ROBNeckSafetyMaximumMaestroTarget) {
         return false;
     }
 
     if (!ROBNeckSafetyTargetBoundsAreValid(
             config->upperMinimumTarget,
             config->upperMaximumTarget
-        )) {
+        )
+        || config->upperMinimumTarget >= ROBNeckSafetyUprightUpperTarget
+        || config->upperMaximumTarget < ROBNeckSafetyUprightUpperTarget) {
         return false;
     }
 
@@ -189,8 +195,7 @@ double ROBNeckSafetyReferenceLowerTarget(const ROBNeckSafetyConfig *config) {
     if (!ROBNeckSafetyConfigIsValid(config)) {
         return NAN;
     }
-    return ((double)config->lowerFullPanLowTarget
-        + (double)config->lowerFullPanHighTarget) / 2.0;
+    return (double)ROBNeckSafetyUprightLowerTarget;
 }
 
 bool ROBNeckSafetyAllowedPanBounds(
@@ -207,7 +212,6 @@ bool ROBNeckSafetyAllowedPanBounds(
         return false;
     }
 
-    const double restricted = config->restrictedPanDegrees;
     const double full = ROBNeckSafetyFullPanDegrees(config);
 
     if (lowerTarget == ROBNeckSafetyTargetOff) {
@@ -216,43 +220,19 @@ bool ROBNeckSafetyAllowedPanBounds(
         return true;
     }
 
-    if (lowerTarget <= config->lowerMinimumTarget) {
-        boundsOut->minimumDegrees = -restricted;
-        boundsOut->maximumDegrees = restricted;
+    const int32_t boundedLowerTarget = ROBNeckSafetyClampTarget(
+        lowerTarget,
+        config->lowerMinimumTarget,
+        config->lowerMaximumTarget
+    );
+    if (boundedLowerTarget < ROBNeckSafetyFullPanLowerThresholdTarget) {
+        boundsOut->minimumDegrees = -config->restrictedPanDegrees;
+        boundsOut->maximumDegrees = config->restrictedPanDegrees;
         return true;
     }
 
-    if (lowerTarget < config->lowerFullPanLowTarget) {
-        const double progress =
-            (double)(lowerTarget - config->lowerMinimumTarget)
-            / (double)(config->lowerFullPanLowTarget
-                - config->lowerMinimumTarget);
-        const double allowance = restricted + progress * (full - restricted);
-        boundsOut->minimumDegrees = -allowance;
-        boundsOut->maximumDegrees = allowance;
-        return true;
-    }
-
-    if (lowerTarget <= config->lowerFullPanHighTarget) {
-        boundsOut->minimumDegrees = -full;
-        boundsOut->maximumDegrees = full;
-        return true;
-    }
-
-    if (lowerTarget >= config->lowerForwardRestrictedTarget) {
-        boundsOut->minimumDegrees = config->forwardPanMinimumDegrees;
-        boundsOut->maximumDegrees = config->forwardPanMaximumDegrees;
-        return true;
-    }
-
-    const double progress =
-        (double)(lowerTarget - config->lowerFullPanHighTarget)
-        / (double)(config->lowerForwardRestrictedTarget
-            - config->lowerFullPanHighTarget);
-    boundsOut->minimumDegrees = -full
-        + progress * (config->forwardPanMinimumDegrees + full);
-    boundsOut->maximumDegrees = full
-        + progress * (config->forwardPanMaximumDegrees - full);
+    boundsOut->minimumDegrees = -full;
+    boundsOut->maximumDegrees = full;
     return true;
 }
 

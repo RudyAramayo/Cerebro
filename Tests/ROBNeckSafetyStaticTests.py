@@ -14,6 +14,7 @@ SERIAL_HEADER_PATH = ROOT / "Cerebro" / "ROBSerialBox.h"
 SERIAL_SOURCE_PATH = ROOT / "Cerebro" / "ROBSerialBox.m"
 TORSO_SOURCE_PATH = ROOT / "Cerebro" / "ROBTorsoControlsViewController.m"
 PROJECT_PATH = ROOT / "Cerebro.xcodeproj" / "project.pbxproj"
+STORYBOARD_PATH = ROOT / "Cerebro" / "Base.lproj" / "Main.storyboard"
 
 
 def require(condition: bool, message: str) -> None:
@@ -225,6 +226,70 @@ def check_pure_c_policy_and_project() -> None:
     require(
         project.count("ROBNeckSafetyPolicy.c in Sources") >= 2,
         "The neck policy is not present in the app target's Sources phase",
+    )
+
+
+def check_lower_clearance_threshold(
+    policy_header: str,
+    policy_source: str,
+    serial_source: str,
+    torso_source: str,
+    storyboard: str,
+) -> None:
+    require(
+        re.search(
+            r"ROBNeckSafetyFullPanLowerThresholdTarget\s*=\s*5000\b",
+            policy_header,
+        )
+        is not None,
+        "The Maestro 24 full-pan lower-neck threshold is no longer exactly 5000",
+    )
+    require(
+        re.search(r"ROBNeckSafetyUprightLowerTarget\s*=\s*6011\b", policy_header)
+            is not None
+        and re.search(r"ROBNeckSafetyUprightUpperTarget\s*=\s*6073\b", policy_header)
+            is not None,
+        "The calibrated lower/upper upright targets must remain 6011/6073",
+    )
+    bounds = compact(braced_declaration(
+        policy_source, "bool ROBNeckSafetyAllowedPanBounds("
+    ))
+    require(
+        "boundedLowerTarget = ROBNeckSafetyClampTarget(" in bounds
+        and "boundedLowerTarget < "
+            "ROBNeckSafetyFullPanLowerThresholdTarget" in bounds
+        and "minimumDegrees = -config->restrictedPanDegrees;" in bounds
+        and "maximumDegrees = config->restrictedPanDegrees;" in bounds
+        and "minimumDegrees = -full;" in bounds
+        and "maximumDegrees = full;" in bounds
+        and "lowerForwardRestrictedTarget" not in bounds,
+        "Known lower-neck pan bounds no longer restrict only below 5000 and "
+        "allow the full calibrated range at and above 5000",
+    )
+    follow = compact(objective_c_method(serial_source, "prepareNeckForPersonFollow"))
+    require(
+        follow.count("ROBNeckSafetyFullPanLowerThresholdTarget") == 2
+        and "lowerFullPanHighTarget" not in follow,
+        "Person-follow pose preparation still treats the old 6823 boundary "
+        "as a full-pan ceiling",
+    )
+    require(
+        "lastVisionNeckTiltTarget = ROBNeckSafetyUprightUpperTarget;"
+            in serial_source
+        and "uprightUpper = (double)ROBNeckSafetyUprightUpperTarget" in serial_source
+        and "configuration.upperMinimumTarget" in serial_source
+        and "configuration.upperMaximumTarget" in serial_source
+        and "6045" not in serial_source,
+        "Vision tracking no longer uses 6073 as its neutral upper-neck target",
+    )
+    require(
+        "ROBNeckSafetyUprightLowerTarget" in torso_source
+        and "ROBNeckSafetyUprightUpperTarget" in torso_source
+        and 'doubleValue="6011"' in storyboard
+        and 'id="Bud-rf-B0V"' in storyboard
+        and 'doubleValue="6073"' in storyboard
+        and 'id="UIa-yF-izD"' in storyboard,
+        "The torso controls no longer start at the calibrated upright targets",
     )
 
 
@@ -696,30 +761,22 @@ def check_configurable_surface(serial_source: str, torso_source: str) -> None:
     )
     require(
         "initWithFrame:NSMakeRect(0, 0, 307, 143)" in compact_setup
-        and '@"Backward pan ±"' in setup
-        and '@"Symmetric backward pan angle in degrees"' in setup
-        and "Rear/off/unknown" not in torso_source
-        and "forwardLabel, self.forwardPanLowerAnchorField, forwardRawLabel"
-            in compact_setup
-        and "forwardPanLabel, self.forwardPanMinimumDegreesField, "
+        and '@"Below 5000 pan ±"' in setup
+        and '@"Symmetric pan limit below lower tilt target 5000"' in setup
+        and '@"Upright targets"' in setup
+        and "ROBNeckSafetyUprightLowerTarget" in setup
+        and "ROBNeckSafetyUprightUpperTarget" in setup
+        and '@"Unknown/off pan"' in setup
+        and "forwardLabel, self.forwardPanMinimumDegreesField, "
             "forwardRangeSeparator, self.forwardPanMaximumDegreesField, "
             "forwardDegreesLabel" in compact_setup,
-        "The asymmetric forward controls no longer fit inside the expanded "
-        "Safety popover or are not attached to its content box",
+        "The lower-clearance and unknown/off controls no longer fit inside "
+        "the Safety popover or are not attached to its content box",
     )
 
     field_mapping = {
         "restrictedPanDegreesField": (
             "restrictedPanDegrees", "doubleValue", "restrictedPanDegrees"
-        ),
-        "fullPanLowerMinimumField": (
-            "lowerFullPanLowTarget", "integerValue", "fullPanLowerMinimum"
-        ),
-        "fullPanLowerMaximumField": (
-            "lowerFullPanHighTarget", "integerValue", "fullPanLowerMaximum"
-        ),
-        "forwardPanLowerAnchorField": (
-            "lowerForwardRestrictedTarget", "integerValue", "forwardPanLowerAnchor"
         ),
         "forwardPanMinimumDegreesField": (
             "forwardPanMinimumDegrees", "doubleValue", "forwardPanMinimumDegrees"
@@ -768,10 +825,10 @@ def check_configurable_surface(serial_source: str, torso_source: str) -> None:
         "The torso UI no longer applies and reports validation of neck settings",
     )
     require(
-        "forwardPanLowerAnchor == trunc(forwardPanLowerAnchor)" in compact_apply
-        and "forwardPanLowerAnchor >= INT32_MIN" in compact_apply
-        and "forwardPanLowerAnchor <= INT32_MAX" in compact_apply,
-        "The forward lower-neck anchor must remain a checked whole raw target",
+        "forwardPanLowerAnchorField" not in torso_source
+        and "fullPanLowerMinimumField" not in torso_source
+        and "fullPanLowerMaximumField" not in torso_source,
+        "Obsolete editable envelope/reference anchors must not remain in the UI",
     )
     require(
         "currentNeckPanMinimumDegrees" in torso_source
@@ -881,8 +938,8 @@ def check_versioned_dictionary_persistence(
             "shippedFullPanLowTarget;" in load
         and "configuration.lowerFullPanHighTarget = "
             "shippedFullPanHighTarget;" in load,
-        "V2/V1 migration must adopt the wider shipped full-pan band only when "
-        "it fits the preserved lower hard stops",
+        "V2/V1 migration must preserve the wider shipped legacy band "
+        "only when it fits the preserved lower hard stops",
     )
     require(
         "const int32_t shippedForwardAnchor = 6823;" in load
@@ -891,8 +948,8 @@ def check_versioned_dictionary_persistence(
         and "shippedForwardAnchor <= configuration.lowerMaximumTarget" in load
         and "? shippedForwardAnchor : configuration.lowerMaximumTarget;" in load
         and "configuration.cameraLevelingEnabled = true;" in load,
-        "Migrated settings must use the first restricted target above 6822 "
-        "when compatible and default the new leveling switch on",
+        "Migrated settings must preserve the legacy V3 anchor when compatible "
+        "and default the new leveling switch on",
     )
     require(
         "if (storedVersion >= 2) {" in load
@@ -1032,7 +1089,15 @@ def main() -> None:
     serial_header = SERIAL_HEADER_PATH.read_text(encoding="utf-8")
     serial_source = SERIAL_SOURCE_PATH.read_text(encoding="utf-8")
     torso_source = TORSO_SOURCE_PATH.read_text(encoding="utf-8")
+    storyboard = STORYBOARD_PATH.read_text(encoding="utf-8")
 
+    check_lower_clearance_threshold(
+        policy_header,
+        policy_source,
+        serial_source,
+        torso_source,
+        storyboard,
+    )
     check_single_physical_neck_gateway(serial_source)
     check_operator_authority(serial_header, serial_source, torso_source)
     check_command_readouts(torso_source)

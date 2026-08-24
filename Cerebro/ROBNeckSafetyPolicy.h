@@ -19,6 +19,11 @@ extern "C" {
 
 enum {
     ROBNeckSafetyTargetOff = 0,
+    // Maestro 24 lower-neck targets below this point place the neck near the
+    // e-stop buttons. Known targets at or above it have full pan clearance.
+    ROBNeckSafetyFullPanLowerThresholdTarget = 5000,
+    ROBNeckSafetyUprightLowerTarget = 6011,
+    ROBNeckSafetyUprightUpperTarget = 6073,
     ROBNeckSafetyMaximumMaestroTarget = 16383
 };
 
@@ -29,6 +34,9 @@ typedef struct {
     double panTargetsPerDegree;
 
     int32_t lowerMinimumTarget;
+    // Legacy fields retained by the V3 settings schema. Upright references
+    // and the pan-clearance boundary now use the fixed Maestro 24 calibration
+    // constants above.
     int32_t lowerFullPanLowTarget;
     int32_t lowerFullPanHighTarget;
     int32_t lowerForwardRestrictedTarget;
@@ -47,8 +55,8 @@ typedef struct {
 
     // Applied in Maestro target units:
     // desiredUpper + gain * (lower - referenceLower). The reference lower
-    // target is the midpoint of the configured full-pan band. The sign must
-    // be calibrated for the physical mounting direction.
+    // target is ROBNeckSafetyUprightLowerTarget. The sign must be calibrated
+    // for the physical mounting direction.
     double upperCounterRotationGain;
 } ROBNeckSafetyConfig;
 
@@ -108,16 +116,17 @@ bool ROBNeckSafetyConfigIsValid(const ROBNeckSafetyConfig *config);
 // Returns NAN when config is invalid.
 double ROBNeckSafetyFullPanDegrees(const ROBNeckSafetyConfig *config);
 
-// Midpoint of the full-pan lower-tilt band, used as the counter-rotation
-// reference. Returns NAN when config is invalid.
+// Calibrated upright lower-neck target used as the counter-rotation reference.
+// Returns NAN when config is invalid.
 double ROBNeckSafetyReferenceLowerTarget(const ROBNeckSafetyConfig *config);
 
 // Computes the pan envelope for a lower-neck target. Target 0 means the lower
 // servo is off or its pose is unknown and therefore returns the tightest
-// configured range (the validated forward range). A known backward extreme is
-// symmetric. The forward side interpolates from full pan to the configured
-// asymmetric range, which applies at and beyond lowerForwardRestrictedTarget.
-// Returns false and writes NaN bounds when config or output is invalid.
+// configured range (the validated forward range). A known target below the
+// Maestro 24 e-stop clearance threshold uses the symmetric restricted range;
+// a known target at or above the threshold receives full pan. Inputs outside
+// the configured hard range are evaluated at the nearest hard bound. Returns
+// false and writes NaN bounds when config or output is invalid.
 bool ROBNeckSafetyAllowedPanBounds(
     const ROBNeckSafetyConfig *config,
     int32_t lowerTarget,

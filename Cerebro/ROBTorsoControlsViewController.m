@@ -71,9 +71,6 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 @property (nonatomic, strong) NSTextField *upperNeckCommandLabel;
 @property (nonatomic, strong) NSButton *neckCameraLevelingButton;
 @property (nonatomic, strong) NSTextField *restrictedPanDegreesField;
-@property (nonatomic, strong) NSTextField *fullPanLowerMinimumField;
-@property (nonatomic, strong) NSTextField *fullPanLowerMaximumField;
-@property (nonatomic, strong) NSTextField *forwardPanLowerAnchorField;
 @property (nonatomic, strong) NSTextField *forwardPanMinimumDegreesField;
 @property (nonatomic, strong) NSTextField *forwardPanMaximumDegreesField;
 @property (nonatomic, strong) NSTextField *panCenterTargetField;
@@ -225,7 +222,7 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
     safetyButton.frame = NSMakeRect(72, 247, 65, 22);
     safetyButton.bezelStyle = NSBezelStyleRounded;
     safetyButton.font = [NSFont systemFontOfSize:10.0];
-    safetyButton.toolTip = @"Configure the lower-tilt pan envelope and camera counter-rotation.";
+    safetyButton.toolTip = @"Configure restricted pan, the leveling reference, and camera counter-rotation.";
     safetyButton.accessibilityLabel = @"Configure neck command safety";
     [headPanel addSubview:safetyButton];
 
@@ -239,50 +236,42 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
     box.toolTip = @"Cerebro can verify the target sent to Maestro, not the physical servo-shaft position.";
     [contentController.view addSubview:box];
 
-    NSTextField *restrictedLabel = ROBNeckLabel(@"Backward pan ±", NSMakeRect(8, 102, 145, 16));
+    NSTextField *restrictedLabel = ROBNeckLabel(@"Below 5000 pan ±", NSMakeRect(8, 102, 145, 16));
     self.restrictedPanDegreesField = ROBNeckNumberField(
         NSMakeRect(154, 99, 48, 21),
-        @"Symmetric backward pan angle in degrees"
+        @"Symmetric pan limit below lower tilt target 5000"
     );
     self.restrictedPanDegreesField.toolTip =
-        @"Symmetric pan limit at the backward lower-neck extreme.";
+        @"Known lower-neck targets below 5000 use this symmetric pan limit.";
     NSTextField *degreesLabel = ROBNeckLabel(@"°", NSMakeRect(204, 102, 18, 16));
 
-    NSTextField *bandLabel = ROBNeckLabel(@"Full-pan lower band", NSMakeRect(8, 78, 119, 16));
-    self.fullPanLowerMinimumField = ROBNeckNumberField(
-        NSMakeRect(129, 75, 49, 21),
-        @"Full-pan lower tilt minimum target"
+    NSTextField *uprightLabel = ROBNeckLabel(@"Upright targets", NSMakeRect(8, 78, 84, 16));
+    NSTextField *lowerUprightLabel = ROBNeckLabel(
+        [NSString stringWithFormat:@"L %d", ROBNeckSafetyUprightLowerTarget],
+        NSMakeRect(98, 78, 58, 16)
     );
-    NSTextField *bandSeparator = ROBNeckLabel(@"–", NSMakeRect(181, 78, 12, 16));
-    self.fullPanLowerMaximumField = ROBNeckNumberField(
-        NSMakeRect(195, 75, 49, 21),
-        @"Full-pan lower tilt maximum target"
+    lowerUprightLabel.accessibilityLabel = @"Lower neck upright target 6011";
+    NSTextField *upperUprightLabel = ROBNeckLabel(
+        [NSString stringWithFormat:@"U %d", ROBNeckSafetyUprightUpperTarget],
+        NSMakeRect(164, 78, 58, 16)
     );
-    NSTextField *rawBandLabel = ROBNeckLabel(@"raw", NSMakeRect(247, 78, 28, 16));
+    upperUprightLabel.accessibilityLabel = @"Upper neck upright target 6073";
 
-    NSTextField *forwardLabel = ROBNeckLabel(@"Forward @", NSMakeRect(8, 54, 58, 16));
-    self.forwardPanLowerAnchorField = ROBNeckNumberField(
-        NSMakeRect(67, 51, 48, 21),
-        @"Forward restricted lower tilt anchor target"
-    );
-    self.forwardPanLowerAnchorField.toolTip =
-        @"At and beyond this lower-neck command target, the asymmetric forward pan limits apply.";
-    NSTextField *forwardRawLabel = ROBNeckLabel(@"raw", NSMakeRect(117, 54, 24, 16));
-    NSTextField *forwardPanLabel = ROBNeckLabel(@"pan", NSMakeRect(143, 54, 22, 16));
+    NSTextField *forwardLabel = ROBNeckLabel(@"Unknown/off pan", NSMakeRect(8, 54, 96, 16));
     self.forwardPanMinimumDegreesField = ROBNeckNumberField(
-        NSMakeRect(166, 51, 46, 21),
-        @"Forward pan minimum angle in degrees"
+        NSMakeRect(106, 51, 48, 21),
+        @"Unknown or off lower-neck pan minimum angle"
     );
     self.forwardPanMinimumDegreesField.toolTip =
-        @"Minimum pan angle at and beyond the forward lower-neck anchor.";
-    NSTextField *forwardRangeSeparator = ROBNeckLabel(@"…", NSMakeRect(214, 54, 12, 16));
+        @"Fail-safe minimum pan angle when lower-neck position is unknown or off.";
+    NSTextField *forwardRangeSeparator = ROBNeckLabel(@"…", NSMakeRect(157, 54, 12, 16));
     self.forwardPanMaximumDegreesField = ROBNeckNumberField(
-        NSMakeRect(228, 51, 48, 21),
-        @"Forward pan maximum angle in degrees"
+        NSMakeRect(171, 51, 48, 21),
+        @"Unknown or off lower-neck pan maximum angle"
     );
     self.forwardPanMaximumDegreesField.toolTip =
-        @"Maximum pan angle at and beyond the forward lower-neck anchor.";
-    NSTextField *forwardDegreesLabel = ROBNeckLabel(@"°", NSMakeRect(278, 54, 15, 16));
+        @"Fail-safe maximum pan angle when lower-neck position is unknown or off.";
+    NSTextField *forwardDegreesLabel = ROBNeckLabel(@"°", NSMakeRect(222, 54, 15, 16));
 
     NSTextField *calibrationLabel = ROBNeckLabel(@"Pan center", NSMakeRect(8, 30, 64, 16));
     self.panCenterTargetField = ROBNeckNumberField(
@@ -311,10 +300,8 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 
     for (NSView *control in @[
         restrictedLabel, self.restrictedPanDegreesField, degreesLabel,
-        bandLabel, self.fullPanLowerMinimumField, bandSeparator,
-        self.fullPanLowerMaximumField, rawBandLabel,
-        forwardLabel, self.forwardPanLowerAnchorField, forwardRawLabel,
-        forwardPanLabel, self.forwardPanMinimumDegreesField,
+        uprightLabel, lowerUprightLabel, upperUprightLabel,
+        forwardLabel, self.forwardPanMinimumDegreesField,
         forwardRangeSeparator, self.forwardPanMaximumDegreesField,
         forwardDegreesLabel,
         calibrationLabel, self.panCenterTargetField, scaleLabel,
@@ -349,9 +336,6 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
         ? [self.robMainViewController.serialBox neckSafetyConfiguration]
         : ROBNeckSafetyDefaultConfig();
     self.restrictedPanDegreesField.doubleValue = configuration.restrictedPanDegrees;
-    self.fullPanLowerMinimumField.integerValue = configuration.lowerFullPanLowTarget;
-    self.fullPanLowerMaximumField.integerValue = configuration.lowerFullPanHighTarget;
-    self.forwardPanLowerAnchorField.integerValue = configuration.lowerForwardRestrictedTarget;
     self.forwardPanMinimumDegreesField.doubleValue = configuration.forwardPanMinimumDegrees;
     self.forwardPanMaximumDegreesField.doubleValue = configuration.forwardPanMaximumDegrees;
     self.panCenterTargetField.integerValue = configuration.panCenterTarget;
@@ -367,7 +351,7 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
         self.neckSafetyConfigurationStatusLabel.stringValue = @"Calibrate";
         self.neckSafetyConfigurationStatusLabel.textColor = NSColor.systemOrangeColor;
         self.neckSafetyConfigurationStatusLabel.toolTip =
-            @"Verify the pan scale, full-pan band, asymmetric forward limits, and signed camera gain, then Apply with all neck servos off.";
+            @"Verify the below-5000 pan limit, unknown/off limits, upright targets, pan scale, and signed camera gain, then Apply with all neck servos off.";
     } else {
         self.neckSafetyConfigurationStatusLabel.stringValue = @"Ready";
         self.neckSafetyConfigurationStatusLabel.textColor = NSColor.secondaryLabelColor;
@@ -398,9 +382,6 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
     }
 
     double restrictedPanDegrees = 0.0;
-    double fullPanLowerMinimum = 0.0;
-    double fullPanLowerMaximum = 0.0;
-    double forwardPanLowerAnchor = 0.0;
     double forwardPanMinimumDegrees = 0.0;
     double forwardPanMaximumDegrees = 0.0;
     double panCenterTarget = 0.0;
@@ -408,25 +389,13 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
     double cameraCounterRotationGain = 0.0;
     BOOL fieldsAreNumbers =
         ROBNeckReadFiniteNumber(self.restrictedPanDegreesField, &restrictedPanDegrees)
-        && ROBNeckReadFiniteNumber(self.fullPanLowerMinimumField, &fullPanLowerMinimum)
-        && ROBNeckReadFiniteNumber(self.fullPanLowerMaximumField, &fullPanLowerMaximum)
-        && ROBNeckReadFiniteNumber(self.forwardPanLowerAnchorField, &forwardPanLowerAnchor)
         && ROBNeckReadFiniteNumber(self.forwardPanMinimumDegreesField, &forwardPanMinimumDegrees)
         && ROBNeckReadFiniteNumber(self.forwardPanMaximumDegreesField, &forwardPanMaximumDegrees)
         && ROBNeckReadFiniteNumber(self.panCenterTargetField, &panCenterTarget)
         && ROBNeckReadFiniteNumber(self.panTargetsPerDegreeField, &panTargetsPerDegree)
         && ROBNeckReadFiniteNumber(self.cameraCounterRotationGainField, &cameraCounterRotationGain);
     BOOL rawTargetsAreIntegers =
-        fullPanLowerMinimum == trunc(fullPanLowerMinimum)
-        && fullPanLowerMaximum == trunc(fullPanLowerMaximum)
-        && forwardPanLowerAnchor == trunc(forwardPanLowerAnchor)
-        && panCenterTarget == trunc(panCenterTarget)
-        && fullPanLowerMinimum >= INT32_MIN
-        && fullPanLowerMinimum <= INT32_MAX
-        && fullPanLowerMaximum >= INT32_MIN
-        && fullPanLowerMaximum <= INT32_MAX
-        && forwardPanLowerAnchor >= INT32_MIN
-        && forwardPanLowerAnchor <= INT32_MAX
+        panCenterTarget == trunc(panCenterTarget)
         && panCenterTarget >= INT32_MIN
         && panCenterTarget <= INT32_MAX;
     if (!fieldsAreNumbers || !rawTargetsAreIntegers) {
@@ -440,9 +409,6 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 
     ROBNeckSafetyConfig configuration = [serialBox neckSafetyConfiguration];
     configuration.restrictedPanDegrees = restrictedPanDegrees;
-    configuration.lowerFullPanLowTarget = (int32_t)fullPanLowerMinimum;
-    configuration.lowerFullPanHighTarget = (int32_t)fullPanLowerMaximum;
-    configuration.lowerForwardRestrictedTarget = (int32_t)forwardPanLowerAnchor;
     configuration.forwardPanMinimumDegrees = forwardPanMinimumDegrees;
     configuration.forwardPanMaximumDegrees = forwardPanMaximumDegrees;
     configuration.panCenterTarget = (int32_t)panCenterTarget;
@@ -453,7 +419,7 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
         self.neckSafetyConfigurationStatusLabel.stringValue = @"Invalid";
         self.neckSafetyConfigurationStatusLabel.textColor = NSColor.systemRedColor;
         self.neckSafetyConfigurationStatusLabel.toolTip =
-            @"Check target ordering, finite forward min/max angles, pan calibration, and gain (−10…+10).";
+            @"Check finite unknown/off min/max angles, pan calibration, and gain (−10…+10).";
         NSBeep();
         return;
     }
