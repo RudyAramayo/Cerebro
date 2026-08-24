@@ -29,6 +29,8 @@ assert "kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly" in gallery
 assert 'appendingPathComponent("People"' in gallery
 assert "displayName" in gallery and "profileDirectory(profile.id)" in gallery
 assert "administratorAlreadyExists" in gallery
+assert "appendAdaptiveSample" in gallery and "retainingAtMost" in gallery
+assert "public let luminance: Float?" in gallery
 
 assert "VNDetectFaceRectanglesRequest" in service
 assert "VNDetectFaceCaptureQualityRequest" in service
@@ -39,7 +41,16 @@ assert "AdaFace-R18-WebFace4M.mlmodelc" in encoder
 assert "AdaFace-R18-VGGFace2.mlmodelc" in encoder
 assert "MLModel(contentsOf:" in encoder
 assert "pendingCandidateFrames >= 3" in service
+assert "pendingAdaptiveCandidateFrames >= 3" in service
 assert "best.second - best.distance >= margin" in service
+assert "maximumAdaptiveCosineDistance" in service
+assert "adaptiveContinuityLifetime" in service
+assert "maybeAppendAdaptiveSample" in service
+assert "existingCompletedProfile(named:" in service
+assert "minimumRefinementCosineMargin" in service
+assert "Refine Selected Identity" in service
+assert 'key: "move-closer"' in service and 'key: "too-dark"' in service
+assert "averageLuminance(of:" in service
 assert "robFaceIdentityConversationCue" in service
 assert "noteUnknownFace" in service and "pendingUnknownFrames >= 5" in service
 assert "spoken-consent-maker-faire" in service and "role: .knownPerson" in service
@@ -62,6 +73,9 @@ assert "People & Face Enrollment" in app
 assert "explicitly consents" in window
 assert "will not authorize robot motion" in window
 assert "Delete Selected Person" in window
+assert "Refine Selected Identity" in window
+assert "Live face enrollment guidance" in window
+assert 'case "lighting"' in window
 assert "Face model" in window and "modelChanged" in window
 assert "faceIdentityConversationCue:" in main
 assert "noteConversationTranscript:text" in main

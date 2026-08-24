@@ -13,6 +13,14 @@ low-quality captures, rejects near-duplicate samples, and prompts for varied
 head positions. Enrollment completes after 24 accepted samples. Cancelling an
 incomplete enrollment deletes its partial profile and samples.
 
+The People window shows accepted and remaining photo counts, live guidance, and
+the enrolled lighting range. Visual and throttled spoken prompts distinguish no
+face, more than one face, too far away (**stand closer**), too dark,
+overexposed, blurred or obstructed, misaligned, and repeated-pose conditions.
+Select any completed profile and choose **Refine Selected Identity** to add eight
+current-lighting and pose samples without changing its name, role, model, or
+trusted controller binding.
+
 Administrator enrollment additionally requires a paired, non-revoked operator
 ROBController and a local confirmation dialog. The controller device ID is
 recorded as the enrollment reference. `administrator` is deliberately only an
@@ -42,8 +50,28 @@ with separate enrollment and validation footage from ROB's actual camera before
 recognition is treated as reliable. Names enter scene context for only 15
 seconds and camera-derived identity remains untrusted sensor data.
 
+Lighting adaptation has separate conservative developer controls:
+`ROBFaceIdentity.maximumAdaptiveCosineDistance` (0.46),
+`ROBFaceIdentity.maximumPossibleMatchDistance` (0.52),
+`ROBFaceIdentity.maximumRefinementConsentDistance` (0.52), and
+`ROBFaceIdentity.minimumRefinementCosineMargin` (0.03). Possible-match guidance
+never publishes an identity, and none of these thresholds grants authority.
+
 The gallery records its backend identifier and stores normalized 512-dimensional
 embeddings alongside retained, consented crops.
+
+After a confident recognition, Cerebro can add at most one high-quality, diverse
+lighting or pose sample per minute under the person's original consent. A
+short-lived, recently confirmed identity may also bridge a gradual lighting
+change after three consistent frames. This does not make a weak match count as
+recognized. The original 24 enrollment samples are retained and later adaptive
+samples use a bounded rolling gallery, so refinement can continue over time
+without unbounded storage growth.
+
+If a face is close to a known profile but not yet confident, ROB asks the person
+to stand closer, face an even light, hold still, and look toward the camera
+instead of immediately treating them as new. A truly unfamiliar stable face
+still enters the consent-first friend flow.
 
 ## Conversation and hands-free friend enrollment
 
@@ -66,6 +94,14 @@ person stepping into the camera is rejected rather than enrolled.
 **“ROB, cancel enrollment”** stops the capture and deletes its
 partial profile and samples. Unknown-person invitations have a five-minute
 cooldown so ROB does not repeatedly ask the same nearby audience.
+
+If the spoken name already belongs to a completed profile, Cerebro does not
+create a duplicate. It requires a conservative face-similarity and cross-profile
+margin check, then refines the existing profile while preserving its role. This
+means an existing **Rudy — Administrator** profile remains Administrator; the
+hands-free flow cannot create or promote an administrator. If comparison is
+ambiguous, ROB refuses the update and directs the operator to **Refine Selected
+Identity**.
 
 ## Installing AdaFace models
 

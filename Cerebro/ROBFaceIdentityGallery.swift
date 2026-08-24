@@ -25,6 +25,9 @@ public struct ROBFaceIdentitySample: Codable, Identifiable, Sendable {
     public let id: UUID
     public let capturedAt: Date
     public let quality: Float
+    /// Average crop luminance from 0 (dark) to 1 (bright).
+    /// Optional so galleries created before lighting-aware refinement decode.
+    public let luminance: Float?
     public let yawRadians: Double?
     public let rollRadians: Double?
     /// AdaFace's normalized 512-dimensional vector. Optional so galleries
@@ -37,6 +40,7 @@ public struct ROBFaceIdentitySample: Codable, Identifiable, Sendable {
         id: UUID,
         capturedAt: Date,
         quality: Float,
+        luminance: Float? = nil,
         yawRadians: Double?,
         rollRadians: Double?,
         embedding: [Float]? = nil,
@@ -46,6 +50,7 @@ public struct ROBFaceIdentitySample: Codable, Identifiable, Sendable {
         self.id = id
         self.capturedAt = capturedAt
         self.quality = quality
+        self.luminance = luminance
         self.yawRadians = yawRadians
         self.rollRadians = rollRadians
         self.embedding = embedding
@@ -185,23 +190,72 @@ public final class ROBFaceIdentityGallery: @unchecked Sendable {
         encryptedImagePlaintext: Data,
         to profileID: UUID
     ) throws -> ROBFaceIdentityProfile {
+        try appendSample(
+            sample,
+            encryptedImagePlaintext: encryptedImagePlaintext,
+            to: profileID,
+            retainingAtMost: 200
+        )
+    }
+
+    /// Adds a consent-covered adaptive sample while retaining the original
+    /// enrollment set and a bounded rolling window of later lighting/pose
+    /// refinements. The evicted encrypted crop is removed only after the
+    /// updated manifest has been written successfully.
+    public func appendAdaptiveSample(
+        _ sample: ROBFaceIdentitySample,
+        encryptedImagePlaintext: Data,
+        to profileID: UUID,
+        retainingAtMost maximumSamples: Int = 96
+    ) throws -> ROBFaceIdentityProfile {
+        try appendSample(
+            sample,
+            encryptedImagePlaintext: encryptedImagePlaintext,
+            to: profileID,
+            retainingAtMost: min(max(maximumSamples, ROBFaceIdentityProfile.requiredEnrollmentSamples + 1), 200)
+        )
+    }
+
+    private func appendSample(
+        _ sample: ROBFaceIdentitySample,
+        encryptedImagePlaintext: Data,
+        to profileID: UUID,
+        retainingAtMost maximumSamples: Int
+    ) throws -> ROBFaceIdentityProfile {
         try queue.sync {
             var profile = try profileUnlocked(id: profileID)
-            guard profile.samples.count < 200 else {
-                throw ROBFaceIdentityGalleryError.invalidInput(
-                    "This identity already has the maximum of 200 retained samples."
-                )
-            }
             let directory = profileDirectory(profileID)
             let samplesDirectory = directory.appendingPathComponent("samples", isDirectory: true)
             try createPrivateDirectory(samplesDirectory)
             let imageURL = samplesDirectory.appendingPathComponent(sample.encryptedImageFileName)
             let encryptedImage = try seal(encryptedImagePlaintext)
+            var evictedSample: ROBFaceIdentitySample?
             do {
                 try encryptedImage.write(to: imageURL, options: [.atomic])
                 try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: imageURL.path)
                 profile.samples.append(sample)
+                if profile.samples.count > maximumSamples {
+                    let protectedCount = min(
+                        ROBFaceIdentityProfile.requiredEnrollmentSamples,
+                        max(0, maximumSamples - 1)
+                    )
+                    let removable = protectedCount..<(profile.samples.count - 1)
+                    if let index = removable.min(by: {
+                        let lhs = profile.samples[$0]
+                        let rhs = profile.samples[$1]
+                        if lhs.quality == rhs.quality { return lhs.capturedAt < rhs.capturedAt }
+                        return lhs.quality < rhs.quality
+                    }) {
+                        evictedSample = profile.samples.remove(at: index)
+                    }
+                }
                 try writeProfile(profile)
+                if let evictedSample {
+                    let evictedURL = samplesDirectory.appendingPathComponent(
+                        evictedSample.encryptedImageFileName
+                    )
+                    try? FileManager.default.removeItem(at: evictedURL)
+                }
                 return profile
             } catch {
                 try? FileManager.default.removeItem(at: imageURL)

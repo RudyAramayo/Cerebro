@@ -25,9 +25,11 @@ import Foundation
         action: nil
     )
     private let startButton = NSButton(title: "Start Enrollment", target: nil, action: nil)
+    private let refineButton = NSButton(title: "Refine Selected Identity", target: nil, action: nil)
     private let cancelButton = NSButton(title: "Cancel Enrollment", target: nil, action: nil)
     private let deleteButton = NSButton(title: "Delete Selected Person", target: nil, action: nil)
     private let progress = NSProgressIndicator()
+    private let progressLabel = NSTextField(labelWithString: "No enrollment in progress")
     private let statusLabel = NSTextField(wrappingLabelWithString: "Loading face identity state…")
     private let table = NSTableView()
     private var profiles: [ROBFaceIdentityProfile] = []
@@ -89,6 +91,9 @@ import Foundation
 
         startButton.target = self
         startButton.action = #selector(startEnrollment(_:))
+        refineButton.target = self
+        refineButton.action = #selector(refineSelected(_:))
+        refineButton.toolTip = "Add current lighting and pose coverage without changing this person's name or role."
         cancelButton.target = self
         cancelButton.action = #selector(cancelEnrollment(_:))
         deleteButton.target = self
@@ -98,8 +103,10 @@ import Foundation
         progress.minValue = 0
         progress.maxValue = Double(ROBFaceRecognitionService.enrollmentTargetSamples)
 
-        statusLabel.maximumNumberOfLines = 3
-        statusLabel.textColor = .secondaryLabelColor
+        progressLabel.textColor = .secondaryLabelColor
+        statusLabel.maximumNumberOfLines = 5
+        statusLabel.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .medium)
+        statusLabel.setAccessibilityLabel("Live face enrollment guidance")
 
         let explanation = NSTextField(wrappingLabelWithString:
             "Face recognition remembers consenting people locally. Administrator is an identity label only: " +
@@ -107,12 +114,18 @@ import Foundation
         )
         explanation.textColor = .secondaryLabelColor
 
+        let guidance = NSTextField(wrappingLabelWithString:
+            "Live guidance will tell the person to stand closer, center one face, adjust lighting, hold still, and vary head position. Completed profiles can be refined later without changing their role."
+        )
+        guidance.textColor = .secondaryLabelColor
+
         for (identifier, title, width) in [
-            ("name", "Person", CGFloat(230)),
-            ("role", "Role", CGFloat(130)),
-            ("model", "Model", CGFloat(170)),
-            ("samples", "Samples", CGFloat(80)),
-            ("confirmed", "Last confirmed", CGFloat(200))
+            ("name", "Person", CGFloat(205)),
+            ("role", "Role", CGFloat(115)),
+            ("model", "Model", CGFloat(145)),
+            ("samples", "Samples", CGFloat(65)),
+            ("lighting", "Lighting range", CGFloat(110)),
+            ("confirmed", "Last confirmed", CGFloat(170))
         ] {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(identifier))
             column.title = title
@@ -144,7 +157,7 @@ import Foundation
         enrollmentGrid.column(at: 0).xPlacement = .trailing
         enrollmentGrid.column(at: 1).xPlacement = .fill
 
-        let buttonRow = NSStackView(views: [startButton, cancelButton, deleteButton])
+        let buttonRow = NSStackView(views: [startButton, refineButton, cancelButton, deleteButton])
         buttonRow.orientation = .horizontal
         buttonRow.spacing = 8
         buttonRow.alignment = .centerY
@@ -152,11 +165,13 @@ import Foundation
         let content = NSStackView(views: [
             enabledCheckbox,
             explanation,
+            guidance,
             NSBox.separator(),
             enrollmentGrid,
             consentCheckbox,
             buttonRow,
             progress,
+            progressLabel,
             statusLabel,
             NSTextField(labelWithString: "Enrolled people"),
             scroll
@@ -178,6 +193,7 @@ import Foundation
             content.topAnchor.constraint(equalTo: window.contentView!.topAnchor),
             content.bottomAnchor.constraint(equalTo: window.contentView!.bottomAnchor),
             explanation.widthAnchor.constraint(equalTo: content.widthAnchor, constant: -36),
+            guidance.widthAnchor.constraint(equalTo: content.widthAnchor, constant: -36),
             enrollmentGrid.widthAnchor.constraint(equalTo: content.widthAnchor, constant: -36),
             consentCheckbox.widthAnchor.constraint(equalTo: content.widthAnchor, constant: -36),
             progress.widthAnchor.constraint(equalTo: content.widthAnchor, constant: -36),
@@ -196,7 +212,16 @@ import Foundation
         profiles = snapshot.profiles
         enrollingProfileID = snapshot.enrollingProfileID
         enabledCheckbox.state = snapshot.enabled ? .on : .off
+        progress.maxValue = Double(max(1, snapshot.enrollmentTargetSamples))
         progress.doubleValue = Double(snapshot.enrollmentAcceptedSamples)
+        if snapshot.enrollingProfileID == nil {
+            progressLabel.stringValue = "No enrollment in progress"
+        } else {
+            let action = snapshot.enrollmentIsRefinement ? "Refinement" : "Enrollment"
+            let remaining = max(0, snapshot.enrollmentTargetSamples - snapshot.enrollmentAcceptedSamples)
+            progressLabel.stringValue =
+                "\(action): \(snapshot.enrollmentAcceptedSamples) of \(snapshot.enrollmentTargetSamples) photos accepted • \(remaining) remaining"
+        }
         statusLabel.stringValue = snapshot.status
         if let index = snapshot.availableModels.firstIndex(of: snapshot.selectedModel) {
             modelPopup.selectItem(at: index)
@@ -207,7 +232,11 @@ import Foundation
 
     private func refreshControls() {
         let isEnrolling = enrollingProfileID != nil
+        let selectedProfile = profiles.indices.contains(table.selectedRow)
+            ? profiles[table.selectedRow]
+            : nil
         startButton.isEnabled = !isEnrolling
+        refineButton.isEnabled = !isEnrolling && selectedProfile?.enrollmentIsComplete == true
         cancelButton.isEnabled = isEnrolling
         deleteButton.isEnabled = !isEnrolling && table.selectedRow >= 0
         nameField.isEnabled = !isEnrolling
@@ -295,6 +324,27 @@ import Foundation
         }
     }
 
+    @objc private func refineSelected(_ sender: Any?) {
+        let row = table.selectedRow
+        guard profiles.indices.contains(row) else { return }
+        guard consentCheckbox.state == .on else {
+            showError("Confirm the person's explicit consent before refining recognition photos.")
+            return
+        }
+        let profile = profiles[row]
+        let alert = NSAlert()
+        alert.messageText = "Refine \(profile.displayName)?"
+        alert.informativeText =
+            "Cerebro will add eight varied, quality-gated photos for the current lighting and pose. " +
+            "The existing \(profile.role.displayName.lowercased()) role and trusted controller binding will not change."
+        alert.addButton(withTitle: "Begin Refinement")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        service.refineEnrollment(profileID: profile.id, consentConfirmed: true) { [weak self] error in
+            if let error { self?.showError(error.localizedDescription) }
+        }
+    }
+
     @objc private func deleteSelected(_ sender: Any?) {
         let row = table.selectedRow
         guard profiles.indices.contains(row) else { return }
@@ -350,6 +400,13 @@ import Foundation
                 .replacingOccurrences(of: "AdaFace R18 — ", with: "")
                 ?? "Legacy"
         case "samples": value = "\(profile.samples.count)"
+        case "lighting":
+            let values = profile.samples.compactMap(\.luminance)
+            if let darkest = values.min(), let brightest = values.max() {
+                value = String(format: "%d–%d%%", Int(darkest * 100), Int(brightest * 100))
+            } else {
+                value = "Not measured"
+            }
         case "confirmed":
             value = profile.lastConfirmedAt.map { Self.dateFormatter.string(from: $0) } ?? "Never"
         default: value = ""

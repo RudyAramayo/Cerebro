@@ -21,6 +21,7 @@ enum ROBFaceIdentityGalleryFixtureTests {
             id: UUID(),
             capturedAt: Date(timeIntervalSince1970: 1234),
             quality: 0.9,
+            luminance: 0.42,
             yawRadians: 0.1,
             rollRadians: -0.1,
             featurePrintArchive: Data([1, 2, 3, 4]),
@@ -36,6 +37,36 @@ enum ROBFaceIdentityGalleryFixtureTests {
         precondition(loaded.count == 1)
         precondition(loaded[0].displayName == "Rob Test Administrator")
         precondition(loaded[0].role == .administrator)
+        precondition(loaded[0].samples[0].luminance == 0.42)
+
+        var latestAdaptiveID = UUID()
+        for index in 2...26 {
+            latestAdaptiveID = UUID()
+            let adaptive = ROBFaceIdentitySample(
+                id: latestAdaptiveID,
+                capturedAt: Date(timeIntervalSince1970: TimeInterval(1234 + index)),
+                quality: Float(index) / 30,
+                luminance: Float(index) / 30,
+                yawRadians: nil,
+                rollRadians: nil,
+                featurePrintArchive: Data([UInt8(index)]),
+                encryptedImageFileName: "adaptive-\(index).robface"
+            )
+            _ = try gallery.appendAdaptiveSample(
+                adaptive,
+                encryptedImagePlaintext: Data("adaptive-\(index)".utf8),
+                to: profile.id,
+                retainingAtMost: 25
+            )
+        }
+        let adapted = try gallery.profiles().first { $0.id == profile.id }!
+        precondition(adapted.samples.count == 25)
+        precondition(adapted.samples.first?.id == sample.id)
+        precondition(adapted.samples.contains { $0.id == latestAdaptiveID })
+        precondition(!FileManager.default.fileExists(atPath:
+            root.appendingPathComponent(profile.id.uuidString.lowercased())
+                .appendingPathComponent("samples/adaptive-25.robface").path
+        ))
 
         let profileCiphertext = try Data(contentsOf:
             root.appendingPathComponent(profile.id.uuidString.lowercased())

@@ -31,6 +31,7 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
     public let enrollingProfileID: UUID?
     public let enrollmentAcceptedSamples: Int
     public let enrollmentTargetSamples: Int
+    public let enrollmentIsRefinement: Bool
     public let status: String
     public let lastRecognition: ROBFaceRecognitionResult?
     public let selectedModel: ROBFaceEmbeddingModelOption
@@ -48,6 +49,16 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
     private static let friendInvitationLifetime: TimeInterval = 60
     private static let unknownInvitationCooldown: TimeInterval = 300
     private static let greetingCooldown: TimeInterval = 300
+    private static let refinementTargetSamples = 8
+    private static let adaptiveSampleInterval: TimeInterval = 60
+    private static let adaptiveContinuityLifetime: TimeInterval = 120
+    private static let guidanceRepeatInterval: TimeInterval = 12
+
+    private enum AdaptiveSampleOutcome {
+        case skipped
+        case refined
+        case failed(String)
+    }
 
     private let gallery: ROBFaceIdentityGallery
     private let analysisQueue = DispatchQueue(
@@ -61,10 +72,15 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
 
     private var cachedProfiles: [ROBFaceIdentityProfile] = []
     private var activeEnrollmentID: UUID?
+    private var activeEnrollmentAcceptedSamples = 0
+    private var activeEnrollmentTargetSamples = enrollmentTargetSamples
+    private var activeEnrollmentIsRefinement = false
     private var statusText = "Face identity is idle."
     private var lastRecognitionValue: ROBFaceRecognitionResult?
     private var pendingCandidateID: UUID?
     private var pendingCandidateFrames = 0
+    private var pendingAdaptiveCandidateID: UUID?
+    private var pendingAdaptiveCandidateFrames = 0
     private var pendingUnknownEmbedding: [Float]?
     private var pendingUnknownFrames = 0
     private var lastUnknownInvitationUptime: TimeInterval = -.greatestFiniteMagnitude
@@ -76,6 +92,10 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
     private var handsFreeEnrollmentReferenceEmbeddings: [UUID: [Float]] = [:]
     private var handsFreeEnrollmentMismatchWarned: Set<UUID> = []
     private var lastGreetingCueUptimeByProfile: [UUID: TimeInterval] = [:]
+    private var lastAdaptiveSampleUptimeByProfile: [UUID: TimeInterval] = [:]
+    private var lastGuidanceKey: String?
+    private var lastGuidanceCueUptime: TimeInterval = -.greatestFiniteMagnitude
+    private var lastRecognitionGuidanceUptime: TimeInterval = -.greatestFiniteMagnitude
     private var encoders: [ROBFaceEmbeddingModelOption: ROBFaceCoreMLEncoder] = [:]
     private var selectedModelValue: ROBFaceEmbeddingModelOption
 
@@ -93,6 +113,7 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
                     ROBSceneSnapshotStore.shared.updateIdentifiedPeople([])
                     self.clearFriendInvitation()
                     self.resetUnknownCandidate()
+                    self.resetAdaptiveCandidate()
                 }
                 self.publishState()
             }
@@ -173,6 +194,47 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
         }
     }
 
+    /// Adds current lighting and pose coverage to an existing consented
+    /// identity without changing its name, role, controller binding, or model.
+    public func refineEnrollment(
+        profileID: UUID,
+        consentConfirmed: Bool,
+        completion: @escaping (Error?) -> Void
+    ) {
+        analysisQueue.async {
+            do {
+                guard consentConfirmed else {
+                    throw ROBFaceIdentityGalleryError.invalidInput(
+                        "Refinement requires the person's explicit consent."
+                    )
+                }
+                guard let profile = self.cachedProfiles.first(where: { $0.id == profileID }) else {
+                    throw ROBFaceIdentityGalleryError.identityNotFound
+                }
+                if profile.role == .administrator {
+                    let trustedOperator = ROBControlPairing.pairedDevices().contains {
+                        !$0.isRevoked
+                            && $0.roleName == "operatorController"
+                            && $0.deviceID.caseInsensitiveCompare(
+                                profile.trustedEnrollmentReference
+                            ) == .orderedSame
+                    }
+                    guard trustedOperator else {
+                        throw ROBFaceIdentityGalleryError.invalidInput(
+                            "Administrator refinement requires the paired controller used for the original imprint."
+                        )
+                    }
+                }
+                try self.startRefinementUnlocked(profile: profile, handsFree: false)
+                DispatchQueue.main.async { completion(nil) }
+            } catch {
+                self.statusText = error.localizedDescription
+                self.publishState()
+                DispatchQueue.main.async { completion(error) }
+            }
+        }
+    }
+
     /// Consumes only the deterministic consent/name exchange for a pending
     /// hands-free friend invitation. Returning true tells the room UI that the
     /// transcript belonged to this exchange rather than an ordinary request.
@@ -223,19 +285,39 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
                             "The consenting face is no longer available."
                         )
                     }
-                    clearFriendInvitation()
-                    let profile = try startEnrollmentUnlocked(
-                        displayName: name,
-                        pronunciation: nil,
-                        role: .knownPerson,
-                        consentConfirmed: true,
-                        trustedEnrollmentReference: "spoken-consent-maker-faire",
-                        handsFree: true
-                    )
+                    let existingProfile = try existingCompletedProfile(named: name)
+                    let profile: ROBFaceIdentityProfile
+                    if let existingProfile {
+                        guard faceCouldBelong(
+                            consentingFace,
+                            to: existingProfile,
+                            maximumDistanceKey: "ROBFaceIdentity.maximumRefinementConsentDistance",
+                            fallback: 0.52
+                        ) else {
+                            throw ROBFaceIdentityGalleryError.invalidInput(
+                                "I already know that name, but this face is not similar enough to update that profile. Please ask the operator to use Refine Selected Identity."
+                            )
+                        }
+                        clearFriendInvitation()
+                        try startRefinementUnlocked(profile: existingProfile, handsFree: true)
+                        profile = existingProfile
+                    } else {
+                        clearFriendInvitation()
+                        profile = try startEnrollmentUnlocked(
+                            displayName: name,
+                            pronunciation: nil,
+                            role: .knownPerson,
+                            consentConfirmed: true,
+                            trustedEnrollmentReference: "spoken-consent-maker-faire",
+                            handsFree: true
+                        )
+                    }
                     handsFreeEnrollmentReferenceEmbeddings[profile.id] = consentingFace
                     postConversationCue(
                         kind: "speak",
-                        text: "Nice to meet you, \(profile.displayName). I'll enroll you as a friend, never as an administrator. Please stand by yourself in front of my camera and look straight at me."
+                        text: existingProfile == nil
+                            ? "Nice to meet you, \(profile.displayName). I'll enroll you as a friend, never as an administrator. Please stand by yourself, stand closer to my camera, face an even light, and look straight at me."
+                            : "I found your existing \(profile.role.displayName.lowercased()) profile for \(profile.displayName). I'll refine it for how you look in this lighting without changing your role. Please stand closer, face an even light, and look straight at me."
                     )
                 } catch {
                     statusText = error.localizedDescription
@@ -245,15 +327,22 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
             case .cancelEnrollment:
                 guard let profileID = activeEnrollmentID,
                       handsFreeEnrollmentIDs.contains(profileID) else { return true }
-                activeEnrollmentID = nil
+                let shouldDelete = cachedProfiles.first(where: { $0.id == profileID })?
+                    .enrollmentIsComplete == false
+                endEnrollmentSession()
                 handsFreeEnrollmentIDs.remove(profileID)
                 handsFreeEnrollmentReferenceEmbeddings.removeValue(forKey: profileID)
                 handsFreeEnrollmentMismatchWarned.remove(profileID)
                 do {
-                    try gallery.deleteProfile(id: profileID)
-                    cachedProfiles.removeAll { $0.id == profileID }
-                    statusText = "Spoken face enrollment cancelled and deleted."
-                    postConversationCue(kind: "speak", text: "Okay. I cancelled enrollment and deleted those face samples.")
+                    if shouldDelete {
+                        try gallery.deleteProfile(id: profileID)
+                        cachedProfiles.removeAll { $0.id == profileID }
+                        statusText = "Spoken face enrollment cancelled and deleted."
+                        postConversationCue(kind: "speak", text: "Okay. I cancelled enrollment and deleted those face samples.")
+                    } else {
+                        statusText = "Face refinement cancelled. The existing identity remains available."
+                        postConversationCue(kind: "speak", text: "Okay. I stopped refining that identity and kept the existing profile.")
+                    }
                 } catch {
                     statusText = error.localizedDescription
                     postConversationCue(kind: "speak", text: "Enrollment stopped, but I couldn't verify deletion. Please ask the operator for help.")
@@ -270,7 +359,7 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
                 DispatchQueue.main.async { completion?(nil) }
                 return
             }
-            self.activeEnrollmentID = nil
+            self.endEnrollmentSession()
             self.handsFreeEnrollmentIDs.remove(profileID)
             self.handsFreeEnrollmentReferenceEmbeddings.removeValue(forKey: profileID)
             self.handsFreeEnrollmentMismatchWarned.remove(profileID)
@@ -294,7 +383,7 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
     public func deleteProfile(id: UUID, completion: @escaping (Error?) -> Void) {
         analysisQueue.async {
             do {
-                if self.activeEnrollmentID == id { self.activeEnrollmentID = nil }
+                if self.activeEnrollmentID == id { self.endEnrollmentSession() }
                 self.handsFreeEnrollmentIDs.remove(id)
                 self.handsFreeEnrollmentReferenceEmbeddings.removeValue(forKey: id)
                 self.handsFreeEnrollmentMismatchWarned.remove(id)
@@ -345,7 +434,11 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
         do {
             try VNImageRequestHandler(cmSampleBuffer: sampleBuffer, options: [:]).perform([rectangles])
             guard let detected = rectangles.results, !detected.isEmpty else {
-                updateStatusWhileEnrolling("No face detected. Move into the main camera view.")
+                updateEnrollmentGuidance(
+                    key: "no-face",
+                    status: "No face detected. Step into the center of the main camera view.",
+                    spoken: "I can't see your face yet. Please step into the center of my main camera view."
+                )
                 resetTemporalCandidate()
                 if activeEnrollmentID == nil {
                     ROBSceneSnapshotStore.shared.updateIdentifiedPeople([])
@@ -353,7 +446,11 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
                 return
             }
             if activeEnrollmentID != nil, detected.count != 1 {
-                updateStatusWhileEnrolling("Enrollment needs exactly one face in view.")
+                updateEnrollmentGuidance(
+                    key: "multiple-faces",
+                    status: "I see \(detected.count) faces. Enrollment needs exactly one person in view.",
+                    spoken: "I need only the person being enrolled in front of my camera. Everyone else, please step out of view."
+                )
                 return
             }
 
@@ -385,22 +482,53 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
     ) throws {
         let quality = face.faceCaptureQuality ?? 0
         guard Self.area(face.boundingBox) >= 0.035 else {
-            updateStatusWhileEnrolling("Move closer; the face is too small for enrollment.")
-            return
-        }
-        guard quality >= 0.45 else {
-            updateStatusWhileEnrolling("Hold still in better light; this face sample is too soft or obstructed.")
+            updateEnrollmentGuidance(
+                key: "move-closer",
+                status: "Stand closer. Your face needs to fill more of the camera view.",
+                spoken: "Please stand closer so your face fills more of my camera view."
+            )
             return
         }
         guard let crop = faceCrop(face.boundingBox, source: source) else {
-            updateStatusWhileEnrolling("Could not align this face sample; please look toward ROB.")
+            updateEnrollmentGuidance(
+                key: "face-camera",
+                status: "I could not align your face. Look directly toward ROB.",
+                spoken: "Please look directly toward me so I can align your face."
+            )
+            return
+        }
+        let luminance = averageLuminance(of: crop)
+        if let luminance, luminance < 0.16 {
+            updateEnrollmentGuidance(
+                key: "too-dark",
+                status: "Your face is too dark. Face a light or move out of shadow.",
+                spoken: "Your face is too dark. Please face a light or move out of shadow."
+            )
+            return
+        }
+        if let luminance, luminance > 0.90 {
+            updateEnrollmentGuidance(
+                key: "too-bright",
+                status: "Your face is overexposed. Step away from the bright light or window.",
+                spoken: "The light on your face is too bright. Please step away from the light or window."
+            )
+            return
+        }
+        guard quality >= 0.45 else {
+            updateEnrollmentGuidance(
+                key: "hold-still",
+                status: "Hold still and uncover your face. This frame is blurred or obstructed.",
+                spoken: "Please hold still and make sure your face is not covered."
+            )
             return
         }
         let embedding = try encoder(for: selectedModelValue).embedding(for: crop)
         if let consentingFace = handsFreeEnrollmentReferenceEmbeddings[profileID],
            Self.cosineDistance(consentingFace, embedding) > 0.45 {
-            updateStatusWhileEnrolling(
-                "Waiting for the same person who gave spoken consent to return alone to the camera."
+            updateEnrollmentGuidance(
+                key: "consenting-person",
+                status: "Waiting for the same person who gave consent to return alone.",
+                spoken: "I can only photograph the person who gave permission. Please have that person stand alone in front of me."
             )
             if handsFreeEnrollmentMismatchWarned.insert(profileID).inserted {
                 postConversationCue(
@@ -410,8 +538,12 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
             }
             return
         }
-        guard sampleIsDiverse(embedding, profileID: profileID) else {
-            updateStatusWhileEnrolling("Good—now turn your head slightly for a different view.")
+        guard sampleIsDiverse(embedding, luminance: luminance, profileID: profileID) else {
+            updateEnrollmentGuidance(
+                key: "different-view",
+                status: "That view is already covered. Turn your head slightly or change your expression.",
+                spoken: "Good. Now turn your head slightly or change your expression so I can capture a different view."
+            )
             return
         }
         guard let jpeg = jpegData(crop) else {
@@ -422,41 +554,64 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
             id: sampleID,
             capturedAt: Date(),
             quality: quality,
+            luminance: luminance,
             yawRadians: face.yaw?.doubleValue,
             rollRadians: face.roll?.doubleValue,
             embedding: embedding,
             encryptedImageFileName: "\(sampleID.uuidString.lowercased()).robface"
         )
-        let updated = try gallery.appendSample(sample, encryptedImagePlaintext: jpeg, to: profileID)
+        let updated: ROBFaceIdentityProfile
+        if activeEnrollmentIsRefinement {
+            updated = try gallery.appendAdaptiveSample(
+                sample,
+                encryptedImagePlaintext: jpeg,
+                to: profileID
+            )
+        } else {
+            updated = try gallery.appendSample(sample, encryptedImagePlaintext: jpeg, to: profileID)
+        }
         replaceCachedProfile(updated)
+        activeEnrollmentAcceptedSamples += 1
+        let sessionAccepted = activeEnrollmentAcceptedSamples
 
-        if updated.samples.count >= Self.enrollmentTargetSamples {
-            activeEnrollmentID = nil
-            statusText = "Enrollment complete for \(updated.displayName). Recognition is now active."
+        if sessionAccepted >= activeEnrollmentTargetSamples {
+            let wasRefinement = activeEnrollmentIsRefinement
+            endEnrollmentSession()
+            statusText = wasRefinement
+                ? "Refinement complete for \(updated.displayName). New lighting and pose samples are active."
+                : "Enrollment complete for \(updated.displayName). Recognition is now active."
             handsFreeEnrollmentReferenceEmbeddings.removeValue(forKey: updated.id)
             handsFreeEnrollmentMismatchWarned.remove(updated.id)
             if handsFreeEnrollmentIDs.remove(updated.id) != nil {
-                postConversationCue(
-                    kind: "prompt",
-                    text: Self.recognitionConversationPrompt(
-                        name: updated.displayName,
-                        newlyEnrolled: true
+                if wasRefinement {
+                    postConversationCue(
+                        kind: "speak",
+                        text: "Thank you, \(updated.displayName). I refined your existing \(updated.role.displayName.lowercased()) profile for this lighting."
                     )
-                )
+                } else {
+                    postConversationCue(
+                        kind: "prompt",
+                        text: Self.recognitionConversationPrompt(
+                            name: updated.displayName,
+                            newlyEnrolled: true
+                        )
+                    )
+                }
             }
         } else {
             statusText = enrollmentPrompt(for: updated)
             if handsFreeEnrollmentIDs.contains(updated.id),
-               updated.samples.count == 6 || updated.samples.count == 12 || updated.samples.count == 18 {
+               enrollmentMilestones.contains(sessionAccepted) {
+                let action = activeEnrollmentIsRefinement ? "Refinement" : "Enrollment"
                 let direction: String
-                switch updated.samples.count {
-                case 6: direction = "turn your head slightly left"
-                case 12: direction = "turn your head slightly right"
+                switch sessionAccepted {
+                case activeEnrollmentTargetSamples / 4: direction = "turn your head slightly left"
+                case activeEnrollmentTargetSamples / 2: direction = "turn your head slightly right"
                 default: direction = "look slightly up, then slightly down"
                 }
                 postConversationCue(
                     kind: "speak",
-                    text: "Enrollment is going well, \(updated.displayName). Now \(direction)."
+                    text: "\(action) is going well, \(updated.displayName). Now \(direction)."
                 )
             }
         }
@@ -472,7 +627,15 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
             publishState()
             return
         }
-        var best: (profile: ROBFaceIdentityProfile, distance: Float, second: Float)?
+        var best: (
+            profile: ROBFaceIdentityProfile,
+            distance: Float,
+            second: Float,
+            embedding: [Float],
+            crop: CGImage,
+            face: VNFaceObservation,
+            luminance: Float?
+        )?
         var firstProbe: [Float]?
         for face in faces where Self.area(face.boundingBox) >= 0.025 {
             guard (face.faceCaptureQuality ?? 0) >= 0.35,
@@ -490,13 +653,31 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
             guard let first = ranked.first else { continue }
             let secondDistance = ranked.dropFirst().first?.1 ?? .greatestFiniteMagnitude
             if best == nil || first.1 < best!.distance {
-                best = (first.0, first.1, secondDistance)
+                best = (
+                    first.0,
+                    first.1,
+                    secondDistance,
+                    probe,
+                    crop,
+                    face,
+                    averageLuminance(of: crop)
+                )
             }
         }
         guard let best else {
             resetTemporalCandidate()
+            resetAdaptiveCandidate()
             ROBSceneSnapshotStore.shared.updateIdentifiedPeople([])
-            if let firstProbe { noteUnknownFace(firstProbe) }
+            if let firstProbe {
+                noteUnknownFace(firstProbe)
+            } else if let largest = faces.first {
+                if Self.area(largest.boundingBox) < 0.025 {
+                    statusText = "I see someone, but the face is too small. Please stand closer."
+                } else {
+                    statusText = "I see someone. Hold still, face an even light, and look toward ROB."
+                }
+                publishState()
+            }
             return
         }
 
@@ -505,13 +686,71 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
         let margin = configuredFloat("ROBFaceIdentity.minimumCosineMargin", fallback: 0.06, range: 0...0.5)
         guard best.distance <= threshold, best.second - best.distance >= margin else {
             resetTemporalCandidate()
-            statusText = "A face is visible, but it is not confidently recognized."
             ROBSceneSnapshotStore.shared.updateIdentifiedPeople([])
-            if let firstProbe { noteUnknownFace(firstProbe) }
+            let now = ProcessInfo.processInfo.systemUptime
+            let relaxedThreshold = configuredFloat(
+                "ROBFaceIdentity.maximumAdaptiveCosineDistance",
+                fallback: 0.46,
+                range: min(threshold, 0.8)...0.8
+            )
+            let possibleMatchThreshold = configuredFloat(
+                "ROBFaceIdentity.maximumPossibleMatchDistance",
+                fallback: 0.52,
+                range: relaxedThreshold...0.9
+            )
+            let hasSeparation = best.second - best.distance >= max(0.03, margin / 2)
+            let hasRecentContinuity = lastRecognitionValue.map {
+                $0.profileID == best.profile.id &&
+                    Date().timeIntervalSince($0.confirmedAt) <= Self.adaptiveContinuityLifetime
+            } ?? false
+
+            if faces.count == 1,
+               hasRecentContinuity,
+               hasSeparation,
+               best.distance <= relaxedThreshold {
+                resetUnknownCandidate()
+                clearFriendInvitation()
+                if pendingAdaptiveCandidateID == best.profile.id {
+                    pendingAdaptiveCandidateFrames += 1
+                } else {
+                    pendingAdaptiveCandidateID = best.profile.id
+                    pendingAdaptiveCandidateFrames = 1
+                }
+                statusText = "Adapting a recently confirmed identity to the current lighting. Hold still and look toward ROB."
+                if pendingAdaptiveCandidateFrames >= 3 {
+                    resetAdaptiveCandidate()
+                    switch maybeAppendAdaptiveSample(
+                        profile: best.profile,
+                        embedding: best.embedding,
+                        crop: best.crop,
+                        face: best.face,
+                        luminance: best.luminance,
+                        now: now
+                    ) {
+                    case .refined:
+                        statusText = "Refined the confirmed \(best.profile.displayName) profile for the current lighting and pose."
+                    case .failed(let message):
+                        statusText = "Identity stayed confirmed, but profile refinement was skipped: \(message)"
+                    case .skipped:
+                        break
+                    }
+                }
+            } else if hasSeparation, best.distance <= possibleMatchThreshold {
+                resetAdaptiveCandidate()
+                resetUnknownCandidate()
+                clearFriendInvitation()
+                statusText = "I may know you, but I need a clearer view. Stand closer, face an even light, and look directly toward ROB."
+                postRecognitionGuidanceIfNeeded(now: now)
+            } else {
+                resetAdaptiveCandidate()
+                statusText = "A face is visible, but it does not match a known identity yet."
+                if let firstProbe { noteUnknownFace(firstProbe) }
+            }
             publishState()
             return
         }
 
+        resetAdaptiveCandidate()
         resetUnknownCandidate()
         clearFriendInvitation()
 
@@ -523,10 +762,28 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
         }
         guard pendingCandidateFrames >= 3 else { return }
         pendingCandidateFrames = 0
+        let now = ProcessInfo.processInfo.systemUptime
+        let adaptiveOutcome = maybeAppendAdaptiveSample(
+            profile: best.profile,
+            embedding: best.embedding,
+            crop: best.crop,
+            face: best.face,
+            luminance: best.luminance,
+            now: now
+        )
         if let previous = lastRecognitionValue,
            previous.profileID == best.profile.id,
            Date().timeIntervalSince(previous.confirmedAt) < 8 {
+            switch adaptiveOutcome {
+            case .refined:
+                statusText = "Recognized \(best.profile.displayName) and refined the profile for the current lighting and pose."
+            case .failed(let message):
+                statusText = "Recognized \(best.profile.displayName), but profile refinement was skipped: \(message)"
+            case .skipped:
+                statusText = "Recognized \(best.profile.displayName) as \(best.profile.role.displayName.lowercased())."
+            }
             ROBSceneSnapshotStore.shared.updateIdentifiedPeople([best.profile.displayName])
+            publishState()
             return
         }
         let result = ROBFaceRecognitionResult(
@@ -537,10 +794,20 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
             confirmedAt: Date()
         )
         lastRecognitionValue = result
-        statusText = "Recognized \(result.displayName) as \(result.role.displayName.lowercased())."
+        switch adaptiveOutcome {
+        case .refined:
+            statusText = "Recognized \(result.displayName) as \(result.role.displayName.lowercased()) and refined the profile for the current lighting and pose."
+        case .failed(let message):
+            statusText = "Recognized \(result.displayName) as \(result.role.displayName.lowercased()), but profile refinement was skipped: \(message)"
+        case .skipped:
+            statusText = "Recognized \(result.displayName) as \(result.role.displayName.lowercased())."
+        }
         ROBSceneSnapshotStore.shared.updateIdentifiedPeople([result.displayName])
         try? gallery.markConfirmed(profileID: result.profileID, at: result.confirmedAt)
-        postGreetingCueIfNeeded(for: result, now: ProcessInfo.processInfo.systemUptime)
+        if let index = cachedProfiles.firstIndex(where: { $0.id == result.profileID }) {
+            cachedProfiles[index].lastConfirmedAt = result.confirmedAt
+        }
+        postGreetingCueIfNeeded(for: result, now: now)
         publishState()
         DispatchQueue.main.async {
             NotificationCenter.default.post(
@@ -582,6 +849,14 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
                 "Finish or cancel the current enrollment (\(activeID.uuidString)) first."
             )
         }
+        let normalizedName = Self.normalizedIdentityName(displayName)
+        if let existing = cachedProfiles.first(where: {
+            Self.normalizedIdentityName($0.displayName) == normalizedName
+        }) {
+            throw ROBFaceIdentityGalleryError.invalidInput(
+                "\(existing.displayName) already has a \(existing.role.displayName.lowercased()) profile. Select it and use Refine Selected Identity instead of creating a duplicate."
+            )
+        }
         let profile = try gallery.createProfile(
             displayName: displayName,
             pronunciation: pronunciation,
@@ -591,13 +866,119 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
         )
         cachedProfiles.append(profile)
         activeEnrollmentID = profile.id
+        activeEnrollmentAcceptedSamples = 0
+        activeEnrollmentTargetSamples = Self.enrollmentTargetSamples
+        activeEnrollmentIsRefinement = false
         if handsFree { handsFreeEnrollmentIDs.insert(profile.id) }
         UserDefaults.standard.set(true, forKey: "ROBFaceIdentity.enabled")
-        statusText = "Enrolling \(profile.displayName): look straight at ROB."
+        statusText = "Enrolling \(profile.displayName): 0/\(activeEnrollmentTargetSamples) accepted. Stand closer, face an even light, and look straight at ROB."
+        resetEnrollmentGuidance()
         resetTemporalCandidate()
         resetUnknownCandidate()
         publishState()
         return profile
+    }
+
+    private func startRefinementUnlocked(
+        profile: ROBFaceIdentityProfile,
+        handsFree: Bool
+    ) throws {
+        guard activeEnrollmentID == nil else {
+            throw ROBFaceIdentityGalleryError.invalidInput(
+                "Finish or cancel the current enrollment before refining another identity."
+            )
+        }
+        guard profile.enrollmentIsComplete else {
+            throw ROBFaceIdentityGalleryError.invalidInput(
+                "Finish or delete this incomplete enrollment before refinement."
+            )
+        }
+        guard profile.modelIdentifier == selectedModelValue.rawValue else {
+            throw ROBFaceIdentityGalleryError.invalidInput(
+                "Switch to the face model used by \(profile.displayName) before refinement."
+            )
+        }
+        activeEnrollmentID = profile.id
+        activeEnrollmentAcceptedSamples = 0
+        activeEnrollmentTargetSamples = Self.refinementTargetSamples
+        activeEnrollmentIsRefinement = true
+        if handsFree { handsFreeEnrollmentIDs.insert(profile.id) }
+        UserDefaults.standard.set(true, forKey: "ROBFaceIdentity.enabled")
+        statusText = "Refining \(profile.displayName): 0/\(activeEnrollmentTargetSamples) accepted. Stand closer, face an even light, and look straight at ROB."
+        resetEnrollmentGuidance()
+        resetTemporalCandidate()
+        resetUnknownCandidate()
+        publishState()
+    }
+
+    private func existingCompletedProfile(named name: String) throws -> ROBFaceIdentityProfile? {
+        let normalizedName = Self.normalizedIdentityName(name)
+        let namedProfiles = cachedProfiles.filter {
+            Self.normalizedIdentityName($0.displayName) == normalizedName
+        }
+        guard !namedProfiles.isEmpty else { return nil }
+        let compatible = namedProfiles.filter {
+            $0.enrollmentIsComplete && $0.modelIdentifier == selectedModelValue.rawValue
+        }
+        guard compatible.count <= 1 else {
+            throw ROBFaceIdentityGalleryError.invalidInput(
+                "More than one completed profile uses that name. Please ask the operator to resolve the duplicate profiles."
+            )
+        }
+        guard let profile = compatible.first else {
+            throw ROBFaceIdentityGalleryError.invalidInput(
+                "That name already exists, but its enrollment is incomplete or uses another face model. Please ask the operator to refine it."
+            )
+        }
+        return profile
+    }
+
+    private func faceCouldBelong(
+        _ probe: [Float],
+        to profile: ROBFaceIdentityProfile,
+        maximumDistanceKey: String,
+        fallback: Float
+    ) -> Bool {
+        let nearest = profile.samples.compactMap { sample -> Float? in
+            guard let enrolled = sample.embedding else { return nil }
+            return Self.cosineDistance(probe, enrolled)
+        }.min() ?? .greatestFiniteMagnitude
+        let second = cachedProfiles.filter {
+            $0.id != profile.id &&
+                $0.enrollmentIsComplete &&
+                $0.modelIdentifier == profile.modelIdentifier
+        }.flatMap(\.samples).compactMap { sample -> Float? in
+            guard let enrolled = sample.embedding else { return nil }
+            return Self.cosineDistance(probe, enrolled)
+        }.min() ?? .greatestFiniteMagnitude
+        let maximum = configuredFloat(maximumDistanceKey, fallback: fallback, range: 0.1...0.8)
+        let minimumMargin = configuredFloat(
+            "ROBFaceIdentity.minimumRefinementCosineMargin",
+            fallback: 0.03,
+            range: 0...0.25
+        )
+        return nearest <= maximum && second - nearest >= minimumMargin
+    }
+
+    private static func normalizedIdentityName(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+    }
+
+    private var enrollmentMilestones: Set<Int> {
+        [
+            max(1, activeEnrollmentTargetSamples / 4),
+            max(1, activeEnrollmentTargetSamples / 2),
+            max(1, activeEnrollmentTargetSamples * 3 / 4)
+        ]
+    }
+
+    private func endEnrollmentSession() {
+        activeEnrollmentID = nil
+        activeEnrollmentAcceptedSamples = 0
+        activeEnrollmentTargetSamples = Self.enrollmentTargetSamples
+        activeEnrollmentIsRefinement = false
+        resetEnrollmentGuidance()
     }
 
     private func noteUnknownFace(_ embedding: [Float]) {
@@ -624,9 +1005,11 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
         friendInvitationEmbedding = embedding
         friendConversationTranscript = ""
         pendingSpokenName = nil
+        statusText = "A new person is ready for consent-first enrollment. Ask them to stand closer and follow ROB's spoken guidance."
+        publishState()
         postConversationCue(
             kind: "speak",
-            text: "Hello! I don't think we've met. If you're an adult, or your grown-up says it's okay, I can remember your face only on this robot. To agree, say, ROB, yes, remember me, my name is, and then your name. Otherwise say, ROB, no thanks."
+            text: "Hello! I don't think we've met. Please stand a little closer and face an even light so I can guide you. If you're an adult, or your grown-up says it's okay, I can remember your face only on this robot. To agree, say, ROB, yes, remember me, my name is, and then your name. Otherwise say, ROB, no thanks."
         )
     }
 
@@ -680,15 +1063,111 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
         }
     }
 
-    private func sampleIsDiverse(_ probe: [Float], profileID: UUID) -> Bool {
-        guard let profile = cachedProfiles.first(where: { $0.id == profileID }) else { return false }
-        for sample in profile.samples.suffix(60) {
-            guard let enrolled = sample.embedding else { continue }
-            if Self.cosineDistance(probe, enrolled) < 0.04 {
-                return false
-            }
+    private func postRecognitionGuidanceIfNeeded(now: TimeInterval) {
+        guard now - lastRecognitionGuidanceUptime >= 20 else { return }
+        lastRecognitionGuidanceUptime = now
+        postConversationCue(
+            kind: "speak",
+            text: "I may know you, but I need a clearer look. Please stand closer, face an even light, hold still, and look directly toward me."
+        )
+    }
+
+    private func updateEnrollmentGuidance(key: String, status: String, spoken: String) {
+        guard activeEnrollmentID != nil else { return }
+        statusText = status
+        let now = ProcessInfo.processInfo.systemUptime
+        let minimumInterval = key == lastGuidanceKey ? Self.guidanceRepeatInterval : 5
+        if now - lastGuidanceCueUptime >= minimumInterval {
+            lastGuidanceKey = key
+            lastGuidanceCueUptime = now
+            postConversationCue(kind: "speak", text: spoken)
         }
-        return true
+        publishState()
+    }
+
+    private func resetEnrollmentGuidance() {
+        lastGuidanceKey = nil
+        lastGuidanceCueUptime = -.greatestFiniteMagnitude
+    }
+
+    private func resetAdaptiveCandidate() {
+        pendingAdaptiveCandidateID = nil
+        pendingAdaptiveCandidateFrames = 0
+    }
+
+    private func maybeAppendAdaptiveSample(
+        profile: ROBFaceIdentityProfile,
+        embedding: [Float],
+        crop: CGImage,
+        face: VNFaceObservation,
+        luminance: Float?,
+        now: TimeInterval
+    ) -> AdaptiveSampleOutcome {
+        guard profile.enrollmentIsComplete,
+              profile.modelIdentifier == selectedModelValue.rawValue,
+              facesAreSuitableForAdaptiveCapture(face: face, luminance: luminance),
+              now - (lastAdaptiveSampleUptimeByProfile[profile.id] ?? -.greatestFiniteMagnitude)
+                >= Self.adaptiveSampleInterval,
+              sampleIsDiverse(
+                  embedding,
+                  luminance: luminance,
+                  profileID: profile.id,
+                  minimumEmbeddingDistance: 0.025
+              ),
+              let jpeg = jpegData(crop) else { return .skipped }
+
+        let sampleID = UUID()
+        let sample = ROBFaceIdentitySample(
+            id: sampleID,
+            capturedAt: Date(),
+            quality: face.faceCaptureQuality ?? 0,
+            luminance: luminance,
+            yawRadians: face.yaw?.doubleValue,
+            rollRadians: face.roll?.doubleValue,
+            embedding: embedding,
+            encryptedImageFileName: "\(sampleID.uuidString.lowercased()).robface"
+        )
+        do {
+            let updated = try gallery.appendAdaptiveSample(
+                sample,
+                encryptedImagePlaintext: jpeg,
+                to: profile.id
+            )
+            replaceCachedProfile(updated)
+            lastAdaptiveSampleUptimeByProfile[profile.id] = now
+            return .refined
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+    }
+
+    private func facesAreSuitableForAdaptiveCapture(
+        face: VNFaceObservation,
+        luminance: Float?
+    ) -> Bool {
+        guard Self.area(face.boundingBox) >= 0.04,
+              (face.faceCaptureQuality ?? 0) >= 0.62 else { return false }
+        guard let luminance else { return true }
+        return (0.16 ... 0.90).contains(luminance)
+    }
+
+    private func sampleIsDiverse(
+        _ probe: [Float],
+        luminance: Float?,
+        profileID: UUID,
+        minimumEmbeddingDistance: Float = 0.04
+    ) -> Bool {
+        guard let profile = cachedProfiles.first(where: { $0.id == profileID }) else { return false }
+        let recent = profile.samples.suffix(60)
+        let duplicates = recent.contains { sample in
+            guard let enrolled = sample.embedding else { return false }
+            return Self.cosineDistance(probe, enrolled) < minimumEmbeddingDistance
+        }
+        guard duplicates else { return true }
+        guard let luminance else { return false }
+        return recent.compactMap(\.luminance).allSatisfy {
+            abs($0 - luminance) >= 0.08
+        }
     }
 
     private func encoder(for option: ROBFaceEmbeddingModelOption) throws -> ROBFaceCoreMLEncoder {
@@ -728,6 +1207,27 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
         return imageContext.createCGImage(source, from: rectangle)
     }
 
+    private func averageLuminance(of image: CGImage) -> Float? {
+        let input = CIImage(cgImage: image)
+        guard let filter = CIFilter(name: "CIAreaAverage") else { return nil }
+        filter.setValue(input, forKey: kCIInputImageKey)
+        filter.setValue(CIVector(cgRect: input.extent), forKey: kCIInputExtentKey)
+        guard let output = filter.outputImage else { return nil }
+        var pixel = [UInt8](repeating: 0, count: 4)
+        imageContext.render(
+            output,
+            toBitmap: &pixel,
+            rowBytes: 4,
+            bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+            format: .RGBA8,
+            colorSpace: CGColorSpaceCreateDeviceRGB()
+        )
+        let red = Float(pixel[0]) / 255
+        let green = Float(pixel[1]) / 255
+        let blue = Float(pixel[2]) / 255
+        return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+    }
+
     private func jpegData(_ image: CGImage) -> Data? {
         NSBitmapImageRep(cgImage: image).representation(
             using: .jpeg,
@@ -736,7 +1236,7 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
     }
 
     private func enrollmentPrompt(for profile: ROBFaceIdentityProfile) -> String {
-        let count = profile.samples.count
+        let count = activeEnrollmentAcceptedSamples
         let direction: String
         switch count % 6 {
         case 0: direction = "look straight at ROB"
@@ -746,13 +1246,8 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
         case 4: direction = "look slightly down"
         default: direction = "change your expression naturally"
         }
-        return "Enrolling \(profile.displayName): \(count)/\(Self.enrollmentTargetSamples) accepted; \(direction)."
-    }
-
-    private func updateStatusWhileEnrolling(_ status: String) {
-        guard activeEnrollmentID != nil else { return }
-        statusText = status
-        publishState()
+        let action = activeEnrollmentIsRefinement ? "Refining" : "Enrolling"
+        return "\(action) \(profile.displayName): \(count)/\(activeEnrollmentTargetSamples) accepted; \(direction)."
     }
 
     private func resetTemporalCandidate() {
@@ -785,17 +1280,15 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
     }
 
     private func snapshotUnlocked() -> ROBFaceIdentityServiceSnapshot {
-        let accepted = activeEnrollmentID.flatMap { id in
-            cachedProfiles.first(where: { $0.id == id })?.samples.count
-        } ?? 0
         return ROBFaceIdentityServiceSnapshot(
             enabled: enabled,
             profiles: cachedProfiles.sorted {
                 $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
             },
             enrollingProfileID: activeEnrollmentID,
-            enrollmentAcceptedSamples: accepted,
-            enrollmentTargetSamples: Self.enrollmentTargetSamples,
+            enrollmentAcceptedSamples: activeEnrollmentAcceptedSamples,
+            enrollmentTargetSamples: activeEnrollmentTargetSamples,
+            enrollmentIsRefinement: activeEnrollmentIsRefinement,
             status: statusText,
             lastRecognition: lastRecognitionValue,
             selectedModel: selectedModelValue,
