@@ -12,9 +12,28 @@ import UniformTypeIdentifiers
 @available(macOS 12.3, *)
 final class ROBRemoteDesktopCaptureService {
     static let cameraID = "desktop"
-    static let maximumWidth = 960
-    static let maximumHeight = 540
-    static let framesPerSecond = 6
+    static let maximumWidth = 4_096
+    static let maximumHeight = 2_160
+    static let framesPerSecond = 8
+
+    struct Configuration: Equatable {
+        let maximumWidth: Int
+        let maximumHeight: Int
+        let framesPerSecond: Int
+        let jpegQuality: Double
+
+        init(
+            maximumWidth: Int,
+            maximumHeight: Int,
+            framesPerSecond: Int,
+            jpegQuality: Double
+        ) {
+            self.maximumWidth = min(max(160, maximumWidth), ROBRemoteDesktopCaptureService.maximumWidth)
+            self.maximumHeight = min(max(90, maximumHeight), ROBRemoteDesktopCaptureService.maximumHeight)
+            self.framesPerSecond = min(max(1, framesPerSecond), ROBRemoteDesktopCaptureService.framesPerSecond)
+            self.jpegQuality = min(max(0.4, jpegQuality), 0.94)
+        }
+    }
 
     typealias FrameHandler = (
         _ sampleBuffer: CMSampleBuffer,
@@ -31,6 +50,7 @@ final class ROBRemoteDesktopCaptureService {
     private let imageContext = CIContext(options: [.cacheIntermediates: false])
     private var stream: SCStream?
     private var wantsActive = false
+    private var configuration: Configuration?
     private var generation: UInt64 = 0
     private var isEncoding = false
     private var latestSample: CMSampleBuffer?
@@ -64,21 +84,21 @@ final class ROBRemoteDesktopCaptureService {
         CGPreflightScreenCaptureAccess()
     }
 
-    func setActive(_ active: Bool) {
+    func setConfiguration(_ configuration: Configuration?) {
         queue.async { [weak self] in
-            guard let self, self.wantsActive != active else { return }
-            self.wantsActive = active
+            guard let self, self.configuration != configuration else { return }
+            self.configuration = configuration
+            self.wantsActive = configuration != nil
             self.generation &+= 1
-            if active {
+            self.stopCapture()
+            if configuration != nil {
                 self.beginCapture(generation: self.generation)
-            } else {
-                self.stopCapture()
             }
         }
     }
 
     private func beginCapture(generation requestedGeneration: UInt64) {
-        guard wantsActive, stream == nil else { return }
+        guard wantsActive, stream == nil, let captureConfiguration = configuration else { return }
         guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else { return }
 
         SCShareableContent.getExcludingDesktopWindows(
@@ -100,28 +120,28 @@ final class ROBRemoteDesktopCaptureService {
                 let scale = min(
                     1,
                     min(
-                        Double(Self.maximumWidth) / Double(sourceWidth),
-                        Double(Self.maximumHeight) / Double(sourceHeight)
+                        Double(captureConfiguration.maximumWidth) / Double(sourceWidth),
+                        Double(captureConfiguration.maximumHeight) / Double(sourceHeight)
                     )
                 )
                 let width = max(2, Int(Double(sourceWidth) * scale)) & ~1
                 let height = max(2, Int(Double(sourceHeight) * scale)) & ~1
-                let configuration = SCStreamConfiguration()
-                configuration.width = width
-                configuration.height = height
-                configuration.minimumFrameInterval = CMTime(
+                let streamConfiguration = SCStreamConfiguration()
+                streamConfiguration.width = width
+                streamConfiguration.height = height
+                streamConfiguration.minimumFrameInterval = CMTime(
                     value: 1,
-                    timescale: CMTimeScale(Self.framesPerSecond)
+                    timescale: CMTimeScale(captureConfiguration.framesPerSecond)
                 )
-                configuration.queueDepth = 2
-                configuration.pixelFormat = kCVPixelFormatType_32BGRA
-                configuration.showsCursor = true
-                configuration.capturesAudio = false
+                streamConfiguration.queueDepth = 2
+                streamConfiguration.pixelFormat = kCVPixelFormatType_32BGRA
+                streamConfiguration.showsCursor = true
+                streamConfiguration.capturesAudio = false
 
                 let filter = SCContentFilter(display: display, excludingWindows: [])
                 let stream = SCStream(
                     filter: filter,
-                    configuration: configuration,
+                    configuration: streamConfiguration,
                     delegate: self.outputDelegate
                 )
                 do {
@@ -201,16 +221,16 @@ final class ROBRemoteDesktopCaptureService {
     }
 
     private func encode(_ sampleBuffer: CMSampleBuffer) {
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
+              let configuration else { return }
         isEncoding = true
         let image = CIImage(cvPixelBuffer: pixelBuffer)
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
-        let jpeg = imageContext.jpegRepresentation(
-            of: image,
+        if let jpeg = boundedJPEG(
+            image,
             colorSpace: colorSpace,
-            options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.68]
-        )
-        if let jpeg, jpeg.count <= ROBVideoWireLimits.maximumAccessUnitBytes {
+            preferredQuality: configuration.jpegQuality
+        ) {
             frameHandler(
                 sampleBuffer,
                 jpeg,
@@ -223,5 +243,31 @@ final class ROBRemoteDesktopCaptureService {
             self.latestSample = nil
             encode(latestSample)
         }
+    }
+
+    private func boundedJPEG(
+        _ image: CIImage,
+        colorSpace: CGColorSpace,
+        preferredQuality: Double
+    ) -> Data? {
+        let fallbackQualities = [preferredQuality, 0.88, 0.78, 0.65]
+        var attempted = Set<Int>()
+        for quality in fallbackQualities {
+            let boundedQuality = min(preferredQuality, quality)
+            let qualityKey = Int(boundedQuality * 100)
+            guard attempted.insert(qualityKey).inserted else { continue }
+            let jpeg = imageContext.jpegRepresentation(
+                of: image,
+                colorSpace: colorSpace,
+                options: [
+                    kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption:
+                        boundedQuality
+                ]
+            )
+            if let jpeg, jpeg.count <= ROBVideoWireLimits.maximumAccessUnitBytes {
+                return jpeg
+            }
+        }
+        return nil
     }
 }

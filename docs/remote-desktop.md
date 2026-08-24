@@ -6,7 +6,12 @@ enabling macOS VNC or opening a password-authenticated RFB port.
 The display is a demand-driven source on the existing TLS 1.3 QUIC video service. It is
 advertised as camera ID `desktop`, supports JPEG frames for ROBController and H.264 for
 existing ROB video clients, and stops capture when the last subscription ends. Capture
-is latest-only at up to 960 × 540 and six frames per second.
+is latest-only and follows the controller's negotiated profile: **Max Detail** captures
+up to 4096 × 2160 with 0.94 JPEG quality at two frames per second for readable text,
+while **Fast** captures up to 960 × 540 with 0.62 JPEG quality at eight frames per
+second. The bounded media-frame limit is 8 MiB so high-detail desktop frames are not
+silently discarded; unusually complex frames retry at progressively lower JPEG quality
+only when needed to remain inside that bound.
 
 Authorization requires all of the following:
 

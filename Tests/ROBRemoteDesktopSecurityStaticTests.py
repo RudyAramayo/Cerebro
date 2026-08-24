@@ -21,8 +21,15 @@ assert "robControlLiveSessionDidEnd" in server and "releasePrimaryButton" in ser
 assert "ROBControlLiveSessionRegistry.isActiveOperator" in video
 assert "ROBRemoteDesktopCaptureService.hasScreenCaptureAccess" in video
 assert "supportedCodecs: [.jpeg, .h264]" in video
-assert "desktopCapture.setActive" in video
+assert "desktopCapture.setConfiguration" in video
 assert "SCStream" in capture and "queueDepth = 2" in capture
+assert "static let maximumWidth = 4_096" in capture
+assert "static let maximumHeight = 2_160" in capture
+assert "boundedJPEG(" in capture and "[preferredQuality, 0.88, 0.78, 0.65]" in capture
+assert "($0.framesPerSecond >= 8 ? 0.62 : 0.68)" in video
+assert "maximumAccessUnitBytes = 8 * 1_024 * 1_024" in (
+    ROOT / "Cerebro/ROBVideoProtocol.swift"
+).read_text()
 assert 'Data("ROBDESK1".utf8)' in protocol
 
 print("ROB remote desktop security static tests passed")

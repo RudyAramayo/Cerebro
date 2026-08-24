@@ -1,7 +1,7 @@
 import Foundation
 
 enum ROBVideoWireLimits {
-    static let maximumAccessUnitBytes = 2 * 1_024 * 1_024
+    static let maximumAccessUnitBytes = 8 * 1_024 * 1_024
     static let maximumCodecConfigurationBytes = 64 * 1_024
     static let maximumControlMessageBytes = 64 * 1_024
     static let maximumDimension = 4_096

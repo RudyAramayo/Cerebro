@@ -20,14 +20,14 @@ enum ROBVideoTransport {
     static let mediaSendTimeout: TimeInterval = 10
     static let sendCompletionTimeout: TimeInterval = 10
     static let maximumControlPayloadBytes = 64 * 1_024
-    static let maximumFramedPayloadBytes = (2 * 1_024 * 1_024) + 92
+    static let maximumFramedPayloadBytes = ROBVideoWireLimits.maximumAccessUnitBytes + 92
 
     static let maximumWidth: UInt16 = 960
     static let maximumHeight: UInt16 = 540
     static let maximumFramesPerSecond: UInt16 = 20
     static let maximumBitrate: UInt32 = 1_500_000
     static let minimumBitrate: UInt32 = 250_000
-    static let desktopMaximumBitrate: UInt32 = 1_500_000
+    static let desktopMaximumBitrate: UInt32 = 40_000_000
 }
 
 enum ROBVideoTransportError: LocalizedError {
@@ -1190,21 +1190,40 @@ final class ROBVideoServer {
     }
 
     private func updateCameraDemand() {
-        let activeCameraIDs = Set(connectionsByID.values.compactMap { connection -> String? in
+        let activeStreams = connectionsByID.values.compactMap { connection -> ROBVideoStreamDescriptor? in
             guard let stream = connection.activeStream,
                   readySubscriptionIDs.contains(stream.id) else { return nil }
-            return stream.cameraID
-        })
+            return stream
+        }
+        let activeCameraIDs = Set(activeStreams.map(\.cameraID))
         offeredSampleLock.lock()
         acceptedCameraIDs = activeCameraIDs
         latestOfferedSamples = latestOfferedSamples.filter {
             activeCameraIDs.contains($0.key)
         }
         offeredSampleLock.unlock()
+        let desktopStream = activeStreams
+            .filter { $0.cameraID == ROBRemoteDesktopCaptureService.cameraID }
+            .max {
+                let leftPixels = Int($0.width) * Int($0.height)
+                let rightPixels = Int($1.width) * Int($1.height)
+                if leftPixels == rightPixels { return $0.bitrate < $1.bitrate }
+                return leftPixels < rightPixels
+            }
+        let desktopConfiguration = desktopStream.map {
+            ROBRemoteDesktopCaptureService.Configuration(
+                maximumWidth: Int($0.width),
+                maximumHeight: Int($0.height),
+                framesPerSecond: Int($0.framesPerSecond),
+                jpegQuality: $0.bitrate >= 20_000_000
+                    ? 0.94
+                    : ($0.framesPerSecond >= 8 ? 0.62 : 0.68)
+            )
+        }
+        desktopCapture.setConfiguration(desktopConfiguration)
         let changedCameraIDs = activeCameraIDs.symmetricDifference(lastReportedCameraDemand)
         guard !changedCameraIDs.isEmpty else { return }
         lastReportedCameraDemand = activeCameraIDs
-        desktopCapture.setActive(activeCameraIDs.contains(ROBRemoteDesktopCaptureService.cameraID))
         DispatchQueue.main.async {
             for cameraID in changedCameraIDs {
                 NotificationCenter.default.post(
@@ -1250,7 +1269,7 @@ final class ROBVideoServer {
         subscriptionOwners.removeAll()
         readySubscriptionIDs.removeAll()
         updateCameraDemand()
-        desktopCapture.setActive(false)
+        desktopCapture.setConfiguration(nil)
         publishStatus()
     }
 
