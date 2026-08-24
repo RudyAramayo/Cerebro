@@ -26,6 +26,189 @@ enum DataMessageType: UInt32 {
   case pairingHello = 8
 }
 
+// MARK: - Administrator terminal
+
+/// A deliberately separate binary protocol for administrator PTY traffic.
+/// The fixed discriminator lets both ends claim malformed terminal frames so
+/// shell bytes can never fall through to the historical robot command parser.
+enum ROBAdministratorTerminalMessageKind: UInt8, CaseIterable {
+  case open = 1
+  case input = 2
+  case resize = 3
+  case close = 4
+  case output = 5
+  case ready = 6
+  case title = 7
+  case exited = 8
+  case error = 9
+}
+
+struct ROBAdministratorTerminalMessage: Equatable {
+  let kind: ROBAdministratorTerminalMessageKind
+  let terminalID: UUID
+  let sequence: UInt64
+  let columns: UInt16
+  let rows: UInt16
+  let payload: Data
+}
+
+enum ROBAdministratorTerminalProtocolError: LocalizedError {
+  case invalid(String)
+
+  var errorDescription: String? {
+    switch self {
+    case .invalid(let detail): return "Invalid administrator terminal message: \(detail)"
+    }
+  }
+}
+
+enum ROBAdministratorTerminalProtocol {
+  static let formatVersion: UInt8 = 1
+  static let maximumTabs = 8
+  static let maximumPayloadBytes = 65_536
+  static let maximumMessageBytes = headerLength + maximumPayloadBytes
+  static let minimumColumns: UInt16 = 20
+  static let maximumColumns: UInt16 = 500
+  static let minimumRows: UInt16 = 5
+  static let maximumRows: UInt16 = 250
+
+  private static let magic = Data("ROBTPTY1".utf8)
+  private static let terminalIDLength = 36
+  private static let headerLength = 8 + 1 + 1 + terminalIDLength + 8 + 2 + 2 + 4
+
+  static func claimsProtocol(_ data: Data) -> Bool {
+    data.count >= magic.count && data.prefix(magic.count) == magic
+  }
+
+  static func encode(_ message: ROBAdministratorTerminalMessage) throws -> Data {
+    try validate(message)
+    let identifier = Data(message.terminalID.uuidString.lowercased().utf8)
+    guard identifier.count == terminalIDLength else {
+      throw ROBAdministratorTerminalProtocolError.invalid("terminal identifier")
+    }
+
+    var data = Data(capacity: headerLength + message.payload.count)
+    data.append(magic)
+    data.append(formatVersion)
+    data.append(message.kind.rawValue)
+    data.append(identifier)
+    append(message.sequence, to: &data)
+    append(message.columns, to: &data)
+    append(message.rows, to: &data)
+    append(UInt32(message.payload.count), to: &data)
+    data.append(message.payload)
+    return data
+  }
+
+  static func decode(_ data: Data) throws -> ROBAdministratorTerminalMessage {
+    guard claimsProtocol(data) else {
+      throw ROBAdministratorTerminalProtocolError.invalid("discriminator")
+    }
+    guard data.count >= headerLength, data.count <= maximumMessageBytes else {
+      throw ROBAdministratorTerminalProtocolError.invalid("length")
+    }
+    guard data[8] == formatVersion,
+          let kind = ROBAdministratorTerminalMessageKind(rawValue: data[9]) else {
+      throw ROBAdministratorTerminalProtocolError.invalid("version or message kind")
+    }
+    let identifierRange = 10 ..< (10 + terminalIDLength)
+    guard let identifierText = String(data: data.subdata(in: identifierRange), encoding: .utf8),
+          let terminalID = UUID(uuidString: identifierText) else {
+      throw ROBAdministratorTerminalProtocolError.invalid("terminal identifier")
+    }
+    var offset = identifierRange.upperBound
+    let sequence: UInt64 = readInteger(from: data, at: &offset)
+    let columns: UInt16 = readInteger(from: data, at: &offset)
+    let rows: UInt16 = readInteger(from: data, at: &offset)
+    let payloadLength: UInt32 = readInteger(from: data, at: &offset)
+    guard payloadLength <= maximumPayloadBytes,
+          offset + Int(payloadLength) == data.count else {
+      throw ROBAdministratorTerminalProtocolError.invalid("payload length")
+    }
+    let message = ROBAdministratorTerminalMessage(
+      kind: kind,
+      terminalID: terminalID,
+      sequence: sequence,
+      columns: columns,
+      rows: rows,
+      payload: data.subdata(in: offset ..< data.count)
+    )
+    try validate(message)
+    return message
+  }
+
+  static func acknowledgementPayload(_ sequence: UInt64) -> Data {
+    var payload = Data(capacity: 8)
+    append(sequence, to: &payload)
+    return payload
+  }
+
+  static func acknowledgement(from payload: Data) -> UInt64? {
+    guard payload.count == 8 else { return nil }
+    var offset = 0
+    return readInteger(from: payload, at: &offset) as UInt64
+  }
+
+  private static func validate(_ message: ROBAdministratorTerminalMessage) throws {
+    guard message.sequence > 0 else {
+      throw ROBAdministratorTerminalProtocolError.invalid("sequence")
+    }
+    let hasValidSize = (minimumColumns ... maximumColumns).contains(message.columns)
+      && (minimumRows ... maximumRows).contains(message.rows)
+    switch message.kind {
+    case .open:
+      guard hasValidSize, acknowledgement(from: message.payload) != nil else {
+        throw ROBAdministratorTerminalProtocolError.invalid("open request")
+      }
+    case .input:
+      guard !message.payload.isEmpty, message.payload.count <= maximumPayloadBytes,
+            message.columns == 0, message.rows == 0 else {
+        throw ROBAdministratorTerminalProtocolError.invalid("terminal input")
+      }
+    case .resize:
+      guard hasValidSize, message.payload.isEmpty else {
+        throw ROBAdministratorTerminalProtocolError.invalid("terminal size")
+      }
+    case .close:
+      guard message.columns == 0, message.rows == 0, message.payload.isEmpty else {
+        throw ROBAdministratorTerminalProtocolError.invalid("close request")
+      }
+    case .output:
+      guard !message.payload.isEmpty, message.payload.count <= maximumPayloadBytes,
+            message.columns == 0, message.rows == 0 else {
+        throw ROBAdministratorTerminalProtocolError.invalid("terminal output")
+      }
+    case .ready, .exited, .error:
+      guard message.columns == 0, message.rows == 0,
+            message.payload.count <= 1_024,
+            String(data: message.payload, encoding: .utf8) != nil else {
+        throw ROBAdministratorTerminalProtocolError.invalid("terminal state")
+      }
+    case .title:
+      guard message.columns == 0, message.rows == 0,
+            message.payload.count <= 512,
+            String(data: message.payload, encoding: .utf8) != nil else {
+        throw ROBAdministratorTerminalProtocolError.invalid("terminal title")
+      }
+    }
+  }
+
+  private static func append<T: FixedWidthInteger>(_ value: T, to data: inout Data) {
+    var bigEndian = value.bigEndian
+    withUnsafeBytes(of: &bigEndian) { data.append(contentsOf: $0) }
+  }
+
+  private static func readInteger<T: FixedWidthInteger>(from data: Data, at offset: inout Int) -> T {
+    let width = MemoryLayout<T>.size
+    var value: T = 0
+    for byte in data[offset ..< (offset + width)] {
+      value = (value << 8) | T(byte)
+    }
+    offset += width
+    return value
+  }
+}
+
 enum AutoNetTransportError: LocalizedError {
   case unsupportedService(String)
   case legacyDisabled
