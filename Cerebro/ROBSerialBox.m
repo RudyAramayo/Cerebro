@@ -62,12 +62,19 @@ static NSInteger const kPololuUSBVendorID = 0x1ffb;
 static NSString * const kROBNeckSafetyConfigurationDefaultsKey = @"ROBNeckSafetyConfigurationV3";
 static NSString * const kROBNeckSafetyV2ConfigurationDefaultsKey = @"ROBNeckSafetyConfigurationV2";
 static NSString * const kROBNeckSafetyLegacyConfigurationDefaultsKey = @"ROBNeckSafetyConfigurationV1";
+static NSString * const kROBMaestroServoSmoothingEnabledDefaultsKey = @"ROBMaestroServoSmoothingEnabled";
+static NSString * const kROBMaestroServoSpeedLimitDefaultsKey = @"ROBMaestroServoSpeedLimit";
+static NSString * const kROBMaestroServoAccelerationLimitDefaultsKey = @"ROBMaestroServoAccelerationLimit";
 static NSTimeInterval const kROBNeckManualOverrideSeconds = 2.0;
 static NSTimeInterval const kROBNeckVisionAuthoritySeconds = 0.35;
 static NSTimeInterval const kROBNeckPanRecenterSeconds = 1.0;
 static NSTimeInterval const kROBNeckClearanceSettleSeconds = 0.75;
 static NSTimeInterval const kROBNeckSupervisedRecoverySeconds = 5.0;
 static NSUInteger const kROBBaseConsoleMaximumCharacters = 256 * 1024;
+enum { kROBMiniMaestroChannelCount = 24 };
+
+NSInteger const ROBMaestroDefaultServoSpeedLimit = 40;
+NSInteger const ROBMaestroDefaultServoAccelerationLimit = 4;
 
 static double ROBTargetOverflow(double target, double minimum, double maximum)
 {
@@ -244,6 +251,7 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 @property (readwrite, assign) NSTimeInterval pendingPanEnvelopeReadyAt;
 @property (readwrite, assign) ROBNeckSafetySettleGate panRecenterSettleGate;
 @property (readwrite, assign) NSTimeInterval commandedNeckPanTargetReadyAt;
+@property (readwrite, assign) NSTimeInterval commandedUpperNeckTargetReadyAt;
 @property (readwrite, assign) NSTimeInterval manualNeckOverrideUntil;
 @property (readwrite, assign) NSTimeInterval visionNeckAuthorityUntil;
 @property (readwrite, assign) NSTimeInterval gestureNeckAuthorityUntil;
@@ -277,6 +285,9 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 @property (readwrite, assign) BOOL maestroReconnectScheduled;
 @property (readwrite, assign) BOOL maestroReconnectInProgress;
 @property (readwrite, assign) BOOL maestroMissingWasReported;
+@property (readwrite, assign, getter=isMaestroServoSmoothingEnabled) BOOL maestroServoSmoothingEnabled;
+@property (readwrite, assign) NSInteger maestroServoSpeedLimit;
+@property (readwrite, assign) NSInteger maestroServoAccelerationLimit;
 @property (readwrite, copy) NSString *maestroDevicePath;
 @property (atomic, readwrite, copy) NSString *baseSerialStatusText;
 @property (atomic, readwrite, copy) NSString *maestroSerialStatusText;
@@ -307,6 +318,11 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 - (void)scheduleMaestroReconnectAfterDelay:(NSTimeInterval)delay;
 - (void)markMaestroDisconnectedForErrno:(int)errorNumber;
 - (BOOL)writeMaestroBytes:(const void *)bytes length:(size_t)length;
+- (BOOL)sendMaestroServoMotionSettingsEnabled:(BOOL)enabled
+                                    speedLimit:(NSInteger)speedLimit
+                             accelerationLimit:(NSInteger)accelerationLimit;
+- (NSTimeInterval)maestroMotionDurationFromTarget:(int)fromTarget
+                                         toTarget:(int)toTarget;
 - (BOOL)sendMaestroTarget:(unsigned short)target channel:(unsigned char)channel;
 - (BOOL)sendMaestroLowerTarget:(unsigned short)lowerTarget
                    upperTarget:(unsigned short)upperTarget;
@@ -375,7 +391,28 @@ typedef enum : NSUInteger {
 {
     self = [super init];
     if (self) {
-        
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        [defaults registerDefaults:@{
+            kROBMaestroServoSmoothingEnabledDefaultsKey: @YES,
+            kROBMaestroServoSpeedLimitDefaultsKey:
+                @(ROBMaestroDefaultServoSpeedLimit),
+            kROBMaestroServoAccelerationLimitDefaultsKey:
+                @(ROBMaestroDefaultServoAccelerationLimit),
+        }];
+        NSInteger speedLimit = [defaults
+            integerForKey:kROBMaestroServoSpeedLimitDefaultsKey];
+        NSInteger accelerationLimit = [defaults
+            integerForKey:kROBMaestroServoAccelerationLimitDefaultsKey];
+        self.maestroServoSmoothingEnabled = [defaults
+            boolForKey:kROBMaestroServoSmoothingEnabledDefaultsKey];
+        self.maestroServoSpeedLimit = speedLimit >= 1
+                && speedLimit <= ROBNeckSafetyMaximumMaestroTarget
+            ? speedLimit
+            : ROBMaestroDefaultServoSpeedLimit;
+        self.maestroServoAccelerationLimit = accelerationLimit >= 1
+                && accelerationLimit <= UINT8_MAX
+            ? accelerationLimit
+            : ROBMaestroDefaultServoAccelerationLimit;
     }
     return self;
 }
@@ -647,6 +684,7 @@ typedef enum : NSUInteger {
     self.pendingPanEnvelopeReadyAt = 0;
     self.panRecenterSettleGate = (ROBNeckSafetySettleGate){0};
     self.commandedNeckPanTargetReadyAt = 0;
+    self.commandedUpperNeckTargetReadyAt = 0;
     self.supervisedLowerRecoveryUntil = 0;
     ROBNeckSafetyPanBounds conservativeBounds = {0};
     if (!ROBNeckConservativeUnknownPanBounds(
@@ -696,6 +734,7 @@ typedef enum : NSUInteger {
     self.pendingPanEnvelopeReadyAt = 0;
     self.panRecenterSettleGate = (ROBNeckSafetySettleGate){0};
     self.commandedNeckPanTargetReadyAt = 0;
+    self.commandedUpperNeckTargetReadyAt = 0;
     self.lastDesiredUpperNeckTargetIsKnown = NO;
     self.supervisedLowerRecoveryUntil = 0;
     self.manualNeckOverrideUntil = 0;
@@ -982,6 +1021,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
                           contextInt:kMaestroSerialContext];
     }
 
+    BOOL motionSettingsApplied = YES;
     @synchronized (self) {
         self.maestroReconnectInProgress = NO;
         self.maestroConnectionValid = path.length > 0 && error == nil && serialFileDescriptor_maestro >= 0;
@@ -990,7 +1030,20 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
             self.maestroMissingWasReported = NO;
             [self invalidateNeckCommandStateWithStatus:
                 @"Maestro connected; neck pose must be re-established conservatively."];
+            // Keep the connection lock until all controller-side ramp limits
+            // are written. No target sender can observe a connected Maestro
+            // in the gap between opening it and configuring its motion.
+            motionSettingsApplied = [self
+                sendMaestroServoMotionSettingsEnabled:
+                    self.maestroServoSmoothingEnabled
+                speedLimit:self.maestroServoSpeedLimit
+                accelerationLimit:self.maestroServoAccelerationLimit];
         }
+    }
+
+    if (!motionSettingsApplied) {
+        [self markMaestroDisconnectedForErrno:EIO];
+        return;
     }
 
     if (self.maestroConnectionValid) {
@@ -1046,31 +1099,149 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
 
 - (BOOL)writeMaestroBytes:(const void *)bytes length:(size_t)length
 {
-    int descriptor = -1;
     @synchronized (self) {
         if (!self.maestroConnectionValid || serialFileDescriptor_maestro < 0) {
             [self scheduleMaestroReconnectAfterDelay:kMaestroReconnectDelaySeconds];
             return NO;
         }
-        descriptor = serialFileDescriptor_maestro;
-    }
 
-    const uint8_t *cursor = bytes;
-    size_t remaining = length;
-    while (remaining > 0) {
-        ssize_t count = write(descriptor, cursor, remaining);
-        if (count > 0) {
-            cursor += count;
-            remaining -= (size_t)count;
-            continue;
+        // Keep complete compact-protocol packets serialized. In particular,
+        // a 24-channel motion profile cannot interleave with a target packet
+        // from the renderer or a background control source.
+        const uint8_t *cursor = bytes;
+        size_t remaining = length;
+        while (remaining > 0) {
+            ssize_t count = write(serialFileDescriptor_maestro, cursor, remaining);
+            if (count > 0) {
+                cursor += count;
+                remaining -= (size_t)count;
+                continue;
+            }
+            int writeError = count < 0 ? errno : EIO;
+            if (writeError == EINTR) continue;
+            if (writeError == EBADF || writeError == EIO || writeError == ENXIO || writeError == ENODEV) {
+                [self markMaestroDisconnectedForErrno:writeError];
+            }
+            return NO;
         }
-        int writeError = count < 0 ? errno : EIO;
-        if (writeError == EINTR) continue;
-        if (writeError == EBADF || writeError == EIO || writeError == ENXIO || writeError == ENODEV) {
-            [self markMaestroDisconnectedForErrno:writeError];
-        }
+        return YES;
+    }
+}
+
+- (BOOL)sendMaestroServoMotionSettingsEnabled:(BOOL)enabled
+                                    speedLimit:(NSInteger)speedLimit
+                             accelerationLimit:(NSInteger)accelerationLimit
+{
+    if (speedLimit < 1
+        || speedLimit > ROBNeckSafetyMaximumMaestroTarget
+        || accelerationLimit < 1
+        || accelerationLimit > UINT8_MAX) {
         return NO;
     }
+
+    const unsigned short appliedSpeed = enabled
+        ? (unsigned short)speedLimit
+        : 0;
+    const unsigned short appliedAcceleration = enabled
+        ? (unsigned short)accelerationLimit
+        : 0;
+    unsigned char commands[kROBMiniMaestroChannelCount * 8] = {0};
+    size_t offset = 0;
+    for (unsigned char channel = 0;
+         channel < kROBMiniMaestroChannelCount;
+         channel++) {
+        commands[offset++] = 0x87;
+        commands[offset++] = channel;
+        commands[offset++] = appliedSpeed & 0x7F;
+        commands[offset++] = (appliedSpeed >> 7) & 0x7F;
+        commands[offset++] = 0x89;
+        commands[offset++] = channel;
+        commands[offset++] = appliedAcceleration & 0x7F;
+        commands[offset++] = (appliedAcceleration >> 7) & 0x7F;
+    }
+    return [self writeMaestroBytes:commands length:sizeof(commands)];
+}
+
+- (NSTimeInterval)maestroMotionDurationFromTarget:(int)fromTarget
+                                         toTarget:(int)toTarget
+{
+    if (!self.maestroServoSmoothingEnabled) return 0.0;
+    double duration = ROBNeckSafetyMaestroMotionDuration(
+        fromTarget,
+        toTarget,
+        (uint16_t)self.maestroServoSpeedLimit,
+        (uint8_t)self.maestroServoAccelerationLimit
+    );
+    return isfinite(duration) && duration >= 0.0 ? duration : 0.0;
+}
+
+- (BOOL)applyMaestroServoSmoothingEnabled:(BOOL)enabled
+                               speedLimit:(NSInteger)speedLimit
+                        accelerationLimit:(NSInteger)accelerationLimit
+{
+    if (speedLimit < 1
+        || speedLimit > ROBNeckSafetyMaximumMaestroTarget
+        || accelerationLimit < 1
+        || accelerationLimit > UINT8_MAX) {
+        return NO;
+    }
+
+    @synchronized (self) {
+        if (self.maestroConnectionValid
+            && ![self sendMaestroServoMotionSettingsEnabled:enabled
+                                                 speedLimit:speedLimit
+                                          accelerationLimit:accelerationLimit]) {
+            return NO;
+        }
+        self.maestroServoSmoothingEnabled = enabled;
+        self.maestroServoSpeedLimit = speedLimit;
+        self.maestroServoAccelerationLimit = accelerationLimit;
+
+        // A slower profile selected during an in-flight neck clearance move
+        // must extend, never shorten, the fail-closed command-space timers.
+        NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+        ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
+        NSTimeInterval worstLowerDuration = [self
+            maestroMotionDurationFromTarget:configuration.lowerMinimumTarget
+            toTarget:configuration.lowerMaximumTarget];
+        if (self.pendingPanEnvelopeLowerTarget != ROBNeckSafetyTargetOff) {
+            self.pendingPanEnvelopeReadyAt = fmax(
+                self.pendingPanEnvelopeReadyAt,
+                now + kROBNeckClearanceSettleSeconds + worstLowerDuration
+            );
+        }
+        if (self.commandedNeckPanTargetReadyAt > now) {
+            NSTimeInterval worstPanDuration = [self
+                maestroMotionDurationFromTarget:configuration.panMinimumTarget
+                toTarget:configuration.panMaximumTarget];
+            self.commandedNeckPanTargetReadyAt = fmax(
+                self.commandedNeckPanTargetReadyAt,
+                now + kROBNeckPanRecenterSeconds + worstPanDuration
+            );
+        }
+        if (self.commandedUpperNeckTargetReadyAt > now) {
+            NSTimeInterval worstUpperDuration = [self
+                maestroMotionDurationFromTarget:configuration.upperMinimumTarget
+                toTarget:configuration.upperMaximumTarget];
+            self.commandedUpperNeckTargetReadyAt = fmax(
+                self.commandedUpperNeckTargetReadyAt,
+                now + kROBNeckPanRecenterSeconds + worstUpperDuration
+            );
+        }
+    }
+
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    [defaults setBool:enabled
+               forKey:kROBMaestroServoSmoothingEnabledDefaultsKey];
+    [defaults setInteger:speedLimit
+                  forKey:kROBMaestroServoSpeedLimitDefaultsKey];
+    [defaults setInteger:accelerationLimit
+                  forKey:kROBMaestroServoAccelerationLimitDefaultsKey];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [[NSNotificationCenter defaultCenter]
+            postNotificationName:ROBSerialHardwareDidChangeNotification
+                          object:self];
+    });
     return YES;
 }
 
@@ -1141,6 +1312,16 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
 
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
     [self refreshSettledNeckEnvelopeAtTime:now];
+
+    BOOL priorPanCommandIsActive = self.neckPanCommandKnown
+        && self.commandedNeckPanTarget != ROBNeckSafetyTargetOff;
+    int priorPanTarget = (int)self.commandedNeckPanTarget;
+    BOOL priorLowerCommandIsActive = self.lowerNeckTiltCommandKnown
+        && self.commandedLowerNeckTiltTarget != ROBNeckSafetyTargetOff;
+    int priorLowerTarget = (int)self.commandedLowerNeckTiltTarget;
+    BOOL priorUpperCommandIsActive = self.upperNeckTiltCommandKnown
+        && self.commandedUpperNeckTiltTarget != ROBNeckSafetyTargetOff;
+    int priorUpperTarget = (int)self.commandedUpperNeckTiltTarget;
 
     ROBNeckSafetyResult boundedJoints = {0};
     int requestedLower = includeLower
@@ -1263,7 +1444,8 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         && boundedLower != ROBNeckSafetyTargetOff
         && levelingRequired
         && (!self.upperNeckTiltCommandKnown
-            || self.commandedUpperNeckTiltTarget == ROBNeckSafetyTargetOff)
+            || self.commandedUpperNeckTiltTarget == ROBNeckSafetyTargetOff
+            || now < self.commandedUpperNeckTargetReadyAt)
         && effectiveDesiredUpperTarget != ROBNeckSafetyTargetOff;
 
     ROBNeckSafetyPanBounds conservativeUnknownBounds = {0};
@@ -1462,7 +1644,19 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     self.commandedNeckPanTarget = panResult.panTarget;
     self.neckPanCommandKnown = YES;
     if (panTargetChanged) {
-        self.commandedNeckPanTargetReadyAt = now + kROBNeckPanRecenterSeconds;
+        NSTimeInterval panMotionDuration = panResult.panTarget
+                == ROBNeckSafetyTargetOff
+            ? 0.0
+            : priorPanCommandIsActive
+                ? [self maestroMotionDurationFromTarget:priorPanTarget
+                                                toTarget:panResult.panTarget]
+                : [self maestroMotionDurationFromTarget:
+                        effectiveConfiguration.panMinimumTarget
+                                                toTarget:
+                        effectiveConfiguration.panMaximumTarget];
+        self.commandedNeckPanTargetReadyAt = now
+            + panMotionDuration
+            + kROBNeckPanRecenterSeconds;
     }
     self.currentNeckPanMinimumDegrees = panResult.allowedPanMinimumDegrees;
     self.currentNeckPanMaximumDegrees = panResult.allowedPanMaximumDegrees;
@@ -1615,8 +1809,26 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
             @"NECK OUTPUT PARTIAL; physical pose and prior targets are unknown."];
         return ROBNeckCommandDispositionRejected;
     }
+    BOOL upperTargetChanged = !self.upperNeckTiltCommandKnown
+        || leveledResult.upperTarget != self.commandedUpperNeckTiltTarget;
     self.commandedUpperNeckTiltTarget = leveledResult.upperTarget;
     self.upperNeckTiltCommandKnown = YES;
+    if (upperTargetChanged) {
+        if (leveledResult.upperTarget == ROBNeckSafetyTargetOff) {
+            self.commandedUpperNeckTargetReadyAt = 0;
+        } else {
+            NSTimeInterval upperMotionDuration = priorUpperCommandIsActive
+                ? [self maestroMotionDurationFromTarget:priorUpperTarget
+                                                toTarget:leveledResult.upperTarget]
+                : [self maestroMotionDurationFromTarget:
+                        effectiveConfiguration.upperMinimumTarget
+                                                toTarget:
+                        effectiveConfiguration.upperMaximumTarget];
+            self.commandedUpperNeckTargetReadyAt = now
+                + upperMotionDuration
+                + kROBNeckPanRecenterSeconds;
+        }
+    }
     self.lastDesiredUpperNeckTargetIsKnown =
         effectiveDesiredUpperTarget != ROBNeckSafetyTargetOff;
     self.lastDesiredUpperNeckTarget = MAX(
@@ -1654,8 +1866,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
                 }
                 self.commandedNeckPanTarget = ROBNeckSafetyTargetOff;
                 self.neckPanCommandKnown = YES;
-                self.commandedNeckPanTargetReadyAt = now
-                    + kROBNeckPanRecenterSeconds;
+                self.commandedNeckPanTargetReadyAt = 0;
                 self.commandedNeckPanDegrees = NAN;
                 self.neckPanCommandLimited = NO;
             }
@@ -1667,7 +1878,15 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
                 // Identical periodic/gesture demands must not postpone this
                 // deadline forever; only a new lower target restarts it.
                 self.pendingPanEnvelopeLowerTarget = boundedLower;
+                NSTimeInterval lowerMotionDuration = priorLowerCommandIsActive
+                    ? [self maestroMotionDurationFromTarget:priorLowerTarget
+                                                    toTarget:boundedLower]
+                    : [self maestroMotionDurationFromTarget:
+                            effectiveConfiguration.lowerMinimumTarget
+                                                    toTarget:
+                            effectiveConfiguration.lowerMaximumTarget];
                 self.pendingPanEnvelopeReadyAt = now
+                    + lowerMotionDuration
                     + kROBNeckClearanceSettleSeconds;
             }
         } else if (calibrationConfirmed) {

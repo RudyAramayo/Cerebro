@@ -145,6 +145,17 @@ def main() -> None:
         re.search(r"\.label\s*=\s*@\"Hardware\"\s*;", settings_source) is not None,
         "Settings is missing its Hardware tab",
     )
+    require(
+        "NSScrollView *hardwareScrollView" in settings_source
+        and "hardwareScrollView.hasVerticalScroller = YES;" in settings_source
+        and "hardwareScrollView.autohidesScrollers = YES;" in settings_source
+        and "hardwareScrollView.documentView = hardwareView;" in settings_source
+        and re.search(
+            r"hardwareView\s*=.*NSMakeRect\(0,\s*0,\s*680,\s*880\)",
+            settings_source,
+        ) is not None,
+        "Hardware Settings must remain vertically scrollable as controls grow",
+    )
     for token in (
         "baseSerialPopup",
         "maestroSerialPopup",
@@ -217,6 +228,65 @@ def main() -> None:
         and "openSerialPort:" in maestro_reconnect
         and "kMaestroSerialContext" in maestro_reconnect,
         "Retry Maestro no longer performs identity-based automatic discovery",
+    )
+
+    # Servo smoothing is a persisted Mini Maestro controller profile, not a
+    # UI-only animation. Applying it to every channel before target writes
+    # keeps all manual, gesture, and tracking routes on the same ramp.
+    for token in (
+        "ROB.Hardware.MaestroServoSmoothing",
+        "ROB.Hardware.MaestroServoSpeed",
+        "ROB.Hardware.MaestroServoAcceleration",
+        "ROB.Hardware.ApplyMaestroServoSmoothing",
+        "@selector(maestroServoSmoothingToggled:)",
+        "@selector(applyMaestroServoSmoothing:)",
+    ):
+        require(token in settings_source, f"Hardware lost servo motion control: {token}")
+    require(
+        "maestroServoSmoothingEnabled" in serial_header
+        and "maestroServoSpeedLimit" in serial_header
+        and "maestroServoAccelerationLimit" in serial_header
+        and "applyMaestroServoSmoothingEnabled:" in serial_header,
+        "The serial service no longer exposes its persisted Maestro motion profile",
+    )
+    maestro_motion_sender = braced_declaration(
+        serial_source,
+        "- (BOOL)sendMaestroServoMotionSettingsEnabled:",
+        serial_implementation,
+    )
+    require(
+        "kROBMiniMaestroChannelCount = 24" in serial_source
+        and "channel < kROBMiniMaestroChannelCount" in maestro_motion_sender
+        and "commands[offset++] = 0x87;" in maestro_motion_sender
+        and "commands[offset++] = 0x89;" in maestro_motion_sender
+        and "enabled" in maestro_motion_sender
+        and "? (unsigned short)speedLimit" in maestro_motion_sender
+        and "? (unsigned short)accelerationLimit" in maestro_motion_sender,
+        "Maestro speed and acceleration limits must cover all 24 channels and support OFF",
+    )
+    require(
+        "kROBMaestroServoSmoothingEnabledDefaultsKey" in serial_source
+        and "kROBMaestroServoSpeedLimitDefaultsKey" in serial_source
+        and "kROBMaestroServoAccelerationLimitDefaultsKey" in serial_source
+        and "ROBMaestroDefaultServoSpeedLimit = 40" in serial_source
+        and "ROBMaestroDefaultServoAccelerationLimit = 4" in serial_source,
+        "The gentle Maestro defaults are no longer registered and persisted",
+    )
+    reconnect_compact = " ".join(maestro_reconnect.split())
+    require(
+        reconnect_compact.find("sendMaestroServoMotionSettingsEnabled:")
+        < reconnect_compact.find('NSLog(@"Maestro connected')
+        and "markMaestroDisconnectedForErrno:EIO" in maestro_reconnect,
+        "A Maestro connection may accept target writes before its motion profile is applied",
+    )
+    apply_motion = braced_declaration(
+        settings_source, "- (void)applyMaestroServoSmoothing:"
+    )
+    require(
+        "applyMaestroServoSmoothingEnabled:enabled" in apply_motion
+        and "speedLimit:speedLimit" in apply_motion
+        and "accelerationLimit:accelerationLimit" in apply_motion,
+        "Hardware Settings no longer applies the validated motion profile centrally",
     )
 
     # The console is explicitly and lazily opened from Settings. It alone owns

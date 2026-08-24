@@ -120,6 +120,18 @@ double ROBNeckSafetyFullPanDegrees(const ROBNeckSafetyConfig *config);
 // Returns NAN when config is invalid.
 double ROBNeckSafetyReferenceLowerTarget(const ROBNeckSafetyConfig *config);
 
+// Conservative duration of the Maestro output-value ramp between two raw
+// targets under compact-protocol speed/acceleration limits. Speed uses the
+// Maestro's (0.25 us)/(10 ms) units; acceleration uses
+// (0.25 us)/(10 ms)/(80 ms). A zero limit means unlimited for that dimension.
+// Returns NAN for targets or speed outside the 14-bit protocol range.
+double ROBNeckSafetyMaestroMotionDuration(
+    int32_t fromTarget,
+    int32_t toTarget,
+    uint16_t speedLimit,
+    uint8_t accelerationLimit
+);
+
 // Computes the pan envelope for a lower-neck target. Target 0 means the lower
 // servo is off or its pose is unknown and therefore returns the tightest
 // configured range (the validated forward range). A known target below the

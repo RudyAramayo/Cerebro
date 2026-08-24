@@ -626,6 +626,28 @@ def check_stateful_safety_gateway(serial_source: str, torso_source: str) -> None
         "expansion forever",
     )
     require(
+        "maestroMotionDurationFromTarget:" in gateway
+        and "panMotionDuration" in gateway
+        and "upperMotionDuration" in gateway
+        and "lowerMotionDuration" in gateway
+        and "commandedUpperNeckTargetReadyAt" in gateway
+        and "now < self.commandedUpperNeckTargetReadyAt" in gateway
+        and "pendingPanEnvelopeReadyAt = now + lowerMotionDuration "
+            "+ kROBNeckClearanceSettleSeconds;" in compact_gateway,
+        "Servo ramp time is no longer included in neck recenter, coupled-upper, "
+        "and lower-clearance gates",
+    )
+    apply_smoothing = objective_c_method(
+        serial_source, "applyMaestroServoSmoothingEnabled:"
+    )
+    require(
+        "fmax(" in apply_smoothing
+        and "worstLowerDuration" in apply_smoothing
+        and "worstPanDuration" in apply_smoothing
+        and "worstUpperDuration" in apply_smoothing,
+        "Changing the Maestro ramp profile may shorten an in-flight neck safety gate",
+    )
+    require(
         "NSProcessInfo.processInfo.systemUptime" in gateway
         and "NSDate" not in gateway,
         "The neck settle gateway must use a monotonic clock",

@@ -47,6 +47,11 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
 @property (nonatomic, strong) NSTextField *maestroSerialStatusLabel;
 @property (nonatomic, strong) NSButton *openBaseConsoleButton;
 @property (nonatomic, strong) NSButton *reconnectMaestroButton;
+@property (nonatomic, strong) NSButton *maestroServoSmoothingToggle;
+@property (nonatomic, strong) NSTextField *maestroServoSpeedLimitField;
+@property (nonatomic, strong) NSTextField *maestroServoAccelerationLimitField;
+@property (nonatomic, strong) NSButton *applyMaestroServoSmoothingButton;
+@property (nonatomic, strong) NSTextField *maestroServoSmoothingStatusLabel;
 @property (nonatomic, strong) NSScrollView *pairedDevicesScrollView;
 @property (nonatomic, strong) NSView *pairedDevicesListView;
 @property (nonatomic, strong) NSTextField *pairedDevicesSummaryLabel;
@@ -186,8 +191,16 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
 
     NSTabViewItem *hardwareTab = [NSTabViewItem tabViewItemWithViewController:[[NSViewController alloc] init]];
     hardwareTab.label = @"Hardware";
-    NSView *hardwareView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 680, 580)];
-    hardwareTab.view = hardwareView;
+    NSScrollView *hardwareScrollView = [[NSScrollView alloc]
+        initWithFrame:NSMakeRect(0, 0, 680, 580)];
+    hardwareScrollView.hasVerticalScroller = YES;
+    hardwareScrollView.hasHorizontalScroller = NO;
+    hardwareScrollView.autohidesScrollers = YES;
+    hardwareScrollView.borderType = NSNoBorder;
+    NSView *hardwareView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 680, 880)];
+    hardwareView.autoresizingMask = NSViewWidthSizable;
+    hardwareScrollView.documentView = hardwareView;
+    hardwareTab.view = hardwareScrollView;
     [tabView addTabViewItem:hardwareTab];
 
     NSTabViewItem *speechTab = [NSTabViewItem tabViewItemWithViewController:[[NSViewController alloc] init]];
@@ -458,17 +471,89 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
     [self refreshMessagesSettings];
 
     NSTextField *hardwareHeading = [self labelWithString:@"Robot USB Hardware"
-                                                    frame:NSMakeRect(24, 530, 632, 28)];
+                                                    frame:NSMakeRect(24, 830, 632, 28)];
     hardwareHeading.font = [NSFont boldSystemFontOfSize:20.0];
     [hardwareView addSubview:hardwareHeading];
 
     NSTextField *hardwareExplanation = [self labelWithString:
         @"Cerebro discovers and reconnects these devices automatically at startup. These controls show the live choices away from the main robot workspace; Base retains a supervised manual USB override for diagnostics."
-        frame:NSMakeRect(24, 474, 632, 48)];
+        frame:NSMakeRect(24, 774, 632, 48)];
     hardwareExplanation.textColor = NSColor.secondaryLabelColor;
     [hardwareView addSubview:hardwareExplanation];
 
-    NSBox *baseBox = [[NSBox alloc] initWithFrame:NSMakeRect(24, 286, 632, 170)];
+    NSBox *servoMotionBox = [[NSBox alloc] initWithFrame:NSMakeRect(24, 526, 632, 230)];
+    servoMotionBox.title = @"Maestro Servo Motion";
+    [hardwareView addSubview:servoMotionBox];
+
+    self.maestroServoSmoothingToggle = [NSButton
+        checkboxWithTitle:@"Gently ramp servo value changes"
+                   target:self
+                   action:@selector(maestroServoSmoothingToggled:)];
+    self.maestroServoSmoothingToggle.frame = NSMakeRect(14, 174, 350, 24);
+    self.maestroServoSmoothingToggle.accessibilityIdentifier =
+        @"ROB.Hardware.MaestroServoSmoothing";
+    self.maestroServoSmoothingToggle.toolTip =
+        @"Apply Maestro speed and acceleration limits to every servo channel.";
+    [servoMotionBox.contentView addSubview:self.maestroServoSmoothingToggle];
+
+    NSTextField *servoMotionExplanation = [self labelWithString:
+        @"The Mini Maestro ramps all 24 servo outputs itself, so manual controls, gestures, and tracking share one smooth profile. Lower values move more gently; neck safety waits are extended automatically."
+        frame:NSMakeRect(16, 125, 600, 42)];
+    servoMotionExplanation.textColor = NSColor.secondaryLabelColor;
+    [servoMotionBox.contentView addSubview:servoMotionExplanation];
+
+    [servoMotionBox.contentView addSubview:[self
+        labelWithString:@"Maximum speed:"
+        frame:NSMakeRect(16, 92, 116, 20)]];
+    self.maestroServoSpeedLimitField = [[NSTextField alloc]
+        initWithFrame:NSMakeRect(132, 86, 88, 26)];
+    NSNumberFormatter *speedFormatter = [[NSNumberFormatter alloc] init];
+    speedFormatter.numberStyle = NSNumberFormatterDecimalStyle;
+    speedFormatter.allowsFloats = NO;
+    speedFormatter.minimum = @1;
+    speedFormatter.maximum = @(ROBNeckSafetyMaximumMaestroTarget);
+    self.maestroServoSpeedLimitField.formatter = speedFormatter;
+    self.maestroServoSpeedLimitField.accessibilityLabel = @"Maestro maximum servo speed";
+    self.maestroServoSpeedLimitField.accessibilityIdentifier =
+        @"ROB.Hardware.MaestroServoSpeed";
+    self.maestroServoSpeedLimitField.toolTip =
+        @"Range 1–16383. Lower values cap target changes more gently.";
+    [servoMotionBox.contentView addSubview:self.maestroServoSpeedLimitField];
+
+    [servoMotionBox.contentView addSubview:[self
+        labelWithString:@"Acceleration:"
+        frame:NSMakeRect(250, 92, 100, 20)]];
+    self.maestroServoAccelerationLimitField = [[NSTextField alloc]
+        initWithFrame:NSMakeRect(350, 86, 76, 26)];
+    NSNumberFormatter *accelerationFormatter = [[NSNumberFormatter alloc] init];
+    accelerationFormatter.numberStyle = NSNumberFormatterDecimalStyle;
+    accelerationFormatter.allowsFloats = NO;
+    accelerationFormatter.minimum = @1;
+    accelerationFormatter.maximum = @255;
+    self.maestroServoAccelerationLimitField.formatter = accelerationFormatter;
+    self.maestroServoAccelerationLimitField.accessibilityLabel =
+        @"Maestro servo acceleration";
+    self.maestroServoAccelerationLimitField.accessibilityIdentifier =
+        @"ROB.Hardware.MaestroServoAcceleration";
+    self.maestroServoAccelerationLimitField.toolTip =
+        @"Range 1–255. Lower values start and stop each joint more softly.";
+    [servoMotionBox.contentView addSubview:self.maestroServoAccelerationLimitField];
+
+    self.applyMaestroServoSmoothingButton = [self
+        buttonWithTitle:@"Apply Motion Profile"
+        frame:NSMakeRect(448, 82, 168, 32)
+        action:@selector(applyMaestroServoSmoothing:)];
+    self.applyMaestroServoSmoothingButton.accessibilityIdentifier =
+        @"ROB.Hardware.ApplyMaestroServoSmoothing";
+    [servoMotionBox.contentView addSubview:self.applyMaestroServoSmoothingButton];
+
+    self.maestroServoSmoothingStatusLabel = [self
+        labelWithString:@"Waiting for the robot runtime…"
+        frame:NSMakeRect(16, 26, 600, 44)];
+    self.maestroServoSmoothingStatusLabel.textColor = NSColor.secondaryLabelColor;
+    [servoMotionBox.contentView addSubview:self.maestroServoSmoothingStatusLabel];
+
+    NSBox *baseBox = [[NSBox alloc] initWithFrame:NSMakeRect(24, 338, 632, 170)];
     baseBox.title = @"Base Arduino";
     [hardwareView addSubview:baseBox];
     [baseBox.contentView addSubview:[self labelWithString:@"Base USB selection:"
@@ -495,7 +580,7 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
         @"Open optional live Base serial output and command controls in a separate window.";
     [baseBox.contentView addSubview:self.openBaseConsoleButton];
 
-    NSBox *maestroBox = [[NSBox alloc] initWithFrame:NSMakeRect(24, 105, 632, 160)];
+    NSBox *maestroBox = [[NSBox alloc] initWithFrame:NSMakeRect(24, 157, 632, 160)];
     maestroBox.title = @"Pololu Maestro";
     [hardwareView addSubview:maestroBox];
     [maestroBox.contentView addSubview:[self labelWithString:@"Maestro USB selection (automatic):"
@@ -522,10 +607,16 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
 
     NSTextField *consoleNote = [self labelWithString:
         @"The Base console is opt-in: output is rendered only while its window is open. Closing the console never stops telemetry, safety parsing, or automatic USB operation."
-        frame:NSMakeRect(24, 44, 632, 44)];
+        frame:NSMakeRect(24, 94, 632, 44)];
     consoleNote.textColor = NSColor.secondaryLabelColor;
     [hardwareView addSubview:consoleNote];
     [self refreshSerialHardwareSettings];
+    [hardwareScrollView.contentView scrollToPoint:NSMakePoint(
+        0,
+        NSHeight(hardwareView.bounds)
+            - NSHeight(hardwareScrollView.contentView.bounds)
+    )];
+    [hardwareScrollView reflectScrolledClipView:hardwareScrollView.contentView];
 
     NSTextField *controllersHeading = [self labelWithString:@"Paired Control Devices"
                                                        frame:NSMakeRect(24, 530, 632, 28)];
@@ -765,6 +856,7 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
     self.baseSerialPopup.enabled = available;
     self.openBaseConsoleButton.enabled = available;
     self.reconnectMaestroButton.enabled = available;
+    self.maestroServoSmoothingToggle.enabled = available;
     if (!available) {
         [self.baseSerialPopup removeAllItems];
         [self.baseSerialPopup addItemWithTitle:@"Robot runtime unavailable"];
@@ -772,9 +864,31 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
         [self.maestroSerialPopup addItemWithTitle:@"Robot runtime unavailable"];
         self.baseSerialStatusLabel.stringValue = @"Open Cerebro's main robot window to manage Base USB.";
         self.maestroSerialStatusLabel.stringValue = @"Open Cerebro's main robot window to view Maestro USB.";
+        self.maestroServoSpeedLimitField.integerValue =
+            ROBMaestroDefaultServoSpeedLimit;
+        self.maestroServoAccelerationLimitField.integerValue =
+            ROBMaestroDefaultServoAccelerationLimit;
+        self.maestroServoSmoothingToggle.state = NSControlStateValueOn;
+        self.maestroServoSpeedLimitField.enabled = NO;
+        self.maestroServoAccelerationLimitField.enabled = NO;
+        self.applyMaestroServoSmoothingButton.enabled = NO;
+        self.maestroServoSmoothingStatusLabel.stringValue =
+            @"Open Cerebro's main robot window to configure servo motion.";
         return;
     }
 
+    self.maestroServoSmoothingToggle.state =
+        serialBox.maestroServoSmoothingEnabled
+            ? NSControlStateValueOn
+            : NSControlStateValueOff;
+    self.maestroServoSpeedLimitField.integerValue =
+        serialBox.maestroServoSpeedLimit;
+    self.maestroServoAccelerationLimitField.integerValue =
+        serialBox.maestroServoAccelerationLimit;
+    BOOL smoothingEnabled = serialBox.maestroServoSmoothingEnabled;
+    self.maestroServoSpeedLimitField.enabled = smoothingEnabled;
+    self.maestroServoAccelerationLimitField.enabled = smoothingEnabled;
+    self.applyMaestroServoSmoothingButton.enabled = smoothingEnabled;
     serialBox.serialListPullDown_base = self.baseSerialPopup;
     serialBox.serialListPullDown_maestro = self.maestroSerialPopup;
     [serialBox refreshSerialPortControls];
@@ -791,6 +905,13 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
         serialBox.baseSerialStatusText ?: @"unknown"];
     self.maestroSerialStatusLabel.stringValue = [NSString stringWithFormat:@"Verified automatic status: %@",
         serialBox.maestroSerialStatusText ?: @"unknown"];
+    self.maestroServoSmoothingStatusLabel.stringValue =
+        serialBox.maestroServoSmoothingEnabled
+            ? [NSString stringWithFormat:
+                @"Smooth ramp configured for all 24 channels — speed %ld, acceleration %ld. The profile is restored after reconnect.",
+                (long)serialBox.maestroServoSpeedLimit,
+                (long)serialBox.maestroServoAccelerationLimit]
+            : @"Servo smoothing is off; Maestro speed and acceleration limits are unlimited.";
 }
 
 - (void)serialHardwareDidChange:(NSNotification *)notification
@@ -799,8 +920,69 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
         return;
     }
     dispatch_async(dispatch_get_main_queue(), ^{
+        ROBSerialBox *serialBox = self.boundSerialBox;
+        if (serialBox == nil) return;
+        BOOL smoothingEnabled = serialBox.maestroServoSmoothingEnabled;
+        self.maestroServoSmoothingToggle.state = smoothingEnabled
+            ? NSControlStateValueOn
+            : NSControlStateValueOff;
+        self.maestroServoSpeedLimitField.integerValue =
+            serialBox.maestroServoSpeedLimit;
+        self.maestroServoAccelerationLimitField.integerValue =
+            serialBox.maestroServoAccelerationLimit;
+        self.maestroServoSpeedLimitField.enabled = smoothingEnabled;
+        self.maestroServoAccelerationLimitField.enabled = smoothingEnabled;
+        self.applyMaestroServoSmoothingButton.enabled = smoothingEnabled;
         [self updateSerialHardwareStatus];
     });
+}
+
+- (void)maestroServoSmoothingToggled:(NSButton *)sender
+{
+    BOOL enabled = sender.state == NSControlStateValueOn;
+    self.maestroServoSpeedLimitField.enabled = enabled;
+    self.maestroServoAccelerationLimitField.enabled = enabled;
+    self.applyMaestroServoSmoothingButton.enabled = enabled;
+    [self applyMaestroServoSmoothing:sender];
+}
+
+- (void)applyMaestroServoSmoothing:(id)sender
+{
+    ROBSerialBox *serialBox = self.boundSerialBox;
+    if (serialBox == nil) {
+        NSBeep();
+        [self refreshSerialHardwareSettings];
+        return;
+    }
+
+    BOOL enabled = self.maestroServoSmoothingToggle.state
+        == NSControlStateValueOn;
+    NSInteger speedLimit = enabled
+        ? self.maestroServoSpeedLimitField.integerValue
+        : serialBox.maestroServoSpeedLimit;
+    NSInteger accelerationLimit = enabled
+        ? self.maestroServoAccelerationLimitField.integerValue
+        : serialBox.maestroServoAccelerationLimit;
+    if (speedLimit < 1
+        || speedLimit > ROBNeckSafetyMaximumMaestroTarget
+        || accelerationLimit < 1
+        || accelerationLimit > UINT8_MAX) {
+        NSBeep();
+        self.maestroServoSmoothingStatusLabel.stringValue =
+            @"Enter a speed from 1–16383 and acceleration from 1–255.";
+        return;
+    }
+
+    if (![serialBox applyMaestroServoSmoothingEnabled:enabled
+                                           speedLimit:speedLimit
+                                    accelerationLimit:accelerationLimit]) {
+        NSBeep();
+        self.maestroServoSmoothingStatusLabel.stringValue =
+            @"The motion profile could not be applied. Check the Maestro connection and retry.";
+        [self refreshSerialHardwareSettings];
+        return;
+    }
+    [self refreshSerialHardwareSettings];
 }
 
 - (void)baseSerialSelectionChanged:(NSPopUpButton *)sender

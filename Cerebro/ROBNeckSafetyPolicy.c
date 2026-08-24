@@ -198,6 +198,49 @@ double ROBNeckSafetyReferenceLowerTarget(const ROBNeckSafetyConfig *config) {
     return (double)ROBNeckSafetyUprightLowerTarget;
 }
 
+double ROBNeckSafetyMaestroMotionDuration(
+    int32_t fromTarget,
+    int32_t toTarget,
+    uint16_t speedLimit,
+    uint8_t accelerationLimit
+) {
+    if (fromTarget < ROBNeckSafetyTargetOff
+        || fromTarget > ROBNeckSafetyMaximumMaestroTarget
+        || toTarget < ROBNeckSafetyTargetOff
+        || toTarget > ROBNeckSafetyMaximumMaestroTarget
+        || speedLimit > ROBNeckSafetyMaximumMaestroTarget) {
+        return NAN;
+    }
+
+    const double distance = fabs((double)toTarget - (double)fromTarget);
+    if (distance <= 0.0
+        || (speedLimit == 0 && accelerationLimit == 0)) {
+        return 0.0;
+    }
+
+    // One speed unit changes one quarter-microsecond target unit per 10 ms.
+    const double maximumSpeed = (double)speedLimit * 100.0;
+    // One acceleration unit changes speed by one target unit per 80 ms,
+    // equivalent to 1250 quarter-microsecond target units per second squared.
+    const double acceleration = (double)accelerationLimit * 1250.0;
+
+    if (accelerationLimit == 0) {
+        return distance / maximumSpeed;
+    }
+    if (speedLimit == 0) {
+        return 2.0 * sqrt(distance / acceleration);
+    }
+
+    const double accelerationAndDecelerationDistance =
+        maximumSpeed * maximumSpeed / acceleration;
+    if (distance <= accelerationAndDecelerationDistance) {
+        return 2.0 * sqrt(distance / acceleration);
+    }
+
+    return 2.0 * maximumSpeed / acceleration
+        + (distance - accelerationAndDecelerationDistance) / maximumSpeed;
+}
+
 bool ROBNeckSafetyAllowedPanBounds(
     const ROBNeckSafetyConfig *config,
     int32_t lowerTarget,

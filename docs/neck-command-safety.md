@@ -80,6 +80,25 @@ touching pan or upper-camera controls cannot qualify. The status identifies
 this mode. It does not energize an unverified compensation direction
 autonomously.
 
+## Hardware servo motion profile
+
+The scrollable **Settings → Hardware → Maestro Servo Motion** section enables
+a controller-owned speed and acceleration profile for all 24 Maestro channels.
+It defaults on with maximum speed `40` and acceleration `4`; lower nonzero
+values are gentler. Cerebro persists the profile and sends the Mini Maestro
+compact-protocol **Set Speed** (`0x87`) and **Set Acceleration** (`0x89`)
+commands for every channel immediately after each verified connection, before
+normal target commands. Turning smoothing off explicitly sends zero limits,
+which restores the Maestro's unlimited setting. See the [Pololu Maestro serial
+servo commands](https://www.pololu.com/docs/0J40/5.e) for the controller's
+units and ramp behavior.
+
+This central controller profile covers manual controls, Vision, gestures, and
+arm targets without generating competing UI-side intermediate writes. It
+smooths changes between active commanded outputs; it cannot establish the
+physical position of an unpowered servo or make an unknown first reference
+safe. Startup reference/calibration gates remain necessary.
+
 ## Dynamic pan envelope
 
 The pan window is selected from the commanded lower-tilt target:
@@ -101,16 +120,19 @@ A request toward a more restrictive lower pose tightens the envelope
 immediately. If needed, Cerebro holds lower tilt while it brings pan inside the
 new envelope and establishes a usable upper-camera target. A request toward
 greater clearance does not expand pan immediately: the commanded lower target
-must remain in place for the current 0.75-second settling interval. Pan
+must remain in place for its calculated Maestro ramp duration plus the current
+0.75-second settling margin. Pan
 recentering—and establishing a usable upper-camera target when that coupled
-axis was previously unknown or off—uses the current 1.0-second staging
-interval. A direct lower-axis recovery authorization is latched only for its
+axis was previously unknown or off—uses the calculated ramp duration plus the
+current 1.0-second staging margin. Selecting a slower Hardware profile while a
+neck gate is active can only extend that gate; it never shortens it. A direct
+lower-axis recovery authorization is latched only for its
 exact pan/lower/upper demand long enough to complete this staging. These are
 command-timing guards, not proof that the mechanism settled.
 Every changed pan target starts the same monotonic settling age, including a
 pan-only command issued before a later lower request; a pan reversal restarts
 the lower-release gate. Repeated identical lower demands do not postpone the
-0.75-second clearance-expansion deadline.
+clearance-expansion deadline.
 
 The gateway writes pan first and, only when establishing an unknown/off coupled
 axis, may establish the upper camera alone while lower remains held. For an

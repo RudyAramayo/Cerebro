@@ -21,6 +21,8 @@
 @class ROBBaseControllerModel;
 
 FOUNDATION_EXPORT NSNotificationName const ROBSerialHardwareDidChangeNotification;
+FOUNDATION_EXPORT NSInteger const ROBMaestroDefaultServoSpeedLimit;
+FOUNDATION_EXPORT NSInteger const ROBMaestroDefaultServoAccelerationLimit;
 
 typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
     ROBNeckCommandDispositionRejected = 0,
@@ -49,6 +51,16 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 /// discovery and reconnect do not depend on either popup being instantiated.
 @property (atomic, readonly, copy) NSString *baseSerialStatusText;
 @property (atomic, readonly, copy) NSString *maestroSerialStatusText;
+
+/// Mini Maestro 24 output-ramp settings. A nonzero speed and acceleration are
+/// applied to all 24 channels after every connection, before target commands.
+/// These limit commanded pulse changes; they are not shaft feedback.
+@property (readonly, assign, getter=isMaestroServoSmoothingEnabled) BOOL maestroServoSmoothingEnabled;
+@property (readonly, assign) NSInteger maestroServoSpeedLimit;
+@property (readonly, assign) NSInteger maestroServoAccelerationLimit;
+- (BOOL)applyMaestroServoSmoothingEnabled:(BOOL)enabled
+                               speedLimit:(NSInteger)speedLimit
+                        accelerationLimit:(NSInteger)accelerationLimit;
 
 @property (readwrite, retain) ROBMainViewController *delegate;
 

@@ -550,6 +550,38 @@ static void testSettleGate(void) {
     EXPECT_FALSE(gate.active);
 }
 
+static void testMaestroMotionDuration(void) {
+    EXPECT_TRUE(isnan(ROBNeckSafetyMaestroMotionDuration(
+        -1, 6000, 40, 4)));
+    EXPECT_TRUE(isnan(ROBNeckSafetyMaestroMotionDuration(
+        6000, ROBNeckSafetyMaximumMaestroTarget + 1, 40, 4)));
+    EXPECT_TRUE(isnan(ROBNeckSafetyMaestroMotionDuration(
+        6000, 7000, ROBNeckSafetyMaximumMaestroTarget + 1, 4)));
+
+    EXPECT_NEAR(ROBNeckSafetyMaestroMotionDuration(
+        6000, 6000, 40, 4), 0.0, 0.0);
+    EXPECT_NEAR(ROBNeckSafetyMaestroMotionDuration(
+        6000, 10000, 0, 0), 0.0, 0.0);
+
+    // Speed 40 caps the target at 4000 quarter-microsecond units/second.
+    EXPECT_NEAR(ROBNeckSafetyMaestroMotionDuration(
+        6000, 10000, 40, 0), 1.0, 0.000001);
+
+    // Acceleration 4 is 5000 target units/second squared. With no speed cap,
+    // a 5000-unit triangular move takes one second up and one second down.
+    EXPECT_NEAR(ROBNeckSafetyMaestroMotionDuration(
+        5000, 10000, 0, 4), 2.0, 0.000001);
+
+    // The configured default profile remains triangular below 3200 units and
+    // becomes trapezoidal beyond it.
+    EXPECT_NEAR(ROBNeckSafetyMaestroMotionDuration(
+        6000, 7000, 40, 4), 2.0 * sqrt(0.2), 0.000001);
+    EXPECT_NEAR(ROBNeckSafetyMaestroMotionDuration(
+        6000, 10000, 40, 4), 1.8, 0.000001);
+    EXPECT_NEAR(ROBNeckSafetyMaestroMotionDuration(
+        10000, 6000, 40, 4), 1.8, 0.000001);
+}
+
 int main(void) {
     testConfigurationValidation();
     testLowerClearancePanEnvelope();
@@ -557,6 +589,7 @@ int main(void) {
     testPanApplicationAndOffSentinel();
     testCounterRotation();
     testSettleGate();
+    testMaestroMotionDuration();
 
     if (failures != 0) {
         fprintf(stderr, "ROB neck safety policy fixtures failed: %d\n", failures);
