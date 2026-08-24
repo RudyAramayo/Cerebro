@@ -95,6 +95,273 @@ adapter defines and tests all of the following:
 - startup, disconnect, stale-feedback, and E-stop behavior; and
 - operator confirmation, audit events, and an offline fake test.
 
+## Proposed Amber B1 reference and startup design
+
+The arm commissioning procedure and the normal power-on procedure are two
+different workflows. Discovering direction, zero, and range is a supervised
+commissioning operation performed after mechanical work or a calibration
+invalidation. A normal power-on must only restore a previously approved
+calibration and run small proof motions. It must never rediscover a hard stop or
+sweep the full arm.
+
+Until this reference gate is implemented and commissioned, the existing Show
+Mode live startup action must remain dry-run for arm motion. Gateway leases,
+fresh telemetry, and measured settling can bound a trajectory in Amber's
+reported coordinate frame, but they cannot prove that the frame corresponds to
+the physical URDF pose.
+
+Amber's published B1 instructions require the arm to be at its zero or safe
+posture before power-on. ROB cannot currently satisfy that assumption: without
+actuator power the arms fall beside the torso, and the resulting hanging pose is
+not the URDF all-zero pose. Sending an all-zero target after boot is therefore
+specifically prohibited. Vendor UDP command 7 accepts a joint ID for
+calibration, but the available documentation does not establish whether an arm
+joint moves, adopts its current encoder position, searches for a datum, or how
+the operation can be stopped. Do not expose command 7 for joints 1 through 7
+until those semantics and stop behavior are confirmed by the manufacturer or
+on an isolated supported fixture.
+
+### Make power-off mechanically repeatable
+
+Software cannot safely recover an unknown pose from an encoder value that was
+reset to zero at power-on. ROB needs a passive, gravity-safe arm park on each
+side of the torso:
+
+- a padded cradle supports the forearm/gripper and positively locates enough of
+  the chain to make the parked pose repeatable;
+- independent presence switches identify that the elbow and tool are seated;
+- the arm cannot fall into a person, wheel, cable, or the other arm when drive
+  power is removed; and
+- an operator can support and remove an arm from the cradle without entering a
+  pinch point.
+
+A counterbalance or normally-engaged joint brake is preferable if it can be
+retrofitted and validated. Until one of these passive protections exists, the
+physical startup remains a fixture-only engineering operation. An E-stop that
+removes torque but lets the arm collapse is necessary electrical protection,
+not a complete safe-state design.
+
+The cradle pose is named `power_off_park`; it is not renamed to Amber zero. Its
+seven physical URDF angles are measured and stored independently for the left
+and right arm. Normal shutdown moves each referenced arm into its cradle,
+confirms the switches and measured pose, and only then permits deactivation.
+
+### Keep vendor and physical coordinates separate
+
+Every value must carry a coordinate frame. For joint `j`, use:
+
+```text
+q_model[j] = direction[j] * (q_vendor[j] - vendor_at_model_zero[j])
+q_vendor[j] = vendor_at_model_zero[j] + direction[j] * q_model[j]
+```
+
+`q_model` is the physical URDF angle used by kinematics, collision checking,
+and calibrated limits. `q_vendor` is the current Amber core reading/target.
+`direction` is either -1 or +1. `vendor_at_model_zero` is recomputed for each
+boot if Amber resets its encoder frame; it is persistent only after testing
+proves that the actuator reports a stable absolute position across power cycles.
+
+When the arm is confirmed in the cradle, the startup adapter can derive the
+session offset without pretending that the cradle is zero:
+
+```text
+vendor_at_model_zero[j] = q_vendor_start[j]
+                          - direction[j] * power_off_park[j]
+```
+
+This mapping is accepted only when cradle switches, an operator checkpoint,
+fresh telemetry, and independent visual pose agree. A disagreement leaves the
+arm `UNREFERENCED`; it is not averaged away. The mapping belongs in the gateway
+below all motion callers so raw joint UI, named gestures, Cartesian IK, and
+manual tools cannot bypass it.
+
+### Every-boot state machine
+
+Only one arm is processed at a time. The other arm remains deactivated and
+seated. Every transition has a monotonic deadline, an audit event, and a route
+to a latched fault.
+
+1. **`LOCKED_OUT`** — Disable model, Vision, stage-show, and raw UDP motion
+   authority. Confirm the base is stationary, the exclusion zone is clear, the
+   E-stop operator is ready, both arms are supported, and both cradle switch
+   sets have the expected state.
+2. **`OBSERVE_ONLY`** — Establish the authenticated exclusive gateway session.
+   Collect several increasing telemetry samples for all seven positions,
+   velocities, currents, statuses, and modes. Require finite values, sample age
+   no greater than 250 ms, near-zero measured motion, and no actuator status
+   fault. Record the boot/controller generation. Do not send a target.
+3. **`POSE_CONSISTENCY`** — Use the cradle switches and deterministic
+   OAK-D/fiducial estimate to compare the physical pose directly with the saved
+   cradle pose. Check the measured raw vector for finiteness, stability, and
+   plausible wrap continuity without assuming a saved session offset. Seven
+   vendor zeros while vision observes a nonzero model pose is classified as an
+   expected unreferenced boot, not as Amber zero.
+4. **`CAPTURE_AND_HOLD`** — If all joints already report Position mode, capture
+   a new raw sample and command exactly that raw pose before any other target.
+   If a mode transition is required, the operator physically supports the arm
+   while the existing Active -> fresh pose capture -> Position -> captured-pose
+   hold transaction runs. The arm may not proceed unless all seven modes and
+   the measured hold are confirmed.
+5. **`SESSION_REFERENCE`** — Derive the session offset from the confirmed
+   `power_off_park` pose. Convert the approved physical hard and operating
+   limits into this session's vendor frame. Reject a wrap ambiguity, changed
+   joint sign, missing calibration version, or a current pose outside the
+   translated envelope.
+6. **`JOINT_PROOF`** — With a maintained hold-to-run input, test one joint at a
+   time around its current pose. A conservative first-lab proof is at most one
+   degree in each permitted direction over 8–10 seconds, returning to the
+   captured pose after each excursion. Test distal joints before proximal ones
+   by default (J7 toward J1) to limit swept mass, but use the collision model to
+   omit or reorder any unsafe excursion. The other six joints must remain
+   within following-error bounds. Never test two joints or both arms together.
+7. **`VISION_PROOF`** — For each micro-motion, require the observed link motion
+   to have the predicted direction and displacement within the commissioned
+   uncertainty bound. Require several stable frames before and after the move.
+   A stale, occluded, contradictory, or jumping visual fit requests a measured
+   hold and latches the arm fault.
+8. **`GRIPPER_PROOF`** — With the arm held in a low-energy, visible pose, run the
+   gripper workflow below. Gripper failure disables gripping but need not erase
+   a valid seven-joint arm reference.
+9. **`READY_LIMITED`** — Allow only the conservative operating envelope and
+   leased, dead-man-controlled motion. Expanding to the commissioned normal
+   envelope requires a separate local operator action after reviewing the proof
+   log. `READY` is never inferred from elapsed time or a vendor acknowledgement.
+
+Any dead-man release, stale telemetry, unexpected mode, gateway/session change,
+status fault, current anomaly, excessive following error, limit approach,
+collision prediction, or visual contradiction requests an immediate measured
+hold. If a hold cannot be confirmed, the state changes to `FAULT_LATCHED` and
+the physical safety system is used; software does not retry or continue with
+the next joint.
+
+### Commission direction, zero, and range
+
+Commissioning occurs with the robot secured to a test fixture, both arms
+supported, and only one actuator enabled. The initial software envelope is a
+small region around the observed pose, not the broad URDF range.
+
+1. Inventory each actuator identity, firmware/core build, CAN mapping, encoder
+   wrap behavior, status bits, rated current, and whether position persists
+   across at least three complete power cycles. A dispatch acknowledgement is
+   not encoder evidence.
+2. Use a mechanical zero fixture or surveyed link fiducials to place a joint at
+   a known physical angle. Record its raw value and determine its sign with a
+   single hold-to-run micro-motion. Repeat the observation before saving it.
+3. Obtain hard travel limits from the arm's mechanical/manufacturer data or
+   install dedicated limit/index sensors. Do not find a limit by intentionally
+   stalling into an ordinary mechanical stop. Current-rise homing is permitted
+   only if the stop and actuator were designed and rated for it and a separate
+   low-level stop primitive has been validated.
+4. Expand a provisional envelope in small increments. At every sample, check
+   the complete interpolated path for self-collision, torso/cradle/camera
+   collision, cable wrap, and left/right-arm collision; monitor measured
+   velocity, following error, current, status, and vision residual. Return to
+   the last proven pose after each sample.
+5. Store three ranges, not one: `mechanical_hard`, `commissioning_tested`, and a
+   smaller `normal_operating` range with an engineering margin. Runtime targets
+   outside `normal_operating` are rejected and faulted, not silently clamped.
+6. Repeat the safe pose set in both directions to measure backlash,
+   repeatability, gravity sag, and current baseline. A limit is not approved
+   from a single pass.
+
+The existing checked-in nominal URDF limits remain an outer model reference:
+J1 +/-2.4435 rad, J2 +/-2.3213 rad, J3–J6 +/-2.2863 rad, and J7 +/-3.05 rad.
+They must not be treated as ROB's measured mechanical or collision-safe limits.
+The current hard-coded gateway bounds must eventually be replaced by the
+signed, per-arm commissioned record.
+
+### Validate 3D geometry with the cameras
+
+Vision is an independent plausibility sensor and metrology aid, not the only
+stop channel. The current OAK-D/QR implementation estimates points at QR centers
+and fits joint-center locations. That can help observe early joints, but it
+cannot observe the final wrist rotation and its current 50–60 mm readiness
+residuals are too loose to certify fine joint calibration.
+
+For commissioning:
+
+- calibrate RGB/depth intrinsics and the camera-to-ROB transform using at least
+  four widely separated surveyed body anchors;
+- mount surveyed fiducial rigs on the links and an orientation-observable tag
+  rig on the wrist/gripper; estimate full tag pose from corners rather than
+  only a depth sample at the tag center;
+- capture stationary observations at a diverse set of collision-safe poses,
+  with repeated approaches from both directions;
+- first solve the fixed arm-mount transform, then joint signs/zero offsets, and
+  only then any link-transform corrections. Do not freely optimize every
+  parameter in one under-constrained fit;
+- validate on held-out poses and store RMS, worst-case error, covariance,
+  camera serial/intrinsics version, marker layout version, temperature, and
+  sample count; and
+- derive acceptance thresholds from stationary repeatability and held-out
+  error, with an engineering margin. The existing broad readiness threshold is
+  not automatically a calibration threshold.
+
+At runtime compare forward kinematics from calibrated joint telemetry with the
+observed link/tool pose. Vision can veto motion or require re-reference. It
+cannot override an encoder, limit, collision, current, status, dead-man, or
+physical E-stop fault, and an AI visual description is never calibration data.
+
+### Gripper commissioning and startup
+
+Amber command 7 with gripper selector 8 may sweep the jaw through its full
+travel. The checked-in interface provides only dispatch acceptance: no measured
+jaw aperture, force, endpoint, completion, or stop. Therefore the current
+gripper can only reach `COMMAND_ACCEPTED_UNVERIFIED`; it must remain unavailable
+for autonomous grasping.
+
+The present supervised procedure is:
+
+1. Hold the selected arm in its referenced low-energy test pose, empty the jaw,
+   clear the pinch zone, and confirm the other gripper is idle.
+2. Start camera recording and issue one calibration request. Never retry an
+   ambiguous acknowledgement.
+3. Observe the entire motion locally with the E-stop ready. The camera may log
+   jaw travel and gross asymmetry, but cannot make the undocumented operation
+   stoppable.
+4. Mark only dispatch acceptance and invalidate it on every controller session
+   or known power-cycle change.
+
+Measured gripper calibration requires a jaw-position sensor or endpoint
+switches plus measured motor current/force (preferably a fingertip load cell)
+and a low-level stop command. With those additions, approach the open datum at
+limited energy, back off, repeat to establish repeatability, close slowly on a
+known gauge, map actuator position to aperture, establish contact and maximum
+force thresholds, and verify release/hold/stop before enabling grasping. A
+fiducial on each jaw can independently validate aperture but does not replace
+the switches, force limit, or stop.
+
+### Calibration record and command boundary
+
+Persist a signed, versioned record per physical arm containing:
+
+- robot/arm/actuator identities, firmware and Amber-core hashes, CAN mapping,
+  encoder type/wrap behavior, direction, model-zero offset, and invalidation
+  rules;
+- `power_off_park`, mechanical/tested/operating ranges, startup proof step,
+  velocity/acceleration/jerk caps, current and following-error bounds, and
+  collision-model version;
+- arm-mount and link/tool transforms with uncertainty and their visual
+  calibration provenance;
+- gripper sensor/endpoint/aperture/force data, or the explicit
+  `feedback_unavailable` state; and
+- calibration ID, schema version, timestamp, operator approval, test log hash,
+  and checksum.
+
+The boot-derived session offset and boot generation are kept separately from
+the persistent physical calibration. A firmware/core change, actuator swap,
+mount movement, marker/camera change, checksum failure, implausible park pose,
+or failed proof invalidates the affected scope.
+
+Finally, the vendor cores, UDP ports, CAN interfaces, and a dedicated
+least-privilege safety gateway must form one isolated service boundary, for
+example in a service/network namespace. Sample scripts and UI processes must
+not be able to reach ports 26001/26002 directly. Every caller submits
+physical-model targets to the same gateway, which rejects unreferenced arms,
+stale state, uncalibrated limits, unsafe paths, excessive step/speed, and
+concurrent owners before translating to the current vendor frame. This is what
+prevents a manual joint packet from bypassing over-rotation protection.
+
 ## Intended character sequence
 
 The future physical sequence should reuse Cerebro's stage-show coordinator for
@@ -130,3 +397,8 @@ Amber gateway deployment and the first supervised gripper procedure are in
 [Amber gateway deployment](amber-gateway-deployment.md). Vision arm authority,
 leases, and measured completion are in
 [Vision Pro supervised Amber arm control](vision-pro-arm-control.md).
+
+The vendor basis for the pre-power physical-pose requirement and the available
+joint/gripper commands is the
+[Amber B1 V1 repository](https://github.com/MrAsana/AMBER_B1_ROS2) and the
+[Amber UDP protocol](https://github.com/MrAsana/UDP-Protocol-API/wiki/Robotic-Arm-API-based-on-UDP-Protocol).
