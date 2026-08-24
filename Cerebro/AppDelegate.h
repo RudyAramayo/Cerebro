@@ -20,9 +20,5 @@
 - (IBAction)showFaceIdentityControl:(id)sender;
 - (IBAction)showAmberArmDiagnostics:(id)sender;
 - (IBAction)showWakeUpCalibration:(id)sender;
-- (IBAction)showHologramCaptureSettings:(id)sender;
-- (IBAction)startHologramMovieRecording:(id)sender;
-- (IBAction)stopHologramMovieRecording:(id)sender;
-- (IBAction)shareLatestHologramViaAirDrop:(id)sender;
 
 @end

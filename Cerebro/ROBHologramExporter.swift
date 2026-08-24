@@ -1024,7 +1024,7 @@ private extension ROBHologramExporter {
 
     A static Three.js RGB point-cloud transmission exported by Cerebro.
 
-    Choose **Development → Hologram Voxel Detail…** before capture to select Standard, High, or Ultra resolution. The browser retains the RGB point cloud. Apple AR uses a connected depth surface with the captured RGB image mapped onto it; higher settings use a finer depth grid and create larger USDZ assets.
+    Open **Camera Capture** from Cerebro's main window, then choose **Voxel Detail…** before capture to select Standard, High, or Ultra resolution. The browser retains the RGB point cloud. Apple AR uses a connected depth surface with the captured RGB image mapped onto it; higher settings use a finer depth grid and create larger USDZ assets.
 
     Preview locally (module loading requires HTTP):
 
@@ -1046,7 +1046,7 @@ private extension ROBHologramExporter {
 
     A synchronized RGB-D voxel recording with microphone audio, interactive Three.js playback, and an animated USDZ for Apple AR Quick Look.
 
-    Choose **Development → Hologram Voxel Detail…** before recording to select Standard, High, or Ultra resolution. Apple AR movies use one connected animated depth surface with synchronized RGB image textures; higher settings use a finer surface grid. Ultra retains four detailed RGB-D geometry samples per second for practical iPhone playback.
+    Open **Camera Capture** from Cerebro's main window, then choose **Voxel Detail…** before recording to select Standard, High, or Ultra resolution. Apple AR movies use one connected animated depth surface with synchronized RGB image textures; higher settings use a finer surface grid. Ultra retains four detailed RGB-D geometry samples per second for practical iPhone playback.
 
     Preview locally (camera AR and JavaScript modules require HTTP):
 

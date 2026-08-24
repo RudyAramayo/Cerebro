@@ -370,6 +370,16 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     insta360Button.toolTip = @"Open the live stitched panorama, orientation guide, and 360° diagnostics";
     [insta360Button setAccessibilityIdentifier:@"ROB.MainWorkspace.Insta360"];
 
+    NSButton *cameraCaptureButton = [NSButton buttonWithTitle:@"Camera Capture"
+                                                       target:self
+                                                       action:@selector(showCameraCapture:)];
+    cameraCaptureButton.image = [NSImage imageWithSystemSymbolName:@"camera.viewfinder"
+                                           accessibilityDescription:@"Open camera capture"];
+    cameraCaptureButton.imagePosition = NSImageLeading;
+    cameraCaptureButton.bezelStyle = NSBezelStyleTexturedRounded;
+    cameraCaptureButton.toolTip = @"Open the main RGB-D camera, hologram capture, recording, and camera controls";
+    [cameraCaptureButton setAccessibilityIdentifier:@"ROB.MainWorkspace.CameraCapture"];
+
     NSButton *settingsButton = [NSButton buttonWithTitle:@"Settings"
                                                   target:self
                                                   action:@selector(showSettings:)];
@@ -382,7 +392,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
     NSView *headerSpacer = [[NSView alloc] initWithFrame:NSZeroRect];
     NSStackView *header = [NSStackView stackViewWithViews:@[
-        appIcon, titleStack, headerSpacer, insta360Button, settingsButton
+        appIcon, titleStack, headerSpacer, cameraCaptureButton, insta360Button, settingsButton
     ]];
     header.orientation = NSUserInterfaceLayoutOrientationHorizontal;
     header.alignment = NSLayoutAttributeCenterY;
@@ -393,6 +403,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                                forOrientation:NSLayoutConstraintOrientationHorizontal];
     [insta360Button setContentHuggingPriority:NSLayoutPriorityRequired
                                forOrientation:NSLayoutConstraintOrientationHorizontal];
+    [cameraCaptureButton setContentHuggingPriority:NSLayoutPriorityRequired
+                                    forOrientation:NSLayoutConstraintOrientationHorizontal];
 
     self.messagesWorkspaceViewController = [[ROBMessagesWorkspaceViewController alloc] init];
     [self addChildViewController:self.messagesWorkspaceViewController];
@@ -3339,9 +3351,16 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     if (![[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey]) {
         return;
     }
+    [self showCameraCapture:sender];
+}
+
+- (IBAction)showCameraCapture:(id)sender
+{
     [self ensureMainCameraRuntime];
+    self.cameraWindowController.window.title = @"Camera Capture";
     [self.cameraViewController setDiagnosticsPreviewVisible:YES];
     [self.cameraWindowController showWindow:sender];
+    [self.cameraWindowController.window makeKeyAndOrderFront:sender];
 }
 
 - (void)mainCameraDiagnosticsWindowWillClose:(NSNotification *)notification

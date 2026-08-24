@@ -518,6 +518,12 @@ final class CameraViewController: NSViewController {
     private let calibrateButton = NSButton()
     private let avFoundationCameraLabel = NSTextField(labelWithString: "AVFoundation:")
     private let avFoundationCameraSelector = NSPopUpButton()
+    private let hologramCapturePanel = NSVisualEffectView()
+    private let hologramCaptureStatusLabel = NSTextField(labelWithString: "")
+    private let hologramDetailButton = NSButton()
+    private let hologramStillButton = NSButton()
+    private let hologramRecordButton = NSButton()
+    private let hologramAirDropButton = NSButton()
     private let processingSettings = ROBMainCameraProcessingSettings.shared
     private var latestHumanObservations: [VNHumanObservation] = []
     private var lastSceneSnapshotUpdate: CFTimeInterval = 0
@@ -605,9 +611,9 @@ final class CameraViewController: NSViewController {
         )
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(perceptionSettingsDidChange(_:)),
+            selector: #selector(hologramRecordingStateDidChange(_:)),
             name: Notification.Name("ROBHologramMovieRecordingStateDidChange"),
-            object: nil
+            object: ROBHologramExporter.shared
         )
         NotificationCenter.default.addObserver(
             self,
@@ -716,6 +722,7 @@ final class CameraViewController: NSViewController {
     }
 
     @objc private func applicationWillTerminate() {
+        ROBHologramExporter.shared.stopAirDropSession()
         videoServer?.stop()
         try? cameraManager?.stopSession()
     }
@@ -1076,6 +1083,7 @@ extension CameraViewController: CameraManagerDelegate {
         avFoundationCameraSelector.setAccessibilityLabel("Main AVFoundation camera")
         view.addSubview(avFoundationCameraSelector, positioned: .above, relativeTo: nil)
         reloadAVFoundationCameraSelector()
+        setupHologramCaptureControls()
         
         NSLayoutConstraint.activate([
             calibrateButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
@@ -1095,6 +1103,173 @@ extension CameraViewController: CameraManagerDelegate {
                 constant: -8
             )
         ])
+    }
+
+    private func setupHologramCaptureControls() {
+        hologramCapturePanel.material = .hudWindow
+        hologramCapturePanel.blendingMode = .withinWindow
+        hologramCapturePanel.state = .active
+        hologramCapturePanel.wantsLayer = true
+        hologramCapturePanel.layer?.cornerRadius = 12
+        hologramCapturePanel.layer?.masksToBounds = true
+        hologramCapturePanel.translatesAutoresizingMaskIntoConstraints = false
+        hologramCapturePanel.setAccessibilityIdentifier("ROB.CameraCapture.HologramPanel")
+
+        let icon = NSImageView()
+        icon.image = NSImage(
+            systemSymbolName: "cube.transparent",
+            accessibilityDescription: "Hologram capture"
+        )
+        icon.contentTintColor = .controlAccentColor
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 22, weight: .medium)
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.widthAnchor.constraint(equalToConstant: 30).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: 30).isActive = true
+
+        let title = NSTextField(labelWithString: "Hologram Capture")
+        title.font = .systemFont(ofSize: 15, weight: .semibold)
+        let subtitle = NSTextField(labelWithString: "Create RGB-D stills or moving AR messages")
+        subtitle.font = .systemFont(ofSize: 10.5)
+        subtitle.textColor = .secondaryLabelColor
+        let titleText = NSStackView(views: [title, subtitle])
+        titleText.orientation = .vertical
+        titleText.alignment = .leading
+        titleText.spacing = 1
+        let titleRow = NSStackView(views: [icon, titleText])
+        titleRow.orientation = .horizontal
+        titleRow.alignment = .centerY
+        titleRow.spacing = 8
+
+        configureHologramButton(
+            hologramStillButton,
+            title: "Capture Still…",
+            action: #selector(captureHologramStill(_:)),
+            identifier: "ROB.CameraCapture.HologramStill"
+        )
+        configureHologramButton(
+            hologramRecordButton,
+            title: "Start Recording",
+            action: #selector(toggleHologramRecording(_:)),
+            identifier: "ROB.CameraCapture.HologramRecord"
+        )
+        let captureRow = NSStackView(views: [hologramStillButton, hologramRecordButton])
+        captureRow.orientation = .horizontal
+        captureRow.distribution = .fillEqually
+        captureRow.spacing = 8
+
+        configureHologramButton(
+            hologramDetailButton,
+            title: "Voxel Detail…",
+            action: #selector(showHologramCaptureSettings(_:)),
+            identifier: "ROB.CameraCapture.HologramDetail"
+        )
+        configureHologramButton(
+            hologramAirDropButton,
+            title: "AirDrop Latest…",
+            action: #selector(shareLatestHologram(_:)),
+            identifier: "ROB.CameraCapture.HologramAirDrop"
+        )
+        let utilityRow = NSStackView(views: [hologramDetailButton, hologramAirDropButton])
+        utilityRow.orientation = .horizontal
+        utilityRow.distribution = .fillEqually
+        utilityRow.spacing = 8
+
+        hologramCaptureStatusLabel.font = .systemFont(ofSize: 10.5, weight: .medium)
+        hologramCaptureStatusLabel.textColor = .secondaryLabelColor
+        hologramCaptureStatusLabel.lineBreakMode = .byTruncatingTail
+        hologramCaptureStatusLabel.setAccessibilityIdentifier("ROB.CameraCapture.HologramStatus")
+
+        let content = NSStackView(views: [titleRow, hologramCaptureStatusLabel, captureRow, utilityRow])
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = 8
+        content.translatesAutoresizingMaskIntoConstraints = false
+        captureRow.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
+        utilityRow.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
+        hologramCapturePanel.addSubview(content)
+        view.addSubview(hologramCapturePanel, positioned: .above, relativeTo: nil)
+
+        NSLayoutConstraint.activate([
+            hologramCapturePanel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            hologramCapturePanel.topAnchor.constraint(equalTo: view.topAnchor, constant: 20),
+            hologramCapturePanel.widthAnchor.constraint(equalToConstant: 360),
+            content.leadingAnchor.constraint(equalTo: hologramCapturePanel.leadingAnchor, constant: 14),
+            content.trailingAnchor.constraint(equalTo: hologramCapturePanel.trailingAnchor, constant: -14),
+            content.topAnchor.constraint(equalTo: hologramCapturePanel.topAnchor, constant: 12),
+            content.bottomAnchor.constraint(equalTo: hologramCapturePanel.bottomAnchor, constant: -12)
+        ])
+        updateHologramCaptureControls()
+    }
+
+    private func configureHologramButton(
+        _ button: NSButton,
+        title: String,
+        action: Selector,
+        identifier: String
+    ) {
+        button.title = title
+        button.bezelStyle = .rounded
+        button.target = self
+        button.action = action
+        button.setAccessibilityIdentifier(identifier)
+    }
+
+    private func updateHologramCaptureControls() {
+        let exporter = ROBHologramExporter.shared
+        let recording = exporter.isMovieRecording
+        let detailName: String
+        switch exporter.voxelDetail {
+        case 2: detailName = "High"
+        case 3: detailName = "Ultra"
+        default: detailName = "Standard"
+        }
+        hologramCaptureStatusLabel.stringValue = recording
+            ? "Recording RGB-D hologram · stop within 15 seconds"
+            : "Ready · \(detailName) voxel detail"
+        hologramRecordButton.title = recording ? "Stop & Export…" : "Start Recording"
+        hologramRecordButton.contentTintColor = recording ? .systemRed : .controlAccentColor
+        hologramStillButton.isEnabled = !recording
+        hologramDetailButton.isEnabled = !recording
+        hologramAirDropButton.isEnabled = !recording
+        hologramRecordButton.toolTip = recording
+            ? "Stop recording and choose where to export the moving hologram"
+            : "Record up to 15 seconds of synchronized RGB-D frames and microphone audio"
+    }
+
+    @objc private func captureHologramStill(_ sender: NSButton) {
+        ROBHologramExporter.shared.exportInteractively()
+    }
+
+    @objc private func showHologramCaptureSettings(_ sender: NSButton) {
+        ROBHologramExporter.shared.showCaptureSettings()
+        updateHologramCaptureControls()
+    }
+
+    @objc private func toggleHologramRecording(_ sender: NSButton) {
+        let exporter = ROBHologramExporter.shared
+        if exporter.isMovieRecording {
+            exporter.stopMovieRecordingInteractively()
+        } else {
+            hologramCaptureStatusLabel.stringValue = "Preparing hologram recording…"
+            exporter.startMovieRecording()
+        }
+        updateHologramCaptureControls()
+        reconcileCameraSession()
+    }
+
+    @objc private func shareLatestHologram(_ sender: NSButton) {
+        ROBHologramExporter.shared.shareLatestHologramViaAirDrop()
+    }
+
+    @objc private func hologramRecordingStateDidChange(_ notification: Notification) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.hologramRecordingStateDidChange(notification)
+            }
+            return
+        }
+        updateHologramCaptureControls()
+        reconcileCameraSession()
     }
 
     @objc private func avFoundationCameraSelected(_ sender: NSPopUpButton) {

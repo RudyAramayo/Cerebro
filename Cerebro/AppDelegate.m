@@ -22,7 +22,6 @@ static NSString * const ROBLegacyLuxonisUVCDefaultsKey = @"ROBAllowLuxonisUVCFal
 static NSString * const ROBDevelopmentModeDefaultsKey = @"ROBDevelopmentMode";
 static NSString * const ROBShowControllerInputDiagnosticsNotification = @"ROBShowControllerInputDiagnostics";
 static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopmentModeDidChange";
-static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"ROBHologramMovieRecordingStateDidChange";
 
 @interface AppDelegate ()
 @property (readwrite, retain) NSTimer *rplidarCheckTimer;
@@ -44,11 +43,6 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
 @property (readwrite, retain) NSMenuItem *cameraDiagnosticsMenuItem;
 @property (readwrite, retain) NSMenuItem *amberDiagnosticsMenuItem;
 @property (readwrite, retain) NSMenuItem *wakeUpCalibrationMenuItem;
-@property (readwrite, retain) NSMenuItem *hologramExportMenuItem;
-@property (readwrite, retain) NSMenuItem *hologramSettingsMenuItem;
-@property (readwrite, retain) NSMenuItem *hologramRecordMenuItem;
-@property (readwrite, retain) NSMenuItem *hologramStopMenuItem;
-@property (readwrite, retain) NSMenuItem *hologramAirDropMenuItem;
 - (void)workspaceDidWake:(NSNotification *)notification;
 - (ROBMainViewController *)mainViewControllerInViewController:(NSViewController *)viewController;
 
@@ -79,11 +73,6 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
            selector:@selector(workspaceDidWake:)
                name:NSWorkspaceDidWakeNotification
              object:nil];
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(hologramMovieRecordingStateDidChange:)
-                                                 name:ROBHologramMovieRecordingStateDidChangeNotification
-                                               object:nil];
-
     self.utcWebCamIsOnline = NO;
     self.utcWebCamOutput = [NSMutableString string];
     self.utcWebCamOutputQueue = dispatch_queue_create("com.orbitusrobotics.Cerebro.UTCWebCamOutput", DISPATCH_QUEUE_SERIAL);
@@ -191,37 +180,6 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
         keyEquivalent:@""];
     self.wakeUpCalibrationMenuItem.target = self;
     [submenu addItem:self.wakeUpCalibrationMenuItem];
-    self.hologramSettingsMenuItem = [[NSMenuItem alloc]
-        initWithTitle:@"Hologram Voxel Detail…"
-               action:@selector(showHologramCaptureSettings:)
-        keyEquivalent:@""];
-    self.hologramSettingsMenuItem.target = self;
-    [submenu addItem:self.hologramSettingsMenuItem];
-    self.hologramExportMenuItem = [[NSMenuItem alloc]
-        initWithTitle:@"Capture Hologram Web Package…"
-               action:@selector(exportHologramMessage:)
-        keyEquivalent:@""];
-    self.hologramExportMenuItem.target = self;
-    [submenu addItem:self.hologramExportMenuItem];
-    self.hologramRecordMenuItem = [[NSMenuItem alloc]
-        initWithTitle:@"Start AR Voxel Hologram Recording…"
-               action:@selector(startHologramMovieRecording:)
-        keyEquivalent:@""];
-    self.hologramRecordMenuItem.target = self;
-    [submenu addItem:self.hologramRecordMenuItem];
-    self.hologramStopMenuItem = [[NSMenuItem alloc]
-        initWithTitle:@"Stop and Export AR Voxel Recording…"
-               action:@selector(stopHologramMovieRecording:)
-        keyEquivalent:@""];
-    self.hologramStopMenuItem.target = self;
-    [submenu addItem:self.hologramStopMenuItem];
-    self.hologramAirDropMenuItem = [[NSMenuItem alloc]
-        initWithTitle:@"AirDrop Latest Hologram for 10 Minutes…"
-               action:@selector(shareLatestHologramViaAirDrop:)
-        keyEquivalent:@""];
-    self.hologramAirDropMenuItem.target = self;
-    [submenu addItem:self.hologramAirDropMenuItem];
-
     NSMenuItem *developmentItem = [[NSMenuItem alloc] initWithTitle:@"Development"
                                                              action:nil
                                                       keyEquivalent:@""];
@@ -238,12 +196,6 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
     self.cameraDiagnosticsMenuItem.enabled = enabled;
     self.amberDiagnosticsMenuItem.enabled = enabled;
     self.wakeUpCalibrationMenuItem.enabled = enabled;
-    self.hologramExportMenuItem.enabled = enabled;
-    BOOL recording = [ROBHologramExporter shared].isMovieRecording;
-    self.hologramSettingsMenuItem.enabled = enabled && !recording;
-    self.hologramRecordMenuItem.enabled = enabled && !recording;
-    self.hologramStopMenuItem.enabled = enabled && recording;
-    self.hologramAirDropMenuItem.enabled = enabled && !recording;
 }
 
 - (IBAction)toggleDevelopmentMode:(id)sender
@@ -303,61 +255,12 @@ static NSString * const ROBHologramMovieRecordingStateDidChangeNotification = @"
     [[ROBWakeUpCalibrationWindowController shared] showWindow:sender];
 }
 
-- (IBAction)exportHologramMessage:(id)sender
-{
-    if (![[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey]) {
-        NSBeep();
-        return;
-    }
-    [[ROBHologramExporter shared] exportInteractively];
-}
-
-- (IBAction)showHologramCaptureSettings:(id)sender
-{
-    if (![[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey]) {
-        NSBeep();
-        return;
-    }
-    [[ROBHologramExporter shared] showCaptureSettings];
-}
-
-- (IBAction)startHologramMovieRecording:(id)sender
-{
-    if (![[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey]) {
-        NSBeep();
-        return;
-    }
-    [[ROBHologramExporter shared] startMovieRecording];
-    [self updateDevelopmentMenuState];
-}
-
-- (IBAction)stopHologramMovieRecording:(id)sender
-{
-    [[ROBHologramExporter shared] stopMovieRecordingInteractively];
-    [self updateDevelopmentMenuState];
-}
-
-- (IBAction)shareLatestHologramViaAirDrop:(id)sender
-{
-    if (![[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey]) {
-        NSBeep();
-        return;
-    }
-    [[ROBHologramExporter shared] shareLatestHologramViaAirDrop];
-}
-
-- (void)hologramMovieRecordingStateDidChange:(NSNotification *)notification
-{
-    [self updateDevelopmentMenuState];
-}
-
 - (void)applicationWillTerminate:(NSNotification *)notification
 {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [[[NSWorkspace sharedWorkspace] notificationCenter] removeObserver:self];
     [self.rplidarCheckTimer invalidate];
     [self.utcWebCamCheckTimer invalidate];
-    [[ROBHologramExporter shared] stopAirDropSession];
     [[ROBRecordingCoordinator shared] stopAllForApplicationTermination];
     [[ROBInsta360CameraService shared] stop];
     [self stopUTCWebCamTask];
