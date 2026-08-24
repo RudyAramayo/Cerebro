@@ -655,9 +655,17 @@ struct ROBMessagesInboxBatch: Sendable {
     let highWaterRowID: Int64
 }
 
+struct ROBMessagesReplyRoute: Sendable {
+    let chatID: String
+    let accountCandidates: [String]
+    let soleChatParticipant: String
+    let participantCount: Int
+}
+
 protocol ROBMessagesInboxReading: AnyObject, Sendable {
     func highestRowID() throws -> Int64
     func messages(after rowID: Int64, limit: Int) throws -> ROBMessagesInboxBatch
+    func replyRoute(forChatID chatID: String) throws -> ROBMessagesReplyRoute?
 }
 
 protocol ROBMessagesImageLoading: AnyObject, Sendable {
@@ -1138,6 +1146,98 @@ final class ROBMessagesSQLiteInbox: ROBMessagesInboxReading, @unchecked Sendable
                 ))
             }
             return ROBMessagesInboxBatch(messages: messages, highWaterRowID: highWater)
+            }
+        }
+    }
+
+    func replyRoute(forChatID chatID: String) throws -> ROBMessagesReplyRoute? {
+        guard !chatID.isEmpty,
+              chatID.utf8.count <= 4_096,
+              !chatID.unicodeScalars.contains(where: { $0.value == 0 }) else {
+            return nil
+        }
+        return try withDatabase { database in
+            try inReadTransaction(database) {
+                let chatColumns = try columns(in: "chat", database: database)
+                let handleColumns = try columns(in: "handle", database: database)
+                guard chatColumns.contains("guid"),
+                      handleColumns.contains("id"),
+                      try tableExists("chat_handle_join", database: database) else {
+                    throw ROBMessagesInboxError.unsupportedSchema(
+                        "required chat route columns or joins are missing"
+                    )
+                }
+
+                var accountExpressions: [String] = []
+                if chatColumns.contains("last_addressed_handle") {
+                    accountExpressions.append("COALESCE(c.last_addressed_handle, '')")
+                }
+                if chatColumns.contains("account_login") {
+                    accountExpressions.append("COALESCE(c.account_login, '')")
+                }
+                if chatColumns.contains("account_id") {
+                    accountExpressions.append("COALESCE(c.account_id, '')")
+                }
+                guard !accountExpressions.isEmpty else {
+                    throw ROBMessagesInboxError.unsupportedSchema(
+                        "a chat route account identity is required"
+                    )
+                }
+
+                let query = """
+                SELECT COALESCE(c.guid, ''),
+                       (SELECT COUNT(*) FROM chat_handle_join participant_count
+                        WHERE participant_count.chat_id = c.ROWID),
+                       (SELECT COALESCE(participant.id, '')
+                          FROM chat_handle_join participant_join
+                          JOIN handle participant
+                            ON participant.ROWID = participant_join.handle_id
+                         WHERE participant_join.chat_id = c.ROWID
+                         ORDER BY participant.ROWID
+                         LIMIT 1),
+                       \(accountExpressions.joined(separator: ", "))
+                  FROM chat c
+                 WHERE c.guid = ?
+                 LIMIT 2
+                """
+                let statement = try prepare(query, database: database)
+                defer { sqlite3_finalize(statement) }
+                let bindResult = chatID.withCString { value in
+                    sqlite3_bind_text(
+                        statement,
+                        1,
+                        value,
+                        -1,
+                        ROBMessagesSQLiteTransient
+                    )
+                }
+                guard bindResult == SQLITE_OK else { throw databaseError(database) }
+
+                var routes: [ROBMessagesReplyRoute] = []
+                while true {
+                    let step = sqlite3_step(statement)
+                    if step == SQLITE_DONE { break }
+                    guard step == SQLITE_ROW else { throw databaseError(database) }
+                    let accounts = accountExpressions.indices.map {
+                        string(statement, column: Int32(3 + $0), maximumBytes: 4_096) ?? ""
+                    }
+                    routes.append(ROBMessagesReplyRoute(
+                        chatID: string(statement, column: 0, maximumBytes: 4_096) ?? "",
+                        accountCandidates: accounts,
+                        soleChatParticipant: string(
+                            statement,
+                            column: 2,
+                            maximumBytes: 4_096
+                        ) ?? "",
+                        participantCount: Int(sqlite3_column_int(statement, 1))
+                    ))
+                }
+                guard routes.count <= 1 else {
+                    throw ROBMessagesInboxError.database(
+                        "The originating chat identifier is ambiguous."
+                    )
+                }
+                return routes.first
             }
         }
     }
@@ -2043,8 +2143,9 @@ enum ROBMessagesOperatorReplyError: LocalizedError {
 
     /// Sends an explicit operator-authored reply to the immutable one-to-one
     /// route recovered from the encrypted transcript. The current bridge
-    /// generation and sender policy are rechecked on the serial worker
-    /// immediately before Messages is invoked.
+    /// generation, sender policy, participant, and native Messages account
+    /// aliases are rechecked on the serial worker immediately before Messages
+    /// is invoked.
     @nonobjc func sendOperatorReply(
         text rawText: String,
         to record: ROBMessagesTranscriptRecord,
@@ -2089,9 +2190,11 @@ enum ROBMessagesOperatorReplyError: LocalizedError {
             chatID: record.chatID
         )
         let replySender = replySender
+        let inbox = inbox
         let authorizationGate = replyAuthorizationGate
         let transcriptStore = transcriptStore
-        workerQueue.async { [weak self, replySender, authorizationGate, transcriptStore] in
+        workerQueue.async {
+            [weak self, inbox, replySender, authorizationGate, transcriptStore] in
             var result: Result<Void, Error>
             do {
                 guard authorizationGate.authorizes(
@@ -2103,11 +2206,24 @@ enum ROBMessagesOperatorReplyError: LocalizedError {
                         "Messages authorization changed before the reply was sent."
                     )
                 }
+                guard let route = try inbox.replyRoute(forChatID: record.chatID),
+                      route.chatID == record.chatID,
+                      route.participantCount == 1,
+                      ROBMessagesBridgeConfiguration.canonicalHandle(
+                          route.soleChatParticipant
+                      ) == sender,
+                      route.accountCandidates.contains(where: {
+                          ROBMessagesBridgePolicy.accountCandidate($0, matches: account)
+                      }) else {
+                    throw ROBMessagesOperatorReplyError.unavailable(
+                        "This conversation's Messages route changed and was not sent."
+                    )
+                }
                 try replySender.send(
                     text: text,
                     toChat: record.chatID,
                     account: account,
-                    originatingAccountAliases: [account],
+                    originatingAccountAliases: route.accountCandidates,
                     expectedSender: sender
                 )
                 if shouldArchive {

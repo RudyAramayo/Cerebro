@@ -425,16 +425,20 @@ def main() -> None:
     )
     require(
         "ROBMessagesWorkspaceViewController" in TRANSCRIPT_WINDOW
-        and 'labelWithString: "Messages"' in TRANSCRIPT_WINDOW
+        and 'labelWithString: "Text Messages"' in TRANSCRIPT_WINDOW
+        and 'placeholderString = "Search people and message text"' in TRANSCRIPT_WINDOW
         and 'sendButton.title = "Reply"' in TRANSCRIPT_WINDOW
         and "bridge.sendOperatorReply(" in TRANSCRIPT_WINDOW
         and 'sender = "You"' in TRANSCRIPT_WINDOW
         and "operatorReplies.map" in TRANSCRIPT_WINDOW,
-        "The main Messages workspace lost conversation browsing, replies, or operator history",
+        "The main Messages workspace lost direct search, replies, or operator history",
     )
     require(
         "func sendOperatorReply(" in BRIDGE
         and "authorizationGate.authorizes(" in BRIDGE
+        and "inbox.replyRoute(forChatID: record.chatID)" in BRIDGE
+        and "route.participantCount == 1" in BRIDGE
+        and "originatingAccountAliases: route.accountCandidates" in BRIDGE
         and "toChat: record.chatID" in BRIDGE
         and "expectedSender: sender" in BRIDGE
         and "try transcriptStore.recordOperatorReply(" in BRIDGE,
@@ -446,9 +450,24 @@ def main() -> None:
         and '@"360° Live View"' in MAIN
         and '@"Settings"' in MAIN
         and "ROBMessagesWorkspaceViewController" in MAIN
+        and "NSSplitView *workspace" in MAIN
+        and "addArrangedSubview:aiCard" in MAIN
+        and "addArrangedSubview:messagesView" in MAIN
         and "@selector(showInsta360Diagnostics:)" in MAIN
         and "@selector(showSettings:)" in MAIN,
-        "The polished main communication workspace lost Messages, Main AI, Settings, or 360 access",
+        "The detailed communication workspace lost its visible Main AI and Messages panes",
+    )
+    require(
+        "workspaceButtonForAction:" in MAIN
+        and "self.conversationTableView.enclosingScrollView" in MAIN
+        and "if (self.speechTextView == nil)" in MAIN
+        and "composerScrollView = [[NSScrollView alloc] initWithFrame:NSZeroRect]"
+        in MAIN
+        and "self.mainAISendButton == nil || self.resetConversationButton == nil"
+        not in MAIN
+        and "buttonWithTitle:@\"Send\"" in MAIN
+        and "buttonWithTitle:@\"Clear\"" in MAIN,
+        "A missing storyboard button outlet can suppress the entire communication workspace",
     )
     require(
         'window.title = "Messages Administrator Commands"' in COMMAND_WINDOW

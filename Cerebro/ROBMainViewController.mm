@@ -316,13 +316,80 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     return card;
 }
 
+- (NSButton *)workspaceButtonForAction:(SEL)action fallbackTitle:(NSString *)fallbackTitle
+{
+    for (NSView *subview in self.view.subviews) {
+        if (![subview isKindOfClass:NSButton.class]) { continue; }
+        NSButton *button = (NSButton *)subview;
+        if (button.action == action ||
+            (fallbackTitle.length > 0 && [button.title isEqualToString:fallbackTitle])) {
+            return button;
+        }
+    }
+    return nil;
+}
+
 - (void)configureMainWorkspace
 {
-    NSScrollView *conversationScrollView = self.speechTranscriptTextView.enclosingScrollView;
-    NSScrollView *composerScrollView = self.speechTextView.enclosingScrollView;
-    if (conversationScrollView == nil || composerScrollView == nil ||
-        self.mainAISendButton == nil || self.resetConversationButton == nil) {
+    NSScrollView *conversationScrollView = self.conversationTableView.enclosingScrollView;
+    if (conversationScrollView == nil) {
+        conversationScrollView = self.speechTranscriptTextView.enclosingScrollView;
+    }
+    if (conversationScrollView == nil) {
+        NSLog(@"Unable to install the communication workspace: Main AI transcript is missing");
         return;
+    }
+
+    // Recover the composer directly from the storyboard hierarchy when its
+    // outlet is unavailable. The transcript table gives us an unambiguous
+    // scroll view to exclude.
+    if (self.speechTextView == nil) {
+        for (NSView *subview in self.view.subviews) {
+            if (![subview isKindOfClass:NSScrollView.class] || subview == conversationScrollView) {
+                continue;
+            }
+            NSView *documentView = ((NSScrollView *)subview).documentView;
+            if ([documentView isKindOfClass:NSTextView.class]) {
+                self.speechTextView = (NSTextView *)documentView;
+                break;
+            }
+        }
+    }
+    NSScrollView *composerScrollView = self.speechTextView.enclosingScrollView;
+    if (composerScrollView == nil) {
+        composerScrollView = [[NSScrollView alloc] initWithFrame:NSZeroRect];
+        composerScrollView.hasVerticalScroller = YES;
+        self.speechTextView = [[NSTextView alloc] initWithFrame:NSZeroRect];
+        self.speechTextView.verticallyResizable = YES;
+        self.speechTextView.horizontallyResizable = NO;
+        self.speechTextView.autoresizingMask = NSViewWidthSizable;
+        self.speechTextView.textContainer.widthTracksTextView = YES;
+        self.speechTextView.delegate = self;
+        composerScrollView.documentView = self.speechTextView;
+    }
+
+    // These two controls originated in the storyboard, but private extension
+    // outlets are not guaranteed to reconnect when an older compiled nib is
+    // restored by Xcode. Recover the existing controls by action and create a
+    // replacement as a final fallback. A missing button must never prevent the
+    // entire Main AI + Text Messages workspace from being installed.
+    if (self.mainAISendButton == nil) {
+        self.mainAISendButton = [self workspaceButtonForAction:@selector(sendROBChatText:)
+                                                 fallbackTitle:@"Send"];
+    }
+    if (self.mainAISendButton == nil) {
+        self.mainAISendButton = [NSButton buttonWithTitle:@"Send"
+                                                   target:self
+                                                   action:@selector(sendROBChatText:)];
+    }
+    if (self.resetConversationButton == nil) {
+        self.resetConversationButton = [self workspaceButtonForAction:@selector(resetTranscript:)
+                                                         fallbackTitle:@"Reset Transcript"];
+    }
+    if (self.resetConversationButton == nil) {
+        self.resetConversationButton = [NSButton buttonWithTitle:@"Clear"
+                                                          target:self
+                                                          action:@selector(resetTranscript:)];
     }
 
     [conversationScrollView removeFromSuperview];
@@ -413,6 +480,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
     NSView *aiCard = [self workspaceCardView];
     aiCard.translatesAutoresizingMaskIntoConstraints = NO;
+    [aiCard setAccessibilityIdentifier:@"ROB.MainWorkspace.MainAI"];
     NSTextField *aiTitle = [NSTextField labelWithString:@"Main AI"];
     aiTitle.font = [NSFont systemFontOfSize:17 weight:NSFontWeightSemibold];
     NSTextField *aiSubtitle = [NSTextField
@@ -495,20 +563,25 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         [composerHint.bottomAnchor constraintEqualToAnchor:aiCard.bottomAnchor constant:-11]
     ]];
 
-    NSStackView *workspace = [NSStackView stackViewWithViews:@[messagesView, aiCard]];
-    workspace.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-    workspace.alignment = NSLayoutAttributeTop;
-    workspace.distribution = NSStackViewDistributionFill;
-    workspace.spacing = 14;
+    // Keep both communication channels on screen and let the operator decide
+    // how much room each transcript needs. Main AI leads; text conversations
+    // stay visible and replyable instead of hiding behind a history button.
+    NSSplitView *workspace = [[NSSplitView alloc] initWithFrame:NSZeroRect];
+    workspace.vertical = YES;
+    workspace.dividerStyle = NSSplitViewDividerStyleThin;
+    workspace.autosaveName = @"ROBMainCommunicationWorkspaceSplit";
+    [workspace addArrangedSubview:aiCard];
+    [workspace addArrangedSubview:messagesView];
+    [workspace setHoldingPriority:NSLayoutPriorityDefaultHigh forSubviewAtIndex:0];
     workspace.translatesAutoresizingMaskIntoConstraints = NO;
     [messagesView.heightAnchor constraintEqualToAnchor:workspace.heightAnchor].active = YES;
     [aiCard.heightAnchor constraintEqualToAnchor:workspace.heightAnchor].active = YES;
-    [messagesView.widthAnchor constraintGreaterThanOrEqualToConstant:440].active = YES;
-    NSLayoutConstraint *preferredMessagesWidth =
-        [messagesView.widthAnchor constraintEqualToConstant:490];
-    preferredMessagesWidth.priority = NSLayoutPriorityDefaultHigh;
-    preferredMessagesWidth.active = YES;
+    [messagesView.widthAnchor constraintGreaterThanOrEqualToConstant:430].active = YES;
     [aiCard.widthAnchor constraintGreaterThanOrEqualToConstant:500].active = YES;
+    NSLayoutConstraint *preferredAIWidth =
+        [aiCard.widthAnchor constraintEqualToAnchor:messagesView.widthAnchor multiplier:1.2];
+    preferredAIWidth.priority = NSLayoutPriorityDefaultLow;
+    preferredAIWidth.active = YES;
 
     header.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:header];

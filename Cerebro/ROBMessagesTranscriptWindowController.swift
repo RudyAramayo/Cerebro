@@ -699,6 +699,12 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
             return String(text.replacingOccurrences(of: "\n", with: " ").prefix(72))
         }
 
+        var turnCount: Int {
+            records.reduce(0) { count, record in
+                count + 1 + (record.replyText == nil ? 0 : 1)
+            } + operatorReplies.count
+        }
+
         private var latestPreviewEvent: (date: Date, text: String)? {
             var events = records.map { ($0.receivedAt, $0.inboundText) }
             events += records.compactMap { record in
@@ -727,6 +733,7 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
 
     private let store = ROBMessagesTranscriptStore.shared
     private let bridge = ROBMessagesBridge.shared
+    private let searchField = NSSearchField()
     private let peopleTable = NSTableView()
     private let personHeading = NSTextField(labelWithString: "Select a conversation")
     private let accountLabel = NSTextField(labelWithString: "")
@@ -735,8 +742,8 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
     private let sendButton = NSButton()
     private let stateDot = NSTextField(labelWithString: "●")
     private let stateLabel = NSTextField(labelWithString: "Messages unavailable")
+    private let conversationSummaryLabel = NSTextField(labelWithString: "")
     private let activityLabel = NSTextField(labelWithString: "")
-    private let historyButton = NSButton()
     private let refreshButton = NSButton()
     private var snapshot = ROBMessagesTranscriptBrowseSnapshot(
         records: [],
@@ -750,7 +757,7 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
 
     private let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.dateStyle = .none
+        formatter.dateStyle = .short
         formatter.timeStyle = .short
         return formatter
     }()
@@ -804,7 +811,11 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
             cell.identifier = identifier
         }
         let person = people[row]
-        cell.configure(sender: person.key.sender, detail: person.preview)
+        let timestamp = dateFormatter.string(from: person.lastActivity)
+        cell.configure(
+            sender: person.key.sender,
+            detail: "\(timestamp)  •  \(person.preview)"
+        )
         return cell
     }
 
@@ -816,6 +827,9 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
         }
         selectedKey = people[peopleTable.selectedRow].key
         renderSelection()
+        if replyField.isEnabled {
+            view.window?.makeFirstResponder(replyField)
+        }
     }
 
     public func controlTextDidChange(_ obj: Notification) {
@@ -835,8 +849,8 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
         refresh()
     }
 
-    @objc private func showFullHistory(_ sender: Any?) {
-        ROBMessagesTranscriptWindowController.shared.showWindow(sender)
+    @objc private func searchChanged(_ sender: NSSearchField) {
+        rebuildPeople()
     }
 
     @objc private func sendReply(_ sender: Any?) {
@@ -879,9 +893,9 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
         view.layer?.borderColor = NSColor.separatorColor.cgColor
         view.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
 
-        let title = NSTextField(labelWithString: "Messages")
+        let title = NSTextField(labelWithString: "Text Messages")
         title.font = .systemFont(ofSize: 17, weight: .semibold)
-        let subtitle = NSTextField(labelWithString: "Reply as ROB to approved conversations")
+        let subtitle = NSTextField(labelWithString: "Read and reply to approved conversations here")
         subtitle.font = .systemFont(ofSize: 11)
         subtitle.textColor = .secondaryLabelColor
         let titleStack = NSStackView(views: [title, subtitle])
@@ -897,17 +911,6 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
         stateStack.alignment = .centerY
         stateStack.spacing = 5
 
-        historyButton.title = "History"
-        historyButton.image = NSImage(
-            systemSymbolName: "clock.arrow.circlepath",
-            accessibilityDescription: "Open full Messages history"
-        )
-        historyButton.imagePosition = .imageLeading
-        historyButton.bezelStyle = .texturedRounded
-        historyButton.target = self
-        historyButton.action = #selector(showFullHistory(_:))
-        historyButton.toolTip = "Open the searchable encrypted Messages archive"
-
         refreshButton.title = ""
         refreshButton.image = NSImage(
             systemSymbolName: "arrow.clockwise",
@@ -917,14 +920,25 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
         refreshButton.target = self
         refreshButton.action = #selector(refreshClicked(_:))
         refreshButton.toolTip = "Refresh Messages conversations"
+        refreshButton.setAccessibilityIdentifier("ROB.MessagesWorkspace.Refresh")
 
-        let headerActions = NSStackView(views: [historyButton, refreshButton])
+        let headerActions = NSStackView(views: [refreshButton])
         headerActions.orientation = .horizontal
         headerActions.spacing = 6
         let header = NSStackView(views: [titleStack, NSView(), stateStack, headerActions])
         header.orientation = .horizontal
         header.alignment = .centerY
         header.spacing = 10
+
+        searchField.placeholderString = "Search people and message text"
+        searchField.sendsSearchStringImmediately = true
+        searchField.target = self
+        searchField.action = #selector(searchChanged(_:))
+        searchField.setAccessibilityIdentifier("ROB.MessagesWorkspace.Search")
+
+        conversationSummaryLabel.font = .systemFont(ofSize: 10)
+        conversationSummaryLabel.textColor = .tertiaryLabelColor
+        conversationSummaryLabel.lineBreakMode = .byTruncatingTail
 
         let peopleColumn = NSTableColumn(identifier: .init("people"))
         peopleColumn.resizingMask = .autoresizingMask
@@ -937,6 +951,7 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
         peopleTable.allowsEmptySelection = true
         peopleTable.backgroundColor = .clear
         peopleTable.setAccessibilityLabel("Recent Messages conversations")
+        peopleTable.setAccessibilityIdentifier("ROB.MessagesWorkspace.Conversations")
         let peopleScroll = NSScrollView()
         peopleScroll.hasVerticalScroller = true
         peopleScroll.autohidesScrollers = true
@@ -964,6 +979,7 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
         transcriptTextView.textContainerInset = NSSize(width: 12, height: 10)
         transcriptTextView.backgroundColor = NSColor.textBackgroundColor.withAlphaComponent(0.72)
         transcriptTextView.setAccessibilityLabel("Selected Messages conversation")
+        transcriptTextView.setAccessibilityIdentifier("ROB.MessagesWorkspace.Transcript")
         let transcriptScroll = NSScrollView()
         transcriptScroll.hasVerticalScroller = true
         transcriptScroll.autohidesScrollers = true
@@ -979,11 +995,13 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
         replyField.target = self
         replyField.action = #selector(sendReply(_:))
         replyField.setAccessibilityLabel("Messages reply")
+        replyField.setAccessibilityIdentifier("ROB.MessagesWorkspace.Reply")
         sendButton.title = "Reply"
         sendButton.bezelStyle = .rounded
         sendButton.target = self
         sendButton.action = #selector(sendReply(_:))
         sendButton.setAccessibilityLabel("Send Messages reply")
+        sendButton.setAccessibilityIdentifier("ROB.MessagesWorkspace.Send")
         let composer = NSStackView(views: [replyField, sendButton])
         composer.orientation = .horizontal
         composer.alignment = .centerY
@@ -1024,7 +1042,7 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
         peopleScroll.widthAnchor.constraint(lessThanOrEqualToConstant: 205).isActive = true
         detail.widthAnchor.constraint(greaterThanOrEqualToConstant: 235).isActive = true
 
-        [header, split].forEach {
+        [header, searchField, conversationSummaryLabel, split].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview($0)
         }
@@ -1032,7 +1050,13 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
             header.topAnchor.constraint(equalTo: view.topAnchor, constant: 14),
             header.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             header.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            split.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 12),
+            searchField.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 10),
+            searchField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 14),
+            searchField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -14),
+            conversationSummaryLabel.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 4),
+            conversationSummaryLabel.leadingAnchor.constraint(equalTo: searchField.leadingAnchor, constant: 2),
+            conversationSummaryLabel.trailingAnchor.constraint(equalTo: searchField.trailingAnchor),
+            split.topAnchor.constraint(equalTo: conversationSummaryLabel.bottomAnchor, constant: 8),
             split.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 14),
             split.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -14),
             split.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
@@ -1075,14 +1099,24 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
         let replies = Dictionary(grouping: snapshot.operatorReplies) {
             PersonKey(receivingAccount: $0.receivingAccount, sender: $0.sender)
         }
+        let query = normalizedSearch
         people = Set(records.keys).union(replies.keys).map { key in
             Person(
                 key: key,
                 records: records[key] ?? [],
                 operatorReplies: replies[key] ?? []
             )
+        }.filter { person in
+            query.isEmpty || personMatches(person, query: query)
         }.sorted { $0.lastActivity > $1.lastActivity }
         peopleTable.reloadData()
+
+        let totalTurns = people.reduce(0) { $0 + $1.turnCount }
+        let archiveNote = snapshot.isTruncated ? " • newest archive segment" : ""
+        let searchNote = query.isEmpty ? "" : " matching “\(searchField.stringValue)”"
+        conversationSummaryLabel.stringValue =
+            "\(people.count) conversation\(people.count == 1 ? "" : "s") • " +
+            "\(totalTurns) turn\(totalTurns == 1 ? "" : "s")\(searchNote)\(archiveNote)"
 
         if let previousSelection,
            let row = people.firstIndex(where: { $0.key == previousSelection }) {
@@ -1103,17 +1137,41 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
         return people.first { $0.key == selectedKey }
     }
 
+    private var normalizedSearch: String {
+        searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func personMatches(_ person: Person, query: String) -> Bool {
+        person.key.sender.localizedCaseInsensitiveContains(query) ||
+            person.key.receivingAccount.localizedCaseInsensitiveContains(query) ||
+            person.records.contains { record in
+                record.inboundText.localizedCaseInsensitiveContains(query) ||
+                    record.replyText?.localizedCaseInsensitiveContains(query) == true ||
+                    record.deliveryError?.localizedCaseInsensitiveContains(query) == true
+            } ||
+            person.operatorReplies.contains {
+                $0.text.localizedCaseInsensitiveContains(query) ||
+                    $0.deliveryError?.localizedCaseInsensitiveContains(query) == true
+            }
+    }
+
     private func renderSelection() {
         guard let person = selectedPerson else {
-            personHeading.stringValue = "No archived conversations"
-            accountLabel.stringValue = "Enable transcript memory in Settings to use the Messages workspace."
+            let isSearching = !normalizedSearch.isEmpty
+            personHeading.stringValue = isSearching
+                ? "No matching text conversations"
+                : "No archived text conversations"
+            accountLabel.stringValue = isSearching
+                ? "Try another person or phrase."
+                : "Enable transcript memory in Settings to use the Messages workspace."
             transcriptTextView.string = ""
             updateComposerState()
             return
         }
 
         personHeading.stringValue = person.key.sender
-        accountLabel.stringValue = "via \(person.key.receivingAccount)"
+        accountLabel.stringValue =
+            "\(person.turnCount) turn\(person.turnCount == 1 ? "" : "s") • via \(person.key.receivingAccount)"
         var events: [TimelineEvent] = []
         for record in person.records {
             events.append(.inbound(record.receivedAt, record.inboundText, record.hasImage))
@@ -1134,13 +1192,19 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
             ))
         }
         transcriptTextView.textStorage?.setAttributedString(
-            transcript(events.sorted { $0.date < $1.date })
+            transcript(
+                events.sorted { $0.date < $1.date },
+                incomingSender: person.key.sender
+            )
         )
         transcriptTextView.scrollToEndOfDocument(nil)
         updateComposerState()
     }
 
-    private func transcript(_ events: [TimelineEvent]) -> NSAttributedString {
+    private func transcript(
+        _ events: [TimelineEvent],
+        incomingSender: String
+    ) -> NSAttributedString {
         let output = NSMutableAttributedString()
         for event in events {
             let sender: String
@@ -1151,7 +1215,7 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
             let error: String?
             switch event {
             case .inbound(_, let text, let image):
-                sender = "Sender"
+                sender = incomingSender
                 body = text
                 color = .systemBlue
                 status = nil
@@ -1194,8 +1258,8 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
             if hasImage {
                 output.append(secondary("Image attached — not retained in transcript.\n"))
             }
-            if let status, status != "delivered" {
-                output.append(secondary("Status: \(status)\n"))
+            if let status {
+                output.append(secondary("\(deliveryLabel(status))\n"))
             }
             if let error {
                 output.append(NSAttributedString(
@@ -1208,6 +1272,17 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
             }
         }
         return output
+    }
+
+    private func deliveryLabel(_ status: String) -> String {
+        switch status {
+        case "pending_ai": return "Waiting for ROB AI"
+        case "delivery_pending": return "Sending through Messages"
+        case "delivered": return "Delivered through Messages"
+        case "failed": return "Delivery failed"
+        case "cancelled": return "Cancelled"
+        default: return status.replacingOccurrences(of: "_", with: " ").capitalized
+        }
     }
 
     private func secondary(_ text: String) -> NSAttributedString {

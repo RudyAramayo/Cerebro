@@ -156,6 +156,14 @@ and whether an image was attached. Because image pixels are deliberately not
 archived, the browser shows the caption and an image-present notice rather than
 the original picture.
 
+Cerebro's main communication window keeps the primary ROB AI transcript and the
+Text Messages workspace visible side by side in a resizable split view. The text
+pane includes archive search, conversation and turn counts, sender/account
+details, full timestamps, delivery status, and an inline reply field. Selecting
+a conversation focuses that field, and Return sends through the same immutable
+route authorization used by automatic replies; opening the separate transcript
+browser is not required for everyday replies.
+
 Gemini is the primary image provider only when cloud image upload is enabled.
 Otherwise—or after a Gemini failure—Cerebro runs the image through the on-device
 Swift MLX Qwen2-VL model. Apple Foundation Models never receives pixels: it

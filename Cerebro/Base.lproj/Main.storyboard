@@ -4013,7 +4013,7 @@ Brake
                     <window key="window" title="Cerebro" allowsToolTipsWhenApplicationIsInactive="NO" autorecalculatesKeyViewLoop="NO" releasedWhenClosed="NO" animationBehavior="default" id="IQv-IB-iLA">
                         <windowStyleMask key="styleMask" titled="YES" closable="YES" miniaturizable="YES" resizable="YES"/>
                         <windowPositionMask key="initialPositionMask" leftStrut="YES" rightStrut="YES" topStrut="YES" bottomStrut="YES"/>
-                        <rect key="contentRect" x="480" y="227" width="1200" height="760"/>
+                        <rect key="contentRect" x="360" y="167" width="1320" height="820"/>
                         <rect key="screenRect" x="0.0" y="0.0" width="1680" height="1027"/>
                         <value key="minSize" type="size" width="1050" height="650"/>
                         <connections>
@@ -4033,7 +4033,7 @@ Brake
             <objects>
                 <viewController id="XfG-lQ-9wD" customClass="ROBMainViewController" sceneMemberID="viewController">
                     <customView key="view" id="nht-s4-M9V">
-                        <rect key="frame" x="0.0" y="0.0" width="1200" height="760"/>
+                        <rect key="frame" x="0.0" y="0.0" width="1320" height="820"/>
                         <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                         <subviews>
                             <scrollView fixedFrame="YES" horizontalLineScroll="10" horizontalPageScroll="10" verticalLineScroll="10" verticalPageScroll="10" hasHorizontalScroller="NO" usesPredominantAxisScrolling="NO" translatesAutoresizingMaskIntoConstraints="NO" id="enw-AR-f0t" userLabel="ROB AI Message Composer">

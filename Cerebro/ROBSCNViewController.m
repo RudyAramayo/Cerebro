@@ -11,6 +11,21 @@ static NSInteger const ROBIRBlockedDistanceCentimeters = 25;
 static CGFloat const ROBDiagnosticMaximumTreadSpeed = 0.9;
 static CGFloat const ROBDiagnosticTrackWidth = 0.86;
 
+static NSString *ROBDiagnosticInhibitReason(NSString *reason)
+{
+    if ([reason isEqualToString:@"operatorDisarmed"]) return @"CONTROL NOT REQUESTED";
+    if ([reason isEqualToString:@"deadManReleased"]) return @"BOTH GRIPS REQUIRED";
+    if ([reason isEqualToString:@"inputExpired"]) return @"CONTROLLER INPUT EXPIRED";
+    if ([reason isEqualToString:@"sceneInactive"]) return @"VISION APP INACTIVE";
+    if ([reason isEqualToString:@"controllerDisconnected"]) return @"CONTROLLERS DISCONNECTED";
+    if ([reason isEqualToString:@"emergencyStop"]) return @"EMERGENCY STOP";
+    if ([reason isEqualToString:@"transportFailure"]) return @"TRANSPORT FAILURE";
+    if ([reason isEqualToString:@"robotWatchdog"]) return @"ROBOT WATCHDOG";
+    if ([reason isEqualToString:@"disconnected"]) return @"VISION APP DISCONNECTED";
+    if ([reason isEqualToString:@"userRequested"]) return @"STOP REQUESTED";
+    return nil;
+}
+
 @interface ROBSCNViewController ()
 @property (readwrite, retain) SCNNode *leftControllerNode;
 @property (readwrite, retain) SCNNode *rightControllerNode;
@@ -38,6 +53,7 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
 @property (readwrite, assign) CGFloat leftTreadDemand;
 @property (readwrite, assign) CGFloat rightTreadDemand;
 @property (readwrite, assign) BOOL treadCommandsAreActive;
+@property (readwrite, copy) NSString *motionInhibitReason;
 @property (readwrite, assign) BOOL neckCommandIsActive;
 @property (readwrite, assign) CGFloat neckPanDemand;
 @property (readwrite, assign) CGFloat neckTiltDemand;
@@ -396,11 +412,16 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
     self.lastSender = sender.length > 0 ? sender : @"Unknown controller";
     self.leftPoseValid = model.leftControllerPoseValid;
     self.rightPoseValid = model.rightControllerPoseValid;
-    self.leftTreadDemand = MAX(-0.5, MIN(0.5, model.touchPadPointL.y));
-    self.rightTreadDemand = MAX(-0.5, MIN(0.5, model.touchPadPointR.y));
+    BOOL leftTreadIsActive = model.touchPadPointL.y > -999;
+    BOOL rightTreadIsActive = model.touchPadPointR.y > -999;
+    self.leftTreadDemand = leftTreadIsActive
+        ? MAX(-0.5, MIN(0.5, model.touchPadPointL.y)) : 0;
+    self.rightTreadDemand = rightTreadIsActive
+        ? MAX(-0.5, MIN(0.5, model.touchPadPointR.y)) : 0;
     self.treadCommandsAreActive = !model.tredBrakeLock
-        && model.touchPadPointL.y > -999
-        && model.touchPadPointR.y > -999;
+        && leftTreadIsActive
+        && rightTreadIsActive;
+    self.motionInhibitReason = model.motionInhibitReason;
 
     if (model.neckControlActive) {
         self.neckCommandIsActive = YES;
@@ -495,18 +516,26 @@ static CGFloat const ROBDiagnosticTrackWidth = 0.86;
     }
     self.statusLabel.stringValue = @"RECEIVING VR CONTROLLER INPUT";
     self.statusLabel.textColor = NSColor.systemGreenColor;
-    NSString *driveState = self.treadCommandsAreActive ? @"DRIVE ACTIVE" : @"BRAKED";
+    NSString *inhibitReason = ROBDiagnosticInhibitReason(self.motionInhibitReason);
+    NSString *driveState = self.treadCommandsAreActive
+        ? @"DRIVE ACTIVE"
+        : (inhibitReason.length > 0
+            ? [NSString stringWithFormat:@"BRAKED: %@", inhibitReason]
+            : @"BRAKED");
     NSString *neckState = self.neckCommandIsActive
         ? [NSString stringWithFormat:@"HEAD %+.2f / %+.2f", self.neckPanDemand, self.neckTiltDemand]
-        : @"HEAD HELD";
+        : @"HEAD COMMAND IDLE";
     NSString *gripperState = self.gripperCommandIsActive
         ? [NSString stringWithFormat:@"GRIP CMD L:%@ R:%@",
            self.leftGripperClosed ? @"CLOSED" : @"OPEN",
            self.rightGripperClosed ? @"CLOSED" : @"OPEN"]
-        : @"GRIP HELD";
-    self.detailLabel.stringValue = [NSString stringWithFormat:@"%@  •  %.0f ms  •  %@  •  %@  •  %@  •  TREADS %+.2f / %+.2f  •  L:%@  R:%@",
+        : @"GRIP COMMAND IDLE";
+    NSString *treadState = self.treadCommandsAreActive
+        ? [NSString stringWithFormat:@"TREADS %+.2f / %+.2f", self.leftTreadDemand, self.rightTreadDemand]
+        : @"TREADS INACTIVE";
+    self.detailLabel.stringValue = [NSString stringWithFormat:@"%@  •  %.0f ms  •  %@  •  %@  •  %@  •  %@  •  L:%@  R:%@",
                      self.lastSender, age * 1000.0,
-                     driveState, neckState, gripperState, self.leftTreadDemand, self.rightTreadDemand,
+                     driveState, neckState, gripperState, treadState,
                      self.leftPoseValid ? @"POSE" : @"NO POSE",
                      self.rightPoseValid ? @"POSE" : @"NO POSE"];
 }

@@ -1294,10 +1294,10 @@ private struct ROBMessagesBridgeProductionFixtureTests {
                     text: "An operator-authored follow-up",
                     chatID: "fixture-chat-A",
                     account: account,
-                    originatingAccountAliases: [account],
+                    originatingAccountAliases: [account, "opaque-account-id"],
                     expectedSender: "owner@example.com"
                 ),
-            "An operator reply lost its exact archived Messages route"
+            "An operator reply lost its live native Messages account route"
         )
         try expect(
             operatorResult?.fixtureIsSuccess == true &&

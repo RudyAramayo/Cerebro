@@ -3739,6 +3739,21 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
 
 - (void) controllerId:(NSString *)controllerId controllerModelData:(ROBBaseControllerModel *)controllerModelData
 {
+    ROBBaseControllerModel *previous = [self.controlModelDataDictionary valueForKey:controllerId];
+    BOOL previousLeftActive = previous != nil && previous.touchPadPointL.x > -999.0
+        && previous.touchPadPointL.y > -999.0;
+    BOOL previousRightActive = previous != nil && previous.touchPadPointR.x > -999.0
+        && previous.touchPadPointR.y > -999.0;
+    BOOL leftActive = controllerModelData.touchPadPointL.x > -999.0
+        && controllerModelData.touchPadPointL.y > -999.0;
+    BOOL rightActive = controllerModelData.touchPadPointR.x > -999.0
+        && controllerModelData.touchPadPointR.y > -999.0;
+    BOOL urgent = previous == nil
+        || previousLeftActive != leftActive
+        || previousRightActive != rightActive
+        || previous.tredBrakeLock != controllerModelData.tredBrakeLock
+        || previous.speed_playPause != controllerModelData.speed_playPause
+        || previous.speed_forward_reverse != controllerModelData.speed_forward_reverse;
     //store the control model data in the dictionary of data
     controllerModelData.receivedAtUptime = NSProcessInfo.processInfo.systemUptime;
     [self.controlModelDataDictionary setValue:controllerModelData forKey:controllerId];
@@ -3746,6 +3761,13 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         recordTreadCommandWithControllerID:controllerId
                                      model:controllerModelData
                               activeMaster:[self.masterControllerID isEqualToString:controllerId]];
+    // Full Vision snapshots are the authoritative tread path. Render the
+    // current master immediately just like the dedicated tread path; the
+    // shared 75 ms limiter still bounds serial traffic, while brake/active
+    // transitions bypass it so releasing the dead-man stops without delay.
+    if ([self.masterControllerID isEqualToString:controllerId]) {
+        [self renderControllerPrioritized:urgent];
+    }
 }
 
 - (void)controllerId:(NSString *)controllerId

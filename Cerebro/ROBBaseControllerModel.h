@@ -16,6 +16,8 @@
 @property (readwrite, assign) float Lat;
 @property (readwrite, assign) float Long;
 @property (readwrite, assign) bool tredBrakeLock;
+// Versioned sender-reported reason for a fail-safe stopped snapshot.
+@property (readwrite, copy) NSString *motionInhibitReason;
 @property (readwrite, assign) bool flipperForwardIsDown;
 @property (readwrite, assign) bool flipperRelaxBrake;
 @property (readwrite, assign) bool flipperBackwardIsDown;
