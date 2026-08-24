@@ -19,11 +19,14 @@ face, more than one face, too far away (**stand closer**), too dark,
 overexposed, blurred or obstructed, misaligned, and repeated-pose conditions.
 Select any completed profile and choose **Refine Selected Identity** to add eight
 current-lighting and pose samples without changing its name, role, model, or
-trusted controller binding.
+trusted controller allowlist.
 
-Administrator enrollment additionally requires a paired, non-revoked operator
-ROBController and a local confirmation dialog. The controller device ID is
-recorded as the enrollment reference. `administrator` is deliberately only an
+Administrator enrollment additionally requires at least one paired, non-revoked
+operator controller and a local confirmation dialog. Every active operator controller
+is recorded in an explicit allowlist. Select a completed Administrator and choose
+**Authorize Active Controllers** to replace that allowlist after controller pairing or
+revocation without changing any face samples. A legacy single-controller profile is
+expanded once only if its original controller is still active. `administrator` is deliberately only an
 identity and personalization label. It is not accepted as authorization for
 treads, arms, pairing, shell commands, secrets, purchases, or safety overrides;
 those operations retain their existing cryptographic controller and local

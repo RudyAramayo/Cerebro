@@ -11,9 +11,9 @@ assert claim < historical_parser, "Terminal frames could reach historical comman
 assert "sendingConnection.authenticatedRole == .operatorController" in server
 assert "authenticatedDeviceID == deviceID" in server
 assert "authenticatedSessionUUID == sessionID" in server
-assert "profile.role == .administrator" in server
-assert "profile.enrollmentIsComplete" in server
-assert "profile.trustedEnrollmentReference" in server
+assert "profile.authorizesAdministratorController(controllerID)" in server
+assert "expandLegacyAdministratorControllerBindings" in server
+assert '!$0.isRevoked && $0.roleName == "operatorController"' in server
 assert 'executableURL = URL(fileURLWithPath: "/bin/zsh")' in server
 assert 'shell.arguments = ["-l", "-i"]' in server
 assert "openpty(" in server and "TIOCSWINSZ" in server

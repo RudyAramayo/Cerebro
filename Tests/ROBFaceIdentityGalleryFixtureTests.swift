@@ -2,20 +2,37 @@ import Foundation
 
 @main
 enum ROBFaceIdentityGalleryFixtureTests {
+    private struct LegacyProfile: Codable {
+        let id: UUID
+        let displayName: String
+        let pronunciation: String?
+        let role: ROBFaceIdentityRole
+        let consentedAt: Date
+        let trustedEnrollmentReference: String
+        let modelIdentifier: String
+        let samples: [ROBFaceIdentitySample]
+        let lastConfirmedAt: Date?
+    }
+
     static func main() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ROBFaceIdentityGallery-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let gallery = ROBFaceIdentityGallery(rootURL: root, encryptionKey: Data(repeating: 0x5a, count: 32))
+        let controllerA = UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
+        let controllerB = UUID(uuidString: "22222222-2222-4222-8222-222222222222")!
 
         let profile = try gallery.createProfile(
             displayName: "Rob Test Administrator",
             pronunciation: "Rob",
             role: .administrator,
-            trustedEnrollmentReference: "fixture-trusted-controller",
+            trustedEnrollmentReference: controllerA.uuidString,
+            trustedControllerIDs: [controllerB.uuidString, controllerA.uuidString],
             modelIdentifier: "fixture-model-v1"
         )
         precondition(profile.samples.isEmpty)
+        precondition(profile.administratorControllerIDs.count == 2)
+        precondition(!profile.authorizesAdministratorController(controllerA))
 
         let sample = ROBFaceIdentitySample(
             id: UUID(),
@@ -61,6 +78,9 @@ enum ROBFaceIdentityGalleryFixtureTests {
         }
         let adapted = try gallery.profiles().first { $0.id == profile.id }!
         precondition(adapted.samples.count == 25)
+        precondition(adapted.enrollmentIsComplete)
+        precondition(adapted.authorizesAdministratorController(controllerA))
+        precondition(adapted.authorizesAdministratorController(controllerB))
         precondition(adapted.samples.first?.id == sample.id)
         precondition(adapted.samples.contains { $0.id == latestAdaptiveID })
         precondition(!FileManager.default.fileExists(atPath:
@@ -79,12 +99,39 @@ enum ROBFaceIdentityGalleryFixtureTests {
         )
         precondition(imageCiphertext != imagePlaintext)
 
+        let rebound = try gallery.updateAdministratorControllerIDs(
+            profileID: profile.id,
+            controllerIDs: [controllerB.uuidString]
+        )
+        precondition(rebound.samples.count == adapted.samples.count)
+        precondition(!rebound.authorizesAdministratorController(controllerA))
+        precondition(rebound.authorizesAdministratorController(controllerB))
+
+        let legacy = LegacyProfile(
+            id: UUID(),
+            displayName: "Legacy Administrator",
+            pronunciation: nil,
+            role: .administrator,
+            consentedAt: Date(timeIntervalSince1970: 1),
+            trustedEnrollmentReference: controllerA.uuidString,
+            modelIdentifier: "fixture-model-v1",
+            samples: Array(repeating: sample, count: ROBFaceIdentityProfile.requiredEnrollmentSamples),
+            lastConfirmedAt: nil
+        )
+        let decodedLegacy = try JSONDecoder().decode(
+            ROBFaceIdentityProfile.self,
+            from: JSONEncoder().encode(legacy)
+        )
+        precondition(decodedLegacy.trustedControllerIDs == nil)
+        precondition(decodedLegacy.authorizesAdministratorController(controllerA))
+        precondition(!decodedLegacy.authorizesAdministratorController(controllerB))
+
         do {
             _ = try gallery.createProfile(
                 displayName: "Second Admin",
                 pronunciation: nil,
                 role: .administrator,
-                trustedEnrollmentReference: "fixture",
+                trustedEnrollmentReference: controllerA.uuidString,
                 modelIdentifier: "fixture-model-v1"
             )
             preconditionFailure("A second administrator must be rejected")

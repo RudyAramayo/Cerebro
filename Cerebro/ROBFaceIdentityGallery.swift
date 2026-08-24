@@ -67,13 +67,37 @@ public struct ROBFaceIdentityProfile: Codable, Identifiable, Sendable {
     public var pronunciation: String?
     public var role: ROBFaceIdentityRole
     public let consentedAt: Date
-    public let trustedEnrollmentReference: String
+    /// Legacy primary reference retained so encrypted profiles written by
+    /// single-controller builds remain decodable.
+    public var trustedEnrollmentReference: String
+    /// Explicit administrator-controller allowlist. `nil` identifies a
+    /// legacy single-controller profile and is migrated only when its original
+    /// reference still names an active paired operator.
+    public var trustedControllerIDs: [String]?
     public var modelIdentifier: String
     public var samples: [ROBFaceIdentitySample]
     public var lastConfirmedAt: Date?
 
     public var enrollmentIsComplete: Bool {
         samples.count >= Self.requiredEnrollmentSamples
+    }
+
+    public var administratorControllerIDs: [String] {
+        guard role == .administrator else { return [] }
+        let references = trustedControllerIDs ?? [trustedEnrollmentReference]
+        var seen = Set<UUID>()
+        return references.compactMap { reference in
+            guard let identifier = UUID(
+                uuidString: reference.trimmingCharacters(in: .whitespacesAndNewlines)
+            ), seen.insert(identifier).inserted else { return nil }
+            return identifier.uuidString.lowercased()
+        }.sorted()
+    }
+
+    public func authorizesAdministratorController(_ controllerID: UUID) -> Bool {
+        role == .administrator
+            && enrollmentIsComplete
+            && administratorControllerIDs.contains(controllerID.uuidString.lowercased())
     }
 }
 
@@ -155,6 +179,7 @@ public final class ROBFaceIdentityGallery: @unchecked Sendable {
         pronunciation: String?,
         role: ROBFaceIdentityRole,
         trustedEnrollmentReference: String,
+        trustedControllerIDs: [String]? = nil,
         modelIdentifier: String
     ) throws -> ROBFaceIdentityProfile {
         try queue.sync {
@@ -165,6 +190,14 @@ public final class ROBFaceIdentityGallery: @unchecked Sendable {
                 maximum: 160,
                 label: "trusted enrollment reference"
             )
+            let administratorControllerIDs: [String]?
+            if role == .administrator {
+                administratorControllerIDs = try normalizedControllerIDs(
+                    trustedControllerIDs ?? [trust]
+                )
+            } else {
+                administratorControllerIDs = nil
+            }
             if role == .administrator,
                try allProfilesUnlocked().contains(where: { $0.role == .administrator }) {
                 throw ROBFaceIdentityGalleryError.administratorAlreadyExists
@@ -175,13 +208,60 @@ public final class ROBFaceIdentityGallery: @unchecked Sendable {
                 pronunciation: spokenName,
                 role: role,
                 consentedAt: Date(),
-                trustedEnrollmentReference: trust,
+                trustedEnrollmentReference: administratorControllerIDs?.first ?? trust,
+                trustedControllerIDs: administratorControllerIDs,
                 modelIdentifier: modelIdentifier,
                 samples: [],
                 lastConfirmedAt: nil
             )
             try writeProfile(profile)
             return profile
+        }
+    }
+
+    /// Replaces the explicit administrator allowlist without touching face
+    /// samples, consent, recognition metadata, or the person's role.
+    public func updateAdministratorControllerIDs(
+        profileID: UUID,
+        controllerIDs: [String]
+    ) throws -> ROBFaceIdentityProfile {
+        try queue.sync {
+            var profile = try profileUnlocked(id: profileID)
+            guard profile.role == .administrator else {
+                throw ROBFaceIdentityGalleryError.invalidInput(
+                    "Only an Administrator profile can authorize controllers."
+                )
+            }
+            let normalized = try normalizedControllerIDs(controllerIDs)
+            profile.trustedEnrollmentReference = normalized[0]
+            profile.trustedControllerIDs = normalized
+            try writeProfile(profile)
+            return profile
+        }
+    }
+
+    /// One-time compatibility migration. Expansion is allowed only when the
+    /// legacy reference still belongs to the supplied active-operator set, so
+    /// an orphaned or revoked binding cannot bootstrap a new administrator.
+    @discardableResult public func expandLegacyAdministratorControllerBindings(
+        to activeControllerIDs: [String]
+    ) throws -> Int {
+        try queue.sync {
+            let normalized = try normalizedControllerIDs(activeControllerIDs)
+            let active = Set(normalized)
+            var migrated = 0
+            for var profile in try allProfilesUnlocked()
+                where profile.role == .administrator && profile.trustedControllerIDs == nil {
+                let legacy = UUID(
+                    uuidString: profile.trustedEnrollmentReference
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                )?.uuidString.lowercased()
+                guard let legacy, active.contains(legacy) else { continue }
+                profile.trustedControllerIDs = normalized
+                try writeProfile(profile)
+                migrated += 1
+            }
+            return migrated
         }
     }
 
@@ -404,6 +484,31 @@ public final class ROBFaceIdentityGallery: @unchecked Sendable {
             )
         }
         return bounded
+    }
+
+    private func normalizedControllerIDs(_ values: [String]) throws -> [String] {
+        guard !values.isEmpty, values.count <= 16 else {
+            throw ROBFaceIdentityGalleryError.invalidInput(
+                "Select between one and sixteen paired operator controllers."
+            )
+        }
+        var identifiers = Set<UUID>()
+        for value in values {
+            guard let identifier = UUID(
+                uuidString: value.trimmingCharacters(in: .whitespacesAndNewlines)
+            ) else {
+                throw ROBFaceIdentityGalleryError.invalidInput(
+                    "An Administrator controller reference is not a valid UUID."
+                )
+            }
+            identifiers.insert(identifier)
+        }
+        guard !identifiers.isEmpty else {
+            throw ROBFaceIdentityGalleryError.invalidInput(
+                "Select at least one paired operator controller."
+            )
+        }
+        return identifiers.map { $0.uuidString.lowercased() }.sorted()
     }
 
     private static func defaultRootURL() -> URL {

@@ -641,14 +641,16 @@ struct ROBControlServerStatusSnapshot: Sendable {
 
 enum ROBAdministratorControllerAuthorization {
     static func isAuthorized(_ controllerID: UUID) -> Bool {
-        let expectedReference = controllerID.uuidString.lowercased()
         do {
+            let activeOperatorIDs = ROBControlPairing.pairedDevices().filter {
+                !$0.isRevoked && $0.roleName == "operatorController"
+            }.map(\.deviceID)
+            if !activeOperatorIDs.isEmpty {
+                _ = try ROBFaceIdentityGallery.shared
+                    .expandLegacyAdministratorControllerBindings(to: activeOperatorIDs)
+            }
             return try ROBFaceIdentityGallery.shared.profiles().contains { profile in
-                profile.role == .administrator
-                    && profile.enrollmentIsComplete
-                    && profile.trustedEnrollmentReference
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                        .lowercased() == expectedReference
+                profile.authorizesAdministratorController(controllerID)
             }
         } catch {
             NSLog("Administrator authorization failed because the encrypted face gallery was unavailable: %@",

@@ -9,8 +9,15 @@ Access requires both layers below:
 
 1. The incoming ROBControl connection is a mutually authenticated, server-authorized
    `operatorController` connection.
-2. The encrypted face gallery contains a completed Administrator profile whose
-   `trustedEnrollmentReference` exactly matches that authenticated controller device ID.
+2. The encrypted face gallery contains a completed Administrator profile whose explicit
+   controller allowlist contains that authenticated controller device ID.
+
+Administrator enrollment snapshots every active, non-revoked operator controller into
+the allowlist. A legacy single-controller Administrator profile is expanded once when
+its original controller is still an active operator. To add or remove controllers later,
+open **People → People & Face Enrollment…**, select the completed Administrator, and use
+**Authorize Active Controllers**. This preserves every face sample and replaces the
+allowlist with the current active operator controllers.
 
 The face itself is not accepted as a network credential. A known-person profile, an
 incomplete enrollment, a revoked controller, a legacy connection, or a lidar publisher

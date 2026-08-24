@@ -26,6 +26,11 @@ import Foundation
     )
     private let startButton = NSButton(title: "Start Enrollment", target: nil, action: nil)
     private let refineButton = NSButton(title: "Refine Selected Identity", target: nil, action: nil)
+    private let authorizeControllersButton = NSButton(
+        title: "Authorize Active Controllers",
+        target: nil,
+        action: nil
+    )
     private let cancelButton = NSButton(title: "Cancel Enrollment", target: nil, action: nil)
     private let deleteButton = NSButton(title: "Delete Selected Person", target: nil, action: nil)
     private let progress = NSProgressIndicator()
@@ -94,6 +99,10 @@ import Foundation
         refineButton.target = self
         refineButton.action = #selector(refineSelected(_:))
         refineButton.toolTip = "Add current lighting and pose coverage without changing this person's name or role."
+        authorizeControllersButton.target = self
+        authorizeControllersButton.action = #selector(authorizeControllersForSelected(_:))
+        authorizeControllersButton.toolTip =
+            "Replace the selected Administrator's allowlist with every active paired operator controller."
         cancelButton.target = self
         cancelButton.action = #selector(cancelEnrollment(_:))
         deleteButton.target = self
@@ -120,12 +129,13 @@ import Foundation
         guidance.textColor = .secondaryLabelColor
 
         for (identifier, title, width) in [
-            ("name", "Person", CGFloat(205)),
+            ("name", "Person", CGFloat(165)),
             ("role", "Role", CGFloat(115)),
             ("model", "Model", CGFloat(145)),
             ("samples", "Samples", CGFloat(65)),
+            ("controllers", "Controllers", CGFloat(90)),
             ("lighting", "Lighting range", CGFloat(110)),
-            ("confirmed", "Last confirmed", CGFloat(170))
+            ("confirmed", "Last confirmed", CGFloat(145))
         ] {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(identifier))
             column.title = title
@@ -157,7 +167,13 @@ import Foundation
         enrollmentGrid.column(at: 0).xPlacement = .trailing
         enrollmentGrid.column(at: 1).xPlacement = .fill
 
-        let buttonRow = NSStackView(views: [startButton, refineButton, cancelButton, deleteButton])
+        let buttonRow = NSStackView(views: [
+            startButton,
+            refineButton,
+            authorizeControllersButton,
+            cancelButton,
+            deleteButton
+        ])
         buttonRow.orientation = .horizontal
         buttonRow.spacing = 8
         buttonRow.alignment = .centerY
@@ -237,6 +253,10 @@ import Foundation
             : nil
         startButton.isEnabled = !isEnrolling
         refineButton.isEnabled = !isEnrolling && selectedProfile?.enrollmentIsComplete == true
+        authorizeControllersButton.isEnabled = !isEnrolling
+            && selectedProfile?.role == .administrator
+            && selectedProfile?.enrollmentIsComplete == true
+            && !pairedOperatorControllers.isEmpty
         cancelButton.isEnabled = isEnrolling
         deleteButton.isEnabled = !isEnrolling && table.selectedRow >= 0
         nameField.isEnabled = !isEnrolling
@@ -267,13 +287,17 @@ import Foundation
 
     @objc private func roleChanged(_ sender: NSPopUpButton) {
         if selectedRole == .administrator {
-            if let controller = pairedOperatorControllers.first {
-                trustField.stringValue = controller.deviceID
-                trustField.placeholderString = "Bound to \(controller.deviceName)"
-                trustField.toolTip = "Paired operator: \(controller.deviceName)"
+            let controllers = pairedOperatorControllers
+            if !controllers.isEmpty {
+                trustField.stringValue = controllers.map(\.deviceName).joined(separator: ", ")
+                trustField.placeholderString =
+                    "Binding \(controllers.count) active operator controller\(controllers.count == 1 ? "" : "s")"
+                trustField.toolTip = controllers.map {
+                    "\($0.deviceName): \($0.deviceID)"
+                }.joined(separator: "\n")
             } else {
                 trustField.stringValue = ""
-                trustField.placeholderString = "Pair a ROBController operator before administrator imprinting"
+                trustField.placeholderString = "Pair an operator controller before administrator imprinting"
                 trustField.toolTip = nil
             }
         } else {
@@ -292,29 +316,41 @@ import Foundation
             return
         }
         if selectedRole == .administrator {
-            guard pairedOperatorControllers.contains(where: {
-                $0.deviceID.caseInsensitiveCompare(trustField.stringValue) == .orderedSame
-            }) else {
-                showError("Pair a non-revoked operator ROBController before administrator imprinting.")
+            let controllers = pairedOperatorControllers
+            guard !controllers.isEmpty else {
+                showError("Pair a non-revoked operator controller before administrator imprinting.")
                 return
             }
             let alert = NSAlert()
             alert.messageText = "Imprint Administrator?"
             alert.informativeText =
-                "This stores a biometric identity label, but it will not authorize robot motion or privileged commands. " +
-                "Those operations continue to require their existing controller credentials."
+                "This stores a biometric identity label and authorizes \(controllers.count) active operator " +
+                "controller\(controllers.count == 1 ? "" : "s") for administrator tools. Face identity alone " +
+                "will not authorize robot motion; every control still requires its existing controller credential."
             alert.addButton(withTitle: "Begin Imprint")
             alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
-        service.startEnrollment(
-            displayName: nameField.stringValue,
-            pronunciation: pronunciationField.stringValue,
-            role: selectedRole,
-            consentConfirmed: true,
-            trustedEnrollmentReference: trustField.stringValue
-        ) { [weak self] error in
-            if let error { self?.showError(error.localizedDescription) }
+        if selectedRole == .administrator {
+            service.startEnrollment(
+                displayName: nameField.stringValue,
+                pronunciation: pronunciationField.stringValue,
+                role: selectedRole,
+                consentConfirmed: true,
+                trustedControllerIDs: pairedOperatorControllers.map(\.deviceID)
+            ) { [weak self] error in
+                if let error { self?.showError(error.localizedDescription) }
+            }
+        } else {
+            service.startEnrollment(
+                displayName: nameField.stringValue,
+                pronunciation: pronunciationField.stringValue,
+                role: selectedRole,
+                consentConfirmed: true,
+                trustedEnrollmentReference: "local-consent"
+            ) { [weak self] error in
+                if let error { self?.showError(error.localizedDescription) }
+            }
         }
     }
 
@@ -342,6 +378,33 @@ import Foundation
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         service.refineEnrollment(profileID: profile.id, consentConfirmed: true) { [weak self] error in
             if let error { self?.showError(error.localizedDescription) }
+        }
+    }
+
+    @objc private func authorizeControllersForSelected(_ sender: Any?) {
+        let row = table.selectedRow
+        guard profiles.indices.contains(row) else { return }
+        let profile = profiles[row]
+        guard profile.role == .administrator, profile.enrollmentIsComplete else { return }
+        let controllers = pairedOperatorControllers
+        guard !controllers.isEmpty else {
+            showError("Pair at least one non-revoked operator controller first.")
+            return
+        }
+        let details = controllers.map { "• \($0.deviceName) — \($0.deviceID)" }
+            .joined(separator: "\n")
+        let alert = NSAlert()
+        alert.messageText = "Authorize Active Controllers for \(profile.displayName)?"
+        alert.informativeText =
+            "This replaces the Administrator allowlist with the active operator controllers below. " +
+            "Face samples and recognition data will not change. Revoked devices and lidar publishers are excluded.\n\n" +
+            details
+        alert.addButton(withTitle: "Authorize Controllers")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        service.authorizeActiveOperatorControllers(profileID: profile.id) { [weak self] error in
+            if let error { self?.showError(error.localizedDescription) }
+            self?.refresh()
         }
     }
 
@@ -400,6 +463,10 @@ import Foundation
                 .replacingOccurrences(of: "AdaFace R18 — ", with: "")
                 ?? "Legacy"
         case "samples": value = "\(profile.samples.count)"
+        case "controllers":
+            value = profile.role == .administrator
+                ? "\(profile.administratorControllerIDs.count) trusted"
+                : "—"
         case "lighting":
             let values = profile.samples.compactMap(\.luminance)
             if let darkest = values.min(), let brightest = values.max() {

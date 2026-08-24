@@ -12,8 +12,8 @@ Authorization requires all of the following:
 
 1. A mutually authenticated, non-revoked `operatorController` credential.
 2. The exact live `robctl/2` session UUID on the independent `robvideo/1` connection.
-3. A completed encrypted Administrator face profile whose trusted enrollment reference
-   exactly matches that controller ID.
+3. A completed encrypted Administrator face profile whose explicit controller allowlist
+   contains that controller ID.
 4. macOS Screen Recording permission for viewing and Accessibility permission for input.
 
 Input frames are claimed before historical robot command parsing. Coordinates are
@@ -21,6 +21,12 @@ normalized and bounded; text is valid UTF-8 capped at 4 KiB; only an explicit ke
 allowlist and modifier mask are accepted. Revocation, server shutdown, tab closure, or
 session replacement releases a held primary mouse button. Text becomes synthetic Unicode
 keyboard events for the focused app—it is never evaluated as a shell command by Cerebro.
+
+Administrator enrollment authorizes all operator controllers that are active at that
+time. Legacy single-controller profiles are expanded once only when their original
+controller is still active. Use **People → People & Face Enrollment… → Authorize Active
+Controllers** to replace the allowlist after pairing or revoking controllers; this does
+not alter the Administrator's face samples.
 
 ## Verification
 

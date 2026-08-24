@@ -11,7 +11,8 @@ claim = server.index("if remoteDesktopInputCoordinator.claimsProtocol(data)")
 historical = server.index("dataDelegate?.didReceiveData(data)", claim)
 assert claim < historical, "Desktop input could reach historical robot parsing"
 assert "ROBAdministratorControllerAuthorization.isAuthorized(controllerID)" in server
-assert "profile.role == .administrator" in server and "profile.enrollmentIsComplete" in server
+assert "profile.authorizesAdministratorController(controllerID)" in server
+assert "expandLegacyAdministratorControllerBindings" in server
 assert "authenticatedDeviceID == deviceID" in server
 assert "authenticatedSessionUUID == sessionID" in server
 assert "AXIsProcessTrusted" in server and "CGPreflightScreenCaptureAccess" in server

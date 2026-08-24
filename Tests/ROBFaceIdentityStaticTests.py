@@ -63,6 +63,9 @@ assert "ROBFaceConversationPolicy.action" in service
 assert "case enroll(String)" in conversation and "case cancelEnrollment" in conversation
 assert "consentConfirmed" in service
 assert "trustedEnrollmentReference" in service
+assert "trustedControllerIDs" in gallery and "administratorControllerIDs" in gallery
+assert "expandLegacyAdministratorControllerBindings" in gallery
+assert "authorizeActiveOperatorControllers" in service
 assert "ROBControlPairing.pairedDevices()" in service
 assert '$0.roleName == "operatorController"' in service
 assert "Administrator is a personalization role" in service
@@ -74,6 +77,7 @@ assert "explicitly consents" in window
 assert "will not authorize robot motion" in window
 assert "Delete Selected Person" in window
 assert "Refine Selected Identity" in window
+assert "Authorize Active Controllers" in window
 assert "Live face enrollment guidance" in window
 assert 'case "lighting"' in window
 assert "Face model" in window and "modelChanged" in window

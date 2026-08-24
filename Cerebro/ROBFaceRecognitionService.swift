@@ -183,8 +183,78 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
                     role: role,
                     consentConfirmed: consentConfirmed,
                     trustedEnrollmentReference: trustedEnrollmentReference,
+                    trustedControllerIDs: nil,
                     handsFree: false
                 )
+                DispatchQueue.main.async { completion(nil) }
+            } catch {
+                self.statusText = error.localizedDescription
+                self.publishState()
+                DispatchQueue.main.async { completion(error) }
+            }
+        }
+    }
+
+    /// Creates an Administrator profile with an explicit snapshot of every
+    /// operator controller selected by the local enrollment UI.
+    public func startEnrollment(
+        displayName: String,
+        pronunciation: String?,
+        role: ROBFaceIdentityRole,
+        consentConfirmed: Bool,
+        trustedControllerIDs: [String],
+        completion: @escaping (Error?) -> Void
+    ) {
+        analysisQueue.async {
+            do {
+                _ = try self.startEnrollmentUnlocked(
+                    displayName: displayName,
+                    pronunciation: pronunciation,
+                    role: role,
+                    consentConfirmed: consentConfirmed,
+                    trustedEnrollmentReference: trustedControllerIDs.first ?? "local-consent",
+                    trustedControllerIDs: trustedControllerIDs,
+                    handsFree: false
+                )
+                DispatchQueue.main.async { completion(nil) }
+            } catch {
+                self.statusText = error.localizedDescription
+                self.publishState()
+                DispatchQueue.main.async { completion(error) }
+            }
+        }
+    }
+
+    /// Replaces an existing completed Administrator profile's allowlist with
+    /// the current active operator controllers. Face samples are preserved.
+    public func authorizeActiveOperatorControllers(
+        profileID: UUID,
+        completion: @escaping (Error?) -> Void
+    ) {
+        analysisQueue.async {
+            do {
+                guard let profile = self.cachedProfiles.first(where: { $0.id == profileID }) else {
+                    throw ROBFaceIdentityGalleryError.identityNotFound
+                }
+                guard profile.role == .administrator, profile.enrollmentIsComplete else {
+                    throw ROBFaceIdentityGalleryError.invalidInput(
+                        "Select a completed Administrator profile."
+                    )
+                }
+                let controllerIDs = self.activeOperatorControllers().map(\.deviceID)
+                guard !controllerIDs.isEmpty else {
+                    throw ROBFaceIdentityGalleryError.invalidInput(
+                        "Pair at least one non-revoked operator controller first."
+                    )
+                }
+                let updated = try self.gallery.updateAdministratorControllerIDs(
+                    profileID: profileID,
+                    controllerIDs: controllerIDs
+                )
+                self.replaceCachedProfile(updated)
+                self.statusText =
+                    "Authorized \(controllerIDs.count) active operator controller\(controllerIDs.count == 1 ? "" : "s") for \(updated.displayName)."
+                self.publishState()
                 DispatchQueue.main.async { completion(nil) }
             } catch {
                 self.statusText = error.localizedDescription
@@ -212,16 +282,13 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
                     throw ROBFaceIdentityGalleryError.identityNotFound
                 }
                 if profile.role == .administrator {
-                    let trustedOperator = ROBControlPairing.pairedDevices().contains {
-                        !$0.isRevoked
-                            && $0.roleName == "operatorController"
-                            && $0.deviceID.caseInsensitiveCompare(
-                                profile.trustedEnrollmentReference
-                            ) == .orderedSame
-                    }
+                    let active = Set(self.activeOperatorControllers().map { $0.deviceID.lowercased() })
+                    let trustedOperator = !active.isDisjoint(
+                        with: Set(profile.administratorControllerIDs)
+                    )
                     guard trustedOperator else {
                         throw ROBFaceIdentityGalleryError.invalidInput(
-                            "Administrator refinement requires the paired controller used for the original imprint."
+                            "Administrator refinement requires an authorized, active paired controller."
                         )
                     }
                 }
@@ -309,6 +376,7 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
                             role: .knownPerson,
                             consentConfirmed: true,
                             trustedEnrollmentReference: "spoken-consent-maker-faire",
+                            trustedControllerIDs: nil,
                             handsFree: true
                         )
                     }
@@ -824,6 +892,7 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
         role: ROBFaceIdentityRole,
         consentConfirmed: Bool,
         trustedEnrollmentReference: String,
+        trustedControllerIDs: [String]?,
         handsFree: Bool
     ) throws -> ROBFaceIdentityProfile {
         guard consentConfirmed else {
@@ -833,14 +902,17 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
         }
         let trust = trustedEnrollmentReference.trimmingCharacters(in: .whitespacesAndNewlines)
         if role == .administrator {
-            let trustedOperator = ROBControlPairing.pairedDevices().contains {
-                !$0.isRevoked
-                    && $0.roleName == "operatorController"
-                    && $0.deviceID.caseInsensitiveCompare(trust) == .orderedSame
+            let requested = trustedControllerIDs ?? [trust]
+            let active = Set(activeOperatorControllers().map { $0.deviceID.lowercased() })
+            let normalized = requested.compactMap {
+                UUID(uuidString: $0.trimmingCharacters(in: .whitespacesAndNewlines))?
+                    .uuidString.lowercased()
             }
-            guard trustedOperator else {
+            guard !normalized.isEmpty,
+                  normalized.count == requested.count,
+                  Set(normalized).isSubset(of: active) else {
                 throw ROBFaceIdentityGalleryError.invalidInput(
-                    "Administrator enrollment requires a currently paired, non-revoked operator controller."
+                    "Administrator enrollment requires only currently paired, non-revoked operator controllers."
                 )
             }
         }
@@ -862,6 +934,7 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
             pronunciation: pronunciation,
             role: role,
             trustedEnrollmentReference: trust.isEmpty ? "local-consent" : trust,
+            trustedControllerIDs: role == .administrator ? trustedControllerIDs ?? [trust] : nil,
             modelIdentifier: selectedModelValue.rawValue
         )
         cachedProfiles.append(profile)
@@ -1263,12 +1336,24 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
 
     private func reloadProfiles() {
         do {
+            let activeControllerIDs = activeOperatorControllers().map(\.deviceID)
+            if !activeControllerIDs.isEmpty {
+                _ = try gallery.expandLegacyAdministratorControllerBindings(
+                    to: activeControllerIDs
+                )
+            }
             cachedProfiles = try gallery.profiles()
         } catch {
             cachedProfiles = []
             statusText = error.localizedDescription
         }
         publishState()
+    }
+
+    private func activeOperatorControllers() -> [ROBControlPairedDevice] {
+        ROBControlPairing.pairedDevices().filter {
+            !$0.isRevoked && $0.roleName == "operatorController"
+        }
     }
 
     private func replaceCachedProfile(_ profile: ROBFaceIdentityProfile) {
