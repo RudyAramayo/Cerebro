@@ -75,13 +75,17 @@ operator must verify all fields and Apply again with all three channels known
 OFF.
 
 With no valid confirmed configuration, Cerebro loads the shipped suggestions,
-keeps pan inside the tightest configured window, forces the effective counter
-gain to zero, and holds automatic lower-neck motion. A direct lower-tilt slider
-or lower-enable action can authorize an explicitly supervised calibration jog.
-An explicit pan-slider action may authorize the same exact-demand recovery only
-when lower tilt is enabled and its slider target is inside `5000`–`6495`; upper
-camera controls cannot qualify. The status identifies this mode. It does not
-energize an unverified compensation direction autonomously.
+forces the effective counter gain to zero, and holds automatic lower-neck
+motion. Pan starts inside the tightest configured window while lower position
+is unknown. A direct lower-tilt slider or lower-enable action can authorize an
+explicitly supervised calibration jog. An explicit pan-slider action may
+authorize the same exact-demand recovery only when lower tilt is enabled and
+its slider target is inside `5000`–`6495`; upper camera controls cannot qualify.
+After that exact lower target is successfully written and its command-space
+settle interval completes, pan uses the corresponding lower-target envelope
+even while the separate camera/counter-rotation calibration remains
+unconfirmed. The status identifies this mode. It does not energize an
+unverified compensation direction autonomously.
 
 ## Hardware servo motion profile
 
@@ -146,7 +150,9 @@ command-timing guards, not proof that the mechanism settled.
 Moving the pan slider counts as that authorization when the lower servo is
 enabled and its requested slider target is within `5000`–`6495`. This sends and
 settles the exact lower target through the same gateway; it does not assume that
-the physical shaft already matches the slider.
+the physical shaft already matches the slider. The authorization lifetime
+includes the configured worst-case pan/upper Maestro ramp, so choosing a slower
+servo profile cannot make recovery expire before staging finishes.
 Every changed pan target starts the same monotonic settling age, including a
 pan-only command issued before a later lower request; a pan reversal restarts
 the lower-release gate. Repeated identical lower demands do not postpone the

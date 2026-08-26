@@ -645,14 +645,28 @@ def check_stateful_safety_gateway(serial_source: str, torso_source: str) -> None
         "completed its settle latch",
     )
     require(
-        "establishedLowerHasFullPanClearance" in gateway
-        and "requestedLowerHasFullPanClearance" in gateway
-        and gateway.count("ROBNeckSafetyLowerTargetHasFullPanClearance(") >= 2
-        and "currentEnvelopeBounds = establishedBounds;" in gateway
-        and "self.pendingPanEnvelopeLowerTarget = ROBNeckSafetyTargetOff;"
-            in gateway,
-        "A known active full-clearance lower pose may retain the asymmetric "
-        "unknown/off pan limits",
+        "establishedEnvelopeMatchesCurrentLower" in gateway
+        and "self.panEnvelopeLowerTargetIsKnown" in gateway
+        and "self.panEnvelopeLowerTarget == "
+            "self.commandedLowerNeckTiltTarget" in compact_gateway
+        and "self.pendingPanEnvelopeLowerTarget == "
+            "ROBNeckSafetyTargetOff" in compact_gateway
+        and "currentEnvelopeBounds = establishedBounds;" in gateway,
+        "An established lower-envelope target may retain stale prior pan limits",
+    )
+    require(
+        "if (boundedLower != ROBNeckSafetyTargetOff "
+            "&& !ROBNeckSafetyAllowedPanBounds(" in compact_gateway
+        and "if (!ROBNeckPanBoundsAreValid(currentEnvelopeBounds))"
+            in compact_gateway
+        and "if (!self.panEnvelopeLowerTargetIsKnown)" in gateway
+        and "int envelopeLower = self.panEnvelopeLowerTargetIsKnown"
+            in compact_gateway
+        and "calibrationConfirmed ? boundedLower" not in gateway
+        and "if (!calibrationConfirmed) { "
+            "self.panEnvelopeLowerTargetIsKnown = NO;" not in compact_gateway,
+        "An unconfirmed camera calibration may again override the pan envelope "
+        "after an operator-supervised lower target is established",
     )
     require(
         "pendingPanEnvelopeLowerTarget != boundedLower" in gateway
@@ -743,6 +757,17 @@ def check_stateful_safety_gateway(serial_source: str, torso_source: str) -> None
         and "kROBNeckSupervisedRecoverySeconds" in gateway,
         "A direct lower-axis recovery authorization no longer survives its "
         "required pan staging interval as an exact-demand latch",
+    )
+    require(
+        "supervisedRecoveryMotionDuration = fmax(" in compact_gateway
+        and "effectiveConfiguration.panMinimumTarget" in gateway
+        and "effectiveConfiguration.panMaximumTarget" in gateway
+        and "effectiveConfiguration.upperMinimumTarget" in gateway
+        and "effectiveConfiguration.upperMaximumTarget" in gateway
+        and "+ supervisedRecoveryMotionDuration "
+            "+ kROBNeckSupervisedRecoverySeconds;" in compact_gateway,
+        "A slower Maestro profile may again let supervised lower recovery "
+        "expire before pan/upper staging completes",
     )
     for flag in (
         "neckPanCommandKnown = NO",

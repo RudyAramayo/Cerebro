@@ -1378,12 +1378,21 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         && boundedLower != ROBNeckSafetyTargetOff;
     if (directSupervisedLowerRecovery) {
         // A lower-axis action authorizes only this exact composite demand. The
-        // short latch survives the pan staging interval and passive renderer
+        // latch survives the configured pan/upper ramp plus passive renderer
         // ticks, but cannot be reused for a different tracking/slider target.
+        NSTimeInterval supervisedRecoveryMotionDuration = fmax(
+            [self maestroMotionDurationFromTarget:
+                    effectiveConfiguration.panMinimumTarget
+                                      toTarget:effectiveConfiguration.panMaximumTarget],
+            [self maestroMotionDurationFromTarget:
+                    effectiveConfiguration.upperMinimumTarget
+                                      toTarget:effectiveConfiguration.upperMaximumTarget]
+        );
         self.supervisedLowerRecoveryPanTarget = panTarget;
         self.supervisedLowerRecoveryTarget = boundedLower;
         self.supervisedLowerRecoveryUpperTarget = desiredUpperTarget;
         self.supervisedLowerRecoveryUntil = now
+            + supervisedRecoveryMotionDuration
             + kROBNeckSupervisedRecoverySeconds;
     } else if (allowSupervisedLowerRecovery
                && boundedLower == ROBNeckSafetyTargetOff) {
@@ -1491,12 +1500,17 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         .minimumDegrees = self.currentNeckPanMinimumDegrees,
         .maximumDegrees = self.currentNeckPanMaximumDegrees,
     };
-    if (!calibrationConfirmed || !ROBNeckPanBoundsAreValid(currentEnvelopeBounds)) {
+    if (!ROBNeckPanBoundsAreValid(currentEnvelopeBounds)) {
+        currentEnvelopeBounds = conservativeUnknownBounds;
+    }
+    if (!self.panEnvelopeLowerTargetIsKnown) {
+        // No settled or deliberately tightened lower-envelope target exists.
+        // Reassert the unknown-pose intersection instead of trusting stale
+        // numeric bounds left by an earlier command path.
         currentEnvelopeBounds = conservativeUnknownBounds;
     }
     ROBNeckSafetyPanBounds requestedEnvelopeBounds = conservativeUnknownBounds;
-    if (calibrationConfirmed
-        && boundedLower != ROBNeckSafetyTargetOff
+    if (boundedLower != ROBNeckSafetyTargetOff
         && !ROBNeckSafetyAllowedPanBounds(
             &effectiveConfiguration,
             boundedLower,
@@ -1506,24 +1520,15 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         return ROBNeckCommandDispositionRejected;
     }
 
-    // Once this Maestro session has successfully written a known active lower
-    // target in the full-clearance band, do not retain a stale unknown/off
-    // intersection while servicing another command that remains in that band.
-    // The lower transition gate still protects moves outside the band.
-    BOOL establishedLowerHasFullPanClearance = calibrationConfirmed
-        && knownLowerIsActive
-        && ROBNeckSafetyLowerTargetHasFullPanClearance(
-            &effectiveConfiguration,
-            (int)self.commandedLowerNeckTiltTarget
-        );
-    BOOL requestedLowerHasFullPanClearance = calibrationConfirmed
-        && boundedLower != ROBNeckSafetyTargetOff
-        && ROBNeckSafetyLowerTargetHasFullPanClearance(
-            &effectiveConfiguration,
-            boundedLower
-        );
-    if (establishedLowerHasFullPanClearance
-        && requestedLowerHasFullPanClearance) {
+    // The envelope target is promoted only after the lower command settles (or
+    // immediately when moving to a tighter window). When it matches the active
+    // lower command, rebuild the current bounds from that established target so
+    // a stale prior intersection cannot keep pan limited indefinitely.
+    BOOL establishedEnvelopeMatchesCurrentLower = knownLowerIsActive
+        && self.panEnvelopeLowerTargetIsKnown
+        && self.panEnvelopeLowerTarget == self.commandedLowerNeckTiltTarget
+        && self.pendingPanEnvelopeLowerTarget == ROBNeckSafetyTargetOff;
+    if (establishedEnvelopeMatchesCurrentLower) {
         ROBNeckSafetyPanBounds establishedBounds = {0};
         if (!ROBNeckSafetyAllowedPanBounds(
                 &effectiveConfiguration,
@@ -1535,10 +1540,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
             return ROBNeckCommandDispositionRejected;
         }
         currentEnvelopeBounds = establishedBounds;
-        self.panEnvelopeLowerTarget = (int)self.commandedLowerNeckTiltTarget;
-        self.panEnvelopeLowerTargetIsKnown = YES;
-        self.pendingPanEnvelopeLowerTarget = ROBNeckSafetyTargetOff;
-        self.pendingPanEnvelopeReadyAt = 0;
     }
 
     // Tighten each edge immediately. Widen either edge only after the lower
@@ -1560,7 +1561,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         requestedEnvelopeBounds
     );
 
-    int envelopeLower = calibrationConfirmed && self.panEnvelopeLowerTargetIsKnown
+    int envelopeLower = self.panEnvelopeLowerTargetIsKnown
         ? self.panEnvelopeLowerTarget
         : ROBNeckSafetyTargetOff;
     if (includeLower && boundedLower == ROBNeckSafetyTargetOff) {
@@ -1570,8 +1571,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         self.pendingPanEnvelopeLowerTarget = ROBNeckSafetyTargetOff;
         self.pendingPanEnvelopeReadyAt = 0;
         envelopeLower = ROBNeckSafetyTargetOff;
-    } else if (calibrationConfirmed
-               && includeLower
+    } else if (includeLower
                && boundedLower != ROBNeckSafetyTargetOff
                && requestedEnvelopeIsContained) {
         self.panEnvelopeLowerTarget = boundedLower;
@@ -1580,14 +1580,6 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         self.pendingPanEnvelopeReadyAt = 0;
         envelopeLower = boundedLower;
     }
-    if (!calibrationConfirmed) {
-        self.panEnvelopeLowerTargetIsKnown = NO;
-        self.pendingPanEnvelopeLowerTarget = ROBNeckSafetyTargetOff;
-        self.pendingPanEnvelopeReadyAt = 0;
-        activeEnvelopeBounds = conservativeUnknownBounds;
-        envelopeLower = ROBNeckSafetyTargetOff;
-    }
-
     // Before a lower move (including active -> OFF), establish pan inside the
     // destination envelope. The pure-C latch keeps its original monotonic
     // deadline across repeated continuous-slider events.
@@ -1606,7 +1598,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
             self.neckPanCommandKnown
                 ? (int)self.commandedNeckPanTarget
                 : ROBNeckSafetyTargetOff,
-            calibrationConfirmed ? boundedLower : ROBNeckSafetyTargetOff,
+            boundedLower,
             ROBNeckSafetyTargetOff,
             &candidatePan
         )) {
@@ -1936,8 +1928,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
                 self.commandedNeckPanDegrees = NAN;
                 self.neckPanCommandLimited = NO;
             }
-        } else if (calibrationConfirmed
-                   && !requestedEnvelopeIsContained) {
+        } else if (!requestedEnvelopeIsContained) {
             if (self.pendingPanEnvelopeLowerTarget != boundedLower
                 || self.pendingPanEnvelopeReadyAt <= 0) {
                 // One or both destination edges widen only after settling.
@@ -1955,7 +1946,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
                     + lowerMotionDuration
                     + kROBNeckClearanceSettleSeconds;
             }
-        } else if (calibrationConfirmed) {
+        } else {
             self.panEnvelopeLowerTarget = boundedLower;
             self.panEnvelopeLowerTargetIsKnown = YES;
         }
