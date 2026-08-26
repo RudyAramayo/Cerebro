@@ -65,6 +65,7 @@ static NSString * const kROBNeckSafetyLegacyConfigurationDefaultsKey = @"ROBNeck
 static NSString * const kROBMaestroServoSmoothingEnabledDefaultsKey = @"ROBMaestroServoSmoothingEnabled";
 static NSString * const kROBMaestroServoSpeedLimitDefaultsKey = @"ROBMaestroServoSpeedLimit";
 static NSString * const kROBMaestroServoAccelerationLimitDefaultsKey = @"ROBMaestroServoAccelerationLimit";
+static NSString * const kROBMaestroServoMotionProfileVersionDefaultsKey = @"ROBMaestroServoMotionProfileVersion";
 static NSTimeInterval const kROBNeckManualOverrideSeconds = 2.0;
 static NSTimeInterval const kROBNeckVisionAuthoritySeconds = 0.35;
 static NSTimeInterval const kROBNeckPanRecenterSeconds = 1.0;
@@ -73,8 +74,11 @@ static NSTimeInterval const kROBNeckSupervisedRecoverySeconds = 5.0;
 static NSUInteger const kROBBaseConsoleMaximumCharacters = 256 * 1024;
 enum { kROBMiniMaestroChannelCount = 24 };
 
-NSInteger const ROBMaestroDefaultServoSpeedLimit = 40;
-NSInteger const ROBMaestroDefaultServoAccelerationLimit = 4;
+static NSInteger const kROBMaestroServoMotionProfileDefaultsVersion = 2;
+static NSInteger const kROBLegacyMaestroDefaultServoSpeedLimit = 40;
+static NSInteger const kROBLegacyMaestroDefaultServoAccelerationLimit = 4;
+NSInteger const ROBMaestroDefaultServoSpeedLimit = 35;
+NSInteger const ROBMaestroDefaultServoAccelerationLimit = 3;
 
 static double ROBTargetOverflow(double target, double minimum, double maximum)
 {
@@ -392,6 +396,33 @@ typedef enum : NSUInteger {
     self = [super init];
     if (self) {
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        NSInteger motionProfileVersion = [defaults
+            integerForKey:kROBMaestroServoMotionProfileVersionDefaultsKey];
+        if (motionProfileVersion
+            < kROBMaestroServoMotionProfileDefaultsVersion) {
+            NSNumber *savedSpeedLimit = [defaults
+                objectForKey:kROBMaestroServoSpeedLimitDefaultsKey];
+            NSNumber *savedAccelerationLimit = [defaults
+                objectForKey:kROBMaestroServoAccelerationLimitDefaultsKey];
+            // Move only the former shipped values to the gentler profile.
+            // Any explicit operator calibration remains authoritative.
+            if (savedSpeedLimit != nil
+                && savedSpeedLimit.integerValue
+                    == kROBLegacyMaestroDefaultServoSpeedLimit) {
+                [defaults setInteger:ROBMaestroDefaultServoSpeedLimit
+                              forKey:kROBMaestroServoSpeedLimitDefaultsKey];
+            }
+            if (savedAccelerationLimit != nil
+                && savedAccelerationLimit.integerValue
+                    == kROBLegacyMaestroDefaultServoAccelerationLimit) {
+                [defaults
+                    setInteger:ROBMaestroDefaultServoAccelerationLimit
+                        forKey:kROBMaestroServoAccelerationLimitDefaultsKey];
+            }
+            [defaults
+                setInteger:kROBMaestroServoMotionProfileDefaultsVersion
+                    forKey:kROBMaestroServoMotionProfileVersionDefaultsKey];
+        }
         [defaults registerDefaults:@{
             kROBMaestroServoSmoothingEnabledDefaultsKey: @YES,
             kROBMaestroServoSpeedLimitDefaultsKey:

@@ -87,7 +87,7 @@ energize an unverified compensation direction autonomously.
 
 The scrollable **Settings → Hardware → Maestro Servo Motion** section enables
 a controller-owned speed and acceleration profile for all 24 Maestro channels.
-It defaults on with maximum speed `40` and acceleration `4`; lower nonzero
+It defaults on with maximum speed `35` and acceleration `3`; lower nonzero
 values are gentler. Cerebro persists the profile and sends the Mini Maestro
 compact-protocol **Set Speed** (`0x87`) and **Set Acceleration** (`0x89`)
 commands for every channel immediately after each verified connection, before
@@ -95,6 +95,10 @@ normal target commands. Turning smoothing off explicitly sends zero limits,
 which restores the Maestro's unlimited setting. See the [Pololu Maestro serial
 servo commands](https://www.pololu.com/docs/0J40/5.e) for the controller's
 units and ramp behavior.
+
+On upgrade, a saved speed of `40` or acceleration of `4` is migrated once to
+the gentler shipped value. Other saved values are treated as operator
+calibration and remain unchanged.
 
 This central controller profile covers manual controls, Vision, gestures, and
 arm targets without generating competing UI-side intermediate writes. It

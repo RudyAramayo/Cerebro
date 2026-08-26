@@ -268,9 +268,30 @@ def main() -> None:
         "kROBMaestroServoSmoothingEnabledDefaultsKey" in serial_source
         and "kROBMaestroServoSpeedLimitDefaultsKey" in serial_source
         and "kROBMaestroServoAccelerationLimitDefaultsKey" in serial_source
-        and "ROBMaestroDefaultServoSpeedLimit = 40" in serial_source
-        and "ROBMaestroDefaultServoAccelerationLimit = 4" in serial_source,
+        and "kROBMaestroServoMotionProfileDefaultsVersion = 2" in serial_source
+        and "kROBLegacyMaestroDefaultServoSpeedLimit = 40" in serial_source
+        and "kROBLegacyMaestroDefaultServoAccelerationLimit = 4" in serial_source
+        and "ROBMaestroDefaultServoSpeedLimit = 35" in serial_source
+        and "ROBMaestroDefaultServoAccelerationLimit = 3" in serial_source,
         "The gentle Maestro defaults are no longer registered and persisted",
+    )
+    serial_init = braced_declaration(
+        serial_source, "- (instancetype)init", serial_implementation
+    )
+    serial_init_compact = " ".join(serial_init.split())
+    require(
+        "kROBMaestroServoMotionProfileVersionDefaultsKey" in serial_init
+        and "kROBMaestroServoMotionProfileDefaultsVersion" in serial_init
+        and "motionProfileVersion < "
+            "kROBMaestroServoMotionProfileDefaultsVersion" in serial_init_compact
+        and "kROBLegacyMaestroDefaultServoSpeedLimit" in serial_init
+        and "kROBLegacyMaestroDefaultServoAccelerationLimit" in serial_init
+        and "savedSpeedLimit.integerValue" in serial_init
+        and "savedAccelerationLimit.integerValue" in serial_init
+        and "setInteger:ROBMaestroDefaultServoSpeedLimit" in serial_init
+        and "setInteger:ROBMaestroDefaultServoAccelerationLimit" in serial_init,
+        "Existing installations no longer migrate only the former shipped "
+        "Maestro values to the gentler profile",
     )
     reconnect_compact = " ".join(maestro_reconnect.split())
     require(
