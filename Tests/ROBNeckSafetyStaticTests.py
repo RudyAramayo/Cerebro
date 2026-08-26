@@ -270,11 +270,12 @@ def check_lower_clearance_threshold(
         )
         is not None
         and re.search(
-            r"ROBNeckSafetyDefaultUpperTarget\s*=\s*7330\b", policy_header
-        )
-        is not None,
+            r"ROBNeckSafetyDefaultUpperTarget\s*=\s*"
+            r"ROBNeckSafetyUprightUpperTarget\b",
+            policy_header,
+        ) is not None,
         "The calibrated forward/resting startup defaults must remain "
-        "5799/7014/7330",
+        "5799/7014/6073",
     )
     bounds = compact(braced_declaration(
         policy_source, "bool ROBNeckSafetyAllowedPanBounds("
@@ -327,9 +328,9 @@ def check_lower_clearance_threshold(
         and 'doubleValue="5798.9583333333339"' in storyboard
         and 'doubleValue="7014"' in storyboard
         and 'id="Bud-rf-B0V"' in storyboard
-        and 'doubleValue="7330"' in storyboard
+        and 'doubleValue="6073"' in storyboard
         and 'id="UIa-yF-izD"' in storyboard,
-        "The torso controls no longer start at the original safe resting defaults",
+        "The torso controls no longer start at the safe resting defaults",
     )
 
 

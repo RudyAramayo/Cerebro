@@ -45,7 +45,7 @@ physical build.
 | Upper upright | 6073 | fixed neutral upper-neck camera target and Vision tracking center |
 | Default forward pan | 5799 | original torso-control forward resting target |
 | Default lower rest | 7014 | original safe resting target toward the rear of the robot |
-| Default upper rest | 7330 | original safe upper-neck resting target |
+| Default upper rest | 6073 | calibrated upright upper-neck resting target |
 | Pan center | 6000 | raw target treated as 0° |
 | Pan targets per degree | 33.3333 | raw-target-to-degree scale |
 | Camera counter gain | -1.0 | upper-target correction per lower-target unit |
@@ -58,7 +58,7 @@ degree; the shipped suggestions therefore describe ±60°.
 
 Before selecting **Apply**, physically confirm the pan center and scale, the
 inclusive `5000`–`6495` lower-tilt clearance band, clearance/neutral targets
-`6011`/`6073`, resting defaults `5799`/`7014`/`7330`, both hard ranges, and
+`6011`/`6073`, resting defaults `5799`/`7014`/`6073`, both hard ranges, and
 the counter-gain sign.
 Command all three neck channels off and confirm the readouts show
 `P OFF`, `L OFF`, and `U OFF`; Cerebro rejects live calibration changes while
@@ -72,7 +72,7 @@ Their old 5300–6822 band and the old serialized `6823` forward anchor remain
 only for V3 settings compatibility; neither defines the active pan envelope or
 the upright reference. The fixed Maestro 24 full-pan band is `5000`–`6495`,
 and the fixed lower/upper clearance/neutral targets are `6011`/`6073`. The
-Head sliders retain the original resting defaults `5799`/`7014`/`7330`. Migration
+Head sliders use the safe resting defaults `5799`/`7014`/`6073`. Migration
 still clips −15.0°…+2.1° inward to the saved pan range and defaults **Keep
 camera upright** to on. Every V1/V2 migration is marked unconfirmed, so the
 operator must verify all fields and Apply again with all three channels known
@@ -99,15 +99,15 @@ turns all three Head enable checkboxes on as one recovery group and starts this
 fixed sequence:
 
 1. Pan is commanded `OFF`. Lower and upper are sent together to lower-up
-   `6011` and upper default `7330`.
+   `6011` and upper upright `6073`.
 2. Cerebro waits for the slower of the worst-case lower/upper Maestro ramps
    plus the settling margin. It then commands pan forward to `5799` while
    holding lower at `6011`.
 3. Only after the worst-case pan ramp and staging margin expire does Cerebro
-   send lower rest `7014` and upper default `7330` together. It waits for that
+   send lower rest `7014` and upper upright `6073` together. It waits for that
    lower ramp before releasing normal torso control.
 
-The Head sliders are restored to `5799`/`7014`/`7330` when the sequence starts,
+The Head sliders are restored to `5799`/`7014`/`6073` when the sequence starts,
 and the three enable checkboxes are wired as explicit operator actions. Camera
 counter-rotation is suspended only for these exact startup poses, then rebased
 at `7014` so the next normal render does not jump the upper servo. Switching

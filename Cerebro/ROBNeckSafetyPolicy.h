@@ -28,12 +28,12 @@ enum {
     // neck. This is intentionally distinct from the normal resting defaults.
     ROBNeckSafetyUprightLowerTarget = 6011,
     ROBNeckSafetyUprightUpperTarget = 6073,
-    // Original torso-control defaults: forward pan and the safe resting pose
-    // toward the rear of the robot. Startup recovery returns to these values
-    // only after the lower neck has been lifted and pan has settled forward.
+    // Safe torso-control defaults: forward pan, lower resting toward the rear
+    // of the robot, and upper held upright. Startup recovery returns to these
+    // values only after the lower neck is lifted and pan settles forward.
     ROBNeckSafetyDefaultForwardPanTarget = 5799,
     ROBNeckSafetyDefaultLowerTarget = 7014,
-    ROBNeckSafetyDefaultUpperTarget = 7330,
+    ROBNeckSafetyDefaultUpperTarget = ROBNeckSafetyUprightUpperTarget,
     ROBNeckSafetyMaximumMaestroTarget = 16383
 };
 

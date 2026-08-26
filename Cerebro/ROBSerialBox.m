@@ -1459,7 +1459,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         self.safeNeckStartupReadyAt = readyAt;
         self.neckCommandSource = @"Torso safe startup";
         self.neckCommandSafetyStatus =
-            @"SAFE STARTUP 1/3: PAN OFF; LIFTING LOWER TO 6011 AND UPPER TO DEFAULT 7330";
+            @"SAFE STARTUP 1/3: PAN OFF; LIFTING LOWER TO 6011 AND UPPER UPRIGHT TO 6073";
     }
     [self scheduleSafeNeckStartupAdvanceForGeneration:generation atTime:readyAt];
     return ROBNeckCommandDispositionAppliedCommand;
@@ -1532,7 +1532,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
             self.torsoNeckAuthorityRequiresOperatorAction = NO;
             self.neckCommandSource = @"Torso safe startup";
             self.neckCommandSafetyStatus =
-                @"SAFE STARTUP COMPLETE: P 5799 • L 7014 • U 7330 (COMMANDS SETTLED BY WORST-CASE TIMING)";
+                @"SAFE STARTUP COMPLETE: P 5799 • L 7014 • U 6073 (COMMANDS SETTLED BY WORST-CASE TIMING)";
         }
         return;
     }

@@ -78,7 +78,7 @@ static void testConfigurationValidation(void) {
     EXPECT_INT(ROBNeckSafetyUprightUpperTarget, 6073);
     EXPECT_INT(ROBNeckSafetyDefaultForwardPanTarget, 5799);
     EXPECT_INT(ROBNeckSafetyDefaultLowerTarget, 7014);
-    EXPECT_INT(ROBNeckSafetyDefaultUpperTarget, 7330);
+    EXPECT_INT(ROBNeckSafetyDefaultUpperTarget, 6073);
     EXPECT_INT(config.lowerFullPanLowTarget, 5300);
     EXPECT_INT(config.lowerFullPanHighTarget, 6822);
     EXPECT_NEAR(ROBNeckSafetyReferenceLowerTarget(&config), 6011.0, 0.0);

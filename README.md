@@ -169,9 +169,9 @@ pan-slider action can safely re-establish an enabled lower slider target in the
 full-pan band after startup or reconnect before the pan envelope widens.
 If any neck axis is OFF or unknown, a deliberate Head action with all three
 axes enabled runs the fixed resting-pose recovery: pan stays OFF while
-lower/upper move to `6011`/`7330`, pan settles forward at `5799`, and only then
-does lower return toward the rear at `7014`. The original Head slider defaults
-are restored to `5799`/`7014`/`7330`.
+lower/upper move to `6011`/`6073`, pan settles forward at `5799`, and only then
+does lower return toward the rear at `7014`. The safe Head slider defaults are
+restored to `5799`/`7014`/`6073`.
 The Head panel also has a persistent **Keep upright** toggle for coupled
 lower/upper camera commands. The torso readouts show commands sent, not
 measured shaft positions; calibration and physical supervision are still
