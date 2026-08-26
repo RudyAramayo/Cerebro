@@ -24,8 +24,16 @@ enum {
     // restricted; values above it use the forward/asymmetric envelope.
     ROBNeckSafetyFullPanLowerThresholdTarget = 5000,
     ROBNeckSafetyFullPanLowerMaximumTarget = 6495,
+    // Calibrated collision-clear lift used before recovering an OFF/unknown
+    // neck. This is intentionally distinct from the normal resting defaults.
     ROBNeckSafetyUprightLowerTarget = 6011,
     ROBNeckSafetyUprightUpperTarget = 6073,
+    // Original torso-control defaults: forward pan and the safe resting pose
+    // toward the rear of the robot. Startup recovery returns to these values
+    // only after the lower neck has been lifted and pan has settled forward.
+    ROBNeckSafetyDefaultForwardPanTarget = 5799,
+    ROBNeckSafetyDefaultLowerTarget = 7014,
+    ROBNeckSafetyDefaultUpperTarget = 7330,
     ROBNeckSafetyMaximumMaestroTarget = 16383
 };
 

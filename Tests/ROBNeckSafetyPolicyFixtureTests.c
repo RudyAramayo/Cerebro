@@ -76,6 +76,9 @@ static void testConfigurationValidation(void) {
     EXPECT_INT(ROBNeckSafetyFullPanLowerMaximumTarget, 6495);
     EXPECT_INT(ROBNeckSafetyUprightLowerTarget, 6011);
     EXPECT_INT(ROBNeckSafetyUprightUpperTarget, 6073);
+    EXPECT_INT(ROBNeckSafetyDefaultForwardPanTarget, 5799);
+    EXPECT_INT(ROBNeckSafetyDefaultLowerTarget, 7014);
+    EXPECT_INT(ROBNeckSafetyDefaultUpperTarget, 7330);
     EXPECT_INT(config.lowerFullPanLowTarget, 5300);
     EXPECT_INT(config.lowerFullPanHighTarget, 6822);
     EXPECT_NEAR(ROBNeckSafetyReferenceLowerTarget(&config), 6011.0, 0.0);
@@ -108,6 +111,35 @@ static void testConfigurationValidation(void) {
     ));
     EXPECT_FALSE(ROBNeckSafetyLowerTargetHasFullPanClearance(NULL, 6200));
     EXPECT_TRUE(config.cameraLevelingEnabled);
+
+    ROBNeckSafetyConfig startupConfig = config;
+    startupConfig.cameraLevelingEnabled = false;
+    ROBNeckSafetyResult startupLift = {0};
+    EXPECT_TRUE(ROBNeckSafetyApply(
+        &startupConfig,
+        ROBNeckSafetyTargetOff,
+        ROBNeckSafetyUprightLowerTarget,
+        ROBNeckSafetyDefaultUpperTarget,
+        &startupLift
+    ));
+    EXPECT_INT(startupLift.panTarget, ROBNeckSafetyTargetOff);
+    EXPECT_INT(startupLift.lowerTarget, ROBNeckSafetyUprightLowerTarget);
+    EXPECT_INT(startupLift.upperTarget, ROBNeckSafetyDefaultUpperTarget);
+
+    ROBNeckSafetyResult startupRest = {0};
+    EXPECT_TRUE(ROBNeckSafetyApply(
+        &startupConfig,
+        ROBNeckSafetyDefaultForwardPanTarget,
+        ROBNeckSafetyDefaultLowerTarget,
+        ROBNeckSafetyDefaultUpperTarget,
+        &startupRest
+    ));
+    EXPECT_INT(startupRest.panTarget, ROBNeckSafetyDefaultForwardPanTarget);
+    EXPECT_INT(startupRest.lowerTarget, ROBNeckSafetyDefaultLowerTarget);
+    EXPECT_INT(startupRest.upperTarget, ROBNeckSafetyDefaultUpperTarget);
+    EXPECT_FALSE(startupRest.panClamped);
+    EXPECT_FALSE(startupRest.lowerClamped);
+    EXPECT_FALSE(startupRest.upperClamped);
 
     ROBNeckSafetyConfig invalid = config;
     invalid.panTargetsPerDegree = NAN;

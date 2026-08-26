@@ -259,6 +259,23 @@ def check_lower_clearance_threshold(
             is not None,
         "The calibrated lower/upper upright targets must remain 6011/6073",
     )
+    require(
+        re.search(
+            r"ROBNeckSafetyDefaultForwardPanTarget\s*=\s*5799\b",
+            policy_header,
+        )
+        is not None
+        and re.search(
+            r"ROBNeckSafetyDefaultLowerTarget\s*=\s*7014\b", policy_header
+        )
+        is not None
+        and re.search(
+            r"ROBNeckSafetyDefaultUpperTarget\s*=\s*7330\b", policy_header
+        )
+        is not None,
+        "The calibrated forward/resting startup defaults must remain "
+        "5799/7014/7330",
+    )
     bounds = compact(braced_declaration(
         policy_source, "bool ROBNeckSafetyAllowedPanBounds("
     ))
@@ -304,11 +321,15 @@ def check_lower_clearance_threshold(
     require(
         "ROBNeckSafetyUprightLowerTarget" in torso_source
         and "ROBNeckSafetyUprightUpperTarget" in torso_source
-        and 'doubleValue="6011"' in storyboard
+        and "ROBNeckSafetyDefaultForwardPanTarget" in torso_source
+        and "ROBNeckSafetyDefaultLowerTarget" in torso_source
+        and "ROBNeckSafetyDefaultUpperTarget" in torso_source
+        and 'doubleValue="5798.9583333333339"' in storyboard
+        and 'doubleValue="7014"' in storyboard
         and 'id="Bud-rf-B0V"' in storyboard
-        and 'doubleValue="6073"' in storyboard
+        and 'doubleValue="7330"' in storyboard
         and 'id="UIa-yF-izD"' in storyboard,
-        "The torso controls no longer start at the calibrated upright targets",
+        "The torso controls no longer start at the original safe resting defaults",
     )
 
 
@@ -410,6 +431,109 @@ def check_single_physical_neck_gateway(serial_source: str) -> None:
         "Vision no longer maps pan/upper demands exactly while keeping lower "
         "motion and supervised recovery disabled",
     )
+
+
+def check_safe_startup_sequence(
+    serial_header: str,
+    serial_source: str,
+    torso_source: str,
+    storyboard: str,
+) -> None:
+    require(
+        "isSafeNeckStartupInProgress" in serial_header
+        and "startSafeNeckStartup" in serial_header
+        and "cancelSafeNeckStartup" in serial_header,
+        "The typed safe-neck startup API is missing",
+    )
+
+    startup = compact(objective_c_method(serial_source, "startSafeNeckStartup"))
+    advance = compact(objective_c_method(
+        serial_source, "advanceSafeNeckStartupForGeneration:"
+    ))
+    gateway = compact(objective_c_method(
+        serial_source, "applySafeNeckPanTarget:"
+    ))
+    invalidate = compact(objective_c_method(
+        serial_source, "invalidateNeckCommandStateWithStatus:"
+    ))
+    require(
+        "applySafeNeckPanTarget:ROBNeckSafetyTargetOff "
+        "lowerTiltTarget:ROBNeckSafetyUprightLowerTarget "
+        "desiredUpperTarget:ROBNeckSafetyDefaultUpperTarget "
+        "includeLower:YES allowSupervisedLowerRecovery:YES "
+        "source:kROBSafeNeckStartupLiftSource" in startup
+        and "sendMaestro" not in startup,
+        "Startup phase 1 must keep pan OFF and submit the coupled 6011/default "
+        "lift only through the shared gateway",
+    )
+    require(
+        "applySafeNeckPanTarget:ROBNeckSafetyDefaultForwardPanTarget "
+        "lowerTiltTarget:ROBNeckSafetyDefaultLowerTarget "
+        "desiredUpperTarget:ROBNeckSafetyDefaultUpperTarget "
+        "includeLower:YES allowSupervisedLowerRecovery:NO "
+        "source:kROBSafeNeckStartupRestSource" in advance
+        and "maestroMotionDurationFromTarget:ROBNeckSafetyUprightLowerTarget "
+        "toTarget:ROBNeckSafetyDefaultLowerTarget" in advance
+        and "ROBSafeNeckStartupPhaseLowering" in advance
+        and "sendMaestro" not in advance,
+        "Startup must center pan through the gateway before timing the return "
+        "from lower-up to the resting lower target",
+    )
+    require(
+        "safeStartupLiftCommand" in gateway
+        and "effectiveConfiguration.cameraLevelingEnabled = false;" in gateway
+        and "&& !safeStartupLiftCommand" in gateway
+        and "|| safeStartupLiftCommand" in gateway,
+        "The gateway lost the narrowly-scoped OFF-pan clearance-lift recovery",
+    )
+    require(
+        "safeNeckStartupGeneration += 1;" in invalidate
+        and "safeNeckStartupInProgress = NO;" in invalidate
+        and "ROBSafeNeckStartupPhaseInactive" in invalidate,
+        "A Maestro disconnect no longer invalidates the asynchronous startup sequence",
+    )
+
+    servo_action = compact(objective_c_method(torso_source, "applyServoCommand:"))
+    require(
+        "allNeckAxesEnabled" in servo_action
+        and "neckNeedsSafeStartup" in servo_action
+        and "neckActivationAction" in servo_action
+        and "neckDeactivationAction" in servo_action
+        and "self.headPan_enabled.state = NSControlStateValueOn;" in servo_action
+        and "self.headTilt_enabled.state = NSControlStateValueOn;" in servo_action
+        and "self.headUpperNeckTilt_enabled.state = NSControlStateValueOn;"
+            in servo_action
+        and servo_action.count(
+            "self.headPan_enabled.state = NSControlStateValueOff;"
+        ) == 1
+        and servo_action.count(
+            "self.headTilt_enabled.state = NSControlStateValueOff;"
+        ) == 1
+        and servo_action.count(
+            "self.headUpperNeckTilt_enabled.state = NSControlStateValueOff;"
+        ) == 1
+        and "self.headPan.integerValue = ROBNeckSafetyDefaultForwardPanTarget;"
+            in servo_action
+        and "self.headTilt.integerValue = ROBNeckSafetyDefaultLowerTarget;"
+            in servo_action
+        and "self.headUpperNeckTilt.integerValue = "
+            "ROBNeckSafetyDefaultUpperTarget;" in servo_action
+        and "[serialBox startSafeNeckStartup]" in servo_action
+        and "[serialBox cancelSafeNeckStartup]" in servo_action,
+        "A deliberate neck action no longer starts/cancels the safe recovery sequence",
+    )
+    for button_id in ("wbx-6Z-lzo", "CSn-jc-2oR", "AMM-Oa-PLc"):
+        button = re.search(
+            rf'<button\b[^>]*\bid="{re.escape(button_id)}"[^>]*>'
+            r".*?</button>",
+            storyboard,
+            flags=re.DOTALL,
+        )
+        require(button is not None, f"Missing neck enable checkbox {button_id}")
+        require(
+            'action selector="applyServoCommand:"' in button.group(0),
+            f"Neck enable checkbox {button_id} is not wired as an operator action",
+        )
 
 
 def check_operator_authority(
@@ -1181,6 +1305,12 @@ def main() -> None:
         storyboard,
     )
     check_single_physical_neck_gateway(serial_source)
+    check_safe_startup_sequence(
+        serial_header,
+        serial_source,
+        torso_source,
+        storyboard,
+    )
     check_operator_authority(serial_header, serial_source, torso_source)
     check_command_readouts(torso_source)
     check_camera_leveling_control(serial_header, torso_source)

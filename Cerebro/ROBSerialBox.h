@@ -88,6 +88,7 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 @property (readonly, assign, getter=isUpperNeckCommandCompensated) BOOL upperNeckCommandCompensated;
 @property (readonly, assign, getter=isNeckSafetyCalibrationConfirmed) BOOL neckSafetyCalibrationConfirmed;
 @property (readonly, assign, getter=isNeckCameraLevelingEnabled) BOOL neckCameraLevelingEnabled;
+@property (readonly, assign, getter=isSafeNeckStartupInProgress) BOOL safeNeckStartupInProgress;
 @property (readonly, copy) NSString *neckCommandSource;
 @property (readonly, copy) NSString *neckCommandSafetyStatus;
 
@@ -98,6 +99,13 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 /// the current upper target as the new camera demand. Unknown/OFF poses are
 /// never energized by this toggle.
 - (BOOL)setNeckCameraLevelingEnabled:(BOOL)enabled;
+/// Deliberately recovers an OFF/unknown neck through the calibrated startup
+/// sequence. Pan remains OFF while lower/upper move to the clearance pose;
+/// pan then settles forward before lower returns to the rear resting default.
+/// This is command-space timing only because the Maestro provides no shaft
+/// feedback. Repeated calls while the sequence is active are harmless.
+- (ROBNeckCommandDisposition)startSafeNeckStartup;
+- (void)cancelSafeNeckStartup;
 
 @property (readwrite, retain) NSSlider *arm_R11_force;
 

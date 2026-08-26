@@ -2555,7 +2555,7 @@ Brake
                                     <slider horizontalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="J1f-FG-Z84">
                                         <rect key="frame" x="42" y="82" width="19" height="76"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                        <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4375" maxValue="7675" doubleValue="6011" tickMarkPosition="right" sliderType="linear" id="Bud-rf-B0V"/>
+                                        <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4375" maxValue="7675" doubleValue="7014" tickMarkPosition="right" sliderType="linear" id="Bud-rf-B0V"/>
                                         <connections>
                                             <action selector="applyServoCommand:" target="cHj-5R-xNm" id="0Cp-xN-UBU"/>
                                         </connections>
@@ -2563,7 +2563,7 @@ Brake
                                     <slider horizontalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="CyK-bn-gZP">
                                         <rect key="frame" x="42" y="172" width="19" height="76"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMaxX="YES" flexibleMinY="YES"/>
-                                        <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4300" maxValue="7790" doubleValue="6073" tickMarkPosition="right" sliderType="linear" id="UIa-yF-izD"/>
+                                        <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4300" maxValue="7790" doubleValue="7330" tickMarkPosition="right" sliderType="linear" id="UIa-yF-izD"/>
                                         <connections>
                                             <action selector="applyServoCommand:" target="cHj-5R-xNm" id="1jw-j1-xfp"/>
                                         </connections>
@@ -2575,6 +2575,9 @@ Brake
                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                             <font key="font" metaFont="system"/>
                                         </buttonCell>
+                                        <connections>
+                                            <action selector="applyServoCommand:" target="cHj-5R-xNm" id="Nsu-qm-LUa"/>
+                                        </connections>
                                     </button>
                                     <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="fur-pu-Uhk">
                                         <rect key="frame" x="33" y="254" width="36" height="17"/>
@@ -2592,6 +2595,9 @@ Brake
                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                             <font key="font" metaFont="system"/>
                                         </buttonCell>
+                                        <connections>
+                                            <action selector="applyServoCommand:" target="cHj-5R-xNm" id="Rzk-7y-PT4"/>
+                                        </connections>
                                     </button>
                                     <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="AMM-Oa-PLc">
                                         <rect key="frame" x="81" y="113" width="22" height="18"/>
@@ -2600,6 +2606,9 @@ Brake
                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                             <font key="font" metaFont="system"/>
                                         </buttonCell>
+                                        <connections>
+                                            <action selector="applyServoCommand:" target="cHj-5R-xNm" id="KDf-8d-F2j"/>
+                                        </connections>
                                     </button>
                                     <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="U7c-Rp-x91">
                                         <rect key="frame" x="10" y="8" width="119" height="18"/>

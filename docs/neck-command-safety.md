@@ -41,8 +41,11 @@ physical build.
 | Full-pan band | 5000–6495 | fixed inclusive Maestro 24 lower-tilt band that permits complete pan |
 | Above-6495 pan | −15° to +2.1° | asymmetric forward pan limits for a known lower-tilt target above the clearance band |
 | Unknown/off pan | −15° to +2.1° | fail-safe asymmetric pan limits when lower tilt has no known active command |
-| Lower upright | 6011 | fixed lower-neck camera-leveling reference and startup slider target |
+| Lower clearance/up | 6011 | fixed lower-neck camera-leveling reference and temporary OFF/unknown startup lift |
 | Upper upright | 6073 | fixed neutral upper-neck camera target and Vision tracking center |
+| Default forward pan | 5799 | original torso-control forward resting target |
+| Default lower rest | 7014 | original safe resting target toward the rear of the robot |
+| Default upper rest | 7330 | original safe upper-neck resting target |
 | Pan center | 6000 | raw target treated as 0° |
 | Pan targets per degree | 33.3333 | raw-target-to-degree scale |
 | Camera counter gain | -1.0 | upper-target correction per lower-target unit |
@@ -54,9 +57,9 @@ smaller distance from pan center to either pan bound, divided by targets per
 degree; the shipped suggestions therefore describe ±60°.
 
 Before selecting **Apply**, physically confirm the pan center and scale, the
-inclusive `5000`–`6495` lower-tilt clearance band, upright targets
-`6011`/`6073`, both hard
-ranges, and the counter-gain sign.
+inclusive `5000`–`6495` lower-tilt clearance band, clearance/neutral targets
+`6011`/`6073`, resting defaults `5799`/`7014`/`7330`, both hard ranges, and
+the counter-gain sign.
 Command all three neck channels off and confirm the readouts show
 `P OFF`, `L OFF`, and `U OFF`; Cerebro rejects live calibration changes while
 any target is nonzero or any readout is `UNKNOWN`. A reconnect changes all
@@ -68,7 +71,8 @@ Existing V1 and V2 settings retain their common calibration values on upgrade.
 Their old 5300–6822 band and the old serialized `6823` forward anchor remain
 only for V3 settings compatibility; neither defines the active pan envelope or
 the upright reference. The fixed Maestro 24 full-pan band is `5000`–`6495`,
-and the fixed lower/upper upright targets are `6011`/`6073`. Migration
+and the fixed lower/upper clearance/neutral targets are `6011`/`6073`. The
+Head sliders retain the original resting defaults `5799`/`7014`/`7330`. Migration
 still clips −15.0°…+2.1° inward to the saved pan range and defaults **Keep
 camera upright** to on. Every V1/V2 migration is marked unconfirmed, so the
 operator must verify all fields and Apply again with all three channels known
@@ -86,6 +90,37 @@ settle interval completes, pan uses the corresponding lower-target envelope
 even while the separate camera/counter-rotation calibration remains
 unconfirmed. The status identifies this mode. It does not energize an
 unverified compensation direction autonomously.
+
+## OFF/unknown safe startup
+
+Reconnecting never moves the neck automatically. When one or more neck axes
+are `OFF` or `UNKNOWN`, a deliberate enabled-slider or enable-checkbox action
+turns all three Head enable checkboxes on as one recovery group and starts this
+fixed sequence:
+
+1. Pan is commanded `OFF`. Lower and upper are sent together to lower-up
+   `6011` and upper default `7330`.
+2. Cerebro waits for the slower of the worst-case lower/upper Maestro ramps
+   plus the settling margin. It then commands pan forward to `5799` while
+   holding lower at `6011`.
+3. Only after the worst-case pan ramp and staging margin expire does Cerebro
+   send lower rest `7014` and upper default `7330` together. It waits for that
+   lower ramp before releasing normal torso control.
+
+The Head sliders are restored to `5799`/`7014`/`7330` when the sequence starts,
+and the three enable checkboxes are wired as explicit operator actions. Camera
+counter-rotation is suspended only for these exact startup poses, then rebased
+at `7014` so the next normal render does not jump the upper servo. Switching
+any neck checkbox off cancels the pending sequence and routes the OFF demand
+through normal shutdown staging. At an entirely unknown/OFF pose, that OFF
+action clears all three checkboxes together so the other checked axes cannot
+be energized incidentally.
+
+Pan and lower are deliberately not started simultaneously in the final leg.
+With no shaft feedback, lower could leave the `5000`–`6495` clearance band
+before pan reached forward center; waiting for the conservative pan deadline
+prevents that race. Every arrival in this sequence is inferred from the
+configured motion profile and worst-case command distance, not measured.
 
 ## Hardware servo motion profile
 
@@ -204,10 +239,12 @@ on.
 
 After lower tilt has been OFF or its command state is unknown, Cerebro cannot
 infer its physical starting angle. Automatic and gesture lower moves stay
-blocked. The first re-enable must be a directly supervised torso-slider
-recovery; it establishes a command-space reference, and counter-rotation
-applies to subsequent lower moves. Watch and support the camera during that
-recovery because there is no sensor data from which to level the first move.
+blocked. With all Head axes enabled, the first deliberate torso slider or
+enable-checkbox action runs the fixed startup sequence above; an isolated
+manual lower-axis calibration jog remains separately supervised. Either path
+establishes only a command-space reference, and counter-rotation applies to
+subsequent normal lower moves. Watch and support the camera during recovery
+because there is no sensor data from which to level the first move.
 
 ## Startup, manual, gesture, and Vision authority
 

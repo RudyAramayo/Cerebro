@@ -1035,14 +1035,74 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 
 - (IBAction) applyServoCommand:(NSControl *)slider
 {
+    ROBSerialBox *serialBox = self.robMainViewController.serialBox;
     BOOL neckOperatorAction = slider == self.headPan
         || slider == self.headTilt
         || slider == self.headUpperNeckTilt
         || slider == (id)self.headPan_enabled
         || slider == (id)self.headTilt_enabled
         || slider == (id)self.headUpperNeckTilt_enabled;
+    BOOL allNeckAxesEnabled = self.headPan_enabled.state == NSControlStateValueOn
+        && self.headTilt_enabled.state == NSControlStateValueOn
+        && self.headUpperNeckTilt_enabled.state == NSControlStateValueOn;
+    BOOL neckNeedsSafeStartup = serialBox != nil
+        && (!serialBox.neckCommandStateKnown
+            || serialBox.commandedNeckPanTarget == ROBNeckSafetyTargetOff
+            || serialBox.commandedLowerNeckTiltTarget == ROBNeckSafetyTargetOff
+            || serialBox.commandedUpperNeckTiltTarget == ROBNeckSafetyTargetOff);
+    BOOL neckActivationAction = (slider == self.headPan
+            && self.headPan_enabled.state == NSControlStateValueOn)
+        || (slider == self.headTilt
+            && self.headTilt_enabled.state == NSControlStateValueOn)
+        || (slider == self.headUpperNeckTilt
+            && self.headUpperNeckTilt_enabled.state == NSControlStateValueOn)
+        || (slider == (id)self.headPan_enabled
+            && self.headPan_enabled.state == NSControlStateValueOn)
+        || (slider == (id)self.headTilt_enabled
+            && self.headTilt_enabled.state == NSControlStateValueOn)
+        || (slider == (id)self.headUpperNeckTilt_enabled
+            && self.headUpperNeckTilt_enabled.state == NSControlStateValueOn);
+    BOOL neckDeactivationAction = (slider == (id)self.headPan_enabled
+            && self.headPan_enabled.state == NSControlStateValueOff)
+        || (slider == (id)self.headTilt_enabled
+            && self.headTilt_enabled.state == NSControlStateValueOff)
+        || (slider == (id)self.headUpperNeckTilt_enabled
+            && self.headUpperNeckTilt_enabled.state == NSControlStateValueOff);
+    if (neckNeedsSafeStartup && neckActivationAction) {
+        // Recover the neck as one coupled unit; never energize only the first
+        // checkbox an operator happens to switch back on.
+        self.headPan_enabled.state = NSControlStateValueOn;
+        self.headTilt_enabled.state = NSControlStateValueOn;
+        self.headUpperNeckTilt_enabled.state = NSControlStateValueOn;
+        allNeckAxesEnabled = YES;
+    } else if (neckNeedsSafeStartup && neckDeactivationAction) {
+        // From an unknown pose, an OFF action must also remain atomic: do not
+        // energize either of the two still-checked axes as a side effect.
+        self.headPan_enabled.state = NSControlStateValueOff;
+        self.headTilt_enabled.state = NSControlStateValueOff;
+        self.headUpperNeckTilt_enabled.state = NSControlStateValueOff;
+        allNeckAxesEnabled = NO;
+    }
+    if (neckOperatorAction
+        && allNeckAxesEnabled
+        && (neckNeedsSafeStartup || serialBox.isSafeNeckStartupInProgress)) {
+        // Restore the original operator-calibrated resting defaults. The
+        // serial gateway first uses 6011 only as a temporary clearance lift.
+        self.headPan.integerValue = ROBNeckSafetyDefaultForwardPanTarget;
+        self.headTilt.integerValue = ROBNeckSafetyDefaultLowerTarget;
+        self.headUpperNeckTilt.integerValue = ROBNeckSafetyDefaultUpperTarget;
+        ROBNeckCommandDisposition disposition = [serialBox startSafeNeckStartup];
+        if (disposition == ROBNeckCommandDispositionRejected) NSBeep();
+        [self refreshNeckCommandReadouts];
+        return;
+    }
+    if (neckOperatorAction
+        && serialBox.isSafeNeckStartupInProgress
+        && !allNeckAxesEnabled) {
+        [serialBox cancelSafeNeckStartup];
+    }
     ROBNeckSafetyConfig neckSafetyConfiguration =
-        [self.robMainViewController.serialBox neckSafetyConfiguration];
+        [serialBox neckSafetyConfiguration];
     // A deliberate pan gesture may re-establish the exact enabled lower
     // slider demand only inside the fixed full-clearance band. The gateway
     // still recenters, stages the coupled upper axis, writes lower, and waits
