@@ -120,6 +120,14 @@ def main() -> None:
         and "[self.serialBox initialize_connection];" in view_did_load,
         "The main controller no longer starts the headless ROBSerialBox",
     )
+    require(
+        "ROBMaestroDidConnectNotification" in serial_header
+        and "ROBMaestroDidConnectNotification" in serial_source
+        and "@selector(maestroDidConnect:)" in view_did_load
+        and view_did_load.index("@selector(maestroDidConnect:)")
+            < view_did_load.index("self.serialBox = [ROBSerialBox new];"),
+        "The Maestro-ready observer must exist before automatic discovery starts",
+    )
     for forbidden in (
         "ROBBaseSerialConsoleWindowController",
         "openBaseSerialConsole:",
@@ -299,6 +307,26 @@ def main() -> None:
         < reconnect_compact.find('NSLog(@"Maestro connected')
         and "markMaestroDisconnectedForErrno:EIO" in maestro_reconnect,
         "A Maestro connection may accept target writes before its motion profile is applied",
+    )
+    maestro_ready_handler = braced_declaration(
+        main_source,
+        "- (void)maestroDidConnect:",
+        main_source.index("@implementation ROBMainViewController"),
+    )
+    require(
+        "postNotificationName:ROBMaestroDidConnectNotification"
+            in maestro_reconnect
+        and reconnect_compact.find("sendMaestroServoMotionSettingsEnabled:")
+            < reconnect_compact.find(
+                "postNotificationName:ROBMaestroDidConnectNotification"
+            )
+        and "connectedSerialBox != self.serialBox" in maestro_ready_handler
+        and "ROBNeckSafetyDefaultForwardPanTarget" in maestro_ready_handler
+        and "ROBNeckSafetyDefaultLowerTarget" in maestro_ready_handler
+        and "ROBNeckSafetyDefaultUpperTarget" in maestro_ready_handler
+        and "[connectedSerialBox startSafeNeckStartup]"
+            in maestro_ready_handler,
+        "A confirmed Maestro connection no longer launches the reviewed neck startup sequence",
     )
     apply_motion = braced_declaration(
         settings_source, "- (void)applyMaestroServoSmoothing:"

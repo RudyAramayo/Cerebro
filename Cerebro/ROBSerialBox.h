@@ -21,6 +21,10 @@
 @class ROBBaseControllerModel;
 
 FOUNDATION_EXPORT NSNotificationName const ROBSerialHardwareDidChangeNotification;
+/// Posted on the main thread after a newly connected Maestro has accepted its
+/// motion profile and is ready for the conservative neck startup sequence.
+/// The notification object is the connected ROBSerialBox instance.
+FOUNDATION_EXPORT NSNotificationName const ROBMaestroDidConnectNotification;
 FOUNDATION_EXPORT NSInteger const ROBMaestroDefaultServoSpeedLimit;
 FOUNDATION_EXPORT NSInteger const ROBMaestroDefaultServoAccelerationLimit;
 

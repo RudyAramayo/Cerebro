@@ -397,6 +397,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 @property (readwrite, retain) IBOutlet NSButton *resetConversationButton;
 @property (readwrite, retain) ROBWorkspaceHeaderButton *workspaceSettingsButton;
 - (void)applicationWillTerminate:(NSNotification *)notification;
+- (void)maestroDidConnect:(NSNotification *)notification;
 - (void)shutdownCerebroRuntime;
 - (BOOL)sendRobotActionMessage:(ROBRobotActionMessage *)message;
 - (void)handleRobotActionMessage:(ROBRobotActionMessage *)message;
@@ -2601,6 +2602,12 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                                              selector:@selector(headlessLiveStartupStopRequested:)
                                                  name:ROBHeadlessLiveStartupStopRequestedNotification
                                                object:[ROBHeadlessLiveStartupAuthorization shared]];
+    // Register before ROBSerialBox begins discovery so the first successful
+    // connection and every later reconnect can establish the approved pose.
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(maestroDidConnect:)
+                                                 name:ROBMaestroDidConnectNotification
+                                               object:nil];
     //-----------------------------
     //---- Setup User Defaults ----
     if (![[NSUserDefaults standardUserDefaults] valueForKey:@"inputLanguage"])
@@ -2772,6 +2779,35 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void)applicationWillTerminate:(NSNotification *)notification
 {
     [self shutdownCerebroRuntime];
+}
+
+- (void)maestroDidConnect:(NSNotification *)notification
+{
+    ROBSerialBox *connectedSerialBox = notification.object;
+    if (self.runtimeIsShuttingDown
+        || connectedSerialBox == nil
+        || connectedSerialBox != self.serialBox) {
+        return;
+    }
+
+    // Keep the visible controls aligned with the fixed, reviewed startup pose.
+    // Setting values programmatically does not emit slider actions.
+    ROBTorsoControlsViewController *controls = self.torsoControlsViewController;
+    if (controls != nil) {
+        controls.headPan_enabled.state = NSControlStateValueOn;
+        controls.headTilt_enabled.state = NSControlStateValueOn;
+        controls.headUpperNeckTilt_enabled.state = NSControlStateValueOn;
+        controls.headPan.integerValue = ROBNeckSafetyDefaultForwardPanTarget;
+        controls.headTilt.integerValue = ROBNeckSafetyDefaultLowerTarget;
+        controls.headUpperNeckTilt.integerValue = ROBNeckSafetyDefaultUpperTarget;
+    }
+
+    ROBNeckCommandDisposition disposition =
+        [connectedSerialBox startSafeNeckStartup];
+    if (disposition == ROBNeckCommandDispositionRejected) {
+        NSLog(@"Maestro connected, but the safe neck startup request was rejected: %@",
+              connectedSerialBox.neckCommandSafetyStatus);
+    }
 }
 
 - (void)shutdownCerebroRuntime

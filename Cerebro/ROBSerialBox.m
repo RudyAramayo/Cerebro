@@ -209,6 +209,8 @@ static BOOL ROBNeckClampPanResultToBounds(
 
 NSNotificationName const ROBSerialHardwareDidChangeNotification =
     @"ROBSerialHardwareDidChangeNotification";
+NSNotificationName const ROBMaestroDidConnectNotification =
+    @"ROBMaestroDidConnectNotification";
 
 #define kRHAPI_SERIAL_PORT_BASE     @"/dev/cu.usbmodem21201"
 
@@ -1099,8 +1101,19 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
 
     if (self.maestroConnectionValid) {
         NSLog(@"Maestro connected on %@", path);
+        NSString *connectedPath = [path copy];
         dispatch_async(dispatch_get_main_queue(), ^{
-            [self refreshSerialList_maestro:path];
+            BOOL connectionIsStillCurrent = NO;
+            @synchronized (self) {
+                connectionIsStillCurrent = self.maestroConnectionValid
+                    && [self.maestroDevicePath isEqualToString:connectedPath];
+            }
+            if (!connectionIsStillCurrent) return;
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:ROBMaestroDidConnectNotification
+                              object:self
+                            userInfo:@{@"devicePath": connectedPath}];
+            [self refreshSerialList_maestro:connectedPath];
         });
         return;
     }
