@@ -1475,12 +1475,10 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         return ROBNeckCommandDispositionRejected;
     }
 
-    // The asymmetric -15...+2.1 window belongs only to a genuinely off or
-    // unknown lower axis. Once this Maestro session has successfully written
-    // a known active lower target in the full-clearance region, do not retain
-    // a stale unknown/off intersection while servicing another command that
-    // remains in that region. The lower transition gate still protects moves
-    // whose established or requested target lacks full-pan clearance.
+    // Once this Maestro session has successfully written a known active lower
+    // target in the full-clearance band, do not retain a stale unknown/off
+    // intersection while servicing another command that remains in that band.
+    // The lower transition gate still protects moves outside the band.
     BOOL establishedLowerHasFullPanClearance = calibrationConfirmed
         && knownLowerIsActive
         && ROBNeckSafetyLowerTargetHasFullPanClearance(
@@ -2739,8 +2737,10 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     }
 
     ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
-    if (self.commandedLowerNeckTiltTarget
-        >= ROBNeckSafetyFullPanLowerThresholdTarget) {
+    if (ROBNeckSafetyLowerTargetHasFullPanClearance(
+            &configuration,
+            (int)self.commandedLowerNeckTiltTarget
+        )) {
         return YES;
     }
 
@@ -2762,8 +2762,10 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     if (disposition == ROBNeckCommandDispositionRejected) {
         return NO;
     }
-    return self.commandedLowerNeckTiltTarget
-        >= ROBNeckSafetyFullPanLowerThresholdTarget;
+    return ROBNeckSafetyLowerTargetHasFullPanClearance(
+        &configuration,
+        (int)self.commandedLowerNeckTiltTarget
+    );
 }
 
 - (ROBNeckCommandDisposition)requestNeckGesturePanDegrees:(double)panDegrees

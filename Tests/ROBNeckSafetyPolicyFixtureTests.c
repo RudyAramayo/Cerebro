@@ -73,6 +73,7 @@ static void testConfigurationValidation(void) {
     EXPECT_FALSE(ROBNeckSafetyConfigIsValid(NULL));
     EXPECT_NEAR(ROBNeckSafetyFullPanDegrees(&config), 60.0, 0.000001);
     EXPECT_INT(ROBNeckSafetyFullPanLowerThresholdTarget, 5000);
+    EXPECT_INT(ROBNeckSafetyFullPanLowerMaximumTarget, 6495);
     EXPECT_INT(ROBNeckSafetyUprightLowerTarget, 6011);
     EXPECT_INT(ROBNeckSafetyUprightUpperTarget, 6073);
     EXPECT_INT(config.lowerFullPanLowTarget, 5300);
@@ -96,6 +97,14 @@ static void testConfigurationValidation(void) {
     EXPECT_TRUE(ROBNeckSafetyLowerTargetHasFullPanClearance(
         &config,
         ROBNeckSafetyUprightLowerTarget
+    ));
+    EXPECT_TRUE(ROBNeckSafetyLowerTargetHasFullPanClearance(
+        &config,
+        ROBNeckSafetyFullPanLowerMaximumTarget
+    ));
+    EXPECT_FALSE(ROBNeckSafetyLowerTargetHasFullPanClearance(
+        &config,
+        ROBNeckSafetyFullPanLowerMaximumTarget + 1
     ));
     EXPECT_FALSE(ROBNeckSafetyLowerTargetHasFullPanClearance(NULL, 6200));
     EXPECT_TRUE(config.cameraLevelingEnabled);
@@ -129,6 +138,11 @@ static void testConfigurationValidation(void) {
     invalid.lowerMaximumTarget = ROBNeckSafetyUprightLowerTarget - 1;
     invalid.lowerFullPanLowTarget = 5300;
     invalid.lowerFullPanHighTarget = 5900;
+    EXPECT_FALSE(ROBNeckSafetyConfigIsValid(&invalid));
+
+    invalid = config;
+    invalid.lowerMaximumTarget = ROBNeckSafetyFullPanLowerMaximumTarget - 1;
+    invalid.lowerFullPanHighTarget = invalid.lowerMaximumTarget - 1;
     EXPECT_FALSE(ROBNeckSafetyConfigIsValid(&invalid));
 
     invalid = config;
@@ -247,10 +261,10 @@ static void testLowerClearancePanEnvelope(void) {
     EXPECT_NEAR(bounds.minimumDegrees, -full, 0.000001);
     EXPECT_NEAR(bounds.maximumDegrees, full, 0.000001);
 
-    // Every integer lower-neck command across the operator-confirmed range,
-    // including the upright target, must retain the complete pan envelope.
+    // Every integer lower-neck command across the inclusive,
+    // operator-confirmed clearance band must retain the complete pan envelope.
     for (int32_t lowerTarget = ROBNeckSafetyFullPanLowerThresholdTarget;
-         lowerTarget <= 6823;
+         lowerTarget <= ROBNeckSafetyFullPanLowerMaximumTarget;
          lowerTarget++) {
         bounds = testedPanBounds(&config, lowerTarget);
         EXPECT_NEAR(bounds.minimumDegrees, -full, 0.000001);
@@ -265,31 +279,37 @@ static void testLowerClearancePanEnvelope(void) {
     EXPECT_NEAR(bounds.minimumDegrees, -full, 0.000001);
     EXPECT_NEAR(bounds.maximumDegrees, full, 0.000001);
 
+    bounds = testedPanBounds(
+        &config,
+        ROBNeckSafetyFullPanLowerMaximumTarget
+    );
+    EXPECT_NEAR(bounds.minimumDegrees, -full, 0.000001);
+    EXPECT_NEAR(bounds.maximumDegrees, full, 0.000001);
+
+    // The exact next target and all higher known targets use the asymmetric
+    // forward envelope. Legacy serialized anchors do not change this boundary.
+    bounds = testedPanBounds(
+        &config,
+        ROBNeckSafetyFullPanLowerMaximumTarget + 1
+    );
+    EXPECT_NEAR(bounds.minimumDegrees, -15.0, 0.000001);
+    EXPECT_NEAR(bounds.maximumDegrees, 2.1, 0.000001);
+
     bounds = testedPanBounds(&config, config.lowerFullPanHighTarget);
-    EXPECT_NEAR(bounds.minimumDegrees, -full, 0.000001);
-    EXPECT_NEAR(bounds.maximumDegrees, full, 0.000001);
-
-    bounds = testedPanBounds(&config, config.lowerFullPanHighTarget + 1);
-    EXPECT_NEAR(bounds.minimumDegrees, -full, 0.000001);
-    EXPECT_NEAR(bounds.maximumDegrees, full, 0.000001);
-
-    bounds = testedPanBounds(&config, config.lowerForwardRestrictedTarget - 1);
-    EXPECT_NEAR(bounds.minimumDegrees, -full, 0.000001);
-    EXPECT_NEAR(bounds.maximumDegrees, full, 0.000001);
+    EXPECT_NEAR(bounds.minimumDegrees, -15.0, 0.000001);
+    EXPECT_NEAR(bounds.maximumDegrees, 2.1, 0.000001);
 
     bounds = testedPanBounds(&config, config.lowerForwardRestrictedTarget);
-    EXPECT_NEAR(bounds.minimumDegrees, -full, 0.000001);
-    EXPECT_NEAR(bounds.maximumDegrees, full, 0.000001);
+    EXPECT_NEAR(bounds.minimumDegrees, -15.0, 0.000001);
+    EXPECT_NEAR(bounds.maximumDegrees, 2.1, 0.000001);
 
-    // Upright/high lower-neck targets remain fully available; the old V3
-    // 6823 anchor is serialized only for settings compatibility.
     bounds = testedPanBounds(&config, 7277);
-    EXPECT_NEAR(bounds.minimumDegrees, -full, 0.000001);
-    EXPECT_NEAR(bounds.maximumDegrees, full, 0.000001);
+    EXPECT_NEAR(bounds.minimumDegrees, -15.0, 0.000001);
+    EXPECT_NEAR(bounds.maximumDegrees, 2.1, 0.000001);
 
     bounds = testedPanBounds(&config, config.lowerMaximumTarget);
-    EXPECT_NEAR(bounds.minimumDegrees, -full, 0.000001);
-    EXPECT_NEAR(bounds.maximumDegrees, full, 0.000001);
+    EXPECT_NEAR(bounds.minimumDegrees, -15.0, 0.000001);
+    EXPECT_NEAR(bounds.maximumDegrees, 2.1, 0.000001);
 
     bounds = testedPanBounds(&config, ROBNeckSafetyTargetOff);
     EXPECT_NEAR(bounds.minimumDegrees, -15.0, 0.000001);
@@ -300,8 +320,8 @@ static void testLowerClearancePanEnvelope(void) {
     EXPECT_NEAR(bounds.maximumDegrees, 30.0, 0.000001);
 
     bounds = testedPanBounds(&config, 12000);
-    EXPECT_NEAR(bounds.minimumDegrees, -full, 0.000001);
-    EXPECT_NEAR(bounds.maximumDegrees, full, 0.000001);
+    EXPECT_NEAR(bounds.minimumDegrees, -15.0, 0.000001);
+    EXPECT_NEAR(bounds.maximumDegrees, 2.1, 0.000001);
 }
 
 static void testPanDegreeConversion(void) {
@@ -365,8 +385,8 @@ static void testPanApplicationAndOffSentinel(void) {
         0,
         &result
     ));
-    EXPECT_INT(result.panTarget, 4000);
-    EXPECT_FALSE(result.panClamped);
+    EXPECT_INT(result.panTarget, 5500);
+    EXPECT_TRUE(result.panClamped);
 
     EXPECT_TRUE(ROBNeckSafetyApply(
         &config,
@@ -375,10 +395,10 @@ static void testPanApplicationAndOffSentinel(void) {
         0,
         &result
     ));
-    EXPECT_INT(result.panTarget, 8000);
-    EXPECT_FALSE(result.panClamped);
-    EXPECT_NEAR(result.allowedPanMinimumDegrees, -60.0, 0.000001);
-    EXPECT_NEAR(result.allowedPanMaximumDegrees, 60.0, 0.000001);
+    EXPECT_INT(result.panTarget, 6070);
+    EXPECT_TRUE(result.panClamped);
+    EXPECT_NEAR(result.allowedPanMinimumDegrees, -15.0, 0.000001);
+    EXPECT_NEAR(result.allowedPanMaximumDegrees, 2.1, 0.000001);
 
     ROBNeckSafetyConfig centerOnly = config;
     centerOnly.restrictedPanDegrees = 0.0;
@@ -391,9 +411,9 @@ static void testPanApplicationAndOffSentinel(void) {
         0,
         &result
     ));
-    EXPECT_INT(result.panTarget, centerOnly.panMaximumTarget);
-    EXPECT_NEAR(result.allowedPanMinimumDegrees, -60.0, 0.000001);
-    EXPECT_NEAR(result.allowedPanMaximumDegrees, 60.0, 0.000001);
+    EXPECT_INT(result.panTarget, centerOnly.panCenterTarget);
+    EXPECT_NEAR(result.allowedPanMinimumDegrees, 0.0, 0.000001);
+    EXPECT_NEAR(result.allowedPanMaximumDegrees, 0.0, 0.000001);
 
     EXPECT_TRUE(ROBNeckSafetyApply(
         &centerOnly,
@@ -411,8 +431,8 @@ static void testPanApplicationAndOffSentinel(void) {
         0,
         &result
     ));
-    EXPECT_INT(result.panTarget, 4000);
-    EXPECT_FALSE(result.panClamped);
+    EXPECT_INT(result.panTarget, 5500);
+    EXPECT_TRUE(result.panClamped);
 
     EXPECT_TRUE(ROBNeckSafetyApply(&config, 8000, 0, 0, &result));
     EXPECT_INT(result.panTarget, 6070);
@@ -432,8 +452,8 @@ static void testPanApplicationAndOffSentinel(void) {
     EXPECT_TRUE(ROBNeckSafetyApply(&config, 6000, 9999, 0, &result));
     EXPECT_INT(result.lowerTarget, config.lowerMaximumTarget);
     EXPECT_TRUE(result.lowerClamped);
-    EXPECT_NEAR(result.allowedPanMinimumDegrees, -60.0, 0.000001);
-    EXPECT_NEAR(result.allowedPanMaximumDegrees, 60.0, 0.000001);
+    EXPECT_NEAR(result.allowedPanMinimumDegrees, -15.0, 0.000001);
+    EXPECT_NEAR(result.allowedPanMaximumDegrees, 2.1, 0.000001);
 
     ROBNeckSafetyConfig invalid = config;
     invalid.panTargetsPerDegree = NAN;

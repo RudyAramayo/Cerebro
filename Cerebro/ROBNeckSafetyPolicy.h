@@ -19,9 +19,11 @@ extern "C" {
 
 enum {
     ROBNeckSafetyTargetOff = 0,
-    // Maestro 24 lower-neck targets below this point place the neck near the
-    // e-stop buttons. Known targets at or above it have full pan clearance.
+    // Operator-confirmed Maestro 24 lower-neck band where the mechanism has
+    // complete pan clearance. Values below the band remain symmetrically
+    // restricted; values above it use the forward/asymmetric envelope.
     ROBNeckSafetyFullPanLowerThresholdTarget = 5000,
+    ROBNeckSafetyFullPanLowerMaximumTarget = 6495,
     ROBNeckSafetyUprightLowerTarget = 6011,
     ROBNeckSafetyUprightUpperTarget = 6073,
     ROBNeckSafetyMaximumMaestroTarget = 16383
@@ -121,8 +123,8 @@ double ROBNeckSafetyFullPanDegrees(const ROBNeckSafetyConfig *config);
 double ROBNeckSafetyReferenceLowerTarget(const ROBNeckSafetyConfig *config);
 
 // Returns true when a known active lower-neck target is in the calibrated
-// collision-clear region and therefore permits the complete pan range. Target
-// 0 is off/unknown and never qualifies.
+// collision-clear band and therefore permits the complete pan range. Target 0
+// is off/unknown and never qualifies.
 bool ROBNeckSafetyLowerTargetHasFullPanClearance(
     const ROBNeckSafetyConfig *config,
     int32_t lowerTarget
@@ -143,10 +145,11 @@ double ROBNeckSafetyMaestroMotionDuration(
 // Computes the pan envelope for a lower-neck target. Target 0 means the lower
 // servo is off or its pose is unknown and therefore returns the tightest
 // configured range (the validated forward range). A known target below the
-// Maestro 24 e-stop clearance threshold uses the symmetric restricted range;
-// a known target at or above the threshold receives full pan. Inputs outside
-// the configured hard range are evaluated at the nearest hard bound. Returns
-// false and writes NaN bounds when config or output is invalid.
+// Maestro 24 e-stop clearance band uses the symmetric restricted range; a
+// known target inside the inclusive band receives full pan, and a known target
+// above it uses the asymmetric forward range. Inputs outside the configured
+// hard range are evaluated at the nearest hard bound. Returns false and writes
+// NaN bounds when config or output is invalid.
 bool ROBNeckSafetyAllowedPanBounds(
     const ROBNeckSafetyConfig *config,
     int32_t lowerTarget,

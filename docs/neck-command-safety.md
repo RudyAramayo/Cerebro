@@ -37,8 +37,9 @@ physical build.
 
 | Field | Shipped suggestion | Meaning |
 | --- | ---: | --- |
-| Below-5000 pan | ±30° | symmetric pan limit for a known lower-tilt target below the e-stop clearance boundary |
-| Full pan starts | 5000 | fixed Maestro 24 lower-tilt boundary; this target and every greater known target permit full pan |
+| Below-5000 pan | ±30° | symmetric pan limit for a known lower-tilt target below the e-stop clearance band |
+| Full-pan band | 5000–6495 | fixed inclusive Maestro 24 lower-tilt band that permits complete pan |
+| Above-6495 pan | −15° to +2.1° | asymmetric forward pan limits for a known lower-tilt target above the clearance band |
 | Unknown/off pan | −15° to +2.1° | fail-safe asymmetric pan limits when lower tilt has no known active command |
 | Lower upright | 6011 | fixed lower-neck camera-leveling reference and startup slider target |
 | Upper upright | 6073 | fixed neutral upper-neck camera target and Vision tracking center |
@@ -53,7 +54,8 @@ smaller distance from pan center to either pan bound, divided by targets per
 degree; the shipped suggestions therefore describe ±60°.
 
 Before selecting **Apply**, physically confirm the pan center and scale, the
-`5000` lower-tilt clearance boundary, upright targets `6011`/`6073`, both hard
+inclusive `5000`–`6495` lower-tilt clearance band, upright targets
+`6011`/`6073`, both hard
 ranges, and the counter-gain sign.
 Command all three neck channels off and confirm the readouts show
 `P OFF`, `L OFF`, and `U OFF`; Cerebro rejects live calibration changes while
@@ -64,9 +66,9 @@ configuration object; it does not submit any neck or arm motion.
 
 Existing V1 and V2 settings retain their common calibration values on upgrade.
 Their old 5300–6822 band and the old serialized `6823` forward anchor remain
-only for V3 settings compatibility; neither limits a known lower-neck pose nor
-defines the upright reference. The fixed Maestro 24 clearance boundary is
-`5000`, and the fixed lower/upper upright targets are `6011`/`6073`. Migration
+only for V3 settings compatibility; neither defines the active pan envelope or
+the upright reference. The fixed Maestro 24 full-pan band is `5000`–`6495`,
+and the fixed lower/upper upright targets are `6011`/`6073`. Migration
 still clips −15.0°…+2.1° inward to the saved pan range and defaults **Keep
 camera upright** to on. Every V1/V2 migration is marked unconfirmed, so the
 operator must verify all fields and Apply again with all three channels known
@@ -74,11 +76,12 @@ OFF.
 
 With no valid confirmed configuration, Cerebro loads the shipped suggestions,
 keeps pan inside the tightest configured window, forces the effective counter
-gain to zero, and holds automatic lower-neck motion. Only a direct lower-tilt slider or
-lower-enable action can authorize an explicitly supervised calibration jog;
-touching pan or upper-camera controls cannot qualify. The status identifies
-this mode. It does not energize an unverified compensation direction
-autonomously.
+gain to zero, and holds automatic lower-neck motion. A direct lower-tilt slider
+or lower-enable action can authorize an explicitly supervised calibration jog.
+An explicit pan-slider action may authorize the same exact-demand recovery only
+when lower tilt is enabled and its slider target is inside `5000`–`6495`; upper
+camera controls cannot qualify. The status identifies this mode. It does not
+energize an unverified compensation direction autonomously.
 
 ## Hardware servo motion profile
 
@@ -108,21 +111,22 @@ The pan window is selected from the commanded lower-tilt target:
   shipped values, that window is −15.0°…+2.1° (raw pan 5500…6070).
 - A known active lower target below `5000` uses the configured symmetric
   restriction. With the shipped values, that is ±30°.
-- A known active lower target at exactly `5000` or any greater value gets the
-  complete calibrated pan range. With the shipped values this is ±60°, so
-  every integer target from `5000` through `6823`—including upright `6011`—is
-  full-pan. Higher known targets such as `7277` are not restricted either.
+- A known active lower target from `5000` through `6495`, inclusive, gets the
+  complete calibrated pan range. With the shipped values this is ±60°, and it
+  includes upright `6011`.
+- A known active lower target above `6495` uses the asymmetric forward window,
+  −15.0°…+2.1° with the shipped values.
 - Once a full-clearance lower target is established in the current Maestro
   session, subsequent commands that remain in that region do not inherit the
   unknown/off −15.0°…+2.1° window from stale transition state.
-- There is no interpolation at the collision boundary: `4999` is restricted
-  and `5000` is full-pan. The gateway's settle interlock controls when a
-  widening becomes active.
+- There is no interpolation at either collision boundary: `4999` is symmetric,
+  `5000` and `6495` are full-pan, and `6496` is asymmetric. The gateway's
+  settle interlock controls when a widening becomes active.
 
 A request toward a more restrictive lower pose tightens the envelope
 immediately. If needed, Cerebro holds lower tilt while it brings pan inside the
 new envelope and establishes a usable upper-camera target. A request toward
-greater clearance from an off, unknown, or restricted lower state does not
+the full-clearance band from an off, unknown, or restricted lower state does not
 expand pan immediately: the commanded lower target must remain in place for
 its calculated Maestro ramp duration plus the current 0.75-second settling
 margin. Once a full-clearance target has already been established, commands
@@ -135,6 +139,10 @@ neck gate is active can only extend that gate; it never shortens it. A direct
 lower-axis recovery authorization is latched only for its
 exact pan/lower/upper demand long enough to complete this staging. These are
 command-timing guards, not proof that the mechanism settled.
+Moving the pan slider counts as that authorization when the lower servo is
+enabled and its requested slider target is within `5000`–`6495`. This sends and
+settles the exact lower target through the same gateway; it does not assume that
+the physical shaft already matches the slider.
 Every changed pan target starts the same monotonic settling age, including a
 pan-only command issued before a later lower request; a pan reversal restarts
 the lower-release gate. Repeated identical lower demands do not postpone the

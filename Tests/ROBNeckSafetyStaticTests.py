@@ -245,6 +245,14 @@ def check_lower_clearance_threshold(
         "The Maestro 24 full-pan lower-neck threshold is no longer exactly 5000",
     )
     require(
+        re.search(
+            r"ROBNeckSafetyFullPanLowerMaximumTarget\s*=\s*6495\b",
+            policy_header,
+        )
+        is not None,
+        "The Maestro 24 full-pan lower-neck maximum is no longer exactly 6495",
+    )
+    require(
         re.search(r"ROBNeckSafetyUprightLowerTarget\s*=\s*6011\b", policy_header)
             is not None
         and re.search(r"ROBNeckSafetyUprightUpperTarget\s*=\s*6073\b", policy_header)
@@ -261,21 +269,28 @@ def check_lower_clearance_threshold(
         "boundedLowerTarget = ROBNeckSafetyClampTarget(" in clearance
         and "boundedLowerTarget >= "
             "ROBNeckSafetyFullPanLowerThresholdTarget" in clearance
+        and "boundedLowerTarget <= "
+            "ROBNeckSafetyFullPanLowerMaximumTarget" in clearance
+        and "boundedLowerTarget < "
+            "ROBNeckSafetyFullPanLowerThresholdTarget" in bounds
         and "!ROBNeckSafetyLowerTargetHasFullPanClearance(" in bounds
         and "minimumDegrees = -config->restrictedPanDegrees;" in bounds
         and "maximumDegrees = config->restrictedPanDegrees;" in bounds
+        and "minimumDegrees = config->forwardPanMinimumDegrees;" in bounds
+        and "maximumDegrees = config->forwardPanMaximumDegrees;" in bounds
         and "minimumDegrees = -full;" in bounds
         and "maximumDegrees = full;" in bounds
         and "lowerForwardRestrictedTarget" not in bounds,
-        "Known lower-neck pan bounds no longer restrict only below 5000 and "
-        "allow the full calibrated range at and above 5000",
+        "Known lower-neck pan bounds no longer use symmetric restriction below "
+        "5000, full pan from 5000 through 6495, and the asymmetric envelope above",
     )
     follow = compact(objective_c_method(serial_source, "prepareNeckForPersonFollow"))
     require(
-        follow.count("ROBNeckSafetyFullPanLowerThresholdTarget") == 2
+        follow.count("ROBNeckSafetyLowerTargetHasFullPanClearance(") == 2
+        and "ROBNeckSafetyFullPanLowerThresholdTarget" not in follow
         and "lowerFullPanHighTarget" not in follow,
-        "Person-follow pose preparation still treats the old 6823 boundary "
-        "as a full-pan ceiling",
+        "Person-follow pose preparation no longer uses the complete fixed "
+        "5000-through-6495 clearance predicate",
     )
     require(
         "lastVisionNeckTiltTarget = ROBNeckSafetyUprightUpperTarget;"
@@ -444,11 +459,17 @@ def check_operator_authority(
     servo_action = objective_c_method(torso_source, "applyServoCommand:")
     require(
         "BOOL neckOperatorAction" in servo_action
+        and "BOOL panRequestsSafeLowerRecovery" in servo_action
         and "BOOL lowerTiltOperatorAction" in servo_action
         and "slider == self.headTilt" in servo_action
         and "slider == (id)self.headTilt_enabled" in servo_action
+        and "slider == self.headPan" in servo_action
+        and "self.headTilt_enabled.state == NSControlStateValueOn" in servo_action
+        and "ROBNeckSafetyLowerTargetHasFullPanClearance(" in servo_action
+        and "|| panRequestsSafeLowerRecovery;" in compact(servo_action)
         and "renderServoCommandsOperatorInitiated:neckOperatorAction" in servo_action,
-        "Servo actions no longer separate neck operator input from passive/arm updates",
+        "Servo actions no longer let an explicit pan action safely establish an "
+        "enabled lower target in the 5000-through-6495 clearance band",
     )
     for control in (
         "self.headPan",

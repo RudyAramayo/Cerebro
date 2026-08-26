@@ -1041,8 +1041,21 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
         || slider == (id)self.headPan_enabled
         || slider == (id)self.headTilt_enabled
         || slider == (id)self.headUpperNeckTilt_enabled;
+    ROBNeckSafetyConfig neckSafetyConfiguration =
+        [self.robMainViewController.serialBox neckSafetyConfiguration];
+    // A deliberate pan gesture may re-establish the exact enabled lower
+    // slider demand only inside the fixed full-clearance band. The gateway
+    // still recenters, stages the coupled upper axis, writes lower, and waits
+    // for command-space settling before it widens pan.
+    BOOL panRequestsSafeLowerRecovery = slider == self.headPan
+        && self.headTilt_enabled.state == NSControlStateValueOn
+        && ROBNeckSafetyLowerTargetHasFullPanClearance(
+            &neckSafetyConfiguration,
+            (int)lround(self.headTilt.doubleValue)
+        );
     BOOL lowerTiltOperatorAction = slider == self.headTilt
-        || slider == (id)self.headTilt_enabled;
+        || slider == (id)self.headTilt_enabled
+        || panRequestsSafeLowerRecovery;
     [self renderServoCommandsOperatorInitiated:neckOperatorAction
                     lowerTiltOperatorInitiated:lowerTiltOperatorAction];
 }
