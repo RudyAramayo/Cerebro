@@ -71,6 +71,17 @@ recognized. The original 24 enrollment samples are retained and later adaptive
 samples use a bounded rolling gallery, so refinement can continue over time
 without unbounded storage growth.
 
+Three strong AdaFace matches also seed a Vision pixel tracker on that face.
+While the tracker remains fresh and above 0.42 confidence, its 10 Hz bounding
+box keeps ROB's opt-in head tracking centered on the same recognized person and
+keeps the name in short-lived scene context between the slower embedding
+checks. Face detections are spatially associated with the tracked box so a
+small or briefly soft face does not immediately erase identity. A clear
+conflicting embedding, prolonged spatial ambiguity, tracker loss, model or
+enrollment changes, or 120 seconds without strong biometric revalidation drops
+the identity latch. This continuity is still untrusted personalization data
+and never authorizes motion or any other privileged action.
+
 If a face is close to a known profile but not yet confident, ROB asks the person
 to stand closer, face an even light, hold still, and look toward the camera
 instead of immediately treating them as new. A truly unfamiliar stable face

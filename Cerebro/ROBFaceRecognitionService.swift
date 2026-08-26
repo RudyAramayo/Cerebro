@@ -15,6 +15,7 @@ extension Notification.Name {
     static let robFaceIdentityStateDidChange = Notification.Name("ROBFaceIdentityStateDidChange")
     static let robFaceIdentityDidRecognize = Notification.Name("ROBFaceIdentityDidRecognize")
     static let robFaceIdentityConversationCue = Notification.Name("ROBFaceIdentityConversationCue")
+    static let robFaceIdentityTrackingDidUpdate = Notification.Name("ROBFaceIdentityTrackingDidUpdate")
 }
 
 public struct ROBFaceRecognitionResult: Sendable {
@@ -53,6 +54,21 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
     private static let adaptiveSampleInterval: TimeInterval = 60
     private static let adaptiveContinuityLifetime: TimeInterval = 120
     private static let guidanceRepeatInterval: TimeInterval = 12
+    private static let recognitionFrameInterval: TimeInterval = 0.4
+    private static let trackingFrameInterval: TimeInterval = 0.1
+    private static let trackingObservationFreshness: TimeInterval = 0.75
+    private static let trackingReacquisitionLifetime: TimeInterval = 1.5
+    private static let minimumTrackingConfidence: Float = 0.42
+
+    private struct PixelIdentityTrack {
+        let profileID: UUID
+        let displayName: String
+        let role: ROBFaceIdentityRole
+        var boundingBox: CGRect
+        var confidence: Float
+        var lastPixelUpdateUptime: TimeInterval
+        var lastBiometricConfirmationUptime: TimeInterval
+    }
 
     private enum AdaptiveSampleOutcome {
         case skipped
@@ -69,6 +85,8 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
     private let imageContext = CIContext(options: [.cacheIntermediates: false])
     private var analysisInFlight = false
     private var lastAdmission: TimeInterval = 0
+    private var lastRecognitionAdmission: TimeInterval = -.greatestFiniteMagnitude
+    private var trackingActiveForAdmission = false
 
     private var cachedProfiles: [ROBFaceIdentityProfile] = []
     private var activeEnrollmentID: UUID?
@@ -96,6 +114,10 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
     private var lastGuidanceKey: String?
     private var lastGuidanceCueUptime: TimeInterval = -.greatestFiniteMagnitude
     private var lastRecognitionGuidanceUptime: TimeInterval = -.greatestFiniteMagnitude
+    private var pixelIdentityTrack: PixelIdentityTrack?
+    private var pixelTrackingRequest: VNTrackObjectRequest?
+    private var pixelTrackingSequenceHandler = VNSequenceRequestHandler()
+    private var lastTrackedIdentityContextUpdateUptime: TimeInterval = -.greatestFiniteMagnitude
     private var encoders: [ROBFaceEmbeddingModelOption: ROBFaceCoreMLEncoder] = [:]
     private var selectedModelValue: ROBFaceEmbeddingModelOption
 
@@ -110,7 +132,7 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
             analysisQueue.async {
                 self.statusText = newValue ? "Looking for known, consenting people." : "Face identity is disabled."
                 if !newValue {
-                    ROBSceneSnapshotStore.shared.updateIdentifiedPeople([])
+                    self.clearPixelIdentityTrack()
                     self.clearFriendInvitation()
                     self.resetUnknownCandidate()
                     self.resetAdaptiveCandidate()
@@ -148,6 +170,7 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
                 self.selectedModelValue = model
                 UserDefaults.standard.set(model.rawValue, forKey: Self.modelDefaultsKey)
                 self.resetTemporalCandidate()
+                self.clearPixelIdentityTrack()
                 self.statusText = "Using \(model.displayName). Enrollments made with another model remain stored but inactive."
                 self.publishState()
                 DispatchQueue.main.async { completion(nil) }
@@ -458,6 +481,7 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
                 try self.gallery.deleteProfile(id: id)
                 self.cachedProfiles.removeAll { $0.id == id }
                 if self.lastRecognitionValue?.profileID == id { self.lastRecognitionValue = nil }
+                if self.pixelIdentityTrack?.profileID == id { self.clearPixelIdentityTrack() }
                 self.statusText = "The identity and all retained face samples were deleted."
                 self.publishState()
                 DispatchQueue.main.async { completion(nil) }
@@ -475,12 +499,17 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
         guard enabled || activeEnrollmentExists else { return }
         let now = ProcessInfo.processInfo.systemUptime
         admissionLock.lock()
-        guard !analysisInFlight, now - lastAdmission >= 0.4 else {
+        let frameInterval = trackingActiveForAdmission
+            ? Self.trackingFrameInterval
+            : Self.recognitionFrameInterval
+        guard !analysisInFlight, now - lastAdmission >= frameInterval else {
             admissionLock.unlock()
             return
         }
         analysisInFlight = true
         lastAdmission = now
+        let shouldAnalyzeIdentity = now - lastRecognitionAdmission >= Self.recognitionFrameInterval
+        if shouldAnalyzeIdentity { lastRecognitionAdmission = now }
         admissionLock.unlock()
 
         analysisQueue.async {
@@ -489,7 +518,14 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
                 self.analysisInFlight = false
                 self.admissionLock.unlock()
             }
-            autoreleasepool { self.analyze(sampleBuffer) }
+            autoreleasepool {
+                if self.pixelIdentityTrack != nil {
+                    self.updatePixelIdentityTrack(sampleBuffer, now: now)
+                }
+                if shouldAnalyzeIdentity {
+                    self.analyze(sampleBuffer)
+                }
+            }
         }
     }
 
@@ -509,6 +545,17 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
                 )
                 resetTemporalCandidate()
                 if activeEnrollmentID == nil {
+                    let now = ProcessInfo.processInfo.systemUptime
+                    expirePixelIdentityTrackIfNeeded(now: now)
+                    if let track = pixelIdentityTrack {
+                        statusText = String(
+                            format: "Reacquiring the pixel lock on %@ at %.0f%% confidence.",
+                            track.displayName,
+                            Double(track.confidence * 100)
+                        )
+                        publishState()
+                        return
+                    }
                     ROBSceneSnapshotStore.shared.updateIdentifiedPeople([])
                 }
                 return
@@ -686,6 +733,188 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
         publishState()
     }
 
+    /// Once AdaFace establishes identity, Vision's correlation tracker keeps a
+    /// low-latency lock on those pixels between the slower embedding checks.
+    /// The lock is personalization context only and expires unless biometrics
+    /// periodically re-establish it.
+    private func establishPixelIdentityTrack(
+        profile: ROBFaceIdentityProfile,
+        face: VNFaceObservation,
+        now: TimeInterval
+    ) {
+        let observation = VNDetectedObjectObservation(boundingBox: face.boundingBox)
+        let request = VNTrackObjectRequest(detectedObjectObservation: observation)
+        request.trackingLevel = .accurate
+        pixelTrackingSequenceHandler = VNSequenceRequestHandler()
+        pixelTrackingRequest = request
+        pixelIdentityTrack = PixelIdentityTrack(
+            profileID: profile.id,
+            displayName: profile.displayName,
+            role: profile.role,
+            boundingBox: face.boundingBox,
+            confidence: max(0.85, face.confidence),
+            lastPixelUpdateUptime: now,
+            lastBiometricConfirmationUptime: now
+        )
+        setTrackingAdmissionActive(true)
+        publishPixelIdentityTrack(now: now)
+    }
+
+    private func reanchorPixelIdentityTrack(
+        to face: VNFaceObservation,
+        now: TimeInterval,
+        appearanceConfidence: Float? = nil
+    ) {
+        guard var track = pixelIdentityTrack else { return }
+        let observation = VNDetectedObjectObservation(boundingBox: face.boundingBox)
+        let request = VNTrackObjectRequest(detectedObjectObservation: observation)
+        request.trackingLevel = .accurate
+        pixelTrackingSequenceHandler = VNSequenceRequestHandler()
+        pixelTrackingRequest = request
+        track.boundingBox = face.boundingBox
+        track.lastPixelUpdateUptime = now
+        if let appearanceConfidence {
+            track.confidence = min(1, max(
+                track.confidence * 0.94,
+                0.55 + 0.35 * appearanceConfidence
+            ))
+        } else {
+            track.confidence *= 0.97
+        }
+        pixelIdentityTrack = track
+        setTrackingAdmissionActive(true)
+        publishPixelIdentityTrack(now: now)
+    }
+
+    private func updatePixelIdentityTrack(_ sampleBuffer: CMSampleBuffer, now: TimeInterval) {
+        guard var track = pixelIdentityTrack else { return }
+        guard now - track.lastBiometricConfirmationUptime <= Self.adaptiveContinuityLifetime else {
+            clearPixelIdentityTrack()
+            return
+        }
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
+              let request = pixelTrackingRequest else {
+            expirePixelIdentityTrackIfNeeded(now: now)
+            return
+        }
+
+        var accepted: VNDetectedObjectObservation?
+        do {
+            try pixelTrackingSequenceHandler.perform([request], on: pixelBuffer)
+            if let observation = request.results?.first as? VNDetectedObjectObservation,
+               observation.confidence >= 0.30,
+               Self.area(observation.boundingBox) >= 0.000_5 {
+                accepted = observation
+            }
+        } catch {
+            accepted = nil
+        }
+
+        guard let observation = accepted else {
+            pixelTrackingRequest = nil
+            track.confidence *= 0.82
+            pixelIdentityTrack = track
+            expirePixelIdentityTrackIfNeeded(now: now)
+            return
+        }
+
+        let next = VNTrackObjectRequest(detectedObjectObservation: observation)
+        next.trackingLevel = .accurate
+        pixelTrackingRequest = next
+        track.boundingBox = observation.boundingBox
+        track.confidence = min(1, 0.72 * track.confidence + 0.28 * observation.confidence)
+        track.lastPixelUpdateUptime = now
+        pixelIdentityTrack = track
+        publishPixelIdentityTrack(now: now)
+    }
+
+    private func expirePixelIdentityTrackIfNeeded(now: TimeInterval) {
+        guard let track = pixelIdentityTrack else { return }
+        let pixelsAreStale = now - track.lastPixelUpdateUptime > Self.trackingReacquisitionLifetime
+        let biometricsAreStale = now - track.lastBiometricConfirmationUptime
+            > Self.adaptiveContinuityLifetime
+        if pixelsAreStale || biometricsAreStale || track.confidence < 0.25 {
+            clearPixelIdentityTrack()
+        }
+    }
+
+    private func publishPixelIdentityTrack(now: TimeInterval) {
+        guard let track = pixelIdentityTrack,
+              track.confidence >= Self.minimumTrackingConfidence,
+              now - track.lastPixelUpdateUptime <= Self.trackingObservationFreshness,
+              now - track.lastBiometricConfirmationUptime <= Self.adaptiveContinuityLifetime else {
+            return
+        }
+        if now - lastTrackedIdentityContextUpdateUptime >= 1 {
+            lastTrackedIdentityContextUpdateUptime = now
+            ROBSceneSnapshotStore.shared.updateIdentifiedPeople([track.displayName])
+        }
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: .robFaceIdentityTrackingDidUpdate,
+                object: self,
+                userInfo: [
+                    "active": true,
+                    "profileID": track.profileID,
+                    "displayName": track.displayName,
+                    "boundingBox": NSValue(rect: track.boundingBox),
+                    "confidence": track.confidence
+                ]
+            )
+        }
+    }
+
+    private func clearPixelIdentityTrack() {
+        let hadTrack = pixelIdentityTrack != nil
+        pixelIdentityTrack = nil
+        pixelTrackingRequest = nil
+        pixelTrackingSequenceHandler = VNSequenceRequestHandler()
+        lastTrackedIdentityContextUpdateUptime = -.greatestFiniteMagnitude
+        setTrackingAdmissionActive(false)
+        ROBSceneSnapshotStore.shared.updateIdentifiedPeople([])
+        guard hadTrack else { return }
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: .robFaceIdentityTrackingDidUpdate,
+                object: self,
+                userInfo: ["active": false]
+            )
+        }
+    }
+
+    private func setTrackingAdmissionActive(_ active: Bool) {
+        admissionLock.lock()
+        trackingActiveForAdmission = active
+        admissionLock.unlock()
+    }
+
+    private func spatiallyAssociatedFace(in faces: [VNFaceObservation]) -> VNFaceObservation? {
+        guard let track = pixelIdentityTrack else { return nil }
+        let previous = track.boundingBox
+        let previousArea = max(0.000_1, Self.area(previous))
+        let previousDiagonal = hypot(previous.width, previous.height)
+        let scored = faces.compactMap { face -> (VNFaceObservation, CGFloat)? in
+            let box = face.boundingBox
+            let intersection = previous.intersection(box)
+            let intersectionArea = intersection.isNull ? 0 : Self.area(intersection)
+            let unionArea = previousArea + max(0.000_1, Self.area(box)) - intersectionArea
+            let overlap = intersectionArea / max(0.000_1, unionArea)
+            let centerDistance = hypot(previous.midX - box.midX, previous.midY - box.midY)
+            let centerAllowance = max(0.08, previousDiagonal * 1.35)
+            guard overlap >= 0.04 || centerDistance <= centerAllowance else { return nil }
+            let centerScore = max(0, 1 - centerDistance / max(0.000_1, centerAllowance))
+            let sizeRatio = min(previousArea, Self.area(box)) / max(previousArea, Self.area(box))
+            return (face, 0.58 * overlap + 0.27 * centerScore + 0.15 * sizeRatio)
+        }.sorted { $0.1 > $1.1 }
+        guard let best = scored.first, best.1 >= 0.24 else { return nil }
+        if scored.count > 1,
+           best.1 - scored[1].1 < 0.10,
+           best.1 < 0.58 {
+            return nil
+        }
+        return best.0
+    }
+
     private func processRecognitionFaces(_ faces: [VNFaceObservation], source: CIImage) {
         let candidates = cachedProfiles.filter {
             $0.enrollmentIsComplete && $0.modelIdentifier == selectedModelValue.rawValue
@@ -695,7 +924,7 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
             publishState()
             return
         }
-        var best: (
+        typealias EvaluatedFace = (
             profile: ROBFaceIdentityProfile,
             distance: Float,
             second: Float,
@@ -703,7 +932,11 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
             crop: CGImage,
             face: VNFaceObservation,
             luminance: Float?
-        )?
+        )
+        let now = ProcessInfo.processInfo.systemUptime
+        let spatiallyTrackedFace = spatiallyAssociatedFace(in: faces)
+        var evaluations: [EvaluatedFace] = []
+        var best: EvaluatedFace?
         var firstProbe: [Float]?
         for face in faces where Self.area(face.boundingBox) >= 0.025 {
             guard (face.faceCaptureQuality ?? 0) >= 0.35,
@@ -720,18 +953,109 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
             }.sorted { $0.1 < $1.1 }
             guard let first = ranked.first else { continue }
             let secondDistance = ranked.dropFirst().first?.1 ?? .greatestFiniteMagnitude
-            if best == nil || first.1 < best!.distance {
-                best = (
-                    first.0,
-                    first.1,
-                    secondDistance,
-                    probe,
-                    crop,
-                    face,
-                    averageLuminance(of: crop)
-                )
+            let evaluation: EvaluatedFace = (
+                first.0,
+                first.1,
+                secondDistance,
+                probe,
+                crop,
+                face,
+                averageLuminance(of: crop)
+            )
+            evaluations.append(evaluation)
+            if best == nil || evaluation.distance < best!.distance {
+                best = evaluation
             }
         }
+
+        // Conservative starting points; calibrate against ROB's actual camera.
+        let threshold = configuredFloat("ROBFaceIdentity.maximumCosineDistance", fallback: 0.35, range: 0.01...1)
+        let margin = configuredFloat("ROBFaceIdentity.minimumCosineMargin", fallback: 0.06, range: 0...0.5)
+        let relaxedThreshold = configuredFloat(
+            "ROBFaceIdentity.maximumAdaptiveCosineDistance",
+            fallback: 0.46,
+            range: min(threshold, 0.8)...0.8
+        )
+        let possibleMatchThreshold = configuredFloat(
+            "ROBFaceIdentity.maximumPossibleMatchDistance",
+            fallback: 0.52,
+            range: relaxedThreshold...0.9
+        )
+
+        // Prefer continuity with the already recognized face. A unique spatial
+        // association can bridge small/blurred frames, while a clear conflicting
+        // embedding breaks the identity latch instead of silently switching it.
+        if let track = pixelIdentityTrack {
+            if let trackedFace = spatiallyTrackedFace {
+                let trackedEvaluation = evaluations.first { $0.face.uuid == trackedFace.uuid }
+                if let trackedEvaluation {
+                    let hasSeparation = trackedEvaluation.second - trackedEvaluation.distance
+                        >= max(0.03, margin / 2)
+                    let isStrongSameIdentity = trackedEvaluation.profile.id == track.profileID
+                        && trackedEvaluation.distance <= threshold
+                        && trackedEvaluation.second - trackedEvaluation.distance >= margin
+                    if isStrongSameIdentity {
+                        best = trackedEvaluation
+                    } else if trackedEvaluation.profile.id == track.profileID,
+                              hasSeparation,
+                              trackedEvaluation.distance <= possibleMatchThreshold {
+                        let appearanceConfidence = max(
+                            0,
+                            min(1, 1 - trackedEvaluation.distance / max(0.01, possibleMatchThreshold))
+                        )
+                        reanchorPixelIdentityTrack(
+                            to: trackedFace,
+                            now: now,
+                            appearanceConfidence: appearanceConfidence
+                        )
+                        resetUnknownCandidate()
+                        clearFriendInvitation()
+                        statusText = String(
+                            format: "Pixel tracking %@ at %.0f%% confidence; face identity will revalidate when the view is clearer.",
+                            track.displayName,
+                            Double((pixelIdentityTrack?.confidence ?? 0) * 100)
+                        )
+                        publishState()
+                        return
+                    } else if Self.area(trackedFace.boundingBox) < 0.035
+                                || (trackedFace.faceCaptureQuality ?? 0) < 0.45 {
+                        reanchorPixelIdentityTrack(to: trackedFace, now: now)
+                        statusText = String(
+                            format: "Pixel tracking %@ at %.0f%% confidence; the face is temporarily too small or soft for biometric revalidation.",
+                            track.displayName,
+                            Double((pixelIdentityTrack?.confidence ?? 0) * 100)
+                        )
+                        publishState()
+                        return
+                    } else {
+                        clearPixelIdentityTrack()
+                    }
+                } else {
+                    reanchorPixelIdentityTrack(to: trackedFace, now: now)
+                    statusText = String(
+                        format: "Pixel tracking %@ at %.0f%% confidence between face-recognition checks.",
+                        track.displayName,
+                        Double((pixelIdentityTrack?.confidence ?? 0) * 100)
+                    )
+                    publishState()
+                    return
+                }
+            } else if now - track.lastPixelUpdateUptime <= Self.trackingObservationFreshness,
+                      now - track.lastBiometricConfirmationUptime <= Self.adaptiveContinuityLifetime,
+                      track.confidence >= Self.minimumTrackingConfidence {
+                publishPixelIdentityTrack(now: now)
+                statusText = String(
+                    format: "Pixel tracking %@ at %.0f%% confidence between face-recognition checks.",
+                    track.displayName,
+                    Double(track.confidence * 100)
+                )
+                publishState()
+                return
+            } else {
+                expirePixelIdentityTrackIfNeeded(now: now)
+            }
+        }
+
         guard let best else {
             resetTemporalCandidate()
             resetAdaptiveCandidate()
@@ -749,23 +1073,9 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
             return
         }
 
-        // Conservative starting points; calibrate against ROB's actual camera.
-        let threshold = configuredFloat("ROBFaceIdentity.maximumCosineDistance", fallback: 0.35, range: 0.01...1)
-        let margin = configuredFloat("ROBFaceIdentity.minimumCosineMargin", fallback: 0.06, range: 0...0.5)
         guard best.distance <= threshold, best.second - best.distance >= margin else {
             resetTemporalCandidate()
             ROBSceneSnapshotStore.shared.updateIdentifiedPeople([])
-            let now = ProcessInfo.processInfo.systemUptime
-            let relaxedThreshold = configuredFloat(
-                "ROBFaceIdentity.maximumAdaptiveCosineDistance",
-                fallback: 0.46,
-                range: min(threshold, 0.8)...0.8
-            )
-            let possibleMatchThreshold = configuredFloat(
-                "ROBFaceIdentity.maximumPossibleMatchDistance",
-                fallback: 0.52,
-                range: relaxedThreshold...0.9
-            )
             let hasSeparation = best.second - best.distance >= max(0.03, margin / 2)
             let hasRecentContinuity = lastRecognitionValue.map {
                 $0.profileID == best.profile.id &&
@@ -822,7 +1132,11 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
         resetUnknownCandidate()
         clearFriendInvitation()
 
-        if pendingCandidateID == best.profile.id {
+        let alreadyTrackingSameIdentity = pixelIdentityTrack?.profileID == best.profile.id
+        if alreadyTrackingSameIdentity {
+            pendingCandidateID = best.profile.id
+            pendingCandidateFrames = 3
+        } else if pendingCandidateID == best.profile.id {
             pendingCandidateFrames += 1
         } else {
             pendingCandidateID = best.profile.id
@@ -830,7 +1144,7 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
         }
         guard pendingCandidateFrames >= 3 else { return }
         pendingCandidateFrames = 0
-        let now = ProcessInfo.processInfo.systemUptime
+        establishPixelIdentityTrack(profile: best.profile, face: best.face, now: now)
         let adaptiveOutcome = maybeAppendAdaptiveSample(
             profile: best.profile,
             embedding: best.embedding,
@@ -938,6 +1252,7 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
             modelIdentifier: selectedModelValue.rawValue
         )
         cachedProfiles.append(profile)
+        clearPixelIdentityTrack()
         activeEnrollmentID = profile.id
         activeEnrollmentAcceptedSamples = 0
         activeEnrollmentTargetSamples = Self.enrollmentTargetSamples
@@ -971,6 +1286,7 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
                 "Switch to the face model used by \(profile.displayName) before refinement."
             )
         }
+        clearPixelIdentityTrack()
         activeEnrollmentID = profile.id
         activeEnrollmentAcceptedSamples = 0
         activeEnrollmentTargetSamples = Self.refinementTargetSamples

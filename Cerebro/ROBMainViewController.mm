@@ -41,6 +41,7 @@ static NSString * const ROBShowControllerInputDiagnosticsNotification = @"ROBSho
 static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopmentModeDidChange";
 static NSString * const ROBGeminiVideoSourceSettingsDidChangeNotification = @"ROBGeminiVideoSourceSettingsDidChange";
 static NSString * const ROBFaceIdentityConversationCueNotification = @"ROBFaceIdentityConversationCue";
+static NSString * const ROBFaceIdentityTrackingDidUpdateNotification = @"ROBFaceIdentityTrackingDidUpdate";
 static NSString * const ROBStageShowStateDidChangeNotification = @"ROBStageShowStateDidChange";
 static NSString * const ROBHeadlessLiveStartupStopRequestedNotification = @"ROBHeadlessLiveStartupStopRequested";
 
@@ -423,6 +424,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void)headlessLiveStartupStopRequested:(NSNotification *)notification;
 - (void)updateGeminiCameraDemand;
 - (void)faceIdentityConversationCue:(NSNotification *)notification;
+- (void)faceIdentityTrackingDidUpdate:(NSNotification *)notification;
+- (void)trackFaceBoundingBox:(CGRect)boundingBox;
 - (void)geminiVideoSourceSettingsDidChange:(NSNotification *)notification;
 - (void)configureConversationTranscript;
 - (void)configureMainWorkspace;
@@ -1064,6 +1067,18 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             NSLog(@"Face identity conversation cue could not be submitted: %@", text);
         }
     }
+}
+
+- (void)faceIdentityTrackingDidUpdate:(NSNotification *)notification
+{
+    BOOL active = [notification.userInfo[@"active"] boolValue];
+    if (!active) { return; }
+    NSNumber *confidence = [notification.userInfo[@"confidence"] isKindOfClass:NSNumber.class]
+        ? notification.userInfo[@"confidence"] : nil;
+    NSValue *boxValue = [notification.userInfo[@"boundingBox"] isKindOfClass:NSValue.class]
+        ? notification.userInfo[@"boundingBox"] : nil;
+    if (confidence.floatValue < 0.42 || boxValue == nil) { return; }
+    [self trackFaceBoundingBox:boxValue.rectValue];
 }
 
 #pragma mark - ROBAIDelegate
@@ -2559,6 +2574,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                                                  name:ROBFaceIdentityConversationCueNotification
                                                object:[ROBFaceRecognitionService shared]];
     [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(faceIdentityTrackingDidUpdate:)
+                                                 name:ROBFaceIdentityTrackingDidUpdateNotification
+                                               object:[ROBFaceRecognitionService shared]];
+    [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(geminiVideoSourceSettingsDidChange:)
                                                  name:ROBGeminiVideoSourceSettingsDidChangeNotification
                                                object:nil];
@@ -3139,77 +3158,53 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void) didSeeNewPeople:(NSArray *)observations {
     dispatch_async(dispatch_get_main_queue(), ^{
         [self.autonomyCoordinator updatePersonVisible:observations.count > 0];
-        if (!self.isNeckLifted) {
-            float targetHeadTilt = 6168.94; //This is the upright neck
-            float targetHeadUpperNeckTilt = 6868.81;
-            if (self.liftNeckAnimationTimer == nil) {
-                self.liftNeckAnimationTimer = [NSTimer scheduledTimerWithTimeInterval:0.1 repeats:YES block:^(NSTimer * _Nonnull timer) {
-                    //exit condition
-                    if (self.currentPerson_tilt >= targetHeadTilt-1 && self.currentPerson_tilt <= targetHeadTilt+1 &&
-                        self.currentPerson_upperNeckTilt >= targetHeadUpperNeckTilt-1 && self.currentPerson_upperNeckTilt <= targetHeadUpperNeckTilt+1) {
-                        self.isNeckLifted = YES;
-                        [self.liftNeckAnimationTimer invalidate];
-                        self.liftNeckAnimationTimer = nil;
-                        return;
-                    }
-                    float currentHeadTilt = [self.torsoControlsViewController.headTilt floatValue];
-                    float currentHeadUpperNeckTilt = [self.torsoControlsViewController.headUpperNeckTilt floatValue];
-                    float deltaHeadTilt = targetHeadTilt - currentHeadTilt;
-                    float deltaHeadUpperNeckTilt = targetHeadUpperNeckTilt - currentHeadUpperNeckTilt;
-                    float deltaTilt_finalValue = 0.0;
-                    
-                    float neckSpeed = 50.0;
-                    if (deltaHeadTilt > neckSpeed) {
-                        deltaTilt_finalValue = neckSpeed;
-                    }
-                    if (deltaHeadTilt < -neckSpeed) {
-                        deltaTilt_finalValue = -neckSpeed;
-                    }
-                    if (deltaHeadTilt > -neckSpeed && deltaHeadTilt <= neckSpeed) {
-                        deltaTilt_finalValue = deltaHeadTilt;
-                    }
-                    
-                    float upperNeckSpeed = 50.0;
-                    float deltaUpperNeckTilt_finalValue = 0.0;
-                    if (deltaHeadUpperNeckTilt > upperNeckSpeed) {
-                        deltaUpperNeckTilt_finalValue = upperNeckSpeed;
-                    }
-                    if (deltaHeadUpperNeckTilt < -upperNeckSpeed) {
-                        deltaUpperNeckTilt_finalValue = -upperNeckSpeed;
-                    }
-                    if (deltaHeadUpperNeckTilt > -upperNeckSpeed && deltaHeadUpperNeckTilt <= upperNeckSpeed) {
-                        deltaUpperNeckTilt_finalValue = deltaHeadUpperNeckTilt;
-                    }
-                    
-                    self.currentPerson_tilt = [self.torsoControlsViewController.headTilt floatValue] + deltaTilt_finalValue;
-                    self.currentPerson_upperNeckTilt = [self.torsoControlsViewController.headUpperNeckTilt floatValue] + deltaUpperNeckTilt_finalValue;
-                    
-                    [[self.torsoControlsViewController headTilt] setFloatValue:self.currentPerson_tilt];
-                    [[self.torsoControlsViewController headUpperNeckTilt] setFloatValue:self.currentPerson_upperNeckTilt];
-                }];
-            }
-            return;
-        } else {
-            self.currentPerson_pan = [self.torsoControlsViewController.headPan floatValue];
-            self.currentPerson_tilt = [self.torsoControlsViewController.headTilt floatValue];
-            self.currentPerson_upperNeckTilt = [self.torsoControlsViewController.headUpperNeckTilt floatValue];
-            
-            id observation = observations.firstObject;
-            
-            for (id observation in observations) {
-                //detectFaceRequest = <VNFaceObservation: 0x81403ce00> 82B411FB-A8EF-45B1-8545-FB0FEC8F978B
-                // VNDetectFaceRectanglesRequestRevision3
-                // confidence=0.713637
-                // boundingBox=[0.847449, 0.470797, 0.175094, 0.311277]
-                
-                [observation boundingBox];
-                if ([observation confidence] > 0.6) {
-                    [self trackingPerson:@"1" position:[observation boundingBox]];
-                }
+        VNFaceObservation *best = nil;
+        for (VNFaceObservation *observation in observations) {
+            if (observation.confidence > 0.6 &&
+                (best == nil || observation.confidence > best.confidence)) {
+                best = observation;
             }
         }
+        if (best != nil) { [self trackFaceBoundingBox:best.boundingBox]; }
     });
+}
 
+- (void)trackFaceBoundingBox:(CGRect)boundingBox
+{
+    NSAssert(NSThread.isMainThread, @"Face tracking targets are main-thread owned");
+    if (!self.isNeckLifted) {
+        float targetHeadTilt = 6168.94; // Upright lower neck.
+        float targetHeadUpperNeckTilt = 6868.81;
+        if (self.liftNeckAnimationTimer == nil) {
+            self.liftNeckAnimationTimer = [NSTimer scheduledTimerWithTimeInterval:0.1 repeats:YES block:^(NSTimer * _Nonnull timer) {
+                if (self.currentPerson_tilt >= targetHeadTilt - 1 &&
+                    self.currentPerson_tilt <= targetHeadTilt + 1 &&
+                    self.currentPerson_upperNeckTilt >= targetHeadUpperNeckTilt - 1 &&
+                    self.currentPerson_upperNeckTilt <= targetHeadUpperNeckTilt + 1) {
+                    self.isNeckLifted = YES;
+                    [self.liftNeckAnimationTimer invalidate];
+                    self.liftNeckAnimationTimer = nil;
+                    return;
+                }
+                float currentHeadTilt = self.torsoControlsViewController.headTilt.floatValue;
+                float currentUpperTilt = self.torsoControlsViewController.headUpperNeckTilt.floatValue;
+                float deltaTilt = targetHeadTilt - currentHeadTilt;
+                float deltaUpperTilt = targetHeadUpperNeckTilt - currentUpperTilt;
+                float tiltStep = fmaxf(-50.0, fminf(50.0, deltaTilt));
+                float upperTiltStep = fmaxf(-50.0, fminf(50.0, deltaUpperTilt));
+                self.currentPerson_tilt = currentHeadTilt + tiltStep;
+                self.currentPerson_upperNeckTilt = currentUpperTilt + upperTiltStep;
+                self.torsoControlsViewController.headTilt.floatValue = self.currentPerson_tilt;
+                self.torsoControlsViewController.headUpperNeckTilt.floatValue = self.currentPerson_upperNeckTilt;
+            }];
+        }
+        return;
+    }
+
+    self.currentPerson_pan = self.torsoControlsViewController.headPan.floatValue;
+    self.currentPerson_tilt = self.torsoControlsViewController.headTilt.floatValue;
+    self.currentPerson_upperNeckTilt = self.torsoControlsViewController.headUpperNeckTilt.floatValue;
+    [self trackingPerson:@"recognized-face" position:boundingBox];
 }
 
 - (void)didCaptureCameraSampleBuffer:(CMSampleBufferRef)sampleBuffer

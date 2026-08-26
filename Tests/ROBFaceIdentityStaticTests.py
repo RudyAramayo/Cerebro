@@ -42,6 +42,11 @@ assert "AdaFace-R18-VGGFace2.mlmodelc" in encoder
 assert "MLModel(contentsOf:" in encoder
 assert "pendingCandidateFrames >= 3" in service
 assert "pendingAdaptiveCandidateFrames >= 3" in service
+assert "VNTrackObjectRequest" in service and "VNSequenceRequestHandler" in service
+assert "trackingFrameInterval: TimeInterval = 0.1" in service
+assert "minimumTrackingConfidence: Float = 0.42" in service
+assert "spatiallyAssociatedFace" in service
+assert "robFaceIdentityTrackingDidUpdate" in service
 assert "best.second - best.distance >= margin" in service
 assert "maximumAdaptiveCosineDistance" in service
 assert "adaptiveContinuityLifetime" in service
@@ -82,6 +87,8 @@ assert "Live face enrollment guidance" in window
 assert 'case "lighting"' in window
 assert "Face model" in window and "modelChanged" in window
 assert "faceIdentityConversationCue:" in main
+assert "faceIdentityTrackingDidUpdate:" in main
+assert "trackFaceBoundingBox:" in main
 assert "noteConversationTranscript:text" in main
 assert "noteConversationTranscript:textInput" in main
 assert "faceIdentityConversationContract" in gemini
