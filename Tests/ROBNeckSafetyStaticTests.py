@@ -495,6 +495,7 @@ def check_safe_startup_sequence(
     )
 
     servo_action = compact(objective_c_method(torso_source, "applyServoCommand:"))
+    servo_timer = compact(objective_c_method(torso_source, "renderServoCommands"))
     require(
         "allNeckAxesEnabled" in servo_action
         and "neckNeedsSafeStartup" in servo_action
@@ -522,6 +523,24 @@ def check_safe_startup_sequence(
         and "[serialBox startSafeNeckStartup]" in servo_action
         and "[serialBox cancelSafeNeckStartup]" in servo_action,
         "A deliberate neck action no longer starts/cancels the safe recovery sequence",
+    )
+    require(
+        "neckSliderAction" in servo_action
+        and "self.pendingNeckOperatorCommandAfterStartup = YES;"
+            in servo_action
+        and "self.pendingLowerTiltOperatorCommandAfterStartup ="
+            in servo_action
+        and "neckNeedsSafeStartup || serialBox.isSafeNeckStartupInProgress"
+            not in servo_action
+        and "self.pendingNeckOperatorCommandAfterStartup"
+            in servo_timer
+        and "!serialBox.isSafeNeckStartupInProgress" in servo_timer
+        and "renderServoCommandsOperatorInitiated:YES"
+            in servo_timer
+        and "lowerTiltOperatorInitiated:lowerTiltOperatorInitiated"
+            in servo_timer,
+        "Slider requests made during safe startup must remain editable and replay "
+        "with operator authority after the sequence completes",
     )
     for button_id in ("wbx-6Z-lzo", "CSn-jc-2oR", "AMM-Oa-PLc"):
         button = re.search(

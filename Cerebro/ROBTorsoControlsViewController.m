@@ -78,6 +78,8 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 @property (nonatomic, strong) NSTextField *cameraCounterRotationGainField;
 @property (nonatomic, strong) NSTextField *neckSafetyConfigurationStatusLabel;
 @property (nonatomic, strong) NSPopover *neckSafetyConfigurationPopover;
+@property (nonatomic, assign) BOOL pendingNeckOperatorCommandAfterStartup;
+@property (nonatomic, assign) BOOL pendingLowerTiltOperatorCommandAfterStartup;
 - (void)startAmberHostDiscovery;
 - (void)applyDiscoveredAmberHost:(NSString *)host source:(NSString *)source;
 - (void)setupNeckCommandReadouts;
@@ -1036,6 +1038,9 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 - (IBAction) applyServoCommand:(NSControl *)slider
 {
     ROBSerialBox *serialBox = self.robMainViewController.serialBox;
+    BOOL neckSliderAction = slider == self.headPan
+        || slider == self.headTilt
+        || slider == self.headUpperNeckTilt;
     BOOL neckOperatorAction = slider == self.headPan
         || slider == self.headTilt
         || slider == self.headUpperNeckTilt
@@ -1083,24 +1088,6 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
         self.headUpperNeckTilt_enabled.state = NSControlStateValueOff;
         allNeckAxesEnabled = NO;
     }
-    if (neckOperatorAction
-        && allNeckAxesEnabled
-        && (neckNeedsSafeStartup || serialBox.isSafeNeckStartupInProgress)) {
-        // Restore the original operator-calibrated resting defaults. The
-        // serial gateway first uses 6011 only as a temporary clearance lift.
-        self.headPan.integerValue = ROBNeckSafetyDefaultForwardPanTarget;
-        self.headTilt.integerValue = ROBNeckSafetyDefaultLowerTarget;
-        self.headUpperNeckTilt.integerValue = ROBNeckSafetyDefaultUpperTarget;
-        ROBNeckCommandDisposition disposition = [serialBox startSafeNeckStartup];
-        if (disposition == ROBNeckCommandDispositionRejected) NSBeep();
-        [self refreshNeckCommandReadouts];
-        return;
-    }
-    if (neckOperatorAction
-        && serialBox.isSafeNeckStartupInProgress
-        && !allNeckAxesEnabled) {
-        [serialBox cancelSafeNeckStartup];
-    }
     ROBNeckSafetyConfig neckSafetyConfiguration =
         [serialBox neckSafetyConfiguration];
     // A deliberate pan gesture may re-establish the exact enabled lower
@@ -1116,6 +1103,64 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
     BOOL lowerTiltOperatorAction = slider == self.headTilt
         || slider == (id)self.headTilt_enabled
         || panRequestsSafeLowerRecovery;
+
+    if (neckOperatorAction
+        && serialBox.isSafeNeckStartupInProgress
+        && !allNeckAxesEnabled) {
+        // An explicit OFF action wins immediately and drops any deferred move.
+        self.pendingNeckOperatorCommandAfterStartup = NO;
+        self.pendingLowerTiltOperatorCommandAfterStartup = NO;
+        [serialBox cancelSafeNeckStartup];
+    } else if (neckOperatorAction
+               && serialBox.isSafeNeckStartupInProgress) {
+        // Keep the controls live while the physical neck completes its staged
+        // clearance move. The last slider values are sent as one deliberate
+        // operator command by the timer immediately after startup completes.
+        if (neckSliderAction) {
+            self.pendingNeckOperatorCommandAfterStartup = YES;
+            self.pendingLowerTiltOperatorCommandAfterStartup =
+                self.pendingLowerTiltOperatorCommandAfterStartup
+                || lowerTiltOperatorAction;
+        }
+        [self refreshNeckCommandReadouts];
+        return;
+    }
+    if (neckOperatorAction
+        && allNeckAxesEnabled
+        && neckNeedsSafeStartup) {
+        NSInteger requestedPan = self.headPan.integerValue;
+        NSInteger requestedLowerTilt = self.headTilt.integerValue;
+        NSInteger requestedUpperTilt = self.headUpperNeckTilt.integerValue;
+        self.pendingNeckOperatorCommandAfterStartup = NO;
+        self.pendingLowerTiltOperatorCommandAfterStartup = NO;
+        // Restore the original operator-calibrated resting defaults. The
+        // serial gateway first uses 6011 only as a temporary clearance lift.
+        self.headPan.integerValue = ROBNeckSafetyDefaultForwardPanTarget;
+        self.headTilt.integerValue = ROBNeckSafetyDefaultLowerTarget;
+        self.headUpperNeckTilt.integerValue = ROBNeckSafetyDefaultUpperTarget;
+        ROBNeckCommandDisposition disposition = [serialBox startSafeNeckStartup];
+        if (disposition == ROBNeckCommandDispositionRejected) NSBeep();
+        if (neckSliderAction) {
+            // The startup sequence uses fixed safe targets internally, so the
+            // UI can retain the operator's first request without affecting it.
+            self.headPan.integerValue = requestedPan;
+            self.headTilt.integerValue = requestedLowerTilt;
+            self.headUpperNeckTilt.integerValue = requestedUpperTilt;
+            if (serialBox.isSafeNeckStartupInProgress) {
+                self.pendingNeckOperatorCommandAfterStartup = YES;
+                self.pendingLowerTiltOperatorCommandAfterStartup =
+                    lowerTiltOperatorAction;
+            }
+        }
+        [self refreshNeckCommandReadouts];
+        return;
+    }
+    if (neckOperatorAction) {
+        // A live gesture after completion supersedes anything the timer was
+        // about to replay from the startup window.
+        self.pendingNeckOperatorCommandAfterStartup = NO;
+        self.pendingLowerTiltOperatorCommandAfterStartup = NO;
+    }
     [self renderServoCommandsOperatorInitiated:neckOperatorAction
                     lowerTiltOperatorInitiated:lowerTiltOperatorAction];
 }
@@ -1123,6 +1168,17 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 
 - (void) renderServoCommands
 {
+    ROBSerialBox *serialBox = self.robMainViewController.serialBox;
+    if (self.pendingNeckOperatorCommandAfterStartup
+        && !serialBox.isSafeNeckStartupInProgress) {
+        BOOL lowerTiltOperatorInitiated =
+            self.pendingLowerTiltOperatorCommandAfterStartup;
+        self.pendingNeckOperatorCommandAfterStartup = NO;
+        self.pendingLowerTiltOperatorCommandAfterStartup = NO;
+        [self renderServoCommandsOperatorInitiated:YES
+                        lowerTiltOperatorInitiated:lowerTiltOperatorInitiated];
+        return;
+    }
     [self renderServoCommandsOperatorInitiated:NO
                     lowerTiltOperatorInitiated:NO];
 }
