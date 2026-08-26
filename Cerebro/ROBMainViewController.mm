@@ -2802,12 +2802,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         controls.headUpperNeckTilt.integerValue = ROBNeckSafetyDefaultUpperTarget;
     }
 
-    ROBNeckCommandDisposition disposition =
-        [connectedSerialBox startSafeNeckStartup];
-    if (disposition == ROBNeckCommandDispositionRejected) {
-        NSLog(@"Maestro connected, but the safe neck startup request was rejected: %@",
-              connectedSerialBox.neckCommandSafetyStatus);
-    }
+    // ROBSerialBox already started the hardware-owned sequence before posting
+    // this event. This observer only mirrors the reviewed pose into the UI.
 }
 
 - (void)shutdownCerebroRuntime

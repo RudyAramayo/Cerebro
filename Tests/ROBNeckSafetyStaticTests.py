@@ -469,16 +469,24 @@ def check_safe_startup_sequence(
     )
     require(
         "applySafeNeckPanTarget:ROBNeckSafetyDefaultForwardPanTarget "
+        "lowerTiltTarget:ROBNeckSafetyUprightLowerTarget "
+        "desiredUpperTarget:ROBNeckSafetyDefaultUpperTarget "
+        "includeLower:YES allowSupervisedLowerRecovery:NO "
+        "source:kROBSafeNeckStartupRestSource" in advance
+        and "applySafeNeckPanTarget:ROBNeckSafetyDefaultForwardPanTarget "
         "lowerTiltTarget:ROBNeckSafetyDefaultLowerTarget "
         "desiredUpperTarget:ROBNeckSafetyDefaultUpperTarget "
         "includeLower:YES allowSupervisedLowerRecovery:NO "
         "source:kROBSafeNeckStartupRestSource" in advance
         and "maestroMotionDurationFromTarget:ROBNeckSafetyUprightLowerTarget "
         "toTarget:ROBNeckSafetyDefaultLowerTarget" in advance
+        and "centeringCommandIsExact" in advance
+        and "loweringCommandIsExact" in advance
+        and "manual controls are available" in advance
         and "ROBSafeNeckStartupPhaseLowering" in advance
         and "sendMaestro" not in advance,
-        "Startup must center pan through the gateway before timing the return "
-        "from lower-up to the resting lower target",
+        "Startup must fully settle a separate forward-pan command before "
+        "lowering, and must release manual controls on an unexpected hold",
     )
     require(
         "safeStartupLiftCommand" in gateway

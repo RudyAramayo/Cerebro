@@ -324,9 +324,15 @@ def main() -> None:
         and "ROBNeckSafetyDefaultForwardPanTarget" in maestro_ready_handler
         and "ROBNeckSafetyDefaultLowerTarget" in maestro_ready_handler
         and "ROBNeckSafetyDefaultUpperTarget" in maestro_ready_handler
+        and "[self startSafeNeckStartup]" in maestro_reconnect
+        and reconnect_compact.find("[self startSafeNeckStartup]")
+            < reconnect_compact.find(
+                "postNotificationName:ROBMaestroDidConnectNotification"
+            )
         and "[connectedSerialBox startSafeNeckStartup]"
-            in maestro_ready_handler,
-        "A confirmed Maestro connection no longer launches the reviewed neck startup sequence",
+            not in maestro_ready_handler,
+        "A confirmed Maestro connection must launch startup in the hardware "
+        "service before notifying UI observers",
     )
     apply_motion = braced_declaration(
         settings_source, "- (void)applyMaestroServoSmoothing:"

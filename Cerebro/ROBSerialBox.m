@@ -1109,10 +1109,21 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
                     && [self.maestroDevicePath isEqualToString:connectedPath];
             }
             if (!connectionIsStillCurrent) return;
+            // Hardware readiness owns hardware startup. Do not make servo
+            // activation depend on any window controller receiving the event.
+            ROBNeckCommandDisposition startupDisposition =
+                [self startSafeNeckStartup];
+            if (startupDisposition == ROBNeckCommandDispositionRejected) {
+                NSLog(@"Maestro connected, but automatic safe neck startup was rejected: %@",
+                      self.neckCommandSafetyStatus);
+            }
             [[NSNotificationCenter defaultCenter]
                 postNotificationName:ROBMaestroDidConnectNotification
                               object:self
-                            userInfo:@{@"devicePath": connectedPath}];
+                            userInfo:@{
+                                @"devicePath": connectedPath,
+                                @"startupDisposition": @(startupDisposition),
+                            }];
             [self refreshSerialList_maestro:connectedPath];
         });
         return;
@@ -1550,18 +1561,69 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         return;
     }
 
-    if (phase != ROBSafeNeckStartupPhaseLifting
-        && phase != ROBSafeNeckStartupPhaseCentering) {
+    if (phase == ROBSafeNeckStartupPhaseLifting) {
+        @synchronized (self) {
+            self.safeNeckStartupPhase = ROBSafeNeckStartupPhaseCentering;
+        }
+        // Establish only the forward pan target while lower remains at the
+        // full-clearance 6011 pose. Asking for the resting lower target in the
+        // same request made the generic recenter latch responsible for phase
+        // progression and could leave startup held indefinitely.
+        ROBNeckCommandDisposition disposition = [self
+            applySafeNeckPanTarget:ROBNeckSafetyDefaultForwardPanTarget
+            lowerTiltTarget:ROBNeckSafetyUprightLowerTarget
+            desiredUpperTarget:ROBNeckSafetyDefaultUpperTarget
+            includeLower:YES
+            allowSupervisedLowerRecovery:NO
+            source:kROBSafeNeckStartupRestSource];
+
+        NSTimeInterval nextReadyAt = 0;
+        @synchronized (self) {
+            if (!self.safeNeckStartupInProgress
+                || self.safeNeckStartupGeneration != generation) {
+                return;
+            }
+            BOOL centeringCommandIsExact =
+                disposition != ROBNeckCommandDispositionRejected
+                && self.commandedNeckPanTarget
+                    == ROBNeckSafetyDefaultForwardPanTarget
+                && self.commandedLowerNeckTiltTarget
+                    == ROBNeckSafetyUprightLowerTarget
+                && self.commandedUpperNeckTiltTarget
+                    == ROBNeckSafetyDefaultUpperTarget;
+            if (!centeringCommandIsExact) {
+                self.safeNeckStartupGeneration += 1;
+                self.safeNeckStartupInProgress = NO;
+                self.safeNeckStartupPhase = ROBSafeNeckStartupPhaseInactive;
+                self.safeNeckStartupReadyAt = 0;
+                self.manualNeckOverrideUntil = 0;
+                self.torsoNeckAuthorityRequiresOperatorAction = YES;
+                self.neckCommandSafetyStatus =
+                    @"SAFE STARTUP INTERRUPTED: forward clearance command could not be verified; manual controls are available.";
+                return;
+            }
+            nextReadyAt = fmax(
+                self.commandedNeckPanTargetReadyAt,
+                self.commandedUpperNeckTargetReadyAt
+            );
+            nextReadyAt = fmax(nextReadyAt, now + 0.05);
+            self.safeNeckStartupReadyAt = nextReadyAt;
+            self.neckCommandSource = @"Torso safe startup";
+            self.neckCommandSafetyStatus =
+                @"SAFE STARTUP 2/3: LOWER HELD UP AT 6011; CENTERING PAN TO 5799";
+        }
+        [self scheduleSafeNeckStartupAdvanceForGeneration:generation
+                                                   atTime:nextReadyAt];
+        return;
+    }
+
+    if (phase != ROBSafeNeckStartupPhaseCentering) {
         [self cancelSafeNeckStartup];
         return;
     }
 
-    @synchronized (self) {
-        self.safeNeckStartupPhase = ROBSafeNeckStartupPhaseCentering;
-    }
-    // Phase 2 goes back through the normal collision gateway. It first sends
-    // only forward pan while lower remains at 6011. Once the worst-case pan
-    // ramp has settled, the same repeated request releases lower toward 7014.
+    // Pan has now settled at the reviewed forward target. Submit the resting
+    // lower pose through the same collision gateway as a separate operation.
     ROBNeckCommandDisposition disposition = [self
         applySafeNeckPanTarget:ROBNeckSafetyDefaultForwardPanTarget
         lowerTiltTarget:ROBNeckSafetyDefaultLowerTarget
@@ -1576,7 +1638,15 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
             || self.safeNeckStartupGeneration != generation) {
             return;
         }
-        if (disposition == ROBNeckCommandDispositionRejected) {
+        BOOL loweringCommandIsExact =
+            disposition == ROBNeckCommandDispositionAppliedCommand
+            && self.commandedNeckPanTarget
+                == ROBNeckSafetyDefaultForwardPanTarget
+            && self.commandedLowerNeckTiltTarget
+                == ROBNeckSafetyDefaultLowerTarget
+            && self.commandedUpperNeckTiltTarget
+                == ROBNeckSafetyDefaultUpperTarget;
+        if (!loweringCommandIsExact) {
             self.safeNeckStartupGeneration += 1;
             self.safeNeckStartupInProgress = NO;
             self.safeNeckStartupPhase = ROBSafeNeckStartupPhaseInactive;
@@ -1584,29 +1654,17 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
             self.manualNeckOverrideUntil = 0;
             self.torsoNeckAuthorityRequiresOperatorAction = YES;
             self.neckCommandSafetyStatus =
-                @"SAFE STARTUP INTERRUPTED: forward/resting command was rejected.";
+                @"SAFE STARTUP INTERRUPTED: resting command was held or rejected; manual controls are available.";
             return;
         }
 
-        if (self.commandedLowerNeckTiltTarget == ROBNeckSafetyDefaultLowerTarget) {
-            NSTimeInterval lowerDuration = [self
-                maestroMotionDurationFromTarget:ROBNeckSafetyUprightLowerTarget
-                toTarget:ROBNeckSafetyDefaultLowerTarget];
-            nextReadyAt = now + lowerDuration + kROBNeckClearanceSettleSeconds;
-            self.safeNeckStartupPhase = ROBSafeNeckStartupPhaseLowering;
-            self.neckCommandSafetyStatus =
-                @"SAFE STARTUP 3/3: PAN FORWARD; LOWERING TO REST DEFAULT 7014";
-        } else {
-            nextReadyAt = fmax(
-                self.commandedNeckPanTargetReadyAt,
-                self.commandedUpperNeckTargetReadyAt
-            );
-            nextReadyAt = fmax(nextReadyAt, self.panRecenterSettleGate.readyAt);
-            nextReadyAt = fmax(nextReadyAt, now + 0.05);
-            self.safeNeckStartupPhase = ROBSafeNeckStartupPhaseCentering;
-            self.neckCommandSafetyStatus =
-                @"SAFE STARTUP 2/3: LOWER HELD UP AT 6011; CENTERING PAN TO 5799";
-        }
+        NSTimeInterval lowerDuration = [self
+            maestroMotionDurationFromTarget:ROBNeckSafetyUprightLowerTarget
+            toTarget:ROBNeckSafetyDefaultLowerTarget];
+        nextReadyAt = now + lowerDuration + kROBNeckClearanceSettleSeconds;
+        self.safeNeckStartupPhase = ROBSafeNeckStartupPhaseLowering;
+        self.neckCommandSafetyStatus =
+            @"SAFE STARTUP 3/3: PAN FORWARD; LOWERING TO REST DEFAULT 7014";
         self.safeNeckStartupReadyAt = nextReadyAt;
         self.neckCommandSource = @"Torso safe startup";
     }
