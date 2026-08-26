@@ -81,6 +81,23 @@ static void testConfigurationValidation(void) {
     EXPECT_INT(config.lowerForwardRestrictedTarget, 6823);
     EXPECT_NEAR(config.forwardPanMinimumDegrees, -15.0, 0.0);
     EXPECT_NEAR(config.forwardPanMaximumDegrees, 2.1, 0.0);
+    EXPECT_FALSE(ROBNeckSafetyLowerTargetHasFullPanClearance(
+        &config,
+        ROBNeckSafetyTargetOff
+    ));
+    EXPECT_FALSE(ROBNeckSafetyLowerTargetHasFullPanClearance(
+        &config,
+        ROBNeckSafetyFullPanLowerThresholdTarget - 1
+    ));
+    EXPECT_TRUE(ROBNeckSafetyLowerTargetHasFullPanClearance(
+        &config,
+        ROBNeckSafetyFullPanLowerThresholdTarget
+    ));
+    EXPECT_TRUE(ROBNeckSafetyLowerTargetHasFullPanClearance(
+        &config,
+        ROBNeckSafetyUprightLowerTarget
+    ));
+    EXPECT_FALSE(ROBNeckSafetyLowerTargetHasFullPanClearance(NULL, 6200));
     EXPECT_TRUE(config.cameraLevelingEnabled);
 
     ROBNeckSafetyConfig invalid = config;

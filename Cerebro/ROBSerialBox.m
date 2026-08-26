@@ -1475,6 +1475,43 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         return ROBNeckCommandDispositionRejected;
     }
 
+    // The asymmetric -15...+2.1 window belongs only to a genuinely off or
+    // unknown lower axis. Once this Maestro session has successfully written
+    // a known active lower target in the full-clearance region, do not retain
+    // a stale unknown/off intersection while servicing another command that
+    // remains in that region. The lower transition gate still protects moves
+    // whose established or requested target lacks full-pan clearance.
+    BOOL establishedLowerHasFullPanClearance = calibrationConfirmed
+        && knownLowerIsActive
+        && ROBNeckSafetyLowerTargetHasFullPanClearance(
+            &effectiveConfiguration,
+            (int)self.commandedLowerNeckTiltTarget
+        );
+    BOOL requestedLowerHasFullPanClearance = calibrationConfirmed
+        && boundedLower != ROBNeckSafetyTargetOff
+        && ROBNeckSafetyLowerTargetHasFullPanClearance(
+            &effectiveConfiguration,
+            boundedLower
+        );
+    if (establishedLowerHasFullPanClearance
+        && requestedLowerHasFullPanClearance) {
+        ROBNeckSafetyPanBounds establishedBounds = {0};
+        if (!ROBNeckSafetyAllowedPanBounds(
+                &effectiveConfiguration,
+                (int)self.commandedLowerNeckTiltTarget,
+                &establishedBounds
+            )) {
+            self.neckCommandSafetyStatus =
+                @"Neck command rejected: invalid established pan bounds.";
+            return ROBNeckCommandDispositionRejected;
+        }
+        currentEnvelopeBounds = establishedBounds;
+        self.panEnvelopeLowerTarget = (int)self.commandedLowerNeckTiltTarget;
+        self.panEnvelopeLowerTargetIsKnown = YES;
+        self.pendingPanEnvelopeLowerTarget = ROBNeckSafetyTargetOff;
+        self.pendingPanEnvelopeReadyAt = 0;
+    }
+
     // Tighten each edge immediately. Widen either edge only after the lower
     // target settles. Persisting this explicit intersection is essential for
     // cross-branch moves whose envelopes are not nested (for example,

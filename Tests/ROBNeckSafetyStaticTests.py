@@ -254,10 +254,14 @@ def check_lower_clearance_threshold(
     bounds = compact(braced_declaration(
         policy_source, "bool ROBNeckSafetyAllowedPanBounds("
     ))
+    clearance = compact(braced_declaration(
+        policy_source, "bool ROBNeckSafetyLowerTargetHasFullPanClearance("
+    ))
     require(
-        "boundedLowerTarget = ROBNeckSafetyClampTarget(" in bounds
-        and "boundedLowerTarget < "
-            "ROBNeckSafetyFullPanLowerThresholdTarget" in bounds
+        "boundedLowerTarget = ROBNeckSafetyClampTarget(" in clearance
+        and "boundedLowerTarget >= "
+            "ROBNeckSafetyFullPanLowerThresholdTarget" in clearance
+        and "!ROBNeckSafetyLowerTargetHasFullPanClearance(" in bounds
         and "minimumDegrees = -config->restrictedPanDegrees;" in bounds
         and "maximumDegrees = config->restrictedPanDegrees;" in bounds
         and "minimumDegrees = -full;" in bounds
@@ -618,6 +622,16 @@ def check_stateful_safety_gateway(serial_source: str, torso_source: str) -> None
             in refresh_envelope,
         "An asymmetric pan edge may widen before the commanded lower target has "
         "completed its settle latch",
+    )
+    require(
+        "establishedLowerHasFullPanClearance" in gateway
+        and "requestedLowerHasFullPanClearance" in gateway
+        and gateway.count("ROBNeckSafetyLowerTargetHasFullPanClearance(") >= 2
+        and "currentEnvelopeBounds = establishedBounds;" in gateway
+        and "self.pendingPanEnvelopeLowerTarget = ROBNeckSafetyTargetOff;"
+            in gateway,
+        "A known active full-clearance lower pose may retain the asymmetric "
+        "unknown/off pan limits",
     )
     require(
         "pendingPanEnvelopeLowerTarget != boundedLower" in gateway

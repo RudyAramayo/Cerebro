@@ -198,6 +198,23 @@ double ROBNeckSafetyReferenceLowerTarget(const ROBNeckSafetyConfig *config) {
     return (double)ROBNeckSafetyUprightLowerTarget;
 }
 
+bool ROBNeckSafetyLowerTargetHasFullPanClearance(
+    const ROBNeckSafetyConfig *config,
+    int32_t lowerTarget
+) {
+    if (!ROBNeckSafetyConfigIsValid(config)
+        || lowerTarget == ROBNeckSafetyTargetOff) {
+        return false;
+    }
+
+    const int32_t boundedLowerTarget = ROBNeckSafetyClampTarget(
+        lowerTarget,
+        config->lowerMinimumTarget,
+        config->lowerMaximumTarget
+    );
+    return boundedLowerTarget >= ROBNeckSafetyFullPanLowerThresholdTarget;
+}
+
 double ROBNeckSafetyMaestroMotionDuration(
     int32_t fromTarget,
     int32_t toTarget,
@@ -263,12 +280,7 @@ bool ROBNeckSafetyAllowedPanBounds(
         return true;
     }
 
-    const int32_t boundedLowerTarget = ROBNeckSafetyClampTarget(
-        lowerTarget,
-        config->lowerMinimumTarget,
-        config->lowerMaximumTarget
-    );
-    if (boundedLowerTarget < ROBNeckSafetyFullPanLowerThresholdTarget) {
+    if (!ROBNeckSafetyLowerTargetHasFullPanClearance(config, lowerTarget)) {
         boundsOut->minimumDegrees = -config->restrictedPanDegrees;
         boundsOut->maximumDegrees = config->restrictedPanDegrees;
         return true;

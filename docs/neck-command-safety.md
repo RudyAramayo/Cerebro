@@ -112,6 +112,9 @@ The pan window is selected from the commanded lower-tilt target:
   complete calibrated pan range. With the shipped values this is ±60°, so
   every integer target from `5000` through `6823`—including upright `6011`—is
   full-pan. Higher known targets such as `7277` are not restricted either.
+- Once a full-clearance lower target is established in the current Maestro
+  session, subsequent commands that remain in that region do not inherit the
+  unknown/off −15.0°…+2.1° window from stale transition state.
 - There is no interpolation at the collision boundary: `4999` is restricted
   and `5000` is full-pan. The gateway's settle interlock controls when a
   widening becomes active.
@@ -119,9 +122,12 @@ The pan window is selected from the commanded lower-tilt target:
 A request toward a more restrictive lower pose tightens the envelope
 immediately. If needed, Cerebro holds lower tilt while it brings pan inside the
 new envelope and establishes a usable upper-camera target. A request toward
-greater clearance does not expand pan immediately: the commanded lower target
-must remain in place for its calculated Maestro ramp duration plus the current
-0.75-second settling margin. Pan
+greater clearance from an off, unknown, or restricted lower state does not
+expand pan immediately: the commanded lower target must remain in place for
+its calculated Maestro ramp duration plus the current 0.75-second settling
+margin. Once a full-clearance target has already been established, commands
+that stay in that region keep full pan without repeating that unknown-pose
+delay. Pan
 recentering—and establishing a usable upper-camera target when that coupled
 axis was previously unknown or off—uses the calculated ramp duration plus the
 current 1.0-second staging margin. Selecting a slower Hardware profile while a

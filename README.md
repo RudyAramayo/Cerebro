@@ -161,12 +161,13 @@ failure states, and validation.
 
 All manual, tracking, and Vision neck targets now pass through one command-space
 gateway with hard bounds, a lower-tilt-dependent pan envelope, and configurable
-upper-camera counter-rotation. Full pan is available for lower-neck targets
-5300…6822 inclusive; every target from 6823 forward—including 7277—limits pan
-to exactly −15.0°…+2.1°. The Head panel also has a persistent **Keep
-upright** toggle for coupled lower/upper camera commands. The torso readouts
-show commands sent, not measured shaft positions; calibration and physical
-supervision are still required. See
+upper-camera counter-rotation. Full pan is available for every known active
+lower-neck target at or above `5000`, including the upright target `6011`; the
+−15.0°…+2.1° window applies only while the lower command is off or unknown.
+The Head panel also has a persistent **Keep upright** toggle for coupled
+lower/upper camera commands. The torso readouts show commands sent, not
+measured shaft positions; calibration and physical supervision are still
+required. See
 [Neck command safety](docs/neck-command-safety.md).
 
 ## Supervised Amber arms, grippers, and wake-up

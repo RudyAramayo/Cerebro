@@ -120,6 +120,14 @@ double ROBNeckSafetyFullPanDegrees(const ROBNeckSafetyConfig *config);
 // Returns NAN when config is invalid.
 double ROBNeckSafetyReferenceLowerTarget(const ROBNeckSafetyConfig *config);
 
+// Returns true when a known active lower-neck target is in the calibrated
+// collision-clear region and therefore permits the complete pan range. Target
+// 0 is off/unknown and never qualifies.
+bool ROBNeckSafetyLowerTargetHasFullPanClearance(
+    const ROBNeckSafetyConfig *config,
+    int32_t lowerTarget
+);
+
 // Conservative duration of the Maestro output-value ramp between two raw
 // targets under compact-protocol speed/acceleration limits. Speed uses the
 // Maestro's (0.25 us)/(10 ms) units; acceleration uses
