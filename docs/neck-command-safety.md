@@ -96,8 +96,9 @@ full-pan envelope, and lower/upper command deadlines have settled. The gateway
 then latches that prepared state while the lower target, full-pan envelope, and
 upper band remain valid. It centers pan before moving a leaning lower neck;
 after upright clearance is established, it does not wait for or recenter each
-active pan or upper-camera correction. Ordinary face/blob centering does not
-request this lower-neck transition.
+active pan or upper-camera correction. Ordinary face/blob centering uses a
+separate minimal clearance request described below; it never requests this
+follow mode's fixed `6011`/`7375` pose.
 After that exact lower target is successfully written and its command-space
 settle interval completes, pan uses the corresponding lower-target envelope
 even while the separate camera/counter-rotation calibration remains
@@ -110,25 +111,29 @@ normalized image center `(0.5, 0.5)`, ignores a 12-percent-wide band on each
 axis to prevent detector jitter, and accepts at most one correction every 0.1
 seconds. The default horizontal response is `3000` raw target units per second
 at a normalized error of `1.0`; **Settings → Tracking** adjusts it live from
-`1500` through `6000`. Upward upper-camera response is `400` raw target units
-per second with a 200-target acquisition range. When pan pauses at center or a
-safe envelope edge, the same upward error gradually moves an active,
-calibrated lower neck toward upright `6011`; the collision gateway stages any
-required pan transition. Downward tracking never moves the lower neck and
-retains an `80`-unit response with a 40-target upper-camera range. A delayed or
-newly reacquired observation is capped to one 0.1-second correction.
+`1500` through `6000`. The same panel adjusts vertical response from `400`
+through `2000`, with an `800` default and a 200-target upward acquisition
+range. Downward response remains one fifth of the selected vertical speed and
+inside a 40-target upper-camera range. A delayed or newly reacquired
+observation is capped to one 0.1-second correction.
 Acquisition captures the current uncompensated upper-camera demand as its
 baseline. It therefore cannot jump from the existing camera pose to the
 authorized-follow target `7375`.
 The shared gateway still applies the configured physical hard bounds. These
 tracking values are integer Maestro command targets, not measured joint angles.
 Both recognized-face and legacy human-blob entry points use the currently
-settled lower-neck-dependent pan envelope immediately and do not force a
-clearance pose before initial pan. Upward tracking may gradually approach
-upright `6011` only from a known active lower command after calibration is
-confirmed. It pauses lower motion during active pan, except that a clamped pan
-edge may begin erecting the neck so the gateway can safely widen the envelope.
-Unknown, OFF, uncalibrated, and downward lower-neck demands remain blocked.
+settled lower-neck-dependent pan envelope immediately. If the lower target is
+outside `5000`–`6495`, tracking requests the nearest boundary: `5000` from the
+rear side or `6495` from the forward side. This automatic request is enabled
+only with confirmed calibration, **Keep upright** on, and known active lower
+and upper tilt commands. While it is active, the tracker holds pan and its
+uncompensated upper-camera demand. The gateway sends the lower move and the
+calibrated `-1` upper counter-rotation together, giving the installed matching
+servos equal and opposite target deltas. Normal pan and upper-only vertical
+centering resume when the accepted lower command is inside the band; the live
+envelope continues to limit pan until the gateway's command-space settle time
+expires. Unknown, OFF, uncalibrated, or uncoupled lower-neck demands remain
+blocked.
 The installed servo turns right as the raw pan target decreases toward `4000`
 and left as it increases toward `8000`. Vision processes the raw unmirrored
 sample buffer, so a person on ROB's physical right directly lowers the raw pan

@@ -45,6 +45,7 @@ static double const kROBPersonTrackingFilterCenter = 0.5;
 static double const kROBPersonTrackingFilterStopBand = 0.06;
 static int const kROBPersonTrackingMaximumUpperDownOffset = 40;
 static int const kROBPersonTrackingMaximumUpperUpOffset = 200;
+static double const kROBPersonTrackingDownwardSpeedRatio = 0.2;
 static NSString * const ROBDevelopmentModeDefaultsKey = @"ROBDevelopmentMode";
 static NSString * const ROBShowControllerInputDiagnosticsNotification = @"ROBShowControllerInputDiagnostics";
 static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopmentModeDidChange";
@@ -3344,9 +3345,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             return;
         }
         // Face acquisition starts inside the currently settled collision-safe
-        // pan envelope. Gross upward tracking may later bring an already
-        // active, calibrated lower neck toward upright through that same
-        // gateway, without blocking initial pan or commanding downward lean.
+        // pan envelope. With calibrated camera leveling available, tracking
+        // may request the nearest full-pan lower boundary through that same
+        // gateway while its direct pan and camera demands remain steady.
         self.currentPerson_positionX = x;
         self.currentPerson_positionY = y;
         self.currentPerson_positionZ = z;
@@ -3414,6 +3415,13 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             ROBPersonTrackingPanTargetsPerSecondFromDefaults(
                 NSUserDefaults.standardUserDefaults
             );
+        configuration.upperTargetsPerSecond =
+            ROBPersonTrackingVerticalTargetsPerSecondFromDefaults(
+                NSUserDefaults.standardUserDefaults
+            );
+        configuration.upperDownTargetsPerSecond =
+            configuration.upperTargetsPerSecond
+                * kROBPersonTrackingDownwardSpeedRatio;
         configuration.panMinimumTarget = (int32_t)lround(
             self.torsoControlsViewController.headPan.minValue
         );
@@ -3469,13 +3477,34 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         configuration.lowerMaximumTarget = (int32_t)lround(
             self.torsoControlsViewController.headTilt.maxValue
         );
-        configuration.lowerUprightTarget = MAX(
+        configuration.lowerFullPanMinimumTarget = MAX(
             configuration.lowerMinimumTarget,
             MIN(
                 configuration.lowerMaximumTarget,
-                ROBPersonTrackingUprightLowerTarget
+                ROBNeckSafetyFullPanLowerThresholdTarget
             )
         );
+        configuration.lowerFullPanMaximumTarget = MAX(
+            configuration.lowerFullPanMinimumTarget,
+            MIN(
+                configuration.lowerMaximumTarget,
+                ROBNeckSafetyFullPanLowerMaximumTarget
+            )
+        );
+        BOOL lowerClearanceAuthorized =
+            self.serialBox.neckSafetyCalibrationConfirmed
+            && self.serialBox.neckCameraLevelingEnabled
+            && self.serialBox.lowerNeckTiltCommandKnown
+            && self.serialBox.commandedLowerNeckTiltTarget
+                != ROBNeckSafetyTargetOff
+            && self.serialBox.upperNeckTiltCommandKnown
+            && self.serialBox.commandedUpperNeckTiltTarget
+                != ROBNeckSafetyTargetOff
+            && self.torsoControlsViewController.headTilt_enabled.state
+                == NSControlStateValueOn
+            && self.torsoControlsViewController.headUpperNeckTilt_enabled.state
+                == NSControlStateValueOn;
+        configuration.lowerClearanceEnabled = lowerClearanceAuthorized;
 
         ROBPersonTrackingResult result = {0};
         if (!ROBPersonTrackingApply(
@@ -3490,20 +3519,13 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             )) {
             return;
         }
-        BOOL lowerTrackingAuthorized =
-            self.serialBox.neckSafetyCalibrationConfirmed
-            && self.serialBox.lowerNeckTiltCommandKnown
-            && self.serialBox.commandedLowerNeckTiltTarget
-                != ROBNeckSafetyTargetOff
-            && self.torsoControlsViewController.headTilt_enabled.state
-                == NSControlStateValueOn;
-        int32_t lowerTarget = lowerTrackingAuthorized
+        int32_t lowerTarget = lowerClearanceAuthorized
             ? result.lowerTarget
             : currentLowerTarget;
         if (now - self.lastPersonTrackingDiagnosticsUptime >= 1.0) {
             self.lastPersonTrackingDiagnosticsUptime = now;
             NSLog(
-                @"Person tracking %@ raw=(%.3f, %.3f) filtered=(%.3f, %.3f) pan=%d->%d speed=%.0f envelope=%d...%d lower=%d->%d authorized=%@ upper=%d->%d baseline=%d mirrored=%@",
+                @"Person tracking %@ raw=(%.3f, %.3f) filtered=(%.3f, %.3f) pan=%d->%d hSpeed=%.0f envelope=%d...%d lower=%d->%d clearance=%@ authorized=%@ upper=%d->%d vSpeed=%.0f baseline=%d mirrored=%@",
                 userID,
                 x,
                 y,
@@ -3516,9 +3538,11 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                 configuration.panMaximumTarget,
                 currentLowerTarget,
                 lowerTarget,
-                lowerTrackingAuthorized ? @"YES" : @"NO",
+                result.lowerClearanceActive ? @"YES" : @"NO",
+                lowerClearanceAuthorized ? @"YES" : @"NO",
                 currentUpperTarget,
                 result.upperTarget,
+                configuration.upperTargetsPerSecond,
                 self.personTrackingUpperBaselineTarget,
                 configuration.mirrorHorizontalCoordinate ? @"YES" : @"NO"
             );
@@ -3527,7 +3551,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         self.currentPerson_tilt = lowerTarget;
         self.currentPerson_upperNeckTilt = result.upperTarget;
         self.torsoControlsViewController.headPan.integerValue = result.panTarget;
-        if (lowerTrackingAuthorized) {
+        if (lowerClearanceAuthorized) {
             self.torsoControlsViewController.headTilt.integerValue = lowerTarget;
         }
         self.torsoControlsViewController.headUpperNeckTilt.integerValue =

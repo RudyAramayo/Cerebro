@@ -173,7 +173,12 @@ startup: pan stays OFF while lower/upper move to `6011`/`6073`, pan settles
 forward at `5799`, and only then does the neck move to the `lean_forward` pose
 at lower `7014` / upper `7698`.
 Recognized-face and human-blob tracking begins inside the neck's currently
-settled collision-safe pan envelope without first forcing a lower-neck pose.
+settled collision-safe pan envelope. When confirmed calibration, **Keep
+upright**, and both active tilt servos are available, it also requests only the
+nearest edge of the reviewed `5000`–`6495` lower-neck band. Pan and the direct
+upper-camera demand pause for that clearance move; the safety gateway sends
+equal and opposite lower/upper target deltas together, then tracking resumes
+inside the widening live pan envelope.
 Vision runs on the raw, unmirrored sample buffer, so a face on ROB's physical
 right lowers the installed servo target and pans right. Each acquisition
 preserves the current uncompensated upper-camera demand instead of jumping to a
@@ -185,11 +190,13 @@ quickly and stops immediately inside the dead band; a softened response curve
 further reduces pan and tilt corrections near center. Bounded pan/tilt
 responses, 12-percent center dead bands, the live pan envelope, and a matching
 10 Hz servo renderer prevent detector jitter and physical command latency from
-producing large corrections. **Settings → Tracking** provides a live horizontal
-speed slider from `1500` to `6000` raw targets per second; `3000` is the
-default. For a face above center, the upper camera now has a gradual 200-target
-upward range and the lower neck moves toward upright once pan pauses. Downward
-tracking keeps a slower 40-target upper-only range to avoid the prior dip. The
+producing large corrections. **Settings → Tracking** provides live horizontal
+and vertical speed sliders. Horizontal ranges from `1500` to `6000` raw targets
+per second with a `3000` default. Vertical ranges from `400` to `2000`, with an
+`800` default; downward correction runs at one fifth of the selected vertical
+speed and stays inside a 40-target upper-camera range to avoid the prior dip.
+Upward centering uses the upper camera's 200-target acquisition range and does
+not change lower-neck posture after full-pan clearance. The
 separately controller-authorized follow mode retains its reviewed
 upright/full-pan preparation sequence.
 The **Servos → Open Servo Control…** window edits named camera positions,

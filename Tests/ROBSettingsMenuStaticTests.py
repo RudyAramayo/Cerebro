@@ -178,6 +178,14 @@ def main() -> None:
         and "@selector(faceTrackingPanSpeedChanged:)" in build_interface,
         "Settings lost the persistent face-tracking speed slider",
     )
+    require(
+        "ROBPersonTrackingMinimumVerticalTargetsPerSecond" in build_interface
+        and "ROBPersonTrackingMaximumVerticalTargetsPerSecond" in build_interface
+        and "self.faceTrackingVerticalSpeedSlider.continuous = YES;"
+        in build_interface
+        and "@selector(faceTrackingVerticalSpeedChanged:)" in build_interface,
+        "Settings lost the persistent vertical face-tracking speed slider",
+    )
     tracking_speed_action = braced_declaration(
         SETTINGS_WINDOW, "- (void)faceTrackingPanSpeedChanged:"
     )
@@ -187,6 +195,19 @@ def main() -> None:
         and "ROBPersonTrackingPanSpeedDefaultsKey" in tracking_speed_action
         and 'ROB.PersonTracking.PanTargetsPerSecond' in TRACKING_PREFERENCES,
         "The face-tracking speed slider no longer saves its bounded value",
+    )
+    vertical_tracking_speed_action = braced_declaration(
+        SETTINGS_WINDOW, "- (void)faceTrackingVerticalSpeedChanged:"
+    )
+    require(
+        "ROBPersonTrackingClampVerticalTargetsPerSecond"
+        in vertical_tracking_speed_action
+        and "setDouble:speed" in vertical_tracking_speed_action
+        and "ROBPersonTrackingVerticalSpeedDefaultsKey"
+        in vertical_tracking_speed_action
+        and 'ROB.PersonTracking.VerticalTargetsPerSecond'
+        in TRACKING_PREFERENCES,
+        "The vertical tracking slider no longer saves its bounded value",
     )
     require(
         "ROBInsta360ProcessingSettingsViewController *insta360SettingsViewController"

@@ -18,6 +18,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 static NSString * const ROBPersonTrackingPanSpeedDefaultsKey =
     @"ROB.PersonTracking.PanTargetsPerSecond";
+static NSString * const ROBPersonTrackingVerticalSpeedDefaultsKey =
+    @"ROB.PersonTracking.VerticalTargetsPerSecond";
 
 static inline double ROBPersonTrackingClampPanTargetsPerSecond(double value)
 {
@@ -38,6 +40,31 @@ static inline double ROBPersonTrackingPanTargetsPerSecondFromDefaults(
         return ROBPersonTrackingDefaultPanTargetsPerSecond;
     }
     return ROBPersonTrackingClampPanTargetsPerSecond(
+        [storedValue doubleValue]
+    );
+}
+
+static inline double ROBPersonTrackingClampVerticalTargetsPerSecond(
+    double value
+) {
+    if (!isfinite(value)) {
+        return ROBPersonTrackingDefaultVerticalTargetsPerSecond;
+    }
+    return fmax(
+        ROBPersonTrackingMinimumVerticalTargetsPerSecond,
+        fmin(ROBPersonTrackingMaximumVerticalTargetsPerSecond, value)
+    );
+}
+
+static inline double ROBPersonTrackingVerticalTargetsPerSecondFromDefaults(
+    NSUserDefaults *defaults
+) {
+    id storedValue = [defaults
+        objectForKey:ROBPersonTrackingVerticalSpeedDefaultsKey];
+    if (![storedValue respondsToSelector:@selector(doubleValue)]) {
+        return ROBPersonTrackingDefaultVerticalTargetsPerSecond;
+    }
+    return ROBPersonTrackingClampVerticalTargetsPerSecond(
         [storedValue doubleValue]
     );
 }

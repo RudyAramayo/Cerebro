@@ -102,7 +102,7 @@ person_tracking = main.split(
 assert "prepareNeckForPersonTracking" not in person_tracking
 assert "prepareNeckForPersonFollow" not in person_tracking
 assert "commandedLowerNeckTiltTarget" in person_tracking
-assert "lowerTrackingAuthorized" in person_tracking
+assert "lowerClearanceAuthorized" in person_tracking
 assert "neckSafetyCalibrationConfirmed" in person_tracking
 assert "currentNeckPanMinimumDegrees" in person_tracking
 assert "currentNeckPanMaximumDegrees" in person_tracking
@@ -149,11 +149,19 @@ assert "ROBPersonTrackingDefaultPanTargetsPerSecond = 3000" in tracking_policy_h
 assert "ROBPersonTrackingMaximumPanTargetsPerSecond = 6000" in tracking_policy_header
 assert 'ROB.PersonTracking.PanTargetsPerSecond' in tracking_preferences
 assert "ROBPersonTrackingPanTargetsPerSecondFromDefaults" in main
-assert "currentPanTarget\n            - resultOut->horizontalError" in tracking_policy_source
-assert "lowerTargetsPerSecond = 1000.0" in tracking_policy_source
-assert "upperTargetsPerSecond = 400.0" in tracking_policy_source
-assert "upperDownTargetsPerSecond = 80.0" in tracking_policy_source
-assert "resultOut->panTarget == currentPanTarget" in tracking_policy_source
+assert "ROBPersonTrackingMinimumVerticalTargetsPerSecond = 400" in tracking_policy_header
+assert "ROBPersonTrackingDefaultVerticalTargetsPerSecond = 800" in tracking_policy_header
+assert "ROBPersonTrackingMaximumVerticalTargetsPerSecond = 2000" in tracking_policy_header
+assert 'ROB.PersonTracking.VerticalTargetsPerSecond' in tracking_preferences
+assert "ROBPersonTrackingVerticalTargetsPerSecondFromDefaults" in main
+assert "currentPanTarget\n                - resultOut->horizontalError" in tracking_policy_source
+assert "lowerClearanceEnabled = false" in tracking_policy_source
+assert "lowerClearanceActive" in tracking_policy_source
+assert "lowerFullPanMinimumTarget" in tracking_policy_source
+assert "lowerFullPanMaximumTarget" in tracking_policy_source
+assert "self.serialBox.neckCameraLevelingEnabled" in person_tracking
+assert "self.serialBox.upperNeckTiltCommandKnown" in person_tracking
+assert "headUpperNeckTilt_enabled.state" in person_tracking
 assert "self.torsoControlsViewController.headTilt.integerValue = lowerTarget" in main
 assert "kROBPersonTrackingMaximumUpperUpOffset = 200" in main
 assert "kROBPersonTrackingMaximumUpperDownOffset = 40" in main

@@ -21,7 +21,11 @@ enum {
     ROBPersonTrackingMinimumPanTargetsPerSecond = 1500,
     ROBPersonTrackingDefaultPanTargetsPerSecond = 3000,
     ROBPersonTrackingMaximumPanTargetsPerSecond = 6000,
-    ROBPersonTrackingUprightLowerTarget = 6011,
+    ROBPersonTrackingMinimumVerticalTargetsPerSecond = 400,
+    ROBPersonTrackingDefaultVerticalTargetsPerSecond = 800,
+    ROBPersonTrackingMaximumVerticalTargetsPerSecond = 2000,
+    ROBPersonTrackingFullPanLowerMinimumTarget = 5000,
+    ROBPersonTrackingFullPanLowerMaximumTarget = 6495,
     // Reviewed camera band for controller-authorized full-pan follow
     // preparation. Ordinary face/blob acquisition instead centers a narrow
     // runtime band on the currently accepted upper-camera target.
@@ -38,16 +42,17 @@ typedef struct {
     double horizontalDeadBand;
     double verticalDeadBand;
     bool mirrorHorizontalCoordinate;
+    bool lowerClearanceEnabled;
     double responseExponent;
     double panTargetsPerSecond;
-    double lowerTargetsPerSecond;
     double upperTargetsPerSecond;
     double upperDownTargetsPerSecond;
     double maximumElapsedSeconds;
     int32_t panMinimumTarget;
     int32_t panMaximumTarget;
     int32_t lowerMinimumTarget;
-    int32_t lowerUprightTarget;
+    int32_t lowerFullPanMinimumTarget;
+    int32_t lowerFullPanMaximumTarget;
     int32_t lowerMaximumTarget;
     int32_t upperMinimumTarget;
     int32_t upperMaximumTarget;
@@ -61,14 +66,17 @@ typedef struct {
     double verticalError;
     bool panClamped;
     bool upperClamped;
+    bool lowerClearanceActive;
 } ROBPersonTrackingResult;
 
 // The default controller samples at no more than 10 Hz, aims at the exact
 // image center in the raw main-camera Vision coordinate system, ignores the
 // central 12 percent on both axes, and eases corrections as the observation
 // approaches that band. The runtime may replace the default horizontal rate
-// with the operator's bounded preference. Upward observations may also bring
-// an active lower neck gradually toward upright, but only while pan is paused.
+// with the operator's bounded preference. The runtime may independently set
+// the bounded vertical rate. Automatic lower-neck clearance is fail-closed by
+// default and must be enabled only when calibrated camera leveling can
+// counter-rotate the upper joint.
 ROBPersonTrackingConfig ROBPersonTrackingDefaultConfig(void);
 
 bool ROBPersonTrackingConfigIsValid(
