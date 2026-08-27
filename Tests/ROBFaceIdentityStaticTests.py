@@ -21,6 +21,8 @@ camera = text("CameraViewController.swift")
 scene = text("ROBSceneSnapshot.swift")
 app = text("AppDelegate.m")
 main = text("ROBMainViewController.mm")
+tracking_policy_header = text("ROBPersonTrackingPolicy.h")
+tracking_policy_source = text("ROBPersonTrackingPolicy.c")
 gemini = text("GeminiRoboticsProtocol.swift")
 project = (ROOT / "Cerebro.xcodeproj" / "project.pbxproj").read_text(encoding="utf-8")
 
@@ -95,8 +97,21 @@ tracking = main.split("- (void)trackFaceBoundingBox:", 1)[1].split(
 assert "prepareNeckForPersonFollow" in tracking
 assert "headTracking_enabled.state" in tracking
 assert "commandedLowerNeckTiltTarget" in tracking
+assert "ROBPersonTrackingNeutralUpperTarget" in tracking
 assert "liftNeckAnimationTimer" not in main
 assert "6168.94" not in tracking and "6868.81" not in tracking
+assert "ROBPersonTrackingApply" in main
+assert "lastPersonTrackingUpdateUptime" in main
+assert "centerX = 0.5" in tracking_policy_source
+assert "centerY = 0.5" in tracking_policy_source
+assert "horizontalDeadBand = 0.04" in tracking_policy_source
+assert "verticalDeadBand = 0.04" in tracking_policy_source
+assert (
+    "ROBPersonTrackingMinimumUpperTarget = ROBNeckSafetyUprightUpperTarget"
+    in tracking_policy_header
+)
+assert "ROBPersonTrackingNeutralUpperTarget = 6869" in tracking_policy_header
+assert "ROBPersonTrackingMaximumUpperTarget = 7400" in tracking_policy_header
 assert "noteConversationTranscript:text" in main
 assert "noteConversationTranscript:textInput" in main
 assert "faceIdentityConversationContract" in gemini
@@ -108,7 +123,10 @@ for source in (
     "ROBFaceIdentityWindowController.swift",
     "ROBFaceEmbeddingModel.swift",
     "ROBFaceConversationPolicy.swift",
+    "ROBPersonTrackingPolicy.c",
 ):
     assert f"{source} in Sources" in project
+
+assert "ROBPersonTrackingPolicy.h" in project
 
 print("ROB face identity static fixtures passed")

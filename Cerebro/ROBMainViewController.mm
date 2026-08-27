@@ -7,6 +7,7 @@
 //
 #import "AppDelegate.h"
 #import "ROBMainViewController.h"
+#import "ROBPersonTrackingPolicy.h"
 #import "ROBSerialBox.h"
 #import "ROBBaseSerialConsoleWindowController.h"
 #import "ROBBaseControllerModel.h"
@@ -378,6 +379,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 @property (readwrite, assign) float currentPerson_pan;
 @property (readwrite, assign) float currentPerson_tilt;
 @property (readwrite, assign) float currentPerson_upperNeckTilt;
+@property (readwrite, assign) NSTimeInterval lastPersonTrackingUpdateUptime;
 
 @property (readwrite, assign) int actualValue;
 @property (readwrite, assign) int targetValue;
@@ -1072,7 +1074,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void)faceIdentityTrackingDidUpdate:(NSNotification *)notification
 {
     BOOL active = [notification.userInfo[@"active"] boolValue];
-    if (!active) { return; }
+    if (!active) {
+        self.lastPersonTrackingUpdateUptime = 0;
+        return;
+    }
     NSNumber *confidence = [notification.userInfo[@"confidence"] isKindOfClass:NSNumber.class]
         ? notification.userInfo[@"confidence"] : nil;
     NSValue *boxValue = [notification.userInfo[@"boundingBox"] isKindOfClass:NSValue.class]
@@ -3213,7 +3218,11 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                 best = observation;
             }
         }
-        if (best != nil) { [self trackFaceBoundingBox:best.boundingBox]; }
+        if (best != nil) {
+            [self trackFaceBoundingBox:best.boundingBox];
+        } else {
+            self.lastPersonTrackingUpdateUptime = 0;
+        }
     });
 }
 
@@ -3222,6 +3231,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     NSAssert(NSThread.isMainThread, @"Face tracking targets are main-thread owned");
     if (self.torsoControlsViewController.headTracking_enabled.state
         != NSControlStateValueOn) {
+        self.lastPersonTrackingUpdateUptime = 0;
         return;
     }
     if (![self.serialBox prepareNeckForPersonFollow]) {
@@ -3238,7 +3248,11 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         self.torsoControlsViewController.headTilt.integerValue =
             self.serialBox.commandedLowerNeckTiltTarget;
         self.torsoControlsViewController.headUpperNeckTilt.integerValue =
-            self.serialBox.commandedUpperNeckTiltTarget;
+            MAX(
+                self.serialBox.commandedUpperNeckTiltTarget,
+                ROBPersonTrackingNeutralUpperTarget
+            );
+        self.lastPersonTrackingUpdateUptime = 0;
         self.isNeckLifted = YES;
     }
 
@@ -3293,37 +3307,77 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void) trackingPerson:(NSString *)userID x:(float)x y:(float)y z:(float)z
 {
-    {
+    void (^updateTrackingTargets)(void) = ^{
+        if (self.torsoControlsViewController.headTracking_enabled.state
+            != NSControlStateValueOn) {
+            self.lastPersonTrackingUpdateUptime = 0;
+            return;
+        }
         self.currentPerson_positionX = x;
         self.currentPerson_positionY = y;
         self.currentPerson_positionZ = z;
-        
-        dispatch_async(dispatch_get_main_queue(), ^(void) {
-            
-            self.currentPerson_tilt = 6168.94;
 
-            float pan_speed = 100;
-            float upperNeckTilt_speed = 60;
-            
-            if (x > 0.55)
-                self.currentPerson_pan = self.currentPerson_pan - (pan_speed * (x-0.55));
-            if (x < 0.45)
-                self.currentPerson_pan = self.currentPerson_pan + (pan_speed * (0.45-x));
-            if (y > 0.55)
-                self.currentPerson_upperNeckTilt = self.currentPerson_upperNeckTilt + (upperNeckTilt_speed * (y-0.55));
-            if (y < 0.45)
-                self.currentPerson_upperNeckTilt = self.currentPerson_upperNeckTilt - (upperNeckTilt_speed * (0.45-y));
-            
-            // !!! CLAMP VALUES SO WE DON"T BREAK SOMETHING EXPENSIVE LIKE THE CAMERA ON THE HEAD !!!
-            if (self.currentPerson_upperNeckTilt > 7400) {
-                self.currentPerson_upperNeckTilt = 7400;
-            }
-            
-            [[self.torsoControlsViewController headPan] setFloatValue:self.currentPerson_pan];
-            [[self.torsoControlsViewController headUpperNeckTilt] setFloatValue:self.currentPerson_upperNeckTilt];
-        });
+        NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+        NSTimeInterval elapsed = self.lastPersonTrackingUpdateUptime > 0
+            ? now - self.lastPersonTrackingUpdateUptime
+            : 0.1;
+        // Face identity and legacy human observations can arrive on the same
+        // camera frame. Use one deterministic 10 Hz controller so duplicate
+        // detections cannot double the servo correction.
+        if (self.lastPersonTrackingUpdateUptime > 0 && elapsed < 0.1) {
+            return;
+        }
+        self.lastPersonTrackingUpdateUptime = now;
+
+        ROBPersonTrackingConfig configuration =
+            ROBPersonTrackingDefaultConfig();
+        configuration.panMinimumTarget = (int32_t)lround(
+            self.torsoControlsViewController.headPan.minValue
+        );
+        configuration.panMaximumTarget = (int32_t)lround(
+            self.torsoControlsViewController.headPan.maxValue
+        );
+        configuration.upperMinimumTarget = MAX(
+            ROBPersonTrackingMinimumUpperTarget,
+            (int32_t)lround(
+                self.torsoControlsViewController.headUpperNeckTilt.minValue
+            )
+        );
+        configuration.upperMaximumTarget = MIN(
+            ROBPersonTrackingMaximumUpperTarget,
+            (int32_t)lround(
+                self.torsoControlsViewController.headUpperNeckTilt.maxValue
+            )
+        );
+
+        ROBPersonTrackingResult result = {0};
+        if (!ROBPersonTrackingApply(
+                &configuration,
+                (int32_t)lround(self.torsoControlsViewController.headPan.doubleValue),
+                (int32_t)lround(
+                    self.torsoControlsViewController.headUpperNeckTilt.doubleValue
+                ),
+                x,
+                y,
+                elapsed,
+                &result
+            )) {
+            return;
+        }
+        self.currentPerson_pan = result.panTarget;
+        self.currentPerson_tilt = self.torsoControlsViewController.headTilt.floatValue;
+        self.currentPerson_upperNeckTilt = result.upperTarget;
+        self.torsoControlsViewController.headPan.integerValue = result.panTarget;
+        self.torsoControlsViewController.headUpperNeckTilt.integerValue =
+            result.upperTarget;
+    };
+
+    if (NSThread.isMainThread) {
+        updateTrackingTargets();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), updateTrackingTargets);
     }
-    
+
     return;
     
     

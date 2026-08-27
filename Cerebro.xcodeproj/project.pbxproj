@@ -107,6 +107,7 @@
 		C0B006022F4C000600000001 /* ROBMessagesBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B006012F4C000600000001 /* ROBMessagesBridge.swift */; };
 		C0B007032F4C000700000001 /* ROBBaseSerialConsoleWindowController.m in Sources */ = {isa = PBXBuildFile; fileRef = C0B007022F4C000700000001 /* ROBBaseSerialConsoleWindowController.m */; };
 		C0B008032F4C000800000001 /* ROBNeckSafetyPolicy.c in Sources */ = {isa = PBXBuildFile; fileRef = C0B008022F4C000800000001 /* ROBNeckSafetyPolicy.c */; };
+		C0B010032F4C001000000001 /* ROBPersonTrackingPolicy.c in Sources */ = {isa = PBXBuildFile; fileRef = C0B010022F4C001000000001 /* ROBPersonTrackingPolicy.c */; };
 		C0B009022F4C000900000001 /* ROBAppleMusicService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B009012F4C000900000001 /* ROBAppleMusicService.swift */; };
 		D4E100022F00000100000001 /* ROBRobotActionProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E100012F00000100000001 /* ROBRobotActionProtocol.swift */; };
 		D4E200022F00000100000001 /* ROBAutonomyCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E200012F00000100000001 /* ROBAutonomyCoordinator.swift */; };
@@ -205,6 +206,8 @@
 		C0D3B00A2F00000100000001 /* ROBTaskLaunchGuard.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBTaskLaunchGuard.h; sourceTree = "<group>"; };
 		C0B008012F4C000800000001 /* ROBNeckSafetyPolicy.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBNeckSafetyPolicy.h; sourceTree = "<group>"; };
 		C0B008022F4C000800000001 /* ROBNeckSafetyPolicy.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = ROBNeckSafetyPolicy.c; sourceTree = "<group>"; };
+		C0B010012F4C001000000001 /* ROBPersonTrackingPolicy.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBPersonTrackingPolicy.h; sourceTree = "<group>"; };
+		C0B010022F4C001000000001 /* ROBPersonTrackingPolicy.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = ROBPersonTrackingPolicy.c; sourceTree = "<group>"; };
 		C0D4B0012F00000100000001 /* ROBVideoProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBVideoProtocol.swift; sourceTree = "<group>"; };
 		C0D4B0022F00000100000001 /* ROBCameraH264Encoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBCameraH264Encoder.swift; sourceTree = "<group>"; };
 		C0D4B0032F00000100000001 /* ROBVideoServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBVideoServer.swift; sourceTree = "<group>"; };
@@ -594,6 +597,8 @@
 				D4A38F621FFC0C7600092A46 /* ROBSerialBox.m */,
 				C0B008012F4C000800000001 /* ROBNeckSafetyPolicy.h */,
 				C0B008022F4C000800000001 /* ROBNeckSafetyPolicy.c */,
+				C0B010012F4C001000000001 /* ROBPersonTrackingPolicy.h */,
+				C0B010022F4C001000000001 /* ROBPersonTrackingPolicy.c */,
 				D4066C5D22863031002ACAD1 /* ROBBaseControllerModel.h */,
 				D4066C5B22863009002ACAD1 /* ROBBaseControllerModel.m */,
 				D4A38F551FFBFD9900092A46 /* ROBSpeechBox.h */,
@@ -847,6 +852,7 @@
 				D4A38F4E1FFB2AEE00092A46 /* main.m in Sources */,
 				D4A38F631FFC0C7600092A46 /* ROBSerialBox.m in Sources */,
 				C0B008032F4C000800000001 /* ROBNeckSafetyPolicy.c in Sources */,
+				C0B010032F4C001000000001 /* ROBPersonTrackingPolicy.c in Sources */,
 				D4AB3DA42E1CF38D00EA2571 /* CameraViewController.swift in Sources */,
 				D4AB3DA52E1CF38D00EA2571 /* CameraManager.swift in Sources */,
 				D4AB3DA62F10000100EA2571 /* ROBHologramExporter.swift in Sources */,

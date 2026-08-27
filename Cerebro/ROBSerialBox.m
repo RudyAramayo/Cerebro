@@ -40,6 +40,7 @@ OUTPUT: ir sensor array in cm : (fl, fr, l, r, bl, br) from front left to back r
 */
 
 #import "ROBSerialBox.h"
+#import "ROBPersonTrackingPolicy.h"
 #import "ROBMainViewController.h"
 #import "ROBSpeechBox.h"
 #import "ROBBaseControllerModel.h"
@@ -2058,7 +2059,7 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         [source isEqualToString:kROBFollowTrackingClearanceSource]
         && panTarget == configuration.panCenterTarget
         && lowerTiltTarget == ROBNeckSafetyUprightLowerTarget
-        && desiredUpperTarget == ROBNeckSafetyUprightUpperTarget
+        && desiredUpperTarget == ROBPersonTrackingNeutralUpperTarget
         && includeLower
         && !allowSupervisedLowerRecovery;
     ROBNeckSafetyConfig effectiveConfiguration = configuration;
@@ -3572,15 +3573,12 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
 
     // The policy may first recenter pan, then move lower tilt, then settle.
     // Repeated calls are intentional and remain fully mediated by the shared
-    // collision gateway. When camera calibration is still unconfirmed, only
-    // this exact reviewed P-center/L-6011/U-6073 tuple may establish tracking
-    // clearance; no arbitrary automatic lower demand receives that authority.
+    // collision gateway. This exact reviewed P-center/L-6011/U-6869 tuple
+    // establishes tracking clearance and restores the camera-specific neutral
+    // used before recognized-face tracking joined this gateway. No arbitrary
+    // automatic lower demand receives that authority.
     int lowerReference = (int)lround(ROBNeckSafetyReferenceLowerTarget(&configuration));
-    int upperTarget = self.neckSafetyCalibrationConfirmed
-        ? (self.lastDesiredUpperNeckTargetIsKnown
-            ? self.lastDesiredUpperNeckTarget
-            : (int)self.commandedUpperNeckTiltTarget)
-        : ROBNeckSafetyUprightUpperTarget;
+    int upperTarget = ROBPersonTrackingNeutralUpperTarget;
     ROBNeckCommandDisposition disposition = [self
         applySafeNeckPanTarget:configuration.panCenterTarget
         lowerTiltTarget:lowerReference

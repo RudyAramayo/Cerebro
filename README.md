@@ -172,6 +172,11 @@ an OFF/unknown axis—the service runs a configurable, validated three-phase
 startup: pan stays OFF while lower/upper move to `6011`/`6073`, pan settles
 forward at `5799`, and only then does the neck move to the `lean_forward` pose
 at lower `7014` / upper `7698`.
+Recognized-face and human-blob following uses a calibrated centered-camera
+upper target of `6869`, an upright lower tracking guard of `6073`, and the
+existing tracking ceiling of `7400`. A normalized center dead band and a fixed
+10 Hz controller keep detector frame rate and duplicate observations from
+changing the servo response.
 The **Servos → Open Servo Control…** window edits named camera positions,
 servo-sequence phases, and relative `YES`/`NO` gestures. Gesture deltas are
 applied around the current pose, so a nod or head shake remains relative to

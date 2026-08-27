@@ -42,7 +42,9 @@ physical build.
 | Above-6495 pan | −15° to +2.1° | asymmetric forward pan limits for a known lower-tilt target above the clearance band |
 | Unknown/off pan | −15° to +2.1° | fail-safe asymmetric pan limits when lower tilt has no known active command |
 | Lower clearance/up | 6011 | fixed lower-neck camera-leveling reference and temporary OFF/unknown startup lift |
-| Upper upright | 6073 | fixed neutral upper-neck camera target and Vision tracking center |
+| Upper upright | 6073 | fixed upright/Vision center target and person-tracking lower guard |
+| Person-follow upper center | 6869 | calibrated upper-neck target used when a face/blob is first centered |
+| Person-follow upper ceiling | 7400 | tracking-only ceiling below the physical upper hard limit |
 | Default forward pan | 5799 | original torso-control forward resting target |
 | Default lower rest | 7014 | original safe resting target toward the rear of the robot |
 | Default upper rest | 6073 | calibrated upright upper-neck target used by the `upright` camera position |
@@ -57,9 +59,9 @@ smaller distance from pan center to either pan bound, divided by targets per
 degree; the shipped suggestions therefore describe ±60°.
 
 Before selecting **Apply**, physically confirm the pan center and scale, the
-inclusive `5000`–`6495` lower-tilt clearance band, clearance/neutral targets
-`6011`/`6073`, resting defaults `5799`/`7014`/`6073`, both hard ranges, and
-the counter-gain sign.
+inclusive `5000`–`6495` lower-tilt clearance band, clearance/upright targets
+`6011`/`6073`, person-follow upper target `6869`, resting defaults
+`5799`/`7014`/`6073`, both hard ranges, and the counter-gain sign.
 Command all three neck channels off and confirm the readouts show
 `P OFF`, `L OFF`, and `U OFF`; Cerebro rejects live calibration changes while
 any target is nonzero or any readout is `UNKNOWN`. A reconnect changes all
@@ -86,7 +88,7 @@ explicitly supervised calibration jog. An explicit pan-slider action may
 authorize the same exact-demand recovery only when lower tilt is enabled and
 its slider target is inside `5000`–`6495`; upper camera controls cannot qualify.
 Recognized-person tracking has one separate reviewed clearance request: center
-pan, lower `6011`, and upper `6073`. It may establish only that exact tuple
+pan, lower `6011`, and upper `6869`. It may establish only that exact tuple
 without enabling arbitrary uncalibrated lower motion, and tracking remains
 paused until the lower, pan, and upper command deadlines have settled.
 After that exact lower target is successfully written and its command-space
@@ -94,6 +96,18 @@ settle interval completes, pan uses the corresponding lower-target envelope
 even while the separate camera/counter-rotation calibration remains
 unconfirmed. The status identifies this mode. It does not energize an
 unverified compensation direction autonomously.
+
+Once the clearance pose settles, one frame-rate-independent proportional
+controller is shared by recognized faces and legacy human blobs. It targets
+normalized image center `(0.5, 0.5)`, ignores an 8-percent-wide central band
+on each axis to prevent detector jitter, and accepts at most one correction
+every 0.1 seconds. Horizontal and vertical response rates are `1000` and `800`
+raw target units per second at a normalized error of `1.0`. A delayed or newly
+reacquired observation is capped to a 0.2-second correction. Upper tracking
+starts at `6869`, may look down only as far as the known upright target `6073`,
+and retains the existing tracking ceiling `7400`; the shared gateway still
+applies the configured physical hard bounds. These tracking values are integer
+Maestro command targets, not measured joint angles.
 
 ## OFF/unknown safe startup
 
@@ -380,5 +394,9 @@ cc -std=c11 -Wall -Wextra -Werror \
   Cerebro/ROBNeckSafetyPolicy.c Tests/ROBNeckSafetyPolicyFixtureTests.c \
   -lm -o /tmp/ROBNeckSafetyPolicyFixtureTests
 /tmp/ROBNeckSafetyPolicyFixtureTests
+cc -std=c11 -Wall -Wextra -Werror \
+  Cerebro/ROBPersonTrackingPolicy.c Tests/ROBPersonTrackingPolicyFixtureTests.c \
+  -lm -o /tmp/ROBPersonTrackingPolicyFixtureTests
+/tmp/ROBPersonTrackingPolicyFixtureTests
 python3 Tests/ROBNeckSafetyStaticTests.py
 ```

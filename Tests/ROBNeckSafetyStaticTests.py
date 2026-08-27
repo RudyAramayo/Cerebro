@@ -311,7 +311,7 @@ def check_lower_clearance_threshold(
             "ROBNeckSafetyConfig configuration", 1
         )[0]
         and "kROBFollowTrackingClearanceSource" in follow
-        and "ROBNeckSafetyUprightUpperTarget" in follow
+        and "ROBPersonTrackingNeutralUpperTarget" in follow
         and "fullPanEnvelopeIsSettled" in follow
         and "pendingPanEnvelopeLowerTarget == ROBNeckSafetyTargetOff" in follow,
         "Person-follow pose preparation no longer uses the complete fixed "
@@ -324,9 +324,9 @@ def check_lower_clearance_threshold(
         and "&& !reviewedFollowClearanceCommand" in compact_gateway
         and "panTarget == configuration.panCenterTarget" in gateway
         and "lowerTiltTarget == ROBNeckSafetyUprightLowerTarget" in gateway
-        and "desiredUpperTarget == ROBNeckSafetyUprightUpperTarget" in gateway,
+        and "desiredUpperTarget == ROBPersonTrackingNeutralUpperTarget" in gateway,
         "Unconfirmed tracking clearance must be limited to the reviewed "
-        "center/6011/6073 tuple",
+        "center/6011/6869 tuple",
     )
     require(
         "lastVisionNeckTiltTarget = ROBNeckSafetyUprightUpperTarget;"
