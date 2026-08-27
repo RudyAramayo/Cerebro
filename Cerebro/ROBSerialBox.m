@@ -3776,6 +3776,45 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     
 }
 
+- (int)visionUpperNeutralTargetForLowerTarget:(int)lowerTarget
+                                 configuration:(ROBNeckSafetyConfig)configuration
+{
+    const int uprightLower = ROBNeckSafetyUprightLowerTarget;
+    const int uprightUpper = MAX(
+        configuration.upperMinimumTarget,
+        MIN(configuration.upperMaximumTarget,
+            ROBNeckSafetyUprightUpperTarget)
+    );
+    ROBServoCameraPosition *leanForward = [[ROBServoControlStore shared]
+        cameraPositionNamed:@"lean_forward"];
+    if (leanForward == nil
+        || leanForward.lowerTarget == uprightLower
+        || leanForward.lowerTarget < configuration.lowerMinimumTarget
+        || leanForward.lowerTarget > configuration.lowerMaximumTarget
+        || leanForward.upperTarget < configuration.upperMinimumTarget
+        || leanForward.upperTarget > configuration.upperMaximumTarget) {
+        return uprightUpper;
+    }
+
+    // The camera mount needs a different raw upper target when the lower neck
+    // leans forward. Blend between the two reviewed poses so lower-neck motion
+    // cannot switch the camera neutral abruptly at a posture threshold.
+    int32_t interpolatedUpper = uprightUpper;
+    if (!ROBNeckSafetyInterpolateUpperTargetForLowerTarget(
+            lowerTarget,
+            uprightLower,
+            uprightUpper,
+            (int32_t)leanForward.lowerTarget,
+            (int32_t)leanForward.upperTarget,
+            configuration.upperMinimumTarget,
+            configuration.upperMaximumTarget,
+            &interpolatedUpper
+        )) {
+        return uprightUpper;
+    }
+    return (int)interpolatedUpper;
+}
+
 - (void)applyVisionNeckPan:(float)pan tilt:(float)tilt
 {
     if (!isfinite(pan)
@@ -3791,9 +3830,13 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         || now < self.gestureNeckAuthorityUntil) {
         return;
     }
+    ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
+    int postureUpperNeutral = [self
+        visionUpperNeutralTargetForLowerTarget:
+            (int)self.commandedLowerNeckTiltTarget
+        configuration:configuration];
     BOOL acquiringVisionAuthority = now >= self.visionNeckAuthorityUntil;
     if (acquiringVisionAuthority) {
-        ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
         self.lastVisionNeckPanTarget = self.commandedNeckPanTarget != ROBNeckSafetyTargetOff
             ? (int)self.commandedNeckPanTarget
             : configuration.panCenterTarget;
@@ -3802,7 +3845,7 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         } else if (self.commandedUpperNeckTiltTarget != ROBNeckSafetyTargetOff) {
             self.lastVisionNeckTiltTarget = (int)self.commandedUpperNeckTiltTarget;
         } else {
-            self.lastVisionNeckTiltTarget = ROBNeckSafetyUprightUpperTarget;
+            self.lastVisionNeckTiltTarget = postureUpperNeutral;
         }
     }
     self.visionNeckAuthorityUntil = now + kROBNeckVisionAuthoritySeconds;
@@ -3812,7 +3855,6 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     // upper camera tilt used by the existing face tracker.
     float boundedPan = MAX(-1.0f, MIN(1.0f, pan));
     float boundedTilt = MAX(-1.0f, MIN(1.0f, tilt));
-    ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
     int32_t requestedPanTarget = configuration.panCenterTarget;
     double requestedPanDegrees = boundedPan
         * ROBNeckSafetyFullPanDegrees(&configuration);
@@ -3824,12 +3866,12 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         return;
     }
     int requestedPan = requestedPanTarget;
-    double uprightUpper = (double)ROBNeckSafetyUprightUpperTarget;
+    double postureUpper = (double)postureUpperNeutral;
     double tiltTargetSpan = boundedTilt >= 0.0f
-        ? uprightUpper - (double)configuration.upperMinimumTarget
-        : (double)configuration.upperMaximumTarget - uprightUpper;
+        ? postureUpper - (double)configuration.upperMinimumTarget
+        : (double)configuration.upperMaximumTarget - postureUpper;
     int requestedTilt = (int)lround(
-        uprightUpper - (double)boundedTilt * tiltTargetSpan
+        postureUpper - (double)boundedTilt * tiltTargetSpan
     );
     // renderController runs at 10 Hz. Limit each accepted step so a tracking
     // discontinuity or rapid head turn cannot command a full-range servo jump.

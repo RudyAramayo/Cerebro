@@ -338,14 +338,25 @@ def check_lower_clearance_threshold(
         "Unconfirmed tracking clearance must be limited to the reviewed "
         "center/6011/7375 tuple",
     )
+    vision_neutral = objective_c_method(
+        serial_source, "visionUpperNeutralTargetForLowerTarget:"
+    )
+    vision = objective_c_method(serial_source, "applyVisionNeckPan:")
     require(
-        "lastVisionNeckTiltTarget = ROBNeckSafetyUprightUpperTarget;"
-            in serial_source
-        and "uprightUpper = (double)ROBNeckSafetyUprightUpperTarget" in serial_source
-        and "configuration.upperMinimumTarget" in serial_source
-        and "configuration.upperMaximumTarget" in serial_source
+        'cameraPositionNamed:@"lean_forward"' in vision_neutral
+        and "ROBNeckSafetyUprightLowerTarget" in vision_neutral
+        and "ROBNeckSafetyUprightUpperTarget" in vision_neutral
+        and "leanForward.lowerTarget" in vision_neutral
+        and "leanForward.upperTarget" in vision_neutral
+        and "ROBNeckSafetyInterpolateUpperTargetForLowerTarget(" in vision_neutral
+        and "postureUpperNeutral = [self" in vision
+        and "visionUpperNeutralTargetForLowerTarget:" in vision
+        and "postureUpper = (double)postureUpperNeutral" in vision
+        and "configuration.upperMinimumTarget" in vision
+        and "configuration.upperMaximumTarget" in vision
         and "6045" not in serial_source,
-        "Vision tracking no longer uses 6906 as its neutral upper-neck target",
+        "Vision tracking no longer keeps separate, smoothly blended upright "
+        "and lean-forward camera neutral targets",
     )
     require(
         "ROBNeckSafetyUprightLowerTarget" in torso_source

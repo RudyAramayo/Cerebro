@@ -191,6 +191,42 @@ double ROBNeckSafetyFullPanDegrees(const ROBNeckSafetyConfig *config) {
     return fmin(negativeCapacity, positiveCapacity);
 }
 
+bool ROBNeckSafetyInterpolateUpperTargetForLowerTarget(
+    int32_t lowerTarget,
+    int32_t firstLowerTarget,
+    int32_t firstUpperTarget,
+    int32_t secondLowerTarget,
+    int32_t secondUpperTarget,
+    int32_t upperMinimumTarget,
+    int32_t upperMaximumTarget,
+    int32_t *upperTargetOut
+) {
+    if (upperTargetOut == NULL
+        || firstLowerTarget == secondLowerTarget
+        || !ROBNeckSafetyTargetBoundsAreValid(
+            upperMinimumTarget,
+            upperMaximumTarget
+        )
+        || firstUpperTarget < upperMinimumTarget
+        || firstUpperTarget > upperMaximumTarget
+        || secondUpperTarget < upperMinimumTarget
+        || secondUpperTarget > upperMaximumTarget) {
+        return false;
+    }
+
+    double progress = ((double)lowerTarget - (double)firstLowerTarget)
+        / ((double)secondLowerTarget - (double)firstLowerTarget);
+    progress = fmax(0.0, fmin(1.0, progress));
+    const double interpolated = (double)firstUpperTarget
+        + progress * ((double)secondUpperTarget - (double)firstUpperTarget);
+    *upperTargetOut = ROBNeckSafetyClampTarget(
+        (int32_t)lround(interpolated),
+        upperMinimumTarget,
+        upperMaximumTarget
+    );
+    return true;
+}
+
 double ROBNeckSafetyReferenceLowerTarget(const ROBNeckSafetyConfig *config) {
     if (!ROBNeckSafetyConfigIsValid(config)) {
         return NAN;

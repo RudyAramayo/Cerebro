@@ -42,7 +42,8 @@ physical build.
 | Above-6495 pan | −15° to +2.1° | asymmetric forward pan limits for a known lower-tilt target above the clearance band |
 | Unknown/off pan | −15° to +2.1° | fail-safe asymmetric pan limits when lower tilt has no known active command |
 | Lower clearance/up | 6011 | fixed lower-neck camera-leveling reference and temporary OFF/unknown startup lift |
-| Upper upright | 6906 | front-camera upright and Vision center target, offset about +833 target units for the approximately -25° camera mount |
+| Upper upright | 6906 | front-camera center target at lower upright, offset about +833 target units for the approximately -25° camera mount |
+| Lean-forward camera | 7698 | shipped camera center anchor at lower 7014; operator-editable in the servo catalog |
 | Authorized-follow upper floor | 7350 | lower edge of the reviewed full-pan follow-clearance pose |
 | Authorized-follow upper center | 7375 | camera target used only by controller-authorized follow preparation |
 | Authorized-follow upper ceiling | 7400 | upper edge of the reviewed full-pan follow-clearance pose |
@@ -408,7 +409,10 @@ because there is no sensor data from which to level the first move.
   uses the same safety gateway. Vision is ignored until calibration and all
   current-session command state are known and lower tilt is active. It slews
   pan and upper tilt by at most 80 raw target units per 0.1-second controller
-  tick. Vision does not command lower tilt.
+  tick. Its zero-tilt camera target is posture-aware: upper `6906` at lower
+  upright `6011`, the saved `lean_forward` upper target (`7698` when shipped)
+  at lower `7014`, and a linear blend between the two. Vision does not command
+  lower tilt.
 - Once Vision has taken the neck lease, passive torso updates stay out of the
   way. Returning to torso control requires another explicit neck operator
   action.

@@ -188,7 +188,9 @@ non-preemptive safe centered sequence returns the neck to `lean_forward`.
 Vision runs on the raw, unmirrored sample buffer, so a face on ROB's physical
 right lowers the installed servo target and pans right. Each acquisition
 preserves the current uncompensated upper-camera demand instead of jumping to a
-fixed tracking tilt. Recognized
+fixed tracking tilt. Vision/follow tilt uses the saved posture anchors: upper
+`6906` at lower upright `6011`, and the `lean_forward` upper target (`7698` by
+default) at lower `7014`, with a smooth interpolation between them. Recognized
 faces take priority over legacy human blobs, while the generic face detector
 runs only as an acquisition fallback and body boxes run only when neither face
 source is active. The observation filter follows a face approaching center

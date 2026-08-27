@@ -651,8 +651,115 @@ static void testMaestroMotionDuration(void) {
         10000, 6000, 40, 4), 1.8, 0.000001);
 }
 
+static void testPostureSpecificUpperInterpolation(void) {
+    const int32_t uprightLower = 6011;
+    const int32_t uprightUpper = 6906;
+    const int32_t leanForwardLower = 7014;
+    const int32_t leanForwardUpper = 7698;
+    int32_t upper = 0;
+
+    EXPECT_TRUE(ROBNeckSafetyInterpolateUpperTargetForLowerTarget(
+        uprightLower,
+        uprightLower,
+        uprightUpper,
+        leanForwardLower,
+        leanForwardUpper,
+        4300,
+        7790,
+        &upper
+    ));
+    EXPECT_INT(upper, uprightUpper);
+    EXPECT_TRUE(ROBNeckSafetyInterpolateUpperTargetForLowerTarget(
+        leanForwardLower,
+        uprightLower,
+        uprightUpper,
+        leanForwardLower,
+        leanForwardUpper,
+        4300,
+        7790,
+        &upper
+    ));
+    EXPECT_INT(upper, leanForwardUpper);
+    EXPECT_TRUE(ROBNeckSafetyInterpolateUpperTargetForLowerTarget(
+        6512,
+        uprightLower,
+        uprightUpper,
+        leanForwardLower,
+        leanForwardUpper,
+        4300,
+        7790,
+        &upper
+    ));
+    EXPECT_INT(upper, 7302);
+    EXPECT_TRUE(ROBNeckSafetyInterpolateUpperTargetForLowerTarget(
+        5000,
+        uprightLower,
+        uprightUpper,
+        leanForwardLower,
+        leanForwardUpper,
+        4300,
+        7790,
+        &upper
+    ));
+    EXPECT_INT(upper, uprightUpper);
+    EXPECT_TRUE(ROBNeckSafetyInterpolateUpperTargetForLowerTarget(
+        7500,
+        uprightLower,
+        uprightUpper,
+        leanForwardLower,
+        leanForwardUpper,
+        4300,
+        7790,
+        &upper
+    ));
+    EXPECT_INT(upper, leanForwardUpper);
+    EXPECT_TRUE(ROBNeckSafetyInterpolateUpperTargetForLowerTarget(
+        uprightLower,
+        leanForwardLower,
+        leanForwardUpper,
+        uprightLower,
+        uprightUpper,
+        4300,
+        7790,
+        &upper
+    ));
+    EXPECT_INT(upper, uprightUpper);
+
+    EXPECT_FALSE(ROBNeckSafetyInterpolateUpperTargetForLowerTarget(
+        uprightLower,
+        uprightLower,
+        uprightUpper,
+        uprightLower,
+        leanForwardUpper,
+        4300,
+        7790,
+        &upper
+    ));
+    EXPECT_FALSE(ROBNeckSafetyInterpolateUpperTargetForLowerTarget(
+        uprightLower,
+        uprightLower,
+        uprightUpper,
+        leanForwardLower,
+        8000,
+        4300,
+        7790,
+        &upper
+    ));
+    EXPECT_FALSE(ROBNeckSafetyInterpolateUpperTargetForLowerTarget(
+        uprightLower,
+        uprightLower,
+        uprightUpper,
+        leanForwardLower,
+        leanForwardUpper,
+        4300,
+        7790,
+        NULL
+    ));
+}
+
 int main(void) {
     testConfigurationValidation();
+    testPostureSpecificUpperInterpolation();
     testLowerClearancePanEnvelope();
     testPanDegreeConversion();
     testPanApplicationAndOffSentinel();

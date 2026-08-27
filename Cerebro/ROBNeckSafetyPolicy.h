@@ -128,6 +128,20 @@ bool ROBNeckSafetyConfigIsValid(const ROBNeckSafetyConfig *config);
 // Returns NAN when config is invalid.
 double ROBNeckSafetyFullPanDegrees(const ROBNeckSafetyConfig *config);
 
+// Linearly blends two calibrated upper-camera targets from the active lower
+// target, clamping before the first posture and after the second. The lower
+// anchors may be ordered in either direction.
+bool ROBNeckSafetyInterpolateUpperTargetForLowerTarget(
+    int32_t lowerTarget,
+    int32_t firstLowerTarget,
+    int32_t firstUpperTarget,
+    int32_t secondLowerTarget,
+    int32_t secondUpperTarget,
+    int32_t upperMinimumTarget,
+    int32_t upperMaximumTarget,
+    int32_t *upperTargetOut
+);
+
 // Calibrated upright lower-neck target used as the counter-rotation reference.
 // Returns NAN when config is invalid.
 double ROBNeckSafetyReferenceLowerTarget(const ROBNeckSafetyConfig *config);
