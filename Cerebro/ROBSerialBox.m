@@ -2475,10 +2475,9 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         || !self.neckCommandStateKnown
         || self.commandedNeckPanTarget == ROBNeckSafetyTargetOff
         || self.commandedLowerNeckTiltTarget == ROBNeckSafetyTargetOff
-        || self.commandedUpperNeckTiltTarget == ROBNeckSafetyTargetOff
-        || !self.neckSafetyCalibrationConfirmed) {
+        || self.commandedUpperNeckTiltTarget == ROBNeckSafetyTargetOff) {
         self.neckCommandSafetyStatus =
-            @"Person tracking posture sequence requires a known active calibrated neck.";
+            @"Person tracking posture sequence requires a known active neck.";
         return ROBNeckCommandDispositionRejected;
     }
     if (self.safeNeckStartupInProgress

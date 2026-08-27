@@ -124,6 +124,15 @@ require(
     and "coupledExactPoseCommand" in serial,
     "Automatic postures no longer stay inside the shared coupled neck safety gateway.",
 )
+posture_request = serial.split(
+    "- (ROBNeckCommandDisposition)requestPersonTrackingPostureSequence:", 1
+)[1].split("- (ROBNeckCommandDisposition)applySafeNeckPanTarget:", 1)[0]
+require(
+    "neckSafetyCalibrationConfirmed" not in posture_request
+    and "requires a known active neck" in posture_request
+    and "exactConfiguration.cameraLevelingEnabled = false" in posture_request,
+    "Reviewed exact distance postures can again be blocked by optional camera-leveling calibration.",
+)
 require(
     "personTrackingPostureDeadline = now + 30.0" in serial
     and "schedulePersonTrackingPostureAdvance" in serial

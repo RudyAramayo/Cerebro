@@ -155,6 +155,8 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 /// Runs only the reviewed centered lean_forward/upright/lean_back tracking
 /// orders. Each exact saved pose advances through the shared pan-first gateway
 /// and cannot preempt manual, gesture, Vision, startup, or upright-edge motion.
+/// These exact raw poses remain eligible while optional counter-rotation
+/// calibration is unconfirmed; arbitrary calibrated gesture motion does not.
 - (ROBNeckCommandDisposition)requestPersonTrackingPostureSequence:
     (NSArray<NSString *> *)positionNames;
 
