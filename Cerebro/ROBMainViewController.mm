@@ -3498,16 +3498,21 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             self.filteredPersonTrackingX >= configuration.centerX
                 ? uprightRight
                 : uprightLeft;
+        BOOL requestedEndpointIsReviewedUpright =
+            requestedUprightEndpoint != nil
+            && requestedUprightEndpoint.lowerTarget
+                == ROBNeckSafetyUprightLowerTarget
+            && requestedUprightEndpoint.upperTarget
+                == ROBNeckSafetyUprightUpperTarget;
         BOOL requestedEndpointHasFullClearance =
             namedPanEndpointsAvailable
-            && requestedUprightEndpoint != nil
+            && requestedEndpointIsReviewedUpright
             && ROBNeckSafetyLowerTargetHasFullPanClearance(
                 &neckConfiguration,
                 (int32_t)requestedUprightEndpoint.lowerTarget
             );
         BOOL uprightTransitionAuthorized =
             requestedEndpointHasFullClearance
-            && self.serialBox.neckSafetyCalibrationConfirmed
             && self.torsoControlsViewController.headPan_enabled.state
                 == NSControlStateValueOn
             && self.serialBox.lowerNeckTiltCommandKnown
@@ -3560,6 +3565,13 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                 );
                 return;
             }
+            NSLog(
+                @"Person tracking upright endpoint rejected P%ld L%ld U%ld: %@",
+                (long)requestedUprightEndpoint.panTarget,
+                (long)requestedUprightEndpoint.lowerTarget,
+                (long)requestedUprightEndpoint.upperTarget,
+                self.serialBox.neckCommandSafetyStatus
+            );
         }
         int32_t lowerTarget = currentLowerTarget;
         if (now - self.lastPersonTrackingDiagnosticsUptime >= 1.0) {

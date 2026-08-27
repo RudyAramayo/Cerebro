@@ -103,7 +103,8 @@ assert "prepareNeckForPersonTracking" not in person_tracking
 assert "prepareNeckForPersonFollow" not in person_tracking
 assert "commandedLowerNeckTiltTarget" in person_tracking
 assert "uprightTransitionAuthorized" in person_tracking
-assert "neckSafetyCalibrationConfirmed" in person_tracking
+assert "ROBNeckSafetyUprightLowerTarget" in person_tracking
+assert "ROBNeckSafetyUprightUpperTarget" in person_tracking
 assert "currentNeckPanMinimumDegrees" in person_tracking
 assert "currentNeckPanMaximumDegrees" in person_tracking
 assert "personTrackingUpperBaselineTarget" in person_tracking

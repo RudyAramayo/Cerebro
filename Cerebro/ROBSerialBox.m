@@ -2128,6 +2128,32 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         return ROBNeckCommandDispositionRejected;
     }
 
+    ROBServoControlStore *servoControlStore = [ROBServoControlStore shared];
+    ROBServoCameraPosition *uprightRight = [servoControlStore
+        cameraPositionNamed:@"fully_upright_right"];
+    ROBServoCameraPosition *uprightLeft = [servoControlStore
+        cameraPositionNamed:@"fully_upright_left"];
+    BOOL matchesSavedRight = uprightRight != nil
+        && panTarget == uprightRight.panTarget
+        && lowerTarget == uprightRight.lowerTarget
+        && upperTarget == uprightRight.upperTarget;
+    BOOL matchesSavedLeft = uprightLeft != nil
+        && panTarget == uprightLeft.panTarget
+        && lowerTarget == uprightLeft.lowerTarget
+        && upperTarget == uprightLeft.upperTarget;
+    BOOL isReviewedUprightPose =
+        lowerTarget == ROBNeckSafetyUprightLowerTarget
+        && upperTarget == ROBNeckSafetyUprightUpperTarget;
+    if ((!matchesSavedRight && !matchesSavedLeft)
+        || !isReviewedUprightPose) {
+        self.personTrackingUprightTransitionActive = NO;
+        self.personTrackingUprightAdvanceScheduled = NO;
+        self.personTrackingUprightGeneration += 1;
+        self.neckCommandSafetyStatus =
+            @"Person tracking endpoint must match a saved reviewed fully-upright pose.";
+        return ROBNeckCommandDispositionRejected;
+    }
+
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
     BOOL wasContinuingTransition = self.personTrackingUprightTransitionActive
         && [self.neckCommandSource
@@ -2155,13 +2181,12 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     }
     if (!continuingTransition) {
         if (!self.maestroConnectionValid
-            || !self.neckSafetyCalibrationConfirmed
             || !self.neckCommandStateKnown
             || self.commandedNeckPanTarget == ROBNeckSafetyTargetOff
             || self.commandedLowerNeckTiltTarget == ROBNeckSafetyTargetOff
             || self.commandedUpperNeckTiltTarget == ROBNeckSafetyTargetOff) {
             self.neckCommandSafetyStatus =
-                @"Person tracking upright endpoint requires a calibrated, known active neck.";
+                @"Person tracking upright endpoint requires a known active neck.";
             return ROBNeckCommandDispositionRejected;
         }
         if (self.safeNeckStartupInProgress
@@ -2430,7 +2455,8 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         && !calibrationConfirmed
         && !supervisedLowerRecovery
         && !safeStartupFinalCommand
-        && !reviewedFollowClearanceCommand;
+        && !reviewedFollowClearanceCommand
+        && !personTrackingUprightCommand;
     BOOL lowerHeldForRecovery = lowerChangeRequested
         && boundedLower != ROBNeckSafetyTargetOff
         && (!self.lowerNeckTiltCommandKnown
@@ -2962,7 +2988,8 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     if (!calibrationConfirmed
         && !safeStartupCommand
         && !servoControlCommand
-        && !reviewedFollowClearanceCommand) {
+        && !reviewedFollowClearanceCommand
+        && !personTrackingUprightCommand) {
         [status addObject:[NSString stringWithFormat:
             @"CALIBRATION REQUIRED: AUTOMATIC LOWER MOTION HELD; PAN %.1f°…%+.1f°",
             panResult.allowedPanMinimumDegrees,

@@ -28,6 +28,9 @@ def main() -> None:
     window = (APP / "ROBServoControlWindowController.swift").read_text()
     serial_header = (APP / "ROBSerialBox.h").read_text()
     serial_source = (APP / "ROBSerialBox.m").read_text()
+    tracking_endpoint_method = serial_source.split(
+        "- (ROBNeckCommandDisposition)requestPersonTrackingUprightPanTarget:", 1
+    )[1].split("- (ROBNeckCommandDisposition)applySafeNeckPanTarget:", 1)[0]
     torso_source = (APP / "ROBTorsoControlsViewController.m").read_text()
     app_delegate = (APP / "AppDelegate.m").read_text()
     project = PROJECT.read_text()
@@ -137,6 +140,16 @@ def main() -> None:
         and "personTrackingUprightOwnsNeck" in serial_source
         and "schedulePersonTrackingUprightTransitionAdvance" in serial_source,
         "Face tracking no longer owns a safety-staged exact upright endpoint animation",
+    )
+    require(
+        'cameraPositionNamed:@"fully_upright_right"' in tracking_endpoint_method
+        and 'cameraPositionNamed:@"fully_upright_left"' in tracking_endpoint_method
+        and "ROBNeckSafetyUprightLowerTarget" in tracking_endpoint_method
+        and "ROBNeckSafetyUprightUpperTarget" in tracking_endpoint_method
+        and "!self.neckSafetyCalibrationConfirmed" not in tracking_endpoint_method
+        and "&& !personTrackingUprightCommand" in serial_source,
+        "The reviewed saved upright endpoint can no longer pass the "
+        "unconfirmed-calibration lower-motion hold",
     )
     require(
         "ROBServoControlNeckDemandDidChangeNotification" in serial_header
