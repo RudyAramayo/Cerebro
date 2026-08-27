@@ -3440,9 +3440,14 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     BOOL servoControlOwnsNeck = !operatorInitiated
         && [self.neckCommandSource isEqualToString:kROBServoControlSource]
         && now < self.manualNeckOverrideUntil;
+    BOOL followClearanceOwnsNeck = !operatorInitiated
+        && [self.neckCommandSource
+            isEqualToString:kROBFollowTrackingClearanceSource]
+        && !self.personFollowTrackingPrepared;
     if (!servoControlOwnsNeck
         && !gestureOwnsNeck
         && !visionOwnsNeck
+        && !followClearanceOwnsNeck
         && torsoMayResumeNeck) {
         NSString *source = (operatorInitiated || now < self.manualNeckOverrideUntil)
             ? @"Torso manual"

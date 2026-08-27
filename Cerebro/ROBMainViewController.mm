@@ -3267,6 +3267,18 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 {
     NSAssert(NSThread.isMainThread, @"Person tracking targets are main-thread owned");
     if (![self.serialBox prepareNeckForPersonFollow]) {
+        NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+        if (now - self.lastPersonTrackingDiagnosticsUptime >= 1.0) {
+            self.lastPersonTrackingDiagnosticsUptime = now;
+            NSLog(
+                @"Person tracking waiting: source=%@ pan=%ld lower=%ld upper=%ld status=%@",
+                self.serialBox.neckCommandSource ?: @"Unknown",
+                (long)self.serialBox.commandedNeckPanTarget,
+                (long)self.serialBox.commandedLowerNeckTiltTarget,
+                (long)self.serialBox.commandedUpperNeckTiltTarget,
+                self.serialBox.neckCommandSafetyStatus ?: @"No safety status"
+            );
+        }
         self.isNeckLifted = NO;
         self.lastPersonTrackingUpdateUptime = 0;
         return NO;

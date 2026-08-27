@@ -447,6 +447,14 @@ def check_single_physical_neck_gateway(serial_source: str) -> None:
         "corresponding safe-gateway arguments",
     )
     require(
+        "BOOL followClearanceOwnsNeck = !operatorInitiated" in torso
+        and "isEqualToString:kROBFollowTrackingClearanceSource" in compact_torso
+        and "!self.personFollowTrackingPrepared" in compact_torso
+        and "&& !followClearanceOwnsNeck" in compact_torso,
+        "The passive torso renderer must not overwrite the staged person-follow "
+        "clearance pose before its settle latch is ready",
+    )
+    require(
         vision.count("applySafeNeckPanTarget:") == 1,
         "Vision neck control no longer submits motion through the safe gateway",
     )

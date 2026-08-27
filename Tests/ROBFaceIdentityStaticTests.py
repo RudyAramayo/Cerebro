@@ -105,6 +105,7 @@ tracking_prepare = main.rsplit("- (BOOL)prepareNeckForPersonTracking", 1)[1].spl
 assert "prepareNeckForPersonFollow" in tracking_prepare
 assert "commandedLowerNeckTiltTarget" in tracking_prepare
 assert "ROBPersonTrackingNeutralUpperTarget" in tracking_prepare
+assert "Person tracking waiting:" in tracking_prepare
 human_tracking = main.split("- (void) didTrackHumans:", 1)[1].split(
     "#pragma mark - AudioInputMethods", 1
 )[0]
