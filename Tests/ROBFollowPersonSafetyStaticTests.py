@@ -13,6 +13,10 @@ assert "Waiting for fresh authenticated RPLidar clearance" in coordinator
 assert "delayed Insta360" in coordinator and "requestBaseStop()" in coordinator
 insta_extension = coordinator.split("extension ROBFollowPersonCoordinator: ROBInsta360VideoFrameConsumer", 1)[1]
 assert "applyLeftTread" not in insta_extension
+assert "insta360OrientationCalibrated" not in insta_extension
+assert "insta360ForwardMarkerDegrees" not in insta_extension
+assert "(best.0.boundingBox.midX - 0.5) * 360" in insta_extension
+assert "Float(-deltaDegrees / 75)" in insta_extension
 assert "ROBNeckSafetyReferenceLowerTarget" in serial
 assert "allowSupervisedLowerRecovery:NO" in serial
 assert "kROBFollowTrackingClearanceSource" in serial

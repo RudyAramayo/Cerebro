@@ -700,7 +700,6 @@ extension ROBFollowPersonCoordinator: ROBInsta360VideoFrameConsumer {
                   ProcessInfo.processInfo.systemUptime - self.latestLockUptime > 0.45,
                   capturedAtUptime - self.lastInstaAnalysisUptime >= 1.5,
                   let targetFeaturePrint = self.targetFeaturePrint,
-                  ROBGeminiVideoSourceSettings.shared.insta360OrientationCalibrated,
                   let image = CIImage(data: jpegData) else { return }
             self.lastInstaAnalysisUptime = capturedAtUptime
             let request = VNDetectHumanRectanglesRequest()
@@ -716,9 +715,10 @@ extension ROBFollowPersonCoordinator: ROBInsta360VideoFrameConsumer {
             guard let best = scored.first, best.1 <= 16,
                   scored.count == 1 || scored[1].1 - best.1 >= 2 else { return }
 
-            let marker = CGFloat(ROBGeminiVideoSourceSettings.shared.insta360ForwardMarkerDegrees)
-            let candidateDegrees = best.0.boundingBox.midX * 360
-            let deltaDegrees = Self.normalizedDegrees(candidateDegrees - marker)
+            // The stitched frame follows the robot's face, so its center is
+            // the live forward bearing. Reacquisition is relative to the
+            // current neck direction and never needs orientation calibration.
+            let deltaDegrees = (best.0.boundingBox.midX - 0.5) * 360
             let coarseTorso = Self.clamp(Float(deltaDegrees / 120), -0.75, 0.75)
             let coarseNeck = Self.clamp(Float(-deltaDegrees / 75), -1, 1)
             self.torsoDemand = coarseTorso
@@ -731,10 +731,4 @@ extension ROBFollowPersonCoordinator: ROBInsta360VideoFrameConsumer {
         }
     }
 
-    private static func normalizedDegrees(_ degrees: CGFloat) -> CGFloat {
-        var result = degrees.truncatingRemainder(dividingBy: 360)
-        if result > 180 { result -= 360 }
-        if result < -180 { result += 360 }
-        return result
-    }
 }

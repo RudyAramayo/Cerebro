@@ -93,13 +93,6 @@ static int ROBCompareUInt16(const void *left, const void *right) {
     return lhs < rhs ? -1 : (lhs > rhs ? 1 : 0);
 }
 
-static double ROBNormalizedDegrees(double degrees) {
-    double result = fmod(degrees, 360.0);
-    if (result > 180.0) result -= 360.0;
-    if (result < -180.0) result += 360.0;
-    return result;
-}
-
 #import "AVFoundation/AVFoundation.h"
 #import "Cerebro-Swift.h"
 
@@ -3615,8 +3608,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 {
     NSAssert(NSThread.isMainThread, @"Insta360 pose selection is main-thread owned");
     if (self.torsoControlsViewController.headTracking_enabled.state
-            != NSControlStateValueOn
-        || ![ROBGeminiVideoSourceSettings shared].insta360OrientationCalibrated) {
+            != NSControlStateValueOn) {
         return;
     }
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
@@ -3632,15 +3624,17 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     ROBPersonTrackingObservation *selected = nil;
     double selectedDelta = 0;
     double bestScore = DBL_MAX;
-    double forwardMarker = [ROBGeminiVideoSourceSettings shared]
-        .insta360ForwardMarkerDegrees;
     for (ROBPersonTrackingObservation *candidate in observations) {
         if (candidate.confidence < 0.25
             || now - candidate.capturedAtUptime
                 > kROBPersonTrackingInstaPoseFreshnessSeconds) {
             continue;
         }
-        double delta = ROBNormalizedDegrees(candidate.headX * 360.0 - forwardMarker);
+        // This camera stream is face-relative: the stitched frame center is
+        // always the robot's current forward direction. Therefore the pose X
+        // is already a signed relative pan bearing and needs no persisted
+        // orientation marker, even after the neck pans.
+        double delta = (candidate.headX - 0.5) * 360.0;
         double score = fabs(delta) - candidate.confidence * 12.0;
         if (score < bestScore) {
             selected = candidate;

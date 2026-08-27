@@ -23,6 +23,9 @@ detectors = text("ROBDynamicDetectorRegistry.swift")
 main = text("ROBMainViewController.mm")
 serial_header = text("ROBSerialBox.h")
 serial = text("ROBSerialBox.m")
+insta_reacquisition = main.rsplit(
+    "- (void)insta360HumanPoseDidUpdate:", 1
+)[1].split("- (void)updatePersonTrackingPostureForDistance:", 1)[0]
 
 require(
     "class ROBPersonTrackingObservation" in observation
@@ -71,13 +74,15 @@ require(
     "A persistently high main-camera human pose no longer lifts safely at the current pan before resuming face centering.",
 )
 require(
-    "insta360OrientationCalibrated" in main
-    and "insta360ForwardMarkerDegrees" in main
+    "insta360OrientationCalibrated" not in insta_reacquisition
+    and "insta360ForwardMarkerDegrees" not in insta_reacquisition
+    and "(candidate.headX - 0.5) * 360.0" in insta_reacquisition
+    and "0.5 + selectedDelta / 120.0" in insta_reacquisition
     and "mainTargetIsFresh" in main
     and "if (mainTargetIsFresh) return" in main
     and 'trackingPerson:@"insta360-pose"' in main
     and "Main-camera\n    // face/body pose must reacquire" in main,
-    "Panoramic pose may bypass calibrated, main-camera-priority reacquisition.",
+    "Panoramic pose no longer uses face-relative frame-center bearing with main-camera priority.",
 )
 require(
     "kROBPersonTrackingAttentionReturnSeconds = 8.0" in main
