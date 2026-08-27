@@ -61,6 +61,8 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
     private let swordTrackerToggle = NSButton(
         checkboxWithTitle: "Track training sword", target: nil, action: nil)
     private let swordTrackerFPSPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let swordTrackerColorPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let swordTrackerColors = ROBSwordTrackerColor.allCases
     private let depthOpacitySlider = NSSlider(
         value: 0.45, minValue: 0, maxValue: 1, target: nil, action: nil)
     private let depthOpacityValueLabel = NSTextField(labelWithString: "45%")
@@ -226,6 +228,12 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         swordTrackerFPSPopup.selectItem(at: nearestRateIndex(
             mainCameraSettings.swordTrackerFramesPerSecond, in: swordTrackerRates))
         swordTrackerFPSPopup.isEnabled = mainCameraSettings.swordTrackerEnabled
+        if let index = swordTrackerColors.firstIndex(where: {
+            $0.rawValue == mainCameraSettings.swordTrackerColorIdentifier
+        }) {
+            swordTrackerColorPopup.selectItem(at: index)
+        }
+        swordTrackerColorPopup.isEnabled = mainCameraSettings.swordTrackerEnabled
         depthOpacitySlider.doubleValue = mainCameraSettings.depthOverlayOpacity
         updateDepthOpacityValueLabel()
 
@@ -404,7 +412,8 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
             ]),
             row([
                 swordTrackerToggle,
-                NSTextField(labelWithString: "Rate:"), swordTrackerFPSPopup
+                NSTextField(labelWithString: "Rate:"), swordTrackerFPSPopup,
+                NSTextField(labelWithString: "Blade:"), swordTrackerColorPopup
             ]),
             row([
                 NSTextField(labelWithString: "Depth overlay opacity:"),
@@ -608,13 +617,19 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         swordTrackerToggle.target = self
         swordTrackerToggle.action = #selector(mainCameraFeatureChanged(_:))
         swordTrackerToggle.setAccessibilityIdentifier("ROB.MainCamera.SwordTracker.Enabled")
-        swordTrackerToggle.toolTip = "Tracks elongated high-contrast training implements near detected wrists."
+        swordTrackerToggle.toolTip = "Tracks the saturated core and colored glow of an illuminated training sword near detected wrists."
         swordTrackerFPSPopup.addItems(withTitles: swordTrackerRateTitles)
         swordTrackerFPSPopup.target = self
         swordTrackerFPSPopup.action = #selector(mainCameraRateChanged(_:))
         swordTrackerFPSPopup.setAccessibilityIdentifier("ROB.MainCamera.SwordTracker.FPS")
         swordTrackerFPSPopup.setAccessibilityLabel("Main camera training sword tracking rate")
         swordTrackerFPSPopup.toolTip = "Maximum admission rate; actual speed is limited by camera FPS and contour processing time."
+        swordTrackerColorPopup.addItems(withTitles: swordTrackerColors.map(\.title))
+        swordTrackerColorPopup.target = self
+        swordTrackerColorPopup.action = #selector(mainCameraSwordColorChanged(_:))
+        swordTrackerColorPopup.setAccessibilityIdentifier("ROB.MainCamera.SwordTracker.Color")
+        swordTrackerColorPopup.setAccessibilityLabel("Training sword blade color")
+        swordTrackerColorPopup.toolTip = "A selected color includes its bright halo and the camera-clipped white core. Any bright blade is most sensitive."
 
         depthOpacitySlider.target = self
         depthOpacitySlider.action = #selector(depthOverlayOpacityChanged(_:))
@@ -829,7 +844,15 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         } else if sender === swordTrackerToggle {
             mainCameraSettings.swordTrackerEnabled = enabled
             swordTrackerFPSPopup.isEnabled = enabled
+            swordTrackerColorPopup.isEnabled = enabled
         }
+    }
+
+    @objc private func mainCameraSwordColorChanged(_ sender: NSPopUpButton) {
+        guard sender === swordTrackerColorPopup,
+              swordTrackerColors.indices.contains(sender.indexOfSelectedItem) else { return }
+        mainCameraSettings.swordTrackerColorIdentifier =
+            swordTrackerColors[sender.indexOfSelectedItem].rawValue
     }
 
     @objc private func mainCameraRateChanged(_ sender: NSPopUpButton) {

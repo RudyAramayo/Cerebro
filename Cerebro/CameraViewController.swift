@@ -20,6 +20,24 @@ extension Notification.Name {
     )
 }
 
+enum ROBSwordTrackerColor: String, CaseIterable {
+    case anyBright = "any"
+    case blue
+    case green
+    case red
+    case purple
+
+    var title: String {
+        switch self {
+        case .anyBright: return "Any bright blade"
+        case .blue: return "Blue"
+        case .green: return "Green"
+        case .red: return "Red"
+        case .purple: return "Purple"
+        }
+    }
+}
+
 /// Typed ownership for preferences that used to live in the main-camera
 /// diagnostics window. The headless capture service and Settings can now share
 /// them without making the preview window part of the runtime lifecycle.
@@ -30,6 +48,7 @@ extension Notification.Name {
     private static let pose3DFPSKey = "ROBCameraPose3DFPS"
     private static let swordTrackerEnabledKey = "ROBCameraSwordTrackerEnabled"
     private static let swordTrackerFPSKey = "ROBCameraSwordTrackerFPS"
+    private static let swordTrackerColorKey = "ROBCameraSwordTrackerColor"
     private static let depthOverlayOpacityKey = "ROBCameraDepthOverlayOpacity"
     private static let bellyPose2DEnabledKey = "ROBCameraBellyPose2DEnabled"
     private static let bellyDepthOverlayOpacityKey = "ROBCameraBellyDepthOverlayOpacity"
@@ -67,6 +86,18 @@ extension Notification.Name {
                 : max(5, min(60, defaults.double(forKey: Self.swordTrackerFPSKey)))
         }
         set { set(max(5, min(60, newValue)), key: Self.swordTrackerFPSKey) }
+    }
+
+    public var swordTrackerColorIdentifier: String {
+        get {
+            let saved = defaults.string(forKey: Self.swordTrackerColorKey) ?? ""
+            return ROBSwordTrackerColor(rawValue: saved)?.rawValue
+                ?? ROBSwordTrackerColor.anyBright.rawValue
+        }
+        set {
+            let value = ROBSwordTrackerColor(rawValue: newValue) ?? .anyBright
+            set(value.rawValue, key: Self.swordTrackerColorKey)
+        }
     }
 
     public var depthOverlayOpacity: Double {
@@ -128,6 +159,12 @@ extension Notification.Name {
 
     private func set(_ value: Double, key: String) {
         guard defaults.object(forKey: key) == nil || defaults.double(forKey: key) != value else { return }
+        defaults.set(value, forKey: key)
+        notifyChange()
+    }
+
+    private func set(_ value: String, key: String) {
+        guard defaults.string(forKey: key) != value else { return }
         defaults.set(value, forKey: key)
         notifyChange()
     }
@@ -329,17 +366,21 @@ private struct ROBProjectedPose3D {
     let confidence: Double
 }
 
-/// A low-latency geometric tracker for elongated training implements. It uses
-/// the latest 2D wrist locations to reject unrelated edges, then smooths the
-/// blade axis over time. Only one contour request may be in flight.
+/// A low-latency tracker for illuminated training implements. A Core Image
+/// color cube isolates the clipped white core plus the selected colored halo,
+/// then Vision contours and wrist/temporal anchors select the blade. Only one
+/// request may be in flight.
 private final class ROBSwordTracker {
     private let queue = DispatchQueue(label: "com.orbitusrobotics.cerebro.sword-tracker", qos: .userInteractive)
     private let lock = NSLock()
     private var inFlight = false
     private var lastAdmission: CFTimeInterval = 0
     private var previous: ROBSwordTrack?
+    private var consecutiveMisses = 0
+    private var maskCubeCache: [ROBSwordTrackerColor: Data] = [:]
 
     func offer(_ sampleBuffer: CMSampleBuffer, wrists: [CGPoint], maximumFPS: Double,
+               color: ROBSwordTrackerColor,
                completion: @escaping (ROBSwordTrack?) -> Void) {
         let now = CACurrentMediaTime()
         lock.lock()
@@ -351,15 +392,26 @@ private final class ROBSwordTracker {
             guard let self else { return }
             defer { self.lock.lock(); self.inFlight = false; self.lock.unlock() }
             autoreleasepool {
+                guard let mask = self.brightBladeMask(from: sampleBuffer, color: color) else {
+                    DispatchQueue.main.async { completion(nil) }
+                    return
+                }
                 let request = VNDetectContoursRequest()
-                request.contrastAdjustment = 1.5
-                request.detectsDarkOnLight = true
-                request.maximumImageDimension = 320
+                request.contrastAdjustment = 2.0
+                request.detectsDarkOnLight = false
+                request.maximumImageDimension = 640
                 do {
-                    try VNImageRequestHandler(cmSampleBuffer: sampleBuffer, options: [:]).perform([request])
+                    try VNImageRequestHandler(ciImage: mask, options: [:]).perform([request])
                     let track = request.results?.first.flatMap { self.bestTrack(in: $0, wrists: wrists) }
-                    self.previous = track
-                    DispatchQueue.main.async { completion(track) }
+                    if let track {
+                        self.previous = track
+                        self.consecutiveMisses = 0
+                    } else {
+                        self.consecutiveMisses += 1
+                        if self.consecutiveMisses >= 4 { self.previous = nil }
+                    }
+                    let stableTrack = track ?? self.previous
+                    DispatchQueue.main.async { completion(stableTrack) }
                 } catch {
                     DispatchQueue.main.async { completion(nil) }
                 }
@@ -368,17 +420,89 @@ private final class ROBSwordTracker {
     }
 
     func reset() {
-        queue.async { self.previous = nil }
+        queue.async {
+            self.previous = nil
+            self.consecutiveMisses = 0
+        }
+    }
+
+    private func brightBladeMask(
+        from sampleBuffer: CMSampleBuffer,
+        color: ROBSwordTrackerColor
+    ) -> CIImage? {
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return nil }
+        let source = CIImage(cvImageBuffer: pixelBuffer)
+        let cubeData: Data
+        if let cached = maskCubeCache[color] {
+            cubeData = cached
+        } else {
+            cubeData = Self.makeMaskCube(for: color)
+            maskCubeCache[color] = cubeData
+        }
+        let isolated = source.applyingFilter("CIColorCube", parameters: [
+            "inputCubeDimension": 32,
+            "inputCubeData": cubeData,
+        ])
+        // Close small gaps between a clipped white core and its colored bloom,
+        // then remove isolated hot pixels before asking Vision for contours.
+        let connected = isolated.applyingFilter("CIMorphologyMaximum", parameters: [
+            "inputRadius": 2.0,
+        ])
+        return connected.applyingFilter("CIMorphologyMinimum", parameters: [
+            "inputRadius": 1.0,
+        ]).cropped(to: source.extent)
+    }
+
+    private static func makeMaskCube(for color: ROBSwordTrackerColor) -> Data {
+        let dimension = 32
+        var values: [Float] = []
+        values.reserveCapacity(dimension * dimension * dimension * 4)
+        for blueIndex in 0..<dimension {
+            let blue = Float(blueIndex) / Float(dimension - 1)
+            for greenIndex in 0..<dimension {
+                let green = Float(greenIndex) / Float(dimension - 1)
+                for redIndex in 0..<dimension {
+                    let red = Float(redIndex) / Float(dimension - 1)
+                    let brightest = max(red, max(green, blue))
+                    let dimmest = min(red, min(green, blue))
+                    let whiteCore = smoothStep(0.78, 0.96, dimmest)
+                        * smoothStep(0.82, 0.98, brightest)
+                    let colorDominance: Float
+                    switch color {
+                    case .anyBright:
+                        colorDominance = smoothStep(0.68, 0.92, brightest)
+                    case .blue:
+                        colorDominance = smoothStep(0.04, 0.28, blue - max(red, green))
+                    case .green:
+                        colorDominance = smoothStep(0.04, 0.28, green - max(red, blue))
+                    case .red:
+                        colorDominance = smoothStep(0.04, 0.28, red - max(green, blue))
+                    case .purple:
+                        colorDominance = smoothStep(0.03, 0.24, min(red, blue) - green)
+                    }
+                    let coloredHalo = smoothStep(0.48, 0.86, brightest) * colorDominance
+                    let mask: Float = max(whiteCore, coloredHalo) >= 0.18 ? 1 : 0
+                    values.append(contentsOf: [mask, mask, mask, 1])
+                }
+            }
+        }
+        return values.withUnsafeBytes { Data($0) }
+    }
+
+    private static func smoothStep(_ low: Float, _ high: Float, _ value: Float) -> Float {
+        let unit = max(0, min(1, (value - low) / (high - low)))
+        return unit * unit * (3 - 2 * unit)
     }
 
     private func bestTrack(in observation: VNContoursObservation, wrists: [CGPoint]) -> ROBSwordTrack? {
         var best: (track: ROBSwordTrack, score: CGFloat)?
         for contour in Self.flattenedContours(observation.topLevelContours) {
             let points = Self.points(in: contour.normalizedPath)
-            guard points.count >= 5, let axis = Self.principalAxis(points) else { continue }
+            guard points.count >= 4,
+                  let geometry = Self.principalGeometry(points) else { continue }
+            let axis = (geometry.start, geometry.end)
             let length = Self.distance(axis.0, axis.1)
-            let bounds = contour.normalizedPath.boundingBox
-            let thickness = max(0.002, min(bounds.width, bounds.height))
+            let thickness = max(0.002, geometry.thickness)
             let elongation = length / thickness
             guard length >= 0.10, length <= 0.85, elongation >= 4 else { continue }
             let d0 = wrists.map { Self.distance($0, axis.0) }.min() ?? 1
@@ -444,7 +568,9 @@ private final class ROBSwordTracker {
         return result
     }
 
-    private static func principalAxis(_ points: [CGPoint]) -> (CGPoint, CGPoint)? {
+    private static func principalGeometry(
+        _ points: [CGPoint]
+    ) -> (start: CGPoint, end: CGPoint, thickness: CGFloat)? {
         let count = CGFloat(points.count)
         let center = CGPoint(x: points.reduce(0) { $0 + $1.x } / count,
                              y: points.reduce(0) { $0 + $1.y } / count)
@@ -455,10 +581,21 @@ private final class ROBSwordTracker {
         }
         let angle = 0.5 * atan2(2 * xy, xx - yy)
         let direction = CGPoint(x: cos(angle), y: sin(angle))
+        let perpendicular = CGPoint(x: -direction.y, y: direction.x)
         let projections = points.map { ($0.x - center.x) * direction.x + ($0.y - center.y) * direction.y }
-        guard let low = projections.min(), let high = projections.max(), high > low else { return nil }
-        return (CGPoint(x: center.x + low * direction.x, y: center.y + low * direction.y),
-                CGPoint(x: center.x + high * direction.x, y: center.y + high * direction.y))
+        let perpendicularProjections = points.map {
+            ($0.x - center.x) * perpendicular.x + ($0.y - center.y) * perpendicular.y
+        }
+        guard let low = projections.min(),
+              let high = projections.max(),
+              let perpendicularLow = perpendicularProjections.min(),
+              let perpendicularHigh = perpendicularProjections.max(),
+              high > low else { return nil }
+        return (
+            CGPoint(x: center.x + low * direction.x, y: center.y + low * direction.y),
+            CGPoint(x: center.x + high * direction.x, y: center.y + high * direction.y),
+            perpendicularHigh - perpendicularLow
+        )
     }
 
     private static func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat { hypot(a.x - b.x, a.y - b.y) }
@@ -557,6 +694,11 @@ final class CameraViewController: NSViewController {
 
     private var swordTrackerFPS: Double {
         processingSettings.swordTrackerFramesPerSecond
+    }
+
+    private var swordTrackerColor: ROBSwordTrackerColor {
+        ROBSwordTrackerColor(rawValue: processingSettings.swordTrackerColorIdentifier)
+            ?? .anyBright
     }
     
     
@@ -1483,11 +1625,19 @@ extension CameraViewController: CameraManagerDelegate {
         )
         if swordTrackerEnabled {
             swordWristLock.lock(); let wrists = swordWristAnchors; swordWristLock.unlock()
-            swordTracker.offer(sampleBuffer, wrists: wrists, maximumFPS: swordTrackerFPS) { [weak self] track in
+            let color = swordTrackerColor
+            swordTracker.offer(
+                sampleBuffer,
+                wrists: wrists,
+                maximumFPS: swordTrackerFPS,
+                color: color
+            ) { [weak self] track in
                 self?.poseView.swordTrack = track
                 self?.poseView.swordTrackingStatus = track == nil
-                    ? (wrists.isEmpty ? "Sword: searching (no wrist lock)" : "Sword: searching near wrist")
-                    : "Sword: locked"
+                    ? (wrists.isEmpty
+                        ? "Sword: searching \(color.title.lowercased()) (no wrist lock)"
+                        : "Sword: searching \(color.title.lowercased()) near wrist")
+                    : "Sword: locked (\(color.title.lowercased()))"
                 self?.poseView.needsDisplay = true
             }
         }
