@@ -85,6 +85,23 @@ private struct ROBHandWaveTrack {
     var focusUntilUptime: TimeInterval
 }
 
+/// Owns the admitted image until the serialized Vision pass completes. Main
+/// camera buffers stay in their native pixel format; stitched images retain a
+/// CGImage so they can still be divided into panorama sectors.
+private enum ROBDetectorFrame {
+    case cgImage(CGImage)
+    case pixelBuffer(CVPixelBuffer)
+
+    func perform(_ requests: [VNRequest]) throws {
+        switch self {
+        case .cgImage(let image):
+            try VNImageRequestHandler(cgImage: image).perform(requests)
+        case .pixelBuffer(let buffer):
+            try VNImageRequestHandler(cvPixelBuffer: buffer).perform(requests)
+        }
+    }
+}
+
 /// Runtime-selectable detector registry. Disabled detectors produce no request,
 /// notification, or callback. Custom Core ML object detectors can be added
 /// without changing the capture services.
@@ -212,17 +229,31 @@ private struct ROBHandWaveTrack {
         guard let generation = reserveFrame(for: source) else { return }
         queue.async {
             guard let cgImage = Self.cgImage(image) else { return }
-            self.process(cgImage, source: source, capturedAt: capturedAt, generation: generation)
+            self.process(
+                .cgImage(cgImage),
+                source: source,
+                capturedAt: capturedAt,
+                generation: generation
+            )
         }
     }
 
     public func offer(_ sampleBuffer: CMSampleBuffer, source: ROBDetectorSource, capturedAt: Date = Date()) {
         guard let generation = reserveFrame(for: source) else { return }
+        guard CMSampleBufferIsValid(sampleBuffer),
+              CMSampleBufferDataIsReady(sampleBuffer),
+              let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
+              CVPixelBufferGetWidth(pixelBuffer) > 0,
+              CVPixelBufferGetHeight(pixelBuffer) > 0 else { return }
         queue.async {
-            guard let pixel = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-            let ci = CIImage(cvPixelBuffer: pixel)
-            guard let cg = Self.imageContext.createCGImage(ci, from: ci.extent) else { return }
-            self.process(cg, source: source, capturedAt: capturedAt, generation: generation)
+            autoreleasepool {
+                self.process(
+                    .pixelBuffer(pixelBuffer),
+                    source: source,
+                    capturedAt: capturedAt,
+                    generation: generation
+                )
+            }
         }
     }
 
@@ -272,8 +303,6 @@ private struct ROBHandWaveTrack {
         }
     }
 
-    private static let imageContext = CIContext(options: [.cacheIntermediates: false])
-
     /// Reserves only frames that can actually be analyzed. This intentionally
     /// runs before any NSImage/CIImage conversion on camera callback threads.
     private func reserveFrame(for source: ROBDetectorSource) -> UInt64? {
@@ -311,7 +340,7 @@ private struct ROBHandWaveTrack {
     }
 
     private func process(
-        _ image: CGImage,
+        _ frame: ROBDetectorFrame,
         source: ROBDetectorSource,
         capturedAt: Date,
         generation: UInt64
@@ -333,8 +362,12 @@ private struct ROBHandWaveTrack {
         var detectedPeople: [(bounds: ROBNormalizedRect, confidence: Double)] = []
         var detectedPoses: [ROBPersonTrackingObservation] = []
         var handWaveCandidates: [ROBHandWaveCandidate] = []
-        let inputs: [(image: CGImage, xOffset: Double, xScale: Double)]
+        let inputs: [(frame: ROBDetectorFrame, xOffset: Double, xScale: Double)]
         if geometry == .sixSectors {
+            guard case .cgImage(let image) = frame else {
+                NSLog("Dynamic detector skipped incompatible six-sector pixel-buffer input")
+                return
+            }
             let width = image.width / 6
             inputs = (0..<6).compactMap { index in
                 let x = index * width
@@ -342,11 +375,15 @@ private struct ROBHandWaveTrack {
                 return image.cropping(
                     to: CGRect(x: x, y: 0, width: cropWidth, height: image.height)
                 ).map {
-                    ($0, Double(x) / Double(image.width), Double(cropWidth) / Double(image.width))
+                    (
+                        .cgImage($0),
+                        Double(x) / Double(image.width),
+                        Double(cropWidth) / Double(image.width)
+                    )
                 }
             }
         } else {
-            inputs = [(image, 0, 1)]
+            inputs = [(frame, 0, 1)]
         }
 
         do {
@@ -443,7 +480,7 @@ private struct ROBHandWaveTrack {
                     })
                 }
 
-                try VNImageRequestHandler(cgImage: input.image).perform(requests)
+                try input.frame.perform(requests)
                 if objectsOn,
                    let classify = requests.compactMap({ $0 as? VNClassifyImageRequest }).first,
                    let saliency = requests.compactMap({
