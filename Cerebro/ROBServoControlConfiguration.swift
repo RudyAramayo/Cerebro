@@ -16,17 +16,21 @@ public extension Notification.Name {
 @objcMembers public final class ROBServoCameraPosition: NSObject {
     public var identifier: String
     public var name: String
+    /// Zero preserves the current pan target; nonzero values request an exact pan pose.
+    public var panTarget: Int
     public var lowerTarget: Int
     public var upperTarget: Int
 
     public init(
         identifier: String = UUID().uuidString,
         name: String,
+        panTarget: Int = 0,
         lowerTarget: Int,
         upperTarget: Int
     ) {
         self.identifier = identifier
         self.name = name
+        self.panTarget = panTarget
         self.lowerTarget = lowerTarget
         self.upperTarget = upperTarget
         super.init()
@@ -36,6 +40,7 @@ public extension Notification.Name {
         ROBServoCameraPosition(
             identifier: identifier,
             name: name,
+            panTarget: panTarget,
             lowerTarget: lowerTarget,
             upperTarget: upperTarget
         )
@@ -236,6 +241,7 @@ public enum ROBServoControlConfigurationError: LocalizedError {
                     "Camera position names must be nonempty and unique."
                 )
             }
+            try validateTargetAllowingOff(position.panTarget, label: "Camera pan target")
             try validateActiveTarget(position.lowerTarget, label: "Lower target")
             try validateActiveTarget(position.upperTarget, label: "Upper target")
         }
@@ -378,10 +384,47 @@ public enum ROBServoControlConfigurationError: LocalizedError {
 
     private static func defaultPositions() -> [ROBServoCameraPosition] {
         [
-            ROBServoCameraPosition(name: "lean_forward", lowerTarget: 7014, upperTarget: 7698),
-            ROBServoCameraPosition(name: "upright", lowerTarget: 6011, upperTarget: 6073),
-            ROBServoCameraPosition(name: "lean_back", lowerTarget: 4747, upperTarget: 5214),
+            ROBServoCameraPosition(
+                name: "lean_forward", panTarget: 0,
+                lowerTarget: 7014, upperTarget: 7698
+            ),
+            ROBServoCameraPosition(
+                name: "upright", panTarget: 0,
+                lowerTarget: 6011, upperTarget: 6073
+            ),
+            ROBServoCameraPosition(
+                name: "lean_back", panTarget: 0,
+                lowerTarget: 4747, upperTarget: 5214
+            ),
+            ROBServoCameraPosition(
+                name: "fully_right", panTarget: 4000,
+                lowerTarget: 6011, upperTarget: 6073
+            ),
+            ROBServoCameraPosition(
+                name: "fully_left", panTarget: 7652,
+                lowerTarget: 6011, upperTarget: 6073
+            ),
         ]
+    }
+
+    private static func appendMissingPanEndpointPositions(
+        to positions: inout [ROBServoCameraPosition]
+    ) {
+        let existingNames = Set(positions.map {
+            $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        })
+        if !existingNames.contains("fully_right") {
+            positions.append(ROBServoCameraPosition(
+                name: "fully_right", panTarget: 4000,
+                lowerTarget: 6011, upperTarget: 6073
+            ))
+        }
+        if !existingNames.contains("fully_left") {
+            positions.append(ROBServoCameraPosition(
+                name: "fully_left", panTarget: 7652,
+                lowerTarget: 6011, upperTarget: 6073
+            ))
+        }
     }
 
     private static func defaultPhases() -> [ROBServoSequencePhase] {
@@ -427,6 +470,8 @@ public enum ROBServoControlConfigurationError: LocalizedError {
     private struct PositionPayload: Codable {
         var identifier: String
         var name: String
+        /// Optional so version-1 position records migrate without losing operator edits.
+        var panTarget: Int?
         var lowerTarget: Int
         var upperTarget: Int
     }
@@ -458,6 +503,7 @@ public enum ROBServoControlConfigurationError: LocalizedError {
             cameraPositions: positionsStorage.map {
                 PositionPayload(
                     identifier: $0.identifier, name: $0.name,
+                    panTarget: $0.panTarget,
                     lowerTarget: $0.lowerTarget, upperTarget: $0.upperTarget
                 )
             },
@@ -488,12 +534,18 @@ public enum ROBServoControlConfigurationError: LocalizedError {
               payload.version == Self.schemaVersion else {
             return false
         }
-        let positions = payload.cameraPositions.map {
+        let positionsNeedPanMigration = payload.cameraPositions.contains {
+            $0.panTarget == nil
+        }
+        var positions = payload.cameraPositions.map {
             ROBServoCameraPosition(
                 identifier: $0.identifier, name: $0.name,
+                panTarget: $0.panTarget ?? 0,
                 lowerTarget: $0.lowerTarget, upperTarget: $0.upperTarget
             )
         }
+        let persistedPositionCount = positions.count
+        Self.appendMissingPanEndpointPositions(to: &positions)
         let phases = payload.sequencePhases.map {
             ROBServoSequencePhase(
                 identifier: $0.identifier, sequenceName: $0.sequenceName,
@@ -520,6 +572,9 @@ public enum ROBServoControlConfigurationError: LocalizedError {
         positionsStorage = positions
         phasesStorage = phases.sorted(by: Self.phaseSort)
         gesturesStorage = gestures
+        if positionsNeedPanMigration || positions.count != persistedPositionCount {
+            persistLocked()
+        }
         return true
     }
 }

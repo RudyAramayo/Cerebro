@@ -127,7 +127,10 @@ import Foundation
     private func configureTables() {
         configure(
             table: positionsTable,
-            columns: [("name", "Position", 360), ("lower", "Lower", 180), ("upper", "Upper", 180)]
+            columns: [
+                ("name", "Position", 300), ("pan", "Pan (0 = current)", 180),
+                ("lower", "Lower", 140), ("upper", "Upper", 140),
+            ]
         )
         configure(
             table: sequencesTable,
@@ -344,6 +347,7 @@ import Foundation
     @objc private func addPosition(_ sender: Any?) {
         positions.append(ROBServoCameraPosition(
             name: uniqueName(prefix: "position", existing: positions.map(\.name)),
+            panTarget: 0,
             lowerTarget: 6011,
             upperTarget: 6073
         ))
@@ -447,6 +451,7 @@ import Foundation
             let item = positions[row]
             switch column {
             case "name": return item.name
+            case "pan": return String(item.panTarget)
             case "lower": return String(item.lowerTarget)
             default: return String(item.upperTarget)
             }
@@ -483,6 +488,7 @@ import Foundation
         if tableView === positionsTable, positions.indices.contains(row) {
             let item = positions[row]
             if column == "name" { item.name = value }
+            else if column == "pan", let parsed = Int(value) { item.panTarget = parsed }
             else if column == "lower", let parsed = Int(value) { item.lowerTarget = parsed }
             else if column == "upper", let parsed = Int(value) { item.upperTarget = parsed }
             else { invalidCell(tableView, row: row); return }

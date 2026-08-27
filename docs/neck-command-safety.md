@@ -114,10 +114,15 @@ action can start the same recovery when one or more axes are `OFF` or
 
 The **Servos → Open Servo Control…** window exposes camera positions, servo
 sequences, and relative gestures. The shipped camera catalog is
-`lean_forward` (`L 7014`, `U 7698`), `upright` (`L 6011`, `U 6073`), and
-`lean_back` (`L 4747`, `U 5214`). Sequence phases contain pan, lower, upper,
-and post-settle hold values; the sequence table receives the largest share of
-the window. Startup edits are accepted only when they still describe exactly
+`lean_forward` (`L 7014`, `U 7698`), `upright` (`L 6011`, `U 6073`),
+`lean_back` (`L 4747`, `U 5214`), `fully_right` (`P 4000`, `L 6011`,
+`U 6073`), and `fully_left` (`P 7652`, `L 6011`, `U 6073`). A camera
+position pan value of `0` preserves the currently commanded pan; a nonzero
+value requests that exact pan target. Existing saved camera catalogs are
+migrated in place and receive the two missing endpoint presets without losing
+operator edits. Sequence phases contain pan, lower, upper, and post-settle
+hold values; the sequence table receives the largest share of the window.
+Startup edits are accepted only when they still describe exactly
 three ordered phases: phase 1 has pan OFF in the full-clearance lower band,
 phase 2 holds phase-1 lower/upper while energizing pan, and phase 3 retains the
 phase-2 pan. Every phase must also pass the active hard limits without a clamp.

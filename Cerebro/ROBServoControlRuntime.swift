@@ -33,7 +33,9 @@ import Foundation
             return
         }
         stopWithoutStatus()
-        let pan = box.commandedNeckPanTarget
+        let pan = cameraPosition.panTarget == 0
+            ? box.commandedNeckPanTarget
+            : cameraPosition.panTarget
         executePose(
             pan: pan,
             lower: cameraPosition.lowerTarget,

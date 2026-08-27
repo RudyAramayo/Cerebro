@@ -40,12 +40,31 @@ def main() -> None:
         require(project.count(filename) >= 3, f"{filename} is not in the app target")
 
     require(
-        'name: "lean_forward", lowerTarget: 7014, upperTarget: 7698'
+        'name: "lean_forward", panTarget: 0' in configuration
+        and 'lowerTarget: 7014, upperTarget: 7698' in configuration
+        and 'name: "upright", panTarget: 0' in configuration
+        and 'lowerTarget: 6011, upperTarget: 6073' in configuration
+        and 'name: "lean_back", panTarget: 0' in configuration
+        and 'lowerTarget: 4747, upperTarget: 5214' in configuration
+        and 'name: "fully_right", panTarget: 4000' in configuration
+        and 'name: "fully_left", panTarget: 7652' in configuration
+        and 'appendMissingPanEndpointPositions(to: &positions)' in configuration,
+        "The shipped camera position catalog no longer includes the reviewed pan endpoints",
+    )
+    require(
+        "public var panTarget: Int" in configuration
+        and "var panTarget: Int?" in configuration
+        and "panTarget: $0.panTarget ?? 0" in configuration
+        and "cameraPosition.panTarget == 0" in runtime
+        and ": cameraPosition.panTarget" in runtime
+        and '("pan", "Pan (0 = current)", 180)' in window,
+        "Camera positions no longer persist, expose, and apply an optional exact pan target",
+    )
+    require(
+        'name: "lean_forward", panTarget: 0'
         in configuration
-        and 'name: "upright", lowerTarget: 6011, upperTarget: 6073'
-        in configuration
-        and 'name: "lean_back", lowerTarget: 4747, upperTarget: 5214'
-        in configuration,
+        and 'name: "upright", panTarget: 0' in configuration
+        and 'name: "lean_back", panTarget: 0' in configuration,
         "The shipped camera position catalog no longer matches the reviewed targets",
     )
     require(
