@@ -4,6 +4,12 @@ import CoreML
 import Foundation
 import Vision
 
+public extension Notification.Name {
+    static let robInsta360HumanPoseDidUpdate = Notification.Name(
+        "ROBInsta360HumanPoseDidUpdate"
+    )
+}
+
 extension Notification.Name {
     static let robDetectorOutputDidChange = Notification.Name("ROBDetectorOutputDidChange")
     static let robDetectorSettingsDidChange = Notification.Name("ROBDetectorSettingsDidChange")
@@ -192,6 +198,7 @@ public struct ROBDetectorOutput: Sendable {
         var points: [ROBOverlayPoint] = []
         var lines: [ROBOverlayLine] = []
         var detectedPeople: [(bounds: ROBNormalizedRect, confidence: Double)] = []
+        var detectedPoses: [ROBPersonTrackingObservation] = []
         let inputs: [(image: CGImage, xOffset: Double, xScale: Double)]
         if geometry == .sixSectors {
             let width = image.width / 6
@@ -236,6 +243,14 @@ public struct ROBDetectorOutput: Sendable {
 
                     requests.append(VNDetectHumanBodyPoseRequest { request, _ in
                         for observation in (request.results as? [VNHumanBodyPoseObservation]) ?? [] {
+                            if let tracking = ROBPersonTrackingObservation.make(
+                                from: observation,
+                                source: ROBDetectorSource.insta360.rawValue,
+                                xOffset: input.xOffset,
+                                xScale: input.xScale
+                            ) {
+                                detectedPoses.append(tracking)
+                            }
                             guard let recognized = try? observation.recognizedPoints(.all) else { continue }
                             for (name, point) in recognized where point.confidence >= 0.2 {
                                 let mapped = mapPoint(point.location)
@@ -326,6 +341,15 @@ public struct ROBDetectorOutput: Sendable {
                     )
                 }
                 publishInsta360PeopleIfCurrent(people, generation: generation)
+                let currentPoses = detectedPoses
+                DispatchQueue.main.async {
+                    guard self.resultIsCurrent(generation, for: source) else { return }
+                    NotificationCenter.default.post(
+                        name: .robInsta360HumanPoseDidUpdate,
+                        object: self,
+                        userInfo: ["observations": currentPoses]
+                    )
+                }
             }
 
             let output = ROBDetectorOutput(

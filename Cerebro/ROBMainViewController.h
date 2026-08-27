@@ -32,6 +32,7 @@
 @class ROBSerialBox;
 @class ROBControlPairedDevice;
 @class ROBFollowPersonCoordinator;
+@class ROBPersonTrackingObservation;
 
 @interface ROBMainViewController : NSViewController <ROBSpeechDelegate>
 {
@@ -87,6 +88,7 @@
 - (void) didRespond: (NSString *) responseText;
 //Tracking
 - (void) didSeeNewPeople:(NSArray<VNFaceObservation*>*)observations;
+- (void)didTrackHumanPoses:(NSArray<ROBPersonTrackingObservation *> *)observations;
 - (void) didCaptureCameraSampleBuffer:(CMSampleBufferRef)sampleBuffer;
 - (void)didCaptureAlignedDepthData:(NSData *)depthData
                              width:(NSUInteger)width

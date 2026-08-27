@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""Structural regressions for fused pose, attention, and posture tracking."""
+
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "Cerebro"
+
+
+def text(name: str) -> str:
+    return (SRC / name).read_text(encoding="utf-8")
+
+
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        raise AssertionError(message)
+
+
+observation = text("CameraOverlayManager.swift")
+camera = text("CameraViewController.swift")
+detectors = text("ROBDynamicDetectorRegistry.swift")
+main = text("ROBMainViewController.mm")
+serial_header = text("ROBSerialBox.h")
+serial = text("ROBSerialBox.m")
+
+require(
+    "class ROBPersonTrackingObservation" in observation
+    and "VNHumanBodyPoseObservation" in observation
+    and ".nose, .leftEye, .rightEye, .leftEar, .rightEar" in observation
+    and "recognized[.leftShoulder]" in observation,
+    "Human pose observations no longer derive a resilient head anchor.",
+)
+require(
+    "didTrackHumanPoses(trackingObservations)" in camera
+    and 'source: "main-camera-pose"' in camera
+    and "onBodyPoseDetected" in camera,
+    "The low-latency main-camera pose path no longer reaches person tracking.",
+)
+require(
+    "ROBInsta360HumanPoseDidUpdate" in detectors
+    and "detectedPoses.append(tracking)" in detectors
+    and 'userInfo: ["observations": currentPoses]' in detectors
+    and "source == .insta360, poseOn" in detectors,
+    "Insta360 body pose no longer publishes source-scoped reacquisition observations.",
+)
+require(
+    "kROBPersonTrackingFaceFreshnessSeconds = 0.75" in main
+    and "lastFaceTrackingSpatialChangeUptime" in main
+    and "faceSpatiallyStalled" in main
+    and "faceWeight = faceSpatiallyStalled ? 0.0 : 0.68" in main
+    and 'source = @"main-camera-face-pose"' in main
+    and 'source = @"main-camera-pose"' in main,
+    "Face and main-camera pose results are no longer fused with a stalled-face fallback.",
+)
+require(
+    "insta360OrientationCalibrated" in main
+    and "insta360ForwardMarkerDegrees" in main
+    and "mainTargetIsFresh" in main
+    and "if (mainTargetIsFresh) return" in main
+    and 'trackingPerson:@"insta360-pose"' in main
+    and "Main-camera\n    // face/body pose must reacquire" in main,
+    "Panoramic pose may bypass calibrated, main-camera-priority reacquisition.",
+)
+require(
+    "kROBPersonTrackingAttentionReturnSeconds = 8.0" in main
+    and "updatePersonTrackingAttentionAtUptime" in main
+    and '@[@"upright", @"lean_forward"]' in main
+    and "if (!self.personTrackingHasAcquiredSubject) return" in main
+    and "self.personTrackingHasAcquiredSubject = NO" in main
+    and "mainFaceIsFresh || mainPoseIsFresh || panoramicPoseIsFresh" in main,
+    "Lost attention no longer returns to a centered forward search pose.",
+)
+require(
+    'nextBand > 0\n        ? @[@"lean_back", @"upright", @"lean_forward"]' in main
+    and ': @[@"lean_forward", @"upright", @"lean_back"]' in main
+    and "kROBPersonTrackingDistanceDwellSeconds = 0.75" in main
+    and "personTrackingDistanceMetersInNormalizedRect" in main,
+    "Depth-driven near/far posture orders or their debounce were lost.",
+)
+require(
+    "requestPersonTrackingPostureSequence" in serial_header
+    and "personTrackingPostureSequenceActive" in serial_header
+    and 'kROBPersonTrackingPostureSource =' in serial
+    and "exactConfiguration.cameraLevelingEnabled = false" in serial
+    and "exactConfiguration.panCenterTarget" in serial
+    and "sendMaestro" not in serial.split(
+        "- (ROBNeckCommandDisposition)requestPersonTrackingPostureSequence:", 1
+    )[1].split("- (ROBNeckCommandDisposition)applySafeNeckPanTarget:", 1)[0]
+    and "personTrackingPostureOwnsNeck" in serial
+    and "coupledExactPoseCommand" in serial,
+    "Automatic postures no longer stay inside the shared coupled neck safety gateway.",
+)
+require(
+    "personTrackingPostureDeadline = now + 30.0" in serial
+    and "schedulePersonTrackingPostureAdvance" in serial
+    and "neckCommandReadyAtUptime" in serial
+    and "cancelPersonTrackingPostureSequence" in serial,
+    "A posture sequence can run without bounded conservative settling.",
+)
+
+print("ROB fused person attention static checks passed")

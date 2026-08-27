@@ -30,7 +30,9 @@ def main() -> None:
     serial_source = (APP / "ROBSerialBox.m").read_text()
     tracking_endpoint_method = serial_source.split(
         "- (ROBNeckCommandDisposition)requestPersonTrackingUprightPanTarget:", 1
-    )[1].split("- (ROBNeckCommandDisposition)applySafeNeckPanTarget:", 1)[0]
+    )[1].split(
+        "- (ROBNeckCommandDisposition)requestPersonTrackingLeanForwardRest", 1
+    )[0]
     torso_source = (APP / "ROBTorsoControlsViewController.m").read_text()
     app_delegate = (APP / "AppDelegate.m").read_text()
     project = PROJECT.read_text()

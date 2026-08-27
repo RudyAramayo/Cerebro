@@ -1051,6 +1051,13 @@ extension CameraViewController: CameraManagerDelegate {
             self?.swordWristLock.lock()
             self?.swordWristAnchors = wrists
             self?.swordWristLock.unlock()
+            let trackingObservations = observations.compactMap {
+                ROBPersonTrackingObservation.make(
+                    from: $0,
+                    source: "main-camera-pose"
+                )
+            }
+            self?.robMainViewController?.didTrackHumanPoses(trackingObservations)
         }
         depthOverlayView.imageScaling = .scaleProportionallyUpOrDown
         depthOverlayView.alphaValue = CGFloat(processingSettings.depthOverlayOpacity)

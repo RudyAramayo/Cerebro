@@ -109,6 +109,8 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 @property (readonly, assign, getter=isSafeNeckStartupInProgress) BOOL safeNeckStartupInProgress;
 @property (readonly, assign, getter=isPersonTrackingUprightTransitionActive)
     BOOL personTrackingUprightTransitionActive;
+@property (readonly, assign, getter=isPersonTrackingPostureSequenceActive)
+    BOOL personTrackingPostureSequenceActive;
 /// Worst-case command-space time at which all currently accepted neck targets
 /// and any pending lower-dependent pan envelope are ready. The Maestro has no
 /// shaft feedback, so this is deliberately conservative timing, not a measured
@@ -150,6 +152,11 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 /// Returns an idle face-tracking neck to the validated startup sequence's
 /// centered lean-forward final pose without preempting current neck authority.
 - (ROBNeckCommandDisposition)requestPersonTrackingLeanForwardRest;
+/// Runs only the reviewed centered lean_forward/upright/lean_back tracking
+/// orders. Each exact saved pose advances through the shared pan-first gateway
+/// and cannot preempt manual, gesture, Vision, startup, or upright-edge motion.
+- (ROBNeckCommandDisposition)requestPersonTrackingPostureSequence:
+    (NSArray<NSString *> *)positionNames;
 
 @property (readwrite, retain) NSSlider *arm_R11_force;
 

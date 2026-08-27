@@ -48,6 +48,13 @@ static int const kROBPersonTrackingMaximumUpperUpOffset = 200;
 static int const kROBPersonTrackingUprightEntryPanStepTargets = 100;
 static NSTimeInterval const kROBPersonTrackingUprightRestSeconds = 15.0;
 static double const kROBPersonTrackingDownwardSpeedRatio = 0.2;
+static NSTimeInterval const kROBPersonTrackingFaceFreshnessSeconds = 0.75;
+static NSTimeInterval const kROBPersonTrackingMainPoseFreshnessSeconds = 1.0;
+static NSTimeInterval const kROBPersonTrackingInstaPoseFreshnessSeconds = 3.0;
+static NSTimeInterval const kROBPersonTrackingAttentionReturnSeconds = 8.0;
+static NSTimeInterval const kROBPersonTrackingDistanceDwellSeconds = 0.75;
+static double const kROBPersonTrackingTooCloseMeters = 0.9;
+static double const kROBPersonTrackingTooFarMeters = 2.8;
 static NSString * const ROBDevelopmentModeDefaultsKey = @"ROBDevelopmentMode";
 static NSString * const ROBShowControllerInputDiagnosticsNotification = @"ROBShowControllerInputDiagnostics";
 static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopmentModeDidChange";
@@ -56,6 +63,7 @@ static NSString * const ROBFaceIdentityConversationCueNotification = @"ROBFaceId
 static NSString * const ROBFaceIdentityTrackingDidUpdateNotification = @"ROBFaceIdentityTrackingDidUpdate";
 static NSString * const ROBStageShowStateDidChangeNotification = @"ROBStageShowStateDidChange";
 static NSString * const ROBHeadlessLiveStartupStopRequestedNotification = @"ROBHeadlessLiveStartupStopRequested";
+static NSString * const ROBInsta360HumanPoseDidUpdateNotification = @"ROBInsta360HumanPoseDidUpdate";
 
 static double ROBPersonTrackingFilterCoordinate(
     double previous,
@@ -74,6 +82,19 @@ static double ROBPersonTrackingFilterCoordinate(
         ? kROBPersonTrackingApproachFilterAlpha
         : kROBPersonTrackingRetreatFilterAlpha;
     return previous + alpha * (observed - previous);
+}
+
+static int ROBCompareUInt16(const void *left, const void *right) {
+    const uint16_t lhs = *(const uint16_t *)left;
+    const uint16_t rhs = *(const uint16_t *)right;
+    return lhs < rhs ? -1 : (lhs > rhs ? 1 : 0);
+}
+
+static double ROBNormalizedDegrees(double degrees) {
+    double result = fmod(degrees, 360.0);
+    if (result > 180.0) result -= 360.0;
+    if (result < -180.0) result += 360.0;
+    return result;
 }
 
 #import "AVFoundation/AVFoundation.h"
@@ -418,6 +439,18 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 @property (readwrite, copy) NSString *personTrackingSourceID;
 @property (readwrite, assign) NSTimeInterval lastPersonTrackingDiagnosticsUptime;
 @property (readwrite, assign) BOOL personTrackingUprightPostureActive;
+@property (readwrite, retain) NSValue *lastFaceTrackingBoundingBoxValue;
+@property (readwrite, assign) NSTimeInterval lastFaceTrackingObservationUptime;
+@property (readwrite, assign) NSTimeInterval lastFaceTrackingSpatialChangeUptime;
+@property (readwrite, strong) ROBPersonTrackingObservation *lastMainPoseTrackingObservation;
+@property (readwrite, assign) NSTimeInterval lastMainPoseTrackingObservationUptime;
+@property (readwrite, assign) NSTimeInterval lastInstaPoseTrackingObservationUptime;
+@property (readwrite, assign) NSTimeInterval personTrackingLostSinceUptime;
+@property (readwrite, assign) BOOL personTrackingHasAcquiredSubject;
+@property (readwrite, assign) NSTimeInterval lastPersonTrackingAttentionReturnUptime;
+@property (readwrite, assign) NSTimeInterval latestAlignedDepthReceivedUptime;
+@property (readwrite, assign) NSInteger personTrackingDistanceBand;
+@property (readwrite, assign) NSTimeInterval personTrackingDistanceBandEnteredUptime;
 
 @property (readwrite, assign) int actualValue;
 @property (readwrite, assign) int targetValue;
@@ -442,6 +475,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void)handleRobotActionMessage:(ROBRobotActionMessage *)message;
 - (void)robotActionBridgeTick:(NSTimer *)timer;
 - (void)updatePersonTrackingUprightRestAtUptime:(NSTimeInterval)now;
+- (void)updatePersonTrackingAttentionAtUptime:(NSTimeInterval)now;
 - (NSString *)robotActionStateString:(ROBRobotActionState)state;
 - (BOOL)robotActionMessageIsAddressedToCerebro:(ROBRobotActionMessage *)message;
 - (void)cancelPendingGeminiRobotActionsWithReason:(NSString *)reason;
@@ -467,6 +501,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void)faceIdentityConversationCue:(NSNotification *)notification;
 - (void)faceIdentityTrackingDidUpdate:(NSNotification *)notification;
 - (void)trackFaceBoundingBox:(CGRect)boundingBox;
+- (void)insta360HumanPoseDidUpdate:(NSNotification *)notification;
+- (double)personTrackingDistanceMetersInNormalizedRect:(CGRect)rect;
+- (void)updatePersonTrackingPostureForDistance:(double)distance
+                                       atUptime:(NSTimeInterval)now;
 - (void)geminiVideoSourceSettingsDidChange:(NSNotification *)notification;
 - (void)configureConversationTranscript;
 - (void)configureMainWorkspace;
@@ -2389,11 +2427,66 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     );
 }
 
+- (void)updatePersonTrackingAttentionAtUptime:(NSTimeInterval)now
+{
+    if (self.serialBox == nil
+        || self.torsoControlsViewController.headTracking_enabled.state
+            != NSControlStateValueOn) {
+        self.personTrackingLostSinceUptime = 0;
+        return;
+    }
+    if (!self.personTrackingHasAcquiredSubject) return;
+    BOOL mainFaceIsFresh = self.lastFaceTrackingObservationUptime > 0
+        && now - self.lastFaceTrackingObservationUptime
+            <= kROBPersonTrackingFaceFreshnessSeconds;
+    BOOL mainPoseIsFresh = self.lastMainPoseTrackingObservationUptime > 0
+        && now - self.lastMainPoseTrackingObservationUptime
+            <= kROBPersonTrackingMainPoseFreshnessSeconds;
+    BOOL panoramicPoseIsFresh = self.lastInstaPoseTrackingObservationUptime > 0
+        && now - self.lastInstaPoseTrackingObservationUptime
+            <= kROBPersonTrackingInstaPoseFreshnessSeconds;
+    if (mainFaceIsFresh || mainPoseIsFresh || panoramicPoseIsFresh) {
+        self.personTrackingLostSinceUptime = 0;
+        return;
+    }
+    if (self.personTrackingLostSinceUptime <= 0) {
+        self.personTrackingLostSinceUptime = now;
+        return;
+    }
+    if (now - self.personTrackingLostSinceUptime
+            < kROBPersonTrackingAttentionReturnSeconds
+        || now - self.lastPersonTrackingAttentionReturnUptime
+            < kROBPersonTrackingAttentionReturnSeconds
+        || self.serialBox.personTrackingUprightTransitionActive
+        || self.serialBox.personTrackingPostureSequenceActive
+        || self.serialBox.safeNeckStartupInProgress) {
+        return;
+    }
+
+    ROBNeckCommandDisposition disposition = [self.serialBox
+        requestPersonTrackingPostureSequence:@[@"upright", @"lean_forward"]];
+    if (disposition == ROBNeckCommandDispositionAppliedCommand
+        || self.serialBox.personTrackingPostureSequenceActive) {
+        self.lastPersonTrackingAttentionReturnUptime = now;
+        self.personTrackingLostSinceUptime = now;
+        self.personTrackingHasAcquiredSubject = NO;
+        self.personTrackingFilterInitialized = NO;
+        self.personTrackingUpperBaselineTarget = 0;
+        self.personTrackingSourceID = nil;
+        self.personTrackingUprightPostureActive = NO;
+        NSLog(
+            @"Person tracking attention expired after %.0f seconds without a main or panoramic human pose; returning to the centered forward search pose",
+            kROBPersonTrackingAttentionReturnSeconds
+        );
+    }
+}
+
 - (void)robotActionBridgeTick:(NSTimer *)timer
 {
     NSDate *now = [NSDate date];
-    [self updatePersonTrackingUprightRestAtUptime:
-        NSProcessInfo.processInfo.systemUptime];
+    NSTimeInterval nowUptime = NSProcessInfo.processInfo.systemUptime;
+    [self updatePersonTrackingUprightRestAtUptime:nowUptime];
+    [self updatePersonTrackingAttentionAtUptime:nowUptime];
     NSArray<NSString *> *callIDs = [self.pendingRobotActionRequests.allKeys copy];
     for (NSString *callID in callIDs) {
         ROBRobotActionMessage *request = self.pendingRobotActionRequests[callID];
@@ -2671,6 +2764,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                                              selector:@selector(faceIdentityTrackingDidUpdate:)
                                                  name:ROBFaceIdentityTrackingDidUpdateNotification
                                                object:[ROBFaceRecognitionService shared]];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(insta360HumanPoseDidUpdate:)
+                                                 name:ROBInsta360HumanPoseDidUpdateNotification
+                                               object:[ROBDynamicDetectorRegistry shared]];
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(geminiVideoSourceSettingsDidChange:)
                                                  name:ROBGeminiVideoSourceSettingsDidChangeNotification
@@ -3310,7 +3407,24 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         if (best != nil && !self.faceIdentityTrackingActive) {
             // Generic face detection is a fallback for acquisition only. Once
             // identity tracking is active, its spatial box has sole authority.
-            [self trackingPerson:@"detected-face" position:best.boundingBox];
+            NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+            CGRect prior = self.lastFaceTrackingBoundingBoxValue.rectValue;
+            if (self.lastFaceTrackingBoundingBoxValue == nil
+                || hypot(CGRectGetMidX(prior) - CGRectGetMidX(best.boundingBox),
+                         CGRectGetMidY(prior) - CGRectGetMidY(best.boundingBox)) > 0.006
+                || fabs(prior.size.width - best.boundingBox.size.width) > 0.006
+                || fabs(prior.size.height - best.boundingBox.size.height) > 0.006) {
+                self.lastFaceTrackingSpatialChangeUptime = now;
+            }
+            self.lastFaceTrackingBoundingBoxValue =
+                [NSValue valueWithRect:best.boundingBox];
+            self.lastFaceTrackingObservationUptime = now;
+            double distance = [self
+                personTrackingDistanceMetersInNormalizedRect:best.boundingBox];
+            [self trackingPerson:@"detected-face"
+                               x:(float)CGRectGetMidX(best.boundingBox)
+                               y:(float)CGRectGetMidY(best.boundingBox)
+                               z:isfinite(distance) ? (float)distance : -1.0f];
         }
     });
 }
@@ -3324,7 +3438,269 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         return;
     }
 
-    [self trackingPerson:@"recognized-face" position:boundingBox];
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    CGRect prior = self.lastFaceTrackingBoundingBoxValue.rectValue;
+    if (self.lastFaceTrackingBoundingBoxValue == nil
+        || hypot(CGRectGetMidX(prior) - CGRectGetMidX(boundingBox),
+                 CGRectGetMidY(prior) - CGRectGetMidY(boundingBox)) > 0.006
+        || fabs(prior.size.width - boundingBox.size.width) > 0.006
+        || fabs(prior.size.height - boundingBox.size.height) > 0.006) {
+        self.lastFaceTrackingSpatialChangeUptime = now;
+    }
+    self.lastFaceTrackingBoundingBoxValue = [NSValue valueWithRect:boundingBox];
+    self.lastFaceTrackingObservationUptime = now;
+
+    ROBPersonTrackingObservation *pose = self.lastMainPoseTrackingObservation;
+    BOOL poseIsFresh = pose != nil
+        && now - self.lastMainPoseTrackingObservationUptime
+            <= kROBPersonTrackingMainPoseFreshnessSeconds;
+    CGFloat faceX = CGRectGetMidX(boundingBox);
+    CGFloat faceY = CGRectGetMidY(boundingBox);
+    BOOL poseMatchesFace = poseIsFresh
+        && fabs(pose.headX - faceX) <= MAX(0.12, boundingBox.size.width * 2.5)
+        && fabs(pose.headY - faceY) <= MAX(0.16, boundingBox.size.height * 2.5);
+    if (poseMatchesFace) {
+        CGRect bodyBounds = CGRectMake(
+            pose.boundsX,
+            pose.boundsY,
+            pose.boundsWidth,
+            pose.boundsHeight
+        );
+        double distance = [self personTrackingDistanceMetersInNormalizedRect:bodyBounds];
+        BOOL faceSpatiallyStalled = now - self.lastFaceTrackingSpatialChangeUptime
+                > kROBPersonTrackingFaceFreshnessSeconds
+            && hypot(pose.headX - faceX, pose.headY - faceY) > 0.04;
+        double faceWeight = faceSpatiallyStalled ? 0.0 : 0.68;
+        [self trackingPerson:@"main-camera-face-pose"
+                           x:(float)(faceX * faceWeight + pose.headX * (1.0 - faceWeight))
+                           y:(float)(faceY * faceWeight + pose.headY * (1.0 - faceWeight))
+                           z:isfinite(distance) ? (float)distance : -1.0f];
+        return;
+    }
+    double distance = [self personTrackingDistanceMetersInNormalizedRect:boundingBox];
+    [self trackingPerson:@"recognized-face"
+                       x:(float)faceX
+                       y:(float)faceY
+                       z:isfinite(distance) ? (float)distance : -1.0f];
+}
+
+- (void)didTrackHumanPoses:(NSArray<ROBPersonTrackingObservation *> *)observations
+{
+    NSAssert(NSThread.isMainThread, @"Main-camera pose tracking is main-thread owned");
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    NSMutableArray<ROBPersonTrackingObservation *> *usable = [NSMutableArray array];
+    for (ROBPersonTrackingObservation *candidate in observations) {
+        if (candidate.confidence >= 0.25) {
+            [usable addObject:candidate];
+        }
+    }
+    if (usable.count == 0) return;
+
+    CGRect faceBounds = self.lastFaceTrackingBoundingBoxValue.rectValue;
+    BOOL faceIsFresh = self.lastFaceTrackingBoundingBoxValue != nil
+        && now - self.lastFaceTrackingObservationUptime
+            <= kROBPersonTrackingFaceFreshnessSeconds;
+    ROBPersonTrackingObservation *selected = nil;
+    double bestScore = DBL_MAX;
+    for (ROBPersonTrackingObservation *candidate in usable) {
+        double referenceX = faceIsFresh
+            ? CGRectGetMidX(faceBounds)
+            : (self.lastMainPoseTrackingObservation != nil
+                ? self.lastMainPoseTrackingObservation.headX : 0.5);
+        double referenceY = faceIsFresh
+            ? CGRectGetMidY(faceBounds)
+            : (self.lastMainPoseTrackingObservation != nil
+                ? self.lastMainPoseTrackingObservation.headY : 0.5);
+        double dx = candidate.headX - referenceX;
+        double dy = candidate.headY - referenceY;
+        double score = dx * dx + dy * dy;
+        if (!faceIsFresh && self.lastMainPoseTrackingObservation == nil) {
+            score -= candidate.confidence * 0.08;
+        }
+        if (score < bestScore) {
+            selected = candidate;
+            bestScore = score;
+        }
+    }
+    if (selected == nil) return;
+    if (faceIsFresh
+        && (fabs(selected.headX - CGRectGetMidX(faceBounds))
+                > MAX(0.12, faceBounds.size.width * 2.5)
+            || fabs(selected.headY - CGRectGetMidY(faceBounds))
+                > MAX(0.16, faceBounds.size.height * 2.5))) {
+        // A different body must not steal a fresh recognized face lock.
+        return;
+    }
+
+    self.lastMainPoseTrackingObservation = selected;
+    self.lastMainPoseTrackingObservationUptime = now;
+    CGRect bodyBounds = CGRectMake(
+        selected.boundsX,
+        selected.boundsY,
+        selected.boundsWidth,
+        selected.boundsHeight
+    );
+    double distance = [self personTrackingDistanceMetersInNormalizedRect:bodyBounds];
+    float x = (float)selected.headX;
+    float y = (float)selected.headY;
+    NSString *source = @"main-camera-pose";
+    if (faceIsFresh) {
+        BOOL faceSpatiallyStalled = now - self.lastFaceTrackingSpatialChangeUptime
+                > kROBPersonTrackingFaceFreshnessSeconds
+            && hypot(selected.headX - CGRectGetMidX(faceBounds),
+                     selected.headY - CGRectGetMidY(faceBounds)) > 0.04;
+        double faceWeight = faceSpatiallyStalled ? 0.0 : 0.68;
+        x = (float)(CGRectGetMidX(faceBounds) * faceWeight
+            + selected.headX * (1.0 - faceWeight));
+        y = (float)(CGRectGetMidY(faceBounds) * faceWeight
+            + selected.headY * (1.0 - faceWeight));
+        source = @"main-camera-face-pose";
+    }
+    [self trackingPerson:source
+                       x:x
+                       y:y
+                       z:isfinite(distance) ? (float)distance : -1.0f];
+}
+
+- (double)personTrackingDistanceMetersInNormalizedRect:(CGRect)rect
+{
+    ROBAlignedDepthFrame *frame = self.latestAlignedDepthFrame;
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (frame == nil
+        || now - self.latestAlignedDepthReceivedUptime > 1.0
+        || frame.width == 0
+        || frame.height == 0) {
+        return NAN;
+    }
+    CGRect clipped = CGRectIntersection(
+        CGRectMake(0, 0, 1, 1),
+        CGRectInset(rect, rect.size.width * 0.22, rect.size.height * 0.16)
+    );
+    if (CGRectIsNull(clipped) || clipped.size.width <= 0 || clipped.size.height <= 0) {
+        return NAN;
+    }
+
+    NSUInteger x0 = MIN(frame.width - 1, (NSUInteger)floor(clipped.origin.x * frame.width));
+    NSUInteger x1 = MIN(frame.width - 1, (NSUInteger)ceil(CGRectGetMaxX(clipped) * frame.width));
+    // Vision uses a lower-left origin; aligned depth rows use upper-left.
+    NSUInteger y0 = MIN(frame.height - 1, (NSUInteger)floor((1.0 - CGRectGetMaxY(clipped)) * frame.height));
+    NSUInteger y1 = MIN(frame.height - 1, (NSUInteger)ceil((1.0 - clipped.origin.y) * frame.height));
+    NSUInteger xStep = MAX(1, (x1 - x0) / 6);
+    NSUInteger yStep = MAX(1, (y1 - y0) / 7);
+    const uint16_t *pixels = (const uint16_t *)frame.millimetersLittleEndian.bytes;
+    uint16_t samples[80] = {0};
+    NSUInteger count = 0;
+    for (NSUInteger y = y0; y <= y1 && count < 80; y += yStep) {
+        for (NSUInteger x = x0; x <= x1 && count < 80; x += xStep) {
+            uint16_t millimeters = CFSwapInt16LittleToHost(pixels[y * frame.width + x]);
+            if (millimeters >= 300 && millimeters <= 8000) {
+                samples[count++] = millimeters;
+            }
+            if (x1 - x < xStep) break;
+        }
+        if (y1 - y < yStep) break;
+    }
+    if (count < 5) return NAN;
+    qsort(samples, count, sizeof(uint16_t), ROBCompareUInt16);
+    return (double)samples[count / 2] / 1000.0;
+}
+
+- (void)insta360HumanPoseDidUpdate:(NSNotification *)notification
+{
+    NSAssert(NSThread.isMainThread, @"Insta360 pose selection is main-thread owned");
+    if (self.torsoControlsViewController.headTracking_enabled.state
+            != NSControlStateValueOn
+        || ![ROBGeminiVideoSourceSettings shared].insta360OrientationCalibrated) {
+        return;
+    }
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    BOOL mainTargetIsFresh = now - self.lastFaceTrackingObservationUptime
+            <= kROBPersonTrackingFaceFreshnessSeconds
+        || now - self.lastMainPoseTrackingObservationUptime
+            <= kROBPersonTrackingMainPoseFreshnessSeconds;
+    if (mainTargetIsFresh) return;
+
+    NSArray<ROBPersonTrackingObservation *> *observations =
+        [notification.userInfo[@"observations"] isKindOfClass:NSArray.class]
+            ? notification.userInfo[@"observations"] : @[];
+    ROBPersonTrackingObservation *selected = nil;
+    double selectedDelta = 0;
+    double bestScore = DBL_MAX;
+    double forwardMarker = [ROBGeminiVideoSourceSettings shared]
+        .insta360ForwardMarkerDegrees;
+    for (ROBPersonTrackingObservation *candidate in observations) {
+        if (candidate.confidence < 0.25
+            || now - candidate.capturedAtUptime
+                > kROBPersonTrackingInstaPoseFreshnessSeconds) {
+            continue;
+        }
+        double delta = ROBNormalizedDegrees(candidate.headX * 360.0 - forwardMarker);
+        double score = fabs(delta) - candidate.confidence * 12.0;
+        if (score < bestScore) {
+            selected = candidate;
+            selectedDelta = delta;
+            bestScore = score;
+        }
+    }
+    if (selected == nil) return;
+
+    // The panorama authorizes only a coarse horizontal re-aim. Main-camera
+    // face/body pose must reacquire before vertical or distance tracking resumes.
+    float syntheticX = (float)MAX(0.0, MIN(1.0, 0.5 + selectedDelta / 120.0));
+    self.lastInstaPoseTrackingObservationUptime = now;
+    [self trackingPerson:@"insta360-pose" x:syntheticX y:0.5f z:-1.0f];
+}
+
+- (void)updatePersonTrackingPostureForDistance:(double)distance
+                                       atUptime:(NSTimeInterval)now
+{
+    if (!isfinite(distance) || distance <= 0 || self.serialBox == nil) return;
+    NSInteger nextBand = self.personTrackingDistanceBand;
+    if (distance >= kROBPersonTrackingTooFarMeters) {
+        nextBand = 1;
+    } else if (distance <= kROBPersonTrackingTooCloseMeters) {
+        nextBand = -1;
+    } else if (distance > kROBPersonTrackingTooCloseMeters + 0.20
+        && distance < kROBPersonTrackingTooFarMeters - 0.30) {
+        nextBand = 0;
+    }
+    if (nextBand == 0) {
+        self.personTrackingDistanceBand = 0;
+        self.personTrackingDistanceBandEnteredUptime = 0;
+        return;
+    }
+    if (nextBand != self.personTrackingDistanceBand) {
+        self.personTrackingDistanceBand = nextBand;
+        self.personTrackingDistanceBandEnteredUptime = now;
+        return;
+    }
+    if (!isfinite(self.personTrackingDistanceBandEnteredUptime)
+        || self.personTrackingDistanceBandEnteredUptime <= 0
+        || now - self.personTrackingDistanceBandEnteredUptime
+            < kROBPersonTrackingDistanceDwellSeconds
+        || self.serialBox.personTrackingPostureSequenceActive) {
+        return;
+    }
+
+    NSArray<NSString *> *sequence = nextBand > 0
+        ? @[@"lean_back", @"upright", @"lean_forward"]
+        : @[@"lean_forward", @"upright", @"lean_back"];
+    ROBNeckCommandDisposition disposition = [self.serialBox
+        requestPersonTrackingPostureSequence:sequence];
+    if (disposition == ROBNeckCommandDispositionAppliedCommand
+        || self.serialBox.personTrackingPostureSequenceActive) {
+        self.personTrackingDistanceBandEnteredUptime = INFINITY;
+        self.personTrackingFilterInitialized = NO;
+        self.personTrackingUpperBaselineTarget = 0;
+        self.personTrackingSourceID = nil;
+        self.personTrackingUprightPostureActive = NO;
+        NSLog(
+            @"Person tracking distance %.2f m started %@ posture sequence",
+            distance,
+            nextBand > 0 ? @"lean_back → upright → lean_forward"
+                         : @"lean_forward → upright → lean_back"
+        );
+    }
 }
 
 - (void)didCaptureCameraSampleBuffer:(CMSampleBufferRef)sampleBuffer
@@ -3352,11 +3728,13 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                                 height:height
                               sequence:sequence
                   timestampNanoseconds:timestampNanoseconds];
+    self.latestAlignedDepthReceivedUptime = NSProcessInfo.processInfo.systemUptime;
 }
 
 - (void)clearAlignedDepthFrame
 {
     self.latestAlignedDepthFrame = nil;
+    self.latestAlignedDepthReceivedUptime = 0;
 }
 
 - (void) trackingPerson:(NSString *)userID position:(NSRect)headPosition
@@ -3381,17 +3759,25 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             self.personTrackingSourceID = nil;
             return;
         }
-        // A recognized face is the authoritative target until its spatial
-        // identity track expires. A concurrent legacy body observation must
-        // not pull the neck toward a different box.
+        NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+        BOOL faceTrackFresh = self.lastFaceTrackingObservationUptime > 0
+            && now - self.lastFaceTrackingObservationUptime
+                <= kROBPersonTrackingFaceFreshnessSeconds;
+        BOOL fusedMainPose = [userID isEqualToString:@"main-camera-face-pose"];
+        // A fresh recognized face remains authoritative, but its boolean state
+        // no longer suppresses the associated body after the spatial box
+        // stalls in poor lighting.
         BOOL recognizedFace = [userID isEqualToString:@"recognized-face"];
-        if (!recognizedFace && self.faceIdentityTrackingActive) {
+        if (!recognizedFace && self.faceIdentityTrackingActive
+            && faceTrackFresh && !fusedMainPose) {
             return;
         }
         BOOL detectedFace = [userID isEqualToString:@"detected-face"];
         if (!recognizedFace
             && !detectedFace
-            && self.faceDetectionTrackingActive) {
+            && self.faceDetectionTrackingActive
+            && faceTrackFresh
+            && !fusedMainPose) {
             return;
         }
         // Face acquisition starts inside the currently settled collision-safe
@@ -3402,7 +3788,14 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         self.currentPerson_positionY = y;
         self.currentPerson_positionZ = z;
 
-        NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+        self.personTrackingHasAcquiredSubject = YES;
+        self.personTrackingLostSinceUptime = 0;
+        if (z > 0) {
+            [self updatePersonTrackingPostureForDistance:z atUptime:now];
+            if (self.serialBox.personTrackingPostureSequenceActive) {
+                return;
+            }
+        }
         NSTimeInterval elapsed = self.lastPersonTrackingUpdateUptime > 0
             ? now - self.lastPersonTrackingUpdateUptime
             : 0.1;
@@ -3593,7 +3986,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             )) {
             return;
         }
-        if (self.serialBox.personTrackingUprightTransitionActive) {
+        if (self.serialBox.personTrackingUprightTransitionActive
+            || self.serialBox.personTrackingPostureSequenceActive) {
             return;
         }
         if (result.uprightTransitionRequested
