@@ -78,7 +78,8 @@ require(
     and "handWaveFocusDeadlineUptime = now + 4.5" in main
     and 'trackingPerson:@"main-camera-wave"' in main
     and 'trackingPerson:@"insta360-wave"' in main
-    and "(self.handWaveFocusX - 0.5) * 360.0" in main,
+    and "forwardCenterX = 0.52" in registry
+    and "[ROBInsta360TrackingCalibration forwardCenterX]" in main,
     "Idle wave focus no longer aims both camera sources at the tracking cadence.",
 )
 require(

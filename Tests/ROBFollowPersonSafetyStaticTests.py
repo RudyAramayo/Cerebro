@@ -3,6 +3,7 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[1] / "Cerebro"
 coordinator = (root / "ROBFollowPersonCoordinator.swift").read_text()
 camera = (root / "CameraViewController.swift").read_text()
+detectors = (root / "ROBDynamicDetectorRegistry.swift").read_text()
 serial = (root / "ROBSerialBox.m").read_text()
 server = (root / "AutoNet" / "AutoNetServer" / "AutoNetServer.swift").read_text()
 
@@ -15,7 +16,8 @@ insta_extension = coordinator.split("extension ROBFollowPersonCoordinator: ROBIn
 assert "applyLeftTread" not in insta_extension
 assert "insta360OrientationCalibrated" not in insta_extension
 assert "insta360ForwardMarkerDegrees" not in insta_extension
-assert "(best.0.boundingBox.midX - 0.5) * 360" in insta_extension
+assert "forwardCenterX = 0.52" in detectors
+assert "ROBInsta360TrackingCalibration.forwardCenterX" in insta_extension
 assert "Float(-deltaDegrees / 75)" in insta_extension
 assert "ROBNeckSafetyReferenceLowerTarget" in serial
 assert "allowSupervisedLowerRecovery:NO" in serial

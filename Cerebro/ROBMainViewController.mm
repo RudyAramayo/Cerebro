@@ -3650,11 +3650,11 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                 > kROBPersonTrackingInstaPoseFreshnessSeconds) {
             continue;
         }
-        // This camera stream is face-relative: the stitched frame center is
-        // always the robot's current forward direction. Therefore the pose X
-        // is already a signed relative pan bearing and needs no persisted
-        // orientation marker, even after the neck pans.
-        double delta = (candidate.headX - 0.5) * 360.0;
+        // This camera stream is face-relative. Its fixed optical center is
+        // slightly right of the stitched midpoint so a coarse panoramic re-aim
+        // hands the face to the middle of the main camera instead of its edge.
+        double delta = (candidate.headX
+            - [ROBInsta360TrackingCalibration forwardCenterX]) * 360.0;
         double score = fabs(delta) - candidate.confidence * 12.0;
         if (score < bestScore) {
             selected = candidate;
@@ -3731,7 +3731,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         return;
     }
     if ([self.handWaveFocusSource isEqualToString:@"insta360"]) {
-        double deltaDegrees = (self.handWaveFocusX - 0.5) * 360.0;
+        double deltaDegrees = (self.handWaveFocusX
+            - [ROBInsta360TrackingCalibration forwardCenterX]) * 360.0;
         float syntheticX = (float)MAX(
             0.0,
             MIN(1.0, 0.5 + deltaDegrees / 120.0)

@@ -715,10 +715,12 @@ extension ROBFollowPersonCoordinator: ROBInsta360VideoFrameConsumer {
             guard let best = scored.first, best.1 <= 16,
                   scored.count == 1 || scored[1].1 - best.1 >= 2 else { return }
 
-            // The stitched frame follows the robot's face, so its center is
-            // the live forward bearing. Reacquisition is relative to the
-            // current neck direction and never needs orientation calibration.
-            let deltaDegrees = (best.0.boundingBox.midX - 0.5) * 360
+            // Reacquisition remains relative to the current neck direction,
+            // with the fixed optical offset shared by attention tracking.
+            let deltaDegrees = (
+                best.0.boundingBox.midX
+                    - CGFloat(ROBInsta360TrackingCalibration.forwardCenterX)
+            ) * 360
             let coarseTorso = Self.clamp(Float(deltaDegrees / 120), -0.75, 0.75)
             let coarseNeck = Self.clamp(Float(-deltaDegrees / 75), -1, 1)
             self.torsoDemand = coarseTorso

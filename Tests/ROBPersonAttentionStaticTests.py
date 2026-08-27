@@ -74,15 +74,17 @@ require(
     "A persistently high main-camera human pose no longer lifts safely at the current pan before resuming face centering.",
 )
 require(
-    "insta360OrientationCalibrated" not in insta_reacquisition
+    "class ROBInsta360TrackingCalibration" in detectors
+    and "forwardCenterX = 0.52" in detectors
+    and "insta360OrientationCalibrated" not in insta_reacquisition
     and "insta360ForwardMarkerDegrees" not in insta_reacquisition
-    and "(candidate.headX - 0.5) * 360.0" in insta_reacquisition
+    and "[ROBInsta360TrackingCalibration forwardCenterX]" in insta_reacquisition
     and "0.5 + selectedDelta / 120.0" in insta_reacquisition
     and "mainTargetIsFresh" in main
     and "if (mainTargetIsFresh) return" in main
     and 'trackingPerson:@"insta360-pose"' in main
     and "Main-camera\n    // face/body pose must reacquire" in main,
-    "Panoramic pose no longer uses face-relative frame-center bearing with main-camera priority.",
+    "Panoramic pose no longer uses the shared face-relative optical center with main-camera priority.",
 )
 require(
     "kROBPersonTrackingAttentionReturnSeconds = 8.0" in main

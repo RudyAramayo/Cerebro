@@ -20,6 +20,16 @@ extension Notification.Name {
 
 public enum ROBDetectorSource: String, CaseIterable, Sendable { case mainCamera, insta360 }
 public enum ROBInsta360AnalysisGeometry: Int, Sendable { case stitchedPanorama, sixSectors }
+
+/// Optical alignment between the stitched panorama and the forward main
+/// camera. The Insta360 is face-relative, but its stitched midpoint sits a few
+/// degrees left of the main camera's optical axis on this mounting.
+@objcMembers public final class ROBInsta360TrackingCalibration: NSObject {
+    public static let forwardCenterX = 0.52
+
+    private override init() {}
+}
+
 public struct ROBOverlayPoint: Sendable { public let x, y: Double; public let label: String; public let confidence: Double }
 public struct ROBOverlayLine: Sendable { public let x1, y1, x2, y2: Double }
 public struct ROBDetectorOutput: Sendable {
