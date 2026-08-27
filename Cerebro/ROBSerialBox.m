@@ -73,6 +73,7 @@ static NSTimeInterval const kROBNeckClearanceSettleSeconds = 0.75;
 static NSTimeInterval const kROBNeckSupervisedRecoverySeconds = 5.0;
 static NSString * const kROBSafeNeckStartupLiftSource = @"Torso safe startup lift";
 static NSString * const kROBSafeNeckStartupRestSource = @"Torso safe startup rest";
+static NSString * const kROBServoControlSource = @"Torso servo control";
 static NSString * const kROBFollowTrackingClearanceSource =
     @"Follow tracking clearance";
 static NSUInteger const kROBBaseConsoleMaximumCharacters = 256 * 1024;
@@ -1839,6 +1840,9 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         );
         readyAt = fmax(readyAt, self.commandedUpperNeckTargetReadyAt);
         readyAt = fmax(readyAt, self.pendingPanEnvelopeReadyAt);
+        if (self.panRecenterSettleGate.active) {
+            readyAt = fmax(readyAt, self.panRecenterSettleGate.readyAt);
+        }
         return readyAt;
     }
 }
@@ -1884,7 +1888,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         desiredUpperTarget:(int)upperTarget
         includeLower:YES
         allowSupervisedLowerRecovery:YES
-        source:@"Torso manual"];
+        source:kROBServoControlSource];
 }
 
 - (ROBNeckCommandDisposition)applySafeNeckPanTarget:(int)panTarget
@@ -1900,6 +1904,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     BOOL safeStartupCommand = self.safeNeckStartupInProgress
         && ([source isEqualToString:kROBSafeNeckStartupLiftSource]
             || [source isEqualToString:kROBSafeNeckStartupRestSource]);
+    BOOL servoControlCommand = [source isEqualToString:kROBServoControlSource];
     BOOL safeStartupLiftCommand = safeStartupCommand
         && self.safeNeckStartupPhase == ROBSafeNeckStartupPhaseLifting
         && [source isEqualToString:kROBSafeNeckStartupLiftSource]
@@ -1924,9 +1929,10 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         // wider lower-dependent pan envelope.
         effectiveConfiguration.upperCounterRotationGain = 0.0;
     }
-    if (safeStartupCommand) {
-        // The startup sequence commands two exact mechanical poses. Rebase
-        // optional camera leveling only after the final pose has settled.
+    if (safeStartupCommand || servoControlCommand) {
+        // Startup and Servo Control sequences command explicit mechanical
+        // targets. Rebase optional camera leveling after the exact pose rather
+        // than transforming an operator-configured raw upper value.
         effectiveConfiguration.cameraLevelingEnabled = false;
     }
 
@@ -1960,6 +1966,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     int boundedLower = boundedJoints.lowerTarget;
 
     BOOL supervisedManualCommand = [source isEqualToString:@"Torso manual"]
+        || servoControlCommand
         || safeStartupLiftCommand;
     BOOL torsoCommand = [source hasPrefix:@"Torso "];
     BOOL directSupervisedLowerRecovery = supervisedManualCommand
@@ -2563,11 +2570,20 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         }
     }
 
+    if (servoControlCommand) {
+        // The exact raw pose becomes the next camera-leveling baseline. This
+        // prevents a later normal torso render from applying compensation
+        // relative to the pose that preceded the Servo Control action.
+        self.neckLevelingReferenceIsValid = NO;
+        self.upperNeckCommandCompensated = NO;
+    }
+
     self.neckCommandSource = source ?: @"Unknown";
 
     NSMutableArray<NSString *> *status = [NSMutableArray array];
     if (!calibrationConfirmed
         && !safeStartupCommand
+        && !servoControlCommand
         && !reviewedFollowClearanceCommand) {
         [status addObject:[NSString stringWithFormat:
             @"CALIBRATION REQUIRED: AUTOMATIC LOWER MOTION HELD; PAN %.1f°…%+.1f°",
@@ -2576,6 +2592,9 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     }
     if (reviewedFollowClearanceCommand) {
         [status addObject:@"REVIEWED TRACKING CLEARANCE"];
+    }
+    if (servoControlCommand) {
+        [status addObject:@"SERVO CONTROL EXACT TARGETS"];
     }
     if (panResult.panClamped) {
         [status addObject:[NSString stringWithFormat:

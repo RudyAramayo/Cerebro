@@ -152,6 +152,11 @@ The shipped `NO` gesture does the same around the current pan target. Servo,
 delta, repetition count, and interval are editable. Gesture steps and named
 camera positions use the same safety gateway as the torso sliders; a clamped
 target stops execution and leaves the warning/restricted envelope visible.
+One button press owns the complete run: if the gateway first holds lower/upper
+while pan settles, the runner waits for that internal deadline and resubmits
+automatically. Explicit Servo Control values are raw Maestro targets, so camera
+leveling does not transform the configured upper value; the accepted exact
+pose becomes the baseline for later normal camera-leveling commands.
 
 ## Hardware servo motion profile
 

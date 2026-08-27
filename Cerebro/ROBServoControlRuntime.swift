@@ -226,13 +226,18 @@ import Foundation
         timer?.invalidate()
         let now = ProcessInfo.processInfo.systemUptime
         let safetyDelay = max(0, box.neckCommandReadyAtUptime - now)
-        timer = Timer.scheduledTimer(
-            withTimeInterval: safetyDelay + minimumDelay,
+        let retryTimer = Timer(
+            timeInterval: safetyDelay + minimumDelay,
             repeats: false
         ) { [weak self] _ in
             self?.timer = nil
             action()
         }
+        timer = retryTimer
+        // Button/table mouse tracking switches the main run loop out of its
+        // default mode. Common mode keeps the one-press sequence advancing
+        // while the Servo Control window remains interactive.
+        RunLoop.main.add(retryTimer, forMode: .common)
     }
 
     private func readySerialBox() -> ROBSerialBox? {

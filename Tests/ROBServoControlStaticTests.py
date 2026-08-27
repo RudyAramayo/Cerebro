@@ -78,6 +78,16 @@ def main() -> None:
         "Servo Control execution bypasses or no longer exposes the shared neck safety gateway",
     )
     require(
+        'kROBServoControlSource = @"Torso servo control"' in serial_source
+        and "safeStartupCommand || servoControlCommand" in serial_source
+        and "effectiveConfiguration.cameraLevelingEnabled = false" in serial_source
+        and "self.panRecenterSettleGate.readyAt" in serial_source
+        and "RunLoop.main.add(retryTimer, forMode: .common)" in runtime
+        and "sendMaestroLowerTarget" in serial_source,
+        "A single Servo Control press no longer advances exact raw targets "
+        "through the automatic pan-first/lower-upper handoff",
+    )
+    require(
         "ROBServoControlStore *store = [ROBServoControlStore shared];"
         in serial_source
         and "safeNeckStartupPhaseOne = phaseOne" in serial_source

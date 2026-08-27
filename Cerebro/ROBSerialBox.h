@@ -122,8 +122,9 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 /// feedback. Repeated calls while the sequence is active are harmless.
 - (ROBNeckCommandDisposition)startSafeNeckStartup;
 - (void)cancelSafeNeckStartup;
-/// Submits an explicit operator pose through the same collision, settling, and
-/// calibration gateway used by the torso sliders. Callers should retry a
+/// Submits exact raw operator targets through the same collision and settling
+/// gateway used by the torso sliders. Lower/upper are issued as one Maestro
+/// packet after any required pan-first clearance stage. Callers should retry a
 /// HeldForSafety result only after `neckCommandReadyAtUptime`.
 - (ROBNeckCommandDisposition)requestOperatorNeckPosePanTarget:(NSInteger)panTarget
                                                   lowerTarget:(NSInteger)lowerTarget
