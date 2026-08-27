@@ -34,6 +34,7 @@ typedef struct {
     double horizontalDeadBand;
     double verticalDeadBand;
     bool mirrorHorizontalCoordinate;
+    double responseExponent;
     double panTargetsPerSecond;
     double upperTargetsPerSecond;
     double maximumElapsedSeconds;
@@ -53,8 +54,9 @@ typedef struct {
 } ROBPersonTrackingResult;
 
 // The default controller samples at no more than 10 Hz, aims at the exact
-// image center, preserves the unmirrored main-camera Vision X coordinate, and
-// ignores the central 12 percent on both axes.
+// image center, converts the mirrored main-camera Vision X coordinate into the
+// physical pan frame, ignores the central 12 percent on both axes, and eases
+// corrections as the observation approaches that band.
 ROBPersonTrackingConfig ROBPersonTrackingDefaultConfig(void);
 
 bool ROBPersonTrackingConfigIsValid(

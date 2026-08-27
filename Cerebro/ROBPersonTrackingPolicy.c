@@ -31,11 +31,24 @@ static int32_t ROBPersonTrackingClampTarget(
 static double ROBPersonTrackingErrorBeyondDeadBand(
     double coordinate,
     double center,
-    double deadBand
+    double deadBand,
+    double responseExponent
 ) {
     const double error = coordinate - center;
     if (fabs(error) <= deadBand) return 0.0;
-    return error - copysign(deadBand, error);
+    const double errorBeyondDeadBand = error - copysign(deadBand, error);
+    const double availableError = error > 0.0
+        ? 1.0 - center - deadBand
+        : center - deadBand;
+    const double normalizedError = ROBPersonTrackingClampDouble(
+        fabs(errorBeyondDeadBand) / availableError,
+        0.0,
+        1.0
+    );
+    return copysign(
+        availableError * pow(normalizedError, responseExponent),
+        errorBeyondDeadBand
+    );
 }
 
 static int32_t ROBPersonTrackingRoundedTarget(double value) {
@@ -50,7 +63,8 @@ ROBPersonTrackingConfig ROBPersonTrackingDefaultConfig(void) {
         .centerY = 0.5,
         .horizontalDeadBand = 0.06,
         .verticalDeadBand = 0.06,
-        .mirrorHorizontalCoordinate = false,
+        .mirrorHorizontalCoordinate = true,
+        .responseExponent = 1.5,
         .panTargetsPerSecond = 250.0,
         .upperTargetsPerSecond = 80.0,
         .maximumElapsedSeconds = 0.1,
@@ -70,6 +84,7 @@ bool ROBPersonTrackingConfigIsValid(
         || !isfinite(configuration->centerY)
         || !isfinite(configuration->horizontalDeadBand)
         || !isfinite(configuration->verticalDeadBand)
+        || !isfinite(configuration->responseExponent)
         || !isfinite(configuration->panTargetsPerSecond)
         || !isfinite(configuration->upperTargetsPerSecond)
         || !isfinite(configuration->maximumElapsedSeconds)) {
@@ -85,6 +100,8 @@ bool ROBPersonTrackingConfigIsValid(
         && configuration->verticalDeadBand >= 0.0
         && configuration->verticalDeadBand
             < fmin(configuration->centerY, 1.0 - configuration->centerY)
+        && configuration->responseExponent >= 1.0
+        && configuration->responseExponent <= 4.0
         && configuration->panTargetsPerSecond > 0.0
         && configuration->upperTargetsPerSecond > 0.0
         && configuration->maximumElapsedSeconds > 0.0
@@ -119,9 +136,8 @@ bool ROBPersonTrackingApply(
         0.0,
         1.0
     );
-    // Vision observations use the unmirrored pixel-buffer coordinate. Keep
-    // the option explicit for future mirrored sources, but the main-camera
-    // default must preserve X so image-right lowers the raw pan target.
+    // The installed main-camera feed presents mirrored X observations. Convert
+    // that display-relative coordinate once before applying physical pan.
     const double x = configuration->mirrorHorizontalCoordinate
         ? 1.0 - observedX
         : observedX;
@@ -133,12 +149,14 @@ bool ROBPersonTrackingApply(
     resultOut->horizontalError = ROBPersonTrackingErrorBeyondDeadBand(
         x,
         configuration->centerX,
-        configuration->horizontalDeadBand
+        configuration->horizontalDeadBand,
+        configuration->responseExponent
     );
     resultOut->verticalError = ROBPersonTrackingErrorBeyondDeadBand(
         y,
         configuration->centerY,
-        configuration->verticalDeadBand
+        configuration->verticalDeadBand,
+        configuration->responseExponent
     );
 
     // ROB's physical pan calibration moves right toward the lower raw target

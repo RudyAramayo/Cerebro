@@ -38,7 +38,10 @@ static NSTimeInterval const kRobotActionApprovalLifetimeSeconds = 30.0;
 static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
 static NSTimeInterval const kROBConversationContinuationWindowSeconds = 15.0;
 static NSTimeInterval const kROBPersonTrackingFilterResetSeconds = 0.5;
-static double const kROBPersonTrackingFilterAlpha = 0.25;
+static double const kROBPersonTrackingApproachFilterAlpha = 0.65;
+static double const kROBPersonTrackingRetreatFilterAlpha = 0.25;
+static double const kROBPersonTrackingFilterCenter = 0.5;
+static double const kROBPersonTrackingFilterStopBand = 0.06;
 static NSString * const ROBDevelopmentModeDefaultsKey = @"ROBDevelopmentMode";
 static NSString * const ROBShowControllerInputDiagnosticsNotification = @"ROBShowControllerInputDiagnostics";
 static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopmentModeDidChange";
@@ -47,6 +50,25 @@ static NSString * const ROBFaceIdentityConversationCueNotification = @"ROBFaceId
 static NSString * const ROBFaceIdentityTrackingDidUpdateNotification = @"ROBFaceIdentityTrackingDidUpdate";
 static NSString * const ROBStageShowStateDidChangeNotification = @"ROBStageShowStateDidChange";
 static NSString * const ROBHeadlessLiveStartupStopRequestedNotification = @"ROBHeadlessLiveStartupStopRequested";
+
+static double ROBPersonTrackingFilterCoordinate(
+    double previous,
+    double observed
+) {
+    const double previousError = previous - kROBPersonTrackingFilterCenter;
+    const double observedError = observed - kROBPersonTrackingFilterCenter;
+    if (fabs(observedError) <= kROBPersonTrackingFilterStopBand
+        || previousError * observedError <= 0.0) {
+        // Do not let filter lag continue driving after the camera has centered
+        // the face or the observation has crossed the center line.
+        return observed;
+    }
+    const BOOL approachingCenter = fabs(observedError) < fabs(previousError);
+    const double alpha = approachingCenter
+        ? kROBPersonTrackingApproachFilterAlpha
+        : kROBPersonTrackingRetreatFilterAlpha;
+    return previous + alpha * (observed - previous);
+}
 
 #import "AVFoundation/AVFoundation.h"
 #import "Cerebro-Swift.h"
@@ -388,6 +410,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 @property (readwrite, assign) double filteredPersonTrackingX;
 @property (readwrite, assign) double filteredPersonTrackingY;
 @property (readwrite, copy) NSString *personTrackingSourceID;
+@property (readwrite, assign) NSTimeInterval lastPersonTrackingDiagnosticsUptime;
 
 @property (readwrite, assign) int actualValue;
 @property (readwrite, assign) int targetValue;
@@ -3380,10 +3403,14 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             self.personTrackingFilterInitialized = YES;
             self.personTrackingSourceID = userID;
         } else {
-            self.filteredPersonTrackingX += kROBPersonTrackingFilterAlpha
-                * (x - self.filteredPersonTrackingX);
-            self.filteredPersonTrackingY += kROBPersonTrackingFilterAlpha
-                * (y - self.filteredPersonTrackingY);
+            self.filteredPersonTrackingX = ROBPersonTrackingFilterCoordinate(
+                self.filteredPersonTrackingX,
+                x
+            );
+            self.filteredPersonTrackingY = ROBPersonTrackingFilterCoordinate(
+                self.filteredPersonTrackingY,
+                y
+            );
         }
         self.lastPersonTrackingUpdateUptime = now;
 
@@ -3431,6 +3458,20 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                 &result
             )) {
             return;
+        }
+        if (now - self.lastPersonTrackingDiagnosticsUptime >= 1.0) {
+            self.lastPersonTrackingDiagnosticsUptime = now;
+            NSLog(
+                @"Person tracking %@ raw=(%.3f, %.3f) filtered=(%.3f, %.3f) pan=%d->%d mirrored=%@",
+                userID,
+                x,
+                y,
+                self.filteredPersonTrackingX,
+                self.filteredPersonTrackingY,
+                currentPanTarget,
+                result.panTarget,
+                configuration.mirrorHorizontalCoordinate ? @"YES" : @"NO"
+            );
         }
         self.currentPerson_pan = result.panTarget;
         self.currentPerson_tilt = self.torsoControlsViewController.headTilt.floatValue;

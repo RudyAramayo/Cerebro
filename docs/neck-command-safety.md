@@ -121,13 +121,15 @@ toward or beyond a restricted pan edge cannot continue while the lower neck is
 leaning. Once upright, pan may use the calibrated full range and still clamps at
 the physical `4000`/`8000` hard targets. The installed servo turns right as the
 raw pan target decreases toward `4000` and left as it increases toward `8000`.
-The main-camera detectors read the unmirrored capture pixel buffer, so person
-tracking preserves normalized X: a target on image right lowers the raw pan
-target and turns the installed servo physically right. Recognized-face tracking
+The installed main-camera feed reports mirrored X, so person tracking reverses
+normalized X once: a person on ROB's physical right lowers the raw pan target
+and turns the installed servo physically right. Recognized-face tracking
 has priority; generic face detection is used only as an acquisition fallback,
-and legacy body boxes run only when neither face source is active. A 25-percent
-observation filter damps frame-to-frame box jitter before each proportional
-correction.
+and legacy body boxes run only when neither face source is active. The filter
+uses 65-percent response while an observation approaches center, 25 percent
+while it retreats, and snaps to the raw observation inside the dead band or
+after a center crossing. A `1.5` response exponent eases the remaining error,
+so corrections shrink more quickly as the camera refocuses.
 
 ## OFF/unknown safe startup
 

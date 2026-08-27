@@ -115,9 +115,14 @@ assert "ROBPersonTrackingApply" in main
 assert "lastPersonTrackingUpdateUptime" in main
 assert "faceIdentityTrackingActive" in main
 assert "faceDetectionTrackingActive" in main
-assert "kROBPersonTrackingFilterAlpha = 0.25" in main
+assert "kROBPersonTrackingApproachFilterAlpha = 0.65" in main
+assert "kROBPersonTrackingRetreatFilterAlpha = 0.25" in main
+assert "fabs(observedError) <= kROBPersonTrackingFilterStopBand" in main
+assert "previousError * observedError <= 0.0" in main
+assert "fabs(observedError) < fabs(previousError)" in main
 assert "filteredPersonTrackingX" in person_tracking
 assert "self.serialBox.commandedNeckPanTarget" in person_tracking
+assert 'Person tracking %@ raw=(%.3f, %.3f)' in person_tracking
 assert "!recognizedFace && self.faceIdentityTrackingActive" in person_tracking
 assert "!detectedFace" in person_tracking
 legacy_faces = main.split("- (void) didSeeNewPeople:", 1)[1].split(
@@ -131,7 +136,9 @@ assert "centerX = 0.5" in tracking_policy_source
 assert "centerY = 0.5" in tracking_policy_source
 assert "horizontalDeadBand = 0.06" in tracking_policy_source
 assert "verticalDeadBand = 0.06" in tracking_policy_source
-assert "mirrorHorizontalCoordinate = false" in tracking_policy_source
+assert "mirrorHorizontalCoordinate = true" in tracking_policy_source
+assert "responseExponent = 1.5" in tracking_policy_source
+assert "pow(normalizedError, responseExponent)" in tracking_policy_source
 assert "panTargetsPerSecond = 250.0" in tracking_policy_source
 assert "currentPanTarget\n            - resultOut->horizontalError" in tracking_policy_source
 assert "upperTargetsPerSecond = 80.0" in tracking_policy_source

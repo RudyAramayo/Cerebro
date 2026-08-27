@@ -60,7 +60,8 @@ static void testDefaultCalibration(void) {
     EXPECT_INT(ROBPersonTrackingMinimumUpperTarget, 7350);
     EXPECT_INT(ROBPersonTrackingNeutralUpperTarget, 7375);
     EXPECT_INT(ROBPersonTrackingMaximumUpperTarget, 7400);
-    EXPECT_FALSE(configuration.mirrorHorizontalCoordinate);
+    EXPECT_TRUE(configuration.mirrorHorizontalCoordinate);
+    EXPECT_TRUE(fabs(configuration.responseExponent - 1.5) < 0.000001);
 
     ROBPersonTrackingResult centered = track(
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
@@ -79,37 +80,57 @@ static void testDefaultCalibration(void) {
 
 static void testCorrectionsPointCameraTowardBlob(void) {
     ROBPersonTrackingConfig configuration = ROBPersonTrackingDefaultConfig();
-    // Vision reads the unmirrored sample buffer. Image right must lower the
-    // installed servo's raw target and turn ROB physically right.
+    // A person on ROB's physical right appears on the left of the mirrored
+    // camera feed. Coordinate conversion must lower the raw target and turn
+    // ROB physically right.
     ROBPersonTrackingResult robotRight = track(
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
-        0.8, 0.8, 0.1
+        0.2, 0.8, 0.1
     );
-    EXPECT_INT(robotRight.panTarget, 5994);
-    EXPECT_INT(robotRight.upperTarget, 7377);
+    EXPECT_INT(robotRight.panTarget, 5996);
+    EXPECT_INT(robotRight.upperTarget, 7376);
 
     ROBPersonTrackingResult robotLeft = track(
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
-        0.2, 0.2, 0.1
+        0.8, 0.2, 0.1
     );
-    EXPECT_INT(robotLeft.panTarget, 6006);
-    EXPECT_INT(robotLeft.upperTarget, 7373);
+    EXPECT_INT(robotLeft.panTarget, 6004);
+    EXPECT_INT(robotLeft.upperTarget, 7374);
     EXPECT_FALSE(robotLeft.upperClamped);
 
-    // A future mirrored display coordinate can still opt into conversion.
-    configuration.mirrorHorizontalCoordinate = true;
-    ROBPersonTrackingResult mirroredRight = track(
+    // A future unmirrored detector can opt out of conversion explicitly.
+    configuration.mirrorHorizontalCoordinate = false;
+    ROBPersonTrackingResult unmirroredRight = track(
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
-        0.2, 0.5, 0.1
+        0.8, 0.5, 0.1
     );
-    EXPECT_INT(mirroredRight.panTarget, 5994);
+    EXPECT_INT(unmirroredRight.panTarget, 5996);
 
-    // A downward correction is limited to two raw targets in this representative
+    // A downward correction is limited to one raw target in this representative
     // frame and cannot cross the slight-up floor that prevents the observed dip.
     ROBPersonTrackingResult downwardWithinGuard = track(
         &configuration, 6000, 7360, 0.5, 0.2, 0.1
     );
-    EXPECT_INT(downwardWithinGuard.upperTarget, 7358);
+    EXPECT_INT(downwardWithinGuard.upperTarget, 7359);
+
+    ROBPersonTrackingResult far = track(
+        &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
+        0.8, 0.5, 0.1
+    );
+    ROBPersonTrackingResult closer = track(
+        &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
+        0.65, 0.5, 0.1
+    );
+    ROBPersonTrackingResult almostCentered = track(
+        &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
+        0.57, 0.5, 0.1
+    );
+    EXPECT_TRUE(fabs(far.horizontalError) > fabs(closer.horizontalError));
+    EXPECT_TRUE(fabs(closer.horizontalError)
+        > fabs(almostCentered.horizontalError));
+    EXPECT_INT(far.panTarget, 5996);
+    EXPECT_INT(closer.panTarget, 5999);
+    EXPECT_INT(almostCentered.panTarget, 6000);
 }
 
 static void testRightTrackingAccumulatesMonotonically(void) {
@@ -121,14 +142,14 @@ static void testRightTrackingAccumulatesMonotonically(void) {
             &configuration,
             pan,
             ROBPersonTrackingNeutralUpperTarget,
-            0.8,
+            0.2,
             0.5,
             0.1
         );
         pan = result.panTarget;
         EXPECT_TRUE(pan < previousPan);
     }
-    EXPECT_INT(pan, 5940);
+    EXPECT_INT(pan, 5960);
 }
 
 static void testTrackingGuards(void) {
@@ -161,7 +182,7 @@ static void testTrackingGuards(void) {
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
         1.0, 0.5, 1.0
     );
-    EXPECT_INT(cappedGap.panTarget, 5989);
+    EXPECT_INT(cappedGap.panTarget, 6011);
 
     EXPECT_FALSE(ROBPersonTrackingApply(
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
@@ -175,6 +196,9 @@ static void testTrackingGuards(void) {
         NULL, 6000, ROBPersonTrackingNeutralUpperTarget,
         0.5, 0.5, 0.1, &low
     ));
+
+    configuration.responseExponent = 0.5;
+    EXPECT_FALSE(ROBPersonTrackingConfigIsValid(&configuration));
 }
 
 int main(void) {
