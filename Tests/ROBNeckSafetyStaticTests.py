@@ -306,9 +306,27 @@ def check_lower_clearance_threshold(
     require(
         follow.count("ROBNeckSafetyLowerTargetHasFullPanClearance(") == 2
         and "ROBNeckSafetyFullPanLowerThresholdTarget" not in follow
-        and "lowerFullPanHighTarget" not in follow,
+        and "lowerFullPanHighTarget" not in follow
+        and "neckSafetyCalibrationConfirmed" not in follow.split(
+            "ROBNeckSafetyConfig configuration", 1
+        )[0]
+        and "kROBFollowTrackingClearanceSource" in follow
+        and "ROBNeckSafetyUprightUpperTarget" in follow
+        and "fullPanEnvelopeIsSettled" in follow
+        and "pendingPanEnvelopeLowerTarget == ROBNeckSafetyTargetOff" in follow,
         "Person-follow pose preparation no longer uses the complete fixed "
-        "5000-through-6495 clearance predicate",
+        "5000-through-6495 clearance predicate and waits for its envelope",
+    )
+    gateway = objective_c_method(serial_source, "applySafeNeckPanTarget:")
+    compact_gateway = compact(gateway)
+    require(
+        "reviewedFollowClearanceCommand" in gateway
+        and "&& !reviewedFollowClearanceCommand" in compact_gateway
+        and "panTarget == configuration.panCenterTarget" in gateway
+        and "lowerTiltTarget == ROBNeckSafetyUprightLowerTarget" in gateway
+        and "desiredUpperTarget == ROBNeckSafetyUprightUpperTarget" in gateway,
+        "Unconfirmed tracking clearance must be limited to the reviewed "
+        "center/6011/6073 tuple",
     )
     require(
         "lastVisionNeckTiltTarget = ROBNeckSafetyUprightUpperTarget;"

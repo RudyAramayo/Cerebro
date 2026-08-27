@@ -85,6 +85,10 @@ is unknown. A direct lower-tilt slider or lower-enable action can authorize an
 explicitly supervised calibration jog. An explicit pan-slider action may
 authorize the same exact-demand recovery only when lower tilt is enabled and
 its slider target is inside `5000`–`6495`; upper camera controls cannot qualify.
+Recognized-person tracking has one separate reviewed clearance request: center
+pan, lower `6011`, and upper `6073`. It may establish only that exact tuple
+without enabling arbitrary uncalibrated lower motion, and tracking remains
+paused until the lower, pan, and upper command deadlines have settled.
 After that exact lower target is successfully written and its command-space
 settle interval completes, pan uses the corresponding lower-target envelope
 even while the separate camera/counter-rotation calibration remains

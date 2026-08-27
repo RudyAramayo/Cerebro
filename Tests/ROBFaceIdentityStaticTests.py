@@ -89,6 +89,14 @@ assert "Face model" in window and "modelChanged" in window
 assert "faceIdentityConversationCue:" in main
 assert "faceIdentityTrackingDidUpdate:" in main
 assert "trackFaceBoundingBox:" in main
+tracking = main.split("- (void)trackFaceBoundingBox:", 1)[1].split(
+    "- (void)didCaptureCameraSampleBuffer:", 1
+)[0]
+assert "prepareNeckForPersonFollow" in tracking
+assert "headTracking_enabled.state" in tracking
+assert "commandedLowerNeckTiltTarget" in tracking
+assert "liftNeckAnimationTimer" not in main
+assert "6168.94" not in tracking and "6868.81" not in tracking
 assert "noteConversationTranscript:text" in main
 assert "noteConversationTranscript:textInput" in main
 assert "faceIdentityConversationContract" in gemini

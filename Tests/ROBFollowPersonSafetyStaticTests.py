@@ -15,7 +15,9 @@ insta_extension = coordinator.split("extension ROBFollowPersonCoordinator: ROBIn
 assert "applyLeftTread" not in insta_extension
 assert "ROBNeckSafetyReferenceLowerTarget" in serial
 assert "allowSupervisedLowerRecovery:NO" in serial
-assert "source:@\"Follow tracking pose\"" in serial
+assert "kROBFollowTrackingClearanceSource" in serial
+assert "reviewedFollowClearanceCommand" in serial
+assert "fullPanEnvelopeIsSettled" in serial
 assert "message.controllerID == controllerID" in server
 assert "message.sessionID == sessionID" in server
 assert "sendFollowTargetMessage" in server

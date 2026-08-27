@@ -388,7 +388,6 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 @property (readwrite, assign) bool NiTE_IS_ON;
 @property (readwrite, assign) BOOL runtimeIsShuttingDown;
 
-@property (readwrite, retain) NSTimer *liftNeckAnimationTimer;
 @property (readwrite, retain) NSTableView *conversationTableView;
 @property (readwrite, retain) NSMutableArray<ROBConversationMessage *> *conversationMessages;
 @property (readwrite, copy) NSString *lastConversationUserText;
@@ -3204,33 +3203,26 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void)trackFaceBoundingBox:(CGRect)boundingBox
 {
     NSAssert(NSThread.isMainThread, @"Face tracking targets are main-thread owned");
-    if (!self.isNeckLifted) {
-        float targetHeadTilt = 6168.94; // Upright lower neck.
-        float targetHeadUpperNeckTilt = 6868.81;
-        if (self.liftNeckAnimationTimer == nil) {
-            self.liftNeckAnimationTimer = [NSTimer scheduledTimerWithTimeInterval:0.1 repeats:YES block:^(NSTimer * _Nonnull timer) {
-                if (self.currentPerson_tilt >= targetHeadTilt - 1 &&
-                    self.currentPerson_tilt <= targetHeadTilt + 1 &&
-                    self.currentPerson_upperNeckTilt >= targetHeadUpperNeckTilt - 1 &&
-                    self.currentPerson_upperNeckTilt <= targetHeadUpperNeckTilt + 1) {
-                    self.isNeckLifted = YES;
-                    [self.liftNeckAnimationTimer invalidate];
-                    self.liftNeckAnimationTimer = nil;
-                    return;
-                }
-                float currentHeadTilt = self.torsoControlsViewController.headTilt.floatValue;
-                float currentUpperTilt = self.torsoControlsViewController.headUpperNeckTilt.floatValue;
-                float deltaTilt = targetHeadTilt - currentHeadTilt;
-                float deltaUpperTilt = targetHeadUpperNeckTilt - currentUpperTilt;
-                float tiltStep = fmaxf(-50.0, fminf(50.0, deltaTilt));
-                float upperTiltStep = fmaxf(-50.0, fminf(50.0, deltaUpperTilt));
-                self.currentPerson_tilt = currentHeadTilt + tiltStep;
-                self.currentPerson_upperNeckTilt = currentUpperTilt + upperTiltStep;
-                self.torsoControlsViewController.headTilt.floatValue = self.currentPerson_tilt;
-                self.torsoControlsViewController.headUpperNeckTilt.floatValue = self.currentPerson_upperNeckTilt;
-            }];
-        }
+    if (self.torsoControlsViewController.headTracking_enabled.state
+        != NSControlStateValueOn) {
         return;
+    }
+    if (![self.serialBox prepareNeckForPersonFollow]) {
+        self.isNeckLifted = NO;
+        return;
+    }
+    if (!self.isNeckLifted) {
+        // The serial gateway has established and settled the reviewed
+        // full-clearance pose. Mirror its accepted targets into the passive
+        // torso renderer so an old slider demand cannot immediately restore
+        // the above-6495 restricted envelope.
+        self.torsoControlsViewController.headPan.integerValue =
+            self.serialBox.commandedNeckPanTarget;
+        self.torsoControlsViewController.headTilt.integerValue =
+            self.serialBox.commandedLowerNeckTiltTarget;
+        self.torsoControlsViewController.headUpperNeckTilt.integerValue =
+            self.serialBox.commandedUpperNeckTiltTarget;
+        self.isNeckLifted = YES;
     }
 
     self.currentPerson_pan = self.torsoControlsViewController.headPan.floatValue;

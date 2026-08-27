@@ -73,6 +73,8 @@ static NSTimeInterval const kROBNeckClearanceSettleSeconds = 0.75;
 static NSTimeInterval const kROBNeckSupervisedRecoverySeconds = 5.0;
 static NSString * const kROBSafeNeckStartupLiftSource = @"Torso safe startup lift";
 static NSString * const kROBSafeNeckStartupRestSource = @"Torso safe startup rest";
+static NSString * const kROBFollowTrackingClearanceSource =
+    @"Follow tracking clearance";
 static NSUInteger const kROBBaseConsoleMaximumCharacters = 256 * 1024;
 enum { kROBMiniMaestroChannelCount = 24 };
 
@@ -1708,11 +1710,19 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         && desiredUpperTarget == ROBNeckSafetyDefaultUpperTarget
         && includeLower
         && allowSupervisedLowerRecovery;
+    BOOL reviewedFollowClearanceCommand =
+        [source isEqualToString:kROBFollowTrackingClearanceSource]
+        && panTarget == configuration.panCenterTarget
+        && lowerTiltTarget == ROBNeckSafetyUprightLowerTarget
+        && desiredUpperTarget == ROBNeckSafetyUprightUpperTarget
+        && includeLower
+        && !allowSupervisedLowerRecovery;
     ROBNeckSafetyConfig effectiveConfiguration = configuration;
     if (!calibrationConfirmed) {
         // Unknown counter-rotation polarity must never be energized by a
-        // guessed default. Pan remains in the conservative restricted band
-        // until the operator validates and saves the calibration.
+        // guessed default. Arbitrary automatic lower motion stays blocked;
+        // only separately reviewed exact-pose sequences may establish a
+        // wider lower-dependent pan envelope.
         effectiveConfiguration.upperCounterRotationGain = 0.0;
     }
     if (safeStartupCommand) {
@@ -1850,7 +1860,8 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     BOOL lowerHeldForCalibration = lowerChangeRequested
         && boundedLower != ROBNeckSafetyTargetOff
         && !calibrationConfirmed
-        && !supervisedLowerRecovery;
+        && !supervisedLowerRecovery
+        && !reviewedFollowClearanceCommand;
     BOOL lowerHeldForRecovery = lowerChangeRequested
         && boundedLower != ROBNeckSafetyTargetOff
         && (!self.lowerNeckTiltCommandKnown
@@ -2337,11 +2348,16 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     self.neckCommandSource = source ?: @"Unknown";
 
     NSMutableArray<NSString *> *status = [NSMutableArray array];
-    if (!calibrationConfirmed && !safeStartupCommand) {
+    if (!calibrationConfirmed
+        && !safeStartupCommand
+        && !reviewedFollowClearanceCommand) {
         [status addObject:[NSString stringWithFormat:
             @"CALIBRATION REQUIRED: AUTOMATIC LOWER MOTION HELD; PAN %.1f°…%+.1f°",
             panResult.allowedPanMinimumDegrees,
             panResult.allowedPanMaximumDegrees]];
+    }
+    if (reviewedFollowClearanceCommand) {
+        [status addObject:@"REVIEWED TRACKING CLEARANCE"];
     }
     if (panResult.panClamped) {
         [status addObject:[NSString stringWithFormat:
@@ -3124,13 +3140,12 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
 {
     if (![NSThread isMainThread]
         || !self.maestroConnectionValid
-        || !self.neckSafetyCalibrationConfirmed
         || !self.neckCommandStateKnown
         || self.commandedNeckPanTarget == ROBNeckSafetyTargetOff
         || self.commandedLowerNeckTiltTarget == ROBNeckSafetyTargetOff
         || self.commandedUpperNeckTiltTarget == ROBNeckSafetyTargetOff) {
         self.neckCommandSafetyStatus =
-            @"Follow tracking pose is waiting for a connected, calibrated, known active neck state.";
+            @"Follow tracking pose is waiting for a connected, known active neck state.";
         return NO;
     }
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
@@ -3141,35 +3156,60 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     }
 
     ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
-    if (ROBNeckSafetyLowerTargetHasFullPanClearance(
+    [self refreshSettledNeckEnvelopeAtTime:now];
+    BOOL lowerCommandHasFullClearance =
+        ROBNeckSafetyLowerTargetHasFullPanClearance(
             &configuration,
             (int)self.commandedLowerNeckTiltTarget
-        )) {
+        );
+    BOOL fullPanEnvelopeIsSettled = lowerCommandHasFullClearance
+        && self.panEnvelopeLowerTargetIsKnown
+        && self.panEnvelopeLowerTarget == self.commandedLowerNeckTiltTarget
+        && self.pendingPanEnvelopeLowerTarget == ROBNeckSafetyTargetOff
+        && now >= self.commandedNeckPanTargetReadyAt
+        && now >= self.commandedUpperNeckTargetReadyAt;
+    if (fullPanEnvelopeIsSettled) {
         return YES;
     }
 
     // The policy may first recenter pan, then move lower tilt, then settle.
     // Repeated calls are intentional and remain fully mediated by the shared
-    // collision gateway. Upper tilt is preserved so "upright" camera pose is
-    // not confused with the old, restricted lower-neck crouch value.
+    // collision gateway. When camera calibration is still unconfirmed, only
+    // this exact reviewed P-center/L-6011/U-6073 tuple may establish tracking
+    // clearance; no arbitrary automatic lower demand receives that authority.
     int lowerReference = (int)lround(ROBNeckSafetyReferenceLowerTarget(&configuration));
-    int upperTarget = self.lastDesiredUpperNeckTargetIsKnown
-        ? self.lastDesiredUpperNeckTarget
-        : (int)self.commandedUpperNeckTiltTarget;
+    int upperTarget = self.neckSafetyCalibrationConfirmed
+        ? (self.lastDesiredUpperNeckTargetIsKnown
+            ? self.lastDesiredUpperNeckTarget
+            : (int)self.commandedUpperNeckTiltTarget)
+        : ROBNeckSafetyUprightUpperTarget;
     ROBNeckCommandDisposition disposition = [self
         applySafeNeckPanTarget:configuration.panCenterTarget
         lowerTiltTarget:lowerReference
         desiredUpperTarget:upperTarget
         includeLower:YES
         allowSupervisedLowerRecovery:NO
-        source:@"Follow tracking pose"];
+        source:kROBFollowTrackingClearanceSource];
     if (disposition == ROBNeckCommandDispositionRejected) {
         return NO;
     }
-    return ROBNeckSafetyLowerTargetHasFullPanClearance(
+    [self refreshSettledNeckEnvelopeAtTime:now];
+    lowerCommandHasFullClearance = ROBNeckSafetyLowerTargetHasFullPanClearance(
         &configuration,
         (int)self.commandedLowerNeckTiltTarget
     );
+    fullPanEnvelopeIsSettled = lowerCommandHasFullClearance
+        && self.panEnvelopeLowerTargetIsKnown
+        && self.panEnvelopeLowerTarget == self.commandedLowerNeckTiltTarget
+        && self.pendingPanEnvelopeLowerTarget == ROBNeckSafetyTargetOff
+        && now >= self.commandedNeckPanTargetReadyAt
+        && now >= self.commandedUpperNeckTargetReadyAt;
+    if (!fullPanEnvelopeIsSettled) {
+        self.neckCommandSource = @"Follow tracking clearance";
+        self.neckCommandSafetyStatus =
+            @"TRACKING WAIT: LOWER 6011 AND CENTERED PAN ARE SETTLING BEFORE FULL PAN";
+    }
+    return fullPanEnvelopeIsSettled;
 }
 
 - (ROBNeckCommandDisposition)requestNeckGesturePanDegrees:(double)panDegrees

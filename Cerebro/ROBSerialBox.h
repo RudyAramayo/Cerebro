@@ -206,9 +206,10 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
      speedPlayPause:(bool)speedPlayPause
  speedForwardReverse:(bool)speedForwardReverse;
 - (void)applyVisionNeckPan:(float)pan tilt:(float)tilt;
-/// Safely stages the calibrated lower-neck axis into the existing full-pan
-/// band before person tracking starts. This never bypasses collision policy;
-/// false means the caller must keep the base stopped and retry or wait for an
+/// Safely stages the lower-neck axis into the reviewed full-pan pose before
+/// person tracking starts. With unconfirmed camera calibration, only the exact
+/// center/6011/6073 tuple is eligible. This never bypasses collision policy;
+/// false means the caller must keep tracking paused and retry or wait for an
 /// operator to recover an unknown/off neck state.
 - (BOOL)prepareNeckForPersonFollow;
 /// Typed ingress for autonomous neck gestures. Pan is calibrated degrees;
