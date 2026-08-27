@@ -160,7 +160,9 @@ camera positions use the same safety gateway as the torso sliders; a clamped
 target stops execution and leaves the warning/restricted envelope visible.
 One button press owns the complete run: if the gateway first holds lower/upper
 while pan settles, the runner waits for that internal deadline and resubmits
-automatically. Explicit Servo Control values are raw Maestro targets, so camera
+automatically. Repeated unresolved safety holds stop after eight resubmissions
+and display the final safety status instead of creating an unbounded main-loop
+retry. Explicit Servo Control values are raw Maestro targets, so camera
 leveling does not transform the configured upper value; the accepted exact
 pose becomes the baseline for later normal camera-leveling commands.
 

@@ -48,6 +48,8 @@
       ignoresPersistentStateOnLaunch = "NO"
       debugDocumentVersioning = "YES"
       debugServiceExtension = "internal"
+      queueDebuggingEnabled = "NO"
+      queueDebuggingEnableBacktraceRecording = "NO"
       allowLocationSimulation = "YES">
       <PreActions>
          <ExecutionAction

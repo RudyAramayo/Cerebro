@@ -7,6 +7,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "Cerebro"
 PROJECT = ROOT / "Cerebro.xcodeproj" / "project.pbxproj"
+SCHEME = (
+    ROOT
+    / "Cerebro.xcodeproj"
+    / "xcuserdata"
+    / "rob.xcuserdatad"
+    / "xcschemes"
+    / "Cerebro.xcscheme"
+)
 
 
 def require(condition: bool, message: str) -> None:
@@ -22,6 +30,7 @@ def main() -> None:
     serial_source = (APP / "ROBSerialBox.m").read_text()
     app_delegate = (APP / "AppDelegate.m").read_text()
     project = PROJECT.read_text()
+    scheme = SCHEME.read_text()
 
     for filename in (
         "ROBServoControlConfiguration.swift",
@@ -60,6 +69,17 @@ def main() -> None:
         and "poses.append(base)" not in runtime
         and "complete at its final -delta extreme" in runtime,
         "YES/NO no longer alternate exactly +delta then -delta per repetition",
+    )
+    require(
+        "private static let maximumSafetyRetries = 8" in runtime
+        and "safetyRetryCount < Self.maximumSafetyRetries" in runtime
+        and "safetyRetryCount: safetyRetryCount + 1" in runtime,
+        "A permanent safety hold can again resubmit forever on the main run loop",
+    )
+    require(
+        'queueDebuggingEnabled = "NO"' in scheme
+        and 'queueDebuggingEnableBacktraceRecording = "NO"' in scheme,
+        "The Xcode Run scheme may inject the dispatch backtrace recorder that deadlocks Cerebro",
     )
 
     require(

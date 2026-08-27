@@ -14,6 +14,7 @@ import Foundation
 
     private var timer: Timer?
     private var generation = 0
+    private static let maximumSafetyRetries = 8
 
     public var isRunning: Bool { timer != nil }
 
@@ -178,6 +179,7 @@ import Foundation
         label: String,
         hold: TimeInterval,
         generation runGeneration: Int? = nil,
+        safetyRetryCount: Int = 0,
         completion: @escaping () -> Void
     ) {
         let expectedGeneration = runGeneration ?? generation
@@ -192,11 +194,18 @@ import Foundation
             timer = nil
             publish("\(label) rejected: \(box.neckCommandSafetyStatus)")
         case .heldForSafety:
+            guard safetyRetryCount < Self.maximumSafetyRetries else {
+                timer = nil
+                publish("\(label) stopped after repeated safety holds: \(box.neckCommandSafetyStatus)")
+                return
+            }
             publish("\(label) is waiting for the safety window to settle…")
             schedule(afterReadyTimeFrom: box, minimumDelay: 0.1) { [weak self] in
                 self?.executePose(
                     pan: pan, lower: lower, upper: upper, label: label,
-                    hold: hold, generation: expectedGeneration, completion: completion
+                    hold: hold, generation: expectedGeneration,
+                    safetyRetryCount: safetyRetryCount + 1,
+                    completion: completion
                 )
             }
         case .appliedCommand:
