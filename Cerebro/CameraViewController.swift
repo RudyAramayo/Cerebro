@@ -18,6 +18,9 @@ extension Notification.Name {
     static let robMainCameraProcessingSettingsDidChange = Notification.Name(
         "ROBMainCameraProcessingSettingsDidChange"
     )
+    static let robTrainingSwordDidUpdate = Notification.Name(
+        "ROBTrainingSwordDidUpdate"
+    )
 }
 
 enum ROBSwordTrackerColor: String, CaseIterable {
@@ -360,6 +363,25 @@ private struct ROBSwordTrack {
     let confidence: Double
 }
 
+@objcMembers public final class ROBTrainingSwordObservation: NSObject {
+    public let targetX: Double
+    public let targetY: Double
+    public let confidence: Double
+    public let capturedAtUptime: TimeInterval
+
+    public init(
+        targetX: Double,
+        targetY: Double,
+        confidence: Double,
+        capturedAtUptime: TimeInterval
+    ) {
+        self.targetX = targetX
+        self.targetY = targetY
+        self.confidence = confidence
+        self.capturedAtUptime = capturedAtUptime
+    }
+}
+
 private struct ROBProjectedPose3D {
     let points: [CGPoint]
     let lines: [(CGPoint, CGPoint)]
@@ -402,7 +424,15 @@ private final class ROBSwordTracker {
                 request.maximumImageDimension = 640
                 do {
                     try VNImageRequestHandler(ciImage: mask, options: [:]).perform([request])
-                    let track = request.results?.first.flatMap { self.bestTrack(in: $0, wrists: wrists) }
+                    let imageAspectRatio = mask.extent.width
+                        / max(1, mask.extent.height)
+                    let track = request.results?.first.flatMap {
+                        self.bestTrack(
+                            in: $0,
+                            wrists: wrists,
+                            imageAspectRatio: imageAspectRatio
+                        )
+                    }
                     if let track {
                         self.previous = track
                         self.consecutiveMisses = 0
@@ -494,33 +524,58 @@ private final class ROBSwordTracker {
         return unit * unit * (3 - 2 * unit)
     }
 
-    private func bestTrack(in observation: VNContoursObservation, wrists: [CGPoint]) -> ROBSwordTrack? {
+    private func bestTrack(
+        in observation: VNContoursObservation,
+        wrists: [CGPoint],
+        imageAspectRatio: CGFloat
+    ) -> ROBSwordTrack? {
+        let xScale = max(0.25, min(4, imageAspectRatio))
         var best: (track: ROBSwordTrack, score: CGFloat)?
         for contour in Self.flattenedContours(observation.topLevelContours) {
             let points = Self.points(in: contour.normalizedPath)
             guard points.count >= 4,
-                  let geometry = Self.principalGeometry(points) else { continue }
+                  let geometry = Self.principalGeometry(
+                    points,
+                    normalizedXScale: xScale
+                  ) else { continue }
             let axis = (geometry.start, geometry.end)
-            let length = Self.distance(axis.0, axis.1)
+            let length = Self.distance(axis.0, axis.1, normalizedXScale: xScale)
             let thickness = max(0.002, geometry.thickness)
             let elongation = length / thickness
-            guard length >= 0.10, length <= 0.85, elongation >= 4 else { continue }
-            let d0 = wrists.map { Self.distance($0, axis.0) }.min() ?? 1
-            let d1 = wrists.map { Self.distance($0, axis.1) }.min() ?? 1
+            guard length >= 0.10, length <= 1.80, elongation >= 4 else { continue }
+            let d0 = wrists.map {
+                Self.distance($0, axis.0, normalizedXScale: xScale)
+            }.min() ?? 1
+            let d1 = wrists.map {
+                Self.distance($0, axis.1, normalizedXScale: xScale)
+            }.min() ?? 1
             let grip = d0 <= d1 ? axis.0 : axis.1
             let tip = d0 <= d1 ? axis.1 : axis.0
             let wristDistance = min(d0, d1)
             // Wrist pose initializes/reacquires the track. Once locked, the
             // previous grip can carry fast motion between slower body-pose
             // updates without letting unrelated scene edges take over.
-            let continuityDistance = previous.map { min(Self.distance($0.grip, axis.0), Self.distance($0.grip, axis.1)) } ?? 1
+            let continuityDistance = previous.map {
+                min(
+                    Self.distance($0.grip, axis.0, normalizedXScale: xScale),
+                    Self.distance($0.grip, axis.1, normalizedXScale: xScale)
+                )
+            } ?? 1
             let hasBodyAnchor = !wrists.isEmpty
             let canAcquireGeometrically = !hasBodyAnchor && previous == nil && length >= 0.16 && elongation >= 7
             guard wristDistance <= 0.22 || continuityDistance <= 0.14 || canAcquireGeometrically else { continue }
             var score = min(1, (elongation - 3) / 12) * 0.35 + min(1, length / 0.45) * 0.35
             score += max(0, 1 - wristDistance / 0.22) * 0.30
             if let previous {
-                let direct = Self.distance(previous.grip, grip) + Self.distance(previous.tip, tip)
+                let direct = Self.distance(
+                    previous.grip,
+                    grip,
+                    normalizedXScale: xScale
+                ) + Self.distance(
+                    previous.tip,
+                    tip,
+                    normalizedXScale: xScale
+                )
                 score += max(0, 1 - direct / 0.5) * 0.25
                 score += max(0, 1 - continuityDistance / 0.14) * 0.20
             } else if !hasBodyAnchor {
@@ -569,21 +624,29 @@ private final class ROBSwordTracker {
     }
 
     private static func principalGeometry(
-        _ points: [CGPoint]
+        _ points: [CGPoint],
+        normalizedXScale: CGFloat
     ) -> (start: CGPoint, end: CGPoint, thickness: CGFloat)? {
-        let count = CGFloat(points.count)
-        let center = CGPoint(x: points.reduce(0) { $0 + $1.x } / count,
-                             y: points.reduce(0) { $0 + $1.y } / count)
+        let metricPoints = points.map {
+            CGPoint(x: $0.x * normalizedXScale, y: $0.y)
+        }
+        let count = CGFloat(metricPoints.count)
+        let center = CGPoint(
+            x: metricPoints.reduce(0) { $0 + $1.x } / count,
+            y: metricPoints.reduce(0) { $0 + $1.y } / count
+        )
         var xx: CGFloat = 0, xy: CGFloat = 0, yy: CGFloat = 0
-        for point in points {
+        for point in metricPoints {
             let x = point.x - center.x, y = point.y - center.y
             xx += x * x; xy += x * y; yy += y * y
         }
         let angle = 0.5 * atan2(2 * xy, xx - yy)
         let direction = CGPoint(x: cos(angle), y: sin(angle))
         let perpendicular = CGPoint(x: -direction.y, y: direction.x)
-        let projections = points.map { ($0.x - center.x) * direction.x + ($0.y - center.y) * direction.y }
-        let perpendicularProjections = points.map {
+        let projections = metricPoints.map {
+            ($0.x - center.x) * direction.x + ($0.y - center.y) * direction.y
+        }
+        let perpendicularProjections = metricPoints.map {
             ($0.x - center.x) * perpendicular.x + ($0.y - center.y) * perpendicular.y
         }
         guard let low = projections.min(),
@@ -592,13 +655,25 @@ private final class ROBSwordTracker {
               let perpendicularHigh = perpendicularProjections.max(),
               high > low else { return nil }
         return (
-            CGPoint(x: center.x + low * direction.x, y: center.y + low * direction.y),
-            CGPoint(x: center.x + high * direction.x, y: center.y + high * direction.y),
+            CGPoint(
+                x: (center.x + low * direction.x) / normalizedXScale,
+                y: center.y + low * direction.y
+            ),
+            CGPoint(
+                x: (center.x + high * direction.x) / normalizedXScale,
+                y: center.y + high * direction.y
+            ),
             perpendicularHigh - perpendicularLow
         )
     }
 
-    private static func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat { hypot(a.x - b.x, a.y - b.y) }
+    private static func distance(
+        _ a: CGPoint,
+        _ b: CGPoint,
+        normalizedXScale: CGFloat = 1
+    ) -> CGFloat {
+        hypot((a.x - b.x) * normalizedXScale, a.y - b.y)
+    }
 }
 
 struct ROBCameraServiceStatusSnapshot: Sendable {
@@ -1639,6 +1714,19 @@ extension CameraViewController: CameraManagerDelegate {
                         : "Sword: searching \(color.title.lowercased()) near wrist")
                     : "Sword: locked (\(color.title.lowercased()))"
                 self?.poseView.needsDisplay = true
+                if let track {
+                    let observation = ROBTrainingSwordObservation(
+                        targetX: Double((track.grip.x + track.tip.x) * 0.5),
+                        targetY: Double((track.grip.y + track.tip.y) * 0.5),
+                        confidence: track.confidence,
+                        capturedAtUptime: ProcessInfo.processInfo.systemUptime
+                    )
+                    NotificationCenter.default.post(
+                        name: .robTrainingSwordDidUpdate,
+                        object: self,
+                        userInfo: ["observation": observation]
+                    )
+                }
             }
         }
 

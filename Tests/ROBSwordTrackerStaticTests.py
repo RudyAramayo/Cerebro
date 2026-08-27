@@ -11,6 +11,9 @@ CAMERA = (ROOT / "Cerebro" / "CameraViewController.swift").read_text(
 SETTINGS = (
     ROOT / "Cerebro" / "ROBInsta360ProcessingSettingsViewController.swift"
 ).read_text(encoding="utf-8")
+MAIN = (ROOT / "Cerebro" / "ROBMainViewController.mm").read_text(
+    encoding="utf-8"
+)
 
 
 def require(condition: bool, message: str) -> None:
@@ -60,8 +63,13 @@ def main() -> None:
         "private static func principalGeometry(" in tracker
         and "let perpendicular = CGPoint" in tracker
         and "perpendicularProjections" in tracker
+        and "imageAspectRatio: CGFloat" in tracker
+        and "normalizedXScale: CGFloat" in tracker
+        and "$0.x * normalizedXScale" in tracker
+        and "/ normalizedXScale" in tracker
+        and "length <= 1.80" in tracker
         and "min(bounds.width, bounds.height)" not in tracker,
-        "Blade thickness must remain rotation independent for diagonal swords",
+        "Blade geometry must remain aspect- and rotation-independent for horizontal swords",
     )
     require(
         "private var consecutiveMisses = 0" in tracker
@@ -78,6 +86,17 @@ def main() -> None:
         and "swordTrackerColorPopup" in SETTINGS
         and 'setAccessibilityIdentifier("ROB.MainCamera.SwordTracker.Color")' in SETTINGS,
         "The Perception blade-color choice is not connected to the live tracker",
+    )
+    require(
+        'robTrainingSwordDidUpdate = Notification.Name(' in CAMERA
+        and "ROBTrainingSwordObservation" in CAMERA
+        and 'name: .robTrainingSwordDidUpdate' in CAMERA
+        and 'cameraPositionNamed:@"lean_back"' in MAIN
+        and '@[@"upright", @"lean_back"]' in MAIN
+        and '@"main-camera-sword"' in MAIN
+        and "!swordFocusSource" in MAIN
+        and "configuration.uprightTransitionEnabled" in MAIN,
+        "Sword detections no longer enter and retain the collision-safe lean-back tracking envelope",
     )
     for actuator in ("ROBSerialBox", "setTarget", "drive", "evade"):
         require(

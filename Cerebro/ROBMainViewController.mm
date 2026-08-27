@@ -58,6 +58,7 @@ static double const kROBPersonTrackingHighPoseEntryY = 0.72;
 static double const kROBPersonTrackingHighPoseResetY = 0.62;
 static double const kROBPersonTrackingTooCloseMeters = 0.9;
 static double const kROBPersonTrackingTooFarMeters = 2.8;
+static NSTimeInterval const kROBTrainingSwordFreshnessSeconds = 0.5;
 static NSString * const ROBDevelopmentModeDefaultsKey = @"ROBDevelopmentMode";
 static NSString * const ROBShowControllerInputDiagnosticsNotification = @"ROBShowControllerInputDiagnostics";
 static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopmentModeDidChange";
@@ -68,6 +69,7 @@ static NSString * const ROBStageShowStateDidChangeNotification = @"ROBStageShowS
 static NSString * const ROBHeadlessLiveStartupStopRequestedNotification = @"ROBHeadlessLiveStartupStopRequested";
 static NSString * const ROBInsta360HumanPoseDidUpdateNotification = @"ROBInsta360HumanPoseDidUpdate";
 static NSString * const ROBHandWaveDidDetectNotification = @"ROBHandWaveDidDetect";
+static NSString * const ROBTrainingSwordDidUpdateNotification = @"ROBTrainingSwordDidUpdate";
 
 static double ROBPersonTrackingFilterCoordinate(
     double previous,
@@ -470,6 +472,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 @property (readwrite, copy) NSString *handWaveFocusSource;
 @property (readwrite, assign) double handWaveFocusX;
 @property (readwrite, assign) double handWaveFocusY;
+@property (readwrite, assign) NSTimeInterval lastSwordTrackingObservationUptime;
 @property (readwrite, copy) NSString *lastConversationUserText;
 @property (readwrite, retain) NSDate *lastConversationUserDate;
 @property (readwrite, retain) IBOutlet NSButton *mainAISendButton;
@@ -510,6 +513,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void)trackFaceBoundingBox:(CGRect)boundingBox;
 - (void)insta360HumanPoseDidUpdate:(NSNotification *)notification;
 - (void)handWaveDidDetect:(NSNotification *)notification;
+- (void)trainingSwordDidUpdate:(NSNotification *)notification;
 - (void)handWaveFocusTick:(NSTimer *)timer;
 - (void)stopHandWaveFocus;
 - (double)personTrackingDistanceMetersInNormalizedRect:(CGRect)rect;
@@ -2787,6 +2791,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                                                  name:ROBHandWaveDidDetectNotification
                                                object:[ROBDynamicDetectorRegistry shared]];
     [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(trainingSwordDidUpdate:)
+                                                 name:ROBTrainingSwordDidUpdateNotification
+                                               object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(geminiVideoSourceSettingsDidChange:)
                                                  name:ROBGeminiVideoSourceSettingsDidChangeNotification
                                                object:nil];
@@ -3718,6 +3726,71 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     [self handWaveFocusTick:self.handWaveFocusTimer];
 }
 
+- (void)trainingSwordDidUpdate:(NSNotification *)notification
+{
+    NSAssert(NSThread.isMainThread, @"Training-sword tracking is main-thread owned");
+    if (self.torsoControlsViewController.headTracking_enabled.state
+            != NSControlStateValueOn) {
+        return;
+    }
+    ROBTrainingSwordObservation *sword =
+        [notification.userInfo[@"observation"]
+            isKindOfClass:ROBTrainingSwordObservation.class]
+            ? notification.userInfo[@"observation"] : nil;
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (sword == nil
+        || sword.confidence < 0.30
+        || now - sword.capturedAtUptime
+            > kROBTrainingSwordFreshnessSeconds) {
+        return;
+    }
+    ROBServoCameraPosition *leanBack = [[ROBServoControlStore shared]
+        cameraPositionNamed:@"lean_back"];
+    if (leanBack == nil) return;
+    self.lastSwordTrackingObservationUptime = now;
+    BOOL leanBackReady = self.serialBox.lowerNeckTiltCommandKnown
+        && self.serialBox.commandedLowerNeckTiltTarget
+            == leanBack.lowerTarget
+        && self.serialBox.upperNeckTiltCommandKnown
+        && self.serialBox.commandedUpperNeckTiltTarget
+            >= leanBack.upperTarget
+                - kROBPersonTrackingMaximumUpperDownOffset
+        && self.serialBox.commandedUpperNeckTiltTarget
+            <= leanBack.upperTarget
+                + kROBPersonTrackingMaximumUpperUpOffset;
+    if (!leanBackReady) {
+        if (!self.serialBox.personTrackingPostureSequenceActive) {
+            ROBNeckCommandDisposition disposition = [self.serialBox
+                requestPersonTrackingPostureSequence:
+                    @[@"upright", @"lean_back"]];
+            if (disposition == ROBNeckCommandDispositionRejected) {
+                if (now - self.lastPersonTrackingDiagnosticsUptime >= 1.0) {
+                    self.lastPersonTrackingDiagnosticsUptime = now;
+                    NSLog(
+                        @"Sword tracking lean-back entry rejected: %@",
+                        self.serialBox.neckCommandSafetyStatus
+                    );
+                }
+                return;
+            }
+            if (self.serialBox.personTrackingPostureSequenceActive) {
+                self.personTrackingFilterInitialized = NO;
+                self.personTrackingUpperBaselineTarget = 0;
+                self.personTrackingSourceID = nil;
+                NSLog(
+                    @"Training sword detected; entering centered lean_back before blade tracking"
+                );
+            }
+        }
+        return;
+    }
+
+    [self trackingPerson:@"main-camera-sword"
+                       x:(float)MAX(0.0, MIN(1.0, sword.targetX))
+                       y:(float)MAX(0.0, MIN(1.0, sword.targetY))
+                       z:-1.0f];
+}
+
 - (void)handWaveFocusTick:(NSTimer *)timer
 {
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
@@ -3927,9 +4000,19 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         }
         NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
         BOOL handWaveFocusSource = [userID hasSuffix:@"-wave"];
+        BOOL swordFocusSource = [userID isEqualToString:@"main-camera-sword"];
         BOOL handWaveFocusOwnsAttention = self.handWaveFocusTimer != nil
             && now <= self.handWaveFocusDeadlineUptime;
         if (handWaveFocusOwnsAttention && !handWaveFocusSource) {
+            return;
+        }
+        BOOL swordFocusOwnsAttention =
+            self.lastSwordTrackingObservationUptime > 0
+            && now - self.lastSwordTrackingObservationUptime
+                <= kROBTrainingSwordFreshnessSeconds;
+        if (!handWaveFocusOwnsAttention
+            && swordFocusOwnsAttention
+            && !swordFocusSource) {
             return;
         }
         BOOL faceTrackFresh = self.lastFaceTrackingObservationUptime > 0
@@ -3940,7 +4023,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         // no longer suppresses the associated body after the spatial box
         // stalls in poor lighting.
         BOOL recognizedFace = [userID isEqualToString:@"recognized-face"];
-        if (!recognizedFace && !handWaveFocusSource
+        if (!recognizedFace && !handWaveFocusSource && !swordFocusSource
             && self.faceIdentityTrackingActive
             && faceTrackFresh && !fusedMainPose) {
             return;
@@ -3949,6 +4032,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         if (!recognizedFace
             && !detectedFace
             && !handWaveFocusSource
+            && !swordFocusSource
             && self.faceDetectionTrackingActive
             && faceTrackFresh
             && !fusedMainPose) {
@@ -4148,7 +4232,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         BOOL lowerAlreadyAtUprightEndpoint = uprightTransitionAuthorized
             && currentLowerTarget == requestedUprightEndpoint.lowerTarget;
         configuration.uprightTransitionEnabled =
-            uprightTransitionAuthorized && !lowerAlreadyAtUprightEndpoint;
+            !swordFocusSource
+            && uprightTransitionAuthorized
+            && !lowerAlreadyAtUprightEndpoint;
 
         ROBPersonTrackingResult result = {0};
         if (!ROBPersonTrackingApply(
