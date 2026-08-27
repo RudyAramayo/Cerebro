@@ -85,6 +85,7 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 - (void)setupNeckCommandReadouts;
 - (void)refreshNeckCameraLevelingControl;
 - (void)safeNeckStartupCommandDidChange:(NSNotification *)notification;
+- (void)servoControlNeckDemandDidChange:(NSNotification *)notification;
 - (IBAction)toggleNeckCameraLeveling:(id)sender;
 - (void)setupNeckSafetyConfigurationControls;
 - (IBAction)showNeckSafetyConfiguration:(id)sender;
@@ -105,6 +106,11 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
         addObserver:self
            selector:@selector(safeNeckStartupCommandDidChange:)
                name:ROBSafeNeckStartupCommandDidChangeNotification
+             object:nil];
+    [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(servoControlNeckDemandDidChange:)
+               name:ROBServoControlNeckDemandDidChangeNotification
              object:nil];
     self.renderServoControlsTimer = [NSTimer scheduledTimerWithTimeInterval:1
                                                                      target:self
@@ -128,6 +134,36 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 - (void)safeNeckStartupCommandDidChange:(NSNotification *)notification
 {
     if (notification.object != self.robMainViewController.serialBox) return;
+    [self refreshNeckCommandReadouts];
+}
+
+- (void)servoControlNeckDemandDidChange:(NSNotification *)notification
+{
+    if (notification.object != self.robMainViewController.serialBox) return;
+    NSNumber *panTarget = notification.userInfo[
+        ROBServoControlPanTargetUserInfoKey
+    ];
+    NSNumber *lowerTarget = notification.userInfo[
+        ROBServoControlLowerTargetUserInfoKey
+    ];
+    NSNumber *upperTarget = notification.userInfo[
+        ROBServoControlUpperTargetUserInfoKey
+    ];
+    if (panTarget == nil || lowerTarget == nil || upperTarget == nil) return;
+
+    // These sliders represent operator demand. Mirror the complete table pose
+    // immediately, even while the command labels continue to show an earlier
+    // safety-staged physical target. The passive render will therefore resume
+    // with the requested pose instead of the pre-animation values.
+    self.headPan.integerValue = panTarget.integerValue;
+    self.headTilt.integerValue = lowerTarget.integerValue;
+    self.headUpperNeckTilt.integerValue = upperTarget.integerValue;
+    self.headPan_enabled.state = panTarget.integerValue == ROBNeckSafetyTargetOff
+        ? NSControlStateValueOff : NSControlStateValueOn;
+    self.headTilt_enabled.state = NSControlStateValueOn;
+    self.headUpperNeckTilt_enabled.state = NSControlStateValueOn;
+    self.pendingNeckOperatorCommandAfterStartup = NO;
+    self.pendingLowerTiltOperatorCommandAfterStartup = NO;
     [self refreshNeckCommandReadouts];
 }
 

@@ -79,6 +79,7 @@ static NSTimeInterval const kROBNeckVisionAuthoritySeconds = 0.35;
 static NSTimeInterval const kROBNeckPanRecenterSeconds = 1.0;
 static NSTimeInterval const kROBNeckClearanceSettleSeconds = 0.75;
 static NSTimeInterval const kROBNeckSupervisedRecoverySeconds = 5.0;
+static NSTimeInterval const kROBServoControlSettleLeaseSeconds = 0.25;
 static NSString * const kROBSafeNeckStartupLiftSource = @"Torso safe startup lift";
 static NSString * const kROBSafeNeckStartupRestSource = @"Torso safe startup rest";
 static NSString * const kROBServoControlSource = @"Torso servo control";
@@ -224,6 +225,11 @@ NSNotificationName const ROBMaestroDidConnectNotification =
     @"ROBMaestroDidConnectNotification";
 NSNotificationName const ROBSafeNeckStartupCommandDidChangeNotification =
     @"ROBSafeNeckStartupCommandDidChangeNotification";
+NSNotificationName const ROBServoControlNeckDemandDidChangeNotification =
+    @"ROBServoControlNeckDemandDidChangeNotification";
+NSString * const ROBServoControlPanTargetUserInfoKey = @"panTarget";
+NSString * const ROBServoControlLowerTargetUserInfoKey = @"lowerTarget";
+NSString * const ROBServoControlUpperTargetUserInfoKey = @"upperTarget";
 
 #define kRHAPI_SERIAL_PORT_BASE     @"/dev/cu.usbmodem21201"
 
@@ -1985,13 +1991,35 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         self.gestureNeckAuthorityUntil = 0;
         self.torsoNeckAuthorityRequiresOperatorAction = NO;
     }
-    return [self
+    ROBNeckCommandDisposition disposition = [self
         applySafeNeckPanTarget:(int)panTarget
         lowerTiltTarget:(int)lowerTarget
         desiredUpperTarget:(int)upperTarget
         includeLower:YES
         allowSupervisedLowerRecovery:YES
         source:kROBServoControlSource];
+    if (disposition != ROBNeckCommandDispositionRejected) {
+        // The passive Torso render loop normally reasserts its sliders once a
+        // second. Keep that loop out of this staged move until the accepted
+        // pan/lower/upper deadlines expire, then let it resume with the exact
+        // demand mirrored by the notification below.
+        NSTimeInterval readyAt = self.neckCommandReadyAtUptime;
+        @synchronized (self) {
+            self.manualNeckOverrideUntil = fmax(
+                self.manualNeckOverrideUntil,
+                readyAt + kROBServoControlSettleLeaseSeconds
+            );
+        }
+        [[NSNotificationCenter defaultCenter]
+            postNotificationName:ROBServoControlNeckDemandDidChangeNotification
+                          object:self
+                        userInfo:@{
+                            ROBServoControlPanTargetUserInfoKey: @(panTarget),
+                            ROBServoControlLowerTargetUserInfoKey: @(lowerTarget),
+                            ROBServoControlUpperTargetUserInfoKey: @(upperTarget),
+                        }];
+    }
+    return disposition;
 }
 
 - (ROBNeckCommandDisposition)applySafeNeckPanTarget:(int)panTarget
@@ -3394,7 +3422,13 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         && now < self.visionNeckAuthorityUntil;
     BOOL torsoMayResumeNeck = operatorInitiated
         || !self.torsoNeckAuthorityRequiresOperatorAction;
-    if (!gestureOwnsNeck && !visionOwnsNeck && torsoMayResumeNeck) {
+    BOOL servoControlOwnsNeck = !operatorInitiated
+        && [self.neckCommandSource isEqualToString:kROBServoControlSource]
+        && now < self.manualNeckOverrideUntil;
+    if (!servoControlOwnsNeck
+        && !gestureOwnsNeck
+        && !visionOwnsNeck
+        && torsoMayResumeNeck) {
         NSString *source = (operatorInitiated || now < self.manualNeckOverrideUntil)
             ? @"Torso manual"
             : @"Torso tracking";

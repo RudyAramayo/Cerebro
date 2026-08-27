@@ -28,6 +28,7 @@ def main() -> None:
     window = (APP / "ROBServoControlWindowController.swift").read_text()
     serial_header = (APP / "ROBSerialBox.h").read_text()
     serial_source = (APP / "ROBSerialBox.m").read_text()
+    torso_source = (APP / "ROBTorsoControlsViewController.m").read_text()
     app_delegate = (APP / "AppDelegate.m").read_text()
     project = PROJECT.read_text()
     scheme = SCHEME.read_text()
@@ -126,6 +127,21 @@ def main() -> None:
         and "sendMaestroLowerTarget" in serial_source,
         "A single Servo Control press no longer advances exact raw targets "
         "through the automatic pan-first/lower-upper handoff",
+    )
+    require(
+        "ROBServoControlNeckDemandDidChangeNotification" in serial_header
+        and "ROBServoControlPanTargetUserInfoKey" in serial_header
+        and "postNotificationName:ROBServoControlNeckDemandDidChangeNotification"
+        in serial_source
+        and "readyAt + kROBServoControlSettleLeaseSeconds" in serial_source
+        and "servoControlOwnsNeck" in serial_source
+        and "!servoControlOwnsNeck" in serial_source
+        and "servoControlNeckDemandDidChange:" in torso_source
+        and "self.headPan.integerValue = panTarget.integerValue" in torso_source
+        and "self.headTilt.integerValue = lowerTarget.integerValue" in torso_source
+        and "self.headUpperNeckTilt.integerValue = upperTarget.integerValue"
+        in torso_source,
+        "Passive Torso renders can again overwrite a staged Servo Control pose",
     )
     require(
         "safeStartupFinalCommand" in serial_source

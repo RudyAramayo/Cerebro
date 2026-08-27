@@ -163,6 +163,11 @@ negative extreme without an extra midpoint step. Servo, delta, repetition
 count, and interval are editable. Gesture steps and named
 camera positions use the same safety gateway as the torso sliders; a clamped
 target stops execution and leaves the warning/restricted envelope visible.
+When Servo Control accepts a pose, the complete requested pan/lower/upper
+values become the Torso slider demand immediately. The Torso panel's passive
+one-second renderer is held out until the conservative staged-motion deadline,
+so it cannot overwrite the animation with stale pre-position slider values;
+the command readouts continue to show each accepted intermediate target.
 One button press owns the complete run: if the gateway first holds lower/upper
 while pan settles, the runner waits for that internal deadline and resubmits
 automatically. Repeated unresolved safety holds stop after eight resubmissions

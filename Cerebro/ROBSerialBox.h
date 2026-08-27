@@ -28,6 +28,14 @@ FOUNDATION_EXPORT NSNotificationName const ROBMaestroDidConnectNotification;
 /// Posted on the main thread whenever the safe neck startup sequence accepts
 /// a new phase target. The object is the ROBSerialBox that owns the sequence.
 FOUNDATION_EXPORT NSNotificationName const ROBSafeNeckStartupCommandDidChangeNotification;
+/// Posted on the main thread after Servo Control accepts a complete requested
+/// pose. The user-info targets are the operator demand, including values still
+/// waiting behind the pan-first safety handoff, so the Torso sliders can mirror
+/// the table without retransmitting stale values during the move.
+FOUNDATION_EXPORT NSNotificationName const ROBServoControlNeckDemandDidChangeNotification;
+FOUNDATION_EXPORT NSString * const ROBServoControlPanTargetUserInfoKey;
+FOUNDATION_EXPORT NSString * const ROBServoControlLowerTargetUserInfoKey;
+FOUNDATION_EXPORT NSString * const ROBServoControlUpperTargetUserInfoKey;
 FOUNDATION_EXPORT NSInteger const ROBMaestroDefaultServoSpeedLimit;
 FOUNDATION_EXPORT NSInteger const ROBMaestroDefaultServoAccelerationLimit;
 
