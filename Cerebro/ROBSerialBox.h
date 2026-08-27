@@ -89,6 +89,9 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 @property (readonly, assign) double currentNeckPanMinimumDegrees;
 @property (readonly, assign) double currentNeckPanMaximumDegrees;
 @property (readonly, assign, getter=isNeckPanCommandLimited) BOOL neckPanCommandLimited;
+/// True whenever the active lower-neck-dependent pan envelope is narrower
+/// than the calibrated full range, even if the current pan target is inside it.
+@property (readonly, assign, getter=isNeckPanEnvelopeRestricted) BOOL neckPanEnvelopeRestricted;
 @property (readonly, assign, getter=isUpperNeckCommandCompensated) BOOL upperNeckCommandCompensated;
 @property (readonly, assign, getter=isNeckSafetyCalibrationConfirmed) BOOL neckSafetyCalibrationConfirmed;
 @property (readonly, assign, getter=isNeckCameraLevelingEnabled) BOOL neckCameraLevelingEnabled;

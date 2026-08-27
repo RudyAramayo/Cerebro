@@ -170,6 +170,12 @@ The pan window is selected from the commanded lower-tilt target:
   `5000` and `6495` are full-pan, and `6496` is asymmetric. The gateway's
   settle interlock controls when a widening becomes active.
 
+The pan command readout shows `!` for the entire time the active envelope is
+narrower than the full calibrated range, even when the current pan command is
+already inside that envelope. Its tooltip labels the envelope `RESTRICTED` or
+`FULL`; an actual out-of-envelope request is still clamped and additionally
+reported as `PAN LIMITED` in the safety status.
+
 A request toward a more restrictive lower pose tightens the envelope
 immediately. If needed, Cerebro holds lower tilt while it brings pan inside the
 new envelope and establishes a usable upper-camera target. A request toward

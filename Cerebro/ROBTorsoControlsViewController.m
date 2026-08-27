@@ -442,6 +442,9 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
         self.upperNeckCommandLabel.stringValue = @"U —";
         return;
     }
+    BOOL panEnvelopeRestricted = serialBox.isNeckPanEnvelopeRestricted;
+    BOOL panNeedsAttention = serialBox.isNeckPanCommandLimited
+        || panEnvelopeRestricted;
 
     if (!serialBox.neckPanCommandKnown) {
         self.headPanCommandLabel.stringValue = @"P UNKNOWN";
@@ -451,7 +454,7 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
         self.headPanCommandLabel.stringValue = [NSString stringWithFormat:@"P %ld  %+.1f°%@",
             (long)serialBox.commandedNeckPanTarget,
             serialBox.commandedNeckPanDegrees,
-            serialBox.isNeckPanCommandLimited ? @" !" : @""];
+            panNeedsAttention ? @" !" : @""];
     } else {
         self.headPanCommandLabel.stringValue = [NSString stringWithFormat:@"P %ld raw",
             (long)serialBox.commandedNeckPanTarget];
@@ -471,7 +474,7 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 
     NSColor *panColor = !serialBox.neckPanCommandKnown
         ? NSColor.systemOrangeColor
-        : serialBox.isNeckPanCommandLimited
+        : panNeedsAttention
         ? NSColor.systemOrangeColor
         : NSColor.secondaryLabelColor;
     self.headPanCommandLabel.textColor = panColor;
@@ -485,10 +488,11 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
         : NSColor.secondaryLabelColor;
 
     NSString *detail = [NSString stringWithFormat:
-        @"%@ • LEVEL %@ • %@ • pan envelope %+.1f°…%+.1f° • commanded targets only (no shaft feedback)",
+        @"%@ • LEVEL %@ • %@ • pan envelope %@ %+.1f°…%+.1f° • commanded targets only (no shaft feedback)",
         serialBox.neckCommandSource ?: @"Unknown source",
         serialBox.neckCameraLevelingEnabled ? @"ON" : @"OFF",
         serialBox.neckCommandSafetyStatus ?: @"No safety status",
+        panEnvelopeRestricted ? @"RESTRICTED" : @"FULL",
         serialBox.currentNeckPanMinimumDegrees,
         serialBox.currentNeckPanMaximumDegrees];
     self.headPanCommandLabel.toolTip = detail;

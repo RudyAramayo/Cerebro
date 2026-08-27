@@ -695,6 +695,14 @@ def check_command_readouts(torso_source: str) -> None:
         refresh.count("UNKNOWN") >= 3,
         "All three neck readouts must visibly distinguish unknown from OFF",
     )
+    require(
+        "isNeckPanEnvelopeRestricted" in refresh
+        and "panNeedsAttention" in refresh
+        and 'panNeedsAttention ? @" !" : @""' in refresh
+        and 'panEnvelopeRestricted ? @"RESTRICTED" : @"FULL"' in refresh,
+        "The pan readout must retain its warning marker for the entire time a "
+        "lower-neck-dependent restricted envelope is active",
+    )
 
 
 def check_camera_leveling_control(serial_header: str, torso_source: str) -> None:
@@ -1085,7 +1093,7 @@ def check_configurable_surface(serial_source: str, torso_source: str) -> None:
     require(
         "currentNeckPanMinimumDegrees" in torso_source
         and "currentNeckPanMaximumDegrees" in torso_source
-        and "pan envelope %+.1f°…%+.1f°" in torso_source,
+        and "pan envelope %@ %+.1f°…%+.1f°" in torso_source,
         "The command readout no longer reports the asymmetric applied pan envelope",
     )
     require(

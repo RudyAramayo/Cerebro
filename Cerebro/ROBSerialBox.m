@@ -624,6 +624,26 @@ typedef enum : NSUInteger {
     return self.activeNeckSafetyConfiguration;
 }
 
+- (BOOL)isNeckPanEnvelopeRestricted
+{
+    ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
+    double fullPanDegrees = ROBNeckSafetyFullPanDegrees(&configuration);
+    double minimumDegrees = NAN;
+    double maximumDegrees = NAN;
+    @synchronized (self) {
+        minimumDegrees = self.currentNeckPanMinimumDegrees;
+        maximumDegrees = self.currentNeckPanMaximumDegrees;
+    }
+    if (!isfinite(fullPanDegrees)
+        || !isfinite(minimumDegrees)
+        || !isfinite(maximumDegrees)) {
+        return YES;
+    }
+    const double tolerance = 0.000001;
+    return minimumDegrees > -fullPanDegrees + tolerance
+        || maximumDegrees < fullPanDegrees - tolerance;
+}
+
 - (BOOL)isNeckCameraLevelingEnabled
 {
     @synchronized (self) {
