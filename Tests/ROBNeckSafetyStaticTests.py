@@ -326,7 +326,7 @@ def check_lower_clearance_threshold(
         and "lowerTiltTarget == ROBNeckSafetyUprightLowerTarget" in gateway
         and "desiredUpperTarget == ROBPersonTrackingNeutralUpperTarget" in gateway,
         "Unconfirmed tracking clearance must be limited to the reviewed "
-        "center/6011/6869 tuple",
+        "center/6011/7200 tuple",
     )
     require(
         "lastVisionNeckTiltTarget = ROBNeckSafetyUprightUpperTarget;"

@@ -10,8 +10,6 @@
 #ifndef ROBPersonTrackingPolicy_h
 #define ROBPersonTrackingPolicy_h
 
-#include "ROBNeckSafetyPolicy.h"
-
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -20,13 +18,12 @@ extern "C" {
 #endif
 
 enum {
-    // The face tracker used this hardware-calibrated target before recognized
-    // face acquisition was routed through the shared neck safety gateway.
-    ROBPersonTrackingNeutralUpperTarget = 6869,
-    // Tracking may look down from neutral, but never below the known upright
-    // upper-neck target. The existing high guard remains deliberately tighter
-    // than the physical joint's hard maximum.
-    ROBPersonTrackingMinimumUpperTarget = ROBNeckSafetyUprightUpperTarget,
+    // Raised after physical testing so face acquisition does not make the
+    // camera dip sharply from the lean-forward pose.
+    ROBPersonTrackingNeutralUpperTarget = 7200,
+    // The prior face-centered target is now the downward tracking guard. The
+    // existing high guard remains tighter than the physical joint maximum.
+    ROBPersonTrackingMinimumUpperTarget = 6869,
     ROBPersonTrackingMaximumUpperTarget = 7400
 };
 

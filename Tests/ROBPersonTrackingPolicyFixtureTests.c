@@ -57,8 +57,8 @@ static ROBPersonTrackingResult track(
 static void testDefaultCalibration(void) {
     ROBPersonTrackingConfig configuration = ROBPersonTrackingDefaultConfig();
     EXPECT_TRUE(ROBPersonTrackingConfigIsValid(&configuration));
-    EXPECT_INT(ROBPersonTrackingMinimumUpperTarget, 6073);
-    EXPECT_INT(ROBPersonTrackingNeutralUpperTarget, 6869);
+    EXPECT_INT(ROBPersonTrackingMinimumUpperTarget, 6869);
+    EXPECT_INT(ROBPersonTrackingNeutralUpperTarget, 7200);
     EXPECT_INT(ROBPersonTrackingMaximumUpperTarget, 7400);
 
     ROBPersonTrackingResult centered = track(
@@ -82,15 +82,15 @@ static void testCorrectionsPointCameraTowardBlob(void) {
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
         0.8, 0.8, 0.1
     );
-    EXPECT_INT(upperRight.panTarget, 5974);
-    EXPECT_INT(upperRight.upperTarget, 6890);
+    EXPECT_INT(upperRight.panTarget, 5990);
+    EXPECT_INT(upperRight.upperTarget, 7208);
 
     ROBPersonTrackingResult lowerLeft = track(
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
         0.2, 0.2, 0.1
     );
-    EXPECT_INT(lowerLeft.panTarget, 6026);
-    EXPECT_INT(lowerLeft.upperTarget, 6848);
+    EXPECT_INT(lowerLeft.panTarget, 6010);
+    EXPECT_INT(lowerLeft.upperTarget, 7192);
 }
 
 static void testTrackingGuards(void) {
@@ -109,22 +109,25 @@ static void testTrackingGuards(void) {
     EXPECT_INT(high.upperTarget, ROBPersonTrackingMaximumUpperTarget);
     EXPECT_TRUE(high.upperClamped);
 
-    // A one-second observation gap is capped to the configured 0.2-second
-    // step, matching a normal two-frame delay instead of producing a jump.
+    // A one-second observation gap is capped to one 0.1-second control step
+    // instead of producing a catch-up jump.
     ROBPersonTrackingResult cappedGap = track(
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
         1.0, 0.5, 1.0
     );
-    EXPECT_INT(cappedGap.panTarget, 5908);
+    EXPECT_INT(cappedGap.panTarget, 5982);
 
     EXPECT_FALSE(ROBPersonTrackingApply(
-        &configuration, 6000, 6869, NAN, 0.5, 0.1, &low
+        &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
+        NAN, 0.5, 0.1, &low
     ));
     EXPECT_FALSE(ROBPersonTrackingApply(
-        &configuration, 6000, 6869, 0.5, 0.5, 0.0, &low
+        &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
+        0.5, 0.5, 0.0, &low
     ));
     EXPECT_FALSE(ROBPersonTrackingApply(
-        NULL, 6000, 6869, 0.5, 0.5, 0.1, &low
+        NULL, 6000, ROBPersonTrackingNeutralUpperTarget,
+        0.5, 0.5, 0.1, &low
     ));
 }
 
