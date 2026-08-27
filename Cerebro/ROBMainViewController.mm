@@ -37,6 +37,8 @@ static NSTimeInterval const kRobotActionControllerFreshnessSeconds = 3.5;
 static NSTimeInterval const kRobotActionApprovalLifetimeSeconds = 30.0;
 static NSTimeInterval const kRobotActionExecutionLifetimeSeconds = 60.0;
 static NSTimeInterval const kROBConversationContinuationWindowSeconds = 15.0;
+static NSTimeInterval const kROBPersonTrackingFilterResetSeconds = 0.5;
+static double const kROBPersonTrackingFilterAlpha = 0.25;
 static NSString * const ROBDevelopmentModeDefaultsKey = @"ROBDevelopmentMode";
 static NSString * const ROBShowControllerInputDiagnosticsNotification = @"ROBShowControllerInputDiagnostics";
 static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopmentModeDidChange";
@@ -380,6 +382,12 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 @property (readwrite, assign) float currentPerson_tilt;
 @property (readwrite, assign) float currentPerson_upperNeckTilt;
 @property (readwrite, assign) NSTimeInterval lastPersonTrackingUpdateUptime;
+@property (readwrite, assign) BOOL faceIdentityTrackingActive;
+@property (readwrite, assign) BOOL faceDetectionTrackingActive;
+@property (readwrite, assign) BOOL personTrackingFilterInitialized;
+@property (readwrite, assign) double filteredPersonTrackingX;
+@property (readwrite, assign) double filteredPersonTrackingY;
+@property (readwrite, copy) NSString *personTrackingSourceID;
 
 @property (readwrite, assign) int actualValue;
 @property (readwrite, assign) int targetValue;
@@ -1076,7 +1084,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 {
     BOOL active = [notification.userInfo[@"active"] boolValue];
     if (!active) {
-        self.lastPersonTrackingUpdateUptime = 0;
+        // Preserve the controller cadence while the identity tracker hands
+        // authority back to legacy human tracking. Resetting the shared clock
+        // here let a second detector apply an immediate extra correction.
+        self.faceIdentityTrackingActive = NO;
         return;
     }
     NSNumber *confidence = [notification.userInfo[@"confidence"] isKindOfClass:NSNumber.class]
@@ -1084,6 +1095,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     NSValue *boxValue = [notification.userInfo[@"boundingBox"] isKindOfClass:NSValue.class]
         ? notification.userInfo[@"boundingBox"] : nil;
     if (confidence.floatValue < 0.42 || boxValue == nil) { return; }
+    self.faceIdentityTrackingActive = YES;
     [self trackFaceBoundingBox:boxValue.rectValue];
 }
 
@@ -3214,15 +3226,16 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         [self.autonomyCoordinator updatePersonVisible:observations.count > 0];
         VNFaceObservation *best = nil;
         for (VNFaceObservation *observation in observations) {
-            if (observation.confidence > 0.6 &&
-                (best == nil || observation.confidence > best.confidence)) {
+            if (observation.confidence > 0.6
+                && (best == nil || observation.confidence > best.confidence)) {
                 best = observation;
             }
         }
-        if (best != nil) {
-            [self trackFaceBoundingBox:best.boundingBox];
-        } else {
-            self.lastPersonTrackingUpdateUptime = 0;
+        self.faceDetectionTrackingActive = best != nil;
+        if (best != nil && !self.faceIdentityTrackingActive) {
+            // Generic face detection is a fallback for acquisition only. Once
+            // identity tracking is active, its spatial box has sole authority.
+            [self trackingPerson:@"detected-face" position:best.boundingBox];
         }
     });
 }
@@ -3318,6 +3331,21 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             != NSControlStateValueOn) {
             self.isNeckLifted = NO;
             self.lastPersonTrackingUpdateUptime = 0;
+            self.personTrackingFilterInitialized = NO;
+            self.personTrackingSourceID = nil;
+            return;
+        }
+        // A recognized face is the authoritative target until its spatial
+        // identity track expires. A concurrent legacy body observation must
+        // not pull the neck toward a different box.
+        BOOL recognizedFace = [userID isEqualToString:@"recognized-face"];
+        if (!recognizedFace && self.faceIdentityTrackingActive) {
+            return;
+        }
+        BOOL detectedFace = [userID isEqualToString:@"detected-face"];
+        if (!recognizedFace
+            && !detectedFace
+            && self.faceDetectionTrackingActive) {
             return;
         }
         // Both recognized faces and legacy human blobs enter here. Hold every
@@ -3339,6 +3367,23 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         // detections cannot double the servo correction.
         if (self.lastPersonTrackingUpdateUptime > 0 && elapsed < 0.1) {
             return;
+        }
+        BOOL trackingSourceChanged = self.personTrackingSourceID == nil
+            || ![self.personTrackingSourceID isEqualToString:userID];
+        BOOL trackingWasInterrupted = self.lastPersonTrackingUpdateUptime <= 0
+            || elapsed > kROBPersonTrackingFilterResetSeconds;
+        if (!self.personTrackingFilterInitialized
+            || trackingSourceChanged
+            || trackingWasInterrupted) {
+            self.filteredPersonTrackingX = x;
+            self.filteredPersonTrackingY = y;
+            self.personTrackingFilterInitialized = YES;
+            self.personTrackingSourceID = userID;
+        } else {
+            self.filteredPersonTrackingX += kROBPersonTrackingFilterAlpha
+                * (x - self.filteredPersonTrackingX);
+            self.filteredPersonTrackingY += kROBPersonTrackingFilterAlpha
+                * (y - self.filteredPersonTrackingY);
         }
         self.lastPersonTrackingUpdateUptime = now;
 
@@ -3364,14 +3409,24 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         );
 
         ROBPersonTrackingResult result = {0};
+        int32_t currentPanTarget = (int32_t)lround(
+            self.torsoControlsViewController.headPan.doubleValue
+        );
+        if (self.serialBox.neckPanCommandKnown
+            && self.serialBox.commandedNeckPanTarget
+                != ROBNeckSafetyTargetOff) {
+            // Accumulate from the accepted hardware command. A passive slider
+            // refresh cannot then reverse or erase a pending rightward step.
+            currentPanTarget = (int32_t)self.serialBox.commandedNeckPanTarget;
+        }
         if (!ROBPersonTrackingApply(
                 &configuration,
-                (int32_t)lround(self.torsoControlsViewController.headPan.doubleValue),
+                currentPanTarget,
                 (int32_t)lround(
                     self.torsoControlsViewController.headUpperNeckTilt.doubleValue
                 ),
-                x,
-                y,
+                self.filteredPersonTrackingX,
+                self.filteredPersonTrackingY,
                 elapsed,
                 &result
             )) {

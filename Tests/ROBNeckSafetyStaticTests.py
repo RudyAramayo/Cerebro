@@ -320,14 +320,18 @@ def check_lower_clearance_threshold(
         and "kROBFollowTrackingClearanceSource" in follow
         and "ROBPersonTrackingNeutralUpperTarget" in follow
         and "fullPanEnvelopeIsSettled" in follow
+        and "personFollowTrackingPrepared" in follow
+        and "trackingPoseIsStructurallyReady" in follow
         and "pendingPanEnvelopeLowerTarget == ROBNeckSafetyTargetOff" in follow,
-        "Person-follow preparation must require settled lower upright and the "
-        "tracking upper band without recentering each active pan correction",
+        "Person-follow preparation must latch the settled upright tracking "
+        "pose without recentering active pan or upper-camera corrections",
     )
     gateway = objective_c_method(serial_source, "applySafeNeckPanTarget:")
     compact_gateway = compact(gateway)
     require(
         "reviewedFollowClearanceCommand" in gateway
+        and "desiredUpperLeavesPersonTrackingBand" in gateway
+        and "self.personFollowTrackingPrepared = NO" in gateway
         and "&& !reviewedFollowClearanceCommand" in compact_gateway
         and "panTarget == configuration.panCenterTarget" in gateway
         and "lowerTiltTarget == ROBNeckSafetyUprightLowerTarget" in gateway

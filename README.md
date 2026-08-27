@@ -173,14 +173,18 @@ startup: pan stays OFF while lower/upper move to `6011`/`6073`, pan settles
 forward at `5799`, and only then does the neck move to the `lean_forward` pose
 at lower `7014` / upper `7698`.
 Recognized-face and human-blob following acquires at slight-up target `7375`
-inside a narrow `7350`–`7400` upper tracking band. Mirrored main-camera X is
-converted once into the physical pan frame. Slower pan/tilt responses, 12-percent
-center dead bands, and a matching 10 Hz servo renderer keep detector frame rate,
-duplicate observations, and physical command latency from producing large or
-oscillating corrections. Face and human-blob tracking both pause until lower-neck `6011`
-has settled upright with the full pan envelope; requests still clamp at the
-calibrated pan hard limits. Once upright, live pan corrections continue without
-being reset to center between 10 Hz tracking updates.
+inside a narrow `7350`–`7400` upper tracking band. Main-camera Vision uses the
+unmirrored capture coordinate, so image right commands the installed pan servo
+physically right. Recognized faces take priority over legacy human blobs, while
+the generic face detector runs only as an acquisition fallback and body boxes
+run only when neither face source is active. A 25-percent observation filter,
+slower pan/tilt responses, 12-percent center
+dead bands, and a matching 10 Hz servo renderer prevent detector jitter and
+physical command latency from producing large corrections. Face and human-blob
+tracking both pause until lower-neck `6011` has settled upright with the full
+pan envelope; requests still clamp at the calibrated pan hard limits. Once
+upright, the gateway latches that prepared posture so live pan and upper-camera
+corrections are not reset to center between 10 Hz tracking updates.
 The **Servos → Open Servo Control…** window edits named camera positions,
 servo-sequence phases, and relative `YES`/`NO` gestures. Gesture deltas are
 applied around the current pose, so a nod or head shake remains relative to

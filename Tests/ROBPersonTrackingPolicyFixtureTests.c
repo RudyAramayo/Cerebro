@@ -60,7 +60,7 @@ static void testDefaultCalibration(void) {
     EXPECT_INT(ROBPersonTrackingMinimumUpperTarget, 7350);
     EXPECT_INT(ROBPersonTrackingNeutralUpperTarget, 7375);
     EXPECT_INT(ROBPersonTrackingMaximumUpperTarget, 7400);
-    EXPECT_TRUE(configuration.mirrorHorizontalCoordinate);
+    EXPECT_FALSE(configuration.mirrorHorizontalCoordinate);
 
     ROBPersonTrackingResult centered = track(
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
@@ -79,30 +79,30 @@ static void testDefaultCalibration(void) {
 
 static void testCorrectionsPointCameraTowardBlob(void) {
     ROBPersonTrackingConfig configuration = ROBPersonTrackingDefaultConfig();
-    // A person on ROB's physical right appears on the left of the mirrored
-    // camera image. Unmirroring must lower the raw target and turn right.
+    // Vision reads the unmirrored sample buffer. Image right must lower the
+    // installed servo's raw target and turn ROB physically right.
     ROBPersonTrackingResult robotRight = track(
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
-        0.2, 0.8, 0.1
+        0.8, 0.8, 0.1
     );
     EXPECT_INT(robotRight.panTarget, 5994);
     EXPECT_INT(robotRight.upperTarget, 7377);
 
     ROBPersonTrackingResult robotLeft = track(
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
-        0.8, 0.2, 0.1
+        0.2, 0.2, 0.1
     );
     EXPECT_INT(robotLeft.panTarget, 6006);
     EXPECT_INT(robotLeft.upperTarget, 7373);
     EXPECT_FALSE(robotLeft.upperClamped);
 
-    // The policy can still serve a future unmirrored detector explicitly.
-    configuration.mirrorHorizontalCoordinate = false;
-    ROBPersonTrackingResult unmirroredRight = track(
+    // A future mirrored display coordinate can still opt into conversion.
+    configuration.mirrorHorizontalCoordinate = true;
+    ROBPersonTrackingResult mirroredRight = track(
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
-        0.8, 0.5, 0.1
+        0.2, 0.5, 0.1
     );
-    EXPECT_INT(unmirroredRight.panTarget, 5994);
+    EXPECT_INT(mirroredRight.panTarget, 5994);
 
     // A downward correction is limited to two raw targets in this representative
     // frame and cannot cross the slight-up floor that prevents the observed dip.
@@ -110,6 +110,25 @@ static void testCorrectionsPointCameraTowardBlob(void) {
         &configuration, 6000, 7360, 0.5, 0.2, 0.1
     );
     EXPECT_INT(downwardWithinGuard.upperTarget, 7358);
+}
+
+static void testRightTrackingAccumulatesMonotonically(void) {
+    ROBPersonTrackingConfig configuration = ROBPersonTrackingDefaultConfig();
+    int pan = 6000;
+    for (int frame = 0; frame < 10; frame++) {
+        const int previousPan = pan;
+        ROBPersonTrackingResult result = track(
+            &configuration,
+            pan,
+            ROBPersonTrackingNeutralUpperTarget,
+            0.8,
+            0.5,
+            0.1
+        );
+        pan = result.panTarget;
+        EXPECT_TRUE(pan < previousPan);
+    }
+    EXPECT_INT(pan, 5940);
 }
 
 static void testTrackingGuards(void) {
@@ -142,7 +161,7 @@ static void testTrackingGuards(void) {
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
         1.0, 0.5, 1.0
     );
-    EXPECT_INT(cappedGap.panTarget, 6011);
+    EXPECT_INT(cappedGap.panTarget, 5989);
 
     EXPECT_FALSE(ROBPersonTrackingApply(
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
@@ -161,6 +180,7 @@ static void testTrackingGuards(void) {
 int main(void) {
     testDefaultCalibration();
     testCorrectionsPointCameraTowardBlob();
+    testRightTrackingAccumulatesMonotonically();
     testTrackingGuards();
 
     if (failures != 0) {

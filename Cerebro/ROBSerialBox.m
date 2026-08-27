@@ -288,6 +288,7 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 @property (readwrite, assign) NSTimeInterval commandedNeckPanTargetReadyAt;
 @property (readwrite, assign) NSTimeInterval commandedLowerNeckTargetReadyAt;
 @property (readwrite, assign) NSTimeInterval commandedUpperNeckTargetReadyAt;
+@property (readwrite, assign) BOOL personFollowTrackingPrepared;
 @property (readwrite, assign) NSTimeInterval manualNeckOverrideUntil;
 @property (readwrite, assign) NSTimeInterval visionNeckAuthorityUntil;
 @property (readwrite, assign) NSTimeInterval gestureNeckAuthorityUntil;
@@ -785,6 +786,7 @@ typedef enum : NSUInteger {
     self.commandedNeckPanTargetReadyAt = 0;
     self.commandedLowerNeckTargetReadyAt = 0;
     self.commandedUpperNeckTargetReadyAt = 0;
+    self.personFollowTrackingPrepared = NO;
     self.supervisedLowerRecoveryUntil = 0;
     ROBNeckSafetyPanBounds conservativeBounds = {0};
     if (!ROBNeckConservativeUnknownPanBounds(
@@ -843,6 +845,7 @@ typedef enum : NSUInteger {
     self.commandedNeckPanTargetReadyAt = 0;
     self.commandedLowerNeckTargetReadyAt = 0;
     self.commandedUpperNeckTargetReadyAt = 0;
+    self.personFollowTrackingPrepared = NO;
     self.lastDesiredUpperNeckTargetIsKnown = NO;
     self.supervisedLowerRecoveryUntil = 0;
     self.manualNeckOverrideUntil = 0;
@@ -2198,6 +2201,17 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         }
     }
 
+    BOOL desiredUpperLeavesPersonTrackingBand =
+        effectiveDesiredUpperTarget != ROBNeckSafetyTargetOff
+        && (effectiveDesiredUpperTarget < ROBPersonTrackingMinimumUpperTarget
+            || effectiveDesiredUpperTarget
+                > ROBPersonTrackingMaximumUpperTarget);
+    if (lowerChangeRequested || desiredUpperLeavesPersonTrackingBand) {
+        // Any posture change that can invalidate the reviewed clearance must
+        // earn a new settle latch before face/body tracking resumes.
+        self.personFollowTrackingPrepared = NO;
+    }
+
     BOOL levelingRequired = effectiveConfiguration.cameraLevelingEnabled
         && fabs(effectiveConfiguration.upperCounterRotationGain) > DBL_EPSILON;
     BOOL lowerHeldForDisabledUpper = lowerChangeRequested
@@ -3543,12 +3557,14 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         || self.commandedNeckPanTarget == ROBNeckSafetyTargetOff
         || self.commandedLowerNeckTiltTarget == ROBNeckSafetyTargetOff
         || self.commandedUpperNeckTiltTarget == ROBNeckSafetyTargetOff) {
+        self.personFollowTrackingPrepared = NO;
         self.neckCommandSafetyStatus =
             @"Follow tracking pose is waiting for a connected, known active neck state.";
         return NO;
     }
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
     if (now < self.manualNeckOverrideUntil || now < self.gestureNeckAuthorityUntil) {
+        self.personFollowTrackingPrepared = NO;
         self.neckCommandSafetyStatus =
             @"Follow tracking pose is waiting for the current manual or gesture neck lease to end.";
         return NO;
@@ -3571,15 +3587,21 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
             >= ROBPersonTrackingMinimumUpperTarget
         && self.commandedUpperNeckTiltTarget
             <= ROBPersonTrackingMaximumUpperTarget;
-    BOOL fullPanEnvelopeIsSettled = lowerCommandIsTrackingUpright
+    BOOL trackingPoseIsStructurallyReady = lowerCommandIsTrackingUpright
         && lowerCommandHasFullClearance
         && upperCommandIsInTrackingBand
         && self.panEnvelopeLowerTargetIsKnown
         && self.panEnvelopeLowerTarget == self.commandedLowerNeckTiltTarget
-        && self.pendingPanEnvelopeLowerTarget == ROBNeckSafetyTargetOff
-        && now >= self.commandedLowerNeckTargetReadyAt
-        && now >= self.commandedUpperNeckTargetReadyAt;
+        && self.pendingPanEnvelopeLowerTarget == ROBNeckSafetyTargetOff;
+    if (!trackingPoseIsStructurallyReady) {
+        self.personFollowTrackingPrepared = NO;
+    }
+    BOOL fullPanEnvelopeIsSettled = trackingPoseIsStructurallyReady
+        && (self.personFollowTrackingPrepared
+            || (now >= self.commandedLowerNeckTargetReadyAt
+                && now >= self.commandedUpperNeckTargetReadyAt));
     if (fullPanEnvelopeIsSettled) {
+        self.personFollowTrackingPrepared = YES;
         return YES;
     }
 
@@ -3612,14 +3634,18 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
             >= ROBPersonTrackingMinimumUpperTarget
         && self.commandedUpperNeckTiltTarget
             <= ROBPersonTrackingMaximumUpperTarget;
-    fullPanEnvelopeIsSettled = lowerCommandIsTrackingUpright
+    trackingPoseIsStructurallyReady = lowerCommandIsTrackingUpright
         && lowerCommandHasFullClearance
         && upperCommandIsInTrackingBand
         && self.panEnvelopeLowerTargetIsKnown
         && self.panEnvelopeLowerTarget == self.commandedLowerNeckTiltTarget
-        && self.pendingPanEnvelopeLowerTarget == ROBNeckSafetyTargetOff
+        && self.pendingPanEnvelopeLowerTarget == ROBNeckSafetyTargetOff;
+    fullPanEnvelopeIsSettled = trackingPoseIsStructurallyReady
         && now >= self.commandedLowerNeckTargetReadyAt
         && now >= self.commandedUpperNeckTargetReadyAt;
+    if (fullPanEnvelopeIsSettled) {
+        self.personFollowTrackingPrepared = YES;
+    }
     if (!fullPanEnvelopeIsSettled) {
         self.neckCommandSource = @"Follow tracking clearance";
         self.neckCommandSafetyStatus =

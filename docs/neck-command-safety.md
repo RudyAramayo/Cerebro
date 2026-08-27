@@ -93,8 +93,10 @@ pan, lower `6011`, and upper `7375`. It may establish only that exact tuple
 without enabling arbitrary uncalibrated lower motion, and tracking remains
 paused until the exact lower-upright target, the tracking camera band, the
 full-pan envelope, and lower/upper command deadlines have settled. The gateway
-centers pan before moving a leaning lower neck; after upright clearance is
-established, it does not wait for or recenter each active tracking pan step.
+then latches that prepared state while the lower target, full-pan envelope, and
+upper tracking band remain valid. It centers pan before moving a leaning lower
+neck; after upright clearance is established, it does not wait for or recenter
+each active pan or upper-camera correction.
 After that exact lower target is successfully written and its command-space
 settle interval completes, pan uses the corresponding lower-target envelope
 even while the separate camera/counter-rotation calibration remains
@@ -119,8 +121,13 @@ toward or beyond a restricted pan edge cannot continue while the lower neck is
 leaning. Once upright, pan may use the calibrated full range and still clamps at
 the physical `4000`/`8000` hard targets. The installed servo turns right as the
 raw pan target decreases toward `4000` and left as it increases toward `8000`.
-The main-camera Vision X coordinate is mirrored relative to that physical frame,
-so person tracking reverses normalized X once before calculating a pan step.
+The main-camera detectors read the unmirrored capture pixel buffer, so person
+tracking preserves normalized X: a target on image right lowers the raw pan
+target and turns the installed servo physically right. Recognized-face tracking
+has priority; generic face detection is used only as an acquisition fallback,
+and legacy body boxes run only when neither face source is active. A 25-percent
+observation filter damps frame-to-frame box jitter before each proportional
+correction.
 
 ## OFF/unknown safe startup
 

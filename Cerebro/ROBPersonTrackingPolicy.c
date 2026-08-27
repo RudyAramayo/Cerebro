@@ -50,7 +50,7 @@ ROBPersonTrackingConfig ROBPersonTrackingDefaultConfig(void) {
         .centerY = 0.5,
         .horizontalDeadBand = 0.06,
         .verticalDeadBand = 0.06,
-        .mirrorHorizontalCoordinate = true,
+        .mirrorHorizontalCoordinate = false,
         .panTargetsPerSecond = 250.0,
         .upperTargetsPerSecond = 80.0,
         .maximumElapsedSeconds = 0.1,
@@ -119,9 +119,9 @@ bool ROBPersonTrackingApply(
         0.0,
         1.0
     );
-    // The main-camera Vision box is horizontally mirrored relative to ROB's
-    // physical left/right frame. Convert exactly once before applying the
-    // verified raw-servo direction below.
+    // Vision observations use the unmirrored pixel-buffer coordinate. Keep
+    // the option explicit for future mirrored sources, but the main-camera
+    // default must preserve X so image-right lowers the raw pan target.
     const double x = configuration->mirrorHorizontalCoordinate
         ? 1.0 - observedX
         : observedX;

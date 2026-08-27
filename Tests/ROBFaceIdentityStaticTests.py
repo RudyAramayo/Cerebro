@@ -113,11 +113,25 @@ assert "liftNeckAnimationTimer" not in main
 assert "6168.94" not in tracking and "6868.81" not in tracking
 assert "ROBPersonTrackingApply" in main
 assert "lastPersonTrackingUpdateUptime" in main
+assert "faceIdentityTrackingActive" in main
+assert "faceDetectionTrackingActive" in main
+assert "kROBPersonTrackingFilterAlpha = 0.25" in main
+assert "filteredPersonTrackingX" in person_tracking
+assert "self.serialBox.commandedNeckPanTarget" in person_tracking
+assert "!recognizedFace && self.faceIdentityTrackingActive" in person_tracking
+assert "!detectedFace" in person_tracking
+legacy_faces = main.split("- (void) didSeeNewPeople:", 1)[1].split(
+    "- (BOOL)prepareNeckForPersonTracking", 1
+)[0]
+assert "updatePersonVisible" in legacy_faces
+assert "trackFaceBoundingBox" not in legacy_faces
+assert '[self trackingPerson:@"detected-face"' in legacy_faces
+assert "!self.faceIdentityTrackingActive" in legacy_faces
 assert "centerX = 0.5" in tracking_policy_source
 assert "centerY = 0.5" in tracking_policy_source
 assert "horizontalDeadBand = 0.06" in tracking_policy_source
 assert "verticalDeadBand = 0.06" in tracking_policy_source
-assert "mirrorHorizontalCoordinate = true" in tracking_policy_source
+assert "mirrorHorizontalCoordinate = false" in tracking_policy_source
 assert "panTargetsPerSecond = 250.0" in tracking_policy_source
 assert "currentPanTarget\n            - resultOut->horizontalError" in tracking_policy_source
 assert "upperTargetsPerSecond = 80.0" in tracking_policy_source

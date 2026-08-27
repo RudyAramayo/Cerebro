@@ -53,8 +53,8 @@ typedef struct {
 } ROBPersonTrackingResult;
 
 // The default controller samples at no more than 10 Hz, aims at the exact
-// image center, converts the mirrored main-camera X coordinate into ROB's
-// physical pan frame, and ignores the central 12 percent on both axes.
+// image center, preserves the unmirrored main-camera Vision X coordinate, and
+// ignores the central 12 percent on both axes.
 ROBPersonTrackingConfig ROBPersonTrackingDefaultConfig(void);
 
 bool ROBPersonTrackingConfigIsValid(
