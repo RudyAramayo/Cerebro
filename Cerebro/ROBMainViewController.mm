@@ -53,6 +53,9 @@ static NSTimeInterval const kROBPersonTrackingMainPoseFreshnessSeconds = 1.0;
 static NSTimeInterval const kROBPersonTrackingInstaPoseFreshnessSeconds = 3.0;
 static NSTimeInterval const kROBPersonTrackingAttentionReturnSeconds = 8.0;
 static NSTimeInterval const kROBPersonTrackingDistanceDwellSeconds = 0.75;
+static NSTimeInterval const kROBPersonTrackingHighPoseDwellSeconds = 0.5;
+static double const kROBPersonTrackingHighPoseEntryY = 0.72;
+static double const kROBPersonTrackingHighPoseResetY = 0.62;
 static double const kROBPersonTrackingTooCloseMeters = 0.9;
 static double const kROBPersonTrackingTooFarMeters = 2.8;
 static NSString * const ROBDevelopmentModeDefaultsKey = @"ROBDevelopmentMode";
@@ -451,6 +454,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 @property (readwrite, assign) NSTimeInterval latestAlignedDepthReceivedUptime;
 @property (readwrite, assign) NSInteger personTrackingDistanceBand;
 @property (readwrite, assign) NSTimeInterval personTrackingDistanceBandEnteredUptime;
+@property (readwrite, assign) BOOL personTrackingHighPoseActive;
+@property (readwrite, assign) NSTimeInterval personTrackingHighPoseEnteredUptime;
+@property (readwrite, assign) NSTimeInterval personTrackingHighPoseLastObservationUptime;
 
 @property (readwrite, assign) int actualValue;
 @property (readwrite, assign) int targetValue;
@@ -3703,6 +3709,62 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     }
 }
 
+- (BOOL)updatePersonTrackingHighPoseAtUptime:(NSTimeInterval)now
+                                      source:(NSString *)source
+{
+    BOOL sourceIncludesMainPose =
+        [source isEqualToString:@"main-camera-pose"]
+        || [source isEqualToString:@"main-camera-face-pose"];
+    ROBPersonTrackingObservation *pose =
+        self.lastMainPoseTrackingObservation;
+    NSTimeInterval observationUptime =
+        self.lastMainPoseTrackingObservationUptime;
+    if (!sourceIncludesMainPose
+        || pose == nil
+        || observationUptime <= 0
+        || now - observationUptime
+            > kROBPersonTrackingMainPoseFreshnessSeconds) {
+        return NO;
+    }
+
+    // Only a newly delivered body-pose sample advances the dwell. Face updates
+    // may reuse the latest pose briefly, but must not turn one high sample into
+    // a persistent high-head signal.
+    if (observationUptime
+        <= self.personTrackingHighPoseLastObservationUptime) {
+        return self.personTrackingHighPoseActive;
+    }
+    if (self.personTrackingHighPoseLastObservationUptime <= 0
+        || observationUptime
+                - self.personTrackingHighPoseLastObservationUptime
+            > kROBPersonTrackingMainPoseFreshnessSeconds) {
+        self.personTrackingHighPoseActive = NO;
+        self.personTrackingHighPoseEnteredUptime = 0;
+    }
+    self.personTrackingHighPoseLastObservationUptime = observationUptime;
+
+    if (self.personTrackingHighPoseActive) {
+        if (pose.headY <= kROBPersonTrackingHighPoseResetY) {
+            self.personTrackingHighPoseActive = NO;
+            self.personTrackingHighPoseEnteredUptime = 0;
+        }
+        return self.personTrackingHighPoseActive;
+    }
+    if (pose.headY < kROBPersonTrackingHighPoseEntryY) {
+        self.personTrackingHighPoseEnteredUptime = 0;
+        return NO;
+    }
+    if (self.personTrackingHighPoseEnteredUptime <= 0) {
+        self.personTrackingHighPoseEnteredUptime = observationUptime;
+        return NO;
+    }
+    if (observationUptime - self.personTrackingHighPoseEnteredUptime
+        >= kROBPersonTrackingHighPoseDwellSeconds) {
+        self.personTrackingHighPoseActive = YES;
+    }
+    return self.personTrackingHighPoseActive;
+}
+
 - (void)didCaptureCameraSampleBuffer:(CMSampleBufferRef)sampleBuffer
 {
     [self.robAI sendVideoSampleBuffer:sampleBuffer];
@@ -3757,6 +3819,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             self.personTrackingFilterInitialized = NO;
             self.personTrackingUpperBaselineTarget = 0;
             self.personTrackingSourceID = nil;
+            self.personTrackingHighPoseActive = NO;
+            self.personTrackingHighPoseEnteredUptime = 0;
+            self.personTrackingHighPoseLastObservationUptime = 0;
             return;
         }
         NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
@@ -3851,6 +3916,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             );
         }
         self.lastPersonTrackingUpdateUptime = now;
+        BOOL highMainPoseRequestsUpright = [self
+            updatePersonTrackingHighPoseAtUptime:now
+            source:userID];
 
         ROBPersonTrackingConfig configuration =
             ROBPersonTrackingDefaultConfig();
@@ -3989,6 +4057,47 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         if (self.serialBox.personTrackingUprightTransitionActive
             || self.serialBox.personTrackingPostureSequenceActive) {
             return;
+        }
+        if (highMainPoseRequestsUpright
+            && uprightTransitionAuthorized
+            && currentLowerTarget != ROBNeckSafetyUprightLowerTarget) {
+            int32_t highPosePanTarget = currentPanTarget;
+            if (highPosePanTarget < uprightRight.panTarget) {
+                highPosePanTarget = (int32_t)uprightRight.panTarget;
+            } else if (highPosePanTarget > uprightLeft.panTarget) {
+                highPosePanTarget = (int32_t)uprightLeft.panTarget;
+            }
+            ROBNeckCommandDisposition disposition = [self.serialBox
+                requestPersonTrackingUprightPanTarget:highPosePanTarget
+                lowerTarget:ROBNeckSafetyUprightLowerTarget
+                upperTarget:ROBNeckSafetyUprightUpperTarget];
+            if (disposition != ROBNeckCommandDispositionRejected) {
+                if (self.serialBox.personTrackingUprightTransitionActive) {
+                    self.personTrackingUpperBaselineTarget =
+                        ROBNeckSafetyUprightUpperTarget;
+                    self.personTrackingUprightPostureActive = YES;
+                }
+                if (now - self.lastPersonTrackingDiagnosticsUptime >= 1.0) {
+                    self.lastPersonTrackingDiagnosticsUptime = now;
+                    NSLog(
+                        @"Main-camera pose head remained high at y=%.3f; lifting upright at preserved safe pan P%d, then resuming face centering (%@)",
+                        self.lastMainPoseTrackingObservation.headY,
+                        highPosePanTarget,
+                        self.serialBox.neckCommandSafetyStatus
+                    );
+                }
+                return;
+            }
+            if (now - self.lastPersonTrackingDiagnosticsUptime >= 1.0) {
+                self.lastPersonTrackingDiagnosticsUptime = now;
+                NSLog(
+                    @"High-pose upright entry rejected at P%d, L%d U%d: %@",
+                    highPosePanTarget,
+                    ROBNeckSafetyUprightLowerTarget,
+                    ROBNeckSafetyUprightUpperTarget,
+                    self.serialBox.neckCommandSafetyStatus
+                );
+            }
         }
         if (result.uprightTransitionRequested
             && requestedUprightEndpoint != nil) {

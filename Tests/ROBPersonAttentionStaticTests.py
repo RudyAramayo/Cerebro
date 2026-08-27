@@ -54,6 +54,23 @@ require(
     "Face and main-camera pose results are no longer fused with a stalled-face fallback.",
 )
 require(
+    "kROBPersonTrackingHighPoseDwellSeconds = 0.5" in main
+    and "kROBPersonTrackingHighPoseEntryY = 0.72" in main
+    and "kROBPersonTrackingHighPoseResetY = 0.62" in main
+    and "updatePersonTrackingHighPoseAtUptime" in main
+    and '[source isEqualToString:@"main-camera-pose"]' in main
+    and '[source isEqualToString:@"main-camera-face-pose"]' in main
+    and "pose.headY <= kROBPersonTrackingHighPoseResetY" in main
+    and "pose.headY < kROBPersonTrackingHighPoseEntryY" in main
+    and "personTrackingHighPoseLastObservationUptime" in main
+    and "highPosePanTarget < uprightRight.panTarget" in main
+    and "highPosePanTarget > uprightLeft.panTarget" in main
+    and "requestPersonTrackingUprightPanTarget:highPosePanTarget" in main
+    and "self.personTrackingUpperBaselineTarget =\n                        ROBNeckSafetyUprightUpperTarget" in main
+    and "then resuming face centering" in main,
+    "A persistently high main-camera human pose no longer lifts safely at the current pan before resuming face centering.",
+)
+require(
     "insta360OrientationCalibrated" in main
     and "insta360ForwardMarkerDegrees" in main
     and "mainTargetIsFresh" in main
