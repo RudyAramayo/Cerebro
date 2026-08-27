@@ -3585,7 +3585,7 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
 
     // The policy may first recenter pan, then move lower tilt, then settle.
     // Repeated calls are intentional and remain fully mediated by the shared
-    // collision gateway. This exact reviewed P-center/L-6011/U-7300 tuple
+    // collision gateway. This exact reviewed P-center/L-6011/U-7375 tuple
     // establishes tracking clearance and restores the camera-specific neutral
     // used before recognized-face tracking joined this gateway. No arbitrary
     // automatic lower demand receives that authority.

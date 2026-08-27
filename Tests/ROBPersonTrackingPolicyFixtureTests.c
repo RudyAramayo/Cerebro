@@ -57,8 +57,8 @@ static ROBPersonTrackingResult track(
 static void testDefaultCalibration(void) {
     ROBPersonTrackingConfig configuration = ROBPersonTrackingDefaultConfig();
     EXPECT_TRUE(ROBPersonTrackingConfigIsValid(&configuration));
-    EXPECT_INT(ROBPersonTrackingMinimumUpperTarget, 7300);
-    EXPECT_INT(ROBPersonTrackingNeutralUpperTarget, 7300);
+    EXPECT_INT(ROBPersonTrackingMinimumUpperTarget, 7350);
+    EXPECT_INT(ROBPersonTrackingNeutralUpperTarget, 7375);
     EXPECT_INT(ROBPersonTrackingMaximumUpperTarget, 7400);
 
     ROBPersonTrackingResult centered = track(
@@ -70,7 +70,7 @@ static void testDefaultCalibration(void) {
 
     ROBPersonTrackingResult jitter = track(
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
-        0.539, 0.461, 0.1
+        0.539, 0.441, 0.1
     );
     EXPECT_INT(jitter.panTarget, 6000);
     EXPECT_INT(jitter.upperTarget, ROBPersonTrackingNeutralUpperTarget);
@@ -84,26 +84,34 @@ static void testCorrectionsPointCameraTowardBlob(void) {
         0.8, 0.8, 0.1
     );
     EXPECT_INT(upperRight.panTarget, 5990);
-    EXPECT_INT(upperRight.upperTarget, 7304);
+    EXPECT_INT(upperRight.upperTarget, 7377);
 
     ROBPersonTrackingResult lowerLeft = track(
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
         0.2, 0.2, 0.1
     );
     EXPECT_INT(lowerLeft.panTarget, 6010);
-    EXPECT_INT(lowerLeft.upperTarget, ROBPersonTrackingMinimumUpperTarget);
-    EXPECT_TRUE(lowerLeft.upperClamped);
+    EXPECT_INT(lowerLeft.upperTarget, 7373);
+    EXPECT_FALSE(lowerLeft.upperClamped);
 
-    // A downward correction may reduce an already raised target, but cannot
-    // cross the slight-up tracking floor that prevents the observed dip.
+    // A downward correction is limited to two raw targets in this representative
+    // frame and cannot cross the slight-up floor that prevents the observed dip.
     ROBPersonTrackingResult downwardWithinGuard = track(
-        &configuration, 6000, 7350, 0.5, 0.2, 0.1
+        &configuration, 6000, 7360, 0.5, 0.2, 0.1
     );
-    EXPECT_INT(downwardWithinGuard.upperTarget, 7346);
+    EXPECT_INT(downwardWithinGuard.upperTarget, 7358);
 }
 
 static void testTrackingGuards(void) {
     ROBPersonTrackingConfig configuration = ROBPersonTrackingDefaultConfig();
+    // A newly acquired face at the bottom edge may move the camera down only
+    // four raw targets, even when the detector was absent for a full second.
+    ROBPersonTrackingResult reacquiredLow = track(
+        &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
+        0.5, 0.0, 1.0
+    );
+    EXPECT_INT(reacquiredLow.upperTarget, 7371);
+
     ROBPersonTrackingResult low = track(
         &configuration, 6000, ROBPersonTrackingMinimumUpperTarget,
         0.5, 0.0, 0.2

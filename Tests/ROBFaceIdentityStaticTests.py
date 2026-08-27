@@ -116,13 +116,13 @@ assert "lastPersonTrackingUpdateUptime" in main
 assert "centerX = 0.5" in tracking_policy_source
 assert "centerY = 0.5" in tracking_policy_source
 assert "horizontalDeadBand = 0.04" in tracking_policy_source
-assert "verticalDeadBand = 0.04" in tracking_policy_source
+assert "verticalDeadBand = 0.06" in tracking_policy_source
 assert "panTargetsPerSecond = 400.0" in tracking_policy_source
 assert "currentPanTarget\n            - resultOut->horizontalError" in tracking_policy_source
-assert "upperTargetsPerSecond = 150.0" in tracking_policy_source
+assert "upperTargetsPerSecond = 80.0" in tracking_policy_source
 assert "maximumElapsedSeconds = 0.1" in tracking_policy_source
-assert "ROBPersonTrackingMinimumUpperTarget = 7300" in tracking_policy_header
-assert "ROBPersonTrackingNeutralUpperTarget = 7300" in tracking_policy_header
+assert "ROBPersonTrackingMinimumUpperTarget = 7350" in tracking_policy_header
+assert "ROBPersonTrackingNeutralUpperTarget = 7375" in tracking_policy_header
 assert "ROBPersonTrackingMaximumUpperTarget = 7400" in tracking_policy_header
 assert "noteConversationTranscript:text" in main
 assert "noteConversationTranscript:textInput" in main

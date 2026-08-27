@@ -18,12 +18,13 @@ extern "C" {
 #endif
 
 enum {
-    // Physical testing showed that 7200 still aimed the camera downward.
-    // Acquire at the slight-up tracking floor so a new face/blob cannot make
-    // the upper neck dip and hunt below the useful camera envelope.
-    ROBPersonTrackingNeutralUpperTarget = 7300,
-    ROBPersonTrackingMinimumUpperTarget = 7300,
-    // Retain the existing high guard below the physical joint maximum.
+    // Physical testing showed that 7300 still aimed the camera too far down.
+    // Acquire near the middle of a narrow slight-up band so face/blob tracking
+    // can make subtle centering corrections without a visible downward dip.
+    ROBPersonTrackingNeutralUpperTarget = 7375,
+    ROBPersonTrackingMinimumUpperTarget = 7350,
+    // Retain the existing high guard below the physical joint maximum. This
+    // leaves only 25 raw targets of travel on either side of neutral.
     ROBPersonTrackingMaximumUpperTarget = 7400
 };
 
@@ -51,8 +52,8 @@ typedef struct {
 } ROBPersonTrackingResult;
 
 // The default controller samples at no more than 10 Hz, aims at the exact
-// image center, and ignores the central 8 percent of each image dimension so
-// detector jitter does not make the neck hunt.
+// image center, and uses a wider vertical dead band than horizontal so detector
+// jitter produces subtle camera centering instead of neck pitch oscillation.
 ROBPersonTrackingConfig ROBPersonTrackingDefaultConfig(void);
 
 bool ROBPersonTrackingConfigIsValid(

@@ -235,7 +235,7 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 - (void)applyVisionNeckPan:(float)pan tilt:(float)tilt;
 /// Safely stages the lower-neck axis into the exact reviewed upright/full-pan
 /// pose before person tracking starts. With unconfirmed camera calibration,
-/// only the exact center/6011/7300 tuple is eligible. This never bypasses
+/// only the exact center/6011/7375 tuple is eligible. This never bypasses
 /// collision policy; false means the caller must keep tracking paused and
 /// retry or wait for an operator to recover an unknown/off neck state. Once
 /// upright is settled, active pan motion does not restart this preparation.

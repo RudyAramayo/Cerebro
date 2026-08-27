@@ -172,12 +172,12 @@ an OFF/unknown axis—the service runs a configurable, validated three-phase
 startup: pan stays OFF while lower/upper move to `6011`/`6073`, pan settles
 forward at `5799`, and only then does the neck move to the `lean_forward` pose
 at lower `7014` / upper `7698`.
-Recognized-face and human-blob following uses a slight-up upper target and
-tracking floor of `7300`, plus the existing tracking ceiling of `7400`.
-Reduced pan/tilt response rates, a normalized
-center dead band, and a matching 10 Hz servo renderer keep detector frame rate,
-duplicate observations, and physical command latency from producing large
-servo deltas. Face and human-blob tracking both pause until lower-neck `6011`
+Recognized-face and human-blob following acquires at slight-up target `7375`
+inside a narrow `7350`–`7400` upper tracking band. A slower vertical response,
+wider vertical center dead band, and matching 10 Hz servo renderer keep detector
+frame rate, duplicate observations, and physical command latency from producing
+large pitch changes. The existing horizontal response remains unchanged. Face
+and human-blob tracking both pause until lower-neck `6011`
 has settled upright with the full pan envelope; requests still clamp at the
 calibrated pan hard limits. Once upright, live pan corrections continue without
 being reset to center between 10 Hz tracking updates.
