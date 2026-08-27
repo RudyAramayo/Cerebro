@@ -91,7 +91,8 @@ its slider target is inside `5000`–`6495`; upper camera controls cannot qualif
 Recognized-person tracking has one separate reviewed clearance request: center
 pan, lower `6011`, and upper `7300`. It may establish only that exact tuple
 without enabling arbitrary uncalibrated lower motion, and tracking remains
-paused until the lower, pan, and upper command deadlines have settled.
+paused until the exact lower-upright target, the tracking camera band, the
+full-pan envelope, and all three command deadlines have settled.
 After that exact lower target is successfully written and its command-space
 settle interval completes, pan uses the corresponding lower-target envelope
 even while the separate camera/counter-rotation calibration remains
@@ -110,6 +111,11 @@ ceiling `7400`. A lower image error may reduce an already raised target, but it
 cannot cross `7300` into the downward pose that caused physical oscillation.
 The shared gateway still applies the configured physical hard bounds. These
 tracking values are integer Maestro command targets, not measured joint angles.
+Both recognized-face and legacy human-blob entry points use the same readiness
+gate. Automatic pan remains paused until lower `6011` is settled, so a request
+toward or beyond a restricted pan edge cannot continue while the lower neck is
+leaning. Once upright, pan may use the calibrated full range and still clamps at
+the physical `4000`/`8000` hard targets.
 
 ## OFF/unknown safe startup
 

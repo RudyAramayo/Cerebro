@@ -94,10 +94,21 @@ assert "trackFaceBoundingBox:" in main
 tracking = main.split("- (void)trackFaceBoundingBox:", 1)[1].split(
     "- (void)didCaptureCameraSampleBuffer:", 1
 )[0]
-assert "prepareNeckForPersonFollow" in tracking
 assert "headTracking_enabled.state" in tracking
-assert "commandedLowerNeckTiltTarget" in tracking
-assert "ROBPersonTrackingNeutralUpperTarget" in tracking
+person_tracking = main.split(
+    "- (void) trackingPerson:(NSString *)userID x:", 1
+)[1].split("- (void) startHeartbeatNiTE_ResetTimer", 1)[0]
+assert "prepareNeckForPersonTracking" in person_tracking
+tracking_prepare = main.rsplit("- (BOOL)prepareNeckForPersonTracking", 1)[1].split(
+    "- (void)trackFaceBoundingBox:", 1
+)[0]
+assert "prepareNeckForPersonFollow" in tracking_prepare
+assert "commandedLowerNeckTiltTarget" in tracking_prepare
+assert "ROBPersonTrackingNeutralUpperTarget" in tracking_prepare
+human_tracking = main.split("- (void) didTrackHumans:", 1)[1].split(
+    "#pragma mark - AudioInputMethods", 1
+)[0]
+assert '[self trackingPerson:@"person1"' in human_tracking
 assert "liftNeckAnimationTimer" not in main
 assert "6168.94" not in tracking and "6868.81" not in tracking
 assert "ROBPersonTrackingApply" in main

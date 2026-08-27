@@ -3555,17 +3555,30 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     }
 
     ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
+    int lowerReference = (int)lround(
+        ROBNeckSafetyReferenceLowerTarget(&configuration)
+    );
     [self refreshSettledNeckEnvelopeAtTime:now];
+    BOOL lowerCommandIsTrackingUpright =
+        self.commandedLowerNeckTiltTarget == lowerReference;
     BOOL lowerCommandHasFullClearance =
         ROBNeckSafetyLowerTargetHasFullPanClearance(
             &configuration,
             (int)self.commandedLowerNeckTiltTarget
         );
-    BOOL fullPanEnvelopeIsSettled = lowerCommandHasFullClearance
+    BOOL upperCommandIsInTrackingBand =
+        self.commandedUpperNeckTiltTarget
+            >= ROBPersonTrackingMinimumUpperTarget
+        && self.commandedUpperNeckTiltTarget
+            <= ROBPersonTrackingMaximumUpperTarget;
+    BOOL fullPanEnvelopeIsSettled = lowerCommandIsTrackingUpright
+        && lowerCommandHasFullClearance
+        && upperCommandIsInTrackingBand
         && self.panEnvelopeLowerTargetIsKnown
         && self.panEnvelopeLowerTarget == self.commandedLowerNeckTiltTarget
         && self.pendingPanEnvelopeLowerTarget == ROBNeckSafetyTargetOff
         && now >= self.commandedNeckPanTargetReadyAt
+        && now >= self.commandedLowerNeckTargetReadyAt
         && now >= self.commandedUpperNeckTargetReadyAt;
     if (fullPanEnvelopeIsSettled) {
         return YES;
@@ -3577,7 +3590,6 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     // establishes tracking clearance and restores the camera-specific neutral
     // used before recognized-face tracking joined this gateway. No arbitrary
     // automatic lower demand receives that authority.
-    int lowerReference = (int)lround(ROBNeckSafetyReferenceLowerTarget(&configuration));
     int upperTarget = ROBPersonTrackingNeutralUpperTarget;
     ROBNeckCommandDisposition disposition = [self
         applySafeNeckPanTarget:configuration.panCenterTarget
@@ -3590,20 +3602,30 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         return NO;
     }
     [self refreshSettledNeckEnvelopeAtTime:now];
+    lowerCommandIsTrackingUpright =
+        self.commandedLowerNeckTiltTarget == lowerReference;
     lowerCommandHasFullClearance = ROBNeckSafetyLowerTargetHasFullPanClearance(
         &configuration,
         (int)self.commandedLowerNeckTiltTarget
     );
-    fullPanEnvelopeIsSettled = lowerCommandHasFullClearance
+    upperCommandIsInTrackingBand =
+        self.commandedUpperNeckTiltTarget
+            >= ROBPersonTrackingMinimumUpperTarget
+        && self.commandedUpperNeckTiltTarget
+            <= ROBPersonTrackingMaximumUpperTarget;
+    fullPanEnvelopeIsSettled = lowerCommandIsTrackingUpright
+        && lowerCommandHasFullClearance
+        && upperCommandIsInTrackingBand
         && self.panEnvelopeLowerTargetIsKnown
         && self.panEnvelopeLowerTarget == self.commandedLowerNeckTiltTarget
         && self.pendingPanEnvelopeLowerTarget == ROBNeckSafetyTargetOff
         && now >= self.commandedNeckPanTargetReadyAt
+        && now >= self.commandedLowerNeckTargetReadyAt
         && now >= self.commandedUpperNeckTargetReadyAt;
     if (!fullPanEnvelopeIsSettled) {
         self.neckCommandSource = @"Follow tracking clearance";
         self.neckCommandSafetyStatus =
-            @"TRACKING WAIT: LOWER 6011 AND CENTERED PAN ARE SETTLING BEFORE FULL PAN";
+            @"TRACKING WAIT: UPRIGHT LOWER 6011, CAMERA, AND CENTERED PAN ARE SETTLING BEFORE FULL PAN";
     }
     return fullPanEnvelopeIsSettled;
 }

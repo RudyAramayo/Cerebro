@@ -177,7 +177,9 @@ tracking floor of `7300`, plus the existing tracking ceiling of `7400`.
 Reduced pan/tilt response rates, a normalized
 center dead band, and a matching 10 Hz servo renderer keep detector frame rate,
 duplicate observations, and physical command latency from producing large
-servo deltas.
+servo deltas. Face and human-blob tracking both pause until lower-neck `6011`
+has settled upright with the full pan envelope; requests still clamp at the
+calibrated pan hard limits.
 The **Servos → Open Servo Control…** window edits named camera positions,
 servo-sequence phases, and relative `YES`/`NO` gestures. Gesture deltas are
 applied around the current pose, so a nod or head shake remains relative to

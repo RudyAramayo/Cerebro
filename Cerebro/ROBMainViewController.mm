@@ -427,6 +427,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void)updateGeminiCameraDemand;
 - (void)faceIdentityConversationCue:(NSNotification *)notification;
 - (void)faceIdentityTrackingDidUpdate:(NSNotification *)notification;
+- (BOOL)prepareNeckForPersonTracking;
 - (void)trackFaceBoundingBox:(CGRect)boundingBox;
 - (void)geminiVideoSourceSettingsDidChange:(NSNotification *)notification;
 - (void)configureConversationTranscript;
@@ -3226,23 +3227,19 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     });
 }
 
-- (void)trackFaceBoundingBox:(CGRect)boundingBox
+- (BOOL)prepareNeckForPersonTracking
 {
-    NSAssert(NSThread.isMainThread, @"Face tracking targets are main-thread owned");
-    if (self.torsoControlsViewController.headTracking_enabled.state
-        != NSControlStateValueOn) {
-        self.lastPersonTrackingUpdateUptime = 0;
-        return;
-    }
+    NSAssert(NSThread.isMainThread, @"Person tracking targets are main-thread owned");
     if (![self.serialBox prepareNeckForPersonFollow]) {
         self.isNeckLifted = NO;
-        return;
+        self.lastPersonTrackingUpdateUptime = 0;
+        return NO;
     }
     if (!self.isNeckLifted) {
         // The serial gateway has established and settled the reviewed
-        // full-clearance pose. Mirror its accepted targets into the passive
-        // torso renderer so an old slider demand cannot immediately restore
-        // the above-6495 restricted envelope.
+        // upright/full-clearance pose. Mirror its accepted targets into the
+        // passive torso renderer so an old slider demand cannot immediately
+        // restore a restricted or non-upright lower-neck envelope.
         self.torsoControlsViewController.headPan.integerValue =
             self.serialBox.commandedNeckPanTarget;
         self.torsoControlsViewController.headTilt.integerValue =
@@ -3255,10 +3252,19 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         self.lastPersonTrackingUpdateUptime = 0;
         self.isNeckLifted = YES;
     }
+    return YES;
+}
 
-    self.currentPerson_pan = self.torsoControlsViewController.headPan.floatValue;
-    self.currentPerson_tilt = self.torsoControlsViewController.headTilt.floatValue;
-    self.currentPerson_upperNeckTilt = self.torsoControlsViewController.headUpperNeckTilt.floatValue;
+- (void)trackFaceBoundingBox:(CGRect)boundingBox
+{
+    NSAssert(NSThread.isMainThread, @"Face tracking targets are main-thread owned");
+    if (self.torsoControlsViewController.headTracking_enabled.state
+        != NSControlStateValueOn) {
+        self.isNeckLifted = NO;
+        self.lastPersonTrackingUpdateUptime = 0;
+        return;
+    }
+
     [self trackingPerson:@"recognized-face" position:boundingBox];
 }
 
@@ -3310,7 +3316,14 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     void (^updateTrackingTargets)(void) = ^{
         if (self.torsoControlsViewController.headTracking_enabled.state
             != NSControlStateValueOn) {
+            self.isNeckLifted = NO;
             self.lastPersonTrackingUpdateUptime = 0;
+            return;
+        }
+        // Both recognized faces and legacy human blobs enter here. Hold every
+        // automatic correction until the exact upright lower-neck pose and
+        // its full-pan envelope have settled.
+        if (![self prepareNeckForPersonTracking]) {
             return;
         }
         self.currentPerson_positionX = x;
