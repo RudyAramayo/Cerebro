@@ -8,6 +8,9 @@ public extension Notification.Name {
     static let robInsta360HumanPoseDidUpdate = Notification.Name(
         "ROBInsta360HumanPoseDidUpdate"
     )
+    static let robHandWaveDidDetect = Notification.Name(
+        "ROBHandWaveDidDetect"
+    )
 }
 
 extension Notification.Name {
@@ -26,6 +29,51 @@ public struct ROBDetectorOutput: Sendable {
     public let lines: [ROBOverlayLine]
 }
 
+@objcMembers public final class ROBHandWaveObservation: NSObject {
+    public let source: String
+    public let targetX: Double
+    public let targetY: Double
+    public let confidence: Double
+    public let capturedAtUptime: TimeInterval
+
+    public init(
+        source: String,
+        targetX: Double,
+        targetY: Double,
+        confidence: Double,
+        capturedAtUptime: TimeInterval
+    ) {
+        self.source = source
+        self.targetX = targetX
+        self.targetY = targetY
+        self.confidence = confidence
+        self.capturedAtUptime = capturedAtUptime
+    }
+}
+
+private struct ROBHandWaveCandidate {
+    let hand: String
+    let targetX: Double
+    let targetY: Double
+    let relativeWristX: Double
+    let confidence: Double
+}
+
+private struct ROBHandWaveTrack {
+    let id: UUID
+    let source: ROBDetectorSource
+    let hand: String
+    var targetX: Double
+    var lastRelativeWristX: Double
+    var lastDirection: Int
+    var reversals: Int
+    var travel: Double
+    var motionStartedAtUptime: TimeInterval
+    var lastSeenUptime: TimeInterval
+    var cooldownUntilUptime: TimeInterval
+    var focusUntilUptime: TimeInterval
+}
+
 /// Runtime-selectable detector registry. Disabled detectors produce no request,
 /// notification, or callback. Custom Core ML object detectors can be added
 /// without changing the capture services.
@@ -38,6 +86,10 @@ public struct ROBDetectorOutput: Sendable {
     private var resultGeneration: [ROBDetectorSource: UInt64] = [:]
     private let modelLock = NSLock()
     private var customModels: [(name: String, model: VNCoreMLModel)] = []
+    private var handWaveTracks: [ROBHandWaveTrack] = []
+
+    private static let focusOnHandWaveDefaultsKey =
+        "ROBDetector.focusOnHandWaveWhenConversationIdle"
 
     public func processingFramesPerSecond(for source: ROBDetectorSource) -> Double {
         let key = "ROBDetector.processingFPS.\(source.rawValue)"
@@ -74,12 +126,33 @@ public struct ROBDetectorOutput: Sendable {
     public func enabled(_ detector: String, source: ROBDetectorSource) -> Bool {
         let key = "ROBDetector.\(detector).\(source.rawValue)"
         let defaults = UserDefaults.standard
-        return defaults.object(forKey: key) == nil || defaults.bool(forKey: key)
+        if defaults.object(forKey: key) == nil {
+            return detector != "hand-wave"
+        }
+        return defaults.bool(forKey: key)
+    }
+
+    public var focusOnHandWaveWhenConversationIdle: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.focusOnHandWaveDefaultsKey) }
+        set {
+            guard newValue != focusOnHandWaveWhenConversationIdle else { return }
+            UserDefaults.standard.set(newValue, forKey: Self.focusOnHandWaveDefaultsKey)
+            NotificationCenter.default.post(
+                name: .robDetectorSettingsDidChange,
+                object: self,
+                userInfo: ["focusOnHandWaveChanged": true]
+            )
+        }
     }
 
     public func setEnabled(_ enabled: Bool, detector: String, source: ROBDetectorSource) {
         UserDefaults.standard.set(enabled, forKey: "ROBDetector.\(detector).\(source.rawValue)")
-        if source == .insta360, detector == "body-pose", !enabled {
+        if detector == "hand-wave" {
+            invalidatePendingResults(for: source)
+            queue.async {
+                self.handWaveTracks.removeAll { $0.source == source }
+            }
+        } else if source == .insta360, detector == "body-pose", !enabled {
             invalidatePendingResults(for: source)
         }
         NotificationCenter.default.post(name: .robDetectorSettingsDidChange, object: self,
@@ -103,11 +176,12 @@ public struct ROBDetectorOutput: Sendable {
     public func requiresFrames(for source: ROBDetectorSource) -> Bool {
         guard processingFramesPerSecond(for: source) > 0 else { return false }
         let usesBuiltInPose = source == .insta360 && enabled("body-pose", source: source)
+        let usesHandWave = enabled("hand-wave", source: source)
         let usesGenericObjects = enabled("generic-objects", source: source)
         modelLock.lock()
         let usesCustomModels = !customModels.isEmpty
         modelLock.unlock()
-        return usesBuiltInPose || usesGenericObjects || usesCustomModels
+        return usesBuiltInPose || usesHandWave || usesGenericObjects || usesCustomModels
     }
 
     /// Drops source-owned people immediately and prevents any Vision request
@@ -138,6 +212,52 @@ public struct ROBDetectorOutput: Sendable {
             let ci = CIImage(cvPixelBuffer: pixel)
             guard let cg = Self.imageContext.createCGImage(ci, from: ci.extent) else { return }
             self.process(cg, source: source, capturedAt: capturedAt, generation: generation)
+        }
+    }
+
+    /// Reuses the main camera's dedicated low-latency pose request so enabling
+    /// wave detection does not run a second body-pose model on the same frame.
+    public func offerMainCameraBodyPoses(
+        _ observations: [VNHumanBodyPoseObservation]
+    ) {
+        guard enabled("hand-wave", source: .mainCamera),
+              processingFramesPerSecond(for: .mainCamera) > 0 else { return }
+        let candidates = observations.compactMap { observation -> [ROBHandWaveCandidate]? in
+            guard let tracking = ROBPersonTrackingObservation.make(
+                from: observation,
+                source: ROBDetectorSource.mainCamera.rawValue
+            ), let recognized = try? observation.recognizedPoints(.all) else {
+                return nil
+            }
+            return Self.handWaveCandidates(
+                tracking: tracking,
+                recognized: recognized,
+                xOffset: 0,
+                xScale: 1
+            )
+        }.flatMap { $0 }
+        admissionLock.lock()
+        let generation = resultGeneration[.mainCamera, default: 0]
+        admissionLock.unlock()
+        queue.async {
+            let now = ProcessInfo.processInfo.systemUptime
+            let waves = self.updateHandWaveTracks(
+                with: candidates,
+                source: .mainCamera,
+                atUptime: now
+            )
+            guard !waves.isEmpty else { return }
+            DispatchQueue.main.async {
+                guard self.resultIsCurrent(generation, for: .mainCamera),
+                      self.enabled("hand-wave", source: .mainCamera) else { return }
+                for wave in waves {
+                    NotificationCenter.default.post(
+                        name: .robHandWaveDidDetect,
+                        object: self,
+                        userInfo: ["observation": wave]
+                    )
+                }
+            }
         }
     }
 
@@ -188,17 +308,20 @@ public struct ROBDetectorOutput: Sendable {
         let geometry = source == .insta360 ? insta360AnalysisGeometry : .stitchedPanorama
         // Main-camera pose has a low-latency dedicated Vision path. Running it
         // again here halves throughput and adds no additional result.
-        let poseOn = source == .insta360 && enabled("body-pose", source: source)
+        let bodyPoseOn = source == .insta360 && enabled("body-pose", source: source)
+        let handWaveOn = source == .insta360 && enabled("hand-wave", source: source)
+        let poseRequestOn = bodyPoseOn || handWaveOn
         let objectsOn = enabled("generic-objects", source: source)
         modelLock.lock()
         let models = customModels
         modelLock.unlock()
-        guard poseOn || objectsOn || !models.isEmpty else { return }
+        guard poseRequestOn || objectsOn || !models.isEmpty else { return }
 
         var points: [ROBOverlayPoint] = []
         var lines: [ROBOverlayLine] = []
         var detectedPeople: [(bounds: ROBNormalizedRect, confidence: Double)] = []
         var detectedPoses: [ROBPersonTrackingObservation] = []
+        var handWaveCandidates: [ROBHandWaveCandidate] = []
         let inputs: [(image: CGImage, xOffset: Double, xScale: Double)]
         if geometry == .sixSectors {
             let width = image.width / 6
@@ -222,7 +345,7 @@ public struct ROBDetectorOutput: Sendable {
                     CGPoint(x: input.xOffset + Double(point.x) * input.xScale, y: point.y)
                 }
 
-                if poseOn {
+                if poseRequestOn {
                     let humanRectangles = VNDetectHumanRectanglesRequest { request, _ in
                         for observation in (request.results as? [VNHumanObservation]) ?? [] {
                             let bounds = observation.boundingBox
@@ -243,15 +366,24 @@ public struct ROBDetectorOutput: Sendable {
 
                     requests.append(VNDetectHumanBodyPoseRequest { request, _ in
                         for observation in (request.results as? [VNHumanBodyPoseObservation]) ?? [] {
-                            if let tracking = ROBPersonTrackingObservation.make(
+                            let tracking = ROBPersonTrackingObservation.make(
                                 from: observation,
-                                source: ROBDetectorSource.insta360.rawValue,
+                                source: source.rawValue,
                                 xOffset: input.xOffset,
                                 xScale: input.xScale
-                            ) {
+                            )
+                            if bodyPoseOn, let tracking {
                                 detectedPoses.append(tracking)
                             }
                             guard let recognized = try? observation.recognizedPoints(.all) else { continue }
+                            if handWaveOn, let tracking {
+                                handWaveCandidates.append(contentsOf: Self.handWaveCandidates(
+                                    tracking: tracking,
+                                    recognized: recognized,
+                                    xOffset: input.xOffset,
+                                    xScale: input.xScale
+                                ))
+                            }
                             for (name, point) in recognized where point.confidence >= 0.2 {
                                 let mapped = mapPoint(point.location)
                                 points.append(ROBOverlayPoint(
@@ -326,7 +458,37 @@ public struct ROBDetectorOutput: Sendable {
                 }
             }
 
-            if source == .insta360, poseOn {
+            if handWaveOn {
+                let now = ProcessInfo.processInfo.systemUptime
+                let waves = updateHandWaveTracks(
+                    with: handWaveCandidates,
+                    source: source,
+                    atUptime: now
+                )
+                for wave in waves {
+                    points.append(ROBOverlayPoint(
+                        x: wave.targetX,
+                        y: wave.targetY,
+                        label: "hand wave",
+                        confidence: wave.confidence
+                    ))
+                }
+                if !waves.isEmpty {
+                    DispatchQueue.main.async {
+                        guard self.resultIsCurrent(generation, for: source),
+                              self.enabled("hand-wave", source: source) else { return }
+                        for wave in waves {
+                            NotificationCenter.default.post(
+                                name: .robHandWaveDidDetect,
+                                object: self,
+                                userInfo: ["observation": wave]
+                            )
+                        }
+                    }
+                }
+            }
+
+            if source == .insta360, bodyPoseOn {
                 detectedPeople.sort {
                     $0.bounds.x == $1.bounds.x
                         ? $0.bounds.y < $1.bounds.y
@@ -369,6 +531,150 @@ public struct ROBDetectorOutput: Sendable {
         } catch {
             NSLog("Dynamic detector request failed: %@", String(describing: error))
         }
+    }
+
+    private static func handWaveCandidates(
+        tracking: ROBPersonTrackingObservation,
+        recognized: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint],
+        xOffset: Double,
+        xScale: Double
+    ) -> [ROBHandWaveCandidate] {
+        let joints: [(String, VNHumanBodyPoseObservation.JointName,
+                      VNHumanBodyPoseObservation.JointName,
+                      VNHumanBodyPoseObservation.JointName)] = [
+            ("left", .leftWrist, .leftElbow, .leftShoulder),
+            ("right", .rightWrist, .rightElbow, .rightShoulder),
+        ]
+        let mapPoint: (CGPoint) -> CGPoint = { point in
+            CGPoint(x: xOffset + Double(point.x) * xScale, y: point.y)
+        }
+        let shoulderWidth: Double = {
+            guard let left = recognized[.leftShoulder], left.confidence >= 0.25,
+                  let right = recognized[.rightShoulder], right.confidence >= 0.25 else {
+                return max(0.01, tracking.boundsWidth * 0.4)
+            }
+            return max(0.01, abs(mapPoint(left.location).x - mapPoint(right.location).x))
+        }()
+        return joints.compactMap { hand, wristName, elbowName, shoulderName in
+            guard let wristPoint = recognized[wristName], wristPoint.confidence >= 0.25,
+                  let elbowPoint = recognized[elbowName], elbowPoint.confidence >= 0.25,
+                  let shoulderPoint = recognized[shoulderName], shoulderPoint.confidence >= 0.25 else {
+                return nil
+            }
+            let wrist = mapPoint(wristPoint.location)
+            let elbow = mapPoint(elbowPoint.location)
+            let shoulder = mapPoint(shoulderPoint.location)
+            guard wrist.y >= elbow.y - 0.02,
+                  wrist.y >= shoulder.y + 0.01 else {
+                return nil
+            }
+            return ROBHandWaveCandidate(
+                hand: hand,
+                targetX: tracking.headX,
+                targetY: tracking.headY,
+                relativeWristX: (wrist.x - tracking.headX) / shoulderWidth,
+                confidence: Double(min(
+                    wristPoint.confidence,
+                    min(elbowPoint.confidence, shoulderPoint.confidence)
+                ))
+            )
+        }
+    }
+
+    private func updateHandWaveTracks(
+        with candidates: [ROBHandWaveCandidate],
+        source: ROBDetectorSource,
+        atUptime now: TimeInterval
+    ) -> [ROBHandWaveObservation] {
+        let motionWindow = 3.5
+        let sampleGapReset = 1.6
+        let minimumStep = 0.08
+        let minimumTravel = 0.45
+        handWaveTracks.removeAll {
+            $0.source == source && now - $0.lastSeenUptime > motionWindow
+        }
+
+        var usedTrackIDs = Set<UUID>()
+        var detected: [ROBHandWaveObservation] = []
+        for candidate in candidates.sorted(by: { $0.confidence > $1.confidence }) {
+            let match = handWaveTracks.indices
+                .filter { index in
+                    let track = handWaveTracks[index]
+                    return track.source == source
+                        && track.hand == candidate.hand
+                        && !usedTrackIDs.contains(track.id)
+                        && abs(track.targetX - candidate.targetX) <= 0.16
+                }
+                .min { left, right in
+                    abs(handWaveTracks[left].targetX - candidate.targetX)
+                        < abs(handWaveTracks[right].targetX - candidate.targetX)
+                }
+
+            guard let index = match else {
+                let track = ROBHandWaveTrack(
+                    id: UUID(),
+                    source: source,
+                    hand: candidate.hand,
+                    targetX: candidate.targetX,
+                    lastRelativeWristX: candidate.relativeWristX,
+                    lastDirection: 0,
+                    reversals: 0,
+                    travel: 0,
+                    motionStartedAtUptime: now,
+                    lastSeenUptime: now,
+                    cooldownUntilUptime: 0,
+                    focusUntilUptime: 0
+                )
+                handWaveTracks.append(track)
+                usedTrackIDs.insert(track.id)
+                continue
+            }
+
+            var track = handWaveTracks[index]
+            usedTrackIDs.insert(track.id)
+            if now - track.lastSeenUptime > sampleGapReset
+                || now - track.motionStartedAtUptime > motionWindow {
+                track.lastDirection = 0
+                track.reversals = 0
+                track.travel = 0
+                track.motionStartedAtUptime = now
+                track.lastRelativeWristX = candidate.relativeWristX
+            }
+            let delta = candidate.relativeWristX - track.lastRelativeWristX
+            if abs(delta) >= minimumStep {
+                let direction = delta > 0 ? 1 : -1
+                track.travel += abs(delta)
+                if track.lastDirection != 0 && direction != track.lastDirection {
+                    track.reversals += 1
+                }
+                track.lastDirection = direction
+                track.lastRelativeWristX = candidate.relativeWristX
+            }
+            track.targetX = candidate.targetX
+            track.lastSeenUptime = now
+
+            if now >= track.cooldownUntilUptime,
+               track.reversals >= 1,
+               track.travel >= minimumTravel {
+                track.cooldownUntilUptime = now + 3.0
+                track.focusUntilUptime = now + 4.0
+                track.lastDirection = 0
+                track.reversals = 0
+                track.travel = 0
+                track.motionStartedAtUptime = now
+            }
+            if now <= track.focusUntilUptime {
+                detected.append(ROBHandWaveObservation(
+                    source: source.rawValue,
+                    targetX: candidate.targetX,
+                    targetY: candidate.targetY,
+                    confidence: candidate.confidence,
+                    capturedAtUptime: now
+                ))
+            }
+            handWaveTracks[index] = track
+        }
+        return detected
     }
 
     private static func cgImage(_ image: NSImage) -> CGImage? {

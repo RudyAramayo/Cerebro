@@ -43,6 +43,12 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         checkboxWithTitle: "Main pose", target: nil, action: nil)
     private let instaPoseToggle = NSButton(
         checkboxWithTitle: "360° human detection and pose", target: nil, action: nil)
+    private let mainHandWaveToggle = NSButton(
+        checkboxWithTitle: "Main hand-wave gesture", target: nil, action: nil)
+    private let instaHandWaveToggle = NSButton(
+        checkboxWithTitle: "360° hand-wave gesture", target: nil, action: nil)
+    private let focusOnHandWaveToggle = NSButton(
+        checkboxWithTitle: "Focus on waves before conversation starts", target: nil, action: nil)
     private let mainObjectsToggle = NSButton(
         checkboxWithTitle: "Main object labels", target: nil, action: nil)
     private let instaObjectsToggle = NSButton(
@@ -201,6 +207,12 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
             "body-pose", source: .mainCamera) ? .on : .off
         instaPoseToggle.state = registry.enabled(
             "body-pose", source: .insta360) ? .on : .off
+        mainHandWaveToggle.state = registry.enabled(
+            "hand-wave", source: .mainCamera) ? .on : .off
+        instaHandWaveToggle.state = registry.enabled(
+            "hand-wave", source: .insta360) ? .on : .off
+        focusOnHandWaveToggle.state = registry.focusOnHandWaveWhenConversationIdle
+            ? .on : .off
         mainObjectsToggle.state = registry.enabled(
             "generic-objects", source: .mainCamera) ? .on : .off
         instaObjectsToggle.state = registry.enabled(
@@ -356,6 +368,13 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
                 mainPoseToggle, instaPoseToggle
             ]),
             row([
+                mainHandWaveToggle, instaHandWaveToggle
+            ]),
+            row([
+                focusOnHandWaveToggle,
+                secondaryLabel("Raised wrist must reverse direction; 2 FPS or faster is recommended")
+            ]),
+            row([
                 mainObjectsToggle, instaObjectsToggle, addModelButton
             ]),
             modelStatusLabel
@@ -501,7 +520,7 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
             geminiBox.widthAnchor.constraint(equalTo: rootStack.widthAnchor),
             geminiBox.heightAnchor.constraint(greaterThanOrEqualToConstant: 135),
             analysisBox.widthAnchor.constraint(equalTo: rootStack.widthAnchor),
-            analysisBox.heightAnchor.constraint(greaterThanOrEqualToConstant: 225),
+            analysisBox.heightAnchor.constraint(greaterThanOrEqualToConstant: 275),
             mainCameraBox.widthAnchor.constraint(equalTo: rootStack.widthAnchor),
             mainCameraBox.heightAnchor.constraint(greaterThanOrEqualToConstant: 125),
             bellyCameraBox.widthAnchor.constraint(equalTo: rootStack.widthAnchor),
@@ -560,10 +579,20 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         analysisGeometryPopup.toolTip = "Six sectors are derived locally from the stitched stream; this is not six native Pro II sensor streams."
         analysisGeometryPopup.setAccessibilityLabel("Insta360 analysis geometry")
 
-        for toggle in [mainPoseToggle, instaPoseToggle, mainObjectsToggle, instaObjectsToggle] {
+        for toggle in [
+            mainPoseToggle, instaPoseToggle,
+            mainHandWaveToggle, instaHandWaveToggle, focusOnHandWaveToggle,
+            mainObjectsToggle, instaObjectsToggle,
+        ] {
             toggle.target = self
             toggle.action = #selector(detectorSettingChanged(_:))
         }
+        mainHandWaveToggle.setAccessibilityIdentifier("ROB.Perception.Main.HandWave")
+        instaHandWaveToggle.setAccessibilityIdentifier("ROB.Perception.Insta360.HandWave")
+        focusOnHandWaveToggle.setAccessibilityIdentifier("ROB.Perception.HandWave.FocusWhenIdle")
+        mainHandWaveToggle.toolTip = "Detect a raised hand moving side to side in the main camera."
+        instaHandWaveToggle.toolTip = "Detect a raised hand moving side to side anywhere in the stitched panorama."
+        focusOnHandWaveToggle.toolTip = "Before the first conversational turn, aim the camera toward the person whose wave was detected."
 
         pose3DToggle.target = self
         pose3DToggle.action = #selector(mainCameraFeatureChanged(_:))
@@ -777,6 +806,13 @@ private final class ROBFlippedPerceptionSettingsDocumentView: NSView {
         } else if sender === instaPoseToggle {
             registry.setEnabled(enabled, detector: "body-pose", source: .insta360)
             service.refreshDecoderDemand()
+        } else if sender === mainHandWaveToggle {
+            registry.setEnabled(enabled, detector: "hand-wave", source: .mainCamera)
+        } else if sender === instaHandWaveToggle {
+            registry.setEnabled(enabled, detector: "hand-wave", source: .insta360)
+            service.refreshDecoderDemand()
+        } else if sender === focusOnHandWaveToggle {
+            registry.focusOnHandWaveWhenConversationIdle = enabled
         } else if sender === mainObjectsToggle {
             registry.setEnabled(enabled, detector: "generic-objects", source: .mainCamera)
         } else if sender === instaObjectsToggle {

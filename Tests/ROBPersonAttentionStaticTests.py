@@ -44,7 +44,7 @@ require(
     "ROBInsta360HumanPoseDidUpdate" in detectors
     and "detectedPoses.append(tracking)" in detectors
     and 'userInfo: ["observations": currentPoses]' in detectors
-    and "source == .insta360, poseOn" in detectors,
+    and "source == .insta360, bodyPoseOn" in detectors,
     "Insta360 body pose no longer publishes source-scoped reacquisition observations.",
 )
 require(

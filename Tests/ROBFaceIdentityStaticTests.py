@@ -128,7 +128,8 @@ assert "fabs(observedError) < fabs(previousError)" in main
 assert "filteredPersonTrackingX" in person_tracking
 assert "self.serialBox.commandedNeckPanTarget" in person_tracking
 assert 'Person tracking %@ raw=(%.3f, %.3f)' in person_tracking
-assert "!recognizedFace && self.faceIdentityTrackingActive" in person_tracking
+assert "!recognizedFace && !handWaveFocusSource" in person_tracking
+assert "&& self.faceIdentityTrackingActive" in person_tracking
 assert "!detectedFace" in person_tracking
 legacy_faces = main.split("- (void) didSeeNewPeople:", 1)[1].split(
     "- (void)trackFaceBoundingBox:", 1

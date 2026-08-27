@@ -67,6 +67,7 @@ static NSString * const ROBFaceIdentityTrackingDidUpdateNotification = @"ROBFace
 static NSString * const ROBStageShowStateDidChangeNotification = @"ROBStageShowStateDidChange";
 static NSString * const ROBHeadlessLiveStartupStopRequestedNotification = @"ROBHeadlessLiveStartupStopRequested";
 static NSString * const ROBInsta360HumanPoseDidUpdateNotification = @"ROBInsta360HumanPoseDidUpdate";
+static NSString * const ROBHandWaveDidDetectNotification = @"ROBHandWaveDidDetect";
 
 static double ROBPersonTrackingFilterCoordinate(
     double previous,
@@ -402,6 +403,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 @property (readwrite, retain) NSMutableSet<NSString *> *geminiCancellingRobotToolCallIDs;
 @property (readwrite, retain) NSMutableSet<NSString *> *timedOutRobotToolCallIDs;
 @property (readwrite, retain) NSTimer *robotActionBridgeTimer;
+@property (readwrite, retain) NSTimer *handWaveFocusTimer;
 @property (readwrite, copy) NSString *localAmberGestureCallID;
 @property (readwrite, copy) NSString *controllerApprovedAmberGestureCallID;
 @property (readwrite, retain) ROBRobotActionMessage *controllerApprovedAmberGestureExecutingStatus;
@@ -462,6 +464,12 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 @property (readwrite, retain) NSTableView *conversationTableView;
 @property (readwrite, retain) NSMutableArray<ROBConversationMessage *> *conversationMessages;
+@property (readwrite, assign) BOOL conversationHasStartedThisSession;
+@property (readwrite, assign) NSTimeInterval lastHandWaveObservationUptime;
+@property (readwrite, assign) NSTimeInterval handWaveFocusDeadlineUptime;
+@property (readwrite, copy) NSString *handWaveFocusSource;
+@property (readwrite, assign) double handWaveFocusX;
+@property (readwrite, assign) double handWaveFocusY;
 @property (readwrite, copy) NSString *lastConversationUserText;
 @property (readwrite, retain) NSDate *lastConversationUserDate;
 @property (readwrite, retain) IBOutlet NSButton *mainAISendButton;
@@ -501,6 +509,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void)faceIdentityTrackingDidUpdate:(NSNotification *)notification;
 - (void)trackFaceBoundingBox:(CGRect)boundingBox;
 - (void)insta360HumanPoseDidUpdate:(NSNotification *)notification;
+- (void)handWaveDidDetect:(NSNotification *)notification;
+- (void)handWaveFocusTick:(NSTimer *)timer;
+- (void)stopHandWaveFocus;
 - (double)personTrackingDistanceMetersInNormalizedRect:(CGRect)rect;
 - (void)updatePersonTrackingPostureForDistance:(double)distance
                                        atUptime:(NSTimeInterval)now;
@@ -1045,6 +1056,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         message.fromUser = fromUser;
         message.date = now;
         [self.conversationMessages addObject:message];
+        self.conversationHasStartedThisSession = YES;
+        [self stopHandWaveFocus];
         [self pruneConversationLog];
         if (fromUser) {
             self.lastConversationUserText = cleanText;
@@ -2658,6 +2671,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
     if (addressesROB)
     {
+        self.conversationHasStartedThisSession = YES;
+        [self stopHandWaveFocus];
         self.ignoreText = false;
         [self.robAI setMicrophoneConversationActive:YES];
         NSLog(@"Listening for spoken input");
@@ -2766,6 +2781,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(insta360HumanPoseDidUpdate:)
                                                  name:ROBInsta360HumanPoseDidUpdateNotification
+                                               object:[ROBDynamicDetectorRegistry shared]];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(handWaveDidDetect:)
+                                                 name:ROBHandWaveDidDetectNotification
                                                object:[ROBDynamicDetectorRegistry shared]];
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(geminiVideoSourceSettingsDidChange:)
@@ -3019,6 +3038,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     self.runtimeIsShuttingDown = YES;
     [self.robotActionBridgeTimer invalidate];
     self.robotActionBridgeTimer = nil;
+    [self stopHandWaveFocus];
 
     for (NSString *callID in self.pendingRobotActionRequests.allKeys) {
         ROBRobotActionMessage *request = self.pendingRobotActionRequests[callID];
@@ -3651,6 +3671,92 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     [self trackingPerson:@"insta360-pose" x:syntheticX y:0.5f z:-1.0f];
 }
 
+- (void)handWaveDidDetect:(NSNotification *)notification
+{
+    NSAssert(NSThread.isMainThread, @"Hand-wave attention is main-thread owned");
+    if (![ROBDynamicDetectorRegistry shared].focusOnHandWaveWhenConversationIdle
+        || self.conversationHasStartedThisSession
+        || self.speechBox.isSpeaking
+        || self.torsoControlsViewController.headTracking_enabled.state
+            != NSControlStateValueOn) {
+        return;
+    }
+    ROBHandWaveObservation *wave =
+        [notification.userInfo[@"observation"]
+            isKindOfClass:ROBHandWaveObservation.class]
+            ? notification.userInfo[@"observation"] : nil;
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (wave == nil
+        || now - wave.capturedAtUptime > 1.6
+        || (![wave.source isEqualToString:@"mainCamera"]
+            && ![wave.source isEqualToString:@"insta360"])) {
+        return;
+    }
+
+    self.handWaveFocusSource = wave.source;
+    self.handWaveFocusX = MAX(0.0, MIN(1.0, wave.targetX));
+    self.handWaveFocusY = MAX(0.0, MIN(1.0, wave.targetY));
+    self.lastHandWaveObservationUptime = now;
+    if (self.handWaveFocusTimer == nil) {
+        self.handWaveFocusDeadlineUptime = now + 4.5;
+        self.handWaveFocusTimer = [NSTimer
+            scheduledTimerWithTimeInterval:0.1
+            target:self
+            selector:@selector(handWaveFocusTick:)
+            userInfo:nil
+            repeats:YES];
+        NSLog(
+            @"Idle hand wave detected on %@ at (%.3f, %.3f); focusing until conversation begins",
+            wave.source,
+            wave.targetX,
+            wave.targetY
+        );
+    }
+    if ([wave.source isEqualToString:@"insta360"]) {
+        self.lastInstaPoseTrackingObservationUptime = now;
+    }
+    [self handWaveFocusTick:self.handWaveFocusTimer];
+}
+
+- (void)handWaveFocusTick:(NSTimer *)timer
+{
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (timer != self.handWaveFocusTimer
+        || ![ROBDynamicDetectorRegistry shared].focusOnHandWaveWhenConversationIdle
+        || self.conversationHasStartedThisSession
+        || self.speechBox.isSpeaking
+        || now > self.handWaveFocusDeadlineUptime
+        || now - self.lastHandWaveObservationUptime > 1.6) {
+        [self stopHandWaveFocus];
+        return;
+    }
+    if ([self.handWaveFocusSource isEqualToString:@"insta360"]) {
+        double deltaDegrees = (self.handWaveFocusX - 0.5) * 360.0;
+        float syntheticX = (float)MAX(
+            0.0,
+            MIN(1.0, 0.5 + deltaDegrees / 120.0)
+        );
+        [self trackingPerson:@"insta360-wave"
+                           x:syntheticX
+                           y:0.5f
+                           z:-1.0f];
+    } else {
+        [self trackingPerson:@"main-camera-wave"
+                           x:(float)self.handWaveFocusX
+                           y:(float)self.handWaveFocusY
+                           z:-1.0f];
+    }
+}
+
+- (void)stopHandWaveFocus
+{
+    [self.handWaveFocusTimer invalidate];
+    self.handWaveFocusTimer = nil;
+    self.handWaveFocusDeadlineUptime = 0;
+    self.lastHandWaveObservationUptime = 0;
+    self.handWaveFocusSource = nil;
+}
+
 - (void)updatePersonTrackingPostureForDistance:(double)distance
                                        atUptime:(NSTimeInterval)now
 {
@@ -3819,6 +3925,12 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             return;
         }
         NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+        BOOL handWaveFocusSource = [userID hasSuffix:@"-wave"];
+        BOOL handWaveFocusOwnsAttention = self.handWaveFocusTimer != nil
+            && now <= self.handWaveFocusDeadlineUptime;
+        if (handWaveFocusOwnsAttention && !handWaveFocusSource) {
+            return;
+        }
         BOOL faceTrackFresh = self.lastFaceTrackingObservationUptime > 0
             && now - self.lastFaceTrackingObservationUptime
                 <= kROBPersonTrackingFaceFreshnessSeconds;
@@ -3827,13 +3939,15 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         // no longer suppresses the associated body after the spatial box
         // stalls in poor lighting.
         BOOL recognizedFace = [userID isEqualToString:@"recognized-face"];
-        if (!recognizedFace && self.faceIdentityTrackingActive
+        if (!recognizedFace && !handWaveFocusSource
+            && self.faceIdentityTrackingActive
             && faceTrackFresh && !fusedMainPose) {
             return;
         }
         BOOL detectedFace = [userID isEqualToString:@"detected-face"];
         if (!recognizedFace
             && !detectedFace
+            && !handWaveFocusSource
             && self.faceDetectionTrackingActive
             && faceTrackFresh
             && !fusedMainPose) {
@@ -4285,6 +4399,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     [self.conversationMessages removeAllObjects];
     self.lastConversationUserText = nil;
     self.lastConversationUserDate = nil;
+    self.conversationHasStartedThisSession = NO;
+    [self stopHandWaveFocus];
     [self.conversationTableView reloadData];
     [self saveConversationLog];
     [self.audioInputTaskController resetTranscript];

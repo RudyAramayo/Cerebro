@@ -1041,6 +1041,8 @@ extension CameraViewController: CameraManagerDelegate {
             customDepthOverlayView: depthOverlayView
         )
         self.overlayManager?.onBodyPoseDetected = { [weak self] observations in
+            let registry = ROBDynamicDetectorRegistry.shared
+            registry.offerMainCameraBodyPoses(observations)
             let wrists = observations.flatMap { observation -> [CGPoint] in
                 [VNHumanBodyPoseObservation.JointName.leftWrist,
                  VNHumanBodyPoseObservation.JointName.rightWrist].compactMap { name in
@@ -1051,6 +1053,7 @@ extension CameraViewController: CameraManagerDelegate {
             self?.swordWristLock.lock()
             self?.swordWristAnchors = wrists
             self?.swordWristLock.unlock()
+            guard registry.enabled("body-pose", source: .mainCamera) else { return }
             let trackingObservations = observations.compactMap {
                 ROBPersonTrackingObservation.make(
                     from: $0,
@@ -1427,12 +1430,14 @@ extension CameraViewController: CameraManagerDelegate {
             }
         }
         
-        let poseEnabled = ROBDynamicDetectorRegistry.shared.enabled("body-pose", source: .mainCamera)
-        let processingFPS = ROBDynamicDetectorRegistry.shared.processingFramesPerSecond(for: .mainCamera)
+        let detectorRegistry = ROBDynamicDetectorRegistry.shared
+        let poseEnabled = detectorRegistry.enabled("body-pose", source: .mainCamera)
+        let handWaveEnabled = detectorRegistry.enabled("hand-wave", source: .mainCamera)
+        let processingFPS = detectorRegistry.processingFramesPerSecond(for: .mainCamera)
         overlayManager?.offer(
             sampleBuffer: sampleBuffer,
             depthFrame: frameSet.alignedDepth,
-            poseEnabled: poseEnabled,
+            poseEnabled: poseEnabled || handWaveEnabled,
             depthOpacity: processingSettings.depthOverlayOpacity,
             processingFPS: processingFPS
         )
