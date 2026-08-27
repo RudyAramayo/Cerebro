@@ -461,7 +461,9 @@ def check_safe_startup_sequence(
     require(
         "isSafeNeckStartupInProgress" in serial_header
         and "startSafeNeckStartup" in serial_header
-        and "cancelSafeNeckStartup" in serial_header,
+        and "cancelSafeNeckStartup" in serial_header
+        and "ROBSafeNeckStartupCommandDidChangeNotification"
+            in serial_header,
         "The typed safe-neck startup API is missing",
     )
 
@@ -518,6 +520,20 @@ def check_safe_startup_sequence(
         and "safeNeckStartupInProgress = NO;" in invalidate
         and "ROBSafeNeckStartupPhaseInactive" in invalidate,
         "A Maestro disconnect no longer invalidates the asynchronous startup sequence",
+    )
+    startup_notification_handler = compact(objective_c_method(
+        torso_source, "safeNeckStartupCommandDidChange:"
+    ))
+    require(
+        serial_source.count(
+            "postNotificationName:"
+            "ROBSafeNeckStartupCommandDidChangeNotification"
+        ) >= 4
+        and "ROBSafeNeckStartupCommandDidChangeNotification" in torso_source
+        and "[self refreshNeckCommandReadouts]"
+            in startup_notification_handler,
+        "Each accepted startup phase must immediately refresh its commanded "
+        "targets in the Torso UI",
     )
 
     servo_action = compact(objective_c_method(torso_source, "applyServoCommand:"))
@@ -702,6 +718,20 @@ def check_command_readouts(torso_source: str) -> None:
         and 'panEnvelopeRestricted ? @"RESTRICTED" : @"FULL"' in refresh,
         "The pan readout must retain its warning marker for the entire time a "
         "lower-neck-dependent restricted envelope is active",
+    )
+    require(
+        "startupOwnsSliderPresentation" in refresh
+        and "isSafeNeckStartupInProgress" in refresh
+        and 'isEqualToString:@"Torso safe startup"' in refresh
+        and "!self.pendingNeckOperatorCommandAfterStartup" in refresh
+        and "self.headPan.integerValue = serialBox.commandedNeckPanTarget;"
+            in refresh
+        and "self.headTilt.integerValue = "
+            "serialBox.commandedLowerNeckTiltTarget;" in compact(refresh)
+        and "self.headUpperNeckTilt.integerValue = "
+            "serialBox.commandedUpperNeckTiltTarget;" in compact(refresh),
+        "Startup command targets must remain synchronized into the sliders "
+        "without overwriting an operator request queued during startup",
     )
 
 

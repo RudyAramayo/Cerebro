@@ -22,9 +22,12 @@
 
 FOUNDATION_EXPORT NSNotificationName const ROBSerialHardwareDidChangeNotification;
 /// Posted on the main thread after a newly connected Maestro has accepted its
-/// motion profile and is ready for the conservative neck startup sequence.
-/// The notification object is the connected ROBSerialBox instance.
+/// motion profile and the hardware service has submitted the conservative
+/// neck startup request. The notification object is the connected ROBSerialBox.
 FOUNDATION_EXPORT NSNotificationName const ROBMaestroDidConnectNotification;
+/// Posted on the main thread whenever the safe neck startup sequence accepts
+/// a new phase target. The object is the ROBSerialBox that owns the sequence.
+FOUNDATION_EXPORT NSNotificationName const ROBSafeNeckStartupCommandDidChangeNotification;
 FOUNDATION_EXPORT NSInteger const ROBMaestroDefaultServoSpeedLimit;
 FOUNDATION_EXPORT NSInteger const ROBMaestroDefaultServoAccelerationLimit;
 

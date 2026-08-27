@@ -111,8 +111,14 @@ fixed sequence:
    send lower rest `7014` and upper upright `6073` together. It waits for that
    lower ramp before releasing normal torso control.
 
-The Head sliders are restored to `5799`/`7014`/`6073` when the sequence starts,
-and the three enable checkboxes are wired as explicit operator actions. Camera
+The Head sliders mirror each accepted startup target as soon as its command is
+issued: lower shows `6011` during the clearance/centering phases and `7014`
+once the resting move is issued; upper shows `6073`, and pan shows `5799` once
+it is energized in phase 2. Because there is no shaft feedback, these are
+commanded targets rather than measured
+positions. A slider deliberately edited during startup retains that queued
+operator value instead and replays it after completion. The three enable
+checkboxes are wired as explicit operator actions. Camera
 counter-rotation is suspended only for these exact startup poses, then rebased
 at `7014` so the next normal render does not jump the upper servo. Switching
 any neck checkbox off cancels the pending sequence and routes the OFF demand

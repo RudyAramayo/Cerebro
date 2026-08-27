@@ -2789,20 +2789,37 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         return;
     }
 
-    // Keep the visible controls aligned with the fixed, reviewed startup pose.
-    // Setting values programmatically does not emit slider actions.
+    // Startup has already issued its first hardware command before this event.
+    // Mirror that accepted command rather than painting the eventual resting
+    // defaults over phase 1 (notably L 6011 versus final L 7014). An OFF pan
+    // target cannot be represented by the enabled slider, so retain its
+    // reviewed forward fallback until startup energizes pan in phase 2.
     ROBTorsoControlsViewController *controls = self.torsoControlsViewController;
     if (controls != nil) {
         controls.headPan_enabled.state = NSControlStateValueOn;
         controls.headTilt_enabled.state = NSControlStateValueOn;
         controls.headUpperNeckTilt_enabled.state = NSControlStateValueOn;
-        controls.headPan.integerValue = ROBNeckSafetyDefaultForwardPanTarget;
-        controls.headTilt.integerValue = ROBNeckSafetyDefaultLowerTarget;
-        controls.headUpperNeckTilt.integerValue = ROBNeckSafetyDefaultUpperTarget;
+        controls.headPan.integerValue = connectedSerialBox.neckPanCommandKnown
+                && connectedSerialBox.commandedNeckPanTarget
+                    != ROBNeckSafetyTargetOff
+            ? connectedSerialBox.commandedNeckPanTarget
+            : ROBNeckSafetyDefaultForwardPanTarget;
+        controls.headTilt.integerValue =
+            connectedSerialBox.lowerNeckTiltCommandKnown
+                && connectedSerialBox.commandedLowerNeckTiltTarget
+                    != ROBNeckSafetyTargetOff
+            ? connectedSerialBox.commandedLowerNeckTiltTarget
+            : ROBNeckSafetyDefaultLowerTarget;
+        controls.headUpperNeckTilt.integerValue =
+            connectedSerialBox.upperNeckTiltCommandKnown
+                && connectedSerialBox.commandedUpperNeckTiltTarget
+                    != ROBNeckSafetyTargetOff
+            ? connectedSerialBox.commandedUpperNeckTiltTarget
+            : ROBNeckSafetyDefaultUpperTarget;
     }
 
     // ROBSerialBox already started the hardware-owned sequence before posting
-    // this event. This observer only mirrors the reviewed pose into the UI.
+    // this event. This observer only mirrors its accepted phase-1 pose.
 }
 
 - (void)shutdownCerebroRuntime

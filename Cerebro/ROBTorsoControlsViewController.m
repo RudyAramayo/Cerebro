@@ -84,6 +84,7 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 - (void)applyDiscoveredAmberHost:(NSString *)host source:(NSString *)source;
 - (void)setupNeckCommandReadouts;
 - (void)refreshNeckCameraLevelingControl;
+- (void)safeNeckStartupCommandDidChange:(NSNotification *)notification;
 - (IBAction)toggleNeckCameraLeveling:(id)sender;
 - (void)setupNeckSafetyConfigurationControls;
 - (IBAction)showNeckSafetyConfiguration:(id)sender;
@@ -100,6 +101,11 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
     [super viewDidLoad];
     [self setupNeckCommandReadouts];
     [self setupNeckSafetyConfigurationControls];
+    [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(safeNeckStartupCommandDidChange:)
+               name:ROBSafeNeckStartupCommandDidChangeNotification
+             object:nil];
     self.renderServoControlsTimer = [NSTimer scheduledTimerWithTimeInterval:1
                                                                      target:self
                                                                    selector:@selector(renderServoCommands)
@@ -117,6 +123,12 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
     keyframeAnimationManager.animations;
     
     self.keyframeNameTextField.stringValue = keyframeAnimationManager.currentAnimation.currentKeyframe.name;
+}
+
+- (void)safeNeckStartupCommandDidChange:(NSNotification *)notification
+{
+    if (notification.object != self.robMainViewController.serialBox) return;
+    [self refreshNeckCommandReadouts];
 }
 
 - (void)setupNeckCommandReadouts
@@ -445,6 +457,31 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
     BOOL panEnvelopeRestricted = serialBox.isNeckPanEnvelopeRestricted;
     BOOL panNeedsAttention = serialBox.isNeckPanCommandLimited
         || panEnvelopeRestricted;
+    BOOL startupOwnsSliderPresentation = serialBox.isSafeNeckStartupInProgress
+        || [serialBox.neckCommandSource isEqualToString:@"Torso safe startup"];
+    if (startupOwnsSliderPresentation
+        && !self.pendingNeckOperatorCommandAfterStartup) {
+        // The sliders normally express operator demand, but while the fixed
+        // startup sequence owns the axes they must show its accepted targets.
+        // Preserve a deliberate edit queued during startup; it will be replayed
+        // with operator authority immediately after startup completes.
+        if (serialBox.neckPanCommandKnown
+            && serialBox.commandedNeckPanTarget != ROBNeckSafetyTargetOff) {
+            self.headPan.integerValue = serialBox.commandedNeckPanTarget;
+        }
+        if (serialBox.lowerNeckTiltCommandKnown
+            && serialBox.commandedLowerNeckTiltTarget
+                != ROBNeckSafetyTargetOff) {
+            self.headTilt.integerValue =
+                serialBox.commandedLowerNeckTiltTarget;
+        }
+        if (serialBox.upperNeckTiltCommandKnown
+            && serialBox.commandedUpperNeckTiltTarget
+                != ROBNeckSafetyTargetOff) {
+            self.headUpperNeckTilt.integerValue =
+                serialBox.commandedUpperNeckTiltTarget;
+        }
+    }
 
     if (!serialBox.neckPanCommandKnown) {
         self.headPanCommandLabel.stringValue = @"P UNKNOWN";

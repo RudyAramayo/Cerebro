@@ -213,6 +213,8 @@ NSNotificationName const ROBSerialHardwareDidChangeNotification =
     @"ROBSerialHardwareDidChangeNotification";
 NSNotificationName const ROBMaestroDidConnectNotification =
     @"ROBMaestroDidConnectNotification";
+NSNotificationName const ROBSafeNeckStartupCommandDidChangeNotification =
+    @"ROBSafeNeckStartupCommandDidChangeNotification";
 
 #define kRHAPI_SERIAL_PORT_BASE     @"/dev/cu.usbmodem21201"
 
@@ -1507,6 +1509,9 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         self.neckCommandSafetyStatus =
             @"SAFE STARTUP 1/3: PAN OFF; LIFTING LOWER TO 6011 AND UPPER UPRIGHT TO 6073";
     }
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:ROBSafeNeckStartupCommandDidChangeNotification
+                      object:self];
     [self scheduleSafeNeckStartupAdvanceForGeneration:generation atTime:readyAt];
     return ROBNeckCommandDispositionAppliedCommand;
 }
@@ -1580,6 +1585,9 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
             self.neckCommandSafetyStatus =
                 @"SAFE STARTUP COMPLETE: P 5799 • L 7014 • U 6073 (COMMANDS SETTLED BY WORST-CASE TIMING)";
         }
+        [[NSNotificationCenter defaultCenter]
+            postNotificationName:ROBSafeNeckStartupCommandDidChangeNotification
+                          object:self];
         return;
     }
 
@@ -1634,6 +1642,9 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
             self.neckCommandSafetyStatus =
                 @"SAFE STARTUP 2/3: LOWER HELD UP AT 6011; CENTERING PAN TO 5799";
         }
+        [[NSNotificationCenter defaultCenter]
+            postNotificationName:ROBSafeNeckStartupCommandDidChangeNotification
+                          object:self];
         [self scheduleSafeNeckStartupAdvanceForGeneration:generation
                                                    atTime:nextReadyAt];
         return;
@@ -1690,6 +1701,9 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         self.safeNeckStartupReadyAt = nextReadyAt;
         self.neckCommandSource = @"Torso safe startup";
     }
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:ROBSafeNeckStartupCommandDidChangeNotification
+                      object:self];
     [self scheduleSafeNeckStartupAdvanceForGeneration:generation atTime:nextReadyAt];
 }
 
