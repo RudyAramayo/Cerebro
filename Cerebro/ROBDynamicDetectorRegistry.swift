@@ -26,6 +26,7 @@ public enum ROBInsta360AnalysisGeometry: Int, Sendable { case stitchedPanorama, 
 /// degrees left of the main camera's optical axis on this mounting.
 @objcMembers public final class ROBInsta360TrackingCalibration: NSObject {
     public static let forwardCenterX = 0.52
+    public static let forwardCenterDegrees = forwardCenterX * 360
 
     private override init() {}
 }

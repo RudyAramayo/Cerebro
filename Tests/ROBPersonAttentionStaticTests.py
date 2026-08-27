@@ -20,6 +20,7 @@ def require(condition: bool, message: str) -> None:
 observation = text("CameraOverlayManager.swift")
 camera = text("CameraViewController.swift")
 detectors = text("ROBDynamicDetectorRegistry.swift")
+insta_diagnostics = text("ROBInsta360DiagnosticsWindowController.swift")
 main = text("ROBMainViewController.mm")
 serial_header = text("ROBSerialBox.h")
 serial = text("ROBSerialBox.m")
@@ -76,6 +77,7 @@ require(
 require(
     "class ROBInsta360TrackingCalibration" in detectors
     and "forwardCenterX = 0.52" in detectors
+    and "forwardCenterDegrees = forwardCenterX * 360" in detectors
     and "insta360OrientationCalibrated" not in insta_reacquisition
     and "insta360ForwardMarkerDegrees" not in insta_reacquisition
     and "[ROBInsta360TrackingCalibration forwardCenterX]" in insta_reacquisition
@@ -85,6 +87,13 @@ require(
     and 'trackingPerson:@"insta360-pose"' in main
     and "Main-camera\n    // face/body pose must reacquire" in main,
     "Panoramic pose no longer uses the shared face-relative optical center with main-camera priority.",
+)
+require(
+    "gyroEstablishesForward = service.gyroStabilizationEnabled" in insta_diagnostics
+    and "ROBInsta360TrackingCalibration.forwardCenterDegrees" in insta_diagnostics
+    and "gyroEstablishesForward || insta360OrientationCalibrated" in insta_diagnostics
+    and "ROB guide: GYRO FORWARD" in insta_diagnostics,
+    "The gyro-stabilized Insta360 feed can still be mislabeled as orientation uncalibrated.",
 )
 require(
     "kROBPersonTrackingAttentionReturnSeconds = 8.0" in main

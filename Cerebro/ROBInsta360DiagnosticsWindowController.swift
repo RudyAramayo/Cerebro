@@ -364,11 +364,22 @@ private final class ROBInsta360OrientationGuideView: NSView {
             .isInsta360OrientationCalibrationValid(
                 forProjectionIdentity: projectionIdentity
             )
-        let forward = geminiVideoSettings.insta360ForwardMarkerDegrees
+        let gyroEstablishesForward = service.gyroStabilizationEnabled
+        let forward = gyroEstablishesForward
+            ? ROBInsta360TrackingCalibration.forwardCenterDegrees
+            : geminiVideoSettings.insta360ForwardMarkerDegrees
         orientationGuide.update(
-            calibratedForwardDegrees: insta360OrientationCalibrated ? forward : nil
+            calibratedForwardDegrees:
+                gyroEstablishesForward || insta360OrientationCalibrated
+                    ? forward
+                    : nil
         )
-        if insta360OrientationCalibrated {
+        if gyroEstablishesForward {
+            let rear = GeminiRoboticsRuntimeSettings.normalizedDegrees(forward + 180)
+            metricsLabel.stringValue += String(
+                format: "   ROB guide: GYRO FORWARD %.0f° / REAR %.0f°", forward, rear
+            )
+        } else if insta360OrientationCalibrated {
             let rear = GeminiRoboticsRuntimeSettings.normalizedDegrees(forward + 180)
             metricsLabel.stringValue += String(
                 format: "   ROB guide: FRONT %.0f° / REAR %.0f°", forward, rear
