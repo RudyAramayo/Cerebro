@@ -2000,8 +2000,8 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         allowSupervisedLowerRecovery:YES
         source:kROBServoControlSource];
     if (disposition != ROBNeckCommandDispositionRejected) {
-        // The passive Torso render loop normally reasserts its sliders once a
-        // second. Keep that loop out of this staged move until the accepted
+        // The passive Torso render loop normally reasserts its sliders at
+        // 10 Hz. Keep that loop out of this staged move until the accepted
         // pan/lower/upper deadlines expire, then let it resume with the exact
         // demand mirrored by the notification below.
         NSTimeInterval readyAt = self.neckCommandReadyAtUptime;

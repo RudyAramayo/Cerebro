@@ -175,8 +175,9 @@ at lower `7014` / upper `7698`.
 Recognized-face and human-blob following uses a calibrated centered-camera
 upper target of `7200`, a downward tracking guard of `6869`, and the existing
 tracking ceiling of `7400`. Reduced pan/tilt response rates, a normalized
-center dead band, and a fixed 10 Hz controller keep detector frame rate and
-duplicate observations from producing large servo deltas.
+center dead band, and a matching 10 Hz servo renderer keep detector frame rate,
+duplicate observations, and physical command latency from producing large
+servo deltas.
 The **Servos → Open Servo Control…** window edits named camera positions,
 servo-sequence phases, and relative `YES`/`NO` gestures. Gesture deltas are
 applied around the current pose, so a nod or head shake remains relative to

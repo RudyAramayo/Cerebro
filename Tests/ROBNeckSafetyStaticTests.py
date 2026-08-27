@@ -650,7 +650,18 @@ def check_operator_authority(
     timer_renderer = objective_c_method(torso_source, "renderServoCommands")
     require(
         "renderServoCommandsOperatorInitiated:NO" in timer_renderer,
-        "The passive one-second renderer must not claim manual neck authority",
+        "The passive 10 Hz renderer must not claim manual neck authority",
+    )
+    require(
+        "kROBServoRenderIntervalSeconds = 0.1" in torso_source
+        and "kROBServoRenderToleranceSeconds = 0.01" in torso_source
+        and "timerWithTimeInterval:kROBServoRenderIntervalSeconds"
+            in torso_source
+        and "self.renderServoControlsTimer.tolerance = "
+            "kROBServoRenderToleranceSeconds;" in torso_source
+        and "addTimer:self.renderServoControlsTimer" in torso_source
+        and "forMode:NSRunLoopCommonModes" in torso_source,
+        "The passive servo renderer no longer runs at 10 Hz in common run-loop modes",
     )
 
     servo_action = objective_c_method(torso_source, "applyServoCommand:")

@@ -17,6 +17,8 @@
 #import <sys/socket.h>
 
 static NSString * const ROBAmberHostIPDefaultsKey = @"ROBAmberHostIP";
+static NSTimeInterval const kROBServoRenderIntervalSeconds = 0.1;
+static NSTimeInterval const kROBServoRenderToleranceSeconds = 0.01;
 
 static NSTextField *ROBNeckLabel(NSString *text, NSRect frame)
 {
@@ -112,11 +114,18 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
            selector:@selector(servoControlNeckDemandDidChange:)
                name:ROBServoControlNeckDemandDidChangeNotification
              object:nil];
-    self.renderServoControlsTimer = [NSTimer scheduledTimerWithTimeInterval:1
-                                                                     target:self
-                                                                   selector:@selector(renderServoCommands)
-                                                                   userInfo:nil
-                                                                    repeats:YES];
+    // Match the face/blob controller cadence so each small tracking delta can
+    // reach the Maestro without accumulating behind the former one-second
+    // render. Common modes keep the loop live during normal UI interaction.
+    self.renderServoControlsTimer = [NSTimer
+        timerWithTimeInterval:kROBServoRenderIntervalSeconds
+                       target:self
+                     selector:@selector(renderServoCommands)
+                     userInfo:nil
+                      repeats:YES];
+    self.renderServoControlsTimer.tolerance = kROBServoRenderToleranceSeconds;
+    [[NSRunLoop mainRunLoop] addTimer:self.renderServoControlsTimer
+                             forMode:NSRunLoopCommonModes];
     self.amberHostIP_TextField.delegate = self;
     NSString *savedAmberHost = [[NSUserDefaults standardUserDefaults] stringForKey:ROBAmberHostIPDefaultsKey];
     if (savedAmberHost.length > 0) {
@@ -206,7 +215,7 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
     [self refreshNeckCameraLevelingControl];
 
     // Checkbox changes are operator actions too; wiring them here prevents the
-    // passive one-second renderer from being mistaken for manual authority.
+    // passive 10 Hz renderer from being mistaken for manual authority.
     for (NSButton *button in @[
         self.headPan_enabled,
         self.headTilt_enabled,
