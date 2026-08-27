@@ -161,10 +161,17 @@ assert "uprightTransitionRequested" in tracking_policy_source
 assert 'cameraPositionNamed:@"fully_upright_right"' in person_tracking
 assert 'cameraPositionNamed:@"fully_upright_left"' in person_tracking
 assert "requestPersonTrackingUprightPanTarget" in person_tracking
+assert "kROBPersonTrackingUprightEntryPanStepTargets = 100" in main
+assert "uprightEntryPanTarget" in person_tracking
+assert "self.personTrackingUpperBaselineTarget =" in person_tracking
+assert "requestedUprightEndpoint.upperTarget" in person_tracking
 assert "headPan_enabled.state" in person_tracking
 assert "self.serialBox.upperNeckTiltCommandKnown" in person_tracking
 assert "headUpperNeckTilt_enabled.state" in person_tracking
 assert "resultOut->panClamped" in tracking_policy_source
+assert "kROBPersonTrackingUprightRestSeconds = 15.0" in main
+assert "requestPersonTrackingLeanForwardRest" in main
+assert "updatePersonTrackingUprightRestAtUptime" in main
 assert "kROBPersonTrackingMaximumUpperUpOffset = 200" in main
 assert "kROBPersonTrackingMaximumUpperDownOffset = 40" in main
 assert "maximumElapsedSeconds = 0.1" in tracking_policy_source

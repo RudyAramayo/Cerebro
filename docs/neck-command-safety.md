@@ -124,19 +124,24 @@ tracking values are integer Maestro command targets, not measured joint angles.
 Both recognized-face and legacy human-blob entry points use the currently
 settled lower-neck-dependent pan envelope immediately. An outward correction
 that reaches a restricted edge requests the direction's saved
-`fully_upright_right` or `fully_upright_left` camera pose. This automatic move
+`fully_upright_right` or `fully_upright_left` direction. This automatic move
 requires known active pan/lower/upper commands and all three neck controls
-enabled. The complete tuple must match one of those saved names, and its
-lower/upper values must remain the reviewed upright `6011`/`6073`. That narrow
-exact-pose exception can run before general camera-leveling calibration is
-confirmed; arbitrary automatic lower motion remains blocked. It never cancels
-a manual, gesture, startup, or Vision authority lease. The gateway stages any
-required pan-safe handoff, sends lower and upper together, and retries from its
-conservative command deadlines until the pose and widened envelope settle.
-Face-centering output pauses during the animation and then resumes. The saved
-endpoint pan values—not the generic hard joint bounds—are the final tracking
-limits; the shipped values are `4000` right and `7652` left. Unknown, OFF,
-invalid, or non-clearance endpoint demands remain blocked.
+enabled. Both saved endpoints must retain the reviewed upright `6011`/`6073`
+lower/upper values. The transition uses those exact tilt targets while its pan
+entry is only 100 targets beyond the current restricted edge and remains
+between the saved endpoint pan values. That narrow reviewed-pose exception can
+run before general camera-leveling calibration is confirmed; arbitrary
+automatic lower motion remains blocked. It never cancels a manual, gesture,
+startup, or Vision authority lease. The gateway stages any required pan-safe
+handoff, sends lower and upper together, and retries from its conservative
+command deadlines until the entry pose and widened envelope settle. Vertical
+tracking rebases around upright `6073`; proportional face centering then
+resumes and pans gradually. The saved endpoint pan values—not the generic hard
+joint bounds—remain the final tracking limits; the shipped values are `4000`
+right and `7652` left. After 15 seconds without a tracking update, a
+non-preemptive request runs the validated centered startup sequence back to its
+`lean_forward` final pose. Unknown, OFF, invalid, or non-clearance demands
+remain blocked.
 The installed servo turns right as the raw pan target decreases toward `4000`
 and left as it increases toward `8000`. Vision processes the raw unmirrored
 sample buffer, so a person on ROB's physical right directly lowers the raw pan

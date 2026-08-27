@@ -146,10 +146,21 @@ def main() -> None:
         and 'cameraPositionNamed:@"fully_upright_left"' in tracking_endpoint_method
         and "ROBNeckSafetyUprightLowerTarget" in tracking_endpoint_method
         and "ROBNeckSafetyUprightUpperTarget" in tracking_endpoint_method
+        and "panTarget >= uprightRight.panTarget" in tracking_endpoint_method
+        and "panTarget <= uprightLeft.panTarget" in tracking_endpoint_method
         and "!self.neckSafetyCalibrationConfirmed" not in tracking_endpoint_method
         and "&& !personTrackingUprightCommand" in serial_source,
-        "The reviewed saved upright endpoint can no longer pass the "
-        "unconfirmed-calibration lower-motion hold",
+        "The reviewed upright entry can no longer advance incrementally inside "
+        "the saved pan limits or pass the unconfirmed-calibration lower-motion hold",
+    )
+    require(
+        "requestPersonTrackingLeanForwardRest" in serial_header
+        and "requestPersonTrackingLeanForwardRest" in serial_source
+        and 'cameraPositionNamed:@"lean_forward"' in serial_source
+        and "startupPhaseAtIndex:2" in serial_source
+        and "return [self startSafeNeckStartup]" in serial_source
+        and "now < self.manualNeckOverrideUntil" in tracking_endpoint_method,
+        "Idle tracking rest no longer uses the non-preemptive safe centered lean-forward sequence",
     )
     require(
         "ROBServoControlNeckDemandDidChangeNotification" in serial_header

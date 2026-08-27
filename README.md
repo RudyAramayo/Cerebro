@@ -175,14 +175,16 @@ at lower `7014` / upper `7698`.
 Recognized-face and human-blob tracking begins inside the neck's currently
 settled collision-safe pan envelope. If an outward correction reaches a
 restricted edge, a known active neck animates through the safety gateway
-to the saved `fully_upright_right` or `fully_upright_left` camera pose. The
-saved tuple must use the reviewed upright `6011`/`6073` lower/upper values. It
-is staged as one exact pose even when general neck calibration has not yet been
-confirmed; arbitrary automatic lower-neck targets remain blocked. Ordinary
-tracking pauses until the pose and widened envelope settle, then resumes. The
-two saved pose pan values are also the final tracking limits (shipped as `4000`
-right and `7652` left), so operator edits to those pan endpoints remain
-authoritative.
+toward the saved `fully_upright_right` or `fully_upright_left` limit. The lift
+uses the reviewed `6011`/`6073` lower/upper values but advances pan only 100
+targets beyond the restricted edge. After that entry pose and its widened
+envelope settle, proportional tracking resumes and approaches the saved pan
+limit gradually. The vertical controller rebases around `6073`, avoiding a
+post-lift camera jump. This reviewed pose can run when general neck calibration
+has not yet been confirmed; arbitrary automatic lower-neck targets remain
+blocked. The two saved pan values remain the final tracking limits (shipped as
+`4000` right and `7652` left). After 15 seconds without a tracking update, the
+non-preemptive safe centered sequence returns the neck to `lean_forward`.
 Vision runs on the raw, unmirrored sample buffer, so a face on ROB's physical
 right lowers the installed servo target and pans right. Each acquisition
 preserves the current uncompensated upper-camera demand instead of jumping to a

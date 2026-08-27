@@ -304,7 +304,7 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
     [trackingView addSubview:verticalMaximumLabel];
 
     NSString *trackingNoteText = [NSString stringWithFormat:
-        @"Factory speeds are %d horizontal and %d vertical targets/second. Changes apply immediately and persist across launches. At a restricted pan edge, an active neck animates to the saved reviewed fully_upright_left or fully_upright_right camera pose, then tracking continues to that pose's exact pan endpoint. Physical smoothing and the collision-safe envelope still apply.",
+        @"Factory speeds are %d horizontal and %d vertical targets/second. Changes apply immediately and persist across launches. At a restricted pan edge, the neck moves to reviewed upright values and pan advances only 100 targets before proportional tracking resumes toward the saved fully_upright_left/right limits. After 15 seconds without a tracking update, the safe centered sequence returns to lean_forward. Physical smoothing and the collision-safe envelope still apply.",
         ROBPersonTrackingDefaultPanTargetsPerSecond,
         ROBPersonTrackingDefaultVerticalTargetsPerSecond];
     NSTextField *trackingNote = [self labelWithString:trackingNoteText

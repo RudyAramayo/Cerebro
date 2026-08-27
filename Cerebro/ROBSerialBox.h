@@ -139,13 +139,17 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 - (ROBNeckCommandDisposition)requestOperatorNeckPosePanTarget:(NSInteger)panTarget
                                                   lowerTarget:(NSInteger)lowerTarget
                                                   upperTarget:(NSInteger)upperTarget;
-/// Animates one validated, active, full-clearance endpoint for automatic face
-/// tracking. Unlike an operator pose, this request never cancels a manual,
-/// gesture, or Vision lease. Repeated calls advance gateway staging until all
-/// three exact raw targets and the widened pan envelope have settled.
+/// Animates one validated, active, full-clearance entry pose for automatic face
+/// tracking. Pan must remain within the saved fully-upright endpoint limits.
+/// Unlike an operator pose, this request never cancels a manual, gesture, or
+/// Vision lease. Repeated calls advance gateway staging until all three exact
+/// raw targets and the widened pan envelope have settled.
 - (ROBNeckCommandDisposition)requestPersonTrackingUprightPanTarget:(NSInteger)panTarget
                                                         lowerTarget:(NSInteger)lowerTarget
                                                         upperTarget:(NSInteger)upperTarget;
+/// Returns an idle face-tracking neck to the validated startup sequence's
+/// centered lean-forward final pose without preempting current neck authority.
+- (ROBNeckCommandDisposition)requestPersonTrackingLeanForwardRest;
 
 @property (readwrite, retain) NSSlider *arm_R11_force;
 

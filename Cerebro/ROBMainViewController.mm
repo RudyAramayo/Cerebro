@@ -45,6 +45,8 @@ static double const kROBPersonTrackingFilterCenter = 0.5;
 static double const kROBPersonTrackingFilterStopBand = 0.06;
 static int const kROBPersonTrackingMaximumUpperDownOffset = 40;
 static int const kROBPersonTrackingMaximumUpperUpOffset = 200;
+static int const kROBPersonTrackingUprightEntryPanStepTargets = 100;
+static NSTimeInterval const kROBPersonTrackingUprightRestSeconds = 15.0;
 static double const kROBPersonTrackingDownwardSpeedRatio = 0.2;
 static NSString * const ROBDevelopmentModeDefaultsKey = @"ROBDevelopmentMode";
 static NSString * const ROBShowControllerInputDiagnosticsNotification = @"ROBShowControllerInputDiagnostics";
@@ -415,6 +417,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 @property (readwrite, assign) int32_t personTrackingUpperBaselineTarget;
 @property (readwrite, copy) NSString *personTrackingSourceID;
 @property (readwrite, assign) NSTimeInterval lastPersonTrackingDiagnosticsUptime;
+@property (readwrite, assign) BOOL personTrackingUprightPostureActive;
 
 @property (readwrite, assign) int actualValue;
 @property (readwrite, assign) int targetValue;
@@ -438,6 +441,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (BOOL)sendRobotActionMessage:(ROBRobotActionMessage *)message;
 - (void)handleRobotActionMessage:(ROBRobotActionMessage *)message;
 - (void)robotActionBridgeTick:(NSTimer *)timer;
+- (void)updatePersonTrackingUprightRestAtUptime:(NSTimeInterval)now;
 - (NSString *)robotActionStateString:(ROBRobotActionState)state;
 - (BOOL)robotActionMessageIsAddressedToCerebro:(ROBRobotActionMessage *)message;
 - (void)cancelPendingGeminiRobotActionsWithReason:(NSString *)reason;
@@ -2341,9 +2345,55 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     [self.robAI sendToolResponseWithCallID:message.callID name:call.name result:result];
 }
 
+- (void)updatePersonTrackingUprightRestAtUptime:(NSTimeInterval)now
+{
+    if (!self.personTrackingUprightPostureActive || self.serialBox == nil) {
+        return;
+    }
+    if (!self.serialBox.lowerNeckTiltCommandKnown
+        || self.serialBox.commandedLowerNeckTiltTarget
+            != ROBNeckSafetyUprightLowerTarget) {
+        // A manual or other authorized posture change already left the
+        // tracking-upright pose, so it owns the resulting rest posture.
+        self.personTrackingUprightPostureActive = NO;
+        return;
+    }
+    if (self.lastPersonTrackingUpdateUptime <= 0
+        || now - self.lastPersonTrackingUpdateUptime
+            < kROBPersonTrackingUprightRestSeconds
+        || self.serialBox.personTrackingUprightTransitionActive
+        || self.serialBox.safeNeckStartupInProgress) {
+        return;
+    }
+
+    ROBNeckCommandDisposition disposition =
+        [self.serialBox requestPersonTrackingLeanForwardRest];
+    if (disposition == ROBNeckCommandDispositionHeldForSafety) {
+        return;
+    }
+    self.personTrackingUprightPostureActive = NO;
+    if (disposition == ROBNeckCommandDispositionRejected) {
+        NSLog(
+            @"Person tracking idle lean-forward rest rejected: %@",
+            self.serialBox.neckCommandSafetyStatus
+        );
+        return;
+    }
+    self.lastPersonTrackingUpdateUptime = 0;
+    self.personTrackingFilterInitialized = NO;
+    self.personTrackingUpperBaselineTarget = 0;
+    self.personTrackingSourceID = nil;
+    NSLog(
+        @"Person tracking was idle for %.0f seconds; returning through the safe centered lean-forward sequence",
+        kROBPersonTrackingUprightRestSeconds
+    );
+}
+
 - (void)robotActionBridgeTick:(NSTimer *)timer
 {
     NSDate *now = [NSDate date];
+    [self updatePersonTrackingUprightRestAtUptime:
+        NSProcessInfo.processInfo.systemUptime];
     NSArray<NSString *> *callIDs = [self.pendingRobotActionRequests.allKeys copy];
     for (NSString *callID in callIDs) {
         ROBRobotActionMessage *request = self.pendingRobotActionRequests[callID];
@@ -3548,16 +3598,38 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         }
         if (result.uprightTransitionRequested
             && requestedUprightEndpoint != nil) {
+            int32_t endpointPanTarget =
+                (int32_t)requestedUprightEndpoint.panTarget;
+            int32_t uprightEntryPanTarget = currentPanTarget;
+            if (endpointPanTarget < currentPanTarget) {
+                uprightEntryPanTarget = MAX(
+                    endpointPanTarget,
+                    currentPanTarget
+                        - kROBPersonTrackingUprightEntryPanStepTargets
+                );
+            } else if (endpointPanTarget > currentPanTarget) {
+                uprightEntryPanTarget = MIN(
+                    endpointPanTarget,
+                    currentPanTarget
+                        + kROBPersonTrackingUprightEntryPanStepTargets
+                );
+            }
             ROBNeckCommandDisposition disposition = [self.serialBox
                 requestPersonTrackingUprightPanTarget:
-                    requestedUprightEndpoint.panTarget
+                    uprightEntryPanTarget
                 lowerTarget:requestedUprightEndpoint.lowerTarget
                 upperTarget:requestedUprightEndpoint.upperTarget];
             if (disposition != ROBNeckCommandDispositionRejected) {
+                if (self.serialBox.personTrackingUprightTransitionActive) {
+                    self.personTrackingUpperBaselineTarget =
+                        (int32_t)requestedUprightEndpoint.upperTarget;
+                    self.personTrackingUprightPostureActive = YES;
+                }
                 NSLog(
-                    @"Person tracking reached %@ pan limit %ld; animating exact upright endpoint P%ld L%ld U%ld (%@)",
-                    requestedUprightEndpoint.name,
+                    @"Person tracking reached a restricted edge at P%ld; lifting with %@ entry P%d toward final limit P%ld, L%ld U%ld (%@)",
                     (long)result.panTarget,
+                    requestedUprightEndpoint.name,
+                    uprightEntryPanTarget,
                     (long)requestedUprightEndpoint.panTarget,
                     (long)requestedUprightEndpoint.lowerTarget,
                     (long)requestedUprightEndpoint.upperTarget,
@@ -3566,7 +3638,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                 return;
             }
             NSLog(
-                @"Person tracking upright endpoint rejected P%ld L%ld U%ld: %@",
+                @"Person tracking upright entry rejected P%d toward P%ld, L%ld U%ld: %@",
+                uprightEntryPanTarget,
                 (long)requestedUprightEndpoint.panTarget,
                 (long)requestedUprightEndpoint.lowerTarget,
                 (long)requestedUprightEndpoint.upperTarget,

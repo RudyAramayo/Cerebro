@@ -2133,24 +2133,25 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         cameraPositionNamed:@"fully_upright_right"];
     ROBServoCameraPosition *uprightLeft = [servoControlStore
         cameraPositionNamed:@"fully_upright_left"];
-    BOOL matchesSavedRight = uprightRight != nil
-        && panTarget == uprightRight.panTarget
-        && lowerTarget == uprightRight.lowerTarget
-        && upperTarget == uprightRight.upperTarget;
-    BOOL matchesSavedLeft = uprightLeft != nil
-        && panTarget == uprightLeft.panTarget
-        && lowerTarget == uprightLeft.lowerTarget
-        && upperTarget == uprightLeft.upperTarget;
+    BOOL savedLimitsAreReviewed = uprightRight != nil
+        && uprightLeft != nil
+        && uprightRight.panTarget < uprightLeft.panTarget
+        && uprightRight.lowerTarget == ROBNeckSafetyUprightLowerTarget
+        && uprightRight.upperTarget == ROBNeckSafetyUprightUpperTarget
+        && uprightLeft.lowerTarget == ROBNeckSafetyUprightLowerTarget
+        && uprightLeft.upperTarget == ROBNeckSafetyUprightUpperTarget;
+    BOOL panIsWithinSavedLimits = savedLimitsAreReviewed
+        && panTarget >= uprightRight.panTarget
+        && panTarget <= uprightLeft.panTarget;
     BOOL isReviewedUprightPose =
         lowerTarget == ROBNeckSafetyUprightLowerTarget
         && upperTarget == ROBNeckSafetyUprightUpperTarget;
-    if ((!matchesSavedRight && !matchesSavedLeft)
-        || !isReviewedUprightPose) {
+    if (!panIsWithinSavedLimits || !isReviewedUprightPose) {
         self.personTrackingUprightTransitionActive = NO;
         self.personTrackingUprightAdvanceScheduled = NO;
         self.personTrackingUprightGeneration += 1;
         self.neckCommandSafetyStatus =
-            @"Person tracking endpoint must match a saved reviewed fully-upright pose.";
+            @"Person tracking upright entry must use the reviewed pose within the saved left/right pan limits.";
         return ROBNeckCommandDispositionRejected;
     }
 
@@ -2252,6 +2253,54 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     [self refreshPersonTrackingUprightTransitionAtTime:now];
     [self schedulePersonTrackingUprightTransitionAdvance];
     return disposition;
+}
+
+- (ROBNeckCommandDisposition)requestPersonTrackingLeanForwardRest
+{
+    if (![NSThread isMainThread]) {
+        self.neckCommandSafetyStatus =
+            @"Person tracking rest requires the main thread.";
+        return ROBNeckCommandDispositionRejected;
+    }
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (self.safeNeckStartupInProgress
+        || self.personTrackingUprightTransitionActive
+        || now < self.manualNeckOverrideUntil
+        || now < self.gestureNeckAuthorityUntil
+        || now < self.visionNeckAuthorityUntil
+        || self.torsoNeckAuthorityRequiresOperatorAction) {
+        self.neckCommandSafetyStatus =
+            @"Person tracking idle rest is waiting for current neck authority to end.";
+        return ROBNeckCommandDispositionHeldForSafety;
+    }
+    if (!self.maestroConnectionValid
+        || !self.neckCommandStateKnown
+        || self.commandedNeckPanTarget == ROBNeckSafetyTargetOff
+        || self.commandedLowerNeckTiltTarget
+            != ROBNeckSafetyUprightLowerTarget
+        || self.commandedUpperNeckTiltTarget == ROBNeckSafetyTargetOff) {
+        self.neckCommandSafetyStatus =
+            @"Person tracking idle rest requires a known active upright neck.";
+        return ROBNeckCommandDispositionRejected;
+    }
+    ROBServoControlStore *servoControlStore = [ROBServoControlStore shared];
+    ROBServoSequencePhase *finalPhase =
+        [servoControlStore startupPhaseAtIndex:2];
+    ROBServoCameraPosition *leanForward = [servoControlStore
+        cameraPositionNamed:@"lean_forward"];
+    BOOL hasLeanForwardFinalPhase = finalPhase != nil
+        && leanForward != nil
+        && finalPhase.cameraPositionName.length > 0
+        && [finalPhase.cameraPositionName
+            caseInsensitiveCompare:@"lean_forward"] == NSOrderedSame
+        && finalPhase.lowerTarget == leanForward.lowerTarget
+        && finalPhase.upperTarget == leanForward.upperTarget;
+    if (!hasLeanForwardFinalPhase) {
+        self.neckCommandSafetyStatus =
+            @"Person tracking idle rest requires startup phase 3 to match lean_forward.";
+        return ROBNeckCommandDispositionRejected;
+    }
+    return [self startSafeNeckStartup];
 }
 
 - (ROBNeckCommandDisposition)applySafeNeckPanTarget:(int)panTarget
