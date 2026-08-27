@@ -42,13 +42,13 @@ physical build.
 | Above-6495 pan | −15° to +2.1° | asymmetric forward pan limits for a known lower-tilt target above the clearance band |
 | Unknown/off pan | −15° to +2.1° | fail-safe asymmetric pan limits when lower tilt has no known active command |
 | Lower clearance/up | 6011 | fixed lower-neck camera-leveling reference and temporary OFF/unknown startup lift |
-| Upper upright | 6073 | fixed upright and Vision-controller center target |
+| Upper upright | 6906 | front-camera upright and Vision center target, offset about +833 target units for the approximately -25° camera mount |
 | Authorized-follow upper floor | 7350 | lower edge of the reviewed full-pan follow-clearance pose |
 | Authorized-follow upper center | 7375 | camera target used only by controller-authorized follow preparation |
 | Authorized-follow upper ceiling | 7400 | upper edge of the reviewed full-pan follow-clearance pose |
 | Default forward pan | 5799 | original torso-control forward resting target |
 | Default lower rest | 7014 | original safe resting target toward the rear of the robot |
-| Default upper rest | 6073 | calibrated upright upper-neck target used by the `upright` camera position |
+| Default upper rest | 6073 | original torso-control upper resting target, independent of the camera-upright pose |
 | Pan center | 6000 | raw target treated as 0° |
 | Pan targets per degree | 33.3333 | raw-target-to-degree scale |
 | Camera counter gain | -1.0 | upper-target correction per lower-target unit |
@@ -61,7 +61,7 @@ degree; the shipped suggestions therefore describe ±60°.
 
 Before selecting **Apply**, physically confirm the pan center and scale, the
 inclusive `5000`–`6495` lower-tilt clearance band, clearance/upright targets
-`6011`/`6073`, person-follow upper target `7375`, resting defaults
+`6011`/`6906`, person-follow upper target `7375`, resting defaults
 `5799`/`7014`/`6073`, both hard ranges, and the counter-gain sign.
 Command all three neck channels off and confirm the readouts show
 `P OFF`, `L OFF`, and `U OFF`; Cerebro rejects live calibration changes while
@@ -74,7 +74,7 @@ Existing V1 and V2 settings retain their common calibration values on upgrade.
 Their old 5300–6822 band and the old serialized `6823` forward anchor remain
 only for V3 settings compatibility; neither defines the active pan envelope or
 the upright reference. The fixed Maestro 24 full-pan band is `5000`–`6495`,
-and the fixed lower/upper clearance/neutral targets are `6011`/`6073`. The
+and the fixed lower/upper clearance/neutral targets are `6011`/`6906`. The
 Head sliders use the safe resting defaults `5799`/`7014`/`6073`. Migration
 still clips −15.0°…+2.1° inward to the saved pan range and defaults **Keep
 camera upright** to on. Every V1/V2 migration is marked unconfirmed, so the
@@ -126,8 +126,8 @@ settled lower-neck-dependent pan envelope immediately. An outward correction
 that reaches a restricted edge requests the direction's saved
 `fully_upright_right` or `fully_upright_left` direction. This automatic move
 requires known active pan/lower/upper commands and all three neck controls
-enabled. Both saved endpoints must retain the reviewed upright `6011`/`6073`
-lower/upper values. The transition uses those exact tilt targets while its pan
+enabled. Both saved endpoints must retain the mount-compensated upright
+`6011`/`6906` lower/upper values. The transition uses those exact tilt targets while its pan
 entry is only 100 targets beyond the current restricted edge and remains
 between the saved endpoint pan values. That narrow reviewed-pose exception can
 run before general camera-leveling calibration is confirmed; arbitrary
@@ -135,7 +135,7 @@ automatic lower motion remains blocked. It never cancels a manual, gesture,
 startup, or Vision authority lease. The gateway stages any required pan-safe
 handoff, sends lower and upper together, and retries from its conservative
 command deadlines until the entry pose and widened envelope settle. Vertical
-tracking rebases around upright `6073`; proportional face centering then
+tracking rebases around upright `6906`; proportional face centering then
 resumes and pans gradually. The saved endpoint pan values—not the generic hard
 joint bounds—remain the final tracking limits; the shipped values are `4000`
 right and `7652` left. After 15 seconds without a tracking update, a
@@ -162,7 +162,7 @@ action can start the same recovery when one or more axes are `OFF` or
 `UNKNOWN`:
 
 1. Pan is commanded `OFF`. Lower and upper are sent together to lower-up
-   `6011` and upper upright `6073`.
+   `6011` and upper upright `6906`.
 2. Cerebro waits for the slower of the worst-case lower/upper Maestro ramps
    plus the settling margin. It then commands pan forward to `5799` while
    holding lower at `6011`.
@@ -172,14 +172,17 @@ action can start the same recovery when one or more axes are `OFF` or
 
 The **Servos → Open Servo Control…** window exposes camera positions, servo
 sequences, and relative gestures. The shipped camera catalog is
-`lean_forward` (`L 7014`, `U 7698`), `upright` (`L 6011`, `U 6073`),
+`lean_forward` (`L 7014`, `U 7698`), `upright` (`L 6011`, `U 6906`),
 `lean_back` (`L 4747`, `U 5214`), `fully_upright_right` (`P 4000`, `L 6011`,
-`U 6073`), and `fully_upright_left` (`P 7652`, `L 6011`, `U 6073`). A camera
+`U 6906`), and `fully_upright_left` (`P 7652`, `L 6011`, `U 6906`). A camera
 position pan value of `0` preserves the currently commanded pan; a nonzero
 value requests that exact pan target. Existing saved camera catalogs are
 migrated in place and receive the two missing endpoint presets without losing
-operator edits. Sequence phases contain pan, lower, upper, and post-settle
-hold values; the sequence table receives the largest share of the window.
+operator edits. Version-1 catalog entries that still exactly match the old
+shipped `6011`/`6073` upright tuple move once to `6011`/`6906`; later operator
+calibration is not rewritten. Sequence phases contain pan, lower, upper, and
+post-settle hold values; the sequence table receives the largest share of the
+window.
 Startup edits are accepted only when they still describe exactly
 three ordered phases: phase 1 has pan OFF in the full-clearance lower band,
 phase 2 holds phase-1 lower/upper while energizing pan, and phase 3 retains the
@@ -189,7 +192,7 @@ an in-flight startup.
 
 The Head sliders mirror each accepted startup target as soon as its command is
 issued: lower shows `6011` during the clearance/centering phases and `7014`
-once the lean-forward move is issued; upper changes from `6073` to `7698` in
+once the lean-forward move is issued; upper changes from `6906` to `7698` in
 phase 3, and pan shows `5799` once it is energized in phase 2. Because there is
 no shaft feedback, these are commanded targets rather than measured
 positions. A slider deliberately edited during startup retains that queued
@@ -359,7 +362,7 @@ upper target = desired upper target
 ```
 
 The configured reference is the calibrated lower upright target `6011`; the
-neutral upper-camera target is `6073`. Changing the checkbox adopts the
+neutral upper-camera target is `6906`. Changing the checkbox adopts the
 currently applied upper-camera command as the new camera demand, takes a short
 manual neck lease, and rebases the current lower target. This prevents the mode
 change itself from jumping a known active neck pose and does not submit any arm

@@ -148,7 +148,11 @@ public enum ROBServoControlConfigurationError: LocalizedError {
     public static let shared = ROBServoControlStore()
 
     private static let defaultsKey = "ROBServoControlConfigurationV1"
-    private static let schemaVersion = 1
+    private static let schemaVersion = 2
+    private static let uprightLowerTarget = 6011
+    private static let legacyUprightUpperTarget = 6073
+    // Compensates for the front camera's approximately -25 degree mounting.
+    private static let uprightUpperTarget = 6906
     private let lock = NSRecursiveLock()
     private var positionsStorage: [ROBServoCameraPosition] = []
     private var phasesStorage: [ROBServoSequencePhase] = []
@@ -401,7 +405,7 @@ public enum ROBServoControlConfigurationError: LocalizedError {
             ),
             ROBServoCameraPosition(
                 name: "upright", panTarget: 0,
-                lowerTarget: 6011, upperTarget: 6073
+                lowerTarget: 6011, upperTarget: 6906
             ),
             ROBServoCameraPosition(
                 name: "lean_back", panTarget: 0,
@@ -409,11 +413,11 @@ public enum ROBServoControlConfigurationError: LocalizedError {
             ),
             ROBServoCameraPosition(
                 name: "fully_upright_right", panTarget: 4000,
-                lowerTarget: 6011, upperTarget: 6073
+                lowerTarget: 6011, upperTarget: 6906
             ),
             ROBServoCameraPosition(
                 name: "fully_upright_left", panTarget: 7652,
-                lowerTarget: 6011, upperTarget: 6073
+                lowerTarget: 6011, upperTarget: 6906
             ),
         ]
     }
@@ -441,7 +445,7 @@ public enum ROBServoControlConfigurationError: LocalizedError {
             } else {
                 positions.append(ROBServoCameraPosition(
                     name: endpoint.canonical, panTarget: endpoint.pan,
-                    lowerTarget: 6011, upperTarget: 6073
+                    lowerTarget: 6011, upperTarget: 6906
                 ))
             }
         }
@@ -452,12 +456,12 @@ public enum ROBServoControlConfigurationError: LocalizedError {
             ROBServoSequencePhase(
                 sequenceName: "startup", phaseIndex: 1,
                 phaseName: "Lift to upright clearance", cameraPositionName: "upright",
-                panTarget: 0, lowerTarget: 6011, upperTarget: 6073, holdSeconds: 0
+                panTarget: 0, lowerTarget: 6011, upperTarget: 6906, holdSeconds: 0
             ),
             ROBServoSequencePhase(
                 sequenceName: "startup", phaseIndex: 2,
                 phaseName: "Center pan", cameraPositionName: "upright",
-                panTarget: 5799, lowerTarget: 6011, upperTarget: 6073, holdSeconds: 0
+                panTarget: 5799, lowerTarget: 6011, upperTarget: 6906, holdSeconds: 0
             ),
             ROBServoSequencePhase(
                 sequenceName: "startup", phaseIndex: 3,
@@ -517,6 +521,41 @@ public enum ROBServoControlConfigurationError: LocalizedError {
         var intervalSeconds: Double
     }
 
+    /// Migrates only the exact upright tuples shipped before the front-camera
+    /// mount correction. A version-2 value of 6073 is an operator calibration
+    /// and is therefore left alone on subsequent launches.
+    private static func migrateLegacyUprightCameraMountOffset(
+        positions: [ROBServoCameraPosition],
+        phases: [ROBServoSequencePhase]
+    ) -> Bool {
+        let uprightPositionNames: Set<String> = [
+            "upright",
+            "fully_upright_right",
+            "fully_upright_left",
+            "fully_upright_center",
+            "fully_right",
+            "fully_left",
+        ]
+        var changed = false
+        for position in positions
+        where uprightPositionNames.contains(position.name.lowercased())
+            && position.lowerTarget == uprightLowerTarget
+            && position.upperTarget == legacyUprightUpperTarget {
+            position.upperTarget = uprightUpperTarget
+            changed = true
+        }
+        for phase in phases
+        where phase.sequenceName.caseInsensitiveCompare("startup") == .orderedSame
+            && (phase.phaseIndex == 1 || phase.phaseIndex == 2)
+            && phase.cameraPositionName.caseInsensitiveCompare("upright") == .orderedSame
+            && phase.lowerTarget == uprightLowerTarget
+            && phase.upperTarget == legacyUprightUpperTarget {
+            phase.upperTarget = uprightUpperTarget
+            changed = true
+        }
+        return changed
+    }
+
     private func persistLocked() {
         let payload = Payload(
             version: Self.schemaVersion,
@@ -551,7 +590,7 @@ public enum ROBServoControlConfigurationError: LocalizedError {
     private func loadPersistedConfiguration() -> Bool {
         guard let data = UserDefaults.standard.data(forKey: Self.defaultsKey),
               let payload = try? JSONDecoder().decode(Payload.self, from: data),
-              payload.version == Self.schemaVersion else {
+              (1 ... Self.schemaVersion).contains(payload.version) else {
             return false
         }
         let positionsNeedPanMigration = payload.cameraPositions.contains {
@@ -575,6 +614,11 @@ public enum ROBServoControlConfigurationError: LocalizedError {
                 upperTarget: $0.upperTarget, holdSeconds: $0.holdSeconds
             )
         }
+        let migratedUprightCameraMountOffset = payload.version < 2
+            && Self.migrateLegacyUprightCameraMountOffset(
+                positions: positions,
+                phases: phases
+            )
         let gestures = payload.gestures.map {
             ROBServoRelativeGesture(
                 identifier: $0.identifier, name: $0.name, servo: $0.servo,
@@ -592,7 +636,10 @@ public enum ROBServoControlConfigurationError: LocalizedError {
         positionsStorage = positions
         phasesStorage = phases.sorted(by: Self.phaseSort)
         gesturesStorage = gestures
-        if positionsNeedPanMigration || positions.count != persistedPositionCount {
+        if payload.version != Self.schemaVersion
+            || positionsNeedPanMigration
+            || positions.count != persistedPositionCount
+            || migratedUprightCameraMountOffset {
             persistLocked()
         }
         return true

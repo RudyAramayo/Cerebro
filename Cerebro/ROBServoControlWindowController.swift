@@ -349,7 +349,7 @@ import Foundation
             name: uniqueName(prefix: "position", existing: positions.map(\.name)),
             panTarget: 0,
             lowerTarget: 6011,
-            upperTarget: 6073
+            upperTarget: 6906
         ))
         positionsTable.reloadData()
         positionsTable.selectRowIndexes([positions.count - 1], byExtendingSelection: false)
@@ -379,7 +379,7 @@ import Foundation
             cameraPositionName: "upright",
             panTarget: 5799,
             lowerTarget: 6011,
-            upperTarget: 6073,
+            upperTarget: 6906,
             holdSeconds: 0.25
         ))
         sortPhases()

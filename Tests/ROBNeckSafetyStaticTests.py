@@ -255,9 +255,9 @@ def check_lower_clearance_threshold(
     require(
         re.search(r"ROBNeckSafetyUprightLowerTarget\s*=\s*6011\b", policy_header)
             is not None
-        and re.search(r"ROBNeckSafetyUprightUpperTarget\s*=\s*6073\b", policy_header)
+        and re.search(r"ROBNeckSafetyUprightUpperTarget\s*=\s*6906\b", policy_header)
             is not None,
-        "The calibrated lower/upper upright targets must remain 6011/6073",
+        "The mount-compensated lower/upper upright targets must remain 6011/6906",
     )
     require(
         re.search(
@@ -270,8 +270,7 @@ def check_lower_clearance_threshold(
         )
         is not None
         and re.search(
-            r"ROBNeckSafetyDefaultUpperTarget\s*=\s*"
-            r"ROBNeckSafetyUprightUpperTarget\b",
+            r"ROBNeckSafetyDefaultUpperTarget\s*=\s*6073\b",
             policy_header,
         ) is not None,
         "The calibrated forward/resting startup defaults must remain "
@@ -346,7 +345,7 @@ def check_lower_clearance_threshold(
         and "configuration.upperMinimumTarget" in serial_source
         and "configuration.upperMaximumTarget" in serial_source
         and "6045" not in serial_source,
-        "Vision tracking no longer uses 6073 as its neutral upper-neck target",
+        "Vision tracking no longer uses 6906 as its neutral upper-neck target",
     )
     require(
         "ROBNeckSafetyUprightLowerTarget" in torso_source

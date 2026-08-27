@@ -47,7 +47,7 @@ def main() -> None:
         'name: "lean_forward", panTarget: 0' in configuration
         and 'lowerTarget: 7014, upperTarget: 7698' in configuration
         and 'name: "upright", panTarget: 0' in configuration
-        and 'lowerTarget: 6011, upperTarget: 6073' in configuration
+        and 'lowerTarget: 6011, upperTarget: 6906' in configuration
         and 'name: "lean_back", panTarget: 0' in configuration
         and 'lowerTarget: 4747, upperTarget: 5214' in configuration
         and 'name: "fully_upright_right", panTarget: 4000' in configuration
@@ -74,14 +74,28 @@ def main() -> None:
     )
     require(
         'sequenceName: "startup", phaseIndex: 1' in configuration
-        and 'panTarget: 0, lowerTarget: 6011, upperTarget: 6073' in configuration
+        and 'panTarget: 0, lowerTarget: 6011, upperTarget: 6906' in configuration
         and 'sequenceName: "startup", phaseIndex: 2' in configuration
-        and 'panTarget: 5799, lowerTarget: 6011, upperTarget: 6073'
+        and 'panTarget: 5799, lowerTarget: 6011, upperTarget: 6906'
         in configuration
         and 'sequenceName: "startup", phaseIndex: 3' in configuration
         and 'panTarget: 5799, lowerTarget: 7014, upperTarget: 7698'
         in configuration,
         "The shipped three-phase startup sequence lost its safe reviewed order",
+    )
+    require(
+        "private static let schemaVersion = 2" in configuration
+        and "migrateLegacyUprightCameraMountOffset" in configuration
+        and '"fully_upright_center"' in configuration
+        and '"fully_right"' in configuration
+        and '"fully_left"' in configuration
+        and "position.lowerTarget == uprightLowerTarget" in configuration
+        and "position.upperTarget == legacyUprightUpperTarget" in configuration
+        and "phase.phaseIndex == 1 || phase.phaseIndex == 2" in configuration
+        and "phase.upperTarget == legacyUprightUpperTarget" in configuration
+        and "payload.version < 2" in configuration
+        and "payload.version != Self.schemaVersion" in configuration,
+        "Saved version-1 shipped upright tuples no longer migrate once without overwriting later operator calibration",
     )
     require(
         'name: "YES", servo: "upper", delta: 160' in configuration

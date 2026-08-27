@@ -169,17 +169,17 @@ pan-slider action can safely re-establish an enabled lower slider target in the
 full-pan band after startup or reconnect before the pan envelope widens.
 When the Maestro comes online—or after a deliberate Head recovery action with
 an OFF/unknown axis—the service runs a configurable, validated three-phase
-startup: pan stays OFF while lower/upper move to `6011`/`6073`, pan settles
+startup: pan stays OFF while lower/upper move to `6011`/`6906`, pan settles
 forward at `5799`, and only then does the neck move to the `lean_forward` pose
 at lower `7014` / upper `7698`.
 Recognized-face and human-blob tracking begins inside the neck's currently
 settled collision-safe pan envelope. If an outward correction reaches a
 restricted edge, a known active neck animates through the safety gateway
 toward the saved `fully_upright_right` or `fully_upright_left` limit. The lift
-uses the reviewed `6011`/`6073` lower/upper values but advances pan only 100
-targets beyond the restricted edge. After that entry pose and its widened
+uses the mount-compensated `6011`/`6906` lower/upper values but advances pan
+only 100 targets beyond the restricted edge. After that entry pose and its widened
 envelope settle, proportional tracking resumes and approaches the saved pan
-limit gradually. The vertical controller rebases around `6073`, avoiding a
+limit gradually. The vertical controller rebases around `6906`, avoiding a
 post-lift camera jump. This reviewed pose can run when general neck calibration
 has not yet been confirmed; arbitrary automatic lower-neck targets remain
 blocked. The two saved pan values remain the final tracking limits (shipped as

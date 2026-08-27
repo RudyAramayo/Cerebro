@@ -75,7 +75,7 @@ static void testConfigurationValidation(void) {
     EXPECT_INT(ROBNeckSafetyFullPanLowerThresholdTarget, 5000);
     EXPECT_INT(ROBNeckSafetyFullPanLowerMaximumTarget, 6495);
     EXPECT_INT(ROBNeckSafetyUprightLowerTarget, 6011);
-    EXPECT_INT(ROBNeckSafetyUprightUpperTarget, 6073);
+    EXPECT_INT(ROBNeckSafetyUprightUpperTarget, 6906);
     EXPECT_INT(ROBNeckSafetyDefaultForwardPanTarget, 5799);
     EXPECT_INT(ROBNeckSafetyDefaultLowerTarget, 7014);
     EXPECT_INT(ROBNeckSafetyDefaultUpperTarget, 6073);
@@ -119,12 +119,12 @@ static void testConfigurationValidation(void) {
         &startupConfig,
         ROBNeckSafetyTargetOff,
         ROBNeckSafetyUprightLowerTarget,
-        ROBNeckSafetyDefaultUpperTarget,
+        ROBNeckSafetyUprightUpperTarget,
         &startupLift
     ));
     EXPECT_INT(startupLift.panTarget, ROBNeckSafetyTargetOff);
     EXPECT_INT(startupLift.lowerTarget, ROBNeckSafetyUprightLowerTarget);
-    EXPECT_INT(startupLift.upperTarget, ROBNeckSafetyDefaultUpperTarget);
+    EXPECT_INT(startupLift.upperTarget, ROBNeckSafetyUprightUpperTarget);
 
     ROBNeckSafetyResult startupRest = {0};
     EXPECT_TRUE(ROBNeckSafetyApply(

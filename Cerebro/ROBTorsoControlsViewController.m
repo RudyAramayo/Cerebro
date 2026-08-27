@@ -314,7 +314,8 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
         [NSString stringWithFormat:@"U %d", ROBNeckSafetyUprightUpperTarget],
         NSMakeRect(164, 78, 58, 16)
     );
-    upperUprightLabel.accessibilityLabel = @"Upper neck upright target 6073";
+    upperUprightLabel.accessibilityLabel = [NSString stringWithFormat:
+        @"Upper neck upright target %d", ROBNeckSafetyUprightUpperTarget];
 
     NSTextField *forwardLabel = ROBNeckLabel(@"Unknown/off pan", NSMakeRect(8, 54, 96, 16));
     self.forwardPanMinimumDegreesField = ROBNeckNumberField(

@@ -27,13 +27,15 @@ enum {
     // Calibrated collision-clear lift used before recovering an OFF/unknown
     // neck. This is intentionally distinct from the normal resting defaults.
     ROBNeckSafetyUprightLowerTarget = 6011,
-    ROBNeckSafetyUprightUpperTarget = 6073,
-    // Safe torso-control defaults: forward pan, lower resting toward the rear
-    // of the robot, and upper held upright. Startup recovery returns to these
-    // values only after the lower neck is lifted and pan settles forward.
+    // The front camera is mounted about 25 degrees nose-down. At the
+    // calibrated 33.333 targets/degree, 6073 + 833 aims it level.
+    ROBNeckSafetyUprightUpperTarget = 6906,
+    // Safe torso-control defaults: forward pan and the original resting neck
+    // pose. This upper value is intentionally independent of the compensated
+    // camera-upright target above.
     ROBNeckSafetyDefaultForwardPanTarget = 5799,
     ROBNeckSafetyDefaultLowerTarget = 7014,
-    ROBNeckSafetyDefaultUpperTarget = ROBNeckSafetyUprightUpperTarget,
+    ROBNeckSafetyDefaultUpperTarget = 6073,
     ROBNeckSafetyMaximumMaestroTarget = 16383
 };
 
