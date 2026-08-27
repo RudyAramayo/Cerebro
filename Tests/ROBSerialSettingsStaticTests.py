@@ -231,11 +231,30 @@ def main() -> None:
     maestro_reconnect = braced_declaration(
         serial_source, "- (void)attemptMaestroReconnect", serial_implementation
     )
+    maestro_discovery = braced_declaration(
+        serial_source, "- (NSString *)maestroCommandPortPath", serial_implementation
+    )
+    preferred_maestro = braced_declaration(
+        serial_source,
+        "- (NSString *)lastVerifiedMaestroCommandPortPath",
+        serial_implementation,
+    )
     require(
         "maestroCommandPortPath" in maestro_reconnect
         and "openSerialPort:" in maestro_reconnect
         and "kMaestroSerialContext" in maestro_reconnect,
         "Retry Maestro no longer performs identity-based automatic discovery",
+    )
+    require(
+        'ROB.Hardware.LastVerifiedMaestroCommandPort' in serial_source
+        and "IOBSDNameMatching" in preferred_maestro
+        and "ROBMaestroSerialMatch(service)" in preferred_maestro
+        and "lastVerifiedMaestroCommandPortPath" in maestro_discovery
+        and maestro_discovery.index("lastVerifiedMaestroCommandPortPath")
+        < maestro_discovery.index("IOServiceGetMatchingServices")
+        and "setObject:path" in maestro_reconnect
+        and "kROBLastVerifiedMaestroCommandPortDefaultsKey" in maestro_reconnect,
+        "Maestro discovery no longer verifies and tries the last successful USB channel first",
     )
 
     # Servo smoothing is a persisted Mini Maestro controller profile, not a

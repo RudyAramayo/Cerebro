@@ -66,6 +66,8 @@ static NSString * const kROBMaestroServoSmoothingEnabledDefaultsKey = @"ROBMaest
 static NSString * const kROBMaestroServoSpeedLimitDefaultsKey = @"ROBMaestroServoSpeedLimit";
 static NSString * const kROBMaestroServoAccelerationLimitDefaultsKey = @"ROBMaestroServoAccelerationLimit";
 static NSString * const kROBMaestroServoMotionProfileVersionDefaultsKey = @"ROBMaestroServoMotionProfileVersion";
+static NSString * const kROBLastVerifiedMaestroCommandPortDefaultsKey =
+    @"ROB.Hardware.LastVerifiedMaestroCommandPort";
 static NSTimeInterval const kROBNeckManualOverrideSeconds = 2.0;
 static NSTimeInterval const kROBNeckVisionAuthoritySeconds = 0.35;
 static NSTimeInterval const kROBNeckPanRecenterSeconds = 1.0;
@@ -341,6 +343,7 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 
 - (NSString *) openSerialPort: (NSString *)serialPortFile baud: (speed_t)baudRate serialFileDescriptor:(int *)serialFileDescriptor contextInt:(int)context;
 - (NSArray<NSString *> *)usbSerialPortPaths;
+- (NSString *)lastVerifiedMaestroCommandPortPath;
 - (NSString *)maestroCommandPortPath;
 - (void)attemptMaestroReconnect;
 - (void)scheduleMaestroReconnectAfterDelay:(NSTimeInterval)delay;
@@ -856,9 +859,14 @@ typedef enum : NSUInteger {
     self.baseSerialReceiveBuffer = [NSMutableData data];
     // Base is the only Arduino role presently installed.
     self.baseSerialStatusText = @"Detecting Base firmware…";
-    self.maestroSerialStatusText = @"Discovering Maestro by USB identity…";
+    NSString *lastMaestroPath = [[NSUserDefaults standardUserDefaults]
+        stringForKey:kROBLastVerifiedMaestroCommandPortDefaultsKey];
+    self.maestroSerialStatusText = lastMaestroPath.length > 0
+        ? [NSString stringWithFormat:
+            @"Trying last verified Maestro channel %@…", lastMaestroPath]
+        : @"Discovering Maestro by USB identity…";
     [self refreshSerialList_base:@"Detecting Base firmware…"];
-    [self refreshSerialList_maestro:@"Discovering Maestro by USB identity…"];
+    [self refreshSerialList_maestro:self.maestroSerialStatusText];
     self.controlModelDataDictionary = [NSMutableDictionary new];
     self.treadControlModelDataDictionary = [NSMutableDictionary new];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
@@ -926,8 +934,106 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
                                            kIORegistryIterateRecursively | kIORegistryIterateParents);
 }
 
+static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
+{
+    CFTypeRef pathValue = IORegistryEntryCreateCFProperty(
+        service,
+        CFSTR(kIOCalloutDeviceKey),
+        kCFAllocatorDefault,
+        0
+    );
+    CFTypeRef vendorValue = ROBRegistryProperty(service, CFSTR("idVendor"));
+    CFTypeRef productValue = ROBRegistryProperty(service, CFSTR("USB Product Name"));
+    if (productValue == NULL) {
+        productValue = ROBRegistryProperty(service, CFSTR("Product Name"));
+    }
+    CFTypeRef interfaceNameValue = ROBRegistryProperty(
+        service,
+        CFSTR("USB Interface Name")
+    );
+    CFTypeRef interfaceNumberValue = ROBRegistryProperty(
+        service,
+        CFSTR("bInterfaceNumber")
+    );
+
+    NSString *path = (pathValue != NULL
+                      && CFGetTypeID(pathValue) == CFStringGetTypeID())
+        ? (__bridge NSString *)pathValue : nil;
+    NSNumber *vendor = (vendorValue != NULL
+                        && CFGetTypeID(vendorValue) == CFNumberGetTypeID())
+        ? (__bridge NSNumber *)vendorValue : nil;
+    NSString *product = (productValue != NULL
+                         && CFGetTypeID(productValue) == CFStringGetTypeID())
+        ? (__bridge NSString *)productValue : @"";
+    NSString *interfaceName = (interfaceNameValue != NULL
+                               && CFGetTypeID(interfaceNameValue)
+                                    == CFStringGetTypeID())
+        ? (__bridge NSString *)interfaceNameValue : @"";
+    NSNumber *interfaceNumber = (interfaceNumberValue != NULL
+                                 && CFGetTypeID(interfaceNumberValue)
+                                    == CFNumberGetTypeID())
+        ? (__bridge NSNumber *)interfaceNumberValue : nil;
+
+    NSDictionary<NSString *, id> *match = nil;
+    BOOL isPololuMaestro = vendor.integerValue == kPololuUSBVendorID
+        && [product rangeOfString:@"Maestro"
+                         options:NSCaseInsensitiveSearch].location != NSNotFound;
+    if (path.length > 0 && isPololuMaestro) {
+        BOOL namedCommandPort = [interfaceName
+            rangeOfString:@"Command"
+                  options:NSCaseInsensitiveSearch].location != NSNotFound;
+        BOOL primaryInterface = interfaceNumber != nil
+            && interfaceNumber.integerValue == 0;
+        NSInteger priority = namedCommandPort ? 0 : (primaryInterface ? 1 : 2);
+        match = @{ @"path": path, @"priority": @(priority) };
+    }
+
+    if (pathValue != NULL) CFRelease(pathValue);
+    if (vendorValue != NULL) CFRelease(vendorValue);
+    if (productValue != NULL) CFRelease(productValue);
+    if (interfaceNameValue != NULL) CFRelease(interfaceNameValue);
+    if (interfaceNumberValue != NULL) CFRelease(interfaceNumberValue);
+    return match;
+}
+
+- (NSString *)lastVerifiedMaestroCommandPortPath
+{
+    NSString *savedPath = [[NSUserDefaults standardUserDefaults]
+        stringForKey:kROBLastVerifiedMaestroCommandPortDefaultsKey];
+    BOOL isUSBCalloutPath = [savedPath hasPrefix:@"/dev/cu.usbmodem"]
+        || [savedPath hasPrefix:@"/dev/cu.usbserial"];
+    if (!isUSBCalloutPath) return nil;
+
+    // Query only the previously verified BSD channel before enumerating all
+    // serial devices. The USB identity is still checked before the path can
+    // be opened, so a reassigned tty cannot receive Maestro commands.
+    NSString *bsdName = savedPath.lastPathComponent;
+    CFMutableDictionaryRef matching = IOBSDNameMatching(
+        kIOMainPortDefault,
+        0,
+        bsdName.fileSystemRepresentation
+    );
+    if (matching == NULL) return nil;
+    io_service_t service = IOServiceGetMatchingService(
+        kIOMainPortDefault,
+        matching
+    );
+    if (service == IO_OBJECT_NULL) return nil;
+    NSDictionary<NSString *, id> *match = ROBMaestroSerialMatch(service);
+    IOObjectRelease(service);
+    NSString *verifiedPath = match[@"path"];
+    return [verifiedPath isEqualToString:savedPath] ? savedPath : nil;
+}
+
 - (NSString *)maestroCommandPortPath
 {
+    NSString *lastVerifiedPath = [self lastVerifiedMaestroCommandPortPath];
+    if (lastVerifiedPath.length > 0) {
+        NSLog(@"Trying last verified Maestro channel %@ before full discovery.",
+              lastVerifiedPath);
+        return lastVerifiedPath;
+    }
+
     NSMutableArray<NSDictionary<NSString *, id> *> *matches = [NSMutableArray array];
     io_iterator_t iterator = IO_OBJECT_NULL;
     kern_return_t result = IOServiceGetMatchingServices(kIOMainPortDefault,
@@ -939,43 +1045,8 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
 
     io_object_t service;
     while ((service = IOIteratorNext(iterator))) {
-        CFTypeRef pathValue = IORegistryEntryCreateCFProperty(service,
-                                                               CFSTR(kIOCalloutDeviceKey),
-                                                               kCFAllocatorDefault,
-                                                               0);
-        CFTypeRef vendorValue = ROBRegistryProperty(service, CFSTR("idVendor"));
-        CFTypeRef productValue = ROBRegistryProperty(service, CFSTR("USB Product Name"));
-        if (productValue == NULL) {
-            productValue = ROBRegistryProperty(service, CFSTR("Product Name"));
-        }
-        CFTypeRef interfaceNameValue = ROBRegistryProperty(service, CFSTR("USB Interface Name"));
-        CFTypeRef interfaceNumberValue = ROBRegistryProperty(service, CFSTR("bInterfaceNumber"));
-
-        NSString *path = (pathValue != NULL && CFGetTypeID(pathValue) == CFStringGetTypeID())
-            ? (__bridge NSString *)pathValue : nil;
-        NSNumber *vendor = (vendorValue != NULL && CFGetTypeID(vendorValue) == CFNumberGetTypeID())
-            ? (__bridge NSNumber *)vendorValue : nil;
-        NSString *product = (productValue != NULL && CFGetTypeID(productValue) == CFStringGetTypeID())
-            ? (__bridge NSString *)productValue : @"";
-        NSString *interfaceName = (interfaceNameValue != NULL && CFGetTypeID(interfaceNameValue) == CFStringGetTypeID())
-            ? (__bridge NSString *)interfaceNameValue : @"";
-        NSNumber *interfaceNumber = (interfaceNumberValue != NULL && CFGetTypeID(interfaceNumberValue) == CFNumberGetTypeID())
-            ? (__bridge NSNumber *)interfaceNumberValue : nil;
-
-        BOOL isPololuMaestro = vendor.integerValue == kPololuUSBVendorID
-            && [product rangeOfString:@"Maestro" options:NSCaseInsensitiveSearch].location != NSNotFound;
-        if (path.length > 0 && isPololuMaestro) {
-            BOOL namedCommandPort = [interfaceName rangeOfString:@"Command" options:NSCaseInsensitiveSearch].location != NSNotFound;
-            BOOL primaryInterface = interfaceNumber != nil && interfaceNumber.integerValue == 0;
-            NSInteger priority = namedCommandPort ? 0 : (primaryInterface ? 1 : 2);
-            [matches addObject:@{ @"path": path, @"priority": @(priority) }];
-        }
-
-        if (pathValue != NULL) CFRelease(pathValue);
-        if (vendorValue != NULL) CFRelease(vendorValue);
-        if (productValue != NULL) CFRelease(productValue);
-        if (interfaceNameValue != NULL) CFRelease(interfaceNameValue);
-        if (interfaceNumberValue != NULL) CFRelease(interfaceNumberValue);
+        NSDictionary<NSString *, id> *match = ROBMaestroSerialMatch(service);
+        if (match != nil) [matches addObject:match];
         IOObjectRelease(service);
     }
     IOObjectRelease(iterator);
@@ -1134,6 +1205,9 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     }
 
     if (self.maestroConnectionValid) {
+        [[NSUserDefaults standardUserDefaults]
+            setObject:path
+               forKey:kROBLastVerifiedMaestroCommandPortDefaultsKey];
         NSLog(@"Maestro connected on %@", path);
         NSString *connectedPath = [path copy];
         dispatch_async(dispatch_get_main_queue(), ^{

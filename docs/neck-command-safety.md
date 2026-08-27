@@ -179,6 +179,13 @@ which restores the Maestro's unlimited setting. See the [Pololu Maestro serial
 servo commands](https://www.pololu.com/docs/0J40/5.e) for the controller's
 units and ramp behavior.
 
+After a successful identity-verified connection and motion-profile write,
+Cerebro remembers the Maestro command-port path. On the next launch it queries
+that exact BSD channel first, verifies that the channel still belongs to a
+Pololu Maestro, and opens it immediately. If the USB route changed or the saved
+channel is absent, discovery falls back to the full identity scan and replaces
+the saved path after the new connection succeeds.
+
 On upgrade, a saved speed of `40` or acceleration of `4` is migrated once to
 the gentler shipped value. Other saved values are treated as operator
 calibration and remain unchanged.
