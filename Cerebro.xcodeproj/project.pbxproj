@@ -208,6 +208,7 @@
 		C0B008022F4C000800000001 /* ROBNeckSafetyPolicy.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = ROBNeckSafetyPolicy.c; sourceTree = "<group>"; };
 		C0B010012F4C001000000001 /* ROBPersonTrackingPolicy.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBPersonTrackingPolicy.h; sourceTree = "<group>"; };
 		C0B010022F4C001000000001 /* ROBPersonTrackingPolicy.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = ROBPersonTrackingPolicy.c; sourceTree = "<group>"; };
+		C0B010042F4C001000000001 /* ROBPersonTrackingPreferences.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBPersonTrackingPreferences.h; sourceTree = "<group>"; };
 		C0D4B0012F00000100000001 /* ROBVideoProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBVideoProtocol.swift; sourceTree = "<group>"; };
 		C0D4B0022F00000100000001 /* ROBCameraH264Encoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBCameraH264Encoder.swift; sourceTree = "<group>"; };
 		C0D4B0032F00000100000001 /* ROBVideoServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBVideoServer.swift; sourceTree = "<group>"; };
@@ -599,6 +600,7 @@
 				C0B008022F4C000800000001 /* ROBNeckSafetyPolicy.c */,
 				C0B010012F4C001000000001 /* ROBPersonTrackingPolicy.h */,
 				C0B010022F4C001000000001 /* ROBPersonTrackingPolicy.c */,
+				C0B010042F4C001000000001 /* ROBPersonTrackingPreferences.h */,
 				D4066C5D22863031002ACAD1 /* ROBBaseControllerModel.h */,
 				D4066C5B22863009002ACAD1 /* ROBBaseControllerModel.m */,
 				D4A38F551FFBFD9900092A46 /* ROBSpeechBox.h */,

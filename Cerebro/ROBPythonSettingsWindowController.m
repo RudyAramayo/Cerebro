@@ -5,6 +5,7 @@
 
 #import "ROBPythonSettingsWindowController.h"
 #import "ROBMainViewController.h"
+#import "ROBPersonTrackingPreferences.h"
 #import "ROBSerialBox.h"
 #import "ROBPythonRuntime.h"
 #import "ROBSystemDependencyManager.h"
@@ -62,6 +63,8 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
 @property (nonatomic, strong) NSTabViewItem *geminiSettingsTab;
 @property (nonatomic, strong) NSTabViewItem *insta360SettingsTab;
 @property (nonatomic, strong) ROBInsta360ProcessingSettingsViewController *insta360SettingsViewController;
+@property (nonatomic, strong) NSSlider *faceTrackingPanSpeedSlider;
+@property (nonatomic, strong) NSTextField *faceTrackingPanSpeedValueLabel;
 @property (nonatomic, assign) NSUInteger operationGeneration;
 @property (nonatomic, assign) BOOL operationInProgress;
 - (BOOL)requireAppliedPythonSelection;
@@ -80,6 +83,7 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
 - (void)refreshPairedControlDevices;
 - (ROBMainViewController *)activeMainViewController;
 - (void)attachGeminiSettingsViewController;
+- (void)refreshFaceTrackingPanSpeedSetting;
 - (void)openPrivacySettings:(NSString *)sectionName;
 - (void)openFullDiskAccessSettings:(id)sender;
 - (void)openAutomationSettings:(id)sender;
@@ -188,6 +192,72 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
     NSView *controllersView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 680, 580)];
     controllersTab.view = controllersView;
     [tabView addTabViewItem:controllersTab];
+
+    NSTabViewItem *trackingTab = [NSTabViewItem
+        tabViewItemWithViewController:[[NSViewController alloc] init]];
+    trackingTab.label = @"Tracking";
+    NSView *trackingView = [[NSView alloc]
+        initWithFrame:NSMakeRect(0, 0, 680, 580)];
+    trackingTab.view = trackingView;
+    [tabView addTabViewItem:trackingTab];
+
+    NSTextField *trackingHeading = [self labelWithString:@"Face Tracking"
+                                                    frame:NSMakeRect(24, 530, 632, 28)];
+    trackingHeading.font = [NSFont boldSystemFontOfSize:20.0];
+    [trackingView addSubview:trackingHeading];
+
+    NSTextField *trackingExplanation = [self labelWithString:
+        @"Adjust how quickly ROB pans toward a recognized face or human blob. The center dead band and easing remain active, so corrections still slow as the face approaches the middle of the camera."
+        frame:NSMakeRect(24, 470, 632, 50)];
+    trackingExplanation.textColor = NSColor.secondaryLabelColor;
+    [trackingView addSubview:trackingExplanation];
+
+    [trackingView addSubview:[self labelWithString:@"Horizontal tracking speed"
+                                             frame:NSMakeRect(24, 430, 300, 22)]];
+    self.faceTrackingPanSpeedValueLabel = [self labelWithString:@""
+                                                              frame:NSMakeRect(420, 430, 236, 22)];
+    self.faceTrackingPanSpeedValueLabel.alignment = NSTextAlignmentRight;
+    self.faceTrackingPanSpeedValueLabel.font =
+        [NSFont monospacedDigitSystemFontOfSize:13.0 weight:NSFontWeightSemibold];
+    [trackingView addSubview:self.faceTrackingPanSpeedValueLabel];
+
+    self.faceTrackingPanSpeedSlider = [[NSSlider alloc]
+        initWithFrame:NSMakeRect(24, 390, 632, 28)];
+    self.faceTrackingPanSpeedSlider.minValue =
+        ROBPersonTrackingMinimumPanTargetsPerSecond;
+    self.faceTrackingPanSpeedSlider.maxValue =
+        ROBPersonTrackingMaximumPanTargetsPerSecond;
+    self.faceTrackingPanSpeedSlider.numberOfTickMarks = 6;
+    self.faceTrackingPanSpeedSlider.tickMarkPosition = NSTickMarkBelow;
+    self.faceTrackingPanSpeedSlider.allowsTickMarkValuesOnly = NO;
+    self.faceTrackingPanSpeedSlider.continuous = YES;
+    self.faceTrackingPanSpeedSlider.target = self;
+    self.faceTrackingPanSpeedSlider.action =
+        @selector(faceTrackingPanSpeedChanged:);
+    self.faceTrackingPanSpeedSlider.accessibilityLabel =
+        @"Face tracking pan speed";
+    self.faceTrackingPanSpeedSlider.accessibilityIdentifier =
+        @"ROB.Tracking.PanSpeed";
+    self.faceTrackingPanSpeedSlider.accessibilityHelp =
+        @"Changes the horizontal face and human-blob tracking speed immediately. The slowest setting preserves the previously calibrated motion.";
+    [trackingView addSubview:self.faceTrackingPanSpeedSlider];
+
+    NSTextField *trackingMinimumLabel = [self labelWithString:@"Slowest · 250"
+                                                         frame:NSMakeRect(24, 350, 200, 20)];
+    trackingMinimumLabel.textColor = NSColor.secondaryLabelColor;
+    [trackingView addSubview:trackingMinimumLabel];
+    NSTextField *trackingMaximumLabel = [self labelWithString:@"Fastest · 1500"
+                                                         frame:NSMakeRect(456, 350, 200, 20)];
+    trackingMaximumLabel.alignment = NSTextAlignmentRight;
+    trackingMaximumLabel.textColor = NSColor.secondaryLabelColor;
+    [trackingView addSubview:trackingMaximumLabel];
+
+    NSTextField *trackingNote = [self labelWithString:
+        @"The factory setting is 500 targets/second. Changes apply to active tracking immediately and persist across launches. Physical servo smoothing and the collision-safe neck envelope still apply."
+        frame:NSMakeRect(24, 286, 632, 48)];
+    trackingNote.textColor = NSColor.secondaryLabelColor;
+    [trackingView addSubview:trackingNote];
+    [self refreshFaceTrackingPanSpeedSetting];
 
     NSTabViewItem *hardwareTab = [NSTabViewItem tabViewItemWithViewController:[[NSViewController alloc] init]];
     hardwareTab.label = @"Hardware";
@@ -794,6 +864,27 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
     }
 }
 
+- (void)refreshFaceTrackingPanSpeedSetting
+{
+    double speed = ROBPersonTrackingPanTargetsPerSecondFromDefaults(
+        NSUserDefaults.standardUserDefaults
+    );
+    self.faceTrackingPanSpeedSlider.doubleValue = speed;
+    self.faceTrackingPanSpeedValueLabel.stringValue = [NSString
+        stringWithFormat:@"%.0f targets/second", speed];
+}
+
+- (void)faceTrackingPanSpeedChanged:(NSSlider *)sender
+{
+    double speed = ROBPersonTrackingClampPanTargetsPerSecond(
+        lround(sender.doubleValue)
+    );
+    sender.doubleValue = speed;
+    [NSUserDefaults.standardUserDefaults setDouble:speed
+                                             forKey:ROBPersonTrackingPanSpeedDefaultsKey];
+    [self refreshFaceTrackingPanSpeedSetting];
+}
+
 - (void)showInsta360Settings:(id)sender
 {
     [self showWindow:sender];
@@ -1283,6 +1374,7 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
     [self refreshMessagesSettings];
     [self refreshSerialHardwareSettings];
     [self refreshPairedControlDevices];
+    [self refreshFaceTrackingPanSpeedSetting];
 }
 
 - (NSString *)qualityNameForVoice:(AVSpeechSynthesisVoice *)voice
@@ -2280,6 +2372,7 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
     [self refreshSystemDependencyStatus];
     [self refreshVoicePopups];
     [self refreshSerialHardwareSettings];
+    [self refreshFaceTrackingPanSpeedSetting];
 }
 
 - (void)speechVoicesDidChange:(NSNotification *)notification

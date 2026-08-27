@@ -108,9 +108,11 @@ One frame-rate-independent proportional controller is shared by recognized
 faces and legacy human blobs. It targets
 normalized image center `(0.5, 0.5)`, ignores a 12-percent-wide band on each
 axis to prevent detector jitter, and accepts at most one correction every 0.1
-seconds. Horizontal and vertical response rates are `250` and `80`
-raw target units per second at a normalized error of `1.0`. A delayed or newly
-reacquired observation is capped to one 0.1-second correction. Acquisition
+seconds. The default horizontal response is `500` raw target units per second
+at a normalized error of `1.0`; **Settings → Tracking** adjusts it live from
+`250` through `1500`, with the former `250` rate retained as the slowest
+choice. The vertical response remains `80` raw target units per second. A
+delayed or newly reacquired observation is capped to one 0.1-second correction. Acquisition
 captures the currently accepted upper-camera target as its baseline and limits
 vertical tracking to ±20 raw targets around it. It therefore cannot jump from
 the existing camera pose to the authorized-follow target `7375`.

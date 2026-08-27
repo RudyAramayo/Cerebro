@@ -23,6 +23,7 @@ app = text("AppDelegate.m")
 main = text("ROBMainViewController.mm")
 tracking_policy_header = text("ROBPersonTrackingPolicy.h")
 tracking_policy_source = text("ROBPersonTrackingPolicy.c")
+tracking_preferences = text("ROBPersonTrackingPreferences.h")
 gemini = text("GeminiRoboticsProtocol.swift")
 project = (ROOT / "Cerebro.xcodeproj" / "project.pbxproj").read_text(encoding="utf-8")
 
@@ -139,7 +140,12 @@ assert "verticalDeadBand = 0.06" in tracking_policy_source
 assert "mirrorHorizontalCoordinate = false" in tracking_policy_source
 assert "responseExponent = 1.5" in tracking_policy_source
 assert "pow(normalizedError, responseExponent)" in tracking_policy_source
-assert "panTargetsPerSecond = 250.0" in tracking_policy_source
+assert "ROBPersonTrackingDefaultPanTargetsPerSecond" in tracking_policy_source
+assert "ROBPersonTrackingMinimumPanTargetsPerSecond = 250" in tracking_policy_header
+assert "ROBPersonTrackingDefaultPanTargetsPerSecond = 500" in tracking_policy_header
+assert "ROBPersonTrackingMaximumPanTargetsPerSecond = 1500" in tracking_policy_header
+assert 'ROB.PersonTracking.PanTargetsPerSecond' in tracking_preferences
+assert "ROBPersonTrackingPanTargetsPerSecondFromDefaults" in main
 assert "currentPanTarget\n            - resultOut->horizontalError" in tracking_policy_source
 assert "upperTargetsPerSecond = 80.0" in tracking_policy_source
 assert "maximumElapsedSeconds = 0.1" in tracking_policy_source
@@ -162,5 +168,6 @@ for source in (
     assert f"{source} in Sources" in project
 
 assert "ROBPersonTrackingPolicy.h" in project
+assert "ROBPersonTrackingPreferences.h" in project
 
 print("ROB face identity static fixtures passed")

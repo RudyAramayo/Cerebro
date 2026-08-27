@@ -65,7 +65,8 @@ ROBPersonTrackingConfig ROBPersonTrackingDefaultConfig(void) {
         .verticalDeadBand = 0.06,
         .mirrorHorizontalCoordinate = false,
         .responseExponent = 1.5,
-        .panTargetsPerSecond = 250.0,
+        .panTargetsPerSecond =
+            ROBPersonTrackingDefaultPanTargetsPerSecond,
         .upperTargetsPerSecond = 80.0,
         .maximumElapsedSeconds = 0.1,
         .panMinimumTarget = 4000,

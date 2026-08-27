@@ -62,6 +62,10 @@ static void testDefaultCalibration(void) {
     EXPECT_INT(ROBPersonTrackingMaximumUpperTarget, 7400);
     EXPECT_FALSE(configuration.mirrorHorizontalCoordinate);
     EXPECT_TRUE(fabs(configuration.responseExponent - 1.5) < 0.000001);
+    EXPECT_INT(configuration.panTargetsPerSecond, 500);
+    EXPECT_INT(ROBPersonTrackingMinimumPanTargetsPerSecond, 250);
+    EXPECT_INT(ROBPersonTrackingDefaultPanTargetsPerSecond, 500);
+    EXPECT_INT(ROBPersonTrackingMaximumPanTargetsPerSecond, 1500);
 
     ROBPersonTrackingResult centered = track(
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
@@ -86,14 +90,14 @@ static void testCorrectionsPointCameraTowardBlob(void) {
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
         0.8, 0.8, 0.1
     );
-    EXPECT_INT(robotRight.panTarget, 5996);
+    EXPECT_INT(robotRight.panTarget, 5991);
     EXPECT_INT(robotRight.upperTarget, 7376);
 
     ROBPersonTrackingResult robotLeft = track(
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
         0.2, 0.2, 0.1
     );
-    EXPECT_INT(robotLeft.panTarget, 6004);
+    EXPECT_INT(robotLeft.panTarget, 6009);
     EXPECT_INT(robotLeft.upperTarget, 7374);
     EXPECT_FALSE(robotLeft.upperClamped);
 
@@ -103,7 +107,7 @@ static void testCorrectionsPointCameraTowardBlob(void) {
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
         0.2, 0.5, 0.1
     );
-    EXPECT_INT(mirroredRight.panTarget, 5996);
+    EXPECT_INT(mirroredRight.panTarget, 5991);
     configuration.mirrorHorizontalCoordinate = false;
 
     // A downward correction is limited to one raw target in this representative
@@ -128,8 +132,8 @@ static void testCorrectionsPointCameraTowardBlob(void) {
     EXPECT_TRUE(fabs(far.horizontalError) > fabs(closer.horizontalError));
     EXPECT_TRUE(fabs(closer.horizontalError)
         > fabs(almostCentered.horizontalError));
-    EXPECT_INT(far.panTarget, 5996);
-    EXPECT_INT(closer.panTarget, 5999);
+    EXPECT_INT(far.panTarget, 5991);
+    EXPECT_INT(closer.panTarget, 5998);
     EXPECT_INT(almostCentered.panTarget, 6000);
 }
 
@@ -149,7 +153,7 @@ static void testRightTrackingAccumulatesMonotonically(void) {
         pan = result.panTarget;
         EXPECT_TRUE(pan < previousPan);
     }
-    EXPECT_INT(pan, 5960);
+    EXPECT_INT(pan, 5910);
 }
 
 static void testTrackingGuards(void) {
@@ -182,7 +186,7 @@ static void testTrackingGuards(void) {
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
         1.0, 0.5, 1.0
     );
-    EXPECT_INT(cappedGap.panTarget, 5989);
+    EXPECT_INT(cappedGap.panTarget, 5978);
 
     // Runtime acquisition may center its narrow tilt band on the actual
     // accepted camera pose instead of jumping to the policy's legacy neutral.

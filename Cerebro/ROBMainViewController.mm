@@ -8,6 +8,7 @@
 #import "AppDelegate.h"
 #import "ROBMainViewController.h"
 #import "ROBPersonTrackingPolicy.h"
+#import "ROBPersonTrackingPreferences.h"
 #import "ROBSerialBox.h"
 #import "ROBBaseSerialConsoleWindowController.h"
 #import "ROBBaseControllerModel.h"
@@ -3401,6 +3402,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
         ROBPersonTrackingConfig configuration =
             ROBPersonTrackingDefaultConfig();
+        configuration.panTargetsPerSecond =
+            ROBPersonTrackingPanTargetsPerSecondFromDefaults(
+                NSUserDefaults.standardUserDefaults
+            );
         configuration.panMinimumTarget = (int32_t)lround(
             self.torsoControlsViewController.headPan.minValue
         );
@@ -3466,7 +3471,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         if (now - self.lastPersonTrackingDiagnosticsUptime >= 1.0) {
             self.lastPersonTrackingDiagnosticsUptime = now;
             NSLog(
-                @"Person tracking %@ raw=(%.3f, %.3f) filtered=(%.3f, %.3f) pan=%d->%d envelope=%d...%d upper=%d->%d baseline=%d mirrored=%@",
+                @"Person tracking %@ raw=(%.3f, %.3f) filtered=(%.3f, %.3f) pan=%d->%d speed=%.0f envelope=%d...%d upper=%d->%d baseline=%d mirrored=%@",
                 userID,
                 x,
                 y,
@@ -3474,6 +3479,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                 self.filteredPersonTrackingY,
                 currentPanTarget,
                 result.panTarget,
+                configuration.panTargetsPerSecond,
                 configuration.panMinimumTarget,
                 configuration.panMaximumTarget,
                 currentUpperTarget,

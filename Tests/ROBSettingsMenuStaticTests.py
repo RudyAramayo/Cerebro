@@ -11,6 +11,9 @@ STORYBOARD_PATH = ROOT / "Cerebro" / "Base.lproj" / "Main.storyboard"
 SETTINGS_WINDOW = (
     ROOT / "Cerebro" / "ROBPythonSettingsWindowController.m"
 ).read_text(encoding="utf-8")
+TRACKING_PREFERENCES = (
+    ROOT / "Cerebro" / "ROBPersonTrackingPreferences.h"
+).read_text(encoding="utf-8")
 PROCESSING_SETTINGS = (
     ROOT / "Cerebro" / "ROBInsta360ProcessingSettingsViewController.swift"
 ).read_text(encoding="utf-8")
@@ -167,6 +170,24 @@ def main() -> None:
     # The Perception tab owns the processing controller, instead of cloning
     # controls into the diagnostics window.
     build_interface = braced_declaration(SETTINGS_WINDOW, "- (void)buildInterface")
+    require(
+        'trackingTab.label = @"Tracking";' in build_interface
+        and "ROBPersonTrackingMinimumPanTargetsPerSecond" in build_interface
+        and "ROBPersonTrackingMaximumPanTargetsPerSecond" in build_interface
+        and "self.faceTrackingPanSpeedSlider.continuous = YES;" in build_interface
+        and "@selector(faceTrackingPanSpeedChanged:)" in build_interface,
+        "Settings lost the persistent face-tracking speed slider",
+    )
+    tracking_speed_action = braced_declaration(
+        SETTINGS_WINDOW, "- (void)faceTrackingPanSpeedChanged:"
+    )
+    require(
+        "ROBPersonTrackingClampPanTargetsPerSecond" in tracking_speed_action
+        and "setDouble:speed" in tracking_speed_action
+        and "ROBPersonTrackingPanSpeedDefaultsKey" in tracking_speed_action
+        and 'ROB.PersonTracking.PanTargetsPerSecond' in TRACKING_PREFERENCES,
+        "The face-tracking speed slider no longer saves its bounded value",
+    )
     require(
         "ROBInsta360ProcessingSettingsViewController *insta360SettingsViewController"
         in SETTINGS_WINDOW,

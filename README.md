@@ -182,11 +182,14 @@ faces take priority over legacy human blobs, while the generic face detector
 runs only as an acquisition fallback and body boxes run only when neither face
 source is active. The observation filter follows a face approaching center
 quickly and stops immediately inside the dead band; a softened response curve
-further reduces pan and tilt corrections near center. Slower maximum pan/tilt
+further reduces pan and tilt corrections near center. Bounded pan/tilt
 responses, 12-percent center dead bands, the live pan envelope, and a matching
 10 Hz servo renderer prevent detector jitter and physical command latency from
-producing large corrections. The separately controller-authorized follow mode
-retains its reviewed upright/full-pan preparation sequence.
+producing large corrections. **Settings → Tracking** provides a live horizontal
+speed slider from `250` to `1500` raw targets per second; `500` is the default,
+and the previous `250` calibration remains the slowest choice. The separately
+controller-authorized follow mode retains its reviewed upright/full-pan
+preparation sequence.
 The **Servos → Open Servo Control…** window edits named camera positions,
 servo-sequence phases, and relative `YES`/`NO` gestures. Gesture deltas are
 applied around the current pose, so a nod or head shake remains relative to

@@ -18,6 +18,11 @@ extern "C" {
 #endif
 
 enum {
+    // The current proven physical tracking speed remains available as the
+    // slowest operator setting. New installations start moderately faster.
+    ROBPersonTrackingMinimumPanTargetsPerSecond = 250,
+    ROBPersonTrackingDefaultPanTargetsPerSecond = 500,
+    ROBPersonTrackingMaximumPanTargetsPerSecond = 1500,
     // Reviewed camera band for controller-authorized full-pan follow
     // preparation. Ordinary face/blob acquisition instead centers a narrow
     // runtime band on the currently accepted upper-camera target.
@@ -56,7 +61,8 @@ typedef struct {
 // The default controller samples at no more than 10 Hz, aims at the exact
 // image center in the raw main-camera Vision coordinate system, ignores the
 // central 12 percent on both axes, and eases corrections as the observation
-// approaches that band.
+// approaches that band. The runtime may replace the default horizontal rate
+// with the operator's bounded preference.
 ROBPersonTrackingConfig ROBPersonTrackingDefaultConfig(void);
 
 bool ROBPersonTrackingConfigIsValid(
