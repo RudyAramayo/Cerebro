@@ -86,7 +86,7 @@ def main() -> None:
         "The shipped three-phase startup sequence lost its safe reviewed order",
     )
     require(
-        "private static let schemaVersion = 2" in configuration
+        "private static let schemaVersion = 3" in configuration
         and "migrateLegacyUprightCameraMountOffset" in configuration
         and '"fully_upright_center"' in configuration
         and '"fully_right"' in configuration
@@ -102,13 +102,20 @@ def main() -> None:
     require(
         'name: "YES", servo: "upper", delta: 160' in configuration
         and 'name: "NO", servo: "pan", delta: 120' in configuration
+        and configuration.count("repetitions: 2, intervalSeconds: 0.20") == 2
+        and "migrateLegacyGestureCadence" in configuration
+        and "gesture.intervalSeconds == 0.35" in configuration
+        and "gesture.intervalSeconds = 0.20" in configuration
         and "poses.append(offset(base, axis: gesture.servo, delta: gesture.delta))"
         in runtime
         and "poses.append(offset(base, axis: gesture.servo, delta: -gesture.delta))"
         in runtime
+        and "usesFastOscillationCadence: usesFastOscillationCadence" in runtime
+        and "waitForServoReady: !usesFastOscillationCadence" in runtime
+        and "maximumFastOscillationDelta = 400" in runtime
         and "poses.append(base)" not in runtime
         and "complete at its final -delta extreme" in runtime,
-        "YES/NO no longer alternate exactly +delta then -delta per repetition",
+        "YES/NO no longer use the bounded fast +delta/-delta cadence",
     )
     require(
         "private static let maximumSafetyRetries = 8" in runtime

@@ -15,6 +15,7 @@ import Foundation
     private var timer: Timer?
     private var generation = 0
     private static let maximumSafetyRetries = 8
+    private static let maximumFastOscillationDelta = 400
 
     public var isRunning: Bool { timer != nil }
 
@@ -106,12 +107,14 @@ import Foundation
 
         stopWithoutStatus()
         let runGeneration = generation
+        let usesFastOscillationCadence = isFastOscillationGesture(gesture)
         publish("Playing \(gesture.name) relative to the current neck pose…")
         run(
             gesturePoses: poses,
             index: 0,
             interval: gesture.intervalSeconds,
             name: gesture.name,
+            usesFastOscillationCadence: usesFastOscillationCadence,
             generation: runGeneration
         )
     }
@@ -146,6 +149,7 @@ import Foundation
         index: Int,
         interval: TimeInterval,
         name: String,
+        usesFastOscillationCadence: Bool,
         generation runGeneration: Int
     ) {
         guard generation == runGeneration else { return }
@@ -161,6 +165,7 @@ import Foundation
             upper: pose.upper,
             label: "Gesture \(name)",
             hold: interval,
+            waitForServoReady: !usesFastOscillationCadence,
             generation: runGeneration,
             completion: { [weak self] in
                 self?.run(
@@ -168,6 +173,7 @@ import Foundation
                     index: index + 1,
                     interval: interval,
                     name: name,
+                    usesFastOscillationCadence: usesFastOscillationCadence,
                     generation: runGeneration
                 )
             }
@@ -180,6 +186,7 @@ import Foundation
         upper: Int,
         label: String,
         hold: TimeInterval,
+        waitForServoReady: Bool = true,
         generation runGeneration: Int? = nil,
         safetyRetryCount: Int = 0,
         completion: @escaping () -> Void
@@ -205,7 +212,8 @@ import Foundation
             schedule(afterReadyTimeFrom: box, minimumDelay: 0.1) { [weak self] in
                 self?.executePose(
                     pan: pan, lower: lower, upper: upper, label: label,
-                    hold: hold, generation: expectedGeneration,
+                    hold: hold, waitForServoReady: waitForServoReady,
+                    generation: expectedGeneration,
                     safetyRetryCount: safetyRetryCount + 1,
                     completion: completion
                 )
@@ -218,8 +226,14 @@ import Foundation
                 publish("\(label) was limited by the active neck safety window: \(box.neckCommandSafetyStatus)")
                 return
             }
-            publish("\(label) accepted; waiting for conservative servo timing…")
-            schedule(afterReadyTimeFrom: box, minimumDelay: max(0.05, hold)) {
+            publish(waitForServoReady
+                ? "\(label) accepted; waiting for conservative servo timing…"
+                : "\(label) accepted; advancing at the configured gesture cadence…")
+            schedule(
+                afterReadyTimeFrom: box,
+                minimumDelay: max(0.05, hold),
+                waitForServoReady: waitForServoReady
+            ) {
                 completion()
             }
         @unknown default:
@@ -231,11 +245,14 @@ import Foundation
     private func schedule(
         afterReadyTimeFrom box: ROBSerialBox,
         minimumDelay: TimeInterval,
+        waitForServoReady: Bool = true,
         action: @escaping () -> Void
     ) {
         timer?.invalidate()
         let now = ProcessInfo.processInfo.systemUptime
-        let safetyDelay = max(0, box.neckCommandReadyAtUptime - now)
+        let safetyDelay = waitForServoReady
+            ? max(0, box.neckCommandReadyAtUptime - now)
+            : 0
         let retryTimer = Timer(
             timeInterval: safetyDelay + minimumDelay,
             repeats: false
@@ -266,6 +283,16 @@ import Foundation
         generation += 1
         timer?.invalidate()
         timer = nil
+    }
+
+    private func isFastOscillationGesture(_ gesture: ROBServoRelativeGesture) -> Bool {
+        let name = gesture.name.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let servo = gesture.servo.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let usesReviewedAxis = (name == "YES" && servo == "upper")
+            || (name == "NO" && servo == "pan")
+        let deltaIsBounded = (-Self.maximumFastOscillationDelta ...
+            Self.maximumFastOscillationDelta).contains(gesture.delta)
+        return usesReviewedAxis && deltaIsBounded
     }
 
     private func publish(_ status: String) {

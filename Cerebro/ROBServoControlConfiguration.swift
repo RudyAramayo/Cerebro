@@ -148,7 +148,7 @@ public enum ROBServoControlConfigurationError: LocalizedError {
     public static let shared = ROBServoControlStore()
 
     private static let defaultsKey = "ROBServoControlConfigurationV1"
-    private static let schemaVersion = 2
+    private static let schemaVersion = 3
     private static let uprightLowerTarget = 6011
     private static let legacyUprightUpperTarget = 6073
     // Compensates for the front camera's approximately -25 degree mounting.
@@ -475,11 +475,11 @@ public enum ROBServoControlConfigurationError: LocalizedError {
         [
             ROBServoRelativeGesture(
                 name: "YES", servo: "upper", delta: 160,
-                repetitions: 2, intervalSeconds: 0.35
+                repetitions: 2, intervalSeconds: 0.20
             ),
             ROBServoRelativeGesture(
                 name: "NO", servo: "pan", delta: 120,
-                repetitions: 2, intervalSeconds: 0.35
+                repetitions: 2, intervalSeconds: 0.20
             ),
         ]
     }
@@ -556,6 +556,31 @@ public enum ROBServoControlConfigurationError: LocalizedError {
         return changed
     }
 
+    /// Speeds up only the exact YES/NO definitions shipped through version 2.
+    /// Operator-edited gesture amplitudes, axes, repetitions, or intervals stay
+    /// authoritative when the configuration is loaded by a newer build.
+    private static func migrateLegacyGestureCadence(
+        gestures: [ROBServoRelativeGesture]
+    ) -> Bool {
+        var changed = false
+        for gesture in gestures {
+            let isLegacyYes = gesture.name.caseInsensitiveCompare("YES") == .orderedSame
+                && gesture.servo.caseInsensitiveCompare("upper") == .orderedSame
+                && gesture.delta == 160
+            let isLegacyNo = gesture.name.caseInsensitiveCompare("NO") == .orderedSame
+                && gesture.servo.caseInsensitiveCompare("pan") == .orderedSame
+                && gesture.delta == 120
+            guard (isLegacyYes || isLegacyNo),
+                  gesture.repetitions == 2,
+                  gesture.intervalSeconds == 0.35 else {
+                continue
+            }
+            gesture.intervalSeconds = 0.20
+            changed = true
+        }
+        return changed
+    }
+
     private func persistLocked() {
         let payload = Payload(
             version: Self.schemaVersion,
@@ -626,6 +651,8 @@ public enum ROBServoControlConfigurationError: LocalizedError {
                 intervalSeconds: $0.intervalSeconds
             )
         }
+        let migratedGestureCadence = payload.version < 3
+            && Self.migrateLegacyGestureCadence(gestures: gestures)
         guard (try? Self.validate(
             cameraPositions: positions,
             sequencePhases: phases,
@@ -639,7 +666,8 @@ public enum ROBServoControlConfigurationError: LocalizedError {
         if payload.version != Self.schemaVersion
             || positionsNeedPanMigration
             || positions.count != persistedPositionCount
-            || migratedUprightCameraMountOffset {
+            || migratedUprightCameraMountOffset
+            || migratedGestureCadence {
             persistLocked()
         }
         return true
