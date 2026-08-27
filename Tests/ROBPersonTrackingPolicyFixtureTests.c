@@ -57,8 +57,8 @@ static ROBPersonTrackingResult track(
 static void testDefaultCalibration(void) {
     ROBPersonTrackingConfig configuration = ROBPersonTrackingDefaultConfig();
     EXPECT_TRUE(ROBPersonTrackingConfigIsValid(&configuration));
-    EXPECT_INT(ROBPersonTrackingMinimumUpperTarget, 6869);
-    EXPECT_INT(ROBPersonTrackingNeutralUpperTarget, 7200);
+    EXPECT_INT(ROBPersonTrackingMinimumUpperTarget, 7300);
+    EXPECT_INT(ROBPersonTrackingNeutralUpperTarget, 7300);
     EXPECT_INT(ROBPersonTrackingMaximumUpperTarget, 7400);
 
     ROBPersonTrackingResult centered = track(
@@ -83,14 +83,22 @@ static void testCorrectionsPointCameraTowardBlob(void) {
         0.8, 0.8, 0.1
     );
     EXPECT_INT(upperRight.panTarget, 5990);
-    EXPECT_INT(upperRight.upperTarget, 7208);
+    EXPECT_INT(upperRight.upperTarget, 7304);
 
     ROBPersonTrackingResult lowerLeft = track(
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
         0.2, 0.2, 0.1
     );
     EXPECT_INT(lowerLeft.panTarget, 6010);
-    EXPECT_INT(lowerLeft.upperTarget, 7192);
+    EXPECT_INT(lowerLeft.upperTarget, ROBPersonTrackingMinimumUpperTarget);
+    EXPECT_TRUE(lowerLeft.upperClamped);
+
+    // A downward correction may reduce an already raised target, but cannot
+    // cross the slight-up tracking floor that prevents the observed dip.
+    ROBPersonTrackingResult downwardWithinGuard = track(
+        &configuration, 6000, 7350, 0.5, 0.2, 0.1
+    );
+    EXPECT_INT(downwardWithinGuard.upperTarget, 7346);
 }
 
 static void testTrackingGuards(void) {

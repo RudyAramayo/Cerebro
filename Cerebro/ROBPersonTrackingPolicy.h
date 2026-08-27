@@ -18,12 +18,12 @@ extern "C" {
 #endif
 
 enum {
-    // Raised after physical testing so face acquisition does not make the
-    // camera dip sharply from the lean-forward pose.
-    ROBPersonTrackingNeutralUpperTarget = 7200,
-    // The prior face-centered target is now the downward tracking guard. The
-    // existing high guard remains tighter than the physical joint maximum.
-    ROBPersonTrackingMinimumUpperTarget = 6869,
+    // Physical testing showed that 7200 still aimed the camera downward.
+    // Acquire at the slight-up tracking floor so a new face/blob cannot make
+    // the upper neck dip and hunt below the useful camera envelope.
+    ROBPersonTrackingNeutralUpperTarget = 7300,
+    ROBPersonTrackingMinimumUpperTarget = 7300,
+    // Retain the existing high guard below the physical joint maximum.
     ROBPersonTrackingMaximumUpperTarget = 7400
 };
 
