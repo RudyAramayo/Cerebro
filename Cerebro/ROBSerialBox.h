@@ -99,6 +99,11 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 @property (readonly, assign, getter=isNeckSafetyCalibrationConfirmed) BOOL neckSafetyCalibrationConfirmed;
 @property (readonly, assign, getter=isNeckCameraLevelingEnabled) BOOL neckCameraLevelingEnabled;
 @property (readonly, assign, getter=isSafeNeckStartupInProgress) BOOL safeNeckStartupInProgress;
+/// Worst-case command-space time at which all currently accepted neck targets
+/// and any pending lower-dependent pan envelope are ready. The Maestro has no
+/// shaft feedback, so this is deliberately conservative timing, not a measured
+/// physical-position guarantee.
+@property (readonly, assign) NSTimeInterval neckCommandReadyAtUptime;
 @property (readonly, copy) NSString *neckCommandSource;
 @property (readonly, copy) NSString *neckCommandSafetyStatus;
 
@@ -111,11 +116,18 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 - (BOOL)setNeckCameraLevelingEnabled:(BOOL)enabled;
 /// Deliberately recovers an OFF/unknown neck through the calibrated startup
 /// sequence. Pan remains OFF while lower/upper move to the clearance pose;
-/// pan then settles forward before lower returns to the rear resting default.
+/// pan then settles forward before the configured phase-3 camera pose is sent
+/// (the shipped final pose is `lean_forward`, lower 7014 / upper 7698).
 /// This is command-space timing only because the Maestro provides no shaft
 /// feedback. Repeated calls while the sequence is active are harmless.
 - (ROBNeckCommandDisposition)startSafeNeckStartup;
 - (void)cancelSafeNeckStartup;
+/// Submits an explicit operator pose through the same collision, settling, and
+/// calibration gateway used by the torso sliders. Callers should retry a
+/// HeldForSafety result only after `neckCommandReadyAtUptime`.
+- (ROBNeckCommandDisposition)requestOperatorNeckPosePanTarget:(NSInteger)panTarget
+                                                  lowerTarget:(NSInteger)lowerTarget
+                                                  upperTarget:(NSInteger)upperTarget;
 
 @property (readwrite, retain) NSSlider *arm_R11_force;
 

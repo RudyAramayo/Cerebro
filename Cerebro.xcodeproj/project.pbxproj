@@ -118,6 +118,9 @@
 		C0F011022F6A011000000001 /* ROBFollowPersonCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0F011012F6A011000000001 /* ROBFollowPersonCoordinator.swift */; };
 		C0A120022F4C012000000001 /* ROBRecordingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A120012F4C012000000001 /* ROBRecordingCoordinator.swift */; };
 		C0A121022F4C012100000001 /* ROBRecordingWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A121012F4C012100000001 /* ROBRecordingWindowController.swift */; };
+		C0F020022F6B020000000001 /* ROBServoControlConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0F020012F6B020000000001 /* ROBServoControlConfiguration.swift */; };
+		C0F021022F6B020100000001 /* ROBServoControlRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0F021012F6B020100000001 /* ROBServoControlRuntime.swift */; };
+		C0F022022F6B020200000001 /* ROBServoControlWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0F022012F6B020200000001 /* ROBServoControlWindowController.swift */; };
 		C0A130022F4C013000000001 /* ROBFaceIdentityGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A130012F4C013000000001 /* ROBFaceIdentityGallery.swift */; };
 		C0A131022F4C013100000001 /* ROBFaceRecognitionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A131012F4C013100000001 /* ROBFaceRecognitionService.swift */; };
 		C0A132022F4C013200000001 /* ROBFaceIdentityWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A132012F4C013200000001 /* ROBFaceIdentityWindowController.swift */; };
@@ -317,6 +320,9 @@
 		C0F011012F6A011000000001 /* ROBFollowPersonCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBFollowPersonCoordinator.swift; sourceTree = "<group>"; };
 		C0A120012F4C012000000001 /* ROBRecordingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRecordingCoordinator.swift; sourceTree = "<group>"; };
 		C0A121012F4C012100000001 /* ROBRecordingWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRecordingWindowController.swift; sourceTree = "<group>"; };
+		C0F020012F6B020000000001 /* ROBServoControlConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBServoControlConfiguration.swift; sourceTree = "<group>"; };
+		C0F021012F6B020100000001 /* ROBServoControlRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBServoControlRuntime.swift; sourceTree = "<group>"; };
+		C0F022012F6B020200000001 /* ROBServoControlWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBServoControlWindowController.swift; sourceTree = "<group>"; };
 		C0A130012F4C013000000001 /* ROBFaceIdentityGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBFaceIdentityGallery.swift; sourceTree = "<group>"; };
 		C0A131012F4C013100000001 /* ROBFaceRecognitionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBFaceRecognitionService.swift; sourceTree = "<group>"; };
 		C0A132012F4C013200000001 /* ROBFaceIdentityWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBFaceIdentityWindowController.swift; sourceTree = "<group>"; };
@@ -523,6 +529,9 @@
 				C0F011012F6A011000000001 /* ROBFollowPersonCoordinator.swift */,
 				C0A120012F4C012000000001 /* ROBRecordingCoordinator.swift */,
 				C0A121012F4C012100000001 /* ROBRecordingWindowController.swift */,
+				C0F020012F6B020000000001 /* ROBServoControlConfiguration.swift */,
+				C0F021012F6B020100000001 /* ROBServoControlRuntime.swift */,
+				C0F022012F6B020200000001 /* ROBServoControlWindowController.swift */,
 				C0A130012F4C013000000001 /* ROBFaceIdentityGallery.swift */,
 				C0A131012F4C013100000001 /* ROBFaceRecognitionService.swift */,
 				C0A132012F4C013200000001 /* ROBFaceIdentityWindowController.swift */,
@@ -869,6 +878,9 @@
 				C0F011022F6A011000000001 /* ROBFollowPersonCoordinator.swift in Sources */,
 				C0A120022F4C012000000001 /* ROBRecordingCoordinator.swift in Sources */,
 				C0A121022F4C012100000001 /* ROBRecordingWindowController.swift in Sources */,
+				C0F020022F6B020000000001 /* ROBServoControlConfiguration.swift in Sources */,
+				C0F021022F6B020100000001 /* ROBServoControlRuntime.swift in Sources */,
+				C0F022022F6B020200000001 /* ROBServoControlWindowController.swift in Sources */,
 				C0A130022F4C013000000001 /* ROBFaceIdentityGallery.swift in Sources */,
 				C0A131022F4C013100000001 /* ROBFaceRecognitionService.swift in Sources */,
 				C0A132022F4C013200000001 /* ROBFaceIdentityWindowController.swift in Sources */,

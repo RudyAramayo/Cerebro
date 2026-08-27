@@ -167,11 +167,16 @@ Targets below the band use the symmetric restriction; targets above it and an
 off or unknown lower command use the −15.0°…+2.1° forward window. An explicit
 pan-slider action can safely re-establish an enabled lower slider target in the
 full-pan band after startup or reconnect before the pan envelope widens.
-If any neck axis is OFF or unknown, a deliberate Head action with all three
-axes enabled runs the fixed resting-pose recovery: pan stays OFF while
-lower/upper move to `6011`/`6073`, pan settles forward at `5799`, and only then
-does lower return toward the rear at `7014`. The safe Head slider defaults are
-restored to `5799`/`7014`/`6073`.
+When the Maestro comes online—or after a deliberate Head recovery action with
+an OFF/unknown axis—the service runs a configurable, validated three-phase
+startup: pan stays OFF while lower/upper move to `6011`/`6073`, pan settles
+forward at `5799`, and only then does the neck move to the `lean_forward` pose
+at lower `7014` / upper `7698`.
+The **Servos → Open Servo Control…** window edits named camera positions,
+servo-sequence phases, and relative `YES`/`NO` gestures. Gesture deltas are
+applied around the current pose, so a nod or head shake remains relative to
+who ROB is already facing. Every action remains subject to the live neck
+safety window.
 The Head panel also has a persistent **Keep upright** toggle for coupled
 lower/upper camera commands. The torso readouts show commands sent, not
 measured shaft positions; calibration and physical supervision are still

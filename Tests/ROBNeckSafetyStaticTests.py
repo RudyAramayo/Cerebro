@@ -478,30 +478,37 @@ def check_safe_startup_sequence(
         serial_source, "invalidateNeckCommandStateWithStatus:"
     ))
     require(
-        "applySafeNeckPanTarget:ROBNeckSafetyTargetOff "
-        "lowerTiltTarget:ROBNeckSafetyUprightLowerTarget "
-        "desiredUpperTarget:ROBNeckSafetyDefaultUpperTarget "
+        "ROBServoControlStore *store = [ROBServoControlStore shared];" in startup
+        and "startupPhaseAtIndex:0" in startup
+        and "startupPhaseAtIndex:1" in startup
+        and "startupPhaseAtIndex:2" in startup
+        and "safeNeckStartupPhaseOne = phaseOne;" in startup
+        and "safeNeckStartupPhaseTwo = phaseTwo;" in startup
+        and "safeNeckStartupPhaseThree = phaseThree;" in startup
+        and "applySafeNeckPanTarget:(int)phaseOne.panTarget "
+        "lowerTiltTarget:(int)phaseOne.lowerTarget "
+        "desiredUpperTarget:(int)phaseOne.upperTarget "
         "includeLower:YES allowSupervisedLowerRecovery:YES "
         "source:kROBSafeNeckStartupLiftSource" in startup
         and "sendMaestro" not in startup,
-        "Startup phase 1 must keep pan OFF and submit the coupled 6011/default "
-        "lift only through the shared gateway",
+        "Startup phase 1 must freeze the validated Servo Control snapshot and "
+        "submit its OFF-pan coupled lift only through the shared gateway",
     )
     require(
-        "applySafeNeckPanTarget:ROBNeckSafetyDefaultForwardPanTarget "
-        "lowerTiltTarget:ROBNeckSafetyUprightLowerTarget "
-        "desiredUpperTarget:ROBNeckSafetyDefaultUpperTarget "
+        "applySafeNeckPanTarget:(int)phaseTwo.panTarget "
+        "lowerTiltTarget:(int)phaseTwo.lowerTarget "
+        "desiredUpperTarget:(int)phaseTwo.upperTarget "
         "includeLower:YES allowSupervisedLowerRecovery:NO "
         "source:kROBSafeNeckStartupRestSource" in advance
-        and "applySafeNeckPanTarget:ROBNeckSafetyDefaultForwardPanTarget "
-        "lowerTiltTarget:ROBNeckSafetyDefaultLowerTarget "
-        "desiredUpperTarget:ROBNeckSafetyDefaultUpperTarget "
+        and "applySafeNeckPanTarget:(int)phaseThree.panTarget "
+        "lowerTiltTarget:(int)phaseThree.lowerTarget "
+        "desiredUpperTarget:(int)phaseThree.upperTarget "
         "includeLower:YES allowSupervisedLowerRecovery:NO "
         "source:kROBSafeNeckStartupRestSource" in advance
-        and "maestroMotionDurationFromTarget:ROBNeckSafetyUprightLowerTarget "
-        "toTarget:ROBNeckSafetyDefaultLowerTarget" in advance
+        and "commandedLowerNeckTargetReadyAt" in advance
         and "centeringCommandIsExact" in advance
         and "loweringCommandIsExact" in advance
+        and "finalCommandIsExact" in advance
         and "manual controls are available" in advance
         and "ROBSafeNeckStartupPhaseLowering" in advance
         and "sendMaestro" not in advance,
@@ -510,6 +517,7 @@ def check_safe_startup_sequence(
     )
     require(
         "safeStartupLiftCommand" in gateway
+        and "safeNeckStartupPhaseOne" in gateway
         and "effectiveConfiguration.cameraLevelingEnabled = false;" in gateway
         and "&& !safeStartupLiftCommand" in gateway
         and "|| safeStartupLiftCommand" in gateway,

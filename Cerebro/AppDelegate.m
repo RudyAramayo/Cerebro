@@ -67,6 +67,7 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 {
     [self installRecordingMenu];
     [self installFaceIdentityMenu];
+    [self installServoControlMenu];
     [self installDevelopmentMenu];
     [[[NSWorkspace sharedWorkspace] notificationCenter]
         addObserver:self
@@ -143,6 +144,41 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 - (IBAction)showRecordingControl:(id)sender
 {
     [[ROBRecordingWindowController shared] showWindow:sender];
+}
+
+- (void)installServoControlMenu
+{
+    NSMenu *submenu = [[NSMenu alloc] initWithTitle:@"Servos"];
+    NSMenuItem *openItem = [[NSMenuItem alloc]
+        initWithTitle:@"Open Servo Control…"
+               action:@selector(showServoControl:)
+        keyEquivalent:@"s"];
+    openItem.keyEquivalentModifierMask =
+        NSEventModifierFlagCommand | NSEventModifierFlagShift;
+    openItem.target = self;
+    [submenu addItem:openItem];
+
+    NSMenuItem *servosItem = [[NSMenuItem alloc] initWithTitle:@"Servos"
+                                                        action:nil
+                                                 keyEquivalent:@""];
+    servosItem.submenu = submenu;
+    [NSApp.mainMenu addItem:servosItem];
+}
+
+- (IBAction)showServoControl:(id)sender
+{
+    ROBServoControlWindowController *controller =
+        [ROBServoControlWindowController shared];
+    for (NSWindow *window in NSApp.windows) {
+        ROBMainViewController *mainViewController =
+            [self mainViewControllerInViewController:window.contentViewController];
+        if (mainViewController != nil) {
+            controller.serialBox = mainViewController.serialBox;
+            [controller showWindow:sender];
+            return;
+        }
+    }
+    NSBeep();
 }
 
 - (void)installDevelopmentMenu

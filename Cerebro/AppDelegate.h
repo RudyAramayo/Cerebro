@@ -20,5 +20,6 @@
 - (IBAction)showFaceIdentityControl:(id)sender;
 - (IBAction)showAmberArmDiagnostics:(id)sender;
 - (IBAction)showWakeUpCalibration:(id)sender;
+- (IBAction)showServoControl:(id)sender;
 
 @end

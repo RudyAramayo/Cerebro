@@ -45,7 +45,7 @@ physical build.
 | Upper upright | 6073 | fixed neutral upper-neck camera target and Vision tracking center |
 | Default forward pan | 5799 | original torso-control forward resting target |
 | Default lower rest | 7014 | original safe resting target toward the rear of the robot |
-| Default upper rest | 6073 | calibrated upright upper-neck resting target |
+| Default upper rest | 6073 | calibrated upright upper-neck target used by the `upright` camera position |
 | Pan center | 6000 | raw target treated as 0° |
 | Pan targets per degree | 33.3333 | raw-target-to-degree scale |
 | Camera counter gain | -1.0 | upper-target correction per lower-target unit |
@@ -97,10 +97,11 @@ unverified compensation direction autonomously.
 
 ## OFF/unknown safe startup
 
-Reconnecting never moves the neck automatically. When one or more neck axes
-are `OFF` or `UNKNOWN`, a deliberate enabled-slider or enable-checkbox action
-turns all three Head enable checkboxes on as one recovery group and starts this
-fixed sequence:
+After a Maestro connection has accepted its conservative speed and
+acceleration profile, the hardware service automatically starts a validated
+three-phase neck sequence. A deliberate enabled-slider or enable-checkbox
+action can start the same recovery when one or more axes are `OFF` or
+`UNKNOWN`:
 
 1. Pan is commanded `OFF`. Lower and upper are sent together to lower-up
    `6011` and upper upright `6073`.
@@ -108,19 +109,32 @@ fixed sequence:
    plus the settling margin. It then commands pan forward to `5799` while
    holding lower at `6011`.
 3. Only after the worst-case pan ramp and staging margin expire does Cerebro
-   send lower rest `7014` and upper upright `6073` together. It waits for that
-   lower ramp before releasing normal torso control.
+   send the `lean_forward` camera pose: lower `7014` and upper `7698` together.
+   It waits for both joint deadlines before releasing normal torso control.
+
+The **Servos → Open Servo Control…** window exposes camera positions, servo
+sequences, and relative gestures. The shipped camera catalog is
+`lean_forward` (`L 7014`, `U 7698`), `upright` (`L 6011`, `U 6073`), and
+`lean_back` (`L 4747`, `U 5214`). Sequence phases contain pan, lower, upper,
+and post-settle hold values; the sequence table receives the largest share of
+the window. Startup edits are accepted only when they still describe exactly
+three ordered phases: phase 1 has pan OFF in the full-clearance lower band,
+phase 2 holds phase-1 lower/upper while energizing pan, and phase 3 retains the
+phase-2 pan. Every phase must also pass the active hard limits without a clamp.
+The service copies all three phases before motion begins, so edits cannot alter
+an in-flight startup.
 
 The Head sliders mirror each accepted startup target as soon as its command is
 issued: lower shows `6011` during the clearance/centering phases and `7014`
-once the resting move is issued; upper shows `6073`, and pan shows `5799` once
-it is energized in phase 2. Because there is no shaft feedback, these are
-commanded targets rather than measured
+once the lean-forward move is issued; upper changes from `6073` to `7698` in
+phase 3, and pan shows `5799` once it is energized in phase 2. Because there is
+no shaft feedback, these are commanded targets rather than measured
 positions. A slider deliberately edited during startup retains that queued
 operator value instead and replays it after completion. The three enable
 checkboxes are wired as explicit operator actions. Camera
 counter-rotation is suspended only for these exact startup poses, then rebased
-at `7014` so the next normal render does not jump the upper servo. Switching
+at the configured phase-3 pose so the next normal render does not jump the
+upper servo. Switching
 any neck checkbox off cancels the pending sequence and routes the OFF demand
 through normal shutdown staging. At an entirely unknown/OFF pose, that OFF
 action clears all three checkboxes together so the other checked axes cannot
@@ -131,6 +145,13 @@ With no shaft feedback, lower could leave the `5000`–`6495` clearance band
 before pan reached forward center; waiting for the conservative pan deadline
 prevents that race. Every arrival in this sequence is inferred from the
 configured motion profile and worst-case command distance, not measured.
+
+The shipped `YES` gesture applies a positive and negative delta around the
+current upper-neck target to nod, then returns to its captured starting pose.
+The shipped `NO` gesture does the same around the current pan target. Servo,
+delta, repetition count, and interval are editable. Gesture steps and named
+camera positions use the same safety gateway as the torso sliders; a clamped
+target stops execution and leaves the warning/restricted envelope visible.
 
 ## Hardware servo motion profile
 

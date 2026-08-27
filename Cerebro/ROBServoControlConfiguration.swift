@@ -1,0 +1,525 @@
+//
+//  ROBServoControlConfiguration.swift
+//  Cerebro
+//
+//  Persistent, operator-editable neck positions, sequences, and gestures.
+//
+
+import Foundation
+
+public extension Notification.Name {
+    static let robServoControlConfigurationDidChange = Notification.Name(
+        "ROBServoControlConfigurationDidChange"
+    )
+}
+
+@objcMembers public final class ROBServoCameraPosition: NSObject {
+    public var identifier: String
+    public var name: String
+    public var lowerTarget: Int
+    public var upperTarget: Int
+
+    public init(
+        identifier: String = UUID().uuidString,
+        name: String,
+        lowerTarget: Int,
+        upperTarget: Int
+    ) {
+        self.identifier = identifier
+        self.name = name
+        self.lowerTarget = lowerTarget
+        self.upperTarget = upperTarget
+        super.init()
+    }
+
+    public func copyValue() -> ROBServoCameraPosition {
+        ROBServoCameraPosition(
+            identifier: identifier,
+            name: name,
+            lowerTarget: lowerTarget,
+            upperTarget: upperTarget
+        )
+    }
+}
+
+@objcMembers public final class ROBServoSequencePhase: NSObject {
+    public var identifier: String
+    public var sequenceName: String
+    public var phaseIndex: Int
+    public var phaseName: String
+    public var cameraPositionName: String
+    public var panTarget: Int
+    public var lowerTarget: Int
+    public var upperTarget: Int
+    public var holdSeconds: Double
+
+    public init(
+        identifier: String = UUID().uuidString,
+        sequenceName: String,
+        phaseIndex: Int,
+        phaseName: String,
+        cameraPositionName: String,
+        panTarget: Int,
+        lowerTarget: Int,
+        upperTarget: Int,
+        holdSeconds: Double
+    ) {
+        self.identifier = identifier
+        self.sequenceName = sequenceName
+        self.phaseIndex = phaseIndex
+        self.phaseName = phaseName
+        self.cameraPositionName = cameraPositionName
+        self.panTarget = panTarget
+        self.lowerTarget = lowerTarget
+        self.upperTarget = upperTarget
+        self.holdSeconds = holdSeconds
+        super.init()
+    }
+
+    public func copyValue() -> ROBServoSequencePhase {
+        ROBServoSequencePhase(
+            identifier: identifier,
+            sequenceName: sequenceName,
+            phaseIndex: phaseIndex,
+            phaseName: phaseName,
+            cameraPositionName: cameraPositionName,
+            panTarget: panTarget,
+            lowerTarget: lowerTarget,
+            upperTarget: upperTarget,
+            holdSeconds: holdSeconds
+        )
+    }
+}
+
+@objcMembers public final class ROBServoRelativeGesture: NSObject {
+    public var identifier: String
+    public var name: String
+    /// One of "pan", "lower", or "upper".
+    public var servo: String
+    public var delta: Int
+    public var repetitions: Int
+    public var intervalSeconds: Double
+
+    public init(
+        identifier: String = UUID().uuidString,
+        name: String,
+        servo: String,
+        delta: Int,
+        repetitions: Int,
+        intervalSeconds: Double
+    ) {
+        self.identifier = identifier
+        self.name = name
+        self.servo = servo
+        self.delta = delta
+        self.repetitions = repetitions
+        self.intervalSeconds = intervalSeconds
+        super.init()
+    }
+
+    public func copyValue() -> ROBServoRelativeGesture {
+        ROBServoRelativeGesture(
+            identifier: identifier,
+            name: name,
+            servo: servo,
+            delta: delta,
+            repetitions: repetitions,
+            intervalSeconds: intervalSeconds
+        )
+    }
+}
+
+public enum ROBServoControlConfigurationError: LocalizedError {
+    case invalid(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalid(let message): return message
+        }
+    }
+}
+
+@objcMembers public final class ROBServoControlStore: NSObject {
+    public static let shared = ROBServoControlStore()
+
+    private static let defaultsKey = "ROBServoControlConfigurationV1"
+    private static let schemaVersion = 1
+    private let lock = NSRecursiveLock()
+    private var positionsStorage: [ROBServoCameraPosition] = []
+    private var phasesStorage: [ROBServoSequencePhase] = []
+    private var gesturesStorage: [ROBServoRelativeGesture] = []
+
+    private override init() {
+        super.init()
+        if !loadPersistedConfiguration() {
+            installDefaults(persist: true)
+        }
+    }
+
+    public func cameraPositionsSnapshot() -> [ROBServoCameraPosition] {
+        lock.lock()
+        defer { lock.unlock() }
+        return positionsStorage.map { $0.copyValue() }
+    }
+
+    public func sequencePhasesSnapshot() -> [ROBServoSequencePhase] {
+        lock.lock()
+        defer { lock.unlock() }
+        return phasesStorage
+            .sorted(by: Self.phaseSort)
+            .map { $0.copyValue() }
+    }
+
+    public func gesturesSnapshot() -> [ROBServoRelativeGesture] {
+        lock.lock()
+        defer { lock.unlock() }
+        return gesturesStorage.map { $0.copyValue() }
+    }
+
+    @objc(startupPhaseAtIndex:)
+    public func startupPhase(at index: Int) -> ROBServoSequencePhase? {
+        lock.lock()
+        defer { lock.unlock() }
+        let startup = phasesStorage
+            .filter { $0.sequenceName.caseInsensitiveCompare("startup") == .orderedSame }
+            .sorted(by: Self.phaseSort)
+        guard startup.indices.contains(index) else { return nil }
+        return startup[index].copyValue()
+    }
+
+    @nonobjc public func replaceConfiguration(
+        cameraPositions: [ROBServoCameraPosition],
+        sequencePhases: [ROBServoSequencePhase],
+        gestures: [ROBServoRelativeGesture]
+    ) throws {
+        try Self.validate(
+            cameraPositions: cameraPositions,
+            sequencePhases: sequencePhases,
+            gestures: gestures
+        )
+        lock.lock()
+        positionsStorage = cameraPositions.map { $0.copyValue() }
+        phasesStorage = sequencePhases.sorted(by: Self.phaseSort).map { $0.copyValue() }
+        gesturesStorage = gestures.map { $0.copyValue() }
+        persistLocked()
+        lock.unlock()
+        NotificationCenter.default.post(
+            name: .robServoControlConfigurationDidChange,
+            object: self
+        )
+    }
+
+    public func restoreDefaults() {
+        installDefaults(persist: true)
+        NotificationCenter.default.post(
+            name: .robServoControlConfigurationDidChange,
+            object: self
+        )
+    }
+
+    @nonobjc public static func validate(
+        cameraPositions: [ROBServoCameraPosition],
+        sequencePhases: [ROBServoSequencePhase],
+        gestures: [ROBServoRelativeGesture]
+    ) throws {
+        guard !cameraPositions.isEmpty else {
+            throw ROBServoControlConfigurationError.invalid(
+                "At least one camera position is required."
+            )
+        }
+        var positionNames = Set<String>()
+        for position in cameraPositions {
+            let normalized = position.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            guard !normalized.isEmpty, positionNames.insert(normalized).inserted else {
+                throw ROBServoControlConfigurationError.invalid(
+                    "Camera position names must be nonempty and unique."
+                )
+            }
+            try validateActiveTarget(position.lowerTarget, label: "Lower target")
+            try validateActiveTarget(position.upperTarget, label: "Upper target")
+        }
+
+        guard !sequencePhases.isEmpty else {
+            throw ROBServoControlConfigurationError.invalid(
+                "At least one servo sequence phase is required."
+            )
+        }
+        var phaseKeys = Set<String>()
+        for phase in sequencePhases {
+            let sequence = phase.sequenceName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let name = phase.phaseName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !sequence.isEmpty, !name.isEmpty, phase.phaseIndex >= 1 else {
+                throw ROBServoControlConfigurationError.invalid(
+                    "Every sequence phase needs a sequence name, phase name, and index of at least 1."
+                )
+            }
+            let key = "\(sequence.lowercased())#\(phase.phaseIndex)"
+            guard phaseKeys.insert(key).inserted else {
+                throw ROBServoControlConfigurationError.invalid(
+                    "Sequence phase indexes must be unique within each sequence."
+                )
+            }
+            try validateTargetAllowingOff(phase.panTarget, label: "Pan target")
+            try validateActiveTarget(phase.lowerTarget, label: "Lower target")
+            try validateActiveTarget(phase.upperTarget, label: "Upper target")
+            guard phase.holdSeconds.isFinite,
+                  (0.0 ... 10.0).contains(phase.holdSeconds) else {
+                throw ROBServoControlConfigurationError.invalid(
+                    "Phase hold must be between 0 and 10 seconds."
+                )
+            }
+            let cameraPosition = phase.cameraPositionName
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            guard cameraPosition.isEmpty || positionNames.contains(cameraPosition) else {
+                throw ROBServoControlConfigurationError.invalid(
+                    "Sequence camera positions must refer to a named camera position."
+                )
+            }
+        }
+
+        let startup = sequencePhases
+            .filter { $0.sequenceName.caseInsensitiveCompare("startup") == .orderedSame }
+            .sorted(by: phaseSort)
+        guard startup.count == 3,
+              startup.map(\.phaseIndex) == [1, 2, 3] else {
+            throw ROBServoControlConfigurationError.invalid(
+                "The startup sequence must contain exactly phases 1, 2, and 3."
+            )
+        }
+        guard startup[0].panTarget == 0 else {
+            throw ROBServoControlConfigurationError.invalid(
+                "Startup phase 1 must keep pan OFF."
+            )
+        }
+        guard (5000 ... 6495).contains(startup[0].lowerTarget) else {
+            throw ROBServoControlConfigurationError.invalid(
+                "Startup phase 1 lower must remain in the 5000–6495 full-clearance band."
+            )
+        }
+        guard startup[1].panTarget != 0,
+              startup[1].lowerTarget == startup[0].lowerTarget,
+              startup[1].upperTarget == startup[0].upperTarget else {
+            throw ROBServoControlConfigurationError.invalid(
+                "Startup phase 2 must hold the phase-1 lower/upper targets while energizing pan."
+            )
+        }
+        guard startup[2].panTarget == startup[1].panTarget else {
+            throw ROBServoControlConfigurationError.invalid(
+                "Startup phase 3 must retain the centered phase-2 pan target."
+            )
+        }
+
+        var gestureNames = Set<String>()
+        for gesture in gestures {
+            let name = gesture.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty,
+                  gestureNames.insert(name.lowercased()).inserted else {
+                throw ROBServoControlConfigurationError.invalid(
+                    "Gesture names must be nonempty and unique."
+                )
+            }
+            guard ["pan", "lower", "upper"].contains(gesture.servo.lowercased()) else {
+                throw ROBServoControlConfigurationError.invalid(
+                    "Gesture servo must be pan, lower, or upper."
+                )
+            }
+            guard gesture.delta != 0,
+                  (-4000 ... 4000).contains(gesture.delta) else {
+                throw ROBServoControlConfigurationError.invalid(
+                    "Gesture delta must be nonzero and no larger than 4000 target units."
+                )
+            }
+            guard (1 ... 5).contains(gesture.repetitions),
+                  gesture.intervalSeconds.isFinite,
+                  (0.1 ... 3.0).contains(gesture.intervalSeconds) else {
+                throw ROBServoControlConfigurationError.invalid(
+                    "Gesture repetitions must be 1–5 and interval must be 0.1–3.0 seconds."
+                )
+            }
+        }
+    }
+
+    private static func validateTargetAllowingOff(_ target: Int, label: String) throws {
+        guard (0 ... 16_383).contains(target) else {
+            throw ROBServoControlConfigurationError.invalid(
+                "\(label) must be between 0 and 16383."
+            )
+        }
+    }
+
+    private static func validateActiveTarget(_ target: Int, label: String) throws {
+        guard (1 ... 16_383).contains(target) else {
+            throw ROBServoControlConfigurationError.invalid(
+                "\(label) must be between 1 and 16383."
+            )
+        }
+    }
+
+    private static func phaseSort(
+        _ lhs: ROBServoSequencePhase,
+        _ rhs: ROBServoSequencePhase
+    ) -> Bool {
+        let sequenceOrder = lhs.sequenceName.localizedCaseInsensitiveCompare(rhs.sequenceName)
+        if sequenceOrder != .orderedSame { return sequenceOrder == .orderedAscending }
+        if lhs.phaseIndex != rhs.phaseIndex { return lhs.phaseIndex < rhs.phaseIndex }
+        return lhs.phaseName.localizedCaseInsensitiveCompare(rhs.phaseName) == .orderedAscending
+    }
+
+    private func installDefaults(persist: Bool) {
+        lock.lock()
+        positionsStorage = Self.defaultPositions()
+        phasesStorage = Self.defaultPhases()
+        gesturesStorage = Self.defaultGestures()
+        if persist { persistLocked() }
+        lock.unlock()
+    }
+
+    private static func defaultPositions() -> [ROBServoCameraPosition] {
+        [
+            ROBServoCameraPosition(name: "lean_forward", lowerTarget: 7014, upperTarget: 7698),
+            ROBServoCameraPosition(name: "upright", lowerTarget: 6011, upperTarget: 6073),
+            ROBServoCameraPosition(name: "lean_back", lowerTarget: 4747, upperTarget: 5214),
+        ]
+    }
+
+    private static func defaultPhases() -> [ROBServoSequencePhase] {
+        [
+            ROBServoSequencePhase(
+                sequenceName: "startup", phaseIndex: 1,
+                phaseName: "Lift to upright clearance", cameraPositionName: "upright",
+                panTarget: 0, lowerTarget: 6011, upperTarget: 6073, holdSeconds: 0
+            ),
+            ROBServoSequencePhase(
+                sequenceName: "startup", phaseIndex: 2,
+                phaseName: "Center pan", cameraPositionName: "upright",
+                panTarget: 5799, lowerTarget: 6011, upperTarget: 6073, holdSeconds: 0
+            ),
+            ROBServoSequencePhase(
+                sequenceName: "startup", phaseIndex: 3,
+                phaseName: "Lean forward", cameraPositionName: "lean_forward",
+                panTarget: 5799, lowerTarget: 7014, upperTarget: 7698, holdSeconds: 0
+            ),
+        ]
+    }
+
+    private static func defaultGestures() -> [ROBServoRelativeGesture] {
+        [
+            ROBServoRelativeGesture(
+                name: "YES", servo: "upper", delta: 160,
+                repetitions: 2, intervalSeconds: 0.35
+            ),
+            ROBServoRelativeGesture(
+                name: "NO", servo: "pan", delta: 120,
+                repetitions: 2, intervalSeconds: 0.35
+            ),
+        ]
+    }
+
+    private struct Payload: Codable {
+        var version: Int
+        var cameraPositions: [PositionPayload]
+        var sequencePhases: [PhasePayload]
+        var gestures: [GesturePayload]
+    }
+
+    private struct PositionPayload: Codable {
+        var identifier: String
+        var name: String
+        var lowerTarget: Int
+        var upperTarget: Int
+    }
+
+    private struct PhasePayload: Codable {
+        var identifier: String
+        var sequenceName: String
+        var phaseIndex: Int
+        var phaseName: String
+        var cameraPositionName: String
+        var panTarget: Int
+        var lowerTarget: Int
+        var upperTarget: Int
+        var holdSeconds: Double
+    }
+
+    private struct GesturePayload: Codable {
+        var identifier: String
+        var name: String
+        var servo: String
+        var delta: Int
+        var repetitions: Int
+        var intervalSeconds: Double
+    }
+
+    private func persistLocked() {
+        let payload = Payload(
+            version: Self.schemaVersion,
+            cameraPositions: positionsStorage.map {
+                PositionPayload(
+                    identifier: $0.identifier, name: $0.name,
+                    lowerTarget: $0.lowerTarget, upperTarget: $0.upperTarget
+                )
+            },
+            sequencePhases: phasesStorage.map {
+                PhasePayload(
+                    identifier: $0.identifier, sequenceName: $0.sequenceName,
+                    phaseIndex: $0.phaseIndex, phaseName: $0.phaseName,
+                    cameraPositionName: $0.cameraPositionName,
+                    panTarget: $0.panTarget, lowerTarget: $0.lowerTarget,
+                    upperTarget: $0.upperTarget, holdSeconds: $0.holdSeconds
+                )
+            },
+            gestures: gesturesStorage.map {
+                GesturePayload(
+                    identifier: $0.identifier, name: $0.name, servo: $0.servo,
+                    delta: $0.delta, repetitions: $0.repetitions,
+                    intervalSeconds: $0.intervalSeconds
+                )
+            }
+        )
+        guard let data = try? JSONEncoder().encode(payload) else { return }
+        UserDefaults.standard.set(data, forKey: Self.defaultsKey)
+    }
+
+    private func loadPersistedConfiguration() -> Bool {
+        guard let data = UserDefaults.standard.data(forKey: Self.defaultsKey),
+              let payload = try? JSONDecoder().decode(Payload.self, from: data),
+              payload.version == Self.schemaVersion else {
+            return false
+        }
+        let positions = payload.cameraPositions.map {
+            ROBServoCameraPosition(
+                identifier: $0.identifier, name: $0.name,
+                lowerTarget: $0.lowerTarget, upperTarget: $0.upperTarget
+            )
+        }
+        let phases = payload.sequencePhases.map {
+            ROBServoSequencePhase(
+                identifier: $0.identifier, sequenceName: $0.sequenceName,
+                phaseIndex: $0.phaseIndex, phaseName: $0.phaseName,
+                cameraPositionName: $0.cameraPositionName,
+                panTarget: $0.panTarget, lowerTarget: $0.lowerTarget,
+                upperTarget: $0.upperTarget, holdSeconds: $0.holdSeconds
+            )
+        }
+        let gestures = payload.gestures.map {
+            ROBServoRelativeGesture(
+                identifier: $0.identifier, name: $0.name, servo: $0.servo,
+                delta: $0.delta, repetitions: $0.repetitions,
+                intervalSeconds: $0.intervalSeconds
+            )
+        }
+        guard (try? Self.validate(
+            cameraPositions: positions,
+            sequencePhases: phases,
+            gestures: gestures
+        )) != nil else {
+            return false
+        }
+        positionsStorage = positions
+        phasesStorage = phases.sorted(by: Self.phaseSort)
+        gesturesStorage = gestures
+        return true
+    }
+}
