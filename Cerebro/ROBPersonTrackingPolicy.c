@@ -48,9 +48,10 @@ ROBPersonTrackingConfig ROBPersonTrackingDefaultConfig(void) {
     const ROBPersonTrackingConfig configuration = {
         .centerX = 0.5,
         .centerY = 0.5,
-        .horizontalDeadBand = 0.04,
+        .horizontalDeadBand = 0.06,
         .verticalDeadBand = 0.06,
-        .panTargetsPerSecond = 400.0,
+        .mirrorHorizontalCoordinate = true,
+        .panTargetsPerSecond = 250.0,
         .upperTargetsPerSecond = 80.0,
         .maximumElapsedSeconds = 0.1,
         .panMinimumTarget = 4000,
@@ -113,7 +114,17 @@ bool ROBPersonTrackingApply(
         return false;
     }
 
-    const double x = ROBPersonTrackingClampDouble(normalizedX, 0.0, 1.0);
+    const double observedX = ROBPersonTrackingClampDouble(
+        normalizedX,
+        0.0,
+        1.0
+    );
+    // The main-camera Vision box is horizontally mirrored relative to ROB's
+    // physical left/right frame. Convert exactly once before applying the
+    // verified raw-servo direction below.
+    const double x = configuration->mirrorHorizontalCoordinate
+        ? 1.0 - observedX
+        : observedX;
     const double y = ROBPersonTrackingClampDouble(normalizedY, 0.0, 1.0);
     const double elapsed = fmin(
         elapsedSeconds,

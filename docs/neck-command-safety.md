@@ -103,10 +103,9 @@ unverified compensation direction autonomously.
 
 Once the clearance pose settles, one frame-rate-independent proportional
 controller is shared by recognized faces and legacy human blobs. It targets
-normalized image center `(0.5, 0.5)`, ignores an 8-percent-wide horizontal band
-and a 12-percent-wide vertical band to prevent detector jitter, and accepts at
-most one correction every 0.1 seconds. Horizontal and vertical response rates
-are `400` and `80`
+normalized image center `(0.5, 0.5)`, ignores a 12-percent-wide band on each
+axis to prevent detector jitter, and accepts at most one correction every 0.1
+seconds. Horizontal and vertical response rates are `250` and `80`
 raw target units per second at a normalized error of `1.0`. A delayed or newly
 reacquired observation is capped to one 0.1-second correction. Upper tracking
 starts at the slight-up center `7375` within a narrow `7350`–`7400` band. A
@@ -120,6 +119,8 @@ toward or beyond a restricted pan edge cannot continue while the lower neck is
 leaning. Once upright, pan may use the calibrated full range and still clamps at
 the physical `4000`/`8000` hard targets. The installed servo turns right as the
 raw pan target decreases toward `4000` and left as it increases toward `8000`.
+The main-camera Vision X coordinate is mirrored relative to that physical frame,
+so person tracking reverses normalized X once before calculating a pan step.
 
 ## OFF/unknown safe startup
 

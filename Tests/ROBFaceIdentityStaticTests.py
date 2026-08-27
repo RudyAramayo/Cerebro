@@ -115,9 +115,10 @@ assert "ROBPersonTrackingApply" in main
 assert "lastPersonTrackingUpdateUptime" in main
 assert "centerX = 0.5" in tracking_policy_source
 assert "centerY = 0.5" in tracking_policy_source
-assert "horizontalDeadBand = 0.04" in tracking_policy_source
+assert "horizontalDeadBand = 0.06" in tracking_policy_source
 assert "verticalDeadBand = 0.06" in tracking_policy_source
-assert "panTargetsPerSecond = 400.0" in tracking_policy_source
+assert "mirrorHorizontalCoordinate = true" in tracking_policy_source
+assert "panTargetsPerSecond = 250.0" in tracking_policy_source
 assert "currentPanTarget\n            - resultOut->horizontalError" in tracking_policy_source
 assert "upperTargetsPerSecond = 80.0" in tracking_policy_source
 assert "maximumElapsedSeconds = 0.1" in tracking_policy_source

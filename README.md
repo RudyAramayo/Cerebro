@@ -173,11 +173,11 @@ startup: pan stays OFF while lower/upper move to `6011`/`6073`, pan settles
 forward at `5799`, and only then does the neck move to the `lean_forward` pose
 at lower `7014` / upper `7698`.
 Recognized-face and human-blob following acquires at slight-up target `7375`
-inside a narrow `7350`–`7400` upper tracking band. A slower vertical response,
-wider vertical center dead band, and matching 10 Hz servo renderer keep detector
-frame rate, duplicate observations, and physical command latency from producing
-large pitch changes. The existing horizontal response remains unchanged. Face
-and human-blob tracking both pause until lower-neck `6011`
+inside a narrow `7350`–`7400` upper tracking band. Mirrored main-camera X is
+converted once into the physical pan frame. Slower pan/tilt responses, 12-percent
+center dead bands, and a matching 10 Hz servo renderer keep detector frame rate,
+duplicate observations, and physical command latency from producing large or
+oscillating corrections. Face and human-blob tracking both pause until lower-neck `6011`
 has settled upright with the full pan envelope; requests still clamp at the
 calibrated pan hard limits. Once upright, live pan corrections continue without
 being reset to center between 10 Hz tracking updates.
