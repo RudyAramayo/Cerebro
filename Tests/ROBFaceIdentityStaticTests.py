@@ -101,11 +101,14 @@ person_tracking = main.split(
 )[1].split("- (void) startHeartbeatNiTE_ResetTimer", 1)[0]
 assert "prepareNeckForPersonTracking" not in person_tracking
 assert "prepareNeckForPersonFollow" not in person_tracking
-assert "commandedLowerNeckTiltTarget" not in person_tracking
+assert "commandedLowerNeckTiltTarget" in person_tracking
+assert "lowerTrackingAuthorized" in person_tracking
+assert "neckSafetyCalibrationConfirmed" in person_tracking
 assert "currentNeckPanMinimumDegrees" in person_tracking
 assert "currentNeckPanMaximumDegrees" in person_tracking
 assert "personTrackingUpperBaselineTarget" in person_tracking
-assert "kROBPersonTrackingMaximumUpperOffset" in person_tracking
+assert "kROBPersonTrackingMaximumUpperUpOffset" in person_tracking
+assert "kROBPersonTrackingMaximumUpperDownOffset" in person_tracking
 human_tracking = main.split("- (void) didTrackHumans:", 1)[1].split(
     "#pragma mark - AudioInputMethods", 1
 )[0]
@@ -141,13 +144,19 @@ assert "mirrorHorizontalCoordinate = false" in tracking_policy_source
 assert "responseExponent = 1.5" in tracking_policy_source
 assert "pow(normalizedError, responseExponent)" in tracking_policy_source
 assert "ROBPersonTrackingDefaultPanTargetsPerSecond" in tracking_policy_source
-assert "ROBPersonTrackingMinimumPanTargetsPerSecond = 250" in tracking_policy_header
-assert "ROBPersonTrackingDefaultPanTargetsPerSecond = 500" in tracking_policy_header
-assert "ROBPersonTrackingMaximumPanTargetsPerSecond = 1500" in tracking_policy_header
+assert "ROBPersonTrackingMinimumPanTargetsPerSecond = 1500" in tracking_policy_header
+assert "ROBPersonTrackingDefaultPanTargetsPerSecond = 3000" in tracking_policy_header
+assert "ROBPersonTrackingMaximumPanTargetsPerSecond = 6000" in tracking_policy_header
 assert 'ROB.PersonTracking.PanTargetsPerSecond' in tracking_preferences
 assert "ROBPersonTrackingPanTargetsPerSecondFromDefaults" in main
 assert "currentPanTarget\n            - resultOut->horizontalError" in tracking_policy_source
-assert "upperTargetsPerSecond = 80.0" in tracking_policy_source
+assert "lowerTargetsPerSecond = 1000.0" in tracking_policy_source
+assert "upperTargetsPerSecond = 400.0" in tracking_policy_source
+assert "upperDownTargetsPerSecond = 80.0" in tracking_policy_source
+assert "resultOut->panTarget == currentPanTarget" in tracking_policy_source
+assert "self.torsoControlsViewController.headTilt.integerValue = lowerTarget" in main
+assert "kROBPersonTrackingMaximumUpperUpOffset = 200" in main
+assert "kROBPersonTrackingMaximumUpperDownOffset = 40" in main
 assert "maximumElapsedSeconds = 0.1" in tracking_policy_source
 assert "ROBPersonTrackingMinimumUpperTarget = 7350" in tracking_policy_header
 assert "ROBPersonTrackingNeutralUpperTarget = 7375" in tracking_policy_header

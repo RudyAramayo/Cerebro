@@ -18,11 +18,10 @@ extern "C" {
 #endif
 
 enum {
-    // The current proven physical tracking speed remains available as the
-    // slowest operator setting. New installations start moderately faster.
-    ROBPersonTrackingMinimumPanTargetsPerSecond = 250,
-    ROBPersonTrackingDefaultPanTargetsPerSecond = 500,
-    ROBPersonTrackingMaximumPanTargetsPerSecond = 1500,
+    ROBPersonTrackingMinimumPanTargetsPerSecond = 1500,
+    ROBPersonTrackingDefaultPanTargetsPerSecond = 3000,
+    ROBPersonTrackingMaximumPanTargetsPerSecond = 6000,
+    ROBPersonTrackingUprightLowerTarget = 6011,
     // Reviewed camera band for controller-authorized full-pan follow
     // preparation. Ordinary face/blob acquisition instead centers a narrow
     // runtime band on the currently accepted upper-camera target.
@@ -41,16 +40,22 @@ typedef struct {
     bool mirrorHorizontalCoordinate;
     double responseExponent;
     double panTargetsPerSecond;
+    double lowerTargetsPerSecond;
     double upperTargetsPerSecond;
+    double upperDownTargetsPerSecond;
     double maximumElapsedSeconds;
     int32_t panMinimumTarget;
     int32_t panMaximumTarget;
+    int32_t lowerMinimumTarget;
+    int32_t lowerUprightTarget;
+    int32_t lowerMaximumTarget;
     int32_t upperMinimumTarget;
     int32_t upperMaximumTarget;
 } ROBPersonTrackingConfig;
 
 typedef struct {
     int32_t panTarget;
+    int32_t lowerTarget;
     int32_t upperTarget;
     double horizontalError;
     double verticalError;
@@ -62,7 +67,8 @@ typedef struct {
 // image center in the raw main-camera Vision coordinate system, ignores the
 // central 12 percent on both axes, and eases corrections as the observation
 // approaches that band. The runtime may replace the default horizontal rate
-// with the operator's bounded preference.
+// with the operator's bounded preference. Upward observations may also bring
+// an active lower neck gradually toward upright, but only while pan is paused.
 ROBPersonTrackingConfig ROBPersonTrackingDefaultConfig(void);
 
 bool ROBPersonTrackingConfigIsValid(
@@ -75,6 +81,7 @@ bool ROBPersonTrackingConfigIsValid(
 bool ROBPersonTrackingApply(
     const ROBPersonTrackingConfig *configuration,
     int32_t currentPanTarget,
+    int32_t currentLowerTarget,
     int32_t currentUpperTarget,
     double normalizedX,
     double normalizedY,

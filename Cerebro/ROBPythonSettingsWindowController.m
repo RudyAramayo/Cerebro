@@ -227,8 +227,8 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
         ROBPersonTrackingMinimumPanTargetsPerSecond;
     self.faceTrackingPanSpeedSlider.maxValue =
         ROBPersonTrackingMaximumPanTargetsPerSecond;
-    self.faceTrackingPanSpeedSlider.numberOfTickMarks = 6;
-    self.faceTrackingPanSpeedSlider.tickMarkPosition = NSTickMarkBelow;
+    self.faceTrackingPanSpeedSlider.numberOfTickMarks = 7;
+    self.faceTrackingPanSpeedSlider.tickMarkPosition = NSTickMarkPositionBelow;
     self.faceTrackingPanSpeedSlider.allowsTickMarkValuesOnly = NO;
     self.faceTrackingPanSpeedSlider.continuous = YES;
     self.faceTrackingPanSpeedSlider.target = self;
@@ -239,22 +239,28 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
     self.faceTrackingPanSpeedSlider.accessibilityIdentifier =
         @"ROB.Tracking.PanSpeed";
     self.faceTrackingPanSpeedSlider.accessibilityHelp =
-        @"Changes the horizontal face and human-blob tracking speed immediately. The slowest setting preserves the previously calibrated motion.";
+        @"Changes the horizontal face and human-blob tracking speed immediately. The slowest setting is the previous maximum tracking speed.";
     [trackingView addSubview:self.faceTrackingPanSpeedSlider];
 
-    NSTextField *trackingMinimumLabel = [self labelWithString:@"Slowest · 250"
+    NSTextField *trackingMinimumLabel = [self labelWithString:[NSString
+        stringWithFormat:@"Slowest · %d",
+                         ROBPersonTrackingMinimumPanTargetsPerSecond]
                                                          frame:NSMakeRect(24, 350, 200, 20)];
     trackingMinimumLabel.textColor = NSColor.secondaryLabelColor;
     [trackingView addSubview:trackingMinimumLabel];
-    NSTextField *trackingMaximumLabel = [self labelWithString:@"Fastest · 1500"
+    NSTextField *trackingMaximumLabel = [self labelWithString:[NSString
+        stringWithFormat:@"Fastest · %d",
+                         ROBPersonTrackingMaximumPanTargetsPerSecond]
                                                          frame:NSMakeRect(456, 350, 200, 20)];
     trackingMaximumLabel.alignment = NSTextAlignmentRight;
     trackingMaximumLabel.textColor = NSColor.secondaryLabelColor;
     [trackingView addSubview:trackingMaximumLabel];
 
-    NSTextField *trackingNote = [self labelWithString:
-        @"The factory setting is 500 targets/second. Changes apply to active tracking immediately and persist across launches. Physical servo smoothing and the collision-safe neck envelope still apply."
-        frame:NSMakeRect(24, 286, 632, 48)];
+    NSString *trackingNoteText = [NSString stringWithFormat:
+        @"The factory setting is %d targets/second. Changes apply immediately and persist across launches. A face above center tilts the upper camera up and gradually brings an active, calibrated lower neck toward upright when pan pauses. Physical servo smoothing and the collision-safe envelope still apply.",
+        ROBPersonTrackingDefaultPanTargetsPerSecond];
+    NSTextField *trackingNote = [self labelWithString:trackingNoteText
+                                                frame:NSMakeRect(24, 270, 632, 64)];
     trackingNote.textColor = NSColor.secondaryLabelColor;
     [trackingView addSubview:trackingNote];
     [self refreshFaceTrackingPanSpeedSetting];

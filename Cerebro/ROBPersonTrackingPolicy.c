@@ -67,10 +67,15 @@ ROBPersonTrackingConfig ROBPersonTrackingDefaultConfig(void) {
         .responseExponent = 1.5,
         .panTargetsPerSecond =
             ROBPersonTrackingDefaultPanTargetsPerSecond,
-        .upperTargetsPerSecond = 80.0,
+        .lowerTargetsPerSecond = 1000.0,
+        .upperTargetsPerSecond = 400.0,
+        .upperDownTargetsPerSecond = 80.0,
         .maximumElapsedSeconds = 0.1,
         .panMinimumTarget = 4000,
         .panMaximumTarget = 8000,
+        .lowerMinimumTarget = 4375,
+        .lowerUprightTarget = ROBPersonTrackingUprightLowerTarget,
+        .lowerMaximumTarget = 7675,
         .upperMinimumTarget = ROBPersonTrackingMinimumUpperTarget,
         .upperMaximumTarget = ROBPersonTrackingMaximumUpperTarget
     };
@@ -87,7 +92,9 @@ bool ROBPersonTrackingConfigIsValid(
         || !isfinite(configuration->verticalDeadBand)
         || !isfinite(configuration->responseExponent)
         || !isfinite(configuration->panTargetsPerSecond)
+        || !isfinite(configuration->lowerTargetsPerSecond)
         || !isfinite(configuration->upperTargetsPerSecond)
+        || !isfinite(configuration->upperDownTargetsPerSecond)
         || !isfinite(configuration->maximumElapsedSeconds)) {
         return false;
     }
@@ -104,9 +111,15 @@ bool ROBPersonTrackingConfigIsValid(
         && configuration->responseExponent >= 1.0
         && configuration->responseExponent <= 4.0
         && configuration->panTargetsPerSecond > 0.0
+        && configuration->lowerTargetsPerSecond > 0.0
         && configuration->upperTargetsPerSecond > 0.0
+        && configuration->upperDownTargetsPerSecond > 0.0
         && configuration->maximumElapsedSeconds > 0.0
         && configuration->panMinimumTarget < configuration->panMaximumTarget
+        && configuration->lowerMinimumTarget
+            <= configuration->lowerUprightTarget
+        && configuration->lowerUprightTarget
+            <= configuration->lowerMaximumTarget
         && configuration->upperMinimumTarget
             <= configuration->upperMaximumTarget;
 }
@@ -114,6 +127,7 @@ bool ROBPersonTrackingConfigIsValid(
 bool ROBPersonTrackingApply(
     const ROBPersonTrackingConfig *configuration,
     int32_t currentPanTarget,
+    int32_t currentLowerTarget,
     int32_t currentUpperTarget,
     double normalizedX,
     double normalizedY,
@@ -170,7 +184,9 @@ bool ROBPersonTrackingApply(
     const int32_t requestedUpper = ROBPersonTrackingRoundedTarget(
         (double)currentUpperTarget
             + resultOut->verticalError
-                * configuration->upperTargetsPerSecond
+                * (resultOut->verticalError >= 0.0
+                    ? configuration->upperTargetsPerSecond
+                    : configuration->upperDownTargetsPerSecond)
                 * elapsed
     );
     resultOut->panTarget = ROBPersonTrackingClampTarget(
@@ -178,6 +194,38 @@ bool ROBPersonTrackingApply(
         configuration->panMinimumTarget,
         configuration->panMaximumTarget
     );
+    int32_t requestedLower = ROBPersonTrackingClampTarget(
+        currentLowerTarget,
+        configuration->lowerMinimumTarget,
+        configuration->lowerMaximumTarget
+    );
+    // Raising the face in frame gradually erects the lower neck once pan has
+    // paused at center or at its current safety edge. Downward observations do
+    // not drive the lower joint, preserving the calibrated anti-dip behavior.
+    if (resultOut->verticalError > 0.0
+        && resultOut->panTarget == currentPanTarget
+        && requestedLower != configuration->lowerUprightTarget) {
+        const double lowerStep = resultOut->verticalError
+            * configuration->lowerTargetsPerSecond
+            * elapsed;
+        const double lowerDirection =
+            configuration->lowerUprightTarget > requestedLower ? 1.0 : -1.0;
+        const int32_t candidateLower = ROBPersonTrackingRoundedTarget(
+            requestedLower + lowerDirection * lowerStep
+        );
+        requestedLower = lowerDirection > 0.0
+            ? ROBPersonTrackingClampTarget(
+                candidateLower,
+                requestedLower,
+                configuration->lowerUprightTarget
+            )
+            : ROBPersonTrackingClampTarget(
+                candidateLower,
+                configuration->lowerUprightTarget,
+                requestedLower
+            );
+    }
+    resultOut->lowerTarget = requestedLower;
     resultOut->upperTarget = ROBPersonTrackingClampTarget(
         requestedUpper,
         configuration->upperMinimumTarget,

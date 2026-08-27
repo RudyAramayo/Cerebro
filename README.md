@@ -173,11 +173,11 @@ startup: pan stays OFF while lower/upper move to `6011`/`6073`, pan settles
 forward at `5799`, and only then does the neck move to the `lean_forward` pose
 at lower `7014` / upper `7698`.
 Recognized-face and human-blob tracking begins inside the neck's currently
-settled collision-safe pan envelope without moving the lower neck. Vision runs
-on the raw, unmirrored sample buffer, so a face on ROB's physical right lowers
-the installed servo target and pans right. Each acquisition preserves the
-accepted upper-camera pose and permits only ±20 raw targets of subtle vertical
-centering around it; it no longer jumps to a fixed tracking tilt. Recognized
+settled collision-safe pan envelope without first forcing a lower-neck pose.
+Vision runs on the raw, unmirrored sample buffer, so a face on ROB's physical
+right lowers the installed servo target and pans right. Each acquisition
+preserves the current uncompensated upper-camera demand instead of jumping to a
+fixed tracking tilt. Recognized
 faces take priority over legacy human blobs, while the generic face detector
 runs only as an acquisition fallback and body boxes run only when neither face
 source is active. The observation filter follows a face approaching center
@@ -186,10 +186,12 @@ further reduces pan and tilt corrections near center. Bounded pan/tilt
 responses, 12-percent center dead bands, the live pan envelope, and a matching
 10 Hz servo renderer prevent detector jitter and physical command latency from
 producing large corrections. **Settings → Tracking** provides a live horizontal
-speed slider from `250` to `1500` raw targets per second; `500` is the default,
-and the previous `250` calibration remains the slowest choice. The separately
-controller-authorized follow mode retains its reviewed upright/full-pan
-preparation sequence.
+speed slider from `1500` to `6000` raw targets per second; `3000` is the
+default. For a face above center, the upper camera now has a gradual 200-target
+upward range and the lower neck moves toward upright once pan pauses. Downward
+tracking keeps a slower 40-target upper-only range to avoid the prior dip. The
+separately controller-authorized follow mode retains its reviewed
+upright/full-pan preparation sequence.
 The **Servos → Open Servo Control…** window edits named camera positions,
 servo-sequence phases, and relative `YES`/`NO` gestures. Gesture deltas are
 applied around the current pose, so a nod or head shake remains relative to
