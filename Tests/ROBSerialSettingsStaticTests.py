@@ -140,10 +140,23 @@ def main() -> None:
     initialize_connection = braced_declaration(
         serial_source, "- (void)initialize_connection", serial_implementation
     )
+    connect_base = braced_declaration(
+        serial_source, "- (void)connectToDetectedBase", serial_implementation
+    )
     require(
         "connectToDetectedBase" in initialize_connection
         and "[self connectMaestro];" in initialize_connection,
         "Base and Maestro are no longer connected automatically at startup",
+    )
+    require(
+        'ROB.Hardware.LastVerifiedBaseSerialPort' in serial_source
+        and "kROBLastVerifiedBaseSerialPortDefaultsKey" in connect_base
+        and "[paths insertObject:lastVerifiedPath atIndex:0]" in connect_base
+        and connect_base.index("insertObject:lastVerifiedPath")
+        < connect_base.index("for (NSString *path in paths)")
+        and "probeBaseFirmwareAtPath:path" in connect_base
+        and "setObject:path" in connect_base,
+        "Base Arduino detection no longer tries and remembers its verified USB channel first",
     )
 
     # Both USB choices now live together in Settings. Base retains a supervised

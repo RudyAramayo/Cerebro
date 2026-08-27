@@ -68,6 +68,12 @@ static NSString * const kROBMaestroServoAccelerationLimitDefaultsKey = @"ROBMaes
 static NSString * const kROBMaestroServoMotionProfileVersionDefaultsKey = @"ROBMaestroServoMotionProfileVersion";
 static NSString * const kROBLastVerifiedMaestroCommandPortDefaultsKey =
     @"ROB.Hardware.LastVerifiedMaestroCommandPort";
+static NSString * const kROBLastVerifiedBaseSerialPortDefaultsKey =
+    @"ROB.Hardware.LastVerifiedBaseSerialPort";
+static NSString * const kROBTiccmdExecutablePathDefaultsKey =
+    @"ROBTiccmdExecutablePath";
+static NSString * const kROBLastVerifiedTicSerialNumberDefaultsKey =
+    @"ROB.Hardware.LastVerifiedTicSerialNumber";
 static NSTimeInterval const kROBNeckManualOverrideSeconds = 2.0;
 static NSTimeInterval const kROBNeckVisionAuthoritySeconds = 0.35;
 static NSTimeInterval const kROBNeckPanRecenterSeconds = 1.0;
@@ -330,6 +336,11 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 
 - (void)runPythonArguments:(NSArray<NSString *> *)arguments operation:(NSString *)operation;
 - (void)runTiccmdArguments:(NSArray<NSString *> *)arguments;
+- (NSString *)ticcmdExecutablePath;
+- (void)refreshTicControllerSelection;
+- (BOOL)runReadOnlyTiccmdAtPath:(NSString *)ticcmdPath
+                      arguments:(NSArray<NSString *> *)arguments
+                         output:(NSString **)output;
 - (void)performSSHpassOperation:(NSString *)operation block:(dispatch_block_t)block;
 - (BOOL)launchSSHpassTask:(NSTask *)task operation:(NSString *)operation;
 - (void)reportSSHpassError:(NSError *)error operation:(NSString *)operation;
@@ -858,20 +869,26 @@ typedef enum : NSUInteger {
     self.currentIncommingVerbalMessage = @"";
     self.baseSerialReceiveBuffer = [NSMutableData data];
     // Base is the only Arduino role presently installed.
-    self.baseSerialStatusText = @"Detecting Base firmware…";
+    NSString *lastBasePath = [[NSUserDefaults standardUserDefaults]
+        stringForKey:kROBLastVerifiedBaseSerialPortDefaultsKey];
+    self.baseSerialStatusText = lastBasePath.length > 0
+        ? [NSString stringWithFormat:
+            @"Trying last verified Base Arduino channel %@…", lastBasePath]
+        : @"Detecting Base firmware…";
     NSString *lastMaestroPath = [[NSUserDefaults standardUserDefaults]
         stringForKey:kROBLastVerifiedMaestroCommandPortDefaultsKey];
     self.maestroSerialStatusText = lastMaestroPath.length > 0
         ? [NSString stringWithFormat:
             @"Trying last verified Maestro channel %@…", lastMaestroPath]
         : @"Discovering Maestro by USB identity…";
-    [self refreshSerialList_base:@"Detecting Base firmware…"];
+    [self refreshSerialList_base:self.baseSerialStatusText];
     [self refreshSerialList_maestro:self.maestroSerialStatusText];
     self.controlModelDataDictionary = [NSMutableDictionary new];
     self.treadControlModelDataDictionary = [NSMutableDictionary new];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         [self connectToDetectedBase];
     });
+    [self refreshTicControllerSelection];
     [self connectMaestro];
     
     self.controllerTimer = [NSTimer timerWithTimeInterval:0.1
@@ -1070,12 +1087,24 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         self.baseDetectionInProgress = YES;
     }
 
-    NSArray<NSString *> *paths = [self usbSerialPortPaths];
+    NSMutableArray<NSString *> *paths = [[self usbSerialPortPaths] mutableCopy];
+    NSString *lastVerifiedPath = [[NSUserDefaults standardUserDefaults]
+        stringForKey:kROBLastVerifiedBaseSerialPortDefaultsKey];
+    if ([paths containsObject:lastVerifiedPath]) {
+        [paths removeObject:lastVerifiedPath];
+        [paths insertObject:lastVerifiedPath atIndex:0];
+        [self appendToIncomingText_base:[NSString stringWithFormat:
+            @"\nTrying last verified Base Arduino channel %@ before full detection…\n",
+            lastVerifiedPath]];
+    }
     for (NSString *path in paths) {
         int candidateFileDescriptor = -1;
         [self appendToIncomingText_base:[NSString stringWithFormat:@"\nDetecting Base firmware on %@…\n", path]];
         if ([self probeBaseFirmwareAtPath:path fileDescriptor:&candidateFileDescriptor]) {
             serialFileDescriptor_base = candidateFileDescriptor;
+            [[NSUserDefaults standardUserDefaults]
+                setObject:path
+                   forKey:kROBLastVerifiedBaseSerialPortDefaultsKey];
             [self.baseSerialReceiveBuffer setLength:0];
             dispatch_async(dispatch_get_main_queue(), ^{
                 [self refreshSerialList_base:path];
@@ -3739,22 +3768,142 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     //we need to control a local speed value that is going to compete with the controller. who overrides who?
 }
 
-- (void)runTiccmdArguments:(NSArray<NSString *> *)arguments
+static BOOL ROBTicSerialNumberIsValid(NSString *serialNumber)
 {
-    NSString *configuredPath = [[NSUserDefaults standardUserDefaults] stringForKey:@"ROBTiccmdExecutablePath"];
+    if (serialNumber.length == 0 || serialNumber.length > 64) return NO;
+    NSCharacterSet *invalidCharacters =
+        NSCharacterSet.alphanumericCharacterSet.invertedSet;
+    return [serialNumber rangeOfCharacterFromSet:invalidCharacters].location
+        == NSNotFound;
+}
+
+static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
+{
+    NSMutableOrderedSet<NSString *> *serialNumbers = [NSMutableOrderedSet
+        orderedSet];
+    [output enumerateLinesUsingBlock:^(NSString *line, BOOL *stop) {
+        NSRange separator = [line rangeOfString:@","];
+        if (separator.location == NSNotFound) return;
+        NSString *serialNumber = [[line substringToIndex:separator.location]
+            stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        NSString *description = [line substringFromIndex:NSMaxRange(separator)];
+        BOOL isTic = [description rangeOfString:@"Tic"
+                                       options:NSCaseInsensitiveSearch].location
+            != NSNotFound;
+        if (isTic && ROBTicSerialNumberIsValid(serialNumber)) {
+            [serialNumbers addObject:serialNumber];
+        }
+    }];
+    return serialNumbers.array;
+}
+
+- (NSString *)ticcmdExecutablePath
+{
+    NSString *configuredPath = [[NSUserDefaults standardUserDefaults]
+        stringForKey:kROBTiccmdExecutablePathDefaultsKey];
     NSString *selection = configuredPath.length > 0
         ? configuredPath
         : @"/Applications/Pololu Tic Stepper Motor Controller.app/Contents/MacOS/ticcmd";
     NSString *ticcmdPath = [[selection stringByExpandingTildeInPath] stringByStandardizingPath];
-    if (![[NSFileManager defaultManager] isExecutableFileAtPath:ticcmdPath]) {
-        NSLog(@"Pololu ticcmd is unavailable at %@. Install the Pololu Tic software or set ROBTiccmdExecutablePath.", ticcmdPath);
+    return [[NSFileManager defaultManager] isExecutableFileAtPath:ticcmdPath]
+        ? ticcmdPath
+        : nil;
+}
+
+- (BOOL)runReadOnlyTiccmdAtPath:(NSString *)ticcmdPath
+                      arguments:(NSArray<NSString *> *)arguments
+                         output:(NSString **)output
+{
+    NSTask *ticcmd = [[NSTask alloc] init];
+    ticcmd.executableURL = [NSURL fileURLWithPath:ticcmdPath];
+    ticcmd.arguments = arguments;
+    NSPipe *pipe = [NSPipe pipe];
+    ticcmd.standardOutput = pipe;
+    ticcmd.standardError = pipe;
+
+    NSError *launchError = nil;
+    if (!ROBLaunchTaskSafely(ticcmd, &launchError)) {
+        NSLog(@"Pololu ticcmd discovery could not start: %@",
+              launchError.localizedDescription);
+        if (output != NULL) *output = @"";
+        return NO;
+    }
+    NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+    [ticcmd waitUntilExit];
+    NSString *captured = [[NSString alloc]
+        initWithData:data
+            encoding:NSUTF8StringEncoding] ?: @"";
+    if (output != NULL) *output = captured;
+    return ticcmd.terminationStatus == 0;
+}
+
+- (void)refreshTicControllerSelection
+{
+    NSString *ticcmdPath = [self ticcmdExecutablePath];
+    if (ticcmdPath.length == 0) {
+        NSLog(@"Pololu ticcmd is unavailable. Install the Pololu Tic software or set %@.",
+              kROBTiccmdExecutablePathDefaultsKey);
+        return;
+    }
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        NSString *savedSerial = [defaults
+            stringForKey:kROBLastVerifiedTicSerialNumberDefaultsKey];
+        NSString *statusOutput = nil;
+        if (ROBTicSerialNumberIsValid(savedSerial)
+            && [self runReadOnlyTiccmdAtPath:ticcmdPath
+                                  arguments:@[@"-d", savedSerial, @"--status"]
+                                     output:&statusOutput]) {
+            NSLog(@"Pololu Tic stepper controller %@ verified first from saved selection.",
+                  savedSerial);
+            return;
+        }
+
+        NSString *listOutput = nil;
+        if (![self runReadOnlyTiccmdAtPath:ticcmdPath
+                                arguments:@[@"--list"]
+                                   output:&listOutput]) {
+            NSLog(@"Pololu Tic controller discovery failed: %@", listOutput ?: @"");
+            return;
+        }
+        NSArray<NSString *> *serialNumbers =
+            ROBTicSerialNumbersFromListOutput(listOutput);
+        if (serialNumbers.count == 1) {
+            NSString *verifiedSerial = serialNumbers.firstObject;
+            [defaults setObject:verifiedSerial
+                         forKey:kROBLastVerifiedTicSerialNumberDefaultsKey];
+            NSLog(@"Pololu Tic stepper controller %@ discovered and remembered.",
+                  verifiedSerial);
+        } else if (serialNumbers.count > 1) {
+            NSLog(@"Multiple Pololu Tic controllers were found; retaining the prior explicit selection.");
+        } else {
+            NSLog(@"No Pololu Tic stepper controller was detected; retaining the prior selection for retry.");
+        }
+    });
+}
+
+- (void)runTiccmdArguments:(NSArray<NSString *> *)arguments
+{
+    NSString *ticcmdPath = [self ticcmdExecutablePath];
+    if (ticcmdPath.length == 0) {
+        NSLog(@"Pololu ticcmd is unavailable. Install the Pololu Tic software or set %@.",
+              kROBTiccmdExecutablePathDefaultsKey);
         return;
     }
 
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSTask *ticcmd = [[NSTask alloc] init];
         ticcmd.executableURL = [NSURL fileURLWithPath:ticcmdPath];
-        ticcmd.arguments = arguments;
+        NSMutableArray<NSString *> *routedArguments = [NSMutableArray array];
+        NSString *savedSerial = [[NSUserDefaults standardUserDefaults]
+            stringForKey:kROBLastVerifiedTicSerialNumberDefaultsKey];
+        if (ROBTicSerialNumberIsValid(savedSerial)
+            && ![arguments containsObject:@"-d"]) {
+            [routedArguments addObjectsFromArray:@[@"-d", savedSerial]];
+        }
+        [routedArguments addObjectsFromArray:arguments];
+        ticcmd.arguments = routedArguments;
         NSPipe *pipe = [NSPipe pipe];
         ticcmd.standardOutput = pipe;
         ticcmd.standardError = pipe;

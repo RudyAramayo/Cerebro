@@ -27,6 +27,9 @@ def objective_c_method(source: str, signature: str) -> str:
 def main() -> None:
     source = SOURCE_PATH.read_text(encoding="utf-8")
     method = objective_c_method(source, METHOD_SIGNATURE)
+    initialization = objective_c_method(source, "- (void)initialize_connection")
+    discovery = objective_c_method(source, "- (void)refreshTicControllerSelection")
+    read_only = objective_c_method(source, "- (BOOL)runReadOnlyTiccmdAtPath:")
 
     drain = method.index("readDataToEndOfFile")
     termination_barrier = method.index("[ticcmd waitUntilExit]")
@@ -37,6 +40,19 @@ def main() -> None:
         "must not be read until waitUntilExit has completed"
     )
     assert "ROBLaunchTaskSafely(ticcmd" in method
+    assert 'ROB.Hardware.LastVerifiedTicSerialNumber' in source
+    assert "[self refreshTicControllerSelection]" in initialization
+    assert '@[@"-d", savedSerial, @"--status"]' in discovery
+    assert '@[@"--list"]' in discovery
+    assert "ROBTicSerialNumbersFromListOutput" in discovery
+    assert "setObject:verifiedSerial" in discovery
+    assert "ROBTicSerialNumberIsValid(savedSerial)" in method
+    assert '[routedArguments addObjectsFromArray:@[@"-d", savedSerial]]' in method
+
+    read_only_drain = read_only.index("readDataToEndOfFile")
+    read_only_wait = read_only.index("[ticcmd waitUntilExit]")
+    read_only_status = read_only.index("ticcmd.terminationStatus")
+    assert read_only_drain < read_only_wait < read_only_status
     print("ticcmd output/status lifecycle is ordered safely")
 
 

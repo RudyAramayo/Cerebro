@@ -186,6 +186,19 @@ Pololu Maestro, and opens it immediately. If the USB route changed or the saved
 channel is absent, discovery falls back to the full identity scan and replaces
 the saved path after the new connection succeeds.
 
+The Base Arduino follows the same verified-first rule. Cerebro remembers its
+USB callout path only after the firmware emits `BEGIN BASE STARTUP SEQUENCE`,
+then moves that path to the front of the next launch's probe order. A missing
+or relocated Arduino still falls back to all current USB serial paths.
+
+The Pololu Tic stepper controller is addressed by its stable controller serial
+number instead of a tty path. Startup first runs a read-only status request
+against the remembered serial number. If it is unavailable, `ticcmd --list`
+provides the fallback; exactly one detected Tic is remembered, while an
+ambiguous multi-controller result retains the prior explicit selection. Motor
+commands include `-d` with the remembered controller serial so they cannot be
+routed to a different Tic merely because USB enumeration order changed.
+
 On upgrade, a saved speed of `40` or acceleration of `4` is migrated once to
 the gentler shipped value. Other saved values are treated as operator
 calibration and remain unchanged.
