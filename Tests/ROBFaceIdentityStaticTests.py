@@ -98,14 +98,13 @@ assert "headTracking_enabled.state" in tracking
 person_tracking = main.split(
     "- (void) trackingPerson:(NSString *)userID x:", 1
 )[1].split("- (void) startHeartbeatNiTE_ResetTimer", 1)[0]
-assert "prepareNeckForPersonTracking" in person_tracking
-tracking_prepare = main.rsplit("- (BOOL)prepareNeckForPersonTracking", 1)[1].split(
-    "- (void)trackFaceBoundingBox:", 1
-)[0]
-assert "prepareNeckForPersonFollow" in tracking_prepare
-assert "commandedLowerNeckTiltTarget" in tracking_prepare
-assert "ROBPersonTrackingNeutralUpperTarget" in tracking_prepare
-assert "Person tracking waiting:" in tracking_prepare
+assert "prepareNeckForPersonTracking" not in person_tracking
+assert "prepareNeckForPersonFollow" not in person_tracking
+assert "commandedLowerNeckTiltTarget" not in person_tracking
+assert "currentNeckPanMinimumDegrees" in person_tracking
+assert "currentNeckPanMaximumDegrees" in person_tracking
+assert "personTrackingUpperBaselineTarget" in person_tracking
+assert "kROBPersonTrackingMaximumUpperOffset" in person_tracking
 human_tracking = main.split("- (void) didTrackHumans:", 1)[1].split(
     "#pragma mark - AudioInputMethods", 1
 )[0]
@@ -127,7 +126,7 @@ assert 'Person tracking %@ raw=(%.3f, %.3f)' in person_tracking
 assert "!recognizedFace && self.faceIdentityTrackingActive" in person_tracking
 assert "!detectedFace" in person_tracking
 legacy_faces = main.split("- (void) didSeeNewPeople:", 1)[1].split(
-    "- (BOOL)prepareNeckForPersonTracking", 1
+    "- (void)trackFaceBoundingBox:", 1
 )[0]
 assert "updatePersonVisible" in legacy_faces
 assert "trackFaceBoundingBox" not in legacy_faces
@@ -137,7 +136,7 @@ assert "centerX = 0.5" in tracking_policy_source
 assert "centerY = 0.5" in tracking_policy_source
 assert "horizontalDeadBand = 0.06" in tracking_policy_source
 assert "verticalDeadBand = 0.06" in tracking_policy_source
-assert "mirrorHorizontalCoordinate = true" in tracking_policy_source
+assert "mirrorHorizontalCoordinate = false" in tracking_policy_source
 assert "responseExponent = 1.5" in tracking_policy_source
 assert "pow(normalizedError, responseExponent)" in tracking_policy_source
 assert "panTargetsPerSecond = 250.0" in tracking_policy_source

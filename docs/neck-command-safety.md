@@ -43,9 +43,9 @@ physical build.
 | Unknown/off pan | −15° to +2.1° | fail-safe asymmetric pan limits when lower tilt has no known active command |
 | Lower clearance/up | 6011 | fixed lower-neck camera-leveling reference and temporary OFF/unknown startup lift |
 | Upper upright | 6073 | fixed upright and Vision-controller center target |
-| Person-follow upper floor | 7350 | downward tracking guard established by physical testing |
-| Person-follow upper center | 7375 | slight-up target used when a face/blob is first acquired |
-| Person-follow upper ceiling | 7400 | tracking-only ceiling below the physical upper hard limit |
+| Authorized-follow upper floor | 7350 | lower edge of the reviewed full-pan follow-clearance pose |
+| Authorized-follow upper center | 7375 | camera target used only by controller-authorized follow preparation |
+| Authorized-follow upper ceiling | 7400 | upper edge of the reviewed full-pan follow-clearance pose |
 | Default forward pan | 5799 | original torso-control forward resting target |
 | Default lower rest | 7014 | original safe resting target toward the rear of the robot |
 | Default upper rest | 6073 | calibrated upright upper-neck target used by the `upright` camera position |
@@ -88,42 +88,42 @@ is unknown. A direct lower-tilt slider or lower-enable action can authorize an
 explicitly supervised calibration jog. An explicit pan-slider action may
 authorize the same exact-demand recovery only when lower tilt is enabled and
 its slider target is inside `5000`–`6495`; upper camera controls cannot qualify.
-Recognized-person tracking has one separate reviewed clearance request: center
-pan, lower `6011`, and upper `7375`. It may establish only that exact tuple
-without enabling arbitrary uncalibrated lower motion, and tracking remains
-paused until the exact lower-upright target, the tracking camera band, the
+Controller-authorized full person follow has one separate reviewed clearance
+request: center pan, lower `6011`, and upper `7375`. It may establish only that
+exact tuple without enabling arbitrary uncalibrated lower motion, and follow
+remains paused until the exact lower-upright target, the camera band, the
 full-pan envelope, and lower/upper command deadlines have settled. The gateway
 then latches that prepared state while the lower target, full-pan envelope, and
-upper tracking band remain valid. It centers pan before moving a leaning lower
-neck; after upright clearance is established, it does not wait for or recenter
-each active pan or upper-camera correction.
+upper band remain valid. It centers pan before moving a leaning lower neck;
+after upright clearance is established, it does not wait for or recenter each
+active pan or upper-camera correction. Ordinary face/blob centering does not
+request this lower-neck transition.
 After that exact lower target is successfully written and its command-space
 settle interval completes, pan uses the corresponding lower-target envelope
 even while the separate camera/counter-rotation calibration remains
 unconfirmed. The status identifies this mode. It does not energize an
 unverified compensation direction autonomously.
 
-Once the clearance pose settles, one frame-rate-independent proportional
-controller is shared by recognized faces and legacy human blobs. It targets
+One frame-rate-independent proportional controller is shared by recognized
+faces and legacy human blobs. It targets
 normalized image center `(0.5, 0.5)`, ignores a 12-percent-wide band on each
 axis to prevent detector jitter, and accepts at most one correction every 0.1
 seconds. Horizontal and vertical response rates are `250` and `80`
 raw target units per second at a normalized error of `1.0`. A delayed or newly
-reacquired observation is capped to one 0.1-second correction. Upper tracking
-starts at the slight-up center `7375` within a narrow `7350`–`7400` band. A
-lower image error may reduce the target slowly, but it cannot cross `7350` into
-the downward pose that caused physical oscillation.
+reacquired observation is capped to one 0.1-second correction. Acquisition
+captures the currently accepted upper-camera target as its baseline and limits
+vertical tracking to ±20 raw targets around it. It therefore cannot jump from
+the existing camera pose to the authorized-follow target `7375`.
 The shared gateway still applies the configured physical hard bounds. These
 tracking values are integer Maestro command targets, not measured joint angles.
-Both recognized-face and legacy human-blob entry points use the same readiness
-gate. Automatic pan remains paused until lower `6011` is settled, so a request
-toward or beyond a restricted pan edge cannot continue while the lower neck is
-leaning. Once upright, pan may use the calibrated full range and still clamps at
-the physical `4000`/`8000` hard targets. The installed servo turns right as the
-raw pan target decreases toward `4000` and left as it increases toward `8000`.
-The installed main-camera feed reports mirrored X, so person tracking reverses
-normalized X once: a person on ROB's physical right lowers the raw pan target
-and turns the installed servo physically right. Recognized-face tracking
+Both recognized-face and legacy human-blob entry points use the currently
+settled lower-neck-dependent pan envelope immediately and never command the
+lower joint. A leaning lower neck therefore clamps tracking at its restricted
+edge; controller-authorized follow must establish `6011` before using full pan.
+The installed servo turns right as the raw pan target decreases toward `4000`
+and left as it increases toward `8000`. Vision processes the raw unmirrored
+sample buffer, so a person on ROB's physical right directly lowers the raw pan
+target and turns the installed servo physically right. Recognized-face tracking
 has priority; generic face detection is used only as an acquisition fallback,
 and legacy body boxes run only when neither face source is active. The filter
 uses 65-percent response while an observation approaches center, 25 percent

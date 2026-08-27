@@ -18,9 +18,9 @@ extern "C" {
 #endif
 
 enum {
-    // Physical testing showed that 7300 still aimed the camera too far down.
-    // Acquire near the middle of a narrow slight-up band so face/blob tracking
-    // can make subtle centering corrections without a visible downward dip.
+    // Reviewed camera band for controller-authorized full-pan follow
+    // preparation. Ordinary face/blob acquisition instead centers a narrow
+    // runtime band on the currently accepted upper-camera target.
     ROBPersonTrackingNeutralUpperTarget = 7375,
     ROBPersonTrackingMinimumUpperTarget = 7350,
     // Retain the existing high guard below the physical joint maximum. This
@@ -54,9 +54,9 @@ typedef struct {
 } ROBPersonTrackingResult;
 
 // The default controller samples at no more than 10 Hz, aims at the exact
-// image center, converts the mirrored main-camera Vision X coordinate into the
-// physical pan frame, ignores the central 12 percent on both axes, and eases
-// corrections as the observation approaches that band.
+// image center in the raw main-camera Vision coordinate system, ignores the
+// central 12 percent on both axes, and eases corrections as the observation
+// approaches that band.
 ROBPersonTrackingConfig ROBPersonTrackingDefaultConfig(void);
 
 bool ROBPersonTrackingConfigIsValid(

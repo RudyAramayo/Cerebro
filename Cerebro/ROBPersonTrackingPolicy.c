@@ -63,7 +63,7 @@ ROBPersonTrackingConfig ROBPersonTrackingDefaultConfig(void) {
         .centerY = 0.5,
         .horizontalDeadBand = 0.06,
         .verticalDeadBand = 0.06,
-        .mirrorHorizontalCoordinate = true,
+        .mirrorHorizontalCoordinate = false,
         .responseExponent = 1.5,
         .panTargetsPerSecond = 250.0,
         .upperTargetsPerSecond = 80.0,
@@ -107,9 +107,7 @@ bool ROBPersonTrackingConfigIsValid(
         && configuration->maximumElapsedSeconds > 0.0
         && configuration->panMinimumTarget < configuration->panMaximumTarget
         && configuration->upperMinimumTarget
-            <= ROBPersonTrackingNeutralUpperTarget
-        && configuration->upperMaximumTarget
-            >= ROBPersonTrackingNeutralUpperTarget;
+            <= configuration->upperMaximumTarget;
 }
 
 bool ROBPersonTrackingApply(
@@ -136,8 +134,9 @@ bool ROBPersonTrackingApply(
         0.0,
         1.0
     );
-    // The installed main-camera feed presents mirrored X observations. Convert
-    // that display-relative coordinate once before applying physical pan.
+    // Vision runs on the raw sample buffer. A future mirrored detector can
+    // request one X conversion explicitly, but preview presentation must not
+    // reverse the physical controller by default.
     const double x = configuration->mirrorHorizontalCoordinate
         ? 1.0 - observedX
         : observedX;

@@ -172,21 +172,21 @@ an OFF/unknown axis—the service runs a configurable, validated three-phase
 startup: pan stays OFF while lower/upper move to `6011`/`6073`, pan settles
 forward at `5799`, and only then does the neck move to the `lean_forward` pose
 at lower `7014` / upper `7698`.
-Recognized-face and human-blob following acquires at slight-up target `7375`
-inside a narrow `7350`–`7400` upper tracking band. Main-camera Vision uses the
-mirrored camera coordinate, so a face on ROB's physical right is converted into
-a rightward pan command. Recognized faces take priority over legacy human blobs,
-while the generic face detector runs only as an acquisition fallback and body
-boxes run only when neither face source is active. The observation filter follows a
-face approaching center quickly and stops immediately inside the dead band;
-a softened response curve further reduces pan and tilt corrections near center.
-Slower maximum pan/tilt responses, 12-percent center
-dead bands, and a matching 10 Hz servo renderer prevent detector jitter and
-physical command latency from producing large corrections. Face and human-blob
-tracking both pause until lower-neck `6011` has settled upright with the full
-pan envelope; requests still clamp at the calibrated pan hard limits. Once
-upright, the gateway latches that prepared posture so live pan and upper-camera
-corrections are not reset to center between 10 Hz tracking updates.
+Recognized-face and human-blob tracking begins inside the neck's currently
+settled collision-safe pan envelope without moving the lower neck. Vision runs
+on the raw, unmirrored sample buffer, so a face on ROB's physical right lowers
+the installed servo target and pans right. Each acquisition preserves the
+accepted upper-camera pose and permits only ±20 raw targets of subtle vertical
+centering around it; it no longer jumps to a fixed tracking tilt. Recognized
+faces take priority over legacy human blobs, while the generic face detector
+runs only as an acquisition fallback and body boxes run only when neither face
+source is active. The observation filter follows a face approaching center
+quickly and stops immediately inside the dead band; a softened response curve
+further reduces pan and tilt corrections near center. Slower maximum pan/tilt
+responses, 12-percent center dead bands, the live pan envelope, and a matching
+10 Hz servo renderer prevent detector jitter and physical command latency from
+producing large corrections. The separately controller-authorized follow mode
+retains its reviewed upright/full-pan preparation sequence.
 The **Servos → Open Servo Control…** window edits named camera positions,
 servo-sequence phases, and relative `YES`/`NO` gestures. Gesture deltas are
 applied around the current pose, so a nod or head shake remains relative to

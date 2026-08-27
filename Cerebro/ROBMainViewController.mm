@@ -42,6 +42,7 @@ static double const kROBPersonTrackingApproachFilterAlpha = 0.65;
 static double const kROBPersonTrackingRetreatFilterAlpha = 0.25;
 static double const kROBPersonTrackingFilterCenter = 0.5;
 static double const kROBPersonTrackingFilterStopBand = 0.06;
+static int const kROBPersonTrackingMaximumUpperOffset = 20;
 static NSString * const ROBDevelopmentModeDefaultsKey = @"ROBDevelopmentMode";
 static NSString * const ROBShowControllerInputDiagnosticsNotification = @"ROBShowControllerInputDiagnostics";
 static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopmentModeDidChange";
@@ -392,7 +393,6 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 @property (readwrite, retain) IBOutlet NSTextView *simpleUserTrackerTaskTextView;
 
 @property (readwrite, assign) bool followingMode;
-@property (readwrite, assign) BOOL isNeckLifted;
 @property (readwrite, assign) bool ignoreText;
 @property (readwrite, assign) int currentPersonTrackingID;
 @property (readwrite, assign) int followingSpeed;
@@ -409,6 +409,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 @property (readwrite, assign) BOOL personTrackingFilterInitialized;
 @property (readwrite, assign) double filteredPersonTrackingX;
 @property (readwrite, assign) double filteredPersonTrackingY;
+@property (readwrite, assign) int32_t personTrackingUpperBaselineTarget;
 @property (readwrite, copy) NSString *personTrackingSourceID;
 @property (readwrite, assign) NSTimeInterval lastPersonTrackingDiagnosticsUptime;
 
@@ -458,7 +459,6 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void)updateGeminiCameraDemand;
 - (void)faceIdentityConversationCue:(NSNotification *)notification;
 - (void)faceIdentityTrackingDidUpdate:(NSNotification *)notification;
-- (BOOL)prepareNeckForPersonTracking;
 - (void)trackFaceBoundingBox:(CGRect)boundingBox;
 - (void)geminiVideoSourceSettingsDidChange:(NSNotification *)notification;
 - (void)configureConversationTranscript;
@@ -2667,7 +2667,6 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     self.followingSpeed = 0;
     self.currentPersonTrackingID = 1;
     self.ignoreText = true;
-    self.isNeckLifted = NO;
     NSString *resolvedHostName = [[NSHost currentHost] name];
     NSString *hostName = resolvedHostName.length > 0 ? resolvedHostName : @"Mac";
     self.robotActionSenderID = [NSString stringWithFormat:@"Cerebro:%@", hostName];
@@ -3263,52 +3262,11 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     });
 }
 
-- (BOOL)prepareNeckForPersonTracking
-{
-    NSAssert(NSThread.isMainThread, @"Person tracking targets are main-thread owned");
-    if (![self.serialBox prepareNeckForPersonFollow]) {
-        NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
-        if (now - self.lastPersonTrackingDiagnosticsUptime >= 1.0) {
-            self.lastPersonTrackingDiagnosticsUptime = now;
-            NSLog(
-                @"Person tracking waiting: source=%@ pan=%ld lower=%ld upper=%ld status=%@",
-                self.serialBox.neckCommandSource ?: @"Unknown",
-                (long)self.serialBox.commandedNeckPanTarget,
-                (long)self.serialBox.commandedLowerNeckTiltTarget,
-                (long)self.serialBox.commandedUpperNeckTiltTarget,
-                self.serialBox.neckCommandSafetyStatus ?: @"No safety status"
-            );
-        }
-        self.isNeckLifted = NO;
-        self.lastPersonTrackingUpdateUptime = 0;
-        return NO;
-    }
-    if (!self.isNeckLifted) {
-        // The serial gateway has established and settled the reviewed
-        // upright/full-clearance pose. Mirror its accepted targets into the
-        // passive torso renderer so an old slider demand cannot immediately
-        // restore a restricted or non-upright lower-neck envelope.
-        self.torsoControlsViewController.headPan.integerValue =
-            self.serialBox.commandedNeckPanTarget;
-        self.torsoControlsViewController.headTilt.integerValue =
-            self.serialBox.commandedLowerNeckTiltTarget;
-        self.torsoControlsViewController.headUpperNeckTilt.integerValue =
-            MAX(
-                self.serialBox.commandedUpperNeckTiltTarget,
-                ROBPersonTrackingNeutralUpperTarget
-            );
-        self.lastPersonTrackingUpdateUptime = 0;
-        self.isNeckLifted = YES;
-    }
-    return YES;
-}
-
 - (void)trackFaceBoundingBox:(CGRect)boundingBox
 {
     NSAssert(NSThread.isMainThread, @"Face tracking targets are main-thread owned");
     if (self.torsoControlsViewController.headTracking_enabled.state
         != NSControlStateValueOn) {
-        self.isNeckLifted = NO;
         self.lastPersonTrackingUpdateUptime = 0;
         return;
     }
@@ -3364,9 +3322,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     void (^updateTrackingTargets)(void) = ^{
         if (self.torsoControlsViewController.headTracking_enabled.state
             != NSControlStateValueOn) {
-            self.isNeckLifted = NO;
             self.lastPersonTrackingUpdateUptime = 0;
             self.personTrackingFilterInitialized = NO;
+            self.personTrackingUpperBaselineTarget = 0;
             self.personTrackingSourceID = nil;
             return;
         }
@@ -3383,12 +3341,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             && self.faceDetectionTrackingActive) {
             return;
         }
-        // Both recognized faces and legacy human blobs enter here. Hold every
-        // automatic correction until the exact upright lower-neck pose and
-        // its full-pan envelope have settled.
-        if (![self prepareNeckForPersonTracking]) {
-            return;
-        }
+        // Face acquisition never changes the lower-neck posture. Track inside
+        // the currently settled collision-safe pan envelope immediately; an
+        // explicitly authorized follow mode owns any later clearance lift.
         self.currentPerson_positionX = x;
         self.currentPerson_positionY = y;
         self.currentPerson_positionZ = z;
@@ -3403,6 +3358,23 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         if (self.lastPersonTrackingUpdateUptime > 0 && elapsed < 0.1) {
             return;
         }
+        int32_t currentPanTarget = (int32_t)lround(
+            self.torsoControlsViewController.headPan.doubleValue
+        );
+        if (self.serialBox.neckPanCommandKnown
+            && self.serialBox.commandedNeckPanTarget
+                != ROBNeckSafetyTargetOff) {
+            currentPanTarget = (int32_t)self.serialBox.commandedNeckPanTarget;
+        }
+        int32_t currentUpperTarget = (int32_t)lround(
+            self.torsoControlsViewController.headUpperNeckTilt.doubleValue
+        );
+        if (self.serialBox.upperNeckTiltCommandKnown
+            && self.serialBox.commandedUpperNeckTiltTarget
+                != ROBNeckSafetyTargetOff) {
+            currentUpperTarget =
+                (int32_t)self.serialBox.commandedUpperNeckTiltTarget;
+        }
         BOOL trackingSourceChanged = self.personTrackingSourceID == nil
             || ![self.personTrackingSourceID isEqualToString:userID];
         BOOL trackingWasInterrupted = self.lastPersonTrackingUpdateUptime <= 0
@@ -3414,6 +3386,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             self.filteredPersonTrackingY = y;
             self.personTrackingFilterInitialized = YES;
             self.personTrackingSourceID = userID;
+            self.personTrackingUpperBaselineTarget = currentUpperTarget;
         } else {
             self.filteredPersonTrackingX = ROBPersonTrackingFilterCoordinate(
                 self.filteredPersonTrackingX,
@@ -3434,36 +3407,55 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         configuration.panMaximumTarget = (int32_t)lround(
             self.torsoControlsViewController.headPan.maxValue
         );
-        configuration.upperMinimumTarget = MAX(
-            ROBPersonTrackingMinimumUpperTarget,
-            (int32_t)lround(
-                self.torsoControlsViewController.headUpperNeckTilt.minValue
+        ROBNeckSafetyConfig neckConfiguration =
+            [self.serialBox neckSafetyConfiguration];
+        int32_t envelopeTargetA = 0;
+        int32_t envelopeTargetB = 0;
+        if (ROBNeckSafetyPanDegreesToTarget(
+                &neckConfiguration,
+                self.serialBox.currentNeckPanMinimumDegrees,
+                &envelopeTargetA
             )
+            && ROBNeckSafetyPanDegreesToTarget(
+                &neckConfiguration,
+                self.serialBox.currentNeckPanMaximumDegrees,
+                &envelopeTargetB
+            )) {
+            configuration.panMinimumTarget = MAX(
+                configuration.panMinimumTarget,
+                MIN(envelopeTargetA, envelopeTargetB)
+            );
+            configuration.panMaximumTarget = MIN(
+                configuration.panMaximumTarget,
+                MAX(envelopeTargetA, envelopeTargetB)
+            );
+        }
+        int32_t hardUpperMinimum = (int32_t)lround(
+            self.torsoControlsViewController.headUpperNeckTilt.minValue
+        );
+        int32_t hardUpperMaximum = (int32_t)lround(
+            self.torsoControlsViewController.headUpperNeckTilt.maxValue
+        );
+        self.personTrackingUpperBaselineTarget = MAX(
+            hardUpperMinimum,
+            MIN(hardUpperMaximum, self.personTrackingUpperBaselineTarget)
+        );
+        configuration.upperMinimumTarget = MAX(
+            hardUpperMinimum,
+            self.personTrackingUpperBaselineTarget
+                - kROBPersonTrackingMaximumUpperOffset
         );
         configuration.upperMaximumTarget = MIN(
-            ROBPersonTrackingMaximumUpperTarget,
-            (int32_t)lround(
-                self.torsoControlsViewController.headUpperNeckTilt.maxValue
-            )
+            hardUpperMaximum,
+            self.personTrackingUpperBaselineTarget
+                + kROBPersonTrackingMaximumUpperOffset
         );
 
         ROBPersonTrackingResult result = {0};
-        int32_t currentPanTarget = (int32_t)lround(
-            self.torsoControlsViewController.headPan.doubleValue
-        );
-        if (self.serialBox.neckPanCommandKnown
-            && self.serialBox.commandedNeckPanTarget
-                != ROBNeckSafetyTargetOff) {
-            // Accumulate from the accepted hardware command. A passive slider
-            // refresh cannot then reverse or erase a pending rightward step.
-            currentPanTarget = (int32_t)self.serialBox.commandedNeckPanTarget;
-        }
         if (!ROBPersonTrackingApply(
                 &configuration,
                 currentPanTarget,
-                (int32_t)lround(
-                    self.torsoControlsViewController.headUpperNeckTilt.doubleValue
-                ),
+                currentUpperTarget,
                 self.filteredPersonTrackingX,
                 self.filteredPersonTrackingY,
                 elapsed,
@@ -3474,7 +3466,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         if (now - self.lastPersonTrackingDiagnosticsUptime >= 1.0) {
             self.lastPersonTrackingDiagnosticsUptime = now;
             NSLog(
-                @"Person tracking %@ raw=(%.3f, %.3f) filtered=(%.3f, %.3f) pan=%d->%d mirrored=%@",
+                @"Person tracking %@ raw=(%.3f, %.3f) filtered=(%.3f, %.3f) pan=%d->%d envelope=%d...%d upper=%d->%d baseline=%d mirrored=%@",
                 userID,
                 x,
                 y,
@@ -3482,6 +3474,11 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                 self.filteredPersonTrackingY,
                 currentPanTarget,
                 result.panTarget,
+                configuration.panMinimumTarget,
+                configuration.panMaximumTarget,
+                currentUpperTarget,
+                result.upperTarget,
+                self.personTrackingUpperBaselineTarget,
                 configuration.mirrorHorizontalCoordinate ? @"YES" : @"NO"
             );
         }
