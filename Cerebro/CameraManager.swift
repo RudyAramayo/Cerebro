@@ -191,6 +191,10 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     private var activeSource: CameraSource?
     private var deliveryInFlight = false
     private var previewDeliveryInFlight = false
+    /// Main-thread-only guard for AVSampleBufferVideoRenderer recovery. A
+    /// renderer can require a flush after display/GPU resources are reclaimed
+    /// while capture and Vision continue to receive frames.
+    private var depthPreviewRecoveryInFlight = false
     private var previewVisible = false
     private var previewVisibilityGeneration: UInt64 = 0
     private var lifecycleGeneration: UInt64 = 0
@@ -539,14 +543,48 @@ final class CameraManager: NSObject, CameraManagerProtocol {
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            if self.previewVisibilityIsCurrent(previewGeneration, visible: true),
-               let renderer = self.depthPreviewLayer?.sampleBufferRenderer,
-               renderer.isReadyForMoreMediaData {
+            defer {
+                self.previewLock.lock()
+                self.previewDeliveryInFlight = false
+                self.previewLock.unlock()
+            }
+            guard self.previewVisibilityIsCurrent(previewGeneration, visible: true),
+                  let renderer = self.depthPreviewLayer?.sampleBufferRenderer else {
+                return
+            }
+            if renderer.status == .failed || renderer.requiresFlushToResumeDecoding {
+                self.recoverDepthPreviewRenderer(
+                    renderer,
+                    previewGeneration: previewGeneration
+                )
+            } else if renderer.isReadyForMoreMediaData {
                 renderer.enqueue(sampleBuffer)
             }
-            self.previewLock.lock()
-            self.previewDeliveryInFlight = false
-            self.previewLock.unlock()
+        }
+    }
+
+    /// Capture is independent of the diagnostic display. If macOS invalidates
+    /// the display renderer, reset it and let the next live frame repopulate the
+    /// preview instead of leaving a permanent black image under active overlays.
+    private func recoverDepthPreviewRenderer(
+        _ renderer: AVSampleBufferVideoRenderer,
+        previewGeneration: UInt64
+    ) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard !depthPreviewRecoveryInFlight else { return }
+        depthPreviewRecoveryInFlight = true
+        let detail = renderer.error?.localizedDescription ?? "renderer requested a decoder reset"
+        NSLog("Camera %@ preview renderer stalled; flushing: %@", role.rawValue, detail)
+        renderer.flush(removingDisplayedImage: true) { [weak self] in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.depthPreviewRecoveryInFlight = false
+                guard self.previewVisibilityIsCurrent(previewGeneration, visible: true),
+                      self.depthPreviewLayer?.sampleBufferRenderer === renderer else {
+                    return
+                }
+                NSLog("Camera %@ preview renderer recovered", self.role.rawValue)
+            }
         }
     }
 
@@ -831,11 +869,10 @@ final class CameraManager: NSObject, CameraManagerProtocol {
             }
             self.depthPreviewLayer?.removeFromSuperlayer()
             self.depthPreviewLayer = nil
+            self.depthPreviewRecoveryInFlight = false
 
             self.previewLayer.videoGravity = .resizeAspectFill
-            self.previewLayer.frame = self.containerView.bounds
-            self.containerView.wantsLayer = true
-            self.containerView.layer = self.previewLayer
+            self.installPreviewBackgroundLayer(self.previewLayer)
         }
     }
 
@@ -853,11 +890,31 @@ final class CameraManager: NSObject, CameraManagerProtocol {
 
             let layer = AVSampleBufferDisplayLayer()
             layer.videoGravity = .resizeAspectFill
-            layer.frame = self.containerView.bounds
-            self.containerView.wantsLayer = true
-            self.containerView.layer = layer
+            self.depthPreviewLayer?.sampleBufferRenderer.flush(
+                removingDisplayedImage: true,
+                completionHandler: nil
+            )
+            self.depthPreviewLayer?.removeFromSuperlayer()
+            self.depthPreviewRecoveryInFlight = false
+            self.installPreviewBackgroundLayer(layer)
             self.depthPreviewLayer = layer
         }
+    }
+
+    /// Keep AppKit's stable backing layer as the owner of overlay subviews.
+    /// Replacing the view's root layer with a camera renderer can detach or
+    /// invalidate the renderer when AppKit rebuilds the view hierarchy.
+    private func installPreviewBackgroundLayer(_ layer: CALayer) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        containerView.wantsLayer = true
+        guard let rootLayer = containerView.layer else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.frame = rootLayer.bounds
+        layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+        layer.removeFromSuperlayer()
+        rootLayer.insertSublayer(layer, at: 0)
+        CATransaction.commit()
     }
 
     private func removePreviewLayers(previewGeneration: UInt64) {
@@ -873,6 +930,7 @@ final class CameraManager: NSObject, CameraManagerProtocol {
             )
             self.depthPreviewLayer?.removeFromSuperlayer()
             self.depthPreviewLayer = nil
+            self.depthPreviewRecoveryInFlight = false
         }
     }
 

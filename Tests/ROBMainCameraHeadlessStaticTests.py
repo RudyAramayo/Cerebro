@@ -356,6 +356,21 @@ def main() -> None:
         and "previewVisibilityIsCurrent" in preview_enqueue,
         "Hidden DepthAI frames can still enqueue local preview rendering",
     )
+    require(
+        "renderer.status == .failed" in preview_enqueue
+        and "renderer.requiresFlushToResumeDecoding" in preview_enqueue
+        and "recoverDepthPreviewRenderer" in preview_enqueue,
+        "A failed RGB-D preview renderer can remain permanently black",
+    )
+    preview_recovery = braced_declaration(
+        MANAGER, "private func recoverDepthPreviewRenderer("
+    )
+    require(
+        "depthPreviewRecoveryInFlight" in preview_recovery
+        and "renderer.flush(removingDisplayedImage: true)" in preview_recovery
+        and "previewVisibilityIsCurrent" in preview_recovery,
+        "RGB-D preview recovery no longer safely flushes the current renderer",
+    )
     fallback_configuration = braced_declaration(
         MANAGER, "private func configureAVFoundationFallbackOnSessionQueue()"
     )
@@ -373,6 +388,16 @@ def main() -> None:
         "guard preview.visible" in install_av_preview
         and "guard preview.visible" in install_depth_preview,
         "A hidden diagnostics window can still install a camera preview layer",
+    )
+    install_preview_background = braced_declaration(
+        MANAGER, "private func installPreviewBackgroundLayer("
+    )
+    require(
+        "rootLayer.insertSublayer(layer, at: 0)" in install_preview_background
+        and "layer.autoresizingMask" in install_preview_background
+        and "containerView.layer =" not in install_av_preview
+        and "containerView.layer =" not in install_depth_preview,
+        "Camera preview layers can replace AppKit's overlay-owning root layer",
     )
     remove_preview = braced_declaration(MANAGER, "private func removePreviewLayers(")
     removes_displayed_depth_image = (
