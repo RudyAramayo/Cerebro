@@ -237,7 +237,8 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 /// pose before person tracking starts. With unconfirmed camera calibration,
 /// only the exact center/6011/7300 tuple is eligible. This never bypasses
 /// collision policy; false means the caller must keep tracking paused and
-/// retry or wait for an operator to recover an unknown/off neck state.
+/// retry or wait for an operator to recover an unknown/off neck state. Once
+/// upright is settled, active pan motion does not restart this preparation.
 - (BOOL)prepareNeckForPersonFollow;
 /// Typed ingress for autonomous neck gestures. Pan is calibrated degrees;
 /// lower/upper are Maestro command targets because those axes do not yet have

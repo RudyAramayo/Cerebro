@@ -78,6 +78,7 @@ static void testDefaultCalibration(void) {
 
 static void testCorrectionsPointCameraTowardBlob(void) {
     ROBPersonTrackingConfig configuration = ROBPersonTrackingDefaultConfig();
+    // The installed pan servo turns right as the raw target decreases.
     ROBPersonTrackingResult upperRight = track(
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
         0.8, 0.8, 0.1

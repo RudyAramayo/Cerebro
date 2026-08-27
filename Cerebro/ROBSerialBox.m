@@ -3577,7 +3577,6 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         && self.panEnvelopeLowerTargetIsKnown
         && self.panEnvelopeLowerTarget == self.commandedLowerNeckTiltTarget
         && self.pendingPanEnvelopeLowerTarget == ROBNeckSafetyTargetOff
-        && now >= self.commandedNeckPanTargetReadyAt
         && now >= self.commandedLowerNeckTargetReadyAt
         && now >= self.commandedUpperNeckTargetReadyAt;
     if (fullPanEnvelopeIsSettled) {
@@ -3619,13 +3618,12 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         && self.panEnvelopeLowerTargetIsKnown
         && self.panEnvelopeLowerTarget == self.commandedLowerNeckTiltTarget
         && self.pendingPanEnvelopeLowerTarget == ROBNeckSafetyTargetOff
-        && now >= self.commandedNeckPanTargetReadyAt
         && now >= self.commandedLowerNeckTargetReadyAt
         && now >= self.commandedUpperNeckTargetReadyAt;
     if (!fullPanEnvelopeIsSettled) {
         self.neckCommandSource = @"Follow tracking clearance";
         self.neckCommandSafetyStatus =
-            @"TRACKING WAIT: UPRIGHT LOWER 6011, CAMERA, AND CENTERED PAN ARE SETTLING BEFORE FULL PAN";
+            @"TRACKING WAIT: CENTER PAN FIRST, THEN SETTLE UPRIGHT LOWER 6011 AND CAMERA BEFORE FULL PAN";
     }
     return fullPanEnvelopeIsSettled;
 }

@@ -130,6 +130,8 @@ bool ROBPersonTrackingApply(
         configuration->verticalDeadBand
     );
 
+    // ROB's physical pan calibration moves right toward the lower raw target
+    // (4000) and left toward the higher raw target (8000).
     const int32_t requestedPan = ROBPersonTrackingRoundedTarget(
         (double)currentPanTarget
             - resultOut->horizontalError

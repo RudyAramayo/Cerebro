@@ -309,6 +309,7 @@ def check_lower_clearance_threshold(
             "self.commandedLowerNeckTiltTarget == lowerReference"
         ) == 2
         and follow.count("now >= self.commandedLowerNeckTargetReadyAt") == 2
+        and "now >= self.commandedNeckPanTargetReadyAt" not in follow
         and follow.count("ROBPersonTrackingMinimumUpperTarget") == 2
         and follow.count("ROBPersonTrackingMaximumUpperTarget") == 2
         and "ROBNeckSafetyFullPanLowerThresholdTarget" not in follow
@@ -320,8 +321,8 @@ def check_lower_clearance_threshold(
         and "ROBPersonTrackingNeutralUpperTarget" in follow
         and "fullPanEnvelopeIsSettled" in follow
         and "pendingPanEnvelopeLowerTarget == ROBNeckSafetyTargetOff" in follow,
-        "Person-follow pose preparation must require exact lower upright, the "
-        "tracking upper band, and settled lower/full-pan command deadlines",
+        "Person-follow preparation must require settled lower upright and the "
+        "tracking upper band without recentering each active pan correction",
     )
     gateway = objective_c_method(serial_source, "applySafeNeckPanTarget:")
     compact_gateway = compact(gateway)

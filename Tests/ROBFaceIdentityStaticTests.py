@@ -118,6 +118,7 @@ assert "centerY = 0.5" in tracking_policy_source
 assert "horizontalDeadBand = 0.04" in tracking_policy_source
 assert "verticalDeadBand = 0.04" in tracking_policy_source
 assert "panTargetsPerSecond = 400.0" in tracking_policy_source
+assert "currentPanTarget\n            - resultOut->horizontalError" in tracking_policy_source
 assert "upperTargetsPerSecond = 150.0" in tracking_policy_source
 assert "maximumElapsedSeconds = 0.1" in tracking_policy_source
 assert "ROBPersonTrackingMinimumUpperTarget = 7300" in tracking_policy_header
