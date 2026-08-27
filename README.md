@@ -173,12 +173,14 @@ startup: pan stays OFF while lower/upper move to `6011`/`6073`, pan settles
 forward at `5799`, and only then does the neck move to the `lean_forward` pose
 at lower `7014` / upper `7698`.
 Recognized-face and human-blob tracking begins inside the neck's currently
-settled collision-safe pan envelope. When confirmed calibration, **Keep
-upright**, and both active tilt servos are available, it also requests only the
-nearest edge of the reviewed `5000`–`6495` lower-neck band. Pan and the direct
-upper-camera demand pause for that clearance move; the safety gateway sends
-equal and opposite lower/upper target deltas together, then tracking resumes
-inside the widening live pan envelope.
+settled collision-safe pan envelope. If an outward correction reaches a
+restricted edge, a confirmed, active neck animates through the safety gateway
+to the saved `fully_upright_right` or `fully_upright_left` camera pose. The
+complete calibrated pan/lower/upper tuple is staged as one exact pose; ordinary
+tracking pauses until it and the widened envelope settle, then resumes. The two
+saved pose pan values are also the final tracking limits (shipped as `4000`
+right and `7652` left), so operator edits to those endpoints remain
+authoritative.
 Vision runs on the raw, unmirrored sample buffer, so a face on ROB's physical
 right lowers the installed servo target and pans right. Each acquisition
 preserves the current uncompensated upper-camera demand instead of jumping to a

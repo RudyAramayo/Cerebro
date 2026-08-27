@@ -167,6 +167,17 @@ public enum ROBServoControlConfigurationError: LocalizedError {
         return positionsStorage.map { $0.copyValue() }
     }
 
+    @objc(cameraPositionNamed:)
+    public func cameraPosition(named name: String) -> ROBServoCameraPosition? {
+        let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+        lock.lock()
+        defer { lock.unlock() }
+        return positionsStorage.first {
+            $0.name.caseInsensitiveCompare(normalized) == .orderedSame
+        }?.copyValue()
+    }
+
     public func sequencePhasesSnapshot() -> [ROBServoSequencePhase] {
         lock.lock()
         defer { lock.unlock() }
@@ -397,33 +408,42 @@ public enum ROBServoControlConfigurationError: LocalizedError {
                 lowerTarget: 4747, upperTarget: 5214
             ),
             ROBServoCameraPosition(
-                name: "fully_right", panTarget: 4000,
+                name: "fully_upright_right", panTarget: 4000,
                 lowerTarget: 6011, upperTarget: 6073
             ),
             ROBServoCameraPosition(
-                name: "fully_left", panTarget: 7652,
+                name: "fully_upright_left", panTarget: 7652,
                 lowerTarget: 6011, upperTarget: 6073
             ),
         ]
     }
 
-    private static func appendMissingPanEndpointPositions(
+    private static func appendMissingUprightPanEndpointPositions(
         to positions: inout [ROBServoCameraPosition]
     ) {
-        let existingNames = Set(positions.map {
-            $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        })
-        if !existingNames.contains("fully_right") {
-            positions.append(ROBServoCameraPosition(
-                name: "fully_right", panTarget: 4000,
-                lowerTarget: 6011, upperTarget: 6073
-            ))
-        }
-        if !existingNames.contains("fully_left") {
-            positions.append(ROBServoCameraPosition(
-                name: "fully_left", panTarget: 7652,
-                lowerTarget: 6011, upperTarget: 6073
-            ))
+        for endpoint in [
+            (canonical: "fully_upright_right", legacy: "fully_right", pan: 4000),
+            (canonical: "fully_upright_left", legacy: "fully_left", pan: 7652),
+        ] {
+            let hasCanonical = positions.contains {
+                $0.name.caseInsensitiveCompare(endpoint.canonical) == .orderedSame
+            }
+            if hasCanonical { continue }
+            if let legacy = positions.first(where: {
+                $0.name.caseInsensitiveCompare(endpoint.legacy) == .orderedSame
+            }) {
+                positions.append(ROBServoCameraPosition(
+                    name: endpoint.canonical,
+                    panTarget: legacy.panTarget,
+                    lowerTarget: legacy.lowerTarget,
+                    upperTarget: legacy.upperTarget
+                ))
+            } else {
+                positions.append(ROBServoCameraPosition(
+                    name: endpoint.canonical, panTarget: endpoint.pan,
+                    lowerTarget: 6011, upperTarget: 6073
+                ))
+            }
         }
     }
 
@@ -545,7 +565,7 @@ public enum ROBServoControlConfigurationError: LocalizedError {
             )
         }
         let persistedPositionCount = positions.count
-        Self.appendMissingPanEndpointPositions(to: &positions)
+        Self.appendMissingUprightPanEndpointPositions(to: &positions)
         let phases = payload.sequencePhases.map {
             ROBServoSequencePhase(
                 identifier: $0.identifier, sequenceName: $0.sequenceName,

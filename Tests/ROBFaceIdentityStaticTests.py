@@ -102,7 +102,7 @@ person_tracking = main.split(
 assert "prepareNeckForPersonTracking" not in person_tracking
 assert "prepareNeckForPersonFollow" not in person_tracking
 assert "commandedLowerNeckTiltTarget" in person_tracking
-assert "lowerClearanceAuthorized" in person_tracking
+assert "uprightTransitionAuthorized" in person_tracking
 assert "neckSafetyCalibrationConfirmed" in person_tracking
 assert "currentNeckPanMinimumDegrees" in person_tracking
 assert "currentNeckPanMaximumDegrees" in person_tracking
@@ -154,15 +154,16 @@ assert "ROBPersonTrackingDefaultVerticalTargetsPerSecond = 800" in tracking_poli
 assert "ROBPersonTrackingMaximumVerticalTargetsPerSecond = 2000" in tracking_policy_header
 assert 'ROB.PersonTracking.VerticalTargetsPerSecond' in tracking_preferences
 assert "ROBPersonTrackingVerticalTargetsPerSecondFromDefaults" in main
-assert "currentPanTarget\n                - resultOut->horizontalError" in tracking_policy_source
-assert "lowerClearanceEnabled = false" in tracking_policy_source
-assert "lowerClearanceActive" in tracking_policy_source
-assert "lowerFullPanMinimumTarget" in tracking_policy_source
-assert "lowerFullPanMaximumTarget" in tracking_policy_source
-assert "self.serialBox.neckCameraLevelingEnabled" in person_tracking
+assert "currentPanTarget\n            - resultOut->horizontalError" in tracking_policy_source
+assert "uprightTransitionEnabled = false" in tracking_policy_source
+assert "uprightTransitionRequested" in tracking_policy_source
+assert 'cameraPositionNamed:@"fully_upright_right"' in person_tracking
+assert 'cameraPositionNamed:@"fully_upright_left"' in person_tracking
+assert "requestPersonTrackingUprightPanTarget" in person_tracking
+assert "headPan_enabled.state" in person_tracking
 assert "self.serialBox.upperNeckTiltCommandKnown" in person_tracking
 assert "headUpperNeckTilt_enabled.state" in person_tracking
-assert "self.torsoControlsViewController.headTilt.integerValue = lowerTarget" in main
+assert "resultOut->panClamped" in tracking_policy_source
 assert "kROBPersonTrackingMaximumUpperUpOffset = 200" in main
 assert "kROBPersonTrackingMaximumUpperDownOffset = 40" in main
 assert "maximumElapsedSeconds = 0.1" in tracking_policy_source

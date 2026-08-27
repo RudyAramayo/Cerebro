@@ -107,6 +107,8 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 @property (readonly, assign, getter=isNeckSafetyCalibrationConfirmed) BOOL neckSafetyCalibrationConfirmed;
 @property (readonly, assign, getter=isNeckCameraLevelingEnabled) BOOL neckCameraLevelingEnabled;
 @property (readonly, assign, getter=isSafeNeckStartupInProgress) BOOL safeNeckStartupInProgress;
+@property (readonly, assign, getter=isPersonTrackingUprightTransitionActive)
+    BOOL personTrackingUprightTransitionActive;
 /// Worst-case command-space time at which all currently accepted neck targets
 /// and any pending lower-dependent pan envelope are ready. The Maestro has no
 /// shaft feedback, so this is deliberately conservative timing, not a measured
@@ -137,6 +139,13 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 - (ROBNeckCommandDisposition)requestOperatorNeckPosePanTarget:(NSInteger)panTarget
                                                   lowerTarget:(NSInteger)lowerTarget
                                                   upperTarget:(NSInteger)upperTarget;
+/// Animates one validated, active, full-clearance endpoint for automatic face
+/// tracking. Unlike an operator pose, this request never cancels a manual,
+/// gesture, or Vision lease. Repeated calls advance gateway staging until all
+/// three exact raw targets and the widened pan envelope have settled.
+- (ROBNeckCommandDisposition)requestPersonTrackingUprightPanTarget:(NSInteger)panTarget
+                                                        lowerTarget:(NSInteger)lowerTarget
+                                                        upperTarget:(NSInteger)upperTarget;
 
 @property (readwrite, retain) NSSlider *arm_R11_force;
 

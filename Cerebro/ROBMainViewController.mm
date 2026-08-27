@@ -3345,9 +3345,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             return;
         }
         // Face acquisition starts inside the currently settled collision-safe
-        // pan envelope. With calibrated camera leveling available, tracking
-        // may request the nearest full-pan lower boundary through that same
-        // gateway while its direct pan and camera demands remain steady.
+        // pan envelope. At an outward edge, a calibrated active neck may
+        // animate to the direction's saved fully-upright endpoint through the
+        // same gateway before ordinary centering resumes.
         self.currentPerson_positionX = x;
         self.currentPerson_positionY = y;
         self.currentPerson_positionZ = z;
@@ -3422,12 +3422,29 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         configuration.upperDownTargetsPerSecond =
             configuration.upperTargetsPerSecond
                 * kROBPersonTrackingDownwardSpeedRatio;
-        configuration.panMinimumTarget = (int32_t)lround(
+        int32_t hardPanMinimum = (int32_t)lround(
             self.torsoControlsViewController.headPan.minValue
         );
-        configuration.panMaximumTarget = (int32_t)lround(
+        int32_t hardPanMaximum = (int32_t)lround(
             self.torsoControlsViewController.headPan.maxValue
         );
+        ROBServoControlStore *servoControlStore =
+            [ROBServoControlStore shared];
+        ROBServoCameraPosition *uprightRight = [servoControlStore
+            cameraPositionNamed:@"fully_upright_right"];
+        ROBServoCameraPosition *uprightLeft = [servoControlStore
+            cameraPositionNamed:@"fully_upright_left"];
+        BOOL namedPanEndpointsAvailable = uprightRight != nil
+            && uprightLeft != nil
+            && uprightRight.panTarget >= hardPanMinimum
+            && uprightRight.panTarget < uprightLeft.panTarget
+            && uprightLeft.panTarget <= hardPanMaximum;
+        configuration.panMinimumTarget = namedPanEndpointsAvailable
+            ? (int32_t)uprightRight.panTarget
+            : hardPanMinimum;
+        configuration.panMaximumTarget = namedPanEndpointsAvailable
+            ? (int32_t)uprightLeft.panTarget
+            : hardPanMaximum;
         ROBNeckSafetyConfig neckConfiguration =
             [self.serialBox neckSafetyConfiguration];
         int32_t envelopeTargetA = 0;
@@ -3477,23 +3494,22 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         configuration.lowerMaximumTarget = (int32_t)lround(
             self.torsoControlsViewController.headTilt.maxValue
         );
-        configuration.lowerFullPanMinimumTarget = MAX(
-            configuration.lowerMinimumTarget,
-            MIN(
-                configuration.lowerMaximumTarget,
-                ROBNeckSafetyFullPanLowerThresholdTarget
-            )
-        );
-        configuration.lowerFullPanMaximumTarget = MAX(
-            configuration.lowerFullPanMinimumTarget,
-            MIN(
-                configuration.lowerMaximumTarget,
-                ROBNeckSafetyFullPanLowerMaximumTarget
-            )
-        );
-        BOOL lowerClearanceAuthorized =
-            self.serialBox.neckSafetyCalibrationConfirmed
-            && self.serialBox.neckCameraLevelingEnabled
+        ROBServoCameraPosition *requestedUprightEndpoint =
+            self.filteredPersonTrackingX >= configuration.centerX
+                ? uprightRight
+                : uprightLeft;
+        BOOL requestedEndpointHasFullClearance =
+            namedPanEndpointsAvailable
+            && requestedUprightEndpoint != nil
+            && ROBNeckSafetyLowerTargetHasFullPanClearance(
+                &neckConfiguration,
+                (int32_t)requestedUprightEndpoint.lowerTarget
+            );
+        BOOL uprightTransitionAuthorized =
+            requestedEndpointHasFullClearance
+            && self.serialBox.neckSafetyCalibrationConfirmed
+            && self.torsoControlsViewController.headPan_enabled.state
+                == NSControlStateValueOn
             && self.serialBox.lowerNeckTiltCommandKnown
             && self.serialBox.commandedLowerNeckTiltTarget
                 != ROBNeckSafetyTargetOff
@@ -3504,7 +3520,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                 == NSControlStateValueOn
             && self.torsoControlsViewController.headUpperNeckTilt_enabled.state
                 == NSControlStateValueOn;
-        configuration.lowerClearanceEnabled = lowerClearanceAuthorized;
+        BOOL lowerAlreadyAtUprightEndpoint = uprightTransitionAuthorized
+            && currentLowerTarget == requestedUprightEndpoint.lowerTarget;
+        configuration.uprightTransitionEnabled =
+            uprightTransitionAuthorized && !lowerAlreadyAtUprightEndpoint;
 
         ROBPersonTrackingResult result = {0};
         if (!ROBPersonTrackingApply(
@@ -3519,13 +3538,34 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             )) {
             return;
         }
-        int32_t lowerTarget = lowerClearanceAuthorized
-            ? result.lowerTarget
-            : currentLowerTarget;
+        if (self.serialBox.personTrackingUprightTransitionActive) {
+            return;
+        }
+        if (result.uprightTransitionRequested
+            && requestedUprightEndpoint != nil) {
+            ROBNeckCommandDisposition disposition = [self.serialBox
+                requestPersonTrackingUprightPanTarget:
+                    requestedUprightEndpoint.panTarget
+                lowerTarget:requestedUprightEndpoint.lowerTarget
+                upperTarget:requestedUprightEndpoint.upperTarget];
+            if (disposition != ROBNeckCommandDispositionRejected) {
+                NSLog(
+                    @"Person tracking reached %@ pan limit %ld; animating exact upright endpoint P%ld L%ld U%ld (%@)",
+                    requestedUprightEndpoint.name,
+                    (long)result.panTarget,
+                    (long)requestedUprightEndpoint.panTarget,
+                    (long)requestedUprightEndpoint.lowerTarget,
+                    (long)requestedUprightEndpoint.upperTarget,
+                    self.serialBox.neckCommandSafetyStatus
+                );
+                return;
+            }
+        }
+        int32_t lowerTarget = currentLowerTarget;
         if (now - self.lastPersonTrackingDiagnosticsUptime >= 1.0) {
             self.lastPersonTrackingDiagnosticsUptime = now;
             NSLog(
-                @"Person tracking %@ raw=(%.3f, %.3f) filtered=(%.3f, %.3f) pan=%d->%d hSpeed=%.0f envelope=%d...%d lower=%d->%d clearance=%@ authorized=%@ upper=%d->%d vSpeed=%.0f baseline=%d mirrored=%@",
+                @"Person tracking %@ raw=(%.3f, %.3f) filtered=(%.3f, %.3f) pan=%d->%d hSpeed=%.0f envelope=%d...%d endpoints=%@ lower=%d upper=%d->%d vSpeed=%.0f baseline=%d mirrored=%@",
                 userID,
                 x,
                 y,
@@ -3536,10 +3576,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                 configuration.panTargetsPerSecond,
                 configuration.panMinimumTarget,
                 configuration.panMaximumTarget,
+                namedPanEndpointsAvailable ? @"NAMED" : @"FALLBACK",
                 currentLowerTarget,
-                lowerTarget,
-                result.lowerClearanceActive ? @"YES" : @"NO",
-                lowerClearanceAuthorized ? @"YES" : @"NO",
                 currentUpperTarget,
                 result.upperTarget,
                 configuration.upperTargetsPerSecond,
@@ -3551,9 +3589,6 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         self.currentPerson_tilt = lowerTarget;
         self.currentPerson_upperNeckTilt = result.upperTarget;
         self.torsoControlsViewController.headPan.integerValue = result.panTarget;
-        if (lowerClearanceAuthorized) {
-            self.torsoControlsViewController.headTilt.integerValue = lowerTarget;
-        }
         self.torsoControlsViewController.headUpperNeckTilt.integerValue =
             result.upperTarget;
     };

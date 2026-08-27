@@ -24,8 +24,6 @@ enum {
     ROBPersonTrackingMinimumVerticalTargetsPerSecond = 400,
     ROBPersonTrackingDefaultVerticalTargetsPerSecond = 800,
     ROBPersonTrackingMaximumVerticalTargetsPerSecond = 2000,
-    ROBPersonTrackingFullPanLowerMinimumTarget = 5000,
-    ROBPersonTrackingFullPanLowerMaximumTarget = 6495,
     // Reviewed camera band for controller-authorized full-pan follow
     // preparation. Ordinary face/blob acquisition instead centers a narrow
     // runtime band on the currently accepted upper-camera target.
@@ -42,7 +40,7 @@ typedef struct {
     double horizontalDeadBand;
     double verticalDeadBand;
     bool mirrorHorizontalCoordinate;
-    bool lowerClearanceEnabled;
+    bool uprightTransitionEnabled;
     double responseExponent;
     double panTargetsPerSecond;
     double upperTargetsPerSecond;
@@ -51,8 +49,6 @@ typedef struct {
     int32_t panMinimumTarget;
     int32_t panMaximumTarget;
     int32_t lowerMinimumTarget;
-    int32_t lowerFullPanMinimumTarget;
-    int32_t lowerFullPanMaximumTarget;
     int32_t lowerMaximumTarget;
     int32_t upperMinimumTarget;
     int32_t upperMaximumTarget;
@@ -66,7 +62,7 @@ typedef struct {
     double verticalError;
     bool panClamped;
     bool upperClamped;
-    bool lowerClearanceActive;
+    bool uprightTransitionRequested;
 } ROBPersonTrackingResult;
 
 // The default controller samples at no more than 10 Hz, aims at the exact
@@ -74,9 +70,9 @@ typedef struct {
 // central 12 percent on both axes, and eases corrections as the observation
 // approaches that band. The runtime may replace the default horizontal rate
 // with the operator's bounded preference. The runtime may independently set
-// the bounded vertical rate. Automatic lower-neck clearance is fail-closed by
-// default and must be enabled only when calibrated camera leveling can
-// counter-rotate the upper joint.
+// the bounded vertical rate. Automatic transition to a saved upright endpoint
+// is fail-closed by default and is requested only when an outward pan step
+// reaches the live envelope.
 ROBPersonTrackingConfig ROBPersonTrackingDefaultConfig(void);
 
 bool ROBPersonTrackingConfigIsValid(

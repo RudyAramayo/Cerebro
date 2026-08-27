@@ -85,9 +85,7 @@ static void testDefaultCalibration(void) {
     EXPECT_INT(ROBPersonTrackingMaximumVerticalTargetsPerSecond, 2000);
     EXPECT_INT(configuration.upperTargetsPerSecond, 800);
     EXPECT_INT(configuration.upperDownTargetsPerSecond, 160);
-    EXPECT_FALSE(configuration.lowerClearanceEnabled);
-    EXPECT_INT(configuration.lowerFullPanMinimumTarget, 5000);
-    EXPECT_INT(configuration.lowerFullPanMaximumTarget, 6495);
+    EXPECT_FALSE(configuration.uprightTransitionEnabled);
 
     ROBPersonTrackingResult centered = track(
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
@@ -179,44 +177,47 @@ static void testRightTrackingAccumulatesMonotonically(void) {
     EXPECT_INT(pan, 5470);
 }
 
-static void testLowerClearanceCoordinatesTiltJoints(void) {
+static void testPanLimitRequestsUprightTransition(void) {
     ROBPersonTrackingConfig configuration = ROBPersonTrackingDefaultConfig();
-    configuration.lowerClearanceEnabled = true;
+    configuration.panMinimumTarget = 5900;
+    configuration.panMaximumTarget = 6100;
+    configuration.uprightTransitionEnabled = true;
 
-    ROBPersonTrackingResult fromForwardLean = trackWithLower(
+    ROBPersonTrackingResult rightLimit = trackWithLower(
+        &configuration, 5900, 7014, 7375, 0.8, 0.8, 0.1
+    );
+    EXPECT_TRUE(rightLimit.uprightTransitionRequested);
+    EXPECT_TRUE(rightLimit.panClamped);
+    EXPECT_INT(rightLimit.panTarget, 5900);
+    EXPECT_INT(rightLimit.lowerTarget, 7014);
+    EXPECT_INT(rightLimit.upperTarget, 7375);
+
+    ROBPersonTrackingResult leftLimit = trackWithLower(
+        &configuration, 6100, 7014, 7375, 0.2, 0.2, 0.1
+    );
+    EXPECT_TRUE(leftLimit.uprightTransitionRequested);
+    EXPECT_TRUE(leftLimit.panClamped);
+    EXPECT_INT(leftLimit.panTarget, 6100);
+    EXPECT_INT(leftLimit.lowerTarget, 7014);
+    EXPECT_INT(leftLimit.upperTarget, 7375);
+
+    ROBPersonTrackingResult insideEnvelope = trackWithLower(
         &configuration, 6000, 7014, 7375, 0.8, 0.8, 0.1
     );
-    EXPECT_TRUE(fromForwardLean.lowerClearanceActive);
-    EXPECT_INT(fromForwardLean.panTarget, 6000);
-    EXPECT_INT(fromForwardLean.lowerTarget, 6495);
-    EXPECT_INT(fromForwardLean.upperTarget, 7375);
+    EXPECT_FALSE(insideEnvelope.uprightTransitionRequested);
+    EXPECT_INT(insideEnvelope.panTarget, 5947);
+    EXPECT_INT(insideEnvelope.lowerTarget, 7014);
+    EXPECT_INT(insideEnvelope.upperTarget, 7389);
 
-    ROBPersonTrackingResult fromRearLean = trackWithLower(
-        &configuration, 6000, 4375, 7375, 0.2, 0.2, 0.1
-    );
-    EXPECT_TRUE(fromRearLean.lowerClearanceActive);
-    EXPECT_INT(fromRearLean.panTarget, 6000);
-    EXPECT_INT(fromRearLean.lowerTarget, 5000);
-    EXPECT_INT(fromRearLean.upperTarget, 7375);
-
-    // Once the command reaches the reviewed band, ordinary independent pan
-    // and vertical centering resume inside the gateway's live envelope.
-    ROBPersonTrackingResult insideBand = trackWithLower(
-        &configuration, 6000, 6495, 7375, 0.8, 0.8, 0.1
-    );
-    EXPECT_FALSE(insideBand.lowerClearanceActive);
-    EXPECT_INT(insideBand.panTarget, 5947);
-    EXPECT_INT(insideBand.lowerTarget, 6495);
-    EXPECT_INT(insideBand.upperTarget, 7389);
-
-    // Without runtime authorization, an out-of-band lower target stays put
-    // and cannot delay normal face tracking.
-    configuration.lowerClearanceEnabled = false;
+    // Without runtime authorization the controller remains clamped at the
+    // live envelope, while ordinary vertical centering remains available.
+    configuration.uprightTransitionEnabled = false;
     ROBPersonTrackingResult unauthorized = trackWithLower(
-        &configuration, 6000, 7014, 7375, 0.8, 0.8, 0.1
+        &configuration, 5900, 7014, 7375, 0.8, 0.8, 0.1
     );
-    EXPECT_FALSE(unauthorized.lowerClearanceActive);
-    EXPECT_INT(unauthorized.panTarget, 5947);
+    EXPECT_FALSE(unauthorized.uprightTransitionRequested);
+    EXPECT_TRUE(unauthorized.panClamped);
+    EXPECT_INT(unauthorized.panTarget, 5900);
     EXPECT_INT(unauthorized.lowerTarget, 7014);
     EXPECT_INT(unauthorized.upperTarget, 7389);
 }
@@ -279,8 +280,7 @@ static void testTrackingGuards(void) {
     configuration.responseExponent = 0.5;
     EXPECT_FALSE(ROBPersonTrackingConfigIsValid(&configuration));
     configuration = ROBPersonTrackingDefaultConfig();
-    configuration.lowerFullPanMinimumTarget =
-        configuration.lowerFullPanMaximumTarget + 1;
+    configuration.lowerMinimumTarget = configuration.lowerMaximumTarget + 1;
     EXPECT_FALSE(ROBPersonTrackingConfigIsValid(&configuration));
     configuration = ROBPersonTrackingDefaultConfig();
     configuration.upperDownTargetsPerSecond = 0.0;
@@ -291,7 +291,7 @@ int main(void) {
     testDefaultCalibration();
     testCorrectionsPointCameraTowardBlob();
     testRightTrackingAccumulatesMonotonically();
-    testLowerClearanceCoordinatesTiltJoints();
+    testPanLimitRequestsUprightTransition();
     testTrackingGuards();
 
     if (failures != 0) {

@@ -64,7 +64,7 @@ ROBPersonTrackingConfig ROBPersonTrackingDefaultConfig(void) {
         .horizontalDeadBand = 0.06,
         .verticalDeadBand = 0.06,
         .mirrorHorizontalCoordinate = false,
-        .lowerClearanceEnabled = false,
+        .uprightTransitionEnabled = false,
         .responseExponent = 1.5,
         .panTargetsPerSecond =
             ROBPersonTrackingDefaultPanTargetsPerSecond,
@@ -76,10 +76,6 @@ ROBPersonTrackingConfig ROBPersonTrackingDefaultConfig(void) {
         .panMinimumTarget = 4000,
         .panMaximumTarget = 8000,
         .lowerMinimumTarget = 4375,
-        .lowerFullPanMinimumTarget =
-            ROBPersonTrackingFullPanLowerMinimumTarget,
-        .lowerFullPanMaximumTarget =
-            ROBPersonTrackingFullPanLowerMaximumTarget,
         .lowerMaximumTarget = 7675,
         .upperMinimumTarget = ROBPersonTrackingMinimumUpperTarget,
         .upperMaximumTarget = ROBPersonTrackingMaximumUpperTarget
@@ -120,10 +116,6 @@ bool ROBPersonTrackingConfigIsValid(
         && configuration->maximumElapsedSeconds > 0.0
         && configuration->panMinimumTarget < configuration->panMaximumTarget
         && configuration->lowerMinimumTarget
-            <= configuration->lowerFullPanMinimumTarget
-        && configuration->lowerFullPanMinimumTarget
-            <= configuration->lowerFullPanMaximumTarget
-        && configuration->lowerFullPanMaximumTarget
             <= configuration->lowerMaximumTarget
         && configuration->upperMinimumTarget
             <= configuration->upperMaximumTarget;
@@ -178,53 +170,32 @@ bool ROBPersonTrackingApply(
         configuration->responseExponent
     );
 
-    int32_t requestedLower = ROBPersonTrackingClampTarget(
+    resultOut->lowerTarget = ROBPersonTrackingClampTarget(
         currentLowerTarget,
         configuration->lowerMinimumTarget,
         configuration->lowerMaximumTarget
     );
-    resultOut->lowerClearanceActive =
-        configuration->lowerClearanceEnabled
-        && (requestedLower < configuration->lowerFullPanMinimumTarget
-            || requestedLower > configuration->lowerFullPanMaximumTarget);
-    if (resultOut->lowerClearanceActive) {
-        // Move only as far as the nearest reviewed full-pan boundary. The
-        // runtime enables this request only when the safety gateway can issue
-        // the lower target and its calibrated upper counter-rotation together.
-        requestedLower = requestedLower
-                < configuration->lowerFullPanMinimumTarget
-            ? configuration->lowerFullPanMinimumTarget
-            : configuration->lowerFullPanMaximumTarget;
-    }
-
     // ROB's physical pan calibration moves right toward the lower raw target
-    // (4000) and left toward the higher raw target (8000). Hold direct pan and
-    // camera demand during a clearance transition so the coupled neck move
-    // cannot compete with image-centering corrections.
-    const int32_t requestedPan = resultOut->lowerClearanceActive
-        ? currentPanTarget
-        : ROBPersonTrackingRoundedTarget(
-            (double)currentPanTarget
-                - resultOut->horizontalError
-                    * configuration->panTargetsPerSecond
-                    * elapsed
-        );
-    const int32_t requestedUpper = resultOut->lowerClearanceActive
-        ? currentUpperTarget
-        : ROBPersonTrackingRoundedTarget(
-            (double)currentUpperTarget
-                + resultOut->verticalError
-                    * (resultOut->verticalError >= 0.0
-                        ? configuration->upperTargetsPerSecond
-                        : configuration->upperDownTargetsPerSecond)
-                    * elapsed
-        );
+    // (4000) and left toward the higher raw target (8000).
+    const int32_t requestedPan = ROBPersonTrackingRoundedTarget(
+        (double)currentPanTarget
+            - resultOut->horizontalError
+                * configuration->panTargetsPerSecond
+                * elapsed
+    );
+    const int32_t requestedUpper = ROBPersonTrackingRoundedTarget(
+        (double)currentUpperTarget
+            + resultOut->verticalError
+                * (resultOut->verticalError >= 0.0
+                    ? configuration->upperTargetsPerSecond
+                    : configuration->upperDownTargetsPerSecond)
+                * elapsed
+    );
     resultOut->panTarget = ROBPersonTrackingClampTarget(
         requestedPan,
         configuration->panMinimumTarget,
         configuration->panMaximumTarget
     );
-    resultOut->lowerTarget = requestedLower;
     resultOut->upperTarget = ROBPersonTrackingClampTarget(
         requestedUpper,
         configuration->upperMinimumTarget,
@@ -232,5 +203,23 @@ bool ROBPersonTrackingApply(
     );
     resultOut->panClamped = resultOut->panTarget != requestedPan;
     resultOut->upperClamped = resultOut->upperTarget != requestedUpper;
+    resultOut->uprightTransitionRequested =
+        configuration->uprightTransitionEnabled
+        && resultOut->panClamped
+        && resultOut->horizontalError != 0.0;
+    if (resultOut->uprightTransitionRequested) {
+        // Hold image-centering outputs while the runtime animates the complete
+        // calibrated upright endpoint through the collision gateway.
+        resultOut->panTarget = ROBPersonTrackingClampTarget(
+            currentPanTarget,
+            configuration->panMinimumTarget,
+            configuration->panMaximumTarget
+        );
+        resultOut->upperTarget = ROBPersonTrackingClampTarget(
+            currentUpperTarget,
+            configuration->upperMinimumTarget,
+            configuration->upperMaximumTarget
+        );
+    }
     return true;
 }

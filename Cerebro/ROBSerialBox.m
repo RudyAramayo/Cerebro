@@ -86,6 +86,8 @@ static NSString * const kROBSafeNeckStartupRestSource = @"Torso safe startup res
 static NSString * const kROBServoControlSource = @"Torso servo control";
 static NSString * const kROBFollowTrackingClearanceSource =
     @"Follow tracking clearance";
+static NSString * const kROBPersonTrackingUprightSource =
+    @"Person tracking upright endpoint";
 static NSUInteger const kROBBaseConsoleMaximumCharacters = 256 * 1024;
 enum { kROBMiniMaestroChannelCount = 24 };
 
@@ -289,6 +291,13 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 @property (readwrite, assign) NSTimeInterval commandedLowerNeckTargetReadyAt;
 @property (readwrite, assign) NSTimeInterval commandedUpperNeckTargetReadyAt;
 @property (readwrite, assign) BOOL personFollowTrackingPrepared;
+@property (readwrite, assign, getter=isPersonTrackingUprightTransitionActive)
+    BOOL personTrackingUprightTransitionActive;
+@property (readwrite, assign) int personTrackingUprightPanTarget;
+@property (readwrite, assign) int personTrackingUprightLowerTarget;
+@property (readwrite, assign) int personTrackingUprightUpperTarget;
+@property (readwrite, assign) BOOL personTrackingUprightAdvanceScheduled;
+@property (readwrite, assign) NSUInteger personTrackingUprightGeneration;
 @property (readwrite, assign) NSTimeInterval manualNeckOverrideUntil;
 @property (readwrite, assign) NSTimeInterval visionNeckAuthorityUntil;
 @property (readwrite, assign) NSTimeInterval gestureNeckAuthorityUntil;
@@ -383,6 +392,8 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
  allowSupervisedLowerRecovery:(BOOL)allowSupervisedLowerRecovery
                         source:(NSString *)source;
 - (void)refreshSettledNeckEnvelopeAtTime:(NSTimeInterval)now;
+- (void)refreshPersonTrackingUprightTransitionAtTime:(NSTimeInterval)now;
+- (void)schedulePersonTrackingUprightTransitionAdvance;
 - (void)advanceSafeNeckStartupForGeneration:(NSUInteger)generation;
 - (void)scheduleSafeNeckStartupAdvanceForGeneration:(NSUInteger)generation
                                              atTime:(NSTimeInterval)readyAt;
@@ -787,6 +798,9 @@ typedef enum : NSUInteger {
     self.commandedLowerNeckTargetReadyAt = 0;
     self.commandedUpperNeckTargetReadyAt = 0;
     self.personFollowTrackingPrepared = NO;
+    self.personTrackingUprightTransitionActive = NO;
+    self.personTrackingUprightAdvanceScheduled = NO;
+    self.personTrackingUprightGeneration += 1;
     self.supervisedLowerRecoveryUntil = 0;
     ROBNeckSafetyPanBounds conservativeBounds = {0};
     if (!ROBNeckConservativeUnknownPanBounds(
@@ -846,6 +860,9 @@ typedef enum : NSUInteger {
     self.commandedLowerNeckTargetReadyAt = 0;
     self.commandedUpperNeckTargetReadyAt = 0;
     self.personFollowTrackingPrepared = NO;
+    self.personTrackingUprightTransitionActive = NO;
+    self.personTrackingUprightAdvanceScheduled = NO;
+    self.personTrackingUprightGeneration += 1;
     self.lastDesiredUpperNeckTargetIsKnown = NO;
     self.supervisedLowerRecoveryUntil = 0;
     self.manualNeckOverrideUntil = 0;
@@ -1543,6 +1560,9 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
             @"Safe neck startup rejected: operator action must arrive on the main thread.";
         return ROBNeckCommandDispositionRejected;
     }
+    self.personTrackingUprightTransitionActive = NO;
+    self.personTrackingUprightAdvanceScheduled = NO;
+    self.personTrackingUprightGeneration += 1;
 
     // Freeze one validated configuration snapshot for the entire motion. An
     // operator may keep editing drafts in the Servo Control window, but an
@@ -1990,6 +2010,9 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
 
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
     @synchronized (self) {
+        self.personTrackingUprightTransitionActive = NO;
+        self.personTrackingUprightAdvanceScheduled = NO;
+        self.personTrackingUprightGeneration += 1;
         self.manualNeckOverrideUntil = now + kROBNeckManualOverrideSeconds;
         self.visionNeckAuthorityUntil = 0;
         self.gestureNeckAuthorityUntil = 0;
@@ -2026,6 +2049,186 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     return disposition;
 }
 
+- (void)refreshPersonTrackingUprightTransitionAtTime:(NSTimeInterval)now
+{
+    if (!self.personTrackingUprightTransitionActive) return;
+    [self refreshSettledNeckEnvelopeAtTime:now];
+    BOOL exactTargetsAccepted = self.neckPanCommandKnown
+        && self.commandedNeckPanTarget == self.personTrackingUprightPanTarget
+        && self.lowerNeckTiltCommandKnown
+        && self.commandedLowerNeckTiltTarget
+            == self.personTrackingUprightLowerTarget
+        && self.upperNeckTiltCommandKnown
+        && self.commandedUpperNeckTiltTarget
+            == self.personTrackingUprightUpperTarget;
+    BOOL envelopeSettled = self.panEnvelopeLowerTargetIsKnown
+        && self.panEnvelopeLowerTarget == self.personTrackingUprightLowerTarget
+        && self.pendingPanEnvelopeLowerTarget == ROBNeckSafetyTargetOff;
+    if (exactTargetsAccepted
+        && envelopeSettled
+        && now >= self.neckCommandReadyAtUptime) {
+        self.personTrackingUprightTransitionActive = NO;
+    }
+}
+
+- (void)schedulePersonTrackingUprightTransitionAdvance
+{
+    if (!self.personTrackingUprightTransitionActive
+        || self.personTrackingUprightAdvanceScheduled) {
+        return;
+    }
+    self.personTrackingUprightAdvanceScheduled = YES;
+    NSUInteger generation = self.personTrackingUprightGeneration;
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    NSTimeInterval readyAt = self.neckCommandReadyAtUptime;
+    NSTimeInterval delay = isfinite(readyAt) ? readyAt - now : 0.1;
+    delay = fmax(0.05, delay);
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(
+        dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
+        dispatch_get_main_queue(),
+        ^{
+            typeof(self) strongSelf = weakSelf;
+            if (strongSelf == nil) return;
+            if (strongSelf.personTrackingUprightGeneration != generation) {
+                return;
+            }
+            strongSelf.personTrackingUprightAdvanceScheduled = NO;
+            if (!strongSelf.personTrackingUprightTransitionActive
+                || ![strongSelf.neckCommandSource
+                    isEqualToString:kROBPersonTrackingUprightSource]) {
+                return;
+            }
+            [strongSelf
+                requestPersonTrackingUprightPanTarget:
+                    strongSelf.personTrackingUprightPanTarget
+                lowerTarget:strongSelf.personTrackingUprightLowerTarget
+                upperTarget:strongSelf.personTrackingUprightUpperTarget];
+        }
+    );
+}
+
+- (ROBNeckCommandDisposition)requestPersonTrackingUprightPanTarget:(NSInteger)panTarget
+                                                        lowerTarget:(NSInteger)lowerTarget
+                                                        upperTarget:(NSInteger)upperTarget
+{
+    if (![NSThread isMainThread]) {
+        self.neckCommandSafetyStatus =
+            @"Person tracking upright transition requires the main thread.";
+        return ROBNeckCommandDispositionRejected;
+    }
+    if (panTarget <= ROBNeckSafetyTargetOff
+        || panTarget > ROBNeckSafetyMaximumMaestroTarget
+        || lowerTarget <= ROBNeckSafetyTargetOff
+        || lowerTarget > ROBNeckSafetyMaximumMaestroTarget
+        || upperTarget <= ROBNeckSafetyTargetOff
+        || upperTarget > ROBNeckSafetyMaximumMaestroTarget) {
+        self.neckCommandSafetyStatus =
+            @"Person tracking upright endpoint is outside the Maestro range.";
+        return ROBNeckCommandDispositionRejected;
+    }
+
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    BOOL wasContinuingTransition = self.personTrackingUprightTransitionActive
+        && [self.neckCommandSource
+            isEqualToString:kROBPersonTrackingUprightSource];
+    [self refreshPersonTrackingUprightTransitionAtTime:now];
+    if (wasContinuingTransition
+        && !self.personTrackingUprightTransitionActive) {
+        return ROBNeckCommandDispositionAppliedCommand;
+    }
+    if (self.personTrackingUprightTransitionActive
+        && ![self.neckCommandSource
+            isEqualToString:kROBPersonTrackingUprightSource]) {
+        self.personTrackingUprightTransitionActive = NO;
+        self.personTrackingUprightAdvanceScheduled = NO;
+        self.personTrackingUprightGeneration += 1;
+    }
+    BOOL continuingTransition = self.personTrackingUprightTransitionActive;
+    if (continuingTransition
+        && (self.personTrackingUprightPanTarget != panTarget
+            || self.personTrackingUprightLowerTarget != lowerTarget
+            || self.personTrackingUprightUpperTarget != upperTarget)) {
+        self.neckCommandSafetyStatus =
+            @"Person tracking is finishing the current upright endpoint before changing sides.";
+        return ROBNeckCommandDispositionHeldForSafety;
+    }
+    if (!continuingTransition) {
+        if (!self.maestroConnectionValid
+            || !self.neckSafetyCalibrationConfirmed
+            || !self.neckCommandStateKnown
+            || self.commandedNeckPanTarget == ROBNeckSafetyTargetOff
+            || self.commandedLowerNeckTiltTarget == ROBNeckSafetyTargetOff
+            || self.commandedUpperNeckTiltTarget == ROBNeckSafetyTargetOff) {
+            self.neckCommandSafetyStatus =
+                @"Person tracking upright endpoint requires a calibrated, known active neck.";
+            return ROBNeckCommandDispositionRejected;
+        }
+        if (self.safeNeckStartupInProgress
+            || now < self.manualNeckOverrideUntil
+            || now < self.gestureNeckAuthorityUntil
+            || now < self.visionNeckAuthorityUntil
+            || self.torsoNeckAuthorityRequiresOperatorAction) {
+            self.neckCommandSafetyStatus =
+                @"Person tracking upright endpoint is waiting for current neck authority to end.";
+            return ROBNeckCommandDispositionHeldForSafety;
+        }
+        ROBNeckSafetyConfig exactConfiguration = [self neckSafetyConfiguration];
+        exactConfiguration.cameraLevelingEnabled = false;
+        ROBNeckSafetyResult exactPose = {0};
+        BOOL endpointIsValid = ROBNeckSafetyLowerTargetHasFullPanClearance(
+                &exactConfiguration,
+                (int)lowerTarget
+            )
+            && ROBNeckSafetyApply(
+                &exactConfiguration,
+                (int)panTarget,
+                (int)lowerTarget,
+                (int)upperTarget,
+                &exactPose
+            )
+            && exactPose.panTarget == panTarget
+            && exactPose.lowerTarget == lowerTarget
+            && exactPose.upperTarget == upperTarget;
+        if (!endpointIsValid) {
+            self.neckCommandSafetyStatus =
+                @"Person tracking upright endpoint failed full-clearance validation.";
+            return ROBNeckCommandDispositionRejected;
+        }
+        self.personTrackingUprightTransitionActive = YES;
+        self.personTrackingUprightAdvanceScheduled = NO;
+        self.personTrackingUprightGeneration += 1;
+        self.personTrackingUprightPanTarget = (int)panTarget;
+        self.personTrackingUprightLowerTarget = (int)lowerTarget;
+        self.personTrackingUprightUpperTarget = (int)upperTarget;
+    }
+
+    ROBNeckCommandDisposition disposition = [self
+        applySafeNeckPanTarget:(int)panTarget
+        lowerTiltTarget:(int)lowerTarget
+        desiredUpperTarget:(int)upperTarget
+        includeLower:YES
+        allowSupervisedLowerRecovery:NO
+        source:kROBPersonTrackingUprightSource];
+    if (disposition == ROBNeckCommandDispositionRejected) {
+        self.personTrackingUprightTransitionActive = NO;
+        self.personTrackingUprightAdvanceScheduled = NO;
+        self.personTrackingUprightGeneration += 1;
+        return disposition;
+    }
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:ROBServoControlNeckDemandDidChangeNotification
+                      object:self
+                    userInfo:@{
+                        ROBServoControlPanTargetUserInfoKey: @(panTarget),
+                        ROBServoControlLowerTargetUserInfoKey: @(lowerTarget),
+                        ROBServoControlUpperTargetUserInfoKey: @(upperTarget),
+                    }];
+    [self refreshPersonTrackingUprightTransitionAtTime:now];
+    [self schedulePersonTrackingUprightTransitionAdvance];
+    return disposition;
+}
+
 - (ROBNeckCommandDisposition)applySafeNeckPanTarget:(int)panTarget
               lowerTiltTarget:(int)lowerTiltTarget
             desiredUpperTarget:(int)desiredUpperTarget
@@ -2040,6 +2243,8 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         && ([source isEqualToString:kROBSafeNeckStartupLiftSource]
             || [source isEqualToString:kROBSafeNeckStartupRestSource]);
     BOOL servoControlCommand = [source isEqualToString:kROBServoControlSource];
+    BOOL personTrackingUprightCommand =
+        [source isEqualToString:kROBPersonTrackingUprightSource];
     BOOL safeStartupLiftCommand = safeStartupCommand
         && self.safeNeckStartupPhase == ROBSafeNeckStartupPhaseLifting
         && [source isEqualToString:kROBSafeNeckStartupLiftSource]
@@ -2073,10 +2278,12 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         // wider lower-dependent pan envelope.
         effectiveConfiguration.upperCounterRotationGain = 0.0;
     }
-    if (safeStartupCommand || servoControlCommand) {
-        // Startup and Servo Control sequences command explicit mechanical
-        // targets. Rebase optional camera leveling after the exact pose rather
-        // than transforming an operator-configured raw upper value.
+    if (safeStartupCommand
+        || servoControlCommand
+        || personTrackingUprightCommand) {
+        // Startup, Servo Control, and tracking endpoint sequences command
+        // explicit mechanical targets. Rebase optional camera leveling after
+        // the exact pose rather than transforming a calibrated raw upper value.
         effectiveConfiguration.cameraLevelingEnabled = false;
     }
 
@@ -2599,7 +2806,9 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     BOOL lowerTargetChanged = mayMoveLower
         && (!self.lowerNeckTiltCommandKnown
             || boundedLower != self.commandedLowerNeckTiltTarget);
-    BOOL coupledExactPoseCommand = safeStartupCommand || servoControlCommand;
+    BOOL coupledExactPoseCommand = safeStartupCommand
+        || servoControlCommand
+        || personTrackingUprightCommand;
     BOOL upperHeldWithCoupledLower = !mayMoveLower
         && lowerChangeRequested
         && coupledExactPoseCommand;
@@ -2618,10 +2827,10 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         lowerWriteSucceeded = coupledWriteSucceeded;
         upperWriteSucceeded = coupledWriteSucceeded;
     } else if (upperHeldWithCoupledLower) {
-        // Startup and Servo Control poses are mechanically coupled. If the
-        // gateway has not released the lower joint, do not pre-position the
-        // upper joint by itself; the caller will resubmit the complete pose
-        // after the safety deadline.
+        // Startup, Servo Control, and tracking endpoint poses are mechanically
+        // coupled. If the gateway has not released the lower joint, do not
+        // pre-position the upper joint by itself; the caller will resubmit the
+        // complete pose after the safety deadline.
         upperWriteSucceeded = YES;
     } else {
         // A held lower joint still permits an upper target to be established,
@@ -2738,7 +2947,8 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         }
     }
 
-    if (servoControlCommand && !upperHeldWithCoupledLower) {
+    if ((servoControlCommand || personTrackingUprightCommand)
+        && !upperHeldWithCoupledLower) {
         // The exact raw pose becomes the next camera-leveling baseline. This
         // prevents a later normal torso render from applying compensation
         // relative to the pose that preceded the Servo Control action.
@@ -2763,6 +2973,9 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     }
     if (servoControlCommand) {
         [status addObject:@"SERVO CONTROL EXACT TARGETS"];
+    }
+    if (personTrackingUprightCommand) {
+        [status addObject:@"PERSON TRACKING UPRIGHT ENDPOINT"];
     }
     if (panResult.panClamped) {
         [status addObject:[NSString stringWithFormat:
@@ -3424,10 +3637,14 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     if (!self.maestroConnectionValid) return;
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
     if (operatorInitiated) {
+        self.personTrackingUprightTransitionActive = NO;
+        self.personTrackingUprightAdvanceScheduled = NO;
+        self.personTrackingUprightGeneration += 1;
         self.manualNeckOverrideUntil = now + kROBNeckManualOverrideSeconds;
         self.gestureNeckAuthorityUntil = 0;
         self.torsoNeckAuthorityRequiresOperatorAction = NO;
     }
+    [self refreshPersonTrackingUprightTransitionAtTime:now];
     BOOL gestureOwnsNeck = !operatorInitiated
         && now >= self.manualNeckOverrideUntil
         && now < self.gestureNeckAuthorityUntil;
@@ -3444,10 +3661,15 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         && [self.neckCommandSource
             isEqualToString:kROBFollowTrackingClearanceSource]
         && !self.personFollowTrackingPrepared;
+    BOOL personTrackingUprightOwnsNeck = !operatorInitiated
+        && [self.neckCommandSource
+            isEqualToString:kROBPersonTrackingUprightSource]
+        && self.personTrackingUprightTransitionActive;
     if (!servoControlOwnsNeck
         && !gestureOwnsNeck
         && !visionOwnsNeck
         && !followClearanceOwnsNeck
+        && !personTrackingUprightOwnsNeck
         && torsoMayResumeNeck) {
         NSString *source = (operatorInitiated || now < self.manualNeckOverrideUntil)
             ? @"Torso manual"

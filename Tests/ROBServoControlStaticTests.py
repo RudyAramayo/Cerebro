@@ -47,9 +47,10 @@ def main() -> None:
         and 'lowerTarget: 6011, upperTarget: 6073' in configuration
         and 'name: "lean_back", panTarget: 0' in configuration
         and 'lowerTarget: 4747, upperTarget: 5214' in configuration
-        and 'name: "fully_right", panTarget: 4000' in configuration
-        and 'name: "fully_left", panTarget: 7652' in configuration
-        and 'appendMissingPanEndpointPositions(to: &positions)' in configuration,
+        and 'name: "fully_upright_right", panTarget: 4000' in configuration
+        and 'name: "fully_upright_left", panTarget: 7652' in configuration
+        and 'appendMissingUprightPanEndpointPositions(to: &positions)'
+        in configuration,
         "The shipped camera position catalog no longer includes the reviewed pan endpoints",
     )
     require(
@@ -120,13 +121,22 @@ def main() -> None:
     )
     require(
         'kROBServoControlSource = @"Torso servo control"' in serial_source
-        and "safeStartupCommand || servoControlCommand" in serial_source
+        and "personTrackingUprightCommand" in serial_source
         and "effectiveConfiguration.cameraLevelingEnabled = false" in serial_source
         and "self.panRecenterSettleGate.readyAt" in serial_source
         and "RunLoop.main.add(retryTimer, forMode: .common)" in runtime
         and "sendMaestroLowerTarget" in serial_source,
         "A single Servo Control press no longer advances exact raw targets "
         "through the automatic pan-first/lower-upper handoff",
+    )
+    require(
+        "cameraPositionNamed:" in configuration
+        and "requestPersonTrackingUprightPanTarget" in serial_header
+        and 'kROBPersonTrackingUprightSource ='
+        in serial_source
+        and "personTrackingUprightOwnsNeck" in serial_source
+        and "schedulePersonTrackingUprightTransitionAdvance" in serial_source,
+        "Face tracking no longer owns a safety-staged exact upright endpoint animation",
     )
     require(
         "ROBServoControlNeckDemandDidChangeNotification" in serial_header

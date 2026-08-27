@@ -96,9 +96,9 @@ full-pan envelope, and lower/upper command deadlines have settled. The gateway
 then latches that prepared state while the lower target, full-pan envelope, and
 upper band remain valid. It centers pan before moving a leaning lower neck;
 after upright clearance is established, it does not wait for or recenter each
-active pan or upper-camera correction. Ordinary face/blob centering uses a
-separate minimal clearance request described below; it never requests this
-follow mode's fixed `6011`/`7375` pose.
+active pan or upper-camera correction. Ordinary face/blob centering uses the
+separate saved upright endpoint transition described below; it never requests
+this follow mode's fixed center/`6011`/`7375` pose.
 After that exact lower target is successfully written and its command-space
 settle interval completes, pan uses the corresponding lower-target envelope
 even while the separate camera/counter-rotation calibration remains
@@ -122,18 +122,19 @@ authorized-follow target `7375`.
 The shared gateway still applies the configured physical hard bounds. These
 tracking values are integer Maestro command targets, not measured joint angles.
 Both recognized-face and legacy human-blob entry points use the currently
-settled lower-neck-dependent pan envelope immediately. If the lower target is
-outside `5000`–`6495`, tracking requests the nearest boundary: `5000` from the
-rear side or `6495` from the forward side. This automatic request is enabled
-only with confirmed calibration, **Keep upright** on, and known active lower
-and upper tilt commands. While it is active, the tracker holds pan and its
-uncompensated upper-camera demand. The gateway sends the lower move and the
-calibrated `-1` upper counter-rotation together, giving the installed matching
-servos equal and opposite target deltas. Normal pan and upper-only vertical
-centering resume when the accepted lower command is inside the band; the live
-envelope continues to limit pan until the gateway's command-space settle time
-expires. Unknown, OFF, uncalibrated, or uncoupled lower-neck demands remain
-blocked.
+settled lower-neck-dependent pan envelope immediately. An outward correction
+that reaches a restricted edge requests the direction's saved
+`fully_upright_right` or `fully_upright_left` camera pose. This automatic move
+requires confirmed calibration, known active pan/lower/upper commands, and all
+three neck controls enabled. It never cancels a manual, gesture, startup, or
+Vision authority lease. The gateway treats the named pan/lower/upper values
+as one exact mechanical pose, stages any required pan-safe handoff, sends lower
+and upper together, and retries from its conservative command deadlines until
+the pose and widened envelope settle. Face-centering output pauses during the
+animation and then resumes. The saved endpoint pan values—not the generic hard
+joint bounds—are the final tracking limits; the shipped values are `4000` right
+and `7652` left. Unknown, OFF, uncalibrated, invalid, or non-clearance endpoint
+demands remain blocked.
 The installed servo turns right as the raw pan target decreases toward `4000`
 and left as it increases toward `8000`. Vision processes the raw unmirrored
 sample buffer, so a person on ROB's physical right directly lowers the raw pan
@@ -165,8 +166,8 @@ action can start the same recovery when one or more axes are `OFF` or
 The **Servos → Open Servo Control…** window exposes camera positions, servo
 sequences, and relative gestures. The shipped camera catalog is
 `lean_forward` (`L 7014`, `U 7698`), `upright` (`L 6011`, `U 6073`),
-`lean_back` (`L 4747`, `U 5214`), `fully_right` (`P 4000`, `L 6011`,
-`U 6073`), and `fully_left` (`P 7652`, `L 6011`, `U 6073`). A camera
+`lean_back` (`L 4747`, `U 5214`), `fully_upright_right` (`P 4000`, `L 6011`,
+`U 6073`), and `fully_upright_left` (`P 7652`, `L 6011`, `U 6073`). A camera
 position pan value of `0` preserves the currently commanded pan; a nonzero
 value requests that exact pan target. Existing saved camera catalogs are
 migrated in place and receive the two missing endpoint presets without losing
