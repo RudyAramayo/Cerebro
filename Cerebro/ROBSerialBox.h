@@ -152,8 +152,8 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 /// Returns an idle face-tracking neck to the validated startup sequence's
 /// centered lean-forward final pose without preempting current neck authority.
 - (ROBNeckCommandDisposition)requestPersonTrackingLeanForwardRest;
-/// Runs only the reviewed centered lean_forward/upright/lean_back tracking
-/// orders. Each exact saved pose advances through the shared pan-first gateway
+/// Runs only the reviewed centered upright-to-lean tracking orders. Each exact
+/// saved pose advances through the shared pan-first gateway
 /// and cannot preempt manual, gesture, Vision, startup, or upright-edge motion.
 /// These exact raw poses remain eligible while optional counter-rotation
 /// calibration is unconfirmed; arbitrary calibrated gesture motion does not.

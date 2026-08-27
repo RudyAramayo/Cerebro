@@ -3790,8 +3790,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     }
 
     NSArray<NSString *> *sequence = nextBand > 0
-        ? @[@"lean_back", @"upright", @"lean_forward"]
-        : @[@"lean_forward", @"upright", @"lean_back"];
+        ? @[@"upright", @"lean_forward"]
+        : @[@"upright", @"lean_back"];
     ROBNeckCommandDisposition disposition = [self.serialBox
         requestPersonTrackingPostureSequence:sequence];
     if (disposition == ROBNeckCommandDispositionAppliedCommand
@@ -3804,8 +3804,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         NSLog(
             @"Person tracking distance %.2f m started %@ posture sequence",
             distance,
-            nextBand > 0 ? @"lean_back → upright → lean_forward"
-                         : @"lean_forward → upright → lean_back"
+            nextBand > 0 ? @"upright → lean_forward"
+                         : @"upright → lean_back"
         );
     }
 }

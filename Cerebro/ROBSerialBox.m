@@ -331,6 +331,7 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 - (void)cancelPersonTrackingPostureSequence;
 - (ROBNeckCommandDisposition)advancePersonTrackingPostureSequence;
 - (void)schedulePersonTrackingPostureAdvance;
+- (void)publishAcceptedPersonTrackingNeckDemand;
 @property (readwrite, assign) BOOL visionTorsoControlWasActive;
 @property (readwrite, assign) int visionTorsoBaselinePosition;
 @property (readwrite, assign) int lastVisionTorsoTarget;
@@ -2260,14 +2261,7 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         self.personTrackingUprightGeneration += 1;
         return disposition;
     }
-    [[NSNotificationCenter defaultCenter]
-        postNotificationName:ROBServoControlNeckDemandDidChangeNotification
-                      object:self
-                    userInfo:@{
-                        ROBServoControlPanTargetUserInfoKey: @(panTarget),
-                        ROBServoControlLowerTargetUserInfoKey: @(lowerTarget),
-                        ROBServoControlUpperTargetUserInfoKey: @(upperTarget),
-                    }];
+    [self publishAcceptedPersonTrackingNeckDemand];
     [self refreshPersonTrackingUprightTransitionAtTime:now];
     [self schedulePersonTrackingUprightTransitionAdvance];
     return disposition;
@@ -2330,6 +2324,34 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     self.personTrackingPostureIndex = 0;
     self.personTrackingPostureDeadline = 0;
     self.personTrackingPostureGeneration += 1;
+}
+
+- (void)publishAcceptedPersonTrackingNeckDemand
+{
+    if (!self.neckPanCommandKnown
+        || !self.lowerNeckTiltCommandKnown
+        || !self.upperNeckTiltCommandKnown
+        || self.commandedNeckPanTarget == ROBNeckSafetyTargetOff
+        || self.commandedLowerNeckTiltTarget == ROBNeckSafetyTargetOff
+        || self.commandedUpperNeckTiltTarget == ROBNeckSafetyTargetOff) {
+        return;
+    }
+    // Safety staging may accept only pan while holding the coupled lower and
+    // upper joints. Publish the complete state actually accepted by the
+    // gateway, never a future posture phase. Otherwise a timeout/cancellation
+    // leaves the Torso sliders with a hybrid pose that ordinary tracking can
+    // later send to the hardware.
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:ROBServoControlNeckDemandDidChangeNotification
+                      object:self
+                    userInfo:@{
+                        ROBServoControlPanTargetUserInfoKey:
+                            @(self.commandedNeckPanTarget),
+                        ROBServoControlLowerTargetUserInfoKey:
+                            @(self.commandedLowerNeckTiltTarget),
+                        ROBServoControlUpperTargetUserInfoKey:
+                            @(self.commandedUpperNeckTiltTarget),
+                    }];
 }
 
 - (void)schedulePersonTrackingPostureAdvance
@@ -2414,17 +2436,7 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
             rejection ?: @"unknown safety error"];
         return disposition;
     }
-    [[NSNotificationCenter defaultCenter]
-        postNotificationName:ROBServoControlNeckDemandDidChangeNotification
-                      object:self
-                    userInfo:@{
-                        ROBServoControlPanTargetUserInfoKey:
-                            @(configuration.panCenterTarget),
-                        ROBServoControlLowerTargetUserInfoKey:
-                            @(position.lowerTarget),
-                        ROBServoControlUpperTargetUserInfoKey:
-                            @(position.upperTarget),
-                    }];
+    [self publishAcceptedPersonTrackingNeckDemand];
     self.neckCommandSafetyStatus = [NSString stringWithFormat:
         @"PERSON TRACKING POSTURE %lu/%lu: %@ • P%d L%ld U%ld",
         (unsigned long)(self.personTrackingPostureIndex + 1),
@@ -2446,9 +2458,8 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         return ROBNeckCommandDispositionRejected;
     }
     NSArray<NSArray<NSString *> *> *allowedOrders = @[
-        @[@"lean_back", @"upright", @"lean_forward"],
-        @[@"lean_forward", @"upright", @"lean_back"],
         @[@"upright", @"lean_forward"],
+        @[@"upright", @"lean_back"],
     ];
     BOOL orderIsReviewed = NO;
     for (NSArray<NSString *> *allowed in allowedOrders) {
@@ -2733,7 +2744,8 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         && !supervisedLowerRecovery
         && !safeStartupFinalCommand
         && !reviewedFollowClearanceCommand
-        && !personTrackingUprightCommand;
+        && !personTrackingUprightCommand
+        && !personTrackingPostureCommand;
     BOOL lowerHeldForRecovery = lowerChangeRequested
         && boundedLower != ROBNeckSafetyTargetOff
         && (!self.lowerNeckTiltCommandKnown
@@ -3269,7 +3281,8 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
         && !safeStartupCommand
         && !servoControlCommand
         && !reviewedFollowClearanceCommand
-        && !personTrackingUprightCommand) {
+        && !personTrackingUprightCommand
+        && !personTrackingPostureCommand) {
         [status addObject:[NSString stringWithFormat:
             @"CALIBRATION REQUIRED: AUTOMATIC LOWER MOTION HELD; PAN %.1f°…%+.1f°",
             panResult.allowedPanMinimumDegrees,

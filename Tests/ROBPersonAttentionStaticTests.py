@@ -105,11 +105,13 @@ require(
     "Lost attention no longer returns to a centered forward search pose.",
 )
 require(
-    'nextBand > 0\n        ? @[@"lean_back", @"upright", @"lean_forward"]' in main
-    and ': @[@"lean_forward", @"upright", @"lean_back"]' in main
+    'nextBand > 0\n        ? @[@"upright", @"lean_forward"]' in main
+    and ': @[@"upright", @"lean_back"]' in main
+    and '@[@"lean_back", @"upright", @"lean_forward"]' not in main
+    and '@[@"lean_forward", @"upright", @"lean_back"]' not in main
     and "kROBPersonTrackingDistanceDwellSeconds = 0.75" in main
     and "personTrackingDistanceMetersInNormalizedRect" in main,
-    "Depth-driven near/far posture orders or their debounce were lost.",
+    "Depth-driven near/far posture transitions can again visit the opposite extreme or lose their debounce.",
 )
 require(
     "requestPersonTrackingPostureSequence" in serial_header
@@ -132,6 +134,13 @@ require(
     and "requires a known active neck" in posture_request
     and "exactConfiguration.cameraLevelingEnabled = false" in posture_request,
     "Reviewed exact distance postures can again be blocked by optional camera-leveling calibration.",
+)
+require(
+    "&& !personTrackingUprightCommand\n        && !personTrackingPostureCommand" in serial
+    and "publishAcceptedPersonTrackingNeckDemand" in serial
+    and "@(self.commandedLowerNeckTiltTarget)" in serial
+    and "@(self.commandedUpperNeckTiltTarget)" in serial,
+    "Staged posture tracking can again publish an unaccepted hybrid neck pose or be calibration-held.",
 )
 require(
     "personTrackingPostureDeadline = now + 30.0" in serial
