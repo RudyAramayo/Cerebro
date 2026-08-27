@@ -57,8 +57,9 @@ def main() -> None:
         in runtime
         and "poses.append(offset(base, axis: gesture.servo, delta: -gesture.delta))"
         in runtime
-        and "poses.append(base)" in runtime,
-        "YES/NO are no longer relative, bidirectional, and returned to the captured pose",
+        and "poses.append(base)" not in runtime
+        and "complete at its final -delta extreme" in runtime,
+        "YES/NO no longer alternate exactly +delta then -delta per repetition",
     )
 
     require(
@@ -86,6 +87,16 @@ def main() -> None:
         and "sendMaestroLowerTarget" in serial_source,
         "A single Servo Control press no longer advances exact raw targets "
         "through the automatic pan-first/lower-upper handoff",
+    )
+    require(
+        "safeStartupFinalCommand" in serial_source
+        and "safeNeckStartupPhaseThree.panTarget" in serial_source
+        and "safeNeckStartupPhaseThree.lowerTarget" in serial_source
+        and "safeNeckStartupPhaseThree.upperTarget" in serial_source
+        and "&& !safeStartupFinalCommand" in serial_source
+        and "upperHeldWithCoupledLower" in serial_source
+        and 'UPPER HELD WITH COUPLED LOWER' in serial_source,
+        "Startup/Servo Control poses may again send upper before a held lower",
     )
     require(
         "ROBServoControlStore *store = [ROBServoControlStore shared];"

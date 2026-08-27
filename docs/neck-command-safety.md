@@ -145,11 +145,17 @@ With no shaft feedback, lower could leave the `5000`–`6495` clearance band
 before pan reached forward center; waiting for the conservative pan deadline
 prevents that race. Every arrival in this sequence is inferred from the
 configured motion profile and worst-case command distance, not measured.
+Once pan has settled, phase 3 sends lower `7014` and upper `7698` together in
+one Maestro multiple-target packet. If a safety condition still holds the
+lower axis, it also holds the upper target so the camera cannot bend backward
+ahead of the lower joint; the complete coupled pose is retried after the hold.
 
-The shipped `YES` gesture applies a positive and negative delta around the
-current upper-neck target to nod, then returns to its captured starting pose.
-The shipped `NO` gesture does the same around the current pan target. Servo,
-delta, repetition count, and interval are editable. Gesture steps and named
+The shipped `YES` gesture alternates positive and negative deltas around the
+current upper-neck target to nod. The shipped `NO` gesture does the same around
+the current pan target. Each repetition is exactly `+delta` then `-delta`, so
+two repetitions run `+delta → -delta → +delta → -delta` and finish at the final
+negative extreme without an extra midpoint step. Servo, delta, repetition
+count, and interval are editable. Gesture steps and named
 camera positions use the same safety gateway as the torso sliders; a clamped
 target stops execution and leaves the warning/restricted envelope visible.
 One button press owns the complete run: if the gateway first holds lower/upper

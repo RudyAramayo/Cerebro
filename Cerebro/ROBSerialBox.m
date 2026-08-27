@@ -1914,6 +1914,15 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         && desiredUpperTarget == self.safeNeckStartupPhaseOne.upperTarget
         && includeLower
         && allowSupervisedLowerRecovery;
+    BOOL safeStartupFinalCommand = safeStartupCommand
+        && self.safeNeckStartupPhase == ROBSafeNeckStartupPhaseCentering
+        && [source isEqualToString:kROBSafeNeckStartupRestSource]
+        && self.safeNeckStartupPhaseThree != nil
+        && panTarget == self.safeNeckStartupPhaseThree.panTarget
+        && lowerTiltTarget == self.safeNeckStartupPhaseThree.lowerTarget
+        && desiredUpperTarget == self.safeNeckStartupPhaseThree.upperTarget
+        && includeLower
+        && !allowSupervisedLowerRecovery;
     BOOL reviewedFollowClearanceCommand =
         [source isEqualToString:kROBFollowTrackingClearanceSource]
         && panTarget == configuration.panCenterTarget
@@ -2067,6 +2076,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         && boundedLower != ROBNeckSafetyTargetOff
         && !calibrationConfirmed
         && !supervisedLowerRecovery
+        && !safeStartupFinalCommand
         && !reviewedFollowClearanceCommand;
     BOOL lowerHeldForRecovery = lowerChangeRequested
         && boundedLower != ROBNeckSafetyTargetOff
@@ -2443,6 +2453,10 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     BOOL lowerTargetChanged = mayMoveLower
         && (!self.lowerNeckTiltCommandKnown
             || boundedLower != self.commandedLowerNeckTiltTarget);
+    BOOL coupledExactPoseCommand = safeStartupCommand || servoControlCommand;
+    BOOL upperHeldWithCoupledLower = !mayMoveLower
+        && lowerChangeRequested
+        && coupledExactPoseCommand;
     BOOL lowerWriteSucceeded = NO;
     BOOL upperWriteSucceeded = NO;
     if (mayMoveLower) {
@@ -2457,6 +2471,12 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
             upperTarget:(unsigned short)leveledResult.upperTarget];
         lowerWriteSucceeded = coupledWriteSucceeded;
         upperWriteSucceeded = coupledWriteSucceeded;
+    } else if (upperHeldWithCoupledLower) {
+        // Startup and Servo Control poses are mechanically coupled. If the
+        // gateway has not released the lower joint, do not pre-position the
+        // upper joint by itself; the caller will resubmit the complete pose
+        // after the safety deadline.
+        upperWriteSucceeded = YES;
     } else {
         // A held lower joint still permits an upper target to be established,
         // which is needed when that coupled axis was previously unknown/off.
@@ -2469,42 +2489,44 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
             @"NECK OUTPUT PARTIAL; physical pose and prior targets are unknown."];
         return ROBNeckCommandDispositionRejected;
     }
-    BOOL upperTargetChanged = !self.upperNeckTiltCommandKnown
-        || leveledResult.upperTarget != self.commandedUpperNeckTiltTarget;
-    self.commandedUpperNeckTiltTarget = leveledResult.upperTarget;
-    self.upperNeckTiltCommandKnown = YES;
-    if (upperTargetChanged) {
-        if (leveledResult.upperTarget == ROBNeckSafetyTargetOff) {
-            self.commandedUpperNeckTargetReadyAt = 0;
-        } else {
-            NSTimeInterval upperMotionDuration = priorUpperCommandIsActive
-                ? [self maestroMotionDurationFromTarget:priorUpperTarget
-                                                toTarget:leveledResult.upperTarget]
-                : [self maestroMotionDurationFromTarget:
-                        effectiveConfiguration.upperMinimumTarget
-                                                toTarget:
-                        effectiveConfiguration.upperMaximumTarget];
-            self.commandedUpperNeckTargetReadyAt = now
-                + upperMotionDuration
-                + kROBNeckPanRecenterSeconds;
+    if (!upperHeldWithCoupledLower) {
+        BOOL upperTargetChanged = !self.upperNeckTiltCommandKnown
+            || leveledResult.upperTarget != self.commandedUpperNeckTiltTarget;
+        self.commandedUpperNeckTiltTarget = leveledResult.upperTarget;
+        self.upperNeckTiltCommandKnown = YES;
+        if (upperTargetChanged) {
+            if (leveledResult.upperTarget == ROBNeckSafetyTargetOff) {
+                self.commandedUpperNeckTargetReadyAt = 0;
+            } else {
+                NSTimeInterval upperMotionDuration = priorUpperCommandIsActive
+                    ? [self maestroMotionDurationFromTarget:priorUpperTarget
+                                                    toTarget:leveledResult.upperTarget]
+                    : [self maestroMotionDurationFromTarget:
+                            effectiveConfiguration.upperMinimumTarget
+                                                    toTarget:
+                            effectiveConfiguration.upperMaximumTarget];
+                self.commandedUpperNeckTargetReadyAt = now
+                    + upperMotionDuration
+                    + kROBNeckPanRecenterSeconds;
+            }
         }
-    }
-    self.lastDesiredUpperNeckTargetIsKnown =
-        effectiveDesiredUpperTarget != ROBNeckSafetyTargetOff;
-    self.lastDesiredUpperNeckTarget = MAX(
-        effectiveConfiguration.upperMinimumTarget,
-        MIN(effectiveConfiguration.upperMaximumTarget, effectiveDesiredUpperTarget)
-    );
-    double runtimeAdjustment = levelingRequired
-        && self.neckLevelingReferenceIsValid
-        ? effectiveConfiguration.upperCounterRotationGain
-            * (lowerForLeveling - self.neckLevelingReferenceLowerTarget)
-        : 0.0;
-    self.upperNeckCommandCompensated =
-        leveledResult.upperTarget != ROBNeckSafetyTargetOff
-        && fabs(runtimeAdjustment) >= 0.5;
-    if (leveledResult.upperTarget == ROBNeckSafetyTargetOff) {
-        self.neckLevelingReferenceIsValid = NO;
+        self.lastDesiredUpperNeckTargetIsKnown =
+            effectiveDesiredUpperTarget != ROBNeckSafetyTargetOff;
+        self.lastDesiredUpperNeckTarget = MAX(
+            effectiveConfiguration.upperMinimumTarget,
+            MIN(effectiveConfiguration.upperMaximumTarget, effectiveDesiredUpperTarget)
+        );
+        double runtimeAdjustment = levelingRequired
+            && self.neckLevelingReferenceIsValid
+            ? effectiveConfiguration.upperCounterRotationGain
+                * (lowerForLeveling - self.neckLevelingReferenceLowerTarget)
+            : 0.0;
+        self.upperNeckCommandCompensated =
+            leveledResult.upperTarget != ROBNeckSafetyTargetOff
+            && fabs(runtimeAdjustment) >= 0.5;
+        if (leveledResult.upperTarget == ROBNeckSafetyTargetOff) {
+            self.neckLevelingReferenceIsValid = NO;
+        }
     }
 
     if (mayMoveLower) {
@@ -2570,7 +2592,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
         }
     }
 
-    if (servoControlCommand) {
+    if (servoControlCommand && !upperHeldWithCoupledLower) {
         // The exact raw pose becomes the next camera-leveling baseline. This
         // prevents a later normal torso render from applying compensation
         // relative to the pose that preceded the Servo Control action.
@@ -2611,6 +2633,7 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
     if (supervisedLowerReferenceRecovery) [status addObject:@"SUPERVISED LOWER REFERENCE RECOVERY (NO SHAFT FEEDBACK)"];
     if (lowerHeldForPanRecenter) [status addObject:@"LOWER HELD: ESTABLISHING SAFE PAN/CAMERA TARGETS"];
     if (lowerHeldForCameraLimit) [status addObject:@"LOWER HELD: CAMERA COMPENSATION LIMIT"];
+    if (upperHeldWithCoupledLower) [status addObject:@"UPPER HELD WITH COUPLED LOWER"];
     if (panOffHeldForActiveLower) [status addObject:@"PAN OFF HELD: LOWER SERVO ACTIVE"];
     if (upperOffHeldForActiveLower) [status addObject:@"UPPER OFF HELD: LOWER SERVO ACTIVE"];
     if (upperOffStagedForLowerShutdown) [status addObject:@"UPPER OFF STAGED UNTIL PAN RECENTERS"];
@@ -2623,7 +2646,8 @@ static CFTypeRef ROBRegistryProperty(io_object_t service, CFStringRef key)
             || lowerHeldForCalibration
             || lowerHeldForRecovery
             || lowerHeldForPanRecenter
-            || lowerHeldForCameraLimit)
+            || lowerHeldForCameraLimit
+            || upperHeldWithCoupledLower)
         ? ROBNeckCommandDispositionHeldForSafety
         : ROBNeckCommandDispositionAppliedCommand;
     }

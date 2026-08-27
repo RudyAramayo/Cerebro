@@ -517,11 +517,14 @@ def check_safe_startup_sequence(
     )
     require(
         "safeStartupLiftCommand" in gateway
+        and "safeStartupFinalCommand" in gateway
         and "safeNeckStartupPhaseOne" in gateway
+        and "safeNeckStartupPhaseThree" in gateway
         and "effectiveConfiguration.cameraLevelingEnabled = false;" in gateway
         and "&& !safeStartupLiftCommand" in gateway
+        and "&& !safeStartupFinalCommand" in gateway
         and "|| safeStartupLiftCommand" in gateway,
-        "The gateway lost the narrowly-scoped OFF-pan clearance-lift recovery",
+        "The gateway lost a narrowly-scoped reviewed startup recovery pose",
     )
     require(
         "safeNeckStartupGeneration += 1;" in invalidate
@@ -953,6 +956,13 @@ def check_stateful_safety_gateway(serial_source: str, torso_source: str) -> None
         in compact_gateway,
         "The coupled packet no longer maps bounded lower to channel 1 and "
         "the leveled upper target to channel 2",
+    )
+    require(
+        "coupledExactPoseCommand = safeStartupCommand || servoControlCommand"
+        in compact_gateway
+        and "upperHeldWithCoupledLower" in gateway
+        and "UPPER HELD WITH COUPLED LOWER" in gateway,
+        "A held lower axis may again allow an exact-pose upper target to move alone",
     )
     require(
         "lowerHeldForCalibration" in gateway

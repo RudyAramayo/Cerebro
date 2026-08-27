@@ -96,7 +96,6 @@ import Foundation
             poses.append(offset(base, axis: gesture.servo, delta: gesture.delta))
             poses.append(offset(base, axis: gesture.servo, delta: -gesture.delta))
         }
-        poses.append(base)
         guard poses.allSatisfy({ $0.targetsAreInMaestroRange }) else {
             publish("Gesture \(gesture.name) would exceed the Maestro target range.")
             return
@@ -149,7 +148,7 @@ import Foundation
         guard generation == runGeneration else { return }
         guard gesturePoses.indices.contains(index) else {
             timer = nil
-            publish("Gesture \(name) complete; returned to its captured starting pose.")
+            publish("Gesture \(name) complete at its final -delta extreme.")
             return
         }
         let pose = gesturePoses[index]
