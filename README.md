@@ -430,3 +430,19 @@ authorization.
 See [ROB control transport v2](docs/rob-control-v2.md) for pairing and migration,
 and [controller-activated autonomy](docs/controller-activated-autonomy.md) for
 the current behavior and the arm/servo integration roadmap.
+
+## Robot geometry calibration
+
+**Development → Robot Geometry Lab (Simulation)** provides a SceneKit workbench
+for body and arm mounting transforms, joint previews, scan registration, LACT
+anchor geometry, approximate collision envelopes, and URDF export. It includes
+position-only ball-reach previews and optional calibrated-depth overlays. It
+does not issue actuator commands or grant motion authority. The same sources
+build an independent offline app with `Scripts/build-robot-geometry-lab.sh`.
+
+Start with the [capture and commissioning guide](docs/calibration/capture-and-commissioning.md)
+and [explicitly uncalibrated model drafts](robot_description/README.md). Hanging
+startup angles and session encoder references remain separate from fixed URDF
+mount geometry. Run `Scripts/test-robot-geometry.sh` for the geometry fixtures.
+See the [validation and remaining commissioning work](docs/calibration/implementation-status.md)
+before using the draft outside the offline workbench.

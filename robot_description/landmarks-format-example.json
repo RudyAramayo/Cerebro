@@ -1,0 +1,7 @@
+[
+  {"name":"SYNTHETIC_A_NOT_ROB_DATA","localMeters":[0,0,0],"parentMeters":[0.1,0.2,0.3],"validationOnly":false},
+  {"name":"SYNTHETIC_B_NOT_ROB_DATA","localMeters":[0.2,0,0],"parentMeters":[0.3,0.2,0.3],"validationOnly":false},
+  {"name":"SYNTHETIC_C_NOT_ROB_DATA","localMeters":[0,0.15,0],"parentMeters":[0.1,0.35,0.3],"validationOnly":false},
+  {"name":"SYNTHETIC_D_NOT_ROB_DATA","localMeters":[0,0,0.1],"parentMeters":[0.1,0.2,0.4],"validationOnly":false},
+  {"name":"SYNTHETIC_HOLDOUT_NOT_ROB_DATA","localMeters":[0.1,0.1,0.1],"parentMeters":[0.2,0.3,0.4],"validationOnly":true}
+]

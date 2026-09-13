@@ -178,6 +178,9 @@
 		D4F642E62325E17F00DF71AE /* ROBNiTEManager.mm in Sources */ = {isa = PBXBuildFile; fileRef = D4F642DF2325E17F00DF71AE /* ROBNiTEManager.mm */; };
 		D4F673B222EFFC4600A9B6E4 /* ReSpeakerTaskController.m in Sources */ = {isa = PBXBuildFile; fileRef = D4F673AF22EFFC4500A9B6E4 /* ReSpeakerTaskController.m */; };
 		D4F673B322EFFC4600A9B6E4 /* ReSpeakerTaskController.command in Resources */ = {isa = PBXBuildFile; fileRef = D4F673B022EFFC4600A9B6E4 /* ReSpeakerTaskController.command */; };
+		4E18A61196D846179F6E6356 /* ROBRobotGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5654E990DD724F99BFE70944 /* ROBRobotGeometry.swift */; };
+		A3041CAC652D4FCC8E0811AC /* ROBRobotGeometryDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A8B075B32D4420A819D7AA0 /* ROBRobotGeometryDocument.swift */; };
+		3CCA31C1CC44407B83490D90 /* ROBRobotGeometryWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57DEFC7245354F0DB9EF2952 /* ROBRobotGeometryWindowController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -401,6 +404,9 @@
 		D4F673AF22EFFC4500A9B6E4 /* ReSpeakerTaskController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = ReSpeakerTaskController.m; sourceTree = "<group>"; };
 		D4F673B022EFFC4600A9B6E4 /* ReSpeakerTaskController.command */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.sh; path = ReSpeakerTaskController.command; sourceTree = "<group>"; };
 		D4F673B122EFFC4600A9B6E4 /* ReSpeakerTaskController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = ReSpeakerTaskController.h; sourceTree = "<group>"; };
+		5654E990DD724F99BFE70944 /* ROBRobotGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRobotGeometry.swift; sourceTree = "<group>"; };
+		3A8B075B32D4420A819D7AA0 /* ROBRobotGeometryDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRobotGeometryDocument.swift; sourceTree = "<group>"; };
+		57DEFC7245354F0DB9EF2952 /* ROBRobotGeometryWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRobotGeometryWindowController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -578,6 +584,9 @@
 				D408B1202E15E7E300F6FEB3 /* ROBAI.swift */,
 				C0D5B0012F00000100000001 /* ROBSceneSnapshot.swift */,
 				C0D6B0012F00000100000001 /* ROBVisualCalibration.swift */,
+				57DEFC7245354F0DB9EF2952 /* ROBRobotGeometryWindowController.swift */,
+				3A8B075B32D4420A819D7AA0 /* ROBRobotGeometryDocument.swift */,
+				5654E990DD724F99BFE70944 /* ROBRobotGeometry.swift */,
 				C0D6B0022F00000100000001 /* ROBChessboardCalibration.swift */,
 				C0D7B0012F00000100000001 /* ROBAmberB1Kinematics.swift */,
 				C0D8B0012F00000100000001 /* ROBAmberArmReference.swift */,
@@ -924,6 +933,9 @@
 				D408B1212E15E7E300F6FEB3 /* ROBAI.swift in Sources */,
 				C0D5A0012F00000100000001 /* ROBSceneSnapshot.swift in Sources */,
 				C0D6A0012F00000100000001 /* ROBVisualCalibration.swift in Sources */,
+				3CCA31C1CC44407B83490D90 /* ROBRobotGeometryWindowController.swift in Sources */,
+				A3041CAC652D4FCC8E0811AC /* ROBRobotGeometryDocument.swift in Sources */,
+				4E18A61196D846179F6E6356 /* ROBRobotGeometry.swift in Sources */,
 				C0D6A0022F00000100000001 /* ROBChessboardCalibration.swift in Sources */,
 				C0D7A0012F00000100000001 /* ROBAmberB1Kinematics.swift in Sources */,
 				C0D8A0012F00000100000001 /* ROBAmberArmReference.swift in Sources */,

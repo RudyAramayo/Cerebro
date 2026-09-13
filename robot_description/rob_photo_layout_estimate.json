@@ -1,0 +1,1933 @@
+{
+  "joints": [
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "left_track_link",
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "fixed",
+      "lower": 0,
+      "name": "left_track_mount",
+      "origin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0.23,
+          0.15
+        ]
+      },
+      "parent": "base_link",
+      "upper": 0
+    },
+    {
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "child": "left_sprocket_link",
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "continuous",
+      "lower": -3.141592653589793,
+      "name": "left_track_drive",
+      "origin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          -0.2,
+          0,
+          0
+        ]
+      },
+      "parent": "left_track_link",
+      "upper": 3.141592653589793
+    },
+    {
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "child": "left_flipper_link",
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "hardwareAnnotation": "Source routes one base M3 command to the flipper mechanism. Verify physical linkage, coupling ratio and axis signs; independent preview coordinates are not two proven actuators.",
+      "kind": "revolute",
+      "lower": -1.5,
+      "name": "left_flipper",
+      "origin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0.17,
+          0.23,
+          0.24
+        ]
+      },
+      "parent": "base_link",
+      "upper": 1.5
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "right_track_link",
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "fixed",
+      "lower": 0,
+      "name": "right_track_mount",
+      "origin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          -0.23,
+          0.15
+        ]
+      },
+      "parent": "base_link",
+      "upper": 0
+    },
+    {
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "child": "right_sprocket_link",
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "continuous",
+      "lower": -3.141592653589793,
+      "name": "right_track_drive",
+      "origin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          -0.2,
+          0,
+          0
+        ]
+      },
+      "parent": "right_track_link",
+      "upper": 3.141592653589793
+    },
+    {
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "child": "right_flipper_link",
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "hardwareAnnotation": "Source routes one base M3 command to the flipper mechanism. Verify physical linkage, coupling ratio and axis signs; independent preview coordinates are not two proven actuators.",
+      "kind": "revolute",
+      "lower": -1.5,
+      "name": "right_flipper",
+      "origin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0.17,
+          -0.23,
+          0.24
+        ]
+      },
+      "parent": "base_link",
+      "upper": 1.5
+    },
+    {
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "child": "lean_link",
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "hardwareAnnotation": "LACT drives this pitch pivot; measure pin centers and stroke-to-angle samples",
+      "kind": "revolute",
+      "lower": -0.35,
+      "name": "body_lean",
+      "origin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          -0.1,
+          0,
+          0.37
+        ]
+      },
+      "parent": "base_link",
+      "upper": 0.35
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "torso_link",
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "hardwareAnnotation": "Pololu Tic waist control; source uses 36800 units per full turn. Mechanical zero, sign and actual gear calibration remain unverified.",
+      "kind": "revolute",
+      "lower": -1.2,
+      "name": "torso_yaw",
+      "origin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.26
+        ]
+      },
+      "parent": "lean_link",
+      "upper": 1.2
+    },
+    {
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "child": "lower_neck_link",
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "hardwareAnnotation": "Maestro channel 1; PWM-to-angle unmeasured",
+      "kind": "revolute",
+      "lower": -1.3,
+      "name": "lower_neck",
+      "origin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.39
+        ]
+      },
+      "parent": "torso_link",
+      "upper": 1.3
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "neck_pan_link",
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "hardwareAnnotation": "Maestro channel 0; PWM-to-angle unmeasured",
+      "kind": "revolute",
+      "lower": -1.05,
+      "name": "neck_pan",
+      "origin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.2
+        ]
+      },
+      "parent": "lower_neck_link",
+      "upper": 1.05
+    },
+    {
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "child": "upper_neck_link",
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "hardwareAnnotation": "Maestro channel 2; PWM-to-angle unmeasured",
+      "kind": "revolute",
+      "lower": -1.3,
+      "name": "upper_neck",
+      "origin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.03
+        ]
+      },
+      "parent": "neck_pan_link",
+      "upper": 1.3
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "insta360_link",
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "fixed",
+      "lower": 0,
+      "name": "insta360_mount",
+      "origin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.11
+        ]
+      },
+      "parent": "upper_neck_link",
+      "upper": 0
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "oak_link",
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "fixed",
+      "lower": 0,
+      "name": "oak_mount",
+      "origin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0.11,
+          0,
+          0.035
+        ]
+      },
+      "parent": "upper_neck_link",
+      "upper": 0
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "oak_optical_frame",
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "fixed",
+      "lower": 0,
+      "name": "oak_optical_mount",
+      "origin": {
+        "rpyRadians": [
+          -1.5707963267948966,
+          0,
+          -1.5707963267948966
+        ],
+        "xyzMeters": [
+          0.015,
+          0,
+          0
+        ]
+      },
+      "parent": "oak_link",
+      "upper": 0
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "belly_oak_link",
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "fixed",
+      "lower": 0,
+      "name": "belly_oak_mount",
+      "origin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0.17,
+          0,
+          0.08
+        ]
+      },
+      "parent": "torso_link",
+      "upper": 0
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "belly_oak_optical_frame",
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "fixed",
+      "lower": 0,
+      "name": "belly_oak_optical_mount",
+      "origin": {
+        "rpyRadians": [
+          -1.5707963267948966,
+          0,
+          -1.5707963267948966
+        ],
+        "xyzMeters": [
+          0.015,
+          0,
+          0
+        ]
+      },
+      "parent": "belly_oak_link",
+      "upper": 0
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "left_base_link",
+      "evidence": {
+        "note": "Illustrative photo layout: first axes canted outward; second-joint axes approximately fore/aft. Roll/pitch/yaw, plate origin, side mapping, and scale require measurements; no calibrated numeric pose is claimed.",
+        "source": "photo_estimate"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "fixed",
+      "lower": 0,
+      "name": "left_b1_mount",
+      "origin": {
+        "rpyRadians": [
+          0,
+          0.35,
+          1.5707963267948966
+        ],
+        "xyzMeters": [
+          0,
+          0.14,
+          0.35
+        ]
+      },
+      "parent": "torso_link",
+      "upper": 0
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "left_one_Link",
+      "evidence": {
+        "note": "Single-arm amber_b1.urdf. Driver direction and boot reference are separate, unverified mappings.",
+        "source": "vendor"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "revolute",
+      "lower": -2.4435,
+      "name": "left_joint1",
+      "origin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.0825
+        ]
+      },
+      "parent": "left_base_link",
+      "upper": 2.4435
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "left_two_Link",
+      "evidence": {
+        "note": "Single-arm amber_b1.urdf. Driver direction and boot reference are separate, unverified mappings.",
+        "source": "vendor"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "revolute",
+      "lower": -2.3213,
+      "name": "left_joint2",
+      "origin": {
+        "rpyRadians": [
+          -1.5707963267948966,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.0853000000000001
+        ]
+      },
+      "parent": "left_one_Link",
+      "upper": 2.3213
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "left_three_Link",
+      "evidence": {
+        "note": "Single-arm amber_b1.urdf. Driver direction and boot reference are separate, unverified mappings.",
+        "source": "vendor"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "revolute",
+      "lower": -2.2863,
+      "name": "left_joint3",
+      "origin": {
+        "rpyRadians": [
+          1.5708,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          -0.1289,
+          0
+        ]
+      },
+      "parent": "left_two_Link",
+      "upper": 2.2863
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "left_four_Link",
+      "evidence": {
+        "note": "Single-arm amber_b1.urdf. Driver direction and boot reference are separate, unverified mappings.",
+        "source": "vendor"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "revolute",
+      "lower": -2.2863,
+      "name": "left_joint4",
+      "origin": {
+        "rpyRadians": [
+          1.5708,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.0853
+        ]
+      },
+      "parent": "left_three_Link",
+      "upper": 2.2863
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "left_five_Link",
+      "evidence": {
+        "note": "Single-arm amber_b1.urdf. Driver direction and boot reference are separate, unverified mappings.",
+        "source": "vendor"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "revolute",
+      "lower": -2.2863,
+      "name": "left_joint5",
+      "origin": {
+        "rpyRadians": [
+          -1.5708,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0.1251,
+          0
+        ]
+      },
+      "parent": "left_four_Link",
+      "upper": 2.2863
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "left_six_Link",
+      "evidence": {
+        "note": "Single-arm amber_b1.urdf. Driver direction and boot reference are separate, unverified mappings.",
+        "source": "vendor"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "revolute",
+      "lower": -2.2863,
+      "name": "left_joint6",
+      "origin": {
+        "rpyRadians": [
+          -1.5708,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.0891
+        ]
+      },
+      "parent": "left_five_Link",
+      "upper": 2.2863
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "left_seven_Link",
+      "evidence": {
+        "note": "Single-arm amber_b1.urdf. Driver direction and boot reference are separate, unverified mappings.",
+        "source": "vendor"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "revolute",
+      "lower": -3.05,
+      "name": "left_joint7",
+      "origin": {
+        "rpyRadians": [
+          1.5708,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          -0.1591,
+          0
+        ]
+      },
+      "parent": "left_six_Link",
+      "upper": 3.05
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "left_tool",
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "fixed",
+      "lower": 0,
+      "name": "left_tool_mount",
+      "origin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.11
+        ]
+      },
+      "parent": "left_seven_Link",
+      "upper": 0
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "right_base_link",
+      "evidence": {
+        "note": "Illustrative photo layout: first axes canted outward; second-joint axes approximately fore/aft. Roll/pitch/yaw, plate origin, side mapping, and scale require measurements; no calibrated numeric pose is claimed.",
+        "source": "photo_estimate"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "fixed",
+      "lower": 0,
+      "name": "right_b1_mount",
+      "origin": {
+        "rpyRadians": [
+          0,
+          0.35,
+          -1.5707963267948966
+        ],
+        "xyzMeters": [
+          0,
+          -0.14,
+          0.35
+        ]
+      },
+      "parent": "torso_link",
+      "upper": 0
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "right_one_Link",
+      "evidence": {
+        "note": "Single-arm amber_b1.urdf. Driver direction and boot reference are separate, unverified mappings.",
+        "source": "vendor"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "revolute",
+      "lower": -2.4435,
+      "name": "right_joint1",
+      "origin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.0825
+        ]
+      },
+      "parent": "right_base_link",
+      "upper": 2.4435
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "right_two_Link",
+      "evidence": {
+        "note": "Single-arm amber_b1.urdf. Driver direction and boot reference are separate, unverified mappings.",
+        "source": "vendor"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "revolute",
+      "lower": -2.3213,
+      "name": "right_joint2",
+      "origin": {
+        "rpyRadians": [
+          -1.5707963267948966,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.0853000000000001
+        ]
+      },
+      "parent": "right_one_Link",
+      "upper": 2.3213
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "right_three_Link",
+      "evidence": {
+        "note": "Single-arm amber_b1.urdf. Driver direction and boot reference are separate, unverified mappings.",
+        "source": "vendor"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "revolute",
+      "lower": -2.2863,
+      "name": "right_joint3",
+      "origin": {
+        "rpyRadians": [
+          1.5708,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          -0.1289,
+          0
+        ]
+      },
+      "parent": "right_two_Link",
+      "upper": 2.2863
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "right_four_Link",
+      "evidence": {
+        "note": "Single-arm amber_b1.urdf. Driver direction and boot reference are separate, unverified mappings.",
+        "source": "vendor"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "revolute",
+      "lower": -2.2863,
+      "name": "right_joint4",
+      "origin": {
+        "rpyRadians": [
+          1.5708,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.0853
+        ]
+      },
+      "parent": "right_three_Link",
+      "upper": 2.2863
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "right_five_Link",
+      "evidence": {
+        "note": "Single-arm amber_b1.urdf. Driver direction and boot reference are separate, unverified mappings.",
+        "source": "vendor"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "revolute",
+      "lower": -2.2863,
+      "name": "right_joint5",
+      "origin": {
+        "rpyRadians": [
+          -1.5708,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0.1251,
+          0
+        ]
+      },
+      "parent": "right_four_Link",
+      "upper": 2.2863
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "right_six_Link",
+      "evidence": {
+        "note": "Single-arm amber_b1.urdf. Driver direction and boot reference are separate, unverified mappings.",
+        "source": "vendor"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "revolute",
+      "lower": -2.2863,
+      "name": "right_joint6",
+      "origin": {
+        "rpyRadians": [
+          -1.5708,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.0891
+        ]
+      },
+      "parent": "right_five_Link",
+      "upper": 2.2863
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "right_seven_Link",
+      "evidence": {
+        "note": "Single-arm amber_b1.urdf. Driver direction and boot reference are separate, unverified mappings.",
+        "source": "vendor"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "revolute",
+      "lower": -3.05,
+      "name": "right_joint7",
+      "origin": {
+        "rpyRadians": [
+          1.5708,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          -0.1591,
+          0
+        ]
+      },
+      "parent": "right_six_Link",
+      "upper": 3.05
+    },
+    {
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "child": "right_tool",
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "hardwareAnnotation": "Unverified mapping; no hardware output",
+      "kind": "fixed",
+      "lower": 0,
+      "name": "right_tool_mount",
+      "origin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.11
+        ]
+      },
+      "parent": "right_seven_Link",
+      "upper": 0
+    }
+  ],
+  "lact": {
+    "evidence": {
+      "note": "Measure both LACT pin centers. Stroke-to-pitch is nonlinear; the URDF tree represents the driven lean pivot. The actuator closes a mechanical loop.",
+      "source": "unmeasured"
+    },
+    "fixedAnchorMeters": [
+      -0.16,
+      0,
+      0.25
+    ],
+    "fixedLink": "base_link",
+    "movingAnchorMeters": [
+      -0.12,
+      0,
+      0.22
+    ],
+    "movingLink": "lean_link"
+  },
+  "links": [
+    {
+      "boxMeters": [
+        0.52,
+        0.32,
+        0.24
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.15
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "base_link"
+    },
+    {
+      "boxMeters": [
+        0.62,
+        0.12,
+        0.3
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "left_track_link"
+    },
+    {
+      "boxMeters": [
+        0.12,
+        0.13,
+        0.12
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "left_sprocket_link"
+    },
+    {
+      "boxMeters": [
+        0.34,
+        0.1,
+        0.1
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0.15,
+          0,
+          0
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "left_flipper_link"
+    },
+    {
+      "boxMeters": [
+        0.62,
+        0.12,
+        0.3
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "right_track_link"
+    },
+    {
+      "boxMeters": [
+        0.12,
+        0.13,
+        0.12
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "right_sprocket_link"
+    },
+    {
+      "boxMeters": [
+        0.34,
+        0.1,
+        0.1
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0.15,
+          0,
+          0
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "right_flipper_link"
+    },
+    {
+      "boxMeters": [
+        0.12,
+        0.25,
+        0.25
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.13
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "lean_link"
+    },
+    {
+      "boxMeters": [
+        0.3,
+        0.32,
+        0.36
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.18
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "torso_link"
+    },
+    {
+      "boxMeters": [
+        0.05,
+        0.07,
+        0.2
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.1
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "lower_neck_link"
+    },
+    {
+      "boxMeters": [
+        0.07,
+        0.07,
+        0.035
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "neck_pan_link"
+    },
+    {
+      "boxMeters": [
+        0.05,
+        0.07,
+        0.07
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "upper_neck_link"
+    },
+    {
+      "boxMeters": [
+        0.16,
+        0.18,
+        0.18
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "insta360_link"
+    },
+    {
+      "boxMeters": [
+        0.025,
+        0.14,
+        0.035
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "oak_link"
+    },
+    {
+      "boxMeters": [
+        0.01,
+        0.01,
+        0.01
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "oak_optical_frame"
+    },
+    {
+      "boxMeters": [
+        0.025,
+        0.14,
+        0.035
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "belly_oak_link"
+    },
+    {
+      "boxMeters": [
+        0.01,
+        0.01,
+        0.01
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "belly_oak_optical_frame"
+    },
+    {
+      "boxMeters": [
+        0.085,
+        0.085,
+        0.083
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.04
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "left_base_link",
+      "vendorLink": "base_link"
+    },
+    {
+      "boxMeters": [
+        0.075,
+        0.075,
+        0.09
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.04
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "left_one_Link",
+      "vendorLink": "one_Link"
+    },
+    {
+      "boxMeters": [
+        0.075,
+        0.075,
+        0.09
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.04
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "left_two_Link",
+      "vendorLink": "two_Link"
+    },
+    {
+      "boxMeters": [
+        0.075,
+        0.075,
+        0.09
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.04
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "left_three_Link",
+      "vendorLink": "three_Link"
+    },
+    {
+      "boxMeters": [
+        0.075,
+        0.075,
+        0.09
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.04
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "left_four_Link",
+      "vendorLink": "four_Link"
+    },
+    {
+      "boxMeters": [
+        0.075,
+        0.075,
+        0.09
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.04
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "left_five_Link",
+      "vendorLink": "five_Link"
+    },
+    {
+      "boxMeters": [
+        0.075,
+        0.075,
+        0.09
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.04
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "left_six_Link",
+      "vendorLink": "six_Link"
+    },
+    {
+      "boxMeters": [
+        0.075,
+        0.075,
+        0.09
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.04
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "left_seven_Link",
+      "vendorLink": "seven_Link"
+    },
+    {
+      "boxMeters": [
+        0.075,
+        0.075,
+        0.12
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "left_tool"
+    },
+    {
+      "boxMeters": [
+        0.085,
+        0.085,
+        0.083
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.04
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "right_base_link",
+      "vendorLink": "base_link"
+    },
+    {
+      "boxMeters": [
+        0.075,
+        0.075,
+        0.09
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.04
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "right_one_Link",
+      "vendorLink": "one_Link"
+    },
+    {
+      "boxMeters": [
+        0.075,
+        0.075,
+        0.09
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.04
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "right_two_Link",
+      "vendorLink": "two_Link"
+    },
+    {
+      "boxMeters": [
+        0.075,
+        0.075,
+        0.09
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.04
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "right_three_Link",
+      "vendorLink": "three_Link"
+    },
+    {
+      "boxMeters": [
+        0.075,
+        0.075,
+        0.09
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.04
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "right_four_Link",
+      "vendorLink": "four_Link"
+    },
+    {
+      "boxMeters": [
+        0.075,
+        0.075,
+        0.09
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.04
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "right_five_Link",
+      "vendorLink": "five_Link"
+    },
+    {
+      "boxMeters": [
+        0.075,
+        0.075,
+        0.09
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.04
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "right_six_Link",
+      "vendorLink": "six_Link"
+    },
+    {
+      "boxMeters": [
+        0.075,
+        0.075,
+        0.09
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0.04
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "right_seven_Link",
+      "vendorLink": "seven_Link"
+    },
+    {
+      "boxMeters": [
+        0.075,
+        0.075,
+        0.12
+      ],
+      "boxOrigin": {
+        "rpyRadians": [
+          0,
+          0,
+          0
+        ],
+        "xyzMeters": [
+          0,
+          0,
+          0
+        ]
+      },
+      "evidence": {
+        "note": "Schematic estimate. Replace with measured landmarks.",
+        "source": "unmeasured"
+      },
+      "name": "right_tool"
+    }
+  ],
+  "name": "ROB photo-layout estimate \u2014 not calibrated",
+  "previewPositions": {
+    "left_joint1": 0,
+    "left_joint2": 2.1,
+    "left_joint3": 0,
+    "left_joint4": -1.0,
+    "left_joint5": 0,
+    "left_joint6": 0,
+    "left_joint7": 0,
+    "right_joint1": 0,
+    "right_joint2": 2.1,
+    "right_joint3": 0,
+    "right_joint4": -1.0,
+    "right_joint5": 0,
+    "right_joint6": 0,
+    "right_joint7": 0
+  },
+  "scanScale": 1,
+  "scanToBase": {
+    "rpyRadians": [
+      0,
+      0,
+      0
+    ],
+    "xyzMeters": [
+      0,
+      0,
+      0
+    ]
+  },
+  "schemaVersion": 1,
+  "simulationOnly": true,
+  "startupReferenceNote": "Operator reports gravity-hanging startup: joints 2 and 4 differ from URDF zero; other joints appear at initialization. Numerical offsets and directions remain unverified. Capture a new vendor reference after every Amber boot; never reuse raw boot offsets as mount geometry. The displayed joint2=2.1 and joint4=-1.0 radians are ILLUSTRATIVE estimates for preview only, not recovered encoder offsets or measured physical angles."
+}

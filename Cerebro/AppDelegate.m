@@ -216,6 +216,12 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         keyEquivalent:@""];
     self.wakeUpCalibrationMenuItem.target = self;
     [submenu addItem:self.wakeUpCalibrationMenuItem];
+    NSMenuItem *geometryItem = [[NSMenuItem alloc]
+        initWithTitle:@"Robot Geometry Lab (Simulation)…"
+               action:@selector(showRobotGeometryLab:)
+        keyEquivalent:@""];
+    geometryItem.target = self;
+    [submenu addItem:geometryItem];
     NSMenuItem *developmentItem = [[NSMenuItem alloc] initWithTitle:@"Development"
                                                              action:nil
                                                       keyEquivalent:@""];
@@ -289,6 +295,11 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         return;
     }
     [[ROBWakeUpCalibrationWindowController shared] showWindow:sender];
+}
+
+- (IBAction)showRobotGeometryLab:(id)sender
+{
+    [[ROBRobotGeometryWindowController shared] showWindow:sender];
 }
 
 - (void)applicationWillTerminate:(NSNotification *)notification

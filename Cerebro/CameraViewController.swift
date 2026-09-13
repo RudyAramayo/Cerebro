@@ -183,13 +183,17 @@ enum ROBSwordTrackerColor: String, CaseIterable {
     public let height: Int
     public let rgbPixelBuffer: CVPixelBuffer?
     public let isBelly: Bool
+    @nonobjc let calibratedIntrinsics: CameraIntrinsics?
+    let receivedUptime: TimeInterval
 
-    init(depth: CameraDepthFrame, rgbSampleBuffer: CMSampleBuffer, isBelly: Bool = false) {
+    init(depth: CameraDepthFrame, rgbSampleBuffer: CMSampleBuffer, isBelly: Bool = false, intrinsics: CameraIntrinsics? = nil) {
         millimetersLittleEndian = depth.millimetersLittleEndian as NSData
         width = depth.width
         height = depth.height
         rgbPixelBuffer = CMSampleBufferGetImageBuffer(rgbSampleBuffer)
         self.isBelly = isBelly
+        calibratedIntrinsics = intrinsics
+        receivedUptime = ProcessInfo.processInfo.systemUptime
     }
 }
 
@@ -1660,7 +1664,7 @@ extension CameraViewController: CameraManagerDelegate {
         )
         
         if let depth = frameSet.alignedDepth {
-            let hologramFrame = ROBDepthCloudFrame(depth: depth, rgbSampleBuffer: sampleBuffer, isBelly: false)
+            let hologramFrame = ROBDepthCloudFrame(depth: depth, rgbSampleBuffer: sampleBuffer, isBelly: false, intrinsics: frameSet.intrinsics)
             ROBHologramExporter.shared.capture(hologramFrame)
             if cameraViewIsVisible {
                 faceDepthPointCloudRenderer.offer(depth: depth, rgbSampleBuffer: sampleBuffer, in: skeletonView)
