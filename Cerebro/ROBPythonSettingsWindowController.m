@@ -179,7 +179,7 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
 
     self.geminiSettingsTab = [NSTabViewItem
         tabViewItemWithViewController:[[NSViewController alloc] init]];
-    self.geminiSettingsTab.label = @"Gemini";
+    self.geminiSettingsTab.label = @"AI Personalities";
     NSView *geminiPlaceholderView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 680, 580)];
     NSTextField *geminiPlaceholderLabel = [self labelWithString:
         @"Open Cerebro's main robot window to configure Gemini."

@@ -433,7 +433,7 @@ public extension Notification.Name {
         clearGeminiTurn(cancelRequest: true)
         let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            speakAdaptiveFallback(for: cue, reason: "Gemini returned an empty response")
+            speakAdaptiveFallback(for: cue, reason: "The selected live AI returned an empty response")
             return true
         }
         awaiting = .speech
@@ -697,7 +697,7 @@ public extension Notification.Name {
         let route = localDirected ? "validated local stage direction" : "authored scene goal"
         publish(
             state: "awaiting_gemini",
-            detail: "Cue \(cue.id): sending \(route) to Gemini Live."
+            detail: "Cue \(cue.id): sending \(route) to the selected live AI."
         )
         scheduleGeminiFallback(after: timeout)
         delegate?.stageShowCoordinator(
@@ -781,12 +781,12 @@ public extension Notification.Name {
             let reason: String
             if localPlanningSeconds >= 0.05 {
                 reason = String(
-                    format: "Gemini did not complete within %.1f seconds (%.1f-second cue budget; %.1f seconds used for local planning)",
+                    format: "Live AI did not complete within %.1f seconds (%.1f-second cue budget; %.1f seconds used for local planning)",
                     seconds, totalBudget, localPlanningSeconds
                 )
             } else {
                 reason = String(
-                    format: "Gemini did not complete within %.1f seconds (%.1f-second cue budget)",
+                    format: "Live AI did not complete within %.1f seconds (%.1f-second cue budget)",
                     seconds, totalBudget
                 )
             }

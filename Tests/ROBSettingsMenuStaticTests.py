@@ -144,15 +144,15 @@ def main() -> None:
     require(
         '@objcMembers public final class ROBGeminiSettingsViewController: NSViewController'
         in GEMINI_SETTINGS
-        and 'checkboxWithTitle: "Connect to Gemini"' in GEMINI_SETTINGS
-        and 'checkboxWithTitle: "Send microphone audio to Gemini"'
+        and 'checkboxWithTitle: "Connect selected AI providers"' in GEMINI_SETTINGS
+        and 'checkboxWithTitle: "Send microphone audio to the driver"'
         in GEMINI_SETTINGS
-        and 'checkboxWithTitle: "Send sampled camera composite to Gemini"'
+        and 'checkboxWithTitle: "Send sampled camera images to selected providers"'
         in GEMINI_SETTINGS,
         "Gemini runtime controls are no longer hosted by a Settings view controller",
     )
     require(
-        'self.geminiSettingsTab.label = @"Gemini";' in SETTINGS_WINDOW
+        'self.geminiSettingsTab.label = @"AI Personalities";' in SETTINGS_WINDOW
         and "[mainViewController geminiProviderSettingsViewController]"
         in SETTINGS_WINDOW
         and "[self.settingsTabView selectTabViewItem:self.geminiSettingsTab];"

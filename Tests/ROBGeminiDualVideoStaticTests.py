@@ -9,6 +9,7 @@ PROTOCOL = (ROOT / "Cerebro" / "GeminiRoboticsProtocol.swift").read_text(
     encoding="utf-8"
 )
 AI = (ROOT / "Cerebro" / "ROBAI.swift").read_text(encoding="utf-8")
+REALTIME = (ROOT / "Cerebro" / "ROBRealtimeSession.swift").read_text(encoding="utf-8")
 INSTA360 = (ROOT / "Cerebro" / "ROBInsta360CameraService.swift").read_text(
     encoding="utf-8"
 )
@@ -331,7 +332,7 @@ def main() -> None:
     # must synchronously revoke old media and be checked again immediately
     # before the actor writes a queued payload to the socket.
     authorization_gate = braced_declaration(
-        AI, "private final class GeminiVideoAuthorizationGate"
+        REALTIME, "final class GeminiVideoAuthorizationGate"
     )
     for token in (
         "private let lock = NSLock()",
@@ -586,8 +587,12 @@ def main() -> None:
     analysis_demand = braced_declaration(
         INSTA360, "private var analysisNeedsFrames: Bool"
     )
+    demand_terms = {
+        term.strip()
+        for term in analysis_demand.partition("{")[2].rpartition("}")[0].split("||")
+    }
     require(
-        "geminiVideoDemandActive || localAnalysisNeedsFrames" in analysis_demand,
+        {"geminiVideoDemandActive", "localAnalysisNeedsFrames"} <= demand_terms,
         "Insta360 decoding still depends on diagnostics or local analysis when Gemini needs it",
     )
     consume_video = braced_declaration(INSTA360, "private func consumeVideo(")

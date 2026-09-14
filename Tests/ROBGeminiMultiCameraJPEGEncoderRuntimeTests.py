@@ -281,6 +281,17 @@ private enum ROBGeminiMultiCameraJPEGEncoderRuntimeTests {
             timeout: 2.0,
             "Two fresh sources did not produce the first composite"
         )
+        // Queue the next burst before the pixel scans below. Unoptimized
+        // million-pixel scans can exceed one second on a busy test host;
+        // queuing afterwards would no longer test one coalescing window.
+        encoder.enqueueMainCamera(
+            try makeSampleBuffer(red: 255, green: 0, blue: 255),
+            generation: 7
+        )
+        encoder.enqueueMainCamera(
+            try makeSampleBuffer(red: 255, green: 255, blue: 0),
+            generation: 7
+        )
         try expect(first.generation == 7, "The rendered composite changed video generation")
         let firstJPEG = try DecodedJPEG(first.data)
         try expect(
@@ -322,14 +333,6 @@ private enum ROBGeminiMultiCameraJPEGEncoderRuntimeTests {
 
         // A new burst cannot create a second aggregate frame before one second,
         // and its final yellow main-camera frame must replace the earlier one.
-        encoder.enqueueMainCamera(
-            try makeSampleBuffer(red: 255, green: 0, blue: 255),
-            generation: 7
-        )
-        encoder.enqueueMainCamera(
-            try makeSampleBuffer(red: 255, green: 255, blue: 0),
-            generation: 7
-        )
         let second = try requireOutput(
             collector,
             at: 1,

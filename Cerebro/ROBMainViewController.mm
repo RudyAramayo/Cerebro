@@ -1230,6 +1230,27 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     [self speakConfiguredAcknowledgementIfNotQueued];
 }
 
+- (void)robAI:(ROBAI *)robAI didReceivePersonalityText:(NSString *)text
+     provider:(NSString *)provider utteranceID:(NSString *)utteranceID
+{
+    if (robAI != self.robAI || self.stageShowCoordinator.isRunning) {
+        [robAI finishPersonalitySpeechWithUtteranceID:utteranceID finished:NO];
+        return;
+    }
+    NSString *label = [provider isEqualToString:@"openai"] ? @"OpenAI" : @"Gemini";
+    NSLog(@"ROB %@ response: %@", label, text);
+    [self appendConversationText:[NSString stringWithFormat:@"%@: %@", label, text] fromUser:NO];
+    if (self.audioInputTaskController.textView != nil) {
+        self.audioInputTaskController.textView.string =
+            [self.audioInputTaskController.textView.string
+                stringByAppendingString:[NSString stringWithFormat:@"\nROB (%@): %@\n", label, text]];
+    }
+    __weak ROBAI *weakAI = robAI;
+    [self.speechBox sayPersonalityText:text provider:provider completion:^(BOOL finished) {
+        [weakAI finishPersonalitySpeechWithUtteranceID:utteranceID finished:finished];
+    }];
+}
+
 - (void)speakConfiguredAcknowledgementIfNotQueued
 {
     if (self.speechBox.isSpeaking) {
@@ -1279,11 +1300,25 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 #pragma mark - Gemini Runtime Controls
 
+- (void)reloadRealtimeConfiguration
+{
+    [self.robAI cancelDualDialogue];
+    [self.speechBox stopIt:nil];
+    if (self.stageShowCoordinator.isRunning) {
+        [self.stageShowCoordinator cancelWithReason:@"Operator changed AI personality"];
+    }
+    [self cancelPendingGeminiRobotActionsWithReason:@"Operator changed the active AI provider"];
+    [self applyPrioritySoftwareStopWithReason:@"Operator changed the active AI provider"];
+    (void)[[ROBAmberGestureExecutor shared] cancelCurrentGestureWithReason:@"AI provider handoff"];
+    [self.robAI reloadRealtimeConfiguration];
+    [self updateGeminiCameraDemand];
+}
+
 - (void)setGeminiConnectionEnabled:(BOOL)enabled
 {
     if (!enabled) {
         [self cancelPendingGeminiRobotActionsWithReason:
-            @"Gemini was turned off; stop or hold safely"];
+            @"Live AI was turned off; stop or hold safely"];
     }
     [self.robAI setGeminiConnectionEnabled:enabled];
     [self updateGeminiCameraDemand];
@@ -1476,7 +1511,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     // is never persisted; the executor resolves the name to an immutable
     // operator-approved pose, limits the measured delta, and waits for fresh
     // position/velocity feedback before returning physical completion.
-    if ([action isEqualToString:@"play_gesture"] &&
+    if ([action isEqualToString:@"play_gesture"] && [call.providerIdentifier isEqualToString:@"gemini"] &&
         [[ROBAmberDebugAuthority shared] authorizesGemini]) {
         NSSet *playGestureArgumentKeys = [NSSet setWithArray:call.arguments.allKeys];
         NSSet *expectedPlayGestureArgumentKeys = [NSSet setWithObjects:@"action", @"gesture", nil];
@@ -2659,6 +2694,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     // or intentionally turned off.
     if ([textInput containsString:@"stop"] || [textInput containsString:@"wait"] || [textInput containsString:@"don't move"] || [textInput containsString:@"do not move"])
     {
+        [self.robAI cancelDualDialogue];
+        [self.speechBox stopIt:nil];
         if (self.stageShowCoordinator.isRunning) {
             [self.stageShowCoordinator cancelWithReason:@"Local spoken stop"];
         } else {
@@ -3112,6 +3149,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void)stageShowCoordinatorWillStart:(ROBStageShowCoordinator *)coordinator
 {
+    [self.robAI cancelDualDialogue];
+    [self.speechBox stopIt:nil];
     [self applyPrioritySoftwareStopWithReason:@"Stage show is acquiring motion authority"];
     (void)[[ROBAmberGestureExecutor shared] cancelCurrentGestureWithReason:@"Stage show is starting"];
 }
@@ -3141,7 +3180,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     if (self.robAI.isLiveSessionReady) {
         [self.robAI sendText:prompt contextID:requestID];
     } else {
-        (void)[coordinator failGeminiTurn:@"Gemini Live is unavailable" requestID:requestID];
+        (void)[coordinator failGeminiTurn:@"The selected live AI is unavailable" requestID:requestID];
     }
 }
 

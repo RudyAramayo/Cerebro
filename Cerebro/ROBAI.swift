@@ -2,7 +2,7 @@
 //  ROBAI.swift
 //  Cerebro
 //
-//  Gemini Robotics ER 2 live-session facade for Objective-C callers.
+//  Selectable realtime AI facade for Objective-C callers.
 //
 
 import AVFoundation
@@ -18,66 +18,6 @@ private enum GeminiRoboticsRuntimeSettingDomain {
     case connection
     case audio
     case video
-}
-
-private struct GeminiRoboticsRuntimePolicy {
-    let settings: GeminiRoboticsRuntimeSettings
-    let revision: UInt64
-    let connectionGeneration: UInt64
-    let audioGeneration: UInt64
-    let videoGeneration: UInt64
-}
-
-/// A synchronous privacy boundary shared by the UI-facing runtime and the
-/// Live actor. Runtime-policy application is asynchronous; this gate ensures
-/// an older queued frame cannot slip onto the socket while a source-off or
-/// camera-off policy is still waiting to reach the actor.
-private final class GeminiVideoAuthorizationGate: @unchecked Sendable {
-    private let lock = NSLock()
-    private var enabled = false
-    private var generation: UInt64 = 0
-    private var revision: UInt64 = 0
-
-    func update(policy: GeminiRoboticsRuntimePolicy) {
-        lock.lock()
-        guard policy.revision > revision else {
-            lock.unlock()
-            return
-        }
-        revision = policy.revision
-        generation = policy.videoGeneration
-        enabled = policy.settings.connectionEnabled &&
-            policy.settings.streamsVideo &&
-            (policy.settings.streamsMainCameraVideo ||
-                policy.settings.streamsInsta360Video)
-        lock.unlock()
-    }
-
-    func revoke() {
-        lock.lock()
-        enabled = false
-        lock.unlock()
-    }
-
-    func allows(generation candidate: UInt64) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return enabled && candidate == generation
-    }
-
-    /// Linearizes authorization with the actual WebSocket enqueue call. The
-    /// lock is held only for the synchronous submission, never for network I/O
-    /// or its completion callback.
-    func performIfAllowed(
-        generation candidate: UInt64,
-        _ submit: () -> Void
-    ) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        guard enabled && candidate == generation else { return false }
-        submit()
-        return true
-    }
 }
 
 /// Tracks state-changing local Music work independently of the Live actor's
@@ -188,6 +128,7 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
     @objc optional func robAI(_ robAI: ROBAI, didReceiveResponseText text: String)
     @objc(robAI:didReceiveResponseText:contextID:)
     optional func robAI(_ robAI: ROBAI, didReceiveResponseText text: String, contextID: String)
+    @objc optional func robAI(_ robAI: ROBAI, didReceivePersonalityText text: String, provider: String, utteranceID: String)
     @objc optional func robAI(_ robAI: ROBAI, didReceiveInputTranscription text: String)
     @objc optional func robAI(_ robAI: ROBAI, didFailRequestWithDetail detail: String)
     @objc(robAI:didFailRequestWithDetail:contextID:)
@@ -208,17 +149,20 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
     /// show has advanced or stopped.
     public let originContextID: String?
     public let isStageOrigin: Bool
+    public let providerIdentifier: String
 
     init(
         callID: String,
         name: String,
         arguments: [String: Any],
-        originContextID: String?
+        originContextID: String?,
+        provider: ROBRealtimeProvider = .gemini
     ) {
         self.callID = callID
         self.name = name
         self.arguments = arguments as NSDictionary
         self.originContextID = originContextID
+        providerIdentifier = provider.rawValue
         isStageOrigin = GeminiRoboticsToolPolicy.isStageContextID(originContextID)
         super.init()
     }
@@ -285,9 +229,9 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
         return microphoneConversationIsActive
     }
 
-    private let configuration: GeminiRoboticsConfiguration?
+    private var configuration: GeminiRoboticsConfiguration?
     private let userDefaults: UserDefaults
-    private let diagnosticsStore: GeminiRoboticsDiagnosticsStore
+    private var diagnosticsStore: GeminiRoboticsDiagnosticsStore
     private let statusLock = NSLock()
     private var liveSessionReady = false
     private var runtimeSettings: GeminiRoboticsRuntimeSettings
@@ -299,7 +243,9 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
     private var appliedCameraStreaming = false
     private var cancelledTextContextIDs: Set<String> = []
     private var cancelledTextContextOrder: [String] = []
-    private var liveSession: GeminiRoboticsLiveSession?
+    private var sessionIdentity = UUID()
+    private var realtimePreferences: ROBRealtimePreferences?
+    private var liveSession: (any ROBRealtimeSession)?
     private var audioEventStream: GeminiOrderedAudioEventStream?
     private var audioEncoder: GeminiPCM16Encoder?
     private var videoEncoder: GeminiMultiCameraJPEGEncoder?
@@ -315,10 +261,11 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
     private var nextLocalFallbackTurnID: UInt64 = 0
 
     public override convenience init() {
-        self.init(
-            configuration: GeminiRoboticsConfiguration.fromEnvironment(),
-            userDefaults: .standard
-        )
+        let preferences = ROBRealtimePreferences(defaults: .standard)
+        let gemini = preferences.providers.contains(.gemini) ? GeminiRoboticsConfiguration.fromEnvironment() : nil
+        let openAI = preferences.providers.contains(.openAI) ? ROBOpenAIRealtimeConfiguration.load(preferences: preferences) : nil
+        self.init(configuration: preferences.driver == .gemini ? gemini : openAI?.runtime,
+                  userDefaults: .standard, preferences: preferences, gemini: gemini, openAI: openAI)
     }
 
     /// Internal profile initializer used by isolated, non-embodied text
@@ -326,7 +273,10 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
     /// inheriting or mutating microphone/camera runtime preferences.
     @nonobjc init(
         configuration: GeminiRoboticsConfiguration?,
-        userDefaults: UserDefaults
+        userDefaults: UserDefaults,
+        preferences: ROBRealtimePreferences? = nil,
+        gemini: GeminiRoboticsConfiguration? = nil,
+        openAI: ROBOpenAIRealtimeConfiguration? = nil
     ) {
         var runtimeSettings = GeminiRoboticsRuntimeSettings(
             configuration: configuration,
@@ -344,6 +294,7 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
             runtimeSettings.insta360OrientationCalibrated = false
         }
         self.configuration = configuration
+        self.realtimePreferences = preferences
         self.userDefaults = userDefaults
         self.runtimeSettings = runtimeSettings
         let diagnosticsStore = GeminiRoboticsDiagnosticsStore(
@@ -353,6 +304,11 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
         self.diagnosticsStore = diagnosticsStore
         super.init()
 
+        installRealtimeSession(preferences: preferences, gemini: gemini, openAI: openAI)
+    }
+
+    private func installRealtimeSession(preferences: ROBRealtimePreferences?, gemini: GeminiRoboticsConfiguration?, openAI: ROBOpenAIRealtimeConfiguration?) {
+        let diagnosticsStore = self.diagnosticsStore
         guard let configuration else {
             return
         }
@@ -365,17 +321,32 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
             videoGeneration: videoGeneration
         )
         videoAuthorizationGate.update(policy: initialPolicy)
-        let session = GeminiRoboticsLiveSession(
-            configuration: configuration,
-            diagnosticsStore: diagnosticsStore,
-            runtimePolicy: initialPolicy,
-            videoAuthorizationGate: videoAuthorizationGate
-        ) { [weak self] event in
-            self?.handle(event)
+        let identity = sessionIdentity
+        let handler: (ROBRealtimeEvent) -> Void = { [weak self] event in
+            self?.handle(event, identity: identity)
+        }
+        let session: any ROBRealtimeSession
+        if let preferences {
+            session = ROBRealtimeRouter(preferences: preferences, policy: initialPolicy, factory: { [videoAuthorizationGate] provider, callback in
+                switch provider {
+                case .gemini:
+                    guard let gemini else { return nil }
+                    return GeminiRoboticsLiveSession(configuration: gemini.withPersonality(preferences.personality(for: .gemini)),
+                        diagnosticsStore: diagnosticsStore, runtimePolicy: initialPolicy,
+                        videoAuthorizationGate: videoAuthorizationGate, eventHandler: callback)
+                case .openAI:
+                    guard let openAI else { return nil }
+                    return ROBOpenAIRealtimeSession(configuration: openAI, policy: initialPolicy,
+                        videoGate: videoAuthorizationGate, diagnostics: diagnosticsStore, event: callback)
+                }
+            }, event: handler)
+        } else {
+            session = GeminiRoboticsLiveSession(configuration: configuration, diagnosticsStore: diagnosticsStore,
+                runtimePolicy: initialPolicy, videoAuthorizationGate: videoAuthorizationGate, eventHandler: handler)
         }
         liveSession = session
 
-        // Allocate media adapters whenever Gemini is configured. The runtime
+        // Allocate media adapters whenever a provider is configured. The runtime
         // gates below ensure they do no work until the operator enables them.
         let audioEventStream = GeminiOrderedAudioEventStream(session: session)
         self.audioEventStream = audioEventStream
@@ -395,7 +366,7 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
             insta360ForwardMarkerDegrees: runtimeSettings.insta360ForwardMarkerDegrees,
             generation: initialPolicy.videoGeneration
         ) { [weak self, weak session, diagnosticsStore] data, generation in
-            guard self?.acceptsEncodedVideo(generation: generation) == true else {
+            guard self?.sessionIsCurrent(identity) == true, self?.acceptsEncodedVideo(generation: generation) == true else {
                 return
             }
             Task {
@@ -417,10 +388,58 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
         Task { await session?.stop(connectionState: .disconnected, failureDetail: nil) }
     }
 
+    private func sessionIsCurrent(_ identity: UUID) -> Bool {
+        statusLock.lock(); defer { statusLock.unlock() }
+        return sessionIdentity == identity
+    }
+
+    /// The main controller stops prior motion and speech before calling this.
+    public func reloadRealtimeConfiguration() {
+        precondition(Thread.isMainThread)
+        guard realtimePreferences != nil else { return } // Isolated Messages profiles retain their own provider.
+        disconnect()
+        audioEventStream?.finish(); audioEventStream = nil
+        audioEncoder = nil; videoEncoder = nil; liveSession = nil
+        let preferences = ROBRealtimePreferences(defaults: userDefaults)
+        let gemini = preferences.providers.contains(.gemini) ? GeminiRoboticsConfiguration.fromEnvironment() : nil
+        let openAI = preferences.providers.contains(.openAI) ? ROBOpenAIRealtimeConfiguration.load(preferences: preferences) : nil
+        let profile = preferences.driver == .gemini ? gemini : openAI?.runtime
+        statusLock.lock()
+        sessionIdentity = UUID(); realtimePreferences = preferences; configuration = profile
+        runtimeSettingsRevision &+= 1; connectionGeneration &+= 1; audioGeneration &+= 1; videoGeneration &+= 1
+        runtimeSettings = GeminiRoboticsRuntimeSettings(configuration: profile, defaults: userDefaults)
+        liveSessionReady = false; appliedMicrophoneStreaming = false; appliedCameraStreaming = false
+        geminiConversationCircuitIsOpen = false; geminiFailureCircuitBreaker = GeminiFailureCircuitBreaker()
+        geminiCircuitResetGeneration &+= 1
+        statusLock.unlock()
+        diagnosticsStore = GeminiRoboticsDiagnosticsStore(configuration: profile, runtimeSettings: runtimeSettings)
+        installRealtimeSession(preferences: preferences, gemini: gemini, openAI: openAI)
+        synchronizeVideoSourceSettings()
+        start()
+    }
+
+    public var realtimeModeDescription: String {
+        guard let preferences = realtimePreferences else { return "Gemini isolated text profile" }
+        return "\(preferences.mode.title) • driver: \(preferences.driver.displayName)"
+    }
+    public func finishPersonalitySpeech(utteranceID: String, finished: Bool) {
+        let session = liveSession
+        Task { await session?.finishPersonalitySpeech(utteranceID: utteranceID, finished: finished) }
+    }
+    public func cancelDualDialogue() {
+        let session = liveSession
+        Task { await session?.cancelDialogue() }
+    }
+    public var dualPersonalityEnabled: Bool { realtimePreferences?.mode == .dual }
+    public func startDualDialogue() {
+        let session = liveSession
+        Task { await session?.startDialogue() }
+    }
+
     public func start() {
         guard let liveSession else {
             diagnosticsStore.noteConnectionState("unavailable")
-            notifyConnectionState("unavailable", detail: "Set GEMINI_ROBOTICS_ENABLED=true and provide GEMINI_EPHEMERAL_TOKEN or GEMINI_API_KEY to enable streaming.")
+            notifyConnectionState("unavailable", detail: "Save a key for the selected driver in Settings → AI Personalities, then Apply.")
             return
         }
         if configuration?.enablesAppleMusic == true && !hasRequestedMusicAutomationPermission {
@@ -430,7 +449,7 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
         let policy = runtimePolicySnapshot()
         guard policy.settings.connectionEnabled else {
             diagnosticsStore.noteConnectionState("off")
-            notifyConnectionState("off", detail: "Gemini is turned off in Cerebro.")
+            notifyConnectionState("off", detail: "Realtime AI is turned off in Cerebro.")
             return
         }
         Task {
@@ -457,7 +476,7 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
         guard configuration != nil else {
             notifyConnectionState(
                 "unavailable",
-                detail: "Gemini cannot connect until launch configuration and a credential are available."
+                detail: "The selected provider needs an enabled credential. Save its key in AI Personalities and Apply."
             )
             return
         }
@@ -642,7 +661,7 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
               policy.settings.streamsAudio else {
             performLocalFallback(
                 prompt: fallbackPrompt,
-                failureDetail: "Gemini microphone streaming is unavailable; using on-device conversation.",
+                failureDetail: "The live AI microphone is unavailable; using on-device conversation.",
                 recordGeminiFailure: false,
                 source: .appleSpeech
             )
@@ -798,8 +817,8 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
                 performLocalFallback(
                     prompt: fallbackPrompt,
                     failureDetail: policy.settings.connectionEnabled
-                        ? "Gemini Live is not ready; using on-device conversation."
-                        : "Gemini is turned off; using on-device conversation.",
+                        ? "The selected live AI is not ready; using on-device conversation."
+                        : "Live AI is turned off; using on-device conversation.",
                     recordGeminiFailure: false,
                     source: fallbackSource
                 )
@@ -807,8 +826,8 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
             }
             handle(.requestFailed(
                 configuration == nil
-                    ? "Gemini is unavailable because Cerebro has no enabled credential configuration."
-                    : "Gemini is turned off in Cerebro.",
+                    ? "The selected AI is unavailable because Cerebro has no enabled credential configuration."
+                    : "Realtime AI is turned off in Cerebro.",
                 contextID: contextID,
                 localFallbackPrompt: nil
             ))
@@ -828,8 +847,9 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
     }
 
     /// Prevents a correlated text turn from being submitted later if it is
-    /// still queued and aborts the current Live connection if that turn was
-    /// already sent. The actor retains a cancellation tombstone so this is
+    /// still queued and cancels the provider response if already sent. Gemini
+    /// requires socket retirement; OpenAI supports response cancellation.
+    /// The adapter retains a cancellation tombstone so this is
     /// race-safe with the asynchronous enqueue performed by `sendText`.
     @objc(cancelTextTurnWithContextID:)
     public func cancelTextTurn(contextID: String) {
@@ -882,6 +902,7 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
         statusLock.lock()
         nextLocalFallbackTurnID &+= 1
         let fallbackTurnID = nextLocalFallbackTurnID
+        let fallbackSessionIdentity = sessionIdentity
         statusLock.unlock()
         let loggedTranscript = Self.boundedLoggedTranscript(prompt)
         NSLog(
@@ -903,7 +924,7 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
                 )
                 return
             }
-            guard let self else { return }
+            guard let self, self.sessionIsCurrent(fallbackSessionIdentity) else { return }
             NSLog(
                 "ROB local fallback turn %@ answered provider=%@ source=%@ after Gemini detail: %@",
                 String(fallbackTurnID),
@@ -911,20 +932,16 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
                 source.rawValue,
                 failureDetail
             )
-            self.diagnosticsStore.noteLocalFallback(provider: reply.provider.rawValue)
-            self.deliverUncorrelatedResponse(reply.text)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.sessionIsCurrent(fallbackSessionIdentity) else { return }
+                self.diagnosticsStore.noteLocalFallback(provider: reply.provider.rawValue)
+                self.delegate?.robAI?(self, didReceiveResponseText: reply.text)
+            }
         }
     }
 
     private static func boundedLoggedTranscript(_ prompt: String) -> String {
         ROBConversationLog.boundedTranscript(prompt)
-    }
-
-    private func deliverUncorrelatedResponse(_ text: String) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.delegate?.robAI?(self, didReceiveResponseText: text)
-        }
     }
 
     private func noteGeminiFailure(_ detail: String) {
@@ -1133,7 +1150,20 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
         }
     }
 
-    private func handle(_ event: GeminiRoboticsLiveSession.Event) {
+    private func handle(_ event: ROBRealtimeEvent, identity: UUID? = nil) {
+        statusLock.lock()
+        let eventIdentity = identity ?? sessionIdentity
+        statusLock.unlock()
+        // Serialize provider effects with the main-thread driver switch. An
+        // old callback must not update the replacement session's readiness,
+        // fallback circuit or tool executive, even before delegate delivery.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.sessionIsCurrent(eventIdentity) else { return }
+            self.handleCurrentEvent(event, identity: eventIdentity)
+        }
+    }
+
+    private func handleCurrentEvent(_ event: ROBRealtimeEvent, identity eventIdentity: UUID) {
         switch event {
         case .connectionState(let state, let detail):
             statusLock.lock()
@@ -1158,7 +1188,7 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
             statusLock.unlock()
             diagnosticsStore.noteRuntimeSettingsApplied(policy.settings)
             DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
+                guard let self, self.sessionIsCurrent(eventIdentity) else { return }
                 self.delegate?.robAIRuntimePolicyDidApply?(self)
             }
 
@@ -1167,7 +1197,7 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
                 noteGeminiSuccess()
             }
             DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
+                guard let self, self.sessionIsCurrent(eventIdentity) else { return }
                 if let contextID {
                     guard !self.textContextIsCancelled(contextID) else { return }
                     let handled: Void? = self.delegate?.robAI?(
@@ -1183,9 +1213,18 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
                 }
             }
 
+        case .personalityText(let text, let provider, let utteranceID):
+            noteGeminiSuccess()
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.sessionIsCurrent(eventIdentity) else { return }
+                let handled: Void? = self.delegate?.robAI?(self, didReceivePersonalityText: text,
+                                                          provider: provider.rawValue, utteranceID: utteranceID)
+                if handled == nil { self.delegate?.robAI?(self, didReceiveResponseText: text) }
+            }
+
         case .inputTranscription(let text):
             DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
+                guard let self, self.sessionIsCurrent(eventIdentity) else { return }
                 self.delegate?.robAI?(self, didReceiveInputTranscription: text)
             }
 
@@ -1206,7 +1245,7 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
             // and must not open the ordinary-conversation circuit breaker.
             diagnosticsStore.noteRequestFailure(detail)
             DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
+                guard let self, self.sessionIsCurrent(eventIdentity) else { return }
                 if let contextID {
                     guard !self.textContextIsCancelled(contextID) else { return }
                     let handled: Void? = self.delegate?.robAI?(
@@ -1224,7 +1263,7 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
 
         case .interrupted:
             DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
+                guard let self, self.sessionIsCurrent(eventIdentity) else { return }
                 self.delegate?.robAIWasInterrupted?(self)
             }
 
@@ -1267,12 +1306,13 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
                     }
                 case .delegate:
                     DispatchQueue.main.async { [weak self] in
-                        guard let self, self.isGeminiConnectionEnabled else { return }
+                        guard let self, self.sessionIsCurrent(eventIdentity), self.isGeminiConnectionEnabled else { return }
                         let bridgedCall = ROBAIRobotToolCall(
                             callID: call.id,
                             name: call.name,
                             arguments: call.arguments,
-                            originContextID: attributedCall.contextID
+                            originContextID: attributedCall.contextID,
+                            provider: attributedCall.provider
                         )
                         self.delegate?.robAI?(self, didReceiveToolCall: bridgedCall)
                     }
@@ -1282,7 +1322,7 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
         case .cancelledToolCalls(let callIDs):
             localAppleMusicToolTasks.cancel(callIDs: callIDs)
             DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
+                guard let self, self.sessionIsCurrent(eventIdentity) else { return }
                 self.delegate?.robAI?(self, didCancelToolCallIDs: callIDs)
             }
         }
@@ -1316,8 +1356,11 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
     }
 
     private func notifyConnectionState(_ state: String, detail: String?) {
+        statusLock.lock()
+        let identity = sessionIdentity
+        statusLock.unlock()
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
+            guard let self, self.sessionIsCurrent(identity) else { return }
             self.delegate?.robAI?(self, didChangeConnectionState: state, detail: detail)
         }
     }
@@ -1341,35 +1384,9 @@ private final class ROBAppleMusicToolTaskRegistry: @unchecked Sendable {
     }
 }
 
-private struct GeminiRoboticsAttributedToolCall {
-    let call: GeminiRoboticsToolCall
-    let contextID: String?
-}
-
-private actor GeminiRoboticsLiveSession {
-    enum ConnectionState: String {
-        case off
-        case connecting
-        case ready
-        case reconnecting
-        case disconnected
-        case failed
-    }
-
-    enum Event {
-        case connectionState(ConnectionState, String?)
-        case runtimePolicyApplied(GeminiRoboticsRuntimePolicy)
-        case completedText(String, contextID: String?)
-        case inputTranscription(String)
-        case requestFailed(
-            String,
-            contextID: String?,
-            localFallbackPrompt: GeminiLocalFallbackPrompt?
-        )
-        case interrupted
-        case toolCalls([GeminiRoboticsAttributedToolCall])
-        case cancelledToolCalls([String])
-    }
+private actor GeminiRoboticsLiveSession: ROBRealtimeSession {
+    typealias ConnectionState = ROBRealtimeConnectionState
+    typealias Event = ROBRealtimeEvent
 
     private enum AudioQueueItem {
         case pcm(Data, generation: UInt64)
@@ -2984,7 +3001,7 @@ private final class GeminiOrderedAudioEventStream {
     private var consumerTask: Task<Void, Never>?
     private var streamEndIsBuffered = false
 
-    init(session: GeminiRoboticsLiveSession) {
+    init(session: any ROBRealtimeSession) {
         var capturedContinuation: AsyncStream<Event>.Continuation!
         // The encoder calls this stream from one serial queue, preserving PCM
         // and streamEnd order. Keep the bridge bounded as well as the session.

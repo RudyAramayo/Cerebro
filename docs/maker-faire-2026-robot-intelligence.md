@@ -1,6 +1,6 @@
 # September 25: IK, chess, loiter and performance
 
-Reviewed September 13, 2026. Calibration is in progress. This is the current
+Reviewed September 14, 2026. Calibration is in progress. This is the current
 implementation assessment; older roadmap documents describe earlier versions.
 
 ## Model choice
@@ -22,11 +22,13 @@ experience, but this is not a latency or grasp-accuracy equivalence claim.
 [Realtime guide](https://developers.openai.com/api/docs/guides/realtime),
 [model modalities](https://developers.openai.com/api/docs/models/gpt-realtime-2.1).
 
-Cerebro currently implements Gemini's Live socket. `ROBRealtimeProvider` and
-Keychain entries for OpenAI are scaffolding, not an OpenAI session adapter.
-There is no measured on-robot Gemini-versus-OpenAI comparison yet. Keep one
-motion executive and select one active proposer; do not race two providers to
-the hardware or replay a failed cloud action on another provider automatically.
+Cerebro now implements both Gemini Live and an OpenAI Realtime adapter, with
+Gemini, OpenAI and Dual Personality preferences. Dual mode has independent
+conversations, character voices and bounded alternating dialogue; only the
+operator-selected driver can propose actions. Both use the existing local
+motion executive. There is no measured on-robot Gemini-versus-OpenAI comparison
+yet, and failed cloud actions are never replayed through the other provider.
+See [setup, input destinations and validation limits](realtime-personalities.md).
 
 Apple Foundation Models already interprets text plus local scene summaries and
 backs up conversation. Show mode now offers it explicitly as a local stage
@@ -170,7 +172,7 @@ Work order before the fair:
 
 ## Loiter and Show changes
 
-Gemini now has `loiter_control`: `status`, `pause`, `resume`, `turn_left`, and
+Both live adapters expose `loiter_control`: `status`, `pause`, `resume`, `turn_left`, and
 `turn_right`. It can shape only an existing ROBController-authorized
 `social_roam` session. Mutating calls require its exact session ID. Turns expire
 after 1.5 seconds; pause persists until explicit resume or session termination.

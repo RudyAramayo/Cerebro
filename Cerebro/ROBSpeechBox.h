@@ -54,6 +54,7 @@ FOUNDATION_EXPORT NSString * _Nonnull ROBResolvedSpeechAcknowledgementPhrase(voi
 - (void) sayIt:(NSString *)stringToSpeak;
 - (void) sayItIfNotQueued:(NSString *)stringToSpeak;
 - (void)sayIt:(NSString *)stringToSpeak completion:(void (^ _Nullable)(BOOL finished))completion;
+- (void)sayPersonalityText:(NSString *)text provider:(NSString *)provider completion:(void (^ _Nullable)(BOOL finished))completion;
 /// Stage delivery keeps normal ROB speech responsive while adding a small
 /// punctuation-aware pause between sentences and before the next show cue.
 - (void)sayStageShowText:(NSString *)stringToSpeak completion:(void (^ _Nullable)(BOOL finished))completion;

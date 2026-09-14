@@ -2,10 +2,11 @@
 //  ROBGeminiDiagnosticsWindowController.swift
 //  Cerebro
 //
-//  Settings-hosted runtime controls and redacted diagnostics for Gemini Robotics Live.
+//  Provider preferences, runtime controls and redacted live AI diagnostics.
 //
 
 import AppKit
+import AVFoundation
 import Foundation
 
 private final class ROBFlippedGeminiSettingsDocumentView: NSView {
@@ -13,6 +14,7 @@ private final class ROBFlippedGeminiSettingsDocumentView: NSView {
 }
 
 @objc public protocol ROBGeminiRuntimeControlDelegate: AnyObject {
+    func reloadRealtimeConfiguration()
     func setGeminiConnectionEnabled(_ enabled: Bool)
     func setGeminiMicrophoneStreamingEnabled(_ enabled: Bool)
     func setGeminiCameraStreamingEnabled(_ enabled: Bool)
@@ -76,6 +78,17 @@ private final class ROBFlippedGeminiSettingsDocumentView: NSView {
     private var microphoneToggle: NSButton!
     private var cameraToggle: NSButton!
     private var apiKeyField: NSSecureTextField!
+    private let modePopup = NSPopUpButton()
+    private let driverPopup = NSPopUpButton()
+    private let credentialProviderPopup = NSPopUpButton()
+    private let modelField = NSTextField()
+    private let linesPopup = NSPopUpButton()
+    private let geminiCharacterField = NSTextField()
+    private let openAICharacterField = NSTextField()
+    private let geminiVoicePopup = NSPopUpButton()
+    private let openAIVoicePopup = NSPopUpButton()
+    private let personalityStatus = NSTextField(wrappingLabelWithString: "")
+    private var banterButton: NSButton!
     private var credentialStatusLabel: NSTextField!
     private var valueLabels: [Row: NSTextField] = [:]
     private var refreshTimer: Timer?
@@ -131,20 +144,23 @@ private final class ROBFlippedGeminiSettingsDocumentView: NSView {
     }
 
     private func configureContentView(in contentView: NSView) {
-        let heading = NSTextField(labelWithString: "Gemini Robotics runtime")
+        let heading = NSTextField(labelWithString: "AI Personalities")
         heading.font = .boldSystemFont(ofSize: 17)
 
         let explanation = wrappingLabel(
-            "Gemini is Cerebro's preferred live provider for direct microphone audio and sampled camera frames. Ordinary conversation automatically falls back to Apple Foundation Models, then Swift MLX, when Live cannot answer. Install a personal key below; it is stored only in this Mac's Keychain."
+            "Choose one live AI or two fictional robot characters. In Dual Personality, the driver receives wake-gated microphone audio and both providers receive enabled camera images. The characters exchange text and take turns speaking. Each API uses its own account and billing. Local motion checks remain in charge."
         )
         explanation.textColor = .secondaryLabelColor
         explanation.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let credentialHeading = NSTextField(labelWithString: "Gemini Live personal API key")
+        let credentialHeading = NSTextField(labelWithString: "Provider API key")
         credentialHeading.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        credentialProviderPopup.addItems(withTitles: ROBRealtimeProvider.allCases.map(\.displayName))
+        credentialProviderPopup.target = self
+        credentialProviderPopup.action = #selector(credentialProviderChanged(_:))
         apiKeyField = NSSecureTextField(string: "")
         apiKeyField.placeholderString = "Paste API key"
-        apiKeyField.setAccessibilityLabel("Gemini Live API key")
+        apiKeyField.setAccessibilityLabel("Selected provider API key")
         let saveKeyButton = NSButton(title: "Save in Keychain", target: self, action: #selector(saveAPIKey(_:)))
         let removeKeyButton = NSButton(title: "Remove Key", target: self, action: #selector(removeAPIKey(_:)))
         let credentialButtons = NSStackView(views: [saveKeyButton, removeKeyButton])
@@ -155,6 +171,7 @@ private final class ROBFlippedGeminiSettingsDocumentView: NSView {
         credentialStatusLabel.textColor = .secondaryLabelColor
         let credentialControls = NSStackView(views: [
             credentialHeading,
+            credentialProviderPopup,
             apiKeyField,
             credentialButtons,
             credentialStatusLabel
@@ -164,39 +181,39 @@ private final class ROBFlippedGeminiSettingsDocumentView: NSView {
         credentialControls.spacing = 6
 
         connectionToggle = NSButton(
-            checkboxWithTitle: "Connect to Gemini",
+            checkboxWithTitle: "Connect selected AI providers",
             target: self,
             action: #selector(connectionToggleChanged(_:))
         )
         microphoneToggle = NSButton(
-            checkboxWithTitle: "Send microphone audio to Gemini",
+            checkboxWithTitle: "Send microphone audio to the driver",
             target: self,
             action: #selector(microphoneToggleChanged(_:))
         )
         cameraToggle = NSButton(
-            checkboxWithTitle: "Send sampled camera composite to Gemini",
+            checkboxWithTitle: "Send sampled camera images to selected providers",
             target: self,
             action: #selector(cameraToggleChanged(_:))
         )
         connectionToggle.setAccessibilityHelp(
-            "Opens or closes Cerebro's Gemini Live connection."
+            "Opens or closes the selected provider sessions."
         )
         microphoneToggle.setAccessibilityHelp(
-            "Controls whether Cerebro sends raw microphone audio to Gemini."
+            "Controls whether Cerebro sends wake-gated microphone audio to the selected driver."
         )
         cameraToggle.setAccessibilityHelp(
-            "Controls Gemini camera sampling without changing controller video subscriptions."
+            "Controls AI camera sampling without changing controller video subscriptions."
         )
 
         let microphoneHelp = wrappingLabel(
-            "When off, ROB keeps Apple local speech recognition and submits recognized text only while the Gemini connection is on."
+            "When off, ROB keeps Apple local speech recognition and submits recognized text while the selected driver is connected."
         )
         microphoneHelp.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         microphoneHelp.textColor = .secondaryLabelColor
         microphoneHelp.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let cameraHelp = wrappingLabel(
-            "This privacy master controls Gemini's labeled main + Insta360 composite. Choose its camera sources in Settings → Perception. It does not disable local perception or paired ROBController/Vision Pro video subscriptions."
+            "This privacy master controls the labeled main + Insta360 composite shared with the selected providers. Choose camera sources in Settings → Perception. Local perception and paired ROBController/Vision Pro video subscriptions have separate controls."
         )
         cameraHelp.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         cameraHelp.textColor = .secondaryLabelColor
@@ -249,13 +266,14 @@ private final class ROBFlippedGeminiSettingsDocumentView: NSView {
         separator.boxType = .separator
 
         let note = wrappingLabel(
-            "Counters cover the lifetime of this ROBAI instance. A sent frame completed the local WebSocket send; Gemini does not acknowledge individual video frames. Local fallbacks are dialogue-only and never receive motion tools. Diagnostics never retain credentials, media, transcript text, tool arguments, or raw server messages."
+            "Counters reset when providers are reloaded. In Dual Personality they aggregate both sessions; server-event details currently cover Gemini. A sent frame completed the local WebSocket send, not a visual-understanding acknowledgement. Local fallbacks have no motion tools. Diagnostics never retain credentials, media, transcript text, tool arguments, or raw server messages."
         )
         note.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         note.textColor = .secondaryLabelColor
         note.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let stack = NSStackView(views: [heading, explanation, credentialControls, controls, separator, grid, note])
+        let personalityControls = makePersonalityControls()
+        let stack = NSStackView(views: [heading, explanation, personalityControls, credentialControls, controls, separator, grid, note])
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -290,6 +308,7 @@ private final class ROBFlippedGeminiSettingsDocumentView: NSView {
             stack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor, constant: -20),
             grid.widthAnchor.constraint(equalTo: stack.widthAnchor),
             controls.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            personalityControls.widthAnchor.constraint(equalTo: stack.widthAnchor),
             credentialControls.widthAnchor.constraint(equalTo: stack.widthAnchor),
             apiKeyField.widthAnchor.constraint(equalTo: credentialControls.widthAnchor),
             credentialStatusLabel.widthAnchor.constraint(equalTo: credentialControls.widthAnchor),
@@ -301,6 +320,85 @@ private final class ROBFlippedGeminiSettingsDocumentView: NSView {
         ])
 
         refresh()
+    }
+
+    private var credentialProvider: ROBRealtimeProvider {
+        credentialProviderPopup.indexOfSelectedItem == 1 ? .openAI : .gemini
+    }
+    @objc private func credentialProviderChanged(_ sender: Any?) {
+        apiKeyField.stringValue = ""
+        apiKeyField.setAccessibilityLabel("\(credentialProvider.displayName) API key")
+        credentialStatusLabel.stringValue = ""
+        refresh()
+    }
+    private func makePersonalityControls() -> NSStackView {
+        let settings = ROBRealtimePreferences(defaults: .standard)
+        modePopup.addItems(withTitles: ROBRealtimeMode.allCases.map(\.title))
+        modePopup.selectItem(at: ROBRealtimeMode.allCases.firstIndex(of: settings.mode) ?? 0)
+        driverPopup.addItems(withTitles: ROBRealtimeProvider.allCases.map(\.displayName))
+        driverPopup.selectItem(at: settings.dualDriver == .openAI ? 1 : 0)
+        modelField.stringValue = settings.openAIModel
+        linesPopup.addItems(withTitles: (2...6).map(String.init))
+        linesPopup.selectItem(withTitle: String(settings.maximumDialogueLines))
+        geminiCharacterField.stringValue = settings.geminiCharacter
+        openAICharacterField.stringValue = settings.openAICharacter
+        for (popup, provider) in [(geminiVoicePopup, ROBRealtimeProvider.gemini), (openAIVoicePopup, .openAI)] {
+            popup.addItem(withTitle: "ROB voice (character pitch)")
+            popup.lastItem?.representedObject = ""
+            for voice in AVSpeechSynthesisVoice.speechVoices().sorted(by: { $0.name < $1.name }) {
+                popup.addItem(withTitle: "\(voice.name) — \(voice.language)")
+                popup.lastItem?.representedObject = voice.identifier
+            }
+            let selected = UserDefaults.standard.string(forKey: ROBRealtimePreferences.prefix + "voice." + provider.rawValue) ?? ""
+            if let item = popup.itemArray.first(where: { $0.representedObject as? String == selected }) { popup.select(item) }
+        }
+        func row(_ title: String, _ input: NSView) -> NSStackView {
+            let label = NSTextField(labelWithString: title)
+            label.widthAnchor.constraint(equalToConstant: 150).isActive = true
+            let row = NSStackView(views: [label, input]); row.orientation = .horizontal; row.spacing = 10
+            input.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            return row
+        }
+        let apply = NSButton(title: "Apply & Switch Driver", target: self, action: #selector(applyPersonalities(_:)))
+        banterButton = NSButton(title: "Start Banter", target: self, action: #selector(startBanter(_:)))
+        let stop = NSButton(title: "Stop Banter", target: self, action: #selector(stopBanter(_:)))
+        let buttons = NSStackView(views: [apply, banterButton, stop])
+        let help = wrappingLabel("Applying ends the current show, stops motion and reconnects the selected providers. The driver alone can propose user-requested actions. Peer replies are dialogue only. Banter waits for speech completion and stops at the selected line limit.")
+        help.textColor = .secondaryLabelColor
+        let views: [NSView] = [row("Mode", modePopup), row("Driver in Dual mode", driverPopup),
+            row("OpenAI model", modelField), row("Lines per exchange", linesPopup),
+            row("Gemini character", geminiCharacterField), row("OpenAI character", openAICharacterField),
+            row("Gemini voice", geminiVoicePopup), row("OpenAI voice", openAIVoicePopup), buttons, help, personalityStatus]
+        let stack = NSStackView(views: views); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 8
+        for view in views { view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        return stack
+    }
+    @objc private func applyPersonalities(_ sender: Any?) {
+        guard ROBRealtimePreferences.validModel(modelField.stringValue) else {
+            credentialStatusLabel.stringValue = "Enter a Realtime model ID such as gpt-realtime-2.1."
+            return
+        }
+        var settings = ROBRealtimePreferences()
+        settings.mode = ROBRealtimeMode.allCases[max(0, modePopup.indexOfSelectedItem)]
+        settings.dualDriver = driverPopup.indexOfSelectedItem == 1 ? .openAI : .gemini
+        settings.openAIModel = modelField.stringValue
+        settings.maximumDialogueLines = Int(linesPopup.titleOfSelectedItem ?? "3") ?? 3
+        settings.geminiCharacter = String(geminiCharacterField.stringValue.prefix(500))
+        settings.openAICharacter = String(openAICharacterField.stringValue.prefix(500))
+        settings.save(to: .standard)
+        for (popup, provider) in [(geminiVoicePopup, ROBRealtimeProvider.gemini), (openAIVoicePopup, .openAI)] {
+            UserDefaults.standard.set(popup.selectedItem?.representedObject as? String ?? "",
+                forKey: ROBRealtimePreferences.prefix + "voice." + provider.rawValue)
+        }
+        controlDelegate?.reloadRealtimeConfiguration()
+        refresh()
+    }
+    @objc private func startBanter(_ sender: Any?) { robAI?.startDualDialogue() }
+    @objc private func stopBanter(_ sender: Any?) {
+        guard let robAI else { return }
+        robAI.cancelDualDialogue()
+        // The interruption delegate stops the current utterance as well.
+        robAI.delegate?.robAIWasInterrupted?(robAI)
     }
 
     private func wrappingLabel(_ text: String) -> NSTextField {
@@ -335,12 +433,10 @@ private final class ROBFlippedGeminiSettingsDocumentView: NSView {
 
     @objc private func saveAPIKey(_ sender: Any?) {
         do {
-            try ROBProviderCredentialStore.saveAPIKey(apiKeyField.stringValue, for: .gemini)
+            try ROBProviderCredentialStore.saveAPIKey(apiKeyField.stringValue, for: credentialProvider)
             apiKeyField.stringValue = ""
             credentialStatusLabel.textColor = .systemGreen
-            credentialStatusLabel.stringValue = robAI?.isConfigured == true
-                ? "Key updated securely. Relaunch Cerebro to load the new credential."
-                : "Key saved securely. Relaunch Cerebro once to initialize Gemini Live."
+            credentialStatusLabel.stringValue = "Key saved in this Mac's Keychain. Choose a mode and Apply to load it."
         } catch {
             credentialStatusLabel.textColor = .systemRed
             credentialStatusLabel.stringValue = error.localizedDescription
@@ -350,12 +446,11 @@ private final class ROBFlippedGeminiSettingsDocumentView: NSView {
 
     @objc private func removeAPIKey(_ sender: Any?) {
         do {
-            try ROBProviderCredentialStore.removeAPIKey(for: .gemini)
+            try ROBProviderCredentialStore.removeAPIKey(for: credentialProvider)
             apiKeyField.stringValue = ""
             credentialStatusLabel.textColor = .secondaryLabelColor
-            credentialStatusLabel.stringValue = robAI?.isConfigured == true
-                ? "Personal key removed. Relaunch Cerebro to discard the loaded credential; an environment credential remains independent."
-                : "Personal key removed. An environment credential, if configured, remains independent."
+            credentialStatusLabel.stringValue = "Personal key removed; provider sessions reloaded. An environment key remains independent."
+            controlDelegate?.reloadRealtimeConfiguration()
         } catch {
             credentialStatusLabel.textColor = .systemRed
             credentialStatusLabel.stringValue = error.localizedDescription
@@ -364,10 +459,12 @@ private final class ROBFlippedGeminiSettingsDocumentView: NSView {
     }
 
     private func refresh() {
+        personalityStatus.stringValue = robAI?.realtimeModeDescription ?? "AI is unavailable"
+        banterButton?.isEnabled = robAI?.dualPersonalityEnabled == true && robAI?.isLiveSessionReady == true
         if credentialStatusLabel?.stringValue.isEmpty == true {
-            credentialStatusLabel.stringValue = ROBProviderCredentialStore.apiKey(for: .gemini) == nil
-                ? "No personal Gemini key is installed."
-                : "A personal Gemini key is installed in Keychain."
+            credentialStatusLabel.stringValue = ROBProviderCredentialStore.apiKey(for: credentialProvider) == nil
+                ? "No personal key for this provider is installed."
+                : "This provider has a personal key in Keychain."
         }
         guard let snapshot = robAI?.diagnosticsSnapshot() else {
             valueLabels[.configured]?.stringValue = "false"
@@ -390,14 +487,14 @@ private final class ROBFlippedGeminiSettingsDocumentView: NSView {
         microphoneToggle.isEnabled = controlsAreAvailable
         cameraToggle.isEnabled = controlsAreAvailable
         connectionToggle.toolTip = snapshot.isConfigured
-            ? "Close or open the Gemini Live WebSocket session"
-            : "Launch Cerebro with Gemini enabled and a credential before connecting"
+            ? "Close or open the selected provider sessions"
+            : "Save a key for the selected driver and Apply before connecting"
         microphoneToggle.toolTip = snapshot.isConfigured
-            ? "Enable or disable raw microphone streaming while Gemini is connected"
-            : "Launch Cerebro with Gemini enabled and a credential before changing microphone streaming"
+            ? "Enable or disable raw microphone streaming to the driver"
+            : "Save a key for the selected driver and Apply before changing microphone streaming"
         cameraToggle.toolTip = snapshot.isConfigured
-            ? "Enable or disable the sampled, labeled camera composite sent to Gemini"
-            : "Launch Cerebro with Gemini enabled and a credential before changing camera streaming"
+            ? "Enable or disable camera images sent to the selected providers"
+            : "Save a key for the selected driver and Apply before changing camera streaming"
 
         valueLabels[.configured]?.stringValue = booleanString(snapshot.isConfigured)
         valueLabels[.connectionRequested]?.stringValue = booleanString(snapshot.isConnectionEnabled)

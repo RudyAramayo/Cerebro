@@ -114,7 +114,7 @@ import UniformTypeIdentifiers
         guard let contentView = window?.contentView else { return }
 
         let safetyLabel = NSTextField(wrappingLabelWithString:
-            "Shows may contain speech, waits, checkpoints, optional Gemini turns, and named gestures. " +
+            "Shows may contain speech, waits, checkpoints, optional live AI turns, and named gestures. " +
             "The optional local director produces dialogue only and cannot authorize motion. " +
             "Shows cannot contain servo values, joint angles, SSH commands, hosts, or ports. Dry Run emits no speech, model request, or hardware request. " +
             "Enable approved arm cues to perform rehearsed poses during this run. The Live Startup Test below remains separate."
@@ -1081,7 +1081,7 @@ import UniformTypeIdentifiers
         guard !localOperationInProgress else { return }
         guard let snapshot = stageShowCoordinator.localImprovisationDiagnosticsSnapshot() else {
             if localEnabledButton.state != .on {
-                localStatusLabel.stringValue = "Local director disabled. Adaptive mode will use Gemini plus the authored fallback."
+                localStatusLabel.stringValue = "Local director disabled. Adaptive mode will use the selected live AI plus the authored fallback."
             }
             return
         }

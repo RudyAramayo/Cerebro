@@ -25,7 +25,7 @@ enum ROBRealtimeProvider: String, CaseIterable {
 
     /// Continuous camera frames are currently a Gemini capability. OpenAI's
     /// Realtime API accepts image inputs rather than a native video stream, so
-    /// a future OpenAI adapter must sample frames without changing this claim.
+    /// the OpenAI adapter samples frames without changing this claim.
     var supportsContinuousVideo: Bool { self == .gemini }
     var supportsRealtimeAudio: Bool { true }
 }

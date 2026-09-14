@@ -1008,6 +1008,26 @@ matchesLanguagePrefixes:(NSArray<NSString *> *)languagePrefixes
     });
 }
 
+- (void)sayPersonalityText:(NSString *)text provider:(NSString *)provider completion:(void (^)(BOOL finished))completion
+{
+    void (^enqueue)(void) = ^{
+        if (text.length == 0 || self.isShuttingDown) {
+            if (completion) completion(NO);
+            return;
+        }
+        AVSpeechUtterance *utterance = [AVSpeechUtterance speechUtteranceWithString:text];
+        NSString *key = [@"com.orbitusrobotics.cerebro.realtime.voice." stringByAppendingString:provider];
+        NSString *identifier = [NSUserDefaults.standardUserDefaults stringForKey:key];
+        AVSpeechSynthesisVoice *voice = identifier.length > 0 ? [AVSpeechSynthesisVoice voiceWithIdentifier:identifier] : nil;
+        utterance.voice = voice ?: [self voiceForText:text];
+        utterance.pitchMultiplier = [provider isEqualToString:@"openai"] ? 0.93f : 1.08f;
+        if (completion) [self.utteranceCompletions setObject:[completion copy] forKey:utterance];
+        [self enqueueSpeechUtterance:utterance];
+    };
+    if (NSThread.isMainThread) enqueue();
+    else dispatch_async(dispatch_get_main_queue(), enqueue);
+}
+
 - (void)sayStageShowText:(NSString *)stringToSpeak completion:(void (^)(BOOL finished))completion
 {
     dispatch_async(dispatch_get_main_queue(), ^{
