@@ -76,8 +76,8 @@ def parse_arguments():
     parser.add_argument(
         "--model-name",
         type=str,
-        default="chess",
-        help="The active custom spatial model project name (e.g. chess, monopoly).",
+        default="",
+        help="Optional installed custom spatial model. A dataset alone is not a trained model.",
     )
     parser.add_argument(
         "--width",
@@ -356,7 +356,7 @@ def load_face_model_manifest(blob_path):
         return None
 
 
-def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess", width=1280, height=720):
+def stream_camera(client, stop_event, mxid=None, role="face", model_name="", width=1280, height=720):
     frame_size = (width, height)
     # Footage capture may request a color size above the OV9282 stereo
     # sensors' native output. Keep stereo at a supported aspect-matched size;
@@ -421,7 +421,7 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                 # The bundled road model has no sidewalk class. Navigation stays
                 # fail-closed until a purpose-built sidewalk contract is added.
                 pass
-            elif role == "face":
+            elif role == "face" and model_name:
                 # Dynamic Custom Spatial model (e.g. yolov8_chess_6shave.blob, yolov8_monopoly_6shave.blob)
                 blob_name = f"yolov8_{model_name.lower()}_6shave.blob"
                 blob_path = os.path.join(script_dir, "Models", blob_name)
@@ -588,7 +588,7 @@ def client_is_connected(client):
         return False
 
 
-def serve(server, stop_event, mxid=None, role="face", model_name="chess", width=1280, height=720):
+def serve(server, stop_event, mxid=None, role="face", model_name="", width=1280, height=720):
     while not stop_event.is_set():
         client = accept_client(server, stop_event)
         if client is None:

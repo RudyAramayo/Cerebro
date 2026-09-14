@@ -1069,9 +1069,17 @@ private final class DepthCameraServiceClient {
         if let mxid = mxid, !mxid.isEmpty {
             args.append(contentsOf: ["--mxid", mxid])
         }
-        if role == .face {
-            let activeProject = ROBDatasetManager.shared.activeProject ?? "chess"
-            args.append(contentsOf: ["--model-name", activeProject])
+        if role == .face, let activeProject = ROBDatasetManager.shared.activeProject,
+           let resources = Bundle.main.resourceURL {
+            let stem = "yolov8_\(activeProject.lowercased())_6shave"
+            let folders = [resources.appendingPathComponent("Models"),
+                           resources.deletingLastPathComponent().appendingPathComponent("Models")]
+            if folders.contains(where: {
+                FileManager.default.fileExists(atPath: $0.appendingPathComponent(stem + ".blob").path)
+                    && FileManager.default.fileExists(atPath: $0.appendingPathComponent(stem + ".json").path)
+            }) {
+                args.append(contentsOf: ["--model-name", activeProject])
+            }
         }
         
         do {

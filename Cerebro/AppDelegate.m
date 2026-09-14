@@ -222,6 +222,10 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         keyEquivalent:@""];
     geometryItem.target = self;
     [submenu addItem:geometryItem];
+    NSMenuItem *chessItem = [[NSMenuItem alloc] initWithTitle:@"Chess Study (Observe & Teach)…"
+        action:@selector(showChessStudy:) keyEquivalent:@""];
+    chessItem.target = self;
+    [submenu addItem:chessItem];
     NSMenuItem *developmentItem = [[NSMenuItem alloc] initWithTitle:@"Development"
                                                              action:nil
                                                       keyEquivalent:@""];
@@ -302,8 +306,14 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     [[ROBRobotGeometryWindowController shared] showWindow:sender];
 }
 
+- (IBAction)showChessStudy:(id)sender
+{
+    [[ROBChessStudyWindowController shared] showWindow:sender];
+}
+
 - (void)applicationWillTerminate:(NSNotification *)notification
 {
+    [[ROBLocalAgentBridge shared] shutdown];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [[[NSWorkspace sharedWorkspace] notificationCenter] removeObserver:self];
     [self.rplidarCheckTimer invalidate];

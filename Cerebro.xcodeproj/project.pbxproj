@@ -181,6 +181,13 @@
 		4E18A61196D846179F6E6356 /* ROBRobotGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5654E990DD724F99BFE70944 /* ROBRobotGeometry.swift */; };
 		A3041CAC652D4FCC8E0811AC /* ROBRobotGeometryDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A8B075B32D4420A819D7AA0 /* ROBRobotGeometryDocument.swift */; };
 		3CCA31C1CC44407B83490D90 /* ROBRobotGeometryWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57DEFC7245354F0DB9EF2952 /* ROBRobotGeometryWindowController.swift */; };
+		52279567D9B9B9C926C2B043 /* ROBChessStudyCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C108E1A475EDE929E3EC340 /* ROBChessStudyCore.swift */; };
+		4F358D895D211BCF6F6D71A7 /* ROBChessStudyVision.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FB351D4B64E198788ADAECA /* ROBChessStudyVision.swift */; };
+		EBFCC97B10FE0A0508F0C42F /* ROBChessStudySession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 932D4BFEFAD33220A2280452 /* ROBChessStudySession.swift */; };
+		0958DE3EAEBEA95DE82122B0 /* ROBChessStudyWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4487F97B7D8330E7B94471E7 /* ROBChessStudyWindowController.swift */; };
+		C581D6626BDEB4957F5B78FC /* ROBLocalAgentBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1710E07DDA426265B1293D7 /* ROBLocalAgentBridge.swift */; };
+		E13D816685B5B120D80EAE10 /* cerebro-agent.py in Resources */ = {isa = PBXBuildFile; fileRef = DC7BC3245826E13405841D8F; };
+		C6DB9FF77A954FB014727FB8 /* game-study.py in Resources */ = {isa = PBXBuildFile; fileRef = 168DB00FCBAE58A4A74C30CC; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -407,6 +414,13 @@
 		5654E990DD724F99BFE70944 /* ROBRobotGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRobotGeometry.swift; sourceTree = "<group>"; };
 		3A8B075B32D4420A819D7AA0 /* ROBRobotGeometryDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRobotGeometryDocument.swift; sourceTree = "<group>"; };
 		57DEFC7245354F0DB9EF2952 /* ROBRobotGeometryWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRobotGeometryWindowController.swift; sourceTree = "<group>"; };
+		1C108E1A475EDE929E3EC340 /* ROBChessStudyCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBChessStudyCore.swift; sourceTree = "<group>"; };
+		7FB351D4B64E198788ADAECA /* ROBChessStudyVision.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBChessStudyVision.swift; sourceTree = "<group>"; };
+		932D4BFEFAD33220A2280452 /* ROBChessStudySession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBChessStudySession.swift; sourceTree = "<group>"; };
+		4487F97B7D8330E7B94471E7 /* ROBChessStudyWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBChessStudyWindowController.swift; sourceTree = "<group>"; };
+		D1710E07DDA426265B1293D7 /* ROBLocalAgentBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBLocalAgentBridge.swift; sourceTree = "<group>"; };
+		DC7BC3245826E13405841D8F /* cerebro-agent.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "Scripts/cerebro-agent.py"; sourceTree = SOURCE_ROOT; };
+		168DB00FCBAE58A4A74C30CC /* game-study.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "Scripts/game-study.py"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -585,6 +599,13 @@
 				C0D5B0012F00000100000001 /* ROBSceneSnapshot.swift */,
 				C0D6B0012F00000100000001 /* ROBVisualCalibration.swift */,
 				57DEFC7245354F0DB9EF2952 /* ROBRobotGeometryWindowController.swift */,
+				168DB00FCBAE58A4A74C30CC /* game-study.py */,
+				DC7BC3245826E13405841D8F /* cerebro-agent.py */,
+				D1710E07DDA426265B1293D7 /* ROBLocalAgentBridge.swift */,
+				4487F97B7D8330E7B94471E7 /* ROBChessStudyWindowController.swift */,
+				932D4BFEFAD33220A2280452 /* ROBChessStudySession.swift */,
+				7FB351D4B64E198788ADAECA /* ROBChessStudyVision.swift */,
+				1C108E1A475EDE929E3EC340 /* ROBChessStudyCore.swift */,
 				3A8B075B32D4420A819D7AA0 /* ROBRobotGeometryDocument.swift */,
 				5654E990DD724F99BFE70944 /* ROBRobotGeometry.swift */,
 				C0D6B0022F00000100000001 /* ROBChessboardCalibration.swift */,
@@ -797,6 +818,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C6DB9FF77A954FB014727FB8 /* game-study.py in Resources */,
+				E13D816685B5B120D80EAE10 /* cerebro-agent.py in Resources */,
 				C0D3A0042F00000100000001 /* PythonRequirements.txt in Resources */,
 				D4E700022F00000100000001 /* StageShows/MakerFaireOpening.robshow.json in Resources */,
 				D4E700042F00000100000001 /* StageShows/OrbitusTenMinuteComedy.robshow.json in Resources */,
@@ -934,6 +957,11 @@
 				C0D5A0012F00000100000001 /* ROBSceneSnapshot.swift in Sources */,
 				C0D6A0012F00000100000001 /* ROBVisualCalibration.swift in Sources */,
 				3CCA31C1CC44407B83490D90 /* ROBRobotGeometryWindowController.swift in Sources */,
+				C581D6626BDEB4957F5B78FC /* ROBLocalAgentBridge.swift in Sources */,
+				0958DE3EAEBEA95DE82122B0 /* ROBChessStudyWindowController.swift in Sources */,
+				EBFCC97B10FE0A0508F0C42F /* ROBChessStudySession.swift in Sources */,
+				4F358D895D211BCF6F6D71A7 /* ROBChessStudyVision.swift in Sources */,
+				52279567D9B9B9C926C2B043 /* ROBChessStudyCore.swift in Sources */,
 				A3041CAC652D4FCC8E0811AC /* ROBRobotGeometryDocument.swift in Sources */,
 				4E18A61196D846179F6E6356 /* ROBRobotGeometry.swift in Sources */,
 				C0D6A0022F00000100000001 /* ROBChessboardCalibration.swift in Sources */,

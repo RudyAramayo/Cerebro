@@ -358,6 +358,7 @@ import FoundationModels
             camera.visibleConsumer ? "preview" : nil,
             camera.automaticProcessingConsumer ? "perception" : nil,
             camera.followConsumer ? "follow" : nil,
+            camera.chessStudyConsumer ? "game study / local agent" : nil,
             camera.geminiConsumer ? "Gemini" : nil,
             camera.remoteMediaConsumer ? "controller media" : nil,
         ].compactMap { $0 }

@@ -2401,6 +2401,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void)updatePersonTrackingUprightRestAtUptime:(NSTimeInterval)now
 {
+    if ([ROBLocalAgentBridge shared].cameraHoldActive) return;
     if (!self.personTrackingUprightPostureActive || self.serialBox == nil) {
         return;
     }
@@ -2445,6 +2446,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void)updatePersonTrackingAttentionAtUptime:(NSTimeInterval)now
 {
+    if ([ROBLocalAgentBridge shared].cameraHoldActive) return;
     if (self.serialBox == nil
         || self.torsoControlsViewController.headTracking_enabled.state
             != NSControlStateValueOn) {
@@ -2913,6 +2915,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     [self showROBNavigation];
     [self ensureMainCameraRuntime];
     [self synchronizeDevelopmentCameraDiagnostics];
+    [[ROBLocalAgentBridge shared] setDelegate:(id<ROBLocalAgentDelegate>)self];
+    [[ROBLocalAgentBridge shared] start];
     
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [NSApp activateIgnoringOtherApps:YES];
@@ -3076,6 +3080,69 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     [self.followPersonCoordinator shutdown];
     [self.bellyCameraWindowController setNavigationDemandActive:NO];
     [self.speechBox shutdown];
+}
+
+#pragma mark - Local agent camera interface
+
+- (NSDictionary *)localAgentStatus
+{
+    ROBSerialBox *serial = self.serialBox;
+    BOOL known = serial.neckCommandStateKnown;
+    BOOL idle = !self.followPersonCoordinator.active && !self.autonomyCoordinator.active
+        && !self.stageShowCoordinator.isRunning && self.pendingRobotActionRequests.count == 0;
+    BOOL settled = known && !serial.safeNeckStartupInProgress
+        && !serial.personTrackingUprightTransitionActive && !serial.personTrackingPostureSequenceActive
+        && NSProcessInfo.processInfo.systemUptime >= serial.neckCommandReadyAtUptime;
+    return @{
+        @"appVersion": [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"",
+        @"build": [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"",
+        @"cameraAdjustmentAvailable": @(idle && settled),
+        @"followActive": @(self.followPersonCoordinator.active),
+        @"autonomyActive": @(self.autonomyCoordinator.active),
+        @"showActive": @(self.stageShowCoordinator.isRunning),
+        @"neck": @{@"known": @(known), @"pan": @(serial.commandedNeckPanTarget),
+            @"lower": @(serial.commandedLowerNeckTiltTarget), @"upper": @(serial.commandedUpperNeckTiltTarget),
+            @"readyAtUptime": @(serial.neckCommandReadyAtUptime),
+            @"safetyStatus": serial.neckCommandSafetyStatus ?: @"Unavailable",
+            @"measuredShaftFeedback": @NO}
+    };
+}
+
+- (NSDictionary *)localAgentNudgeAxis:(NSString *)axis delta:(NSInteger)delta expected:(NSDictionary<NSString *, NSNumber *> *)expected
+{
+    if (![NSThread isMainThread] || ![ROBLocalAgentBridge shared].cameraHoldActive
+        || delta == 0 || delta < -100 || delta > 100
+        || (![[self localAgentStatus][@"cameraAdjustmentAvailable"] boolValue])) {
+        return @{@"accepted": @NO, @"error": @"Camera is not held, idle and settled, or the nudge is outside its bound."};
+    }
+    ROBSerialBox *serial = self.serialBox;
+    NSInteger pan = serial.commandedNeckPanTarget;
+    NSInteger lower = serial.commandedLowerNeckTiltTarget;
+    NSInteger upper = serial.commandedUpperNeckTiltTarget;
+    if (pan != expected[@"pan"].integerValue || lower != expected[@"lower"].integerValue
+        || upper != expected[@"upper"].integerValue) {
+        return @{@"accepted": @NO, @"error": @"Neck command changed after the status read. Read status again."};
+    }
+    ROBNeckSafetyConfig config = serial.neckSafetyConfiguration;
+    if ([axis isEqualToString:@"upper"]) upper += delta;
+    else if ([axis isEqualToString:@"pan"]) pan += delta;
+    else return @{@"accepted": @NO, @"error": @"Only pan and upper tilt are available."};
+    ROBNeckSafetyResult checked;
+    config.cameraLevelingEnabled = false; // operator targets are exact, as in Servo Control
+    if (!ROBNeckSafetyApply(&config, (int32_t)pan, (int32_t)lower, (int32_t)upper, &checked)
+        || checked.panTarget != pan || checked.lowerTarget != lower || checked.upperTarget != upper) {
+        return @{@"accepted": @NO, @"error": @"Requested nudge reaches a configured neck limit. No command submitted."};
+    }
+    ROBNeckCommandDisposition disposition = [serial requestOperatorNeckPosePanTarget:pan lowerTarget:lower upperTarget:upper];
+    return @{@"accepted": @(disposition == ROBNeckCommandDispositionAppliedCommand),
+        @"disposition": @(disposition), @"status": [self localAgentStatus],
+        @"detail": @"Commanded targets only; inspect a fresh camera frame after settling."};
+}
+
+- (void)localAgentStop
+{
+    [self.stageShowCoordinator cancelWithReason:@"Local agent software stop"];
+    [self applyPrioritySoftwareStopWithReason:@"Local agent software stop"];
 }
 
 #pragma mark - Controller-authorized autonomy
@@ -3996,6 +4063,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void) trackingPerson:(NSString *)userID x:(float)x y:(float)y z:(float)z
 {
     void (^updateTrackingTargets)(void) = ^{
+        if ([ROBLocalAgentBridge shared].cameraHoldActive) return;
         if (self.torsoControlsViewController.headTracking_enabled.state
             != NSControlStateValueOn) {
             self.lastPersonTrackingUpdateUptime = 0;

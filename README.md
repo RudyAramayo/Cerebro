@@ -73,6 +73,13 @@ unknown**, never **path clear**, because the legacy firmware emits no explicit
 clear event or numeric distance. These grass-sensitive IR warnings are advisory;
 RPLidar remains the source for room geometry and traversable-path decisions.
 
+## Guided chess and game study
+
+Build 3 adds **Development → Chess Study (Observe & Teach)…**, reviewed RGB-D
+teaching data, a simple legal-move coach, and a bounded local CLI for status,
+frame capture and small camera adjustments. It needs no pretrained chess
+detector. See [the game-study workflow and command interface](docs/game-study.md).
+
 ## Python environment
 
 Cerebro no longer assumes a developer-specific Python path. Open **Settings…**

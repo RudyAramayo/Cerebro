@@ -690,6 +690,7 @@ struct ROBCameraServiceStatusSnapshot: Sendable {
     let visibleConsumer: Bool
     let automaticProcessingConsumer: Bool
     let followConsumer: Bool
+    let chessStudyConsumer: Bool
     let geminiConsumer: Bool
     let remoteMediaConsumer: Bool
     let videoServer: ROBVideoServerStatusSnapshot?
@@ -844,6 +845,8 @@ final class CameraViewController: NSViewController {
             name: .robRecordingDemandDidChange,
             object: ROBRecordingCoordinator.shared
         )
+        NotificationCenter.default.addObserver(self, selector: #selector(chessStudyDemandDidChange(_:)),
+            name: .robChessStudyDemandDidChange, object: nil)
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(remoteVideoDemandDidChange(_:)),
@@ -962,11 +965,16 @@ final class CameraViewController: NSViewController {
         try? cameraManager?.stopSession()
     }
 
+    @objc private func chessStudyDemandDidChange(_ notification: Notification) {
+        reconcileCameraSession()
+    }
+
     private func reconcileCameraSession() {
         guard let cameraManager else { return }
         let shouldRun = cameraViewIsVisible
             || automaticProcessingNeedsFrames
             || followVideoIsActive
+            || ROBChessStudyLiveSource.shared.isActive
             || remoteVideoIsActive
             || geminiVideoIsActive
             || recordingDemandActive
@@ -1109,6 +1117,7 @@ final class CameraViewController: NSViewController {
             visibleConsumer: cameraViewIsVisible,
             automaticProcessingConsumer: automaticProcessingNeedsFrames,
             followConsumer: followVideoIsActive,
+            chessStudyConsumer: ROBChessStudyLiveSource.shared.isActive,
             geminiConsumer: geminiVideoIsActive,
             remoteMediaConsumer: remoteVideoIsActive,
             videoServer: videoServer?.statusSnapshot(),
@@ -1591,6 +1600,16 @@ extension CameraViewController: CameraManagerDelegate {
         cameraFramesReceived &+= 1
         cameraLastFrameAt = Date()
         let sampleBuffer = frameSet.rgbSampleBuffer
+        if ROBChessStudyLiveSource.shared.isActive {
+            let depth = frameSet.alignedDepth.map {
+                ROBChessStudyDepth(width: $0.width, height: $0.height,
+                    millimetersLittleEndian: $0.millimetersLittleEndian,
+                    fx: frameSet.intrinsics?.fx, fy: frameSet.intrinsics?.fy,
+                    cx: frameSet.intrinsics?.cx, cy: frameSet.intrinsics?.cy,
+                    cameraSequence: frameSet.sequence, cameraTimestampNanoseconds: frameSet.timestampNanoseconds)
+            }
+            ROBChessStudyLiveSource.shared.offer(sampleBuffer, depth: depth)
+        }
         self.latestFrameSet = frameSet
         
         if isCalibrationRequested {
@@ -2294,7 +2313,7 @@ class PoseDrawingView: NSView {
                     }
                 }
             } else {
-                statusText = "NO CHESSBOARD SEEN (Searching...)"
+                statusText = "No model detections • use Chess Study for guided observation"
                 textColor = .systemOrange
             }
             
