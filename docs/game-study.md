@@ -226,3 +226,78 @@ Arm actions remain a separate stage: measure the board frame relative to ROB,
 calibrate the actual arm mounts and encoders, simulate reach and collision,
 then validate a low-speed grasp with feedback. No game recognition result is
 currently converted into an arm, gripper, tread or torso movement command.
+
+## Belly-camera evidence alongside the main view
+
+The existing **Recording → Open Recording Control → Start Training Session**
+can capture **Face RGB-D** and **Belly RGB-D** together at 2 fps. Stop after a
+short clip with the board still and hands clear. This uses the running camera
+streams without changing resolution or restarting Cerebro. The recording also
+contains the recorder's existing telemetry; the chess importer reads only its
+camera evidence and manifest.
+
+`Scripts/chess-multiview.py` imports a completed recording into an existing
+chess project's `multiview/` directory. It preserves each camera's original
+JPEG, aligned millimeter depth, intrinsics, device timestamp, host receipt
+time and recorded calibration. Images and metadata have SHA-256 checksums.
+Any saved camera-to-robot pose remains unvalidated for this board.
+
+```sh
+python3 Scripts/chess-multiview.py import \
+  --project ~/Documents/ROB-Games/MakerFaire-Marble-Chess \
+  --recording "/path/to/completed/Training/recording"
+
+python3 Scripts/chess-multiview.py review \
+  --session "/path/returned/by/import" --pair pair-0010 \
+  --native-session "/path/to/Guided Chess Session" \
+  --record-id NATIVE_RECORD_UUID --confirmed \
+  --note "Both images checked; the board stayed in this saved position."
+
+python3 Scripts/chess-multiview.py annotate \
+  --session "/path/returned/by/import" --review-id REVIEW_UUID \
+  --camera belly --square d1 --box 272 19 322 122 \
+  --visibility clear --confirmed --note "Queen identity and crop reviewed."
+```
+
+The example box belongs to the September 13 capture; choose bounds from the
+actual image each time. `--confirmed` records the operator's visual review,
+not an automatic recognition result. A position review associates only the
+selected pair with a snapshot of the native FEN. Other pairs stay unreviewed.
+It does not modify the native move history or copy 64 square labels into the
+belly image. Individual crop annotations retain clear/partial visibility,
+source hashes and the reviewed square context. Rectangles use the camera's
+own pixels; no main-camera homography is reused for the belly view.
+
+Open the generated, self-contained `review.html` for a two-view gallery with
+reviewed boxes, the position reference and a timeline. Its images are embedded
+locally; it loads no remote resources. The import allows at most 300 frames
+per camera and 32 MB of RGB images in this portable page.
+
+Pairs use chronological nearest available **host recorder receipt** times,
+with a default maximum difference of 250 ms and no reused belly frames.
+These timestamps are recorded when the recorder processes a frame, so their
+difference is not an exposure-time bound. Device clocks remain separate.
+For an operator-confirmed stationary board, different capture instants can
+still show the same position. Records therefore distinguish
+`stationarySceneConfirmed` from hardware exposure synchronization. Moving
+hands, pieces or arms require exposure timing and motion checks before fusion.
+
+This adds reviewed side-view examples and raw depth to the teaching dataset.
+The native automatic matcher still uses the main camera. Bounding-box pixel
+height is not physical piece height: millimeter heights remain unset until a
+board plane and depth support are validated in that camera. Metric fusion and
+grasp coordinates additionally require the relevant coordinate transforms.
+The belly's lower angle reveals silhouettes while the front row can obscure
+pieces behind it; hidden identities are not filled in automatically.
+
+On September 13, the first real clip produced 18 face frames and 19 belly
+frames, all with aligned depth, forming 18 receipt-time pairs. Pair 10 was
+visually reviewed against **1. e4 e5 2. Nf3 Nc6 3. Bc4**. The belly queen at d1
+and bishop at c1 received individual crop labels; the bishop crop is marked
+partial because neighboring pieces overlap its region. These local images
+are not committed to Git. No robot commands or public release are involved.
+
+Run `python3 Tests/ROBChessMultiViewTests.py` for import, independent device
+clocks, stale-pair and frame-reuse rejection, review gates, invalid files,
+depth integrity and rollback checks. The running build remains build 3; this
+offline adapter needs no Cerebro binary replacement.
