@@ -178,6 +178,7 @@ public final class ROBRobotGeometryWindowController: NSWindowController {
         fields(["Target X mm", "Target Y mm", "Target Z mm"], into: &targetFields, stack: inspector)
         [400.0, 250.0, 650.0].enumerated().forEach { targetFields[$0.offset].doubleValue = $0.element }
         inspector.addArrangedSubview(button("Preview position-only IK", #selector(previewReach)))
+        inspector.addArrangedSubview(button("Open URDF Pose IK…", #selector(openPoseIK)))
         inspector.addArrangedSubview(label("Preview only: no wrist-orientation goal, grasp, trajectory, or hardware command. Envelope overlaps are approximate warnings, not certified collision checks."))
         for view in inspector.arrangedSubviews { view.widthAnchor.constraint(lessThanOrEqualTo: inspector.widthAnchor, constant: -32).isActive = true }
     }
@@ -200,6 +201,8 @@ public final class ROBRobotGeometryWindowController: NSWindowController {
         }
         let click = NSClickGestureRecognizer(target: self, action: #selector(inspectPoint(_:))); sceneView.addGestureRecognizer(click)
     }
+
+    @objc private func openPoseIK() { ROBArmIKWindowController.shared.showWindow(nil) }
     private func floats(_ m: simd_double4x4) -> simd_float4x4 { .init(columns: (SIMD4<Float>(m.columns.0), SIMD4<Float>(m.columns.1), SIMD4<Float>(m.columns.2), SIMD4<Float>(m.columns.3))) }
     private func material(_ color: NSColor, wire: Bool = false) -> SCNMaterial {
         let value = SCNMaterial(); value.diffuse.contents = color; value.roughness.contents = 0.7; value.isDoubleSided = true

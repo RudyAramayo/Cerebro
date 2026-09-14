@@ -19,6 +19,11 @@ if let destination = argument("--export-draft") {
 
 final class GeometryAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if CommandLine.arguments.contains("--pose-ik") {
+            ROBArmIKWindowController.shared.showWindow(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
         let controller = ROBRobotGeometryWindowController.shared
         do {
             if let path = argument("--profile") { try controller.installProfile(ROBGeometryProfile.load(URL(fileURLWithPath: path))) }

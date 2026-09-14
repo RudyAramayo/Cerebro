@@ -1,0 +1,339 @@
+{
+  "arms": [
+    {
+      "base": "base_link",
+      "boot_directory": "L-10",
+      "chain": [
+        {
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "child": "Lone_Link",
+          "limit": {
+            "effort": "100000",
+            "lower": "-2.09",
+            "upper": "2.09",
+            "velocity": "1000000"
+          },
+          "name": "Lone",
+          "origin": {
+            "rpy": "1.138 0 0",
+            "xyz": "0 -0.13364 0.061738"
+          },
+          "parent": "base_link",
+          "type": "revolute"
+        },
+        {
+          "axis": {
+            "xyz": "0 0 -1"
+          },
+          "child": "Ltwo_Link",
+          "limit": {
+            "effort": "100000",
+            "lower": "-2.09",
+            "upper": "2.09",
+            "velocity": "1000000"
+          },
+          "name": "Ltwo",
+          "origin": {
+            "rpy": "-1.5708 0 0",
+            "xyz": "0 0 0.0853"
+          },
+          "parent": "Lone_Link",
+          "type": "revolute"
+        },
+        {
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "child": "Lthree_Link",
+          "limit": {
+            "effort": "100000",
+            "lower": "-2.09",
+            "upper": "2.09",
+            "velocity": "1000000"
+          },
+          "name": "Lthree",
+          "origin": {
+            "rpy": "1.5708 0 0",
+            "xyz": "0 -0.1289 0"
+          },
+          "parent": "Ltwo_Link",
+          "type": "revolute"
+        },
+        {
+          "axis": {
+            "xyz": "0 0 -1"
+          },
+          "child": "Lfour_Link",
+          "limit": {
+            "effort": "100000",
+            "lower": "-2.09",
+            "upper": "2.09",
+            "velocity": "1000000"
+          },
+          "name": "Lfour",
+          "origin": {
+            "rpy": "1.5707963267949 0 0",
+            "xyz": "0 0 0.0853000000000002"
+          },
+          "parent": "Lthree_Link",
+          "type": "revolute"
+        },
+        {
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "child": "Lfive_Link",
+          "limit": {
+            "effort": "100000",
+            "lower": "-2.09",
+            "upper": "2.09",
+            "velocity": "1000000"
+          },
+          "name": "Lfive",
+          "origin": {
+            "rpy": "-1.5708 0 0",
+            "xyz": "0 0.1251 0"
+          },
+          "parent": "Lfour_Link",
+          "type": "revolute"
+        },
+        {
+          "axis": {
+            "xyz": "0 0 -1"
+          },
+          "child": "Lsix_Link",
+          "limit": {
+            "effort": "100000",
+            "lower": "-2.09",
+            "upper": "2.09",
+            "velocity": "1000000"
+          },
+          "name": "Lsix",
+          "origin": {
+            "rpy": "-1.5707963267949 0 0",
+            "xyz": "0 0 0.0891000000000001"
+          },
+          "parent": "Lfive_Link",
+          "type": "revolute"
+        },
+        {
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "child": "Lseven_Link",
+          "limit": {
+            "effort": "100000",
+            "lower": "-2.09",
+            "upper": "2.09",
+            "velocity": "1000000"
+          },
+          "name": "Lseven",
+          "origin": {
+            "rpy": "1.5707963267949 0 0",
+            "xyz": "0 -0.1591 0"
+          },
+          "parent": "Lsix_Link",
+          "type": "revolute"
+        }
+      ],
+      "enabled": true,
+      "launch": "L-10/launch.json",
+      "launch_sha256": "baea5d73603f3e44eb603fde26c8d06268e2949b1adc4fb880f65a73a901f572",
+      "lcm_prefix": "Left_",
+      "robot_direction": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "selected_urdf": "L-10/urdf/dual_b1/DualArmL.urdf",
+      "solver_direction": [
+        1,
+        -1,
+        1,
+        -1,
+        1,
+        -1,
+        1
+      ],
+      "solver_type": "Drake",
+      "tip": "Lseven_Link",
+      "urdf_sha256": "24f6d1bf064306d3b83867b5939e66a8e1ee7a1765782e881285ef4266da6660"
+    },
+    {
+      "base": "base_link",
+      "boot_directory": "R-11",
+      "chain": [
+        {
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "child": "Rone_Link",
+          "limit": {
+            "effort": "100000",
+            "lower": "-2.09",
+            "upper": "2.09",
+            "velocity": "1000000"
+          },
+          "name": "Rone",
+          "origin": {
+            "rpy": "-1.13804396130002 0 0",
+            "xyz": "0 0.133644731508115 0.0617380553162488"
+          },
+          "parent": "base_link",
+          "type": "revolute"
+        },
+        {
+          "axis": {
+            "xyz": "0 0 -1"
+          },
+          "child": "Rtwo_Link",
+          "limit": {
+            "effort": "100000",
+            "lower": "-2.09",
+            "upper": "2.09",
+            "velocity": "1000000"
+          },
+          "name": "Rtwo",
+          "origin": {
+            "rpy": "1.5707963267949 0 0",
+            "xyz": "0 0 0.0853"
+          },
+          "parent": "Rone_Link",
+          "type": "revolute"
+        },
+        {
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "child": "Rthree_Link",
+          "limit": {
+            "effort": "100000",
+            "lower": "-2.09",
+            "upper": "2.09",
+            "velocity": "1000000"
+          },
+          "name": "Rthree",
+          "origin": {
+            "rpy": "-1.5707963267949 0 0",
+            "xyz": "0 0.1289 0"
+          },
+          "parent": "Rtwo_Link",
+          "type": "revolute"
+        },
+        {
+          "axis": {
+            "xyz": "0 0 -1"
+          },
+          "child": "Rfour_Link",
+          "limit": {
+            "effort": "100000",
+            "lower": "-2.09",
+            "upper": "2.09",
+            "velocity": "1000000"
+          },
+          "name": "Rfour",
+          "origin": {
+            "rpy": "-1.5708 0 0",
+            "xyz": "0 0 0.0853"
+          },
+          "parent": "Rthree_Link",
+          "type": "revolute"
+        },
+        {
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "child": "Rfive_Link",
+          "limit": {
+            "effort": "100000",
+            "lower": "-2.09",
+            "upper": "2.09",
+            "velocity": "1000000"
+          },
+          "name": "Rfive",
+          "origin": {
+            "rpy": "1.5707963267949 0 0",
+            "xyz": "0 -0.1251 0"
+          },
+          "parent": "Rfour_Link",
+          "type": "revolute"
+        },
+        {
+          "axis": {
+            "xyz": "0 0 -1"
+          },
+          "child": "Rsix_Link",
+          "limit": {
+            "effort": "100000",
+            "lower": "-2.09",
+            "upper": "2.09",
+            "velocity": "1000000"
+          },
+          "name": "Rsix",
+          "origin": {
+            "rpy": "1.5708 0 0",
+            "xyz": "0 0 0.0891"
+          },
+          "parent": "Rfive_Link",
+          "type": "revolute"
+        },
+        {
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "child": "Rseven_Link",
+          "limit": {
+            "effort": "100000",
+            "lower": "-2.09",
+            "upper": "2.09",
+            "velocity": "1000000"
+          },
+          "name": "Rseven",
+          "origin": {
+            "rpy": "-1.5708 0 0",
+            "xyz": "0 0.1591 0"
+          },
+          "parent": "Rsix_Link",
+          "type": "revolute"
+        }
+      ],
+      "enabled": true,
+      "launch": "R-11/launch.json",
+      "launch_sha256": "5de7ef5c9e8f2315b5fc88d6b4db4dac54065cb2d0b1569484636435f649410d",
+      "lcm_prefix": "Right_",
+      "robot_direction": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "selected_urdf": "R-11/urdf/dual_b1/DualArmR.urdf",
+      "solver_direction": [
+        1,
+        -1,
+        1,
+        -1,
+        1,
+        -1,
+        1
+      ],
+      "solver_type": "Drake",
+      "tip": "Rseven_Link",
+      "urdf_sha256": "c36f5d3649a45daf1689c3712b07e7058f200c7fefd74cb59253e3b70b67385b"
+    }
+  ],
+  "scope": "Files under the supplied Amber root; this is not proof of what a running core loaded.",
+  "units": {
+    "rotation": "radians",
+    "translation": "meters"
+  }
+}

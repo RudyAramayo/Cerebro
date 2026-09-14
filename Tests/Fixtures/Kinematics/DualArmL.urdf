@@ -1,0 +1,61 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="DualArm">
+  <!--Kinematic fixture extracted from DualArmL.urdf; source SHA256 24f6d1bf064306d3b83867b5939e66a8e1ee7a1765782e881285ef4266da6660. Not a robot calibration or actuation model.-->
+  <link name="base_link" />
+  <link name="Lone_Link" />
+  <link name="Ltwo_Link" />
+  <link name="Lthree_Link" />
+  <link name="Lfour_Link" />
+  <link name="Lfive_Link" />
+  <link name="Lsix_Link" />
+  <link name="Lseven_Link" />
+  <joint name="Lone" type="revolute">
+    <origin xyz="0 -0.13364 0.061738" rpy="1.138 0 0" />
+    <parent link="base_link" />
+    <child link="Lone_Link" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.09" upper="2.09" effort="100000" velocity="1000000" />
+  </joint>
+  <joint name="Ltwo" type="revolute">
+    <origin xyz="0 0 0.0853" rpy="-1.5708 0 0" />
+    <parent link="Lone_Link" />
+    <child link="Ltwo_Link" />
+    <axis xyz="0 0 -1" />
+    <limit lower="-2.09" upper="2.09" effort="100000" velocity="1000000" />
+  </joint>
+  <joint name="Lthree" type="revolute">
+    <origin xyz="0 -0.1289 0" rpy="1.5708 0 0" />
+    <parent link="Ltwo_Link" />
+    <child link="Lthree_Link" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.09" upper="2.09" effort="100000" velocity="1000000" />
+  </joint>
+  <joint name="Lfour" type="revolute">
+    <origin xyz="0 0 0.0853000000000002" rpy="1.5707963267949 0 0" />
+    <parent link="Lthree_Link" />
+    <child link="Lfour_Link" />
+    <axis xyz="0 0 -1" />
+    <limit lower="-2.09" upper="2.09" effort="100000" velocity="1000000" />
+  </joint>
+  <joint name="Lfive" type="revolute">
+    <origin xyz="0 0.1251 0" rpy="-1.5708 0 0" />
+    <parent link="Lfour_Link" />
+    <child link="Lfive_Link" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.09" upper="2.09" effort="100000" velocity="1000000" />
+  </joint>
+  <joint name="Lsix" type="revolute">
+    <origin xyz="0 0 0.0891000000000001" rpy="-1.5707963267949 0 0" />
+    <parent link="Lfive_Link" />
+    <child link="Lsix_Link" />
+    <axis xyz="0 0 -1" />
+    <limit lower="-2.09" upper="2.09" effort="100000" velocity="1000000" />
+  </joint>
+  <joint name="Lseven" type="revolute">
+    <origin xyz="0 -0.1591 0" rpy="1.5707963267949 0 0" />
+    <parent link="Lsix_Link" />
+    <child link="Lseven_Link" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.09" upper="2.09" effort="100000" velocity="1000000" />
+  </joint>
+</robot>

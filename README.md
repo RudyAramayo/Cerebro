@@ -280,6 +280,13 @@ before launch. Launch failures and legacy `NSTask` exceptions are converted to
 recoverable errors, so a missing optional dependency disables only its feature
 instead of terminating Cerebro.
 
+For the September 25 demo, see the current
+[IK, chess, loiter and performance assessment](docs/maker-faire-2026-robot-intelligence.md).
+It records the dual-arm boot URDFs, the new **URDF Pose IK** workbench,
+Foundation Models in Show mode, approved arm cues, and bounded Gemini loiter
+commands. Physical chess and whole-body choreography still depend on the
+calibration now in progress.
+
 The current development integration streams microphone audio and sampled
 camera frames to `gemini-robotics-er-2-streaming-preview`, then speaks completed
 model turns through the existing `ROBSpeechBox` voice.

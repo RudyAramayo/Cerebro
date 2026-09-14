@@ -607,6 +607,7 @@ enum GeminiRoboticsToolPolicy {
     /// executor result. The receiver still returns a normal correlated tool
     /// response, but it must apply the local software stop first.
     static func requiresPriorityDispatch(_ call: GeminiRoboticsToolCall) -> Bool {
+        if call.name == "loiter_control", call.arguments["command"] as? String == "pause" { return true }
         guard call.name == "robot_action",
               let action = call.arguments["action"] as? String else {
             return false
@@ -1321,6 +1322,7 @@ enum GeminiRoboticsProtocol {
         var functionDeclarations: [[String: Any]] = []
         if configuration.exposesRobotActionTool {
             functionDeclarations.append(robotActionToolDeclaration)
+            functionDeclarations.append(loiterControlToolDeclaration)
         }
         if configuration.enablesNewsSearch {
             functionDeclarations.append(newsSearchToolDeclaration)
@@ -1454,6 +1456,20 @@ enum GeminiRoboticsProtocol {
 
         return event
     }
+
+    private static let loiterControlToolDeclaration: [String: Any] = [
+        "name": "loiter_control",
+        "description": "Inspect or shape an existing controller-authorized social_roam session. Call status to obtain the current session_id. Then pause for conversation, resume when explicitly asked, or request a brief left/right turn. No new motion authority is granted. Local Lidar/zone/speed checks can veto every movement. An accepted intent is never proof of physical completion. Unavailable during stage shows.",
+        "behavior": "BLOCKING",
+        "parameters": [
+            "type": "OBJECT",
+            "properties": [
+                "command": ["type": "STRING", "enum": ["status", "pause", "resume", "turn_left", "turn_right"]],
+                "session_id": ["type": "STRING", "description": "Exact session_id from status; required for every command except status."]
+            ],
+            "required": ["command"]
+        ]
+    ]
 
     private static let robotActionToolDeclaration: [String: Any] = [
         "name": "robot_action",

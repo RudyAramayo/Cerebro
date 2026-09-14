@@ -3,10 +3,12 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 app_path="${1:-$repo_dir/build/ROB Geometry Lab.app}"
 mkdir -p "$app_path/Contents/MacOS"
-xcrun swiftc -O -target "$(uname -m)-apple-macos14.0" -D ROB_GEOMETRY_STANDALONE -module-name ROBRobotGeometryLab \
+xcrun swiftc -O -module-cache-path /private/tmp/cerebro-swift-module-cache -target "$(uname -m)-apple-macos14.0" -D ROB_GEOMETRY_STANDALONE -module-name ROBRobotGeometryLab \
   "$repo_dir/Cerebro/ROBAmberB1Kinematics.swift" \
   "$repo_dir/Cerebro/ROBRobotGeometry.swift" \
   "$repo_dir/Cerebro/ROBRobotGeometryDocument.swift" \
+  "$repo_dir/Cerebro/ROBSerialChainKinematics.swift" \
+  "$repo_dir/Cerebro/ROBArmIKWindowController.swift" \
   "$repo_dir/Cerebro/ROBRobotGeometryWindowController.swift" \
   "$repo_dir/Tools/RobotGeometryLab/main.swift" \
   -o "$app_path/Contents/MacOS/ROB Geometry Lab"

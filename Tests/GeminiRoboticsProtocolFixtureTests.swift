@@ -56,6 +56,11 @@ struct GeminiRoboticsProtocolFixtureTests {
         try expect(GeminiRoboticsToolPolicy.requiresPriorityDispatch(stop), "stop_motion must bypass ordinary tool work")
         try expect(!GeminiRoboticsToolPolicy.requiresPriorityDispatch(gesture), "A gesture was incorrectly prioritized")
         try expect(!GeminiRoboticsToolPolicy.requiresPriorityDispatch(unrelated), "An unrelated tool was incorrectly prioritized")
+        let pause = GeminiRoboticsToolCall(id: "loiter-pause", name: "loiter_control", arguments: ["command": "pause"])
+        let resume = GeminiRoboticsToolCall(id: "loiter-resume", name: "loiter_control", arguments: ["command": "resume"])
+        try expect(GeminiRoboticsToolPolicy.requiresPriorityDispatch(pause), "Loiter pause waited behind ordinary queued work")
+        try expect(!GeminiRoboticsToolPolicy.requiresPriorityDispatch(resume), "Loiter resume bypassed ordinary queued work")
+        try expect(GeminiRoboticsToolPolicy.dispatchRoute(for: pause) == .delegate, "Loiter skipped the local authority gate")
         let news = GeminiRoboticsToolCall(
             id: "news-1",
             name: ROBNewsSearchService.toolName,
@@ -531,6 +536,11 @@ struct GeminiRoboticsProtocolFixtureTests {
             "Missing robot_action declaration"
         )
         try expect(robotDeclaration["behavior"] as? String == "BLOCKING", "Physical tools must be blocking")
+        let loiter = try require(declarations.first { $0["name"] as? String == "loiter_control" }, "Missing loiter declaration")
+        try expect(loiter["behavior"] as? String == "BLOCKING", "Loiter decisions must wait for local validation")
+        let loiterParameters = try require(loiter["parameters"] as? [String: Any], "Missing loiter schema")
+        let loiterProperties = try require(loiterParameters["properties"] as? [String: Any], "Missing loiter properties")
+        try expect(Set(loiterProperties.keys) == ["command", "session_id"], "Loiter exposed extra authority or motor parameters")
         let parameters = try require(
             robotDeclaration["parameters"] as? [String: Any],
             "Missing robot_action parameters"

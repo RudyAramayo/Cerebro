@@ -56,6 +56,8 @@ import Foundation
         case returningToZone
         case followingSidewalk
         case navigating
+        case paused
+        case blocked
     }
 
     private let robotID: String
@@ -73,6 +75,11 @@ import Foundation
     private var nextConversationUptime: TimeInterval = 0
     private var personVisible = false
     private var motionState: MotionState = .silent
+    private var modelPaused = false
+    private var modelTurn: (left: Bool, expires: TimeInterval)?
+    private var modelCallResults: [String: NSDictionary] = [:]
+    private var cancelledModelCallIDs = Set<String>()
+    private var currentModelCallID: String?
     private var lastPublishedDetail: String?
     private var lastStatusUptime: TimeInterval = 0
 
@@ -147,6 +154,68 @@ import Foundation
         personVisible = visible
     }
 
+    /// Provider-neutral, high-level decisions within an existing operator grant.
+    /// No coordinates, motor values, new sessions, or authority extensions.
+    public func applyLoiterControl(_ arguments: NSDictionary, callID: String) -> NSDictionary {
+        precondition(Thread.isMainThread)
+        guard let command = arguments["command"] as? String,
+              Set(arguments.allKeys.compactMap { $0 as? String }).isSubset(of: ["command", "session_id"]),
+              arguments.allKeys.allSatisfy({ $0 is String }) else {
+            return ["status": "rejected", "detail": "Use only command and session_id."]
+        }
+        guard active, let sessionID, let expiresAt, Date() < expiresAt,
+              profile == .socialRoam, behaviors.contains("roam"), destination == nil else {
+            return ["status": "rejected", "detail": "Start a social_roam session in ROBController first. This tool cannot authorize motion."]
+        }
+        if command == "status" {
+            return ["status": "active", "session_id": sessionID, "paused": modelPaused,
+                    "detail": lastPublishedDetail ?? "Waiting for the local planner", "measured_completion": false]
+        }
+        guard !cancelledModelCallIDs.contains(callID), cancelledModelCallIDs.count < 512 else {
+            return ["status": "cancelled", "detail": "This AI intent was cancelled or the session's cancellation budget was exhausted."]
+        }
+        guard arguments["session_id"] as? String == sessionID else {
+            return ["status": "rejected", "detail": "The loiter session changed. Request status before proposing another intent."]
+        }
+        if let previous = modelCallResults[callID] { return previous }
+        guard modelCallResults.count < 512 else {
+            return ["status": "rejected", "detail": "This session's AI command budget is exhausted; start a new operator session."]
+        }
+        switch command {
+        case "pause": modelPaused = true; modelTurn = nil
+        case "resume": modelPaused = false; modelTurn = nil
+        case "turn_left", "turn_right":
+            guard !modelPaused else {
+                return ["status": "rejected", "detail": "Loiter is paused. Resume explicitly before requesting a turn."]
+            }
+            modelTurn = (command == "turn_left", ProcessInfo.processInfo.systemUptime + 1.5)
+        default: return ["status": "rejected", "detail": "Unknown loiter command."]
+        }
+        currentModelCallID = callID
+        plannerTick()
+        let result: NSDictionary = ["status": "accepted", "session_id": sessionID,
+            "intent": command, "measured_completion": false,
+            "detail": lastPublishedDetail ?? "The local planner will check this intent."]
+        modelCallResults[callID] = result
+        return result
+    }
+
+    /// Cancellation must not silently resume roaming or leave a cancelled turn
+    /// active. A later, separately accepted intent supersedes an older one.
+    public func cancelLoiterControlCalls(_ callIDs: [String]) {
+        precondition(Thread.isMainThread)
+        guard active else { return }
+        for id in callIDs where cancelledModelCallIDs.count < 512 {
+            cancelledModelCallIDs.insert(id)
+        }
+        if let currentModelCallID, callIDs.contains(currentModelCallID) {
+            modelPaused = true
+            modelTurn = nil
+            self.currentModelCallID = nil
+            plannerTick()
+        }
+    }
+
     private static func sceneFreeSpace(from points: [LidarPoint]) -> [ROBFreeSpaceRegion] {
         let sectors: [(String, Double)] = [("forward", 0), ("left", .pi / 2), ("back", .pi), ("right", -.pi / 2)]
         return sectors.map { name, center in
@@ -181,6 +250,11 @@ import Foundation
         let statusSequence = max(sequence, 1)
 
         active = false
+        modelPaused = false
+        modelTurn = nil
+        modelCallResults = [:]
+        cancelledModelCallIDs = []
+        currentModelCallID = nil
         ROBTraversabilityRuntime.shared.setAutonomousMotionActive(false)
         ROBNavigationRuntime.shared.clear()
         tickTimer?.invalidate()
@@ -239,8 +313,14 @@ import Foundation
         if active {
             stop(reason: "Replaced by a newly authorized autonomy session")
         }
+        delegate?.autonomyCoordinatorDidRequestBaseStop(self)
 
         active = true
+        modelPaused = false
+        modelTurn = nil
+        modelCallResults = [:]
+        cancelledModelCallIDs = []
+        currentModelCallID = nil
         sessionID = message.sessionID
         controllerID = message.senderID
         sequence = message.sequence
@@ -306,13 +386,20 @@ import Foundation
             stop(reason: "Autonomy session duration ended")
             return
         }
+        defer {
+            maybeRequestConversation(now: now)
+            publishActiveStatus(force: now - lastStatusUptime >= 2)
+        }
+
+        if modelPaused {
+            transition(to: .paused, left: nil, right: nil, detail: "Loiter paused for interaction; waiting for an explicit resume")
+            return
+        }
 
         let snapshot = ROBSceneSnapshotStore.shared.snapshot()
 
         if profile == .expressiveStationary || !behaviors.contains("roam") {
             transition(to: .silent, left: nil, right: nil, detail: "Expressive stationary autonomy is active")
-            maybeRequestConversation(now: now)
-            publishActiveStatus(force: now - lastStatusUptime >= 2)
             return
         }
 
@@ -325,7 +412,6 @@ import Foundation
                 right: nil,
                 detail: "Social roam is active and waiting for a fresh RPLidar scan"
             )
-            publishActiveStatus(force: now - lastStatusUptime >= 2)
             return
         }
 
@@ -345,12 +431,20 @@ import Foundation
 
         if behaviors.contains("navigate_destination") {
             planDestinationNavigation(lidar: lidar, now: now)
-            maybeRequestConversation(now: now)
-            publishActiveStatus(force: now - lastStatusUptime >= 2)
             return
         }
 
-        if distanceFromOrigin >= zoneRadiusMeters * 0.82 {
+        if distanceFromOrigin >= zoneRadiusMeters {
+            transition(to: .blocked, left: nil, right: nil, detail: "At the authorized zone boundary; operator repositioning is required")
+            return
+        }
+        if front < Self.obstacleDistanceMeters {
+            let turnLeft = left > right
+            wanderTurnUntilUptime = now + 0.8
+            transition(to: turnLeft ? .turningLeft : .turningRight,
+                       left: turnLeft ? -0.13 : 0.13, right: turnLeft ? 0.13 : -0.13,
+                       detail: "Turning around a nearby obstacle")
+        } else if distanceFromOrigin >= zoneRadiusMeters * 0.82 {
             let targetYaw = atan2(origin.y - lidar.y, origin.x - lidar.x)
             let yawError = Self.normalizedAngle(targetYaw - lidar.yaw)
             if abs(yawError) > 0.35 {
@@ -369,15 +463,10 @@ import Foundation
                     detail: "Moving toward the center of the designated area"
                 )
             }
-        } else if front < Self.obstacleDistanceMeters {
-            let turnLeft = left > right
-            wanderTurnUntilUptime = now + 0.8
-            transition(
-                to: turnLeft ? .turningLeft : .turningRight,
-                left: turnLeft ? -0.13 : 0.13,
-                right: turnLeft ? 0.13 : -0.13,
-                detail: "Turning around a nearby obstacle"
-            )
+        } else if let turn = modelTurn, now < turn.expires {
+            transition(to: turn.left ? .turningLeft : .turningRight,
+                       left: turn.left ? -0.09 : 0.09, right: turn.left ? 0.09 : -0.09,
+                       detail: "Applying a bounded AI loiter turn after local clearance checks")
         } else if now < wanderTurnUntilUptime {
             let turnLeft = motionState == .turningLeft
             transition(
@@ -419,8 +508,6 @@ import Foundation
             )
         }
 
-        maybeRequestConversation(now: now)
-        publishActiveStatus(force: now - lastStatusUptime >= 2)
     }
 
     private func planDestinationNavigation(lidar: LidarSnapshot, now: TimeInterval) {
@@ -511,6 +598,24 @@ import Foundation
         detail: String
     ) {
         if let left, let right {
+            // Turning sweeps both sides and the rear; missing sectors cannot
+            // mean clear. This gate also applies to zone-return/navigation turns.
+            guard let lidar = latestLidar,
+                  ProcessInfo.processInfo.systemUptime - lidar.receivedAtUptime <= Self.lidarFreshness else {
+                transition(to: .blocked, left: nil, right: nil, detail: "Motion vetoed: RPLidar is stale")
+                return
+            }
+            let front = minimumDistance(in: lidar.points) { abs(Self.normalizedAngle($0.angle)) <= Self.frontHalfAngleRadians }
+            let turning = left < 0 || right < 0
+            let sweepClear = [Double.pi / 2, -Double.pi / 2, Double.pi].allSatisfy { center in
+                minimumDistance(in: lidar.points) {
+                    abs(Self.normalizedAngle($0.angle - center)) <= 0.6
+                } >= 0.8
+            }
+            guard front >= (turning ? 0.4 : Self.obstacleDistanceMeters), !turning || sweepClear else {
+                transition(to: .blocked, left: nil, right: nil, detail: "Motion vetoed: obstacle or insufficient scan coverage in the travel/swept area")
+                return
+            }
             delegate?.autonomyCoordinator(
                 self,
                 applyLeftTread: left,
@@ -534,11 +639,12 @@ import Foundation
         // known people and avoids duplicate prompts when autonomy is active.
         guard now >= nextConversationUptime else { return }
         nextConversationUptime = now + Double.random(in: 45 ... 90)
+        let context = "Controller-authorized loiter session_id=\(sessionID ?? ""). Local state: \(lastPublishedDetail ?? "waiting"). Use loiter_control status/pause/resume/turn_left/turn_right to shape this existing session. Turns last at most 1.5 seconds and are locally vetoed when clearance is uncertain. Acceptance is not measured movement. Never call resume unless the person asks to continue roaming. "
         let prompt: String
         if personVisible {
-            prompt = "Autonomy context: a person is visible. Briefly and naturally greet or engage them using the live camera and audio context."
+            prompt = context + "Autonomy context: a person is visible. Briefly and naturally greet or engage them using the live camera and audio context. You may pause to converse."
         } else {
-            prompt = "Autonomy context: continue mingling naturally. If nobody is clearly present, make at most one brief friendly observation and then listen."
+            prompt = context + "Autonomy context: if nobody is clearly present, make at most one brief friendly observation and then listen."
         }
         delegate?.autonomyCoordinator(self, requestConversationPrompt: prompt)
     }
@@ -655,7 +761,10 @@ import Foundation
         in points: [LidarPoint],
         where predicate: (LidarPoint) -> Bool
     ) -> Double {
-        return points.lazy.filter(predicate).map(\.distance).min() ?? .infinity
+        let distances = points.filter(predicate).map(\.distance)
+        guard distances.count >= 2,
+              distances.allSatisfy({ $0.isFinite && $0 > 0 }) else { return 0 }
+        return distances.min() ?? 0
     }
 
     private static func normalizedAngle(_ angle: Double) -> Double {

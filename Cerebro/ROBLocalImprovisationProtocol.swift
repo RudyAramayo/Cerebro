@@ -12,11 +12,13 @@ import Foundation
 public enum ROBLocalImprovisationProviderKind: String, CaseIterable {
     case llamaCpp = "llama_cpp"
     case mlxSwift = "mlx_swift"
+    case foundationModels = "foundation_models"
 
     public var displayName: String {
         switch self {
         case .llamaCpp: return "llama.cpp server"
         case .mlxSwift: return "MLX Swift (private/offline)"
+        case .foundationModels: return "Apple Foundation Models (on device)"
         }
     }
 }
@@ -447,6 +449,8 @@ public enum ROBLocalImprovisationProviderFactory {
             return ROBLlamaCppImprovisationProvider(configuration: configuration)
         case .mlxSwift:
             return ROBMLXImprovisationProvider(configuration: configuration)
+        case .foundationModels:
+            return ROBFoundationImprovisationProvider(configuration: configuration)
         }
     }
 }

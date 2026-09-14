@@ -128,6 +128,7 @@ struct ROBRobotActionProtocolFixtureTests {
         try testStrictModelActionProposals()
         try testAutonomySessionRoundTripAndBounds()
         try testAutonomyCoordinatorSessionAndLidar()
+        try testLoiterControlAndClearance()
         print("ROB robot-action protocol fixtures passed")
     }
 
@@ -561,6 +562,71 @@ struct ROBRobotActionProtocolFixtureTests {
             _ coordinator: ROBAutonomyCoordinator,
             requestConversationPrompt prompt: String
         ) {}
+    }
+
+    private static func testLoiterControlAndClearance() throws {
+        let delegate = AutonomyDelegate(), coordinator = ROBAutonomyCoordinator(robotID: "cerebro-1")
+        coordinator.delegate = delegate
+        func command(_ name: String, _ id: String = UUID().uuidString, session: String = "loiter-fixture") -> NSDictionary {
+            coordinator.applyLoiterControl(["command": name, "session_id": session], callID: id)
+        }
+        func scan(x: Float = 0, front: Float = 2, complete: Bool = true) throws {
+            let angles: [Float] = complete
+                ? [-3, -2.8, -1.9, -1.6, -1.2, -0.4, -0.1, 0.1, 0.4, 1.2, 1.6, 1.9, 2.8, 3]
+                : [-1.9, -1.6, -1.2, 1.2, 1.6, 1.9, 2.8, 3]
+            let frame = ROBLidarScanFrame(deviceID: UUID(), sequence: 1,
+                sentAtMilliseconds: UInt64(Date().timeIntervalSince1970 * 1000),
+                x: x, y: 0, z: 0, yaw: .pi, pitch: 0, roll: 0,
+                points: angles.map { ROBLidarWirePoint(distanceMeters: abs($0) < 0.5 ? front : 2, angleRadians: $0) })
+            coordinator.updateLidarScanData(try frame.encoded())
+        }
+        try expect(command("resume")["status"] as? String == "rejected", "AI started unapproved autonomy")
+        try scan()
+        coordinator.handleSessionMessage(.start(sessionID: "loiter-fixture", sequence: 1,
+            senderID: "controller-1", recipientID: "cerebro-1", profile: .socialRoam,
+            zoneRadiusMeters: 5, maximumSpeedScale: 0.2, behaviors: ["roam", "talk"], expiresAt: Date(timeIntervalSinceNow: 60)))
+        defer { coordinator.stop(reason: "fixture finished") }
+        try expect(command("status")["session_id"] as? String == "loiter-fixture", "Status lacks exact session identity")
+        let beforePause = delegate.commands.count
+        _ = command("pause")
+        try expect(delegate.commands.count == beforePause, "Pause emitted a motion command")
+        try expect(command("turn_left")["status"] as? String == "rejected", "Turn silently resumed paused loiter")
+        try expect(command("resume", session: "old-session")["status"] as? String == "rejected", "Old model session moved ROB")
+        let accepted = command("resume", "dedup")
+        let afterResume = delegate.commands.count
+        _ = command("resume", "dedup")
+        try expect(delegate.commands.count == afterResume, "Duplicate tool call repeated a physical request")
+        try expect(accepted["measured_completion"] as? Bool == false, "Intent acceptance claimed measured motion")
+        _ = command("turn_left", "cancelled-turn")
+        try expect(delegate.commands.last!.0 < 0 && delegate.commands.last!.1 > 0, "Bounded AI turn did not reach the planner")
+        let stopsBeforeCancel = delegate.stopCount
+        coordinator.cancelLoiterControlCalls(["cancelled-turn"])
+        try expect(delegate.stopCount > stopsBeforeCancel && command("status")["paused"] as? Bool == true,
+                   "Cancelled AI turn did not pause and stop the base")
+        try expect(command("turn_left", "cancelled-turn")["status"] as? String == "cancelled",
+                   "Cancelled turn was replayed")
+        coordinator.cancelLoiterControlCalls(["cancelled-before-dispatch"])
+        try expect(command("resume", "cancelled-before-dispatch")["status"] as? String == "cancelled",
+                   "A cancelled queued request mutated loiter")
+        _ = command("resume", "new-intent")
+        coordinator.cancelLoiterControlCalls(["cancelled-turn"])
+        try expect(command("status")["paused"] as? Bool == false, "Old cancellation stopped a newer intent")
+        let beforeMissing = delegate.commands.count
+        try scan(complete: false)
+        _ = command("resume")
+        try expect(delegate.commands.count == beforeMissing, "Missing front sector was treated as clear")
+        try scan(x: 4.3, front: 0.1)
+        _ = command("resume")
+        try expect(delegate.commands.count == beforeMissing, "Zone-return goal overrode an obstacle")
+        try scan(x: 5.1)
+        _ = command("resume")
+        try expect(delegate.commands.count == beforeMissing, "AI escaped the authorized zone")
+        try scan()
+        Thread.sleep(forTimeInterval: 0.8)
+        _ = command("resume")
+        try expect(delegate.commands.count == beforeMissing, "Stale scan authorized motion")
+        let unknown = coordinator.applyLoiterControl(["command": "resume", "session_id": "loiter-fixture", "speed": 1], callID: "extra")
+        try expect(unknown["status"] as? String == "rejected", "Model motor parameter accepted")
     }
 
     private static func testAutonomyCoordinatorSessionAndLidar() throws {

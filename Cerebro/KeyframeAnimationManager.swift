@@ -186,6 +186,21 @@ private struct ROBAmberApprovedGesture: Codable {
         lock.withLock { gestures.values.map(\.name).sorted() }
     }
 
+    /// The show grant binds the exact approved pose, including its revision.
+    /// Re-approving a name during a performance invalidates the old grant.
+    public func stageRevision(forGesture name: String) -> Data? {
+        lock.withLock {
+            guard let gesture = gestures[normalized(name)] else { return nil }
+            return Self.revision(of: gesture)
+        }
+    }
+
+    private static func revision(of gesture: ROBAmberApprovedGesture) -> Data? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return try? encoder.encode(gesture)
+    }
+
     /// Captures the currently edited keyframe under a human-readable tool
     /// name. At least one arm must be enabled in the keyframe.
     public func approveCurrentKeyframe(as proposedName: String) throws {
@@ -274,8 +289,12 @@ private struct ROBAmberApprovedGesture: Codable {
         ]
     }
 
-    fileprivate func snapshot(named name: String) -> ROBAmberApprovedGesture? {
-        lock.withLock { gestures[normalized(name)] }
+    fileprivate func snapshot(named name: String, expectedRevision: Data? = nil) -> ROBAmberApprovedGesture? {
+        lock.withLock {
+            guard let gesture = gestures[normalized(name)] else { return nil }
+            if let expectedRevision, Self.revision(of: gesture) != expectedRevision { return nil }
+            return gesture
+        }
     }
 
     private func validatedTarget(
@@ -337,6 +356,7 @@ private enum ROBAmberGestureAuthoritySource {
     case geminiDebug
     case controllerApprovedOneShot
     case localOperatorConfirmedOneShot
+    case stageOperatorApproved
 
     var requiresGeminiDebugAuthority: Bool {
         self == .geminiDebug
@@ -466,6 +486,13 @@ private final class ROBAmberGestureRun {
         )
     }
 
+    /// Called only after the show coordinator verifies its per-run pose grant.
+    /// All measured-feedback, ownership, speed, reference and lease gates apply.
+    @objc(executeStageApprovedGesture:revision:completion:)
+    public func executeStageApprovedGesture(_ name: String, revision: Data, completion: @escaping (NSDictionary) -> Void) {
+        executeGesture(name, authoritySource: .stageOperatorApproved, expectedRevision: revision, completion: completion)
+    }
+
     /// Executes one immutable gesture under the authority of a local, critical
     /// operator confirmation. Callers must not expose this as a generic show
     /// runner: it exists for Cerebro's fixed live startup sequence, and all
@@ -529,6 +556,7 @@ private final class ROBAmberGestureRun {
     private func executeGesture(
         _ name: String,
         authoritySource: ROBAmberGestureAuthoritySource,
+        expectedRevision: Data? = nil,
         completion: @escaping (NSDictionary) -> Void
     ) {
         guard Thread.isMainThread else {
@@ -536,6 +564,7 @@ private final class ROBAmberGestureRun {
                 self?.executeGesture(
                     name,
                     authoritySource: authoritySource,
+                    expectedRevision: expectedRevision,
                     completion: completion
                 )
             }
@@ -563,11 +592,13 @@ private final class ROBAmberGestureRun {
             ])
             return
         }
-        guard let gesture = ROBAmberGestureCatalog.shared.snapshot(named: name) else {
+        guard let gesture = ROBAmberGestureCatalog.shared.snapshot(named: name, expectedRevision: expectedRevision) else {
             let names = ROBAmberGestureCatalog.shared.approvedGestureNames
             completion([
                 "status": "rejected",
-                "detail": names.isEmpty
+                "detail": expectedRevision != nil
+                    ? "The approved arm pose was revoked or its revision changed before dispatch."
+                    : names.isEmpty
                     ? "No immutable Amber gestures have been approved locally."
                     : "Gesture is not approved. Available names: \(names.joined(separator: ", ")).",
             ])

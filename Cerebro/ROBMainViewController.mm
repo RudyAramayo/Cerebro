@@ -1370,6 +1370,16 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void)robAI:(ROBAI *)robAI didReceiveToolCall:(ROBAIRobotToolCall *)call
 {
+    if ([call.name isEqualToString:@"loiter_control"]) {
+        NSDictionary *result;
+        if (call.isStageOrigin || self.stageShowCoordinator.isRunning) {
+            result = @{@"status": @"rejected", @"detail": @"Stage dialogue cannot control loiter motion"};
+        } else {
+            result = [self.autonomyCoordinator applyLoiterControl:call.arguments callID:call.callID];
+        }
+        [robAI sendToolResponseWithCallID:call.callID name:call.name result:result];
+        return;
+    }
     if (![call.name isEqualToString:@"robot_action"]) {
         [robAI sendToolResponseWithCallID:call.callID
                                      name:call.name
@@ -1610,6 +1620,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void)robAI:(ROBAI *)robAI didCancelToolCallIDs:(NSArray<NSString *> *)callIDs
 {
+    [self.autonomyCoordinator cancelLoiterControlCalls:callIDs];
     for (NSString *callID in callIDs) {
         if ([self.localAmberGestureCallID isEqualToString:callID]) {
             self.localAmberGestureCallID = nil;
@@ -3099,6 +3110,12 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 #pragma mark - Stage show coordinator
 
+- (void)stageShowCoordinatorWillStart:(ROBStageShowCoordinator *)coordinator
+{
+    [self applyPrioritySoftwareStopWithReason:@"Stage show is acquiring motion authority"];
+    (void)[[ROBAmberGestureExecutor shared] cancelCurrentGestureWithReason:@"Stage show is starting"];
+}
+
 - (void)stageShowCoordinator:(ROBStageShowCoordinator *)coordinator
                        speak:(NSString *)text
                        cueID:(NSString *)cueID
@@ -3139,9 +3156,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                        cueID:(NSString *)cueID
                      timeout:(NSTimeInterval)timeout
 {
-    // Only the fixed Show Mode startup builder can set this one-shot context.
-    // Ordinary loaded show documents continue through the separate, explicitly
-    // armed saber catalog below and cannot invoke approved Amber keyframes.
+    NSString *gestureRequestID = [coordinator.currentGestureRequestID copy];
+    // The startup workflow retains its separate two-arm completion requirement.
     if ([coordinator.liveStartupGestureName isEqualToString:name]) {
         NSDictionary *preflight = [[ROBAmberGestureExecutor shared]
             preflightLocallyConfirmedGesture:name];
@@ -3184,7 +3200,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             } else if (detail.length == 0) {
                 detail = @"The two-arm wake gesture did not produce a measured terminal result.";
             }
-            (void)[strongCoordinator completeGestureWithSuccess:success detail:detail];
+            (void)[strongCoordinator completeGestureWithSuccess:success detail:detail requestID:gestureRequestID];
         };
         if (coordinator.liveStartupIsControllerAuthorized) {
             [[ROBAmberGestureExecutor shared]
@@ -3195,6 +3211,24 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                 executeLocallyConfirmedGesture:name
                 completion:completion];
         }
+        return;
+    }
+
+    NSData *revision = [[ROBAmberGestureCatalog shared] stageRevisionForGesture:name];
+    if (revision != nil) {
+        if (![coordinator authorizesStageGesture:name revision:revision]) {
+            (void)[coordinator completeGestureWithSuccess:NO
+                detail:@"This approved arm pose was not authorized for this show run, or its revision changed."
+                requestID:gestureRequestID];
+            return;
+        }
+        __weak ROBStageShowCoordinator *weakCoordinator = coordinator;
+        [[ROBAmberGestureExecutor shared] executeStageApprovedGesture:name revision:revision completion:^(NSDictionary *result) {
+            BOOL success = [result[@"status"] isEqualToString:@"completed"] && [result[@"measured"] boolValue];
+            NSString *detail = [result[@"detail"] isKindOfClass:NSString.class] ? result[@"detail"]
+                : (success ? @"Approved arm pose reached measured completion." : @"Arm pose did not reach measured completion.");
+            (void)[weakCoordinator completeGestureWithSuccess:success detail:detail requestID:gestureRequestID];
+        }];
         return;
     }
 
@@ -4812,6 +4846,11 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     ROBAutonomySessionMessage *autonomyMessage = [ROBAutonomySessionWireCodec decodeEnvelopeData:data];
     if (autonomyMessage != nil) {
         dispatch_async(dispatch_get_main_queue(), ^{
+            if (autonomyMessage.kind == ROBAutonomySessionMessageKindStart && !autonomyMessage.isExpired &&
+                (autonomyMessage.recipientID == nil || [autonomyMessage.recipientID isEqualToString:self.robotActionSenderID]) &&
+                self.stageShowCoordinator.isRunning) {
+                [self.stageShowCoordinator cancelWithReason:@"Operator requested autonomy"];
+            }
             [self.autonomyCoordinator handleSessionMessage:autonomyMessage];
         });
         return;
@@ -5175,6 +5214,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     }
     if ([msg isEqualToString:@"RequestToBeMasterController"])
     {
+        if (self.stageShowCoordinator.isRunning) {
+            [self.stageShowCoordinator cancelWithReason:@"Manual controller requested motion authority"];
+        }
         if (self.autonomyCoordinator.active) {
             [self.autonomyCoordinator stopWithReason:@"Manual controller requested motion authority"];
         }

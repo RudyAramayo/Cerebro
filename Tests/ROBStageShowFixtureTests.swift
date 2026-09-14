@@ -20,6 +20,8 @@ private final class FakeStageDelegate: NSObject, ROBStageShowCoordinatorDelegate
     var failGemini = false
     var holdGemini = false
     var gestureSucceeds = false
+    var holdGesture = false
+    var gestureRequestIDs: [String] = []
 
     func stageShowCoordinator(_ coordinator: ROBStageShowCoordinator, speak text: String, cueID: String) {
         spoken.append(text)
@@ -59,6 +61,8 @@ private final class FakeStageDelegate: NSObject, ROBStageShowCoordinatorDelegate
         timeout: TimeInterval
     ) {
         gestures.append(name)
+        gestureRequestIDs.append(coordinator.currentGestureRequestID ?? "missing")
+        if holdGesture { return }
         _ = coordinator.completeGesture(
             success: gestureSucceeds,
             detail: gestureSucceeds ? "fixture completed" : "fixture executor unavailable"
@@ -148,6 +152,7 @@ struct ROBStageShowFixtureTests {
         try testLateLocalCompletionIsSuppressed()
         try testGeminiTurnLifecycleCancellation()
         try testOptionalGestureAndCancellation()
+        try testGestureRunGrantAndTimeout()
         print("ROB stage-show fixtures passed")
     }
 
@@ -614,6 +619,30 @@ struct ROBStageShowFixtureTests {
         cancelCoordinator.cancel(reason: "duplicate stop")
         try expect(cancelCoordinator.state == "cancelled", "Cancellation did not become terminal")
         try expect(cancelDelegate.stopCount == 1, "Cancellation stop was not idempotent")
+    }
+
+    private static func testGestureRunGrantAndTimeout() throws {
+        let show = ROBStageShow(showID: "gesture-grant", title: "Gesture grant", cues: [
+            ROBStageCue(id: "pose", kind: .playGesture, durationSeconds: 0.1, gesture: "b1.test", required: false),
+            ROBStageCue(id: "later", kind: .speak, text: "Must not speak while motion is unconfirmed")
+        ])
+        let coordinator = ROBStageShowCoordinator(), delegate = FakeStageDelegate()
+        delegate.holdGesture = true; coordinator.delegate = delegate
+        try coordinator.load(show)
+        let revision = Data("pose-v1".utf8)
+        coordinator.start(mode: .speechOnly, approvedGestures: ["b1.test": revision])
+        try expect(coordinator.authorizesStageGesture("b1.test", revision: revision), "Per-run gesture grant was lost")
+        try expect(!coordinator.authorizesStageGesture("b1.test", revision: Data("pose-v2".utf8)), "Changed pose inherited old authority")
+        let oldRequest = delegate.gestureRequestIDs[0]
+        try waitUntil(timeout: 1) { !coordinator.isRunning }
+        try expect(coordinator.state == "failed" && delegate.stopCount == 1, "Optional motion timeout did not stop the show")
+        try expect(delegate.spoken.isEmpty, "Show advanced while timed-out motion could be active")
+        try expect(!coordinator.authorizesStageGesture("b1.test", revision: revision), "Ended run retained gesture authority")
+        try coordinator.load(show)
+        coordinator.start(mode: .speechOnly)
+        try expect(!coordinator.completeGesture(success: true, detail: "late", requestID: oldRequest), "Stale gesture completion advanced a new run")
+        try expect(!coordinator.authorizesStageGesture("b1.test", revision: revision), "Ordinary restart inherited prior gesture grant")
+        coordinator.cancel(reason: "fixture finished")
     }
 
     private static func waitUntil(timeout: TimeInterval, condition: () -> Bool) throws {

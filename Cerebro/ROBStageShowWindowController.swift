@@ -31,6 +31,7 @@ import UniformTypeIdentifiers
         action: nil
     )
     private let localProviderPopup = NSPopUpButton()
+    private let approvedArmCuesButton = NSButton(checkboxWithTitle: "Use approved arm cues", target: nil, action: nil)
     private let localEndpointField = NSTextField()
     private let localModelField = NSTextField()
     private let localTimeoutField = NSTextField()
@@ -116,7 +117,7 @@ import UniformTypeIdentifiers
             "Shows may contain speech, waits, checkpoints, optional Gemini turns, and named gestures. " +
             "The optional local director produces dialogue only and cannot authorize motion. " +
             "Shows cannot contain servo values, joint angles, SSH commands, hosts, or ports. Dry Run emits no speech, model request, or hardware request. " +
-            "The Live Startup Test below is a separate, fixed operator-confirmed sequence."
+            "Enable approved arm cues to perform rehearsed poses during this run. The Live Startup Test below remains separate."
         )
         safetyLabel.font = .systemFont(ofSize: 12)
         safetyLabel.textColor = .secondaryLabelColor
@@ -145,7 +146,7 @@ import UniformTypeIdentifiers
         localProviderPopup.addItems(withTitles: ROBLocalImprovisationProviderKind.allCases.map(\.displayName))
         localProviderPopup.target = self
         localProviderPopup.action = #selector(localProviderSelectionChanged(_:))
-        localProviderPopup.toolTip = "Choose the loopback llama.cpp server or private in-process MLX Swift inference."
+        localProviderPopup.toolTip = "Choose llama.cpp, MLX Swift, or Apple's on-device Foundation Models for local dialogue."
 
         localEndpointField.placeholderString = "http://127.0.0.1:8080"
         localEndpointField.toolTip = "Loopback llama.cpp server root, /v1, or /v1/chat/completions"
@@ -199,6 +200,7 @@ import UniformTypeIdentifiers
         let rememberButton = makeButton("Remember", action: #selector(rememberWithMLX(_:)))
         let retrieveButton = makeButton("Retrieve", action: #selector(retrieveWithMLX(_:)))
         let mlxRow = NSStackView(views: [mlxVisionButton, mlxMemoryField, rememberButton, retrieveButton])
+        approvedArmCuesButton.toolTip = "Authorize the exact locally approved arm poses named in the loaded script for one run."
         mlxRow.orientation = .horizontal
         mlxRow.alignment = .centerY
         mlxRow.spacing = 8
@@ -206,7 +208,10 @@ import UniformTypeIdentifiers
         mlxTelemetryLabel.textColor = .secondaryLabelColor
         mlxTelemetryLabel.lineBreakMode = .byTruncatingMiddle
         mlxTelemetryLabel.usesSingleLineMode = true
-        let mlxStack = NSStackView(views: [mlxRow, mlxTelemetryLabel])
+        let motionRow = NSStackView(views: [approvedArmCuesButton, saberArmButton])
+        motionRow.orientation = .horizontal
+        motionRow.spacing = 16
+        let mlxStack = NSStackView(views: [mlxRow, mlxTelemetryLabel, motionRow])
         mlxStack.orientation = .vertical
         mlxStack.alignment = .leading
         mlxStack.spacing = 5
@@ -214,7 +219,6 @@ import UniformTypeIdentifiers
         saberArmButton.target = self
         saberArmButton.action = #selector(saberArmingChanged(_:))
         saberArmButton.toolTip = "Requires a clear exclusion zone, secured lightweight prop, calibrated right Amber arm, supervision, and ready physical E-stop. Resets when this window closes."
-        mlxRow.addArrangedSubview(saberArmButton)
 
         let titleColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("title"))
         titleColumn.title = "Bundled Show"
@@ -862,6 +866,12 @@ import UniformTypeIdentifiers
            localModelField.stringValue == ROBLocalImprovisationConfiguration.defaultModel {
             localModelField.stringValue = ROBMLXEngine.defaultLLMModel
         }
+        if localProviderPopup.indexOfSelectedItem == 2 {
+            localModelField.stringValue = "SystemLanguageModel.default"
+        } else if localModelField.stringValue == "SystemLanguageModel.default" {
+            localModelField.stringValue = localProviderPopup.indexOfSelectedItem == 1
+                ? ROBMLXEngine.defaultLLMModel : ROBLocalImprovisationConfiguration.defaultModel
+        }
         updateLocalFieldAvailability()
     }
 
@@ -947,8 +957,27 @@ import UniformTypeIdentifiers
     private func start(mode: ROBStageShowRunMode) {
         do {
             let show = try decodedEditorShow()
+            var revisions: [String: Data] = [:]
+            if mode != .dryRun, approvedArmCuesButton.state == .on {
+                let names = Set(show.cues.compactMap(\.gesture)).sorted()
+                for name in names {
+                    if let revision = ROBAmberGestureCatalog.shared.stageRevision(forGesture: name) {
+                        revisions[name] = revision
+                    }
+                }
+                guard !revisions.isEmpty else {
+                    throw ROBStageShowError.invalidDocument("This script has no locally approved arm poses. Teach and approve its named poses in Amber Diagnostics, or turn off approved arm cues for a dialogue rehearsal.")
+                }
+                let alert = NSAlert()
+                alert.messageText = "Perform approved arm cues in \(show.title)?"
+                alert.informativeText = "This run can physically move ROB's arms through these rehearsed poses: \(revisions.keys.sorted().joined(separator: ", ")). Each pose must pass fresh arm feedback and motion limits. Stop ends this run's authorization. Unmapped body cues remain unavailable."
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "Run with Arm Cues")
+                alert.addButton(withTitle: "Cancel")
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
+            }
             try stageShowCoordinator.load(show)
-            stageShowCoordinator.start(mode: mode)
+            stageShowCoordinator.start(mode: mode, approvedGestures: revisions)
         } catch {
             report(error)
         }
@@ -1012,8 +1041,8 @@ import UniformTypeIdentifiers
         localEndpointField.isEnabled = isLlama
         localEndpointField.toolTip = isLlama
             ? "Loopback llama.cpp server root, /v1, or /v1/chat/completions"
-            : "Not used by MLX; inference stays in this Cerebro process."
-        localModelField.isEnabled = true
+            : "No server endpoint is used by this on-device provider."
+        localModelField.isEnabled = localProviderPopup.indexOfSelectedItem != 2
         localTimeoutField.isEnabled = true
     }
 

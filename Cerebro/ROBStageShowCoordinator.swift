@@ -106,6 +106,7 @@ public extension Notification.Name {
 }
 
 @objc public protocol ROBStageShowCoordinatorDelegate: AnyObject {
+    @objc optional func stageShowCoordinatorWillStart(_ coordinator: ROBStageShowCoordinator)
     func stageShowCoordinator(_ coordinator: ROBStageShowCoordinator, speak text: String, cueID: String)
     func stageShowCoordinator(
         _ coordinator: ROBStageShowCoordinator,
@@ -133,6 +134,8 @@ public extension Notification.Name {
     public private(set) var state = "idle"
     public private(set) var detail = "Load a show to begin."
     public private(set) var currentCueID: String?
+    public private(set) var currentGestureRequestID: String?
+    private var approvedGestureRevisions: [String: Data] = [:]
     public private(set) var loadedShowTitle: String?
     /// Non-nil only for the fixed, locally constructed startup sequence after
     /// Show Mode's critical operator confirmation. Ordinary loaded show files
@@ -305,6 +308,22 @@ public extension Notification.Name {
         start(mode: mode, liveStartupGestureName: nil, controllerAuthorized: false)
     }
 
+    @nonobjc public func start(mode: ROBStageShowRunMode, approvedGestures: [String: Data]) {
+        start(mode: mode, liveStartupGestureName: nil, controllerAuthorized: false,
+              approvedGestures: approvedGestures)
+    }
+
+    @objc(authorizesStageGesture:revision:)
+    public func authorizesStageGesture(_ name: String, revision: Data) -> Bool {
+        isRunning && mode != .dryRun && approvedGestureRevisions[name] == revision
+    }
+
+    @objc(completeGestureWithSuccess:detail:requestID:)
+    public func completeGesture(success: Bool, detail: String, requestID: String) -> Bool {
+        guard requestID == currentGestureRequestID else { return false }
+        return completeGesture(success: success, detail: detail)
+    }
+
     /// Starts Cerebro's fixed operator-confirmed live startup sequence. This is
     /// intentionally not an Objective-C entry point and does not accept an
     /// arbitrary show document.
@@ -332,7 +351,8 @@ public extension Notification.Name {
     private func start(
         mode: ROBStageShowRunMode,
         liveStartupGestureName: String?,
-        controllerAuthorized: Bool
+        controllerAuthorized: Bool,
+        approvedGestures: [String: Data] = [:]
     ) {
         precondition(Thread.isMainThread, "Stage-show state must be serialized on the main thread")
         guard let show else {
@@ -343,8 +363,14 @@ public extension Notification.Name {
             cancel(reason: "Replaced by a new run")
         }
 
+        // A live show acquires the stage only after previous autonomy/manual
+        // motion has stopped. Dry Run retains its no-side-effects contract.
+        if mode != .dryRun { delegate?.stageShowCoordinatorWillStart?(self) }
+
         generation &+= 1
         self.mode = mode
+        approvedGestureRevisions = mode == .dryRun ? [:] : approvedGestures
+        currentGestureRequestID = nil
         self.liveStartupGestureName = liveStartupGestureName
         liveStartupIsControllerAuthorized = controllerAuthorized
         cueIndex = 0
@@ -364,6 +390,8 @@ public extension Notification.Name {
         precondition(Thread.isMainThread, "Stage-show state must be serialized on the main thread")
         guard isRunning else { return }
         generation &+= 1
+        currentGestureRequestID = nil
+        approvedGestureRevisions = [:]
         timer?.invalidate()
         timer = nil
         clearLocalImprovisation(cancelRequest: true)
@@ -433,6 +461,7 @@ public extension Notification.Name {
     public func completeGesture(success: Bool, detail completionDetail: String) -> Bool {
         precondition(Thread.isMainThread, "Stage-show state must be serialized on the main thread")
         guard isRunning, case .gesture(let required) = awaiting, let cue = currentCue else { return false }
+        currentGestureRequestID = nil
         timer?.invalidate()
         timer = nil
         if success {
@@ -492,6 +521,7 @@ public extension Notification.Name {
                 return
             }
             awaiting = .gesture(required: cue.required)
+            currentGestureRequestID = "stage-gesture:\(UUID().uuidString)"
             let timeout = cue.durationSeconds ?? 1
             publish(state: "awaiting_gesture", detail: "Cue \(cue.id): requesting named gesture \(gesture).")
             scheduleTimeout(seconds: timeout, label: "gesture")
@@ -694,6 +724,8 @@ public extension Notification.Name {
     }
 
     private func finish() {
+        currentGestureRequestID = nil
+        approvedGestureRevisions = [:]
         timer?.invalidate()
         timer = nil
         clearLocalImprovisation(cancelRequest: true)
@@ -709,6 +741,8 @@ public extension Notification.Name {
     }
 
     private func fail(_ failureDetail: String) {
+        currentGestureRequestID = nil
+        approvedGestureRevisions = [:]
         timer?.invalidate()
         timer = nil
         clearLocalImprovisation(cancelRequest: true)
@@ -813,11 +847,9 @@ public extension Notification.Name {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak self] _ in
             guard let self, self.generation == expectedGeneration, self.isRunning else { return }
-            if case .gesture(let required) = self.awaiting, !required {
-                self.advance(detail: "Optional gesture timed out and was skipped.")
-            } else {
-                self.fail("Cue \(self.currentCueID ?? "unknown") exceeded its \(label) timeout.")
-            }
+            // Even an optional gesture may still be moving. Retire the cue,
+            // stop/hold through the delegate, and end the run before proceeding.
+            self.fail("Cue \(self.currentCueID ?? "unknown") exceeded its \(label) timeout; the show stopped.")
         }
     }
 

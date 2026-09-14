@@ -1,0 +1,61 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="amber_b1">
+  <!--Kinematic fixture extracted from amber_b1.urdf; source SHA256 7d83fa365e619f39b58daa61e48b162f1902d02d3f704a3f40c53a1401cf0a4f. Not a robot calibration or actuation model.-->
+  <link name="base_link" />
+  <link name="one_Link" />
+  <link name="two_Link" />
+  <link name="three_Link" />
+  <link name="four_Link" />
+  <link name="five_Link" />
+  <link name="six_Link" />
+  <link name="seven_Link" />
+  <joint name="joint1" type="revolute">
+    <origin rpy="0 0 0" xyz="0 0 0.0825" />
+    <parent link="base_link" />
+    <child link="one_Link" />
+    <axis xyz="0 0 1" />
+    <limit effort="100" lower="-2.4435" upper="2.4435" velocity="3.1415" />
+  </joint>
+  <joint name="joint2" type="revolute">
+    <origin rpy="-1.5707963267949 0 0" xyz="0 0 0.0853000000000001" />
+    <parent link="one_Link" />
+    <child link="two_Link" />
+    <axis xyz="0 0 1" />
+    <limit effort="100" lower="-2.3213" upper="2.3213" velocity="3.1415" />
+  </joint>
+  <joint name="joint3" type="revolute">
+    <origin rpy="1.5708 0 0" xyz="0 -0.1289 0" />
+    <parent link="two_Link" />
+    <child link="three_Link" />
+    <axis xyz="0 0 1" />
+    <limit effort="100" lower="-2.2863" upper="2.2863" velocity="3.1415" />
+  </joint>
+  <joint name="joint4" type="revolute">
+    <origin rpy="1.5708 0 0" xyz="0 0 0.0853" />
+    <parent link="three_Link" />
+    <child link="four_Link" />
+    <axis xyz="0 0 1" />
+    <limit effort="100" lower="-2.2863" upper="2.2863" velocity="3.1415" />
+  </joint>
+  <joint name="joint5" type="revolute">
+    <origin rpy="-1.5708 0 0" xyz="0 0.1251 0" />
+    <parent link="four_Link" />
+    <child link="five_Link" />
+    <axis xyz="0 0 1" />
+    <limit effort="100" lower="-2.2863" upper="2.2863" velocity="5.23" />
+  </joint>
+  <joint name="joint6" type="revolute">
+    <origin rpy="-1.5708 0 0" xyz="0 0 0.0891" />
+    <parent link="five_Link" />
+    <child link="six_Link" />
+    <axis xyz="0 0 1" />
+    <limit effort="100" lower="-2.2863" upper="2.2863" velocity="5.23" />
+  </joint>
+  <joint name="joint7" type="revolute">
+    <origin rpy="1.5708 0 0" xyz="0 -0.1591 0" />
+    <parent link="six_Link" />
+    <child link="seven_Link" />
+    <axis xyz="0 0 1" />
+    <limit effort="100" lower="-3.05" upper="3.05" velocity="5.23" />
+  </joint>
+</robot>

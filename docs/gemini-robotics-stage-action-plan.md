@@ -1,5 +1,12 @@
 # Gemini robotics, stage-show, and local action plan
 
+September 13, 2026 update: the [current demo/IK assessment](maker-faire-2026-robot-intelligence.md)
+supersedes the historical availability and execution boundaries below. ER 2
+streaming is now publicly documented; measured approved Amber poses can run in
+Show mode under a per-run grant; Foundation Models is an available local stage
+provider; and the separate URDF Pose IK workbench calculates full poses.
+Calibrated chess and whole-body execution remain pending.
+
 ## Outcome and current boundary
 
 Cerebro now has the first safe rehearsal layer:

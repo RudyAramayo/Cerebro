@@ -149,6 +149,9 @@
 		D4E900022F00000100000001 /* ROBLlamaCppImprovisationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E900012F00000100000001 /* ROBLlamaCppImprovisationProvider.swift */; };
 		D4EA00022F00000100000001 /* ROBMLXRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4EA00012F00000100000001 /* ROBMLXRuntime.swift */; };
 		D4EA00042F00000100000001 /* ROBMLXImprovisationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4EA00032F00000100000001 /* ROBMLXImprovisationProvider.swift */; };
+		C0AF01022F50000100000001 /* ROBFoundationImprovisationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0AF01012F50000100000001 /* ROBFoundationImprovisationProvider.swift */; };
+		C0AF01062F50000100000001 /* ROBArmIKWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0AF01042F50000100000001 /* ROBArmIKWindowController.swift */; };
+		C0AF01052F50000100000001 /* ROBSerialChainKinematics.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0AF01032F50000100000001 /* ROBSerialChainKinematics.swift */; };
 		D4EA00062F00000100000001 /* ROBMLXStageObservation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4EA00052F00000100000001 /* ROBMLXStageObservation.swift */; };
 		D4EA01012F00000100000001 /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = D4EA02012F00000100000001 /* MLX */; };
 		D4EA01022F00000100000001 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = D4EA02022F00000100000001 /* MLXLMCommon */; };
@@ -357,6 +360,9 @@
 		D4E900012F00000100000001 /* ROBLlamaCppImprovisationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBLlamaCppImprovisationProvider.swift; sourceTree = "<group>"; };
 		D4EA00012F00000100000001 /* ROBMLXRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBMLXRuntime.swift; sourceTree = "<group>"; };
 		D4EA00032F00000100000001 /* ROBMLXImprovisationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBMLXImprovisationProvider.swift; sourceTree = "<group>"; };
+		C0AF01012F50000100000001 /* ROBFoundationImprovisationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBFoundationImprovisationProvider.swift; sourceTree = "<group>"; };
+		C0AF01042F50000100000001 /* ROBArmIKWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBArmIKWindowController.swift; sourceTree = "<group>"; };
+		C0AF01032F50000100000001 /* ROBSerialChainKinematics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBSerialChainKinematics.swift; sourceTree = "<group>"; };
 		D4EA00052F00000100000001 /* ROBMLXStageObservation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBMLXStageObservation.swift; sourceTree = "<group>"; };
 		D4EB00012F00000100000001 /* ROBSaberChoreography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBSaberChoreography.swift; sourceTree = "<group>"; };
 		D4EC00012F00000100000001 /* ROBAmberGatewayClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAmberGatewayClient.swift; sourceTree = "<group>"; };
@@ -580,6 +586,9 @@
 				D4E900012F00000100000001 /* ROBLlamaCppImprovisationProvider.swift */,
 				D4EA00012F00000100000001 /* ROBMLXRuntime.swift */,
 				D4EA00032F00000100000001 /* ROBMLXImprovisationProvider.swift */,
+				C0AF01012F50000100000001 /* ROBFoundationImprovisationProvider.swift */,
+				C0AF01042F50000100000001 /* ROBArmIKWindowController.swift */,
+				C0AF01032F50000100000001 /* ROBSerialChainKinematics.swift */,
 				D4EA00052F00000100000001 /* ROBMLXStageObservation.swift */,
 				D408B1202E15E7E300F6FEB3 /* ROBAI.swift */,
 				C0D5B0012F00000100000001 /* ROBSceneSnapshot.swift */,
@@ -918,6 +927,9 @@
 				D4E900022F00000100000001 /* ROBLlamaCppImprovisationProvider.swift in Sources */,
 				D4EA00022F00000100000001 /* ROBMLXRuntime.swift in Sources */,
 				D4EA00042F00000100000001 /* ROBMLXImprovisationProvider.swift in Sources */,
+				C0AF01022F50000100000001 /* ROBFoundationImprovisationProvider.swift in Sources */,
+				C0AF01062F50000100000001 /* ROBArmIKWindowController.swift in Sources */,
+				C0AF01052F50000100000001 /* ROBSerialChainKinematics.swift in Sources */,
 				D4EA00062F00000100000001 /* ROBMLXStageObservation.swift in Sources */,
 				D4EB00022F00000100000001 /* ROBSaberChoreography.swift in Sources */,
 				D4EC00022F00000100000001 /* ROBAmberGatewayClient.swift in Sources */,
