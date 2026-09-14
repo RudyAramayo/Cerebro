@@ -26,7 +26,7 @@ struct ROBMessagesTranscriptStatistics: Sendable {
     let deliveredCount: Int
 }
 
-struct ROBMessagesTranscriptRecord: Sendable {
+struct ROBMessagesTranscriptRecord: Sendable, Equatable {
     let contextID: String
     let receivingAccount: String
     let sender: String
@@ -41,7 +41,7 @@ struct ROBMessagesTranscriptRecord: Sendable {
     let deliveryError: String?
 }
 
-struct ROBMessagesOperatorReplyRecord: Sendable {
+struct ROBMessagesOperatorReplyRecord: Sendable, Equatable {
     let contextID: String
     let receivingAccount: String
     let sender: String
@@ -52,7 +52,7 @@ struct ROBMessagesOperatorReplyRecord: Sendable {
     let deliveryError: String?
 }
 
-struct ROBMessagesTranscriptBrowseSnapshot: Sendable {
+struct ROBMessagesTranscriptBrowseSnapshot: Sendable, Equatable {
     let records: [ROBMessagesTranscriptRecord]
     let operatorReplies: [ROBMessagesOperatorReplyRecord]
     let isTruncated: Bool
