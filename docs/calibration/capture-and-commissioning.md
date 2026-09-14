@@ -57,6 +57,25 @@ angles can become input to an observed park calibration only after measurement
 and independent validation. Gravity, payload, joint friction and support can
 change a hanging pose, so photograph and label its actual power/support state.
 
+### Paired zero and hanging readings
+
+Rodolfo can initialize the arms in the known zero pose and retain active encoder
+feedback while they settle. This provides a direct joint-offset measurement
+once the starting pose is verified against the single-arm B1 URDF and the
+feedback units and axis directions are confirmed.
+
+Record all seven readings on each arm at the verified zero pose, then record
+them again at the supported, settled hanging pose without reinitializing or
+changing the encoder reference. Keep photographs of both poses and identify
+ROB-left/right. Use only the arm's documented compliant mode for controlled
+settling; do not force powered joints or permit an uncontrolled fall.
+
+With both readings converted to radians, the relationship is
+`q_hanging = q_known_zero + direction * (vendor_hanging - vendor_known_zero)`.
+`q_known_zero` is zero only for a physically verified URDF-zero pose. Capture
+the hanging scan in that same stationary configuration. This establishes joint
+configuration; shoulder mounting transforms still come from measured landmarks.
+
 ## Capture the first dataset
 
 Use the iPhone 16 Pro for detailed original photographs and compare an iPhone
@@ -225,3 +244,9 @@ device tunnel was unavailable during the read-only version check.
 The new full Cerebro build has not been launched against ROB or installed over
 the existing runtime. The standalone Geometry Lab is available independently.
 No arms, neck, treads, flippers, torso or LACT were moved during this work.
+
+Later on September 13, ROBController development build 2 was installed and its
+version was read back from the iPhone. It adds **Auto → Open Follow Mode**.
+A signed Cerebro build 2 with independent Follow camera demand was prepared;
+installation and startup await confirmation that ROB is physically ready.
+See [the iPhone-only Follow workflow](../iphone-headless-follow.md).

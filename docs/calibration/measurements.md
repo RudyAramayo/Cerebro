@@ -70,9 +70,13 @@ do not call it a joint center unless the offset to the actual axis is known.
 
 ## Stationary startup observations
 
-Read only. Do not move or re-home a joint to fill this sheet. Record radians or
-the exact raw units the interface reports; do not silently convert counts to
-angles. Physical model angles and signs remain unknown until measured.
+For an existing stationary scan, record its current readings without moving or
+re-homing to fill this sheet. If using the separately planned zero-to-hanging
+capture, fill two copies of the table: one at the physically verified URDF-zero
+pose and one after controlled settling, within the same encoder session. Label
+each copy with its pose and capture time. Record radians or the exact raw units
+the interface reports; do not silently convert counts to angles. Physical model
+angles and signs remain unknown until verified.
 
 | Physical arm | Joint | Raw feedback | Raw unit | Observed model angle rad | Direction verified ±1 | Notes |
 | --- | --- | --- | --- | --- | --- | --- |

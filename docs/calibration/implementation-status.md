@@ -57,3 +57,13 @@ sensor gate was bypassed.
 
 See [capture and commissioning](capture-and-commissioning.md) for the first
 stationary dataset and the progression to a supervised ball exercise.
+
+## Subsequent iPhone update
+
+Later on September 13, ROBController build 2 was installed and verified on the
+physical iPhone. It includes a direct Auto-screen Follow entry. The separate
+Cerebro Follow camera fix builds and passes its isolated lifecycle checks;
+the signed local Mac build is prepared, with installation/startup pending an
+operator-ready confirmation. See [iPhone-only Follow](../iphone-headless-follow.md)
+for the current workflow. The original unavailable-phone finding above records
+the earlier calibration inspection.
