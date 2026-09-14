@@ -234,19 +234,23 @@ Person**. This uses a fresh camera selection, not an arbitrary old photo from
 the photo library. Authorizing can initiate physical motion; it was not done
 during this inspection.
 
-The installed `/Applications/Cerebro.app` is dated August 24, 2026 at 09:30 and
-does not contain the follow coordinator, including in its debug dylib. The
+The app found at `/Applications/Cerebro.app` during the initial inspection was
+dated August 24, 2026 at 09:30 and did not contain the follow coordinator,
+including in its debug dylib. The
 coordinator was added at 11:53 that day, after the installed build. A current
-source build succeeds and includes it. Updating the installed runtime and checking the actual phone
-build are still required before a physical follow test. The iPhone's paired
-device tunnel was unavailable during the read-only version check.
+source build included it. The iPhone's paired device tunnel was unavailable
+during that initial read-only version check.
 
-The new full Cerebro build has not been launched against ROB or installed over
-the existing runtime. The standalone Geometry Lab is available independently.
-No arms, neck, treads, flippers, torso or LACT were moved during this work.
+The initial geometry-only work did not replace or start the robot runtime or
+command actuators. The standalone Geometry Lab remains available independently.
 
 Later on September 13, ROBController development build 2 was installed and its
 version was read back from the iPhone. It adds **Auto → Open Follow Mode**.
-A signed Cerebro build 2 with independent Follow camera demand was prepared;
-installation and startup await confirmation that ROB is physically ready.
+After the operator confirmed ROB was ready, signed Cerebro build 2 from clean
+commit `590e83c` was installed and started through the existing login supervisor.
+Main-camera RGB-D was healthy, both depth workers reported streaming, and the
+controller listener was ready. No controller was connected at observation time,
+and no Follow target was authorized. Normal startup may initialize or move
+hardware. Insta360 remained unavailable, and a configured camera neural-network
+blob was missing. A live phone connection and physical rehearsal remain pending.
 See [the iPhone-only Follow workflow](../iphone-headless-follow.md).

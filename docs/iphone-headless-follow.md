@@ -44,11 +44,27 @@ does not log into or unlock macOS. Establish the login and launch arrangement
 before rehearsal, and verify a complete startup with the monitor disconnected.
 Do not assume that unplugging a monitor proves a cold boot will work.
 
-During the September 13 inspection, the LaunchAgent file existed but its service
-was not loaded, and Cerebro was not running. The installed Mac binary was older
-than the Follow feature. Source builds and a phone update alone do not establish
-an operational robot: the Mac runtime must be updated, started under operator
-supervision, and checked with actual cameras and the authenticated phone.
+At the start of the September 13 inspection, the LaunchAgent file existed but
+its service was not loaded, Cerebro was stopped, and its installed binary
+predated Follow. After the operator confirmed ROB was physically ready,
+Apple Development signed Cerebro 1.0 build 2, built from clean commit `590e83c`,
+was installed at `/Applications/Cerebro.app` and started through this supervisor.
+The prior app is preserved at
+`~/Downloads/Cerebro Before Follow - 2026-09-13.app`.
+
+The running app passed signature verification and remained running through the
+startup observation. Its read-only System Services panel reported synchronized
+main-camera RGB-D streaming and the QUIC/TLS controller listener ready. Both
+depth-camera workers reported streaming. No controller was connected during
+this observation; the installed iPhone build 2 still needs a live connection
+and supervised Follow rehearsal. No Follow target was selected or authorized.
+Normal Cerebro startup and its existing camera-tracking settings can initialize
+or move hardware; this was not a motion-free startup test.
+
+Insta360 had no frames and reported connection errors. The depth-camera log
+also reported a missing configured `yolov8_chess_6shave.blob` model and disabled
+that neural-network stage while RGB-D capture continued. These observations do
+not establish complete perception or physical Follow readiness.
 
 ## Validation
 

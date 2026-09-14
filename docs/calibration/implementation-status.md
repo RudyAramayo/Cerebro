@@ -39,8 +39,9 @@ release or a commissioned geometry solution.
   connected, and preview angles were not baked into joint origins.
 
 The local standalone utility is ad-hoc signed for development. It has not been
-published as a signed/notarized production download. No installed production
-Cerebro binary was replaced, and no robot actuator was commanded.
+published as a signed/notarized production download. At this geometry-only
+milestone no installed Cerebro binary was replaced or actuator commanded;
+the later supervised runtime update is recorded below.
 
 ## Remaining inputs and commissioning
 
@@ -49,21 +50,30 @@ LACT pin centers, joint directions and physical hanging angles require measured
 data. The apparent startup positions of joints 2 and 4 are recorded as an
 operator observation, not numerical calibration.
 
-The installed Cerebro app predates the follow feature. A current source build
-contains it, but installation, verification of the controller on the physical
-phone, and supervised follow testing remain pending. The paired iPhone tunnel
-was unavailable for the read-only version query. No motion authorization or
-sensor gate was bypassed.
+The initial inspection found an installed Cerebro app that predated Follow and
+an unavailable paired iPhone tunnel for the read-only version query. Both local
+apps were subsequently updated as recorded below. Supervised Follow testing
+remains pending; no motion authorization or sensor gate was bypassed.
 
 See [capture and commissioning](capture-and-commissioning.md) for the first
 stationary dataset and the progression to a supervised ball exercise.
 
-## Subsequent iPhone update
+## Subsequent iPhone and Cerebro update
 
 Later on September 13, ROBController build 2 was installed and verified on the
 physical iPhone. It includes a direct Auto-screen Follow entry. The separate
-Cerebro Follow camera fix builds and passes its isolated lifecycle checks;
-the signed local Mac build is prepared, with installation/startup pending an
-operator-ready confirmation. See [iPhone-only Follow](../iphone-headless-follow.md)
-for the current workflow. The original unavailable-phone finding above records
-the earlier calibration inspection.
+Cerebro Follow camera fix builds and passes its isolated lifecycle checks.
+After the operator confirmed physical readiness, Apple Development signed
+Cerebro 1.0 build 2 from clean commit `590e83c` was installed and started through
+its existing login supervisor. Signature verification passed; the process
+remained running during startup observation. The prior app is preserved in
+Downloads as `Cerebro Before Follow - 2026-09-13.app`.
+
+Read-only service status showed healthy aligned main-camera RGB-D and a ready
+controller listener; both depth workers reported streaming. No controller was
+connected at observation time and no Follow target was authorized. Normal
+startup can initialize or move hardware. Insta360 was not supplying frames,
+and the camera worker disabled a neural-network stage because its configured
+`yolov8_chess_6shave.blob` model was absent. Live iPhone connection, complete
+perception readiness and a supervised physical rehearsal remain to be verified.
+See [iPhone-only Follow](../iphone-headless-follow.md) for the current workflow.
