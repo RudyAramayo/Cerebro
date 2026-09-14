@@ -484,7 +484,7 @@ Brake
                                     <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="TSU-2Q-oCx">
                                         <rect key="frame" x="36" y="69" width="96" height="19"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                        <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="8000" tickMarkPosition="above" sliderType="linear" id="gMt-9v-nAz"/>
+                                        <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="4000" tickMarkPosition="above" sliderType="linear" id="gMt-9v-nAz"/>
                                         <connections>
                                             <action selector="applyServoCommand:" target="cHj-5R-xNm" id="4if-wW-iKm"/>
                                         </connections>
@@ -492,7 +492,7 @@ Brake
                                     <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="hG0-md-oq9">
                                         <rect key="frame" x="36" y="92" width="96" height="19"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                        <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="7250" tickMarkPosition="above" sliderType="linear" id="dRn-ZA-klD"/>
+                                        <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4000" maxValue="8000" doubleValue="4000" tickMarkPosition="above" sliderType="linear" id="dRn-ZA-klD"/>
                                         <connections>
                                             <action selector="applyServoCommand:" target="cHj-5R-xNm" id="njM-Q2-Ydi"/>
                                         </connections>
@@ -500,7 +500,7 @@ Brake
                                     <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="QGR-Ln-Gyn">
                                         <rect key="frame" x="36" y="46" width="96" height="19"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                        <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4000" maxValue="8000" doubleValue="6000" tickMarkPosition="above" sliderType="linear" id="qAF-1g-72s"/>
+                                        <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="4000" tickMarkPosition="above" sliderType="linear" id="qAF-1g-72s"/>
                                         <connections>
                                             <action selector="applyServoCommand:" target="cHj-5R-xNm" id="uXA-7N-umX"/>
                                         </connections>
@@ -524,7 +524,7 @@ Brake
                                     <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="KqO-6U-HjP">
                                         <rect key="frame" x="36" y="23" width="96" height="19"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                        <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4000" maxValue="8000" doubleValue="4450" tickMarkPosition="above" sliderType="linear" id="lca-3f-l19"/>
+                                        <sliderCell key="cell" continuous="YES" state="on" alignment="left" minValue="4000" maxValue="8000" doubleValue="4000" tickMarkPosition="above" sliderType="linear" id="lca-3f-l19"/>
                                         <connections>
                                             <action selector="applyServoCommand:" target="cHj-5R-xNm" id="tPW-LF-hlg"/>
                                         </connections>
@@ -540,7 +540,7 @@ Brake
                                     <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="DX1-NI-9b4">
                                         <rect key="frame" x="36" y="138" width="96" height="19"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                        <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="6025.625" tickMarkPosition="above" sliderType="linear" id="rfT-As-d3L"/>
+                                        <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="8000" tickMarkPosition="above" sliderType="linear" id="rfT-As-d3L"/>
                                         <connections>
                                             <action selector="applyServoCommand:" target="cHj-5R-xNm" id="vA9-2j-trv"/>
                                         </connections>
@@ -548,7 +548,7 @@ Brake
                                     <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="IoM-51-Ywd">
                                         <rect key="frame" x="64" y="163" width="41" height="17"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                        <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="R Arm" id="GVU-uK-Bd2">
+                                        <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Laser" id="GVU-uK-Bd2">
                                             <font key="font" metaFont="system"/>
                                             <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
                                             <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
@@ -581,7 +581,7 @@ Brake
                                     <slider verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="8ew-oh-hDz">
                                         <rect key="frame" x="36" y="115" width="96" height="19"/>
                                         <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
-                                        <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="8000" tickMarkPosition="above" sliderType="linear" id="1Rh-6I-Mfs"/>
+                                        <sliderCell key="cell" continuous="YES" alignment="left" minValue="4000" maxValue="8000" doubleValue="4000" tickMarkPosition="above" sliderType="linear" id="1Rh-6I-Mfs"/>
                                         <connections>
                                             <action selector="applyServoCommand:" target="cHj-5R-xNm" id="D2T-Mg-ViW"/>
                                         </connections>
@@ -3190,6 +3190,42 @@ Brake
                                     <action selector="restartSpeech:" target="cHj-5R-xNm" id="hoR-Ty-J4C"/>
                                 </connections>
                             </button>
+                            <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Hvj-Ya-pGl">
+                                <rect key="frame" x="1078" y="870" width="41" height="17"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
+                                <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Pan" id="RnK-Xe-Jgz">
+                                    <font key="font" metaFont="system"/>
+                                    <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
+                                    <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
+                                </textFieldCell>
+                            </textField>
+                            <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="INQ-RK-fR6">
+                                <rect key="frame" x="1078" y="845" width="41" height="17"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
+                                <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Tilt" id="7KG-Ua-reC">
+                                    <font key="font" metaFont="system"/>
+                                    <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
+                                    <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
+                                </textFieldCell>
+                            </textField>
+                            <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="RnE-Hy-pdV">
+                                <rect key="frame" x="1078" y="802" width="41" height="17"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
+                                <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Red" id="gg7-zg-q90">
+                                    <font key="font" metaFont="system"/>
+                                    <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
+                                    <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
+                                </textFieldCell>
+                            </textField>
+                            <textField focusRingType="none" horizontalHuggingPriority="251" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="ALf-X2-VvH">
+                                <rect key="frame" x="1078" y="777" width="41" height="17"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
+                                <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Blue" id="eEP-1c-Loh">
+                                    <font key="font" metaFont="system"/>
+                                    <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
+                                    <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
+                                </textFieldCell>
+                            </textField>
                         </subviews>
                     </view>
                     <connections>
