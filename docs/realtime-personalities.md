@@ -108,10 +108,13 @@ services and link no robot hardware runtime.
 
 The full macOS build and the existing Show/Foundation/loiter/Gemini, settings,
 speech and camera checks are also part of validation. On September 14, a dedicated
-Realtime-only API key was installed in Cerebro's OpenAI Keychain entry. An
-isolated check read that entry and reached the OpenAI service, which returned
-`credit_balance_exhausted` before session setup. A completed live reply remains
-pending API funding; the check sent no camera, microphone or robot tool input.
+Realtime-only API key was installed in Cerebro's OpenAI Keychain entry. After
+funding, live testing exposed the provider's 32-character conversation item ID
+limit. Text and camera item IDs now use unprefixed UUIDs without hyphens, and
+the socket fixtures enforce that limit. Two isolated text-only checks then
+completed with replies in 1.38 and 1.10 seconds, including session setup. These
+checks sent no camera, microphone or robot tool input and did not launch or
+restart Cerebro.
 Acoustic echo behavior and physical motion still need a coordinated rehearsal.
 Start with dialogue and camera descriptions, then separately authorize loiter
 and named gestures. Chess

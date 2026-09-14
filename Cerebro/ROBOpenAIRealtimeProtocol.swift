@@ -39,7 +39,12 @@ enum ROBOpenAIRealtimeProtocol {
         if let values = value as? [Any] { return values.map(schema) }
         return value
     }
-    static func userItem(text: String?, image: Data? = nil, id: String = "rob_" + UUID().uuidString.replacingOccurrences(of: "-", with: "")) -> [String: Any] {
+    static func makeItemID() -> String {
+        // Realtime item IDs accept at most 32 characters. Preserve the full
+        // UUID entropy without adding a prefix or its punctuation.
+        UUID().uuidString.replacingOccurrences(of: "-", with: "")
+    }
+    static func userItem(text: String?, image: Data? = nil, id: String = ROBOpenAIRealtimeProtocol.makeItemID()) -> [String: Any] {
         var content: [[String: Any]] = []
         if let text { content.append(["type": "input_text", "text": text]) }
         if let image { content.append(["type": "input_image", "image_url": "data:image/jpeg;base64," + image.base64EncodedString()]) }

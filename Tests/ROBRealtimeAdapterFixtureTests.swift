@@ -38,6 +38,12 @@ private final class FakeSocket: ROBRealtimeSocket, @unchecked Sendable {
     func send(_ data: Data, completion: @escaping (Error?) -> Void) {
         do {
             let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+            if json["type"] as? String == "conversation.item.create",
+               let item = json["item"] as? [String: Any], let id = item["id"] as? String {
+                guard !id.isEmpty, id.utf8.count <= 32 else {
+                    throw TestFailure.failed("Realtime item ID exceeds the provider's 32-character limit")
+                }
+            }
             lock.lock()
             outgoing.append(json)
             if holdsToolOutputs, let item = json["item"] as? [String: Any],

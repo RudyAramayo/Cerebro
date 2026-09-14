@@ -237,7 +237,7 @@ actor ROBOpenAIRealtimeSession: ROBRealtimeSession {
         catch { connectionFailed(epoch: connection, detail: "OpenAI image send failed."); return false }
     }
     private func sendImage(_ data: Data, generation: UInt64) async throws {
-        let id = "robimg_" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        let id = ROBOpenAIRealtimeProtocol.makeItemID()
         let expected = epoch
         try await send(ROBOpenAIRealtimeProtocol.userItem(text: nil, image: data, id: id), videoGeneration: generation)
         guard epoch == expected else { return }
