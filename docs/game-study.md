@@ -102,7 +102,9 @@ means invalid. Captures are unreviewed. Robot command state is sampled at
 export, not measured shaft feedback or synchronized robot extrinsics.
 
 **camera-hold on** pauses automatic person-camera tracking without issuing a
-servo target. Keep it on for a stationary board. It stays held if the CLI
+servo target. An already-running transition may finish before nudges become
+available; the hold blocks new tracking targets during that wait.
+Keep it on for a stationary board. It stays held if the CLI
 exits; release explicitly when finished. Capture demand is separate, so
 observe off does not release the hold.
 

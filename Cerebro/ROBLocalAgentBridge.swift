@@ -168,8 +168,12 @@ struct ROBLocalAgentRequest: Codable {
             result = ["observing":active]
         case "camera-hold":
             let active = request.arguments["active"] == "true"
-            if active, delegate.localAgentStatus()["cameraAdjustmentAvailable"] as? Bool != true {
-                reply(id:request.id,ok:false,result:["error":"Wait for an idle, settled neck with no active Follow, autonomy or show."]); return
+            // Holding stops new automatic tracking requests without moving a
+            // servo. Requiring a settled neck here would starve the hold while
+            // tracking continuously renews its target. Nudges still wait for
+            // the existing transition to finish and the neck to settle.
+            if active, delegate.localAgentStatus()["cameraHoldAvailable"] as? Bool != true {
+                reply(id:request.id,ok:false,result:["error":"Finish Follow, autonomy, shows and pending robot actions before acquiring camera-hold."]); return
             }
             cameraHoldActive = active
             if active { ROBChessStudyLiveSource.shared.setAgentActive(true) }

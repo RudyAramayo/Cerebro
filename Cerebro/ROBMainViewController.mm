@@ -3096,6 +3096,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     return @{
         @"appVersion": [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"",
         @"build": [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"",
+        @"cameraHoldAvailable": @(idle),
         @"cameraAdjustmentAvailable": @(idle && settled),
         @"followActive": @(self.followPersonCoordinator.active),
         @"autonomyActive": @(self.autonomyCoordinator.active),
