@@ -70,9 +70,10 @@ default to enabled:
 
 Keys are sent only in the Authorization header to `api.openai.com`; the endpoint
 cannot be overridden through a model string. Diagnostics record generic failure
-details rather than raw server payloads or credentials. Event-specific counters
-currently describe Gemini; frame counters aggregate enabled sessions in Dual
-Personality and reset on reload.
+details rather than raw server payloads or credentials. Exhausted API credits
+and quota errors include local billing guidance, including when returned inside
+a failed response. Event-specific counters currently describe Gemini; frame
+counters aggregate enabled sessions in Dual Personality and reset on reload.
 
 ## Motion and Show ownership
 
@@ -101,14 +102,18 @@ remain separate from dialogue generation.
 Run `bash Scripts/test-realtime-adapters.sh` for socket-fixture tests of GA
 envelopes, settings, PCM chunk continuity, turn/tool correlation, concurrent
 tool-result delivery, microphone barge-in, wake-gate closure, camera revocation,
-provider routing, peer rejection and bounded playback-driven dialogue. These
-tests use no cloud services and link no robot hardware runtime.
+provider routing, peer rejection, billing error guidance without provider payload
+disclosure, and bounded playback-driven dialogue. These tests use no cloud
+services and link no robot hardware runtime.
 
 The full macOS build and the existing Show/Foundation/loiter/Gemini, settings,
-speech and camera checks are also part of validation. No OpenAI credential was
-available in the process environment or Cerebro's OpenAI Keychain entry during
-implementation, so an authenticated cloud session, acoustic echo behavior and
-physical motion still need a coordinated rehearsal. Start with dialogue and
-camera descriptions, then separately authorize loiter and named gestures. Chess
+speech and camera checks are also part of validation. On September 14, a dedicated
+Realtime-only API key was installed in Cerebro's OpenAI Keychain entry. An
+isolated check read that entry and reached the OpenAI service, which returned
+`credit_balance_exhausted` before session setup. A completed live reply remains
+pending API funding; the check sent no camera, microphone or robot tool input.
+Acoustic echo behavior and physical motion still need a coordinated rehearsal.
+Start with dialogue and camera descriptions, then separately authorize loiter
+and named gestures. Chess
 execution continues to wait for the commissioned URDF and measured calibration
 described in [the September 25 demo assessment](maker-faire-2026-robot-intelligence.md).

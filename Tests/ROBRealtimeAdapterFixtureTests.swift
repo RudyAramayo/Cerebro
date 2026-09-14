@@ -114,6 +114,7 @@ private final class SessionPool: @unchecked Sendable {
         try testProtocolAndSettings()
         try testResampling()
         try await testSocketLifecycle()
+        try await testProviderFailureDiagnostics()
         try await testMicrophoneInterruption()
         try await testConcurrentToolDelivery()
         try await testRouterAndDialogue()
@@ -231,6 +232,55 @@ private final class SessionPool: @unchecked Sendable {
         try socket.push(["type": "session.updated"])
         try await eventually("Fixture connection failed") { log.values.contains { if case .connectionState(.ready, _) = $0 { return true }; return false } }
         return (session, socket, log)
+    }
+    static func testProviderFailureDiagnostics() async throws {
+        let cases: [(code: String?, type: String, expectedGuidance: String?)] = [
+            ("credit_balance_exhausted", "insufficient_quota", "no credits remaining"),
+            ("insufficient_quota", "server_error", "API credits or quota"),
+            (nil, "insufficient_quota", "API credits or quota"),
+            ("unknown_error", "server_error", nil)
+        ]
+        for nested in [false, true] {
+            for fixture in cases {
+                let (session, socket, log) = try await connectedSession()
+                await session.sendTextTurn("Readiness check", contextID: "failure-check", localFallbackPrompt: "Local readiness check",
+                                          fallbackSource: .typedText, generation: 1, minimumPolicyRevision: 1)
+                var error: [String: Any] = ["type": fixture.type, "message": "private-provider-text sk-fixture-secret"]
+                if let code = fixture.code { error["code"] = code }
+                if nested {
+                    let metadata = (socket.sent.last { $0["type"] as? String == "response.create" }!["response"] as! [String: Any])["metadata"] as! [String: Any]
+                    try socket.push(["type": "response.created", "response": ["id": "failed-response", "metadata": metadata]])
+                    try socket.push(["type": "response.done", "response": ["id": "failed-response", "status": "failed",
+                        "status_details": ["type": "failed", "error": error], "output": [
+                            ["type": "function_call", "call_id": "failed-motion", "name": "robot_action", "arguments": "{}"]
+                        ]]])
+                } else {
+                    try socket.push(["type": "error", "error": error])
+                }
+                try await eventually("Provider error was not reported") {
+                    log.values.contains { if case .connectionState(.failed, _) = $0 { return true }; return false }
+                }
+                let connectionDetails: [String] = log.values.compactMap {
+                    if case .connectionState(.failed, let detail) = $0 { return detail }; return nil
+                }
+                let requestDetails: [String] = log.values.compactMap {
+                    if case .requestFailed(let detail, let context, let fallback) = $0,
+                       context == "failure-check", fallback?.text == "Local readiness check" { return detail }; return nil
+                }
+                try expect(connectionDetails.count == 1 && requestDetails == connectionDetails,
+                           "Provider failure lost the request context or local fallback")
+                let detail = connectionDetails[0]
+                try expect(!detail.contains("private-provider-text") && !detail.contains("sk-fixture-secret"), "Provider payload leaked into diagnostics")
+                if let expected = fixture.expectedGuidance {
+                    try expect(detail.contains(expected) && detail.contains("ChatGPT subscription billing is separate"), "Missing actionable API billing guidance")
+                } else {
+                    let expected = nested ? "OpenAI did not complete the requested response." : "OpenAI rejected a Realtime event. Check model access and the selected settings."
+                    try expect(detail == expected, "Unknown provider error changed the safe generic fallback")
+                }
+                try expect(log.calls.isEmpty && log.texts.isEmpty, "Failed provider response dispatched output")
+                await session.stop(connectionState: .off, failureDetail: nil)
+            }
+        }
     }
     static func testMicrophoneInterruption() async throws {
         let (session, socket, log) = try await connectedSession()

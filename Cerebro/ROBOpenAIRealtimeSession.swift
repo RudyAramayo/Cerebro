@@ -398,7 +398,9 @@ actor ROBOpenAIRealtimeSession: ROBRealtimeSession {
             responseDone = true
             responseRequested = false
             guard response["status"] as? String == "completed" else {
-                connectionFailed(epoch: generation, detail: "OpenAI did not complete the requested response."); return
+                let error = (response["status_details"] as? [String: Any])?["error"] as? [String: Any]
+                connectionFailed(epoch: generation, detail: ROBOpenAIRealtimeProtocol.failureDetail(error,
+                    fallback: "OpenAI did not complete the requested response.")); return
             }
             let (text, calls) = try ROBOpenAIRealtimeProtocol.output(response)
             if !calls.isEmpty {
@@ -429,7 +431,8 @@ actor ROBOpenAIRealtimeSession: ROBRealtimeSession {
                let id = error["event_id"] as? String, cancellationEventIDs.remove(id) != nil {
                 return // The response completed at the same instant as cancellation.
             }
-            connectionFailed(epoch: generation, detail: "OpenAI rejected a Realtime event. Check model access and the selected settings.")
+            connectionFailed(epoch: generation, detail: ROBOpenAIRealtimeProtocol.failureDetail(message["error"] as? [String: Any],
+                fallback: "OpenAI rejected a Realtime event. Check model access and the selected settings."))
         default: break // Deltas are not spoken; only a correlated terminal output is delivered.
         }
     }

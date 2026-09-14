@@ -62,6 +62,17 @@ enum ROBOpenAIRealtimeProtocol {
               object["type"] is String else { throw Failure.invalidEvent }
         return object
     }
+    static func failureDetail(_ error: [String: Any]?, fallback: String) -> String {
+        // Provider messages may contain request data or credentials. Translate
+        // known codes into local operator guidance without exposing the payload.
+        if error?["code"] as? String == "credit_balance_exhausted" {
+            return "The OpenAI API account has no credits remaining. Add API credits on the OpenAI Platform, then reconnect. ChatGPT subscription billing is separate."
+        }
+        if error?["code"] as? String == "insufficient_quota" || error?["type"] as? String == "insufficient_quota" {
+            return "OpenAI API credits or quota are exhausted. Add credits or review API billing and limits on the OpenAI Platform, then reconnect. ChatGPT subscription billing is separate."
+        }
+        return fallback
+    }
     static func output(_ response: [String: Any]) throws -> (String, [GeminiRoboticsToolCall]) {
         let items = response["output"] as? [[String: Any]] ?? []
         guard items.count <= 32 else { throw Failure.invalidEvent }
