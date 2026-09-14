@@ -112,8 +112,154 @@ private struct ROBMessagesTranscriptWindowSmokeTests {
             )
         }
 
+        try verifyRefreshPreservesReadingPosition(workspace, host: host)
+
         controller.close()
         print("ROB Messages transcript window smoke tests passed")
+    }
+
+    private static func verifyRefreshPreservesReadingPosition(
+        _ workspace: ROBMessagesWorkspaceViewController,
+        host: NSView
+    ) throws {
+        let hostWindow = NSWindow(
+            contentRect: host.frame,
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        hostWindow.isReleasedWhenClosed = false
+        hostWindow.contentView = host
+        defer { hostWindow.close() }
+        let views = descendants(of: workspace.view)
+        guard let transcript = views.compactMap({ $0 as? NSTextView }).first,
+              let scroll = transcript.enclosingScrollView,
+              let search = views.compactMap({ $0 as? NSSearchField }).first,
+              let people = views.compactMap({ $0 as? NSTableView }).first,
+              let storage = transcript.textStorage else {
+            throw SmokeFailure.failed("Missing Messages controls for refresh regression")
+        }
+        let editCounter = TextEditCounter()
+        storage.delegate = editCounter
+        var records = (0..<50).map { fixtureRecord($0) }
+        func snapshot() -> ROBMessagesTranscriptBrowseSnapshot {
+            ROBMessagesTranscriptBrowseSnapshot(records: records, isTruncated: false)
+        }
+        func settleLayout() {
+            host.layoutSubtreeIfNeeded()
+            if let container = transcript.textContainer {
+                transcript.layoutManager?.ensureLayout(for: container)
+            }
+        }
+        func expectAtBottom(_ reason: String) throws {
+            guard scroll.documentVisibleRect.maxY >= transcript.bounds.maxY - 2 else {
+                throw SmokeFailure.failed(reason)
+            }
+        }
+
+        workspace.applySnapshot(snapshot())
+        settleLayout()
+        guard transcript.bounds.height > scroll.documentVisibleRect.height * 2 else {
+            throw SmokeFailure.failed("Scroll fixture must be longer than the viewport")
+        }
+        try expectAtBottom("Opening a conversation should show its newest messages")
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: 180))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        transcript.setSelectedRange(NSRange(location: 30, length: 12))
+        hostWindow.makeFirstResponder(search)
+        let originalOrigin = scroll.documentVisibleRect.origin
+        let originalSelection = transcript.selectedRanges
+        let originalResponder = hostWindow.firstResponder
+        let originalEdits = editCounter.count
+
+        for _ in 0..<10 { workspace.applySnapshot(snapshot()) }
+        settleLayout()
+        guard editCounter.count == originalEdits,
+              scroll.documentVisibleRect.origin == originalOrigin,
+              transcript.selectedRanges == originalSelection,
+              hostWindow.firstResponder === originalResponder else {
+            throw SmokeFailure.failed("Idle polling rewrote, scrolled, or focused the conversation")
+        }
+
+        records.append(fixtureRecord(50))
+        workspace.applySnapshot(snapshot())
+        settleLayout()
+        guard transcript.string.contains("Message 50"),
+              scroll.documentVisibleRect.origin == originalOrigin,
+              transcript.selectedRanges == originalSelection,
+              hostWindow.firstResponder === originalResponder else {
+            throw SmokeFailure.failed("An incoming message interrupted reading older messages")
+        }
+
+        let beforeOtherConversation = editCounter.count
+        records.append(fixtureRecord(51, sender: "other@example.test"))
+        workspace.applySnapshot(snapshot())
+        settleLayout()
+        guard editCounter.count == beforeOtherConversation,
+              scroll.documentVisibleRect.origin == originalOrigin,
+              transcript.string.contains("reader@example.test"),
+              !transcript.string.contains("other@example.test"),
+              hostWindow.firstResponder === originalResponder else {
+            throw SmokeFailure.failed("Reordering conversations disturbed the selected transcript")
+        }
+
+        transcript.scrollToEndOfDocument(nil)
+        settleLayout()
+        records.append(fixtureRecord(52))
+        workspace.applySnapshot(snapshot())
+        settleLayout()
+        try expectAtBottom("New messages should follow the end when already at the bottom")
+
+        let editsBeforeStatus = editCounter.count
+        records[records.count - 1] = fixtureRecord(52, deliveryStatus: "failed")
+        workspace.applySnapshot(snapshot())
+        settleLayout()
+        guard editCounter.count > editsBeforeStatus,
+              transcript.string.contains("Delivery failed") else {
+            throw SmokeFailure.failed("Delivery status changes were missed with unchanged message IDs")
+        }
+        people.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
+        settleLayout()
+        guard transcript.string.contains("other@example.test") else {
+            throw SmokeFailure.failed("Explicit conversation selection did not update the transcript")
+        }
+        try expectAtBottom("Switching conversations should show the selected conversation's end")
+        print("Messages refresh regression passed: idle polls, reading position, focus, new messages, delivery status, and conversation switches")
+    }
+
+    private static func fixtureRecord(
+        _ index: Int,
+        sender: String = "reader@example.test",
+        deliveryStatus: String = "delivered"
+    ) -> ROBMessagesTranscriptRecord {
+        let date = Date(timeIntervalSince1970: 1_700_000_000 + Double(index))
+        return ROBMessagesTranscriptRecord(
+            contextID: "fixture-\(index)",
+            receivingAccount: "robot@example.test",
+            sender: sender,
+            chatID: sender,
+            receivedAt: date,
+            inboundText: "Message \(index): some longer conversation text to read while the inbox polls.",
+            hasImage: false,
+            replyText: "Reply \(index)",
+            replyCreatedAt: date.addingTimeInterval(0.1),
+            deliveryStatus: deliveryStatus,
+            deliveryFinishedAt: date.addingTimeInterval(0.2),
+            deliveryError: nil
+        )
+    }
+
+    private final class TextEditCounter: NSObject, NSTextStorageDelegate {
+        var count = 0
+
+        func textStorage(
+            _ textStorage: NSTextStorage,
+            didProcessEditing editedMask: NSTextStorageEditActions,
+            range editedRange: NSRange,
+            changeInLength delta: Int
+        ) {
+            count += 1
+        }
     }
 
     private static func descendants(of view: NSView) -> [NSView] {

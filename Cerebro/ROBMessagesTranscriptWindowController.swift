@@ -754,6 +754,9 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
     private var loadGeneration: UInt64 = 0
     private var isSending = false
     private var bridgeEnabled = false
+    private var hasLoadedSnapshot = false
+    private var isRebuildingPeople = false
+    private var renderedSelectionKey: PersonKey?
 
     private let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -820,6 +823,7 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
     }
 
     public func tableViewSelectionDidChange(_ notification: Notification) {
+        guard !isRebuildingPeople else { return }
         guard people.indices.contains(peopleTable.selectedRow) else {
             selectedKey = nil
             renderSelection()
@@ -1076,22 +1080,32 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
             self.refreshButton.isEnabled = true
             switch result {
             case .success(let snapshot):
-                self.snapshot = snapshot
-                self.rebuildPeople()
+                self.applySnapshot(snapshot)
             case .failure(let error):
-                self.snapshot = ROBMessagesTranscriptBrowseSnapshot(
+                self.applySnapshot(ROBMessagesTranscriptBrowseSnapshot(
                     records: [],
                     isTruncated: false
-                )
-                self.people = []
-                self.peopleTable.reloadData()
+                ))
                 self.activityLabel.stringValue = error.localizedDescription
-                self.renderSelection()
             }
         }
     }
 
+    @nonobjc func applySnapshot(_ snapshot: ROBMessagesTranscriptBrowseSnapshot) {
+        // Inbox status is published on every poll, including idle polls.
+        // Leave the text, selection, scroll position, and keyboard focus alone
+        // when the archive has not changed.
+        guard !hasLoadedSnapshot || snapshot != self.snapshot else { return }
+        hasLoadedSnapshot = true
+        self.snapshot = snapshot
+        rebuildPeople()
+    }
+
     private func rebuildPeople() {
+        // reloadData/selectRowIndexes can emit intermediate selection changes.
+        // Render only the final selection and never focus the composer here.
+        isRebuildingPeople = true
+        defer { isRebuildingPeople = false }
         let previousSelection = selectedKey
         let records = Dictionary(grouping: snapshot.records) {
             PersonKey(receivingAccount: $0.receivingAccount, sender: $0.sender)
@@ -1164,7 +1178,10 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
             accountLabel.stringValue = isSearching
                 ? "Try another person or phrase."
                 : "Enable transcript memory in Settings to use the Messages workspace."
-            transcriptTextView.string = ""
+            if !transcriptTextView.string.isEmpty {
+                transcriptTextView.string = ""
+            }
+            renderedSelectionKey = nil
             updateComposerState()
             return
         }
@@ -1191,13 +1208,39 @@ public final class ROBMessagesTranscriptWindowController: NSWindowController,
                 reply.deliveryError
             ))
         }
-        transcriptTextView.textStorage?.setAttributedString(
-            transcript(
-                events.sorted { $0.date < $1.date },
-                incomingSender: person.key.sender
-            )
+        let renderedTranscript = transcript(
+            events.sorted { $0.date < $1.date },
+            incomingSender: person.key.sender
         )
-        transcriptTextView.scrollToEndOfDocument(nil)
+        let changedConversation = renderedSelectionKey != person.key
+        if changedConversation ||
+            transcriptTextView.textStorage?.isEqual(to: renderedTranscript) != true {
+            let scrollView = transcriptTextView.enclosingScrollView
+            let visibleRect = scrollView?.documentVisibleRect ?? .zero
+            let wasAtBottom = visibleRect.maxY >= transcriptTextView.bounds.maxY - 2
+            let selectedRanges = transcriptTextView.selectedRanges
+            transcriptTextView.textStorage?.setAttributedString(renderedTranscript)
+            // Lay out the new text before restoring the viewport or following
+            // the end. Otherwise deferred layout can move it again afterward.
+            if let container = transcriptTextView.textContainer {
+                transcriptTextView.layoutManager?.ensureLayout(for: container)
+            }
+            if changedConversation || wasAtBottom {
+                transcriptTextView.scrollToEndOfDocument(nil)
+            } else if let scrollView {
+                transcriptTextView.selectedRanges = selectedRanges.map { value in
+                    let range = value.rangeValue
+                    let location = min(range.location, renderedTranscript.length)
+                    return NSValue(range: NSRange(
+                        location: location,
+                        length: min(range.length, renderedTranscript.length - location)
+                    ))
+                }
+                scrollView.contentView.scroll(to: visibleRect.origin)
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+            }
+        }
+        renderedSelectionKey = person.key
         updateComposerState()
     }
 
