@@ -292,6 +292,14 @@ struct ROBChessBoardMap: Codable, Equatable {
         let d = h[6]*u + h[7]*v + 1
         return ROBChessPoint(x: (h[0]*u+h[1]*v+h[2])/d, y: (h[3]*u+h[4]*v+h[5])/d)
     }
+    func boardPoint(image p:ROBChessPoint) -> ROBChessPoint? {
+        let a = h[0]-p.x*h[6], b = h[1]-p.x*h[7], c = p.x-h[2]
+        let d = h[3]-p.y*h[6], e = h[4]-p.y*h[7], f = p.y-h[5]
+        let determinant = a*e-b*d
+        guard determinant.isFinite, abs(determinant) > 1e-10 else { return nil }
+        let point = ROBChessPoint(x:(c*e-b*f)/determinant,y:(a*f-c*d)/determinant)
+        return point.x.isFinite && point.y.isFinite ? point : nil
+    }
     func polygon(square: Int) -> [ROBChessPoint] {
         let f = Double(square % 8)/8, r = Double(7-square/8)/8
         return [(f,r),(f+0.125,r),(f+0.125,r+0.125),(f,r+0.125)].map { imagePoint(u:$0.0,v:$0.1) }

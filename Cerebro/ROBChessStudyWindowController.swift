@@ -296,7 +296,8 @@ private final class ROBChessDiagramView: NSView {
         live = false; frozen = true
     }
     @objc private func freezeReview() {
-        guard !busy else { return }
+        // Stop incoming frames even while the current frame is being analyzed.
+        // Its completion may finish normally; review stays disabled until then.
         if live, let frame, ProcessInfo.processInfo.systemUptime-frame.receivedUptime > 3 {
             status.stringValue = "The live feed is stale. Wait for a fresh frame before freezing."; return
         }
@@ -341,7 +342,7 @@ private final class ROBChessDiagramView: NSView {
         let base = baseline, prior = previous, currentPosition = position
         queue.async { [weak self] in
             let result = Result { () throws -> (ROBChessRaster,ROBChessEvidence,[Double],[ROBChessProposal],Bool) in
-                let board = try frame.raster.rectified(map:map)
+                let board = try frame.raster.rectified(map:map,size:256)
                 var evidence = board.evidence()
                 evidence.heightsMillimeters = frame.depth?.heights(map:map,position:currentPosition)
                 let changes = base.map { evidence.changes(from:$0) } ?? []
@@ -398,7 +399,7 @@ private final class ROBChessDiagramView: NSView {
             frame != nil && frame?.handVisible == false && frozen && !busy && !marking && review.state == .on
         baselineButton.isEnabled = ready && reviewedMove.isEmpty && (baseline == nil || pendingCorrection)
         moveButton.isEnabled = ready && baseline != nil && !pendingCorrection && (try? position.applying(uci:reviewedMove)) != nil
-        freezeButton.isEnabled = live && !busy
+        freezeButton.isEnabled = live
         liveButton.isEnabled = !live && !busy
         review.isEnabled = frozen && !busy && map != nil && frame?.handVisible == false
         memoryLabel.stringValue = "\(session?.manifest.records.count ?? 0) reviewed frames • \(memory.examples.count) saved appearance examples\n\(session?.directory.lastPathComponent ?? "Create a session to save teaching data.")"

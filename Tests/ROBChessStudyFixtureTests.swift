@@ -68,6 +68,8 @@ import ImageIO
         let corners:[ROBChessPoint] = [.init(x:0.1,y:0.1),.init(x:0.9,y:0.1),.init(x:0.9,y:0.9),.init(x:0.1,y:0.9)]
         let map = try ROBChessBoardMap(corners:corners)
         check(abs(map.imagePoint(u:0.5,v:0.5).x-0.5)<1e-9,"board center")
+        let inverse = map.boardPoint(image:map.imagePoint(u:0.15,v:0.85))!
+        check(abs(inverse.x-0.15)<1e-9 && abs(inverse.y-0.85)<1e-9,"board projection round trip")
         check(map.polygon(square:0)[0].y > 0.7,"a1 is at bottom")
         let turned = try ROBChessBoardMap(corners:[corners[2],corners[3],corners[0],corners[1]])
         check(abs(turned.imagePoint(u:0,v:0).x-corners[2].x)<1e-9,"180-degree semantic orientation")
@@ -101,6 +103,17 @@ import ImageIO
         let heights = depthFrame.heights(map:map,position:next)!
         check(abs(heights[28]!-80)<0.5,"aligned depth height above board")
         check(abs(heights[20]!)<0.5,"empty square zero height")
+        var raisedDepth = [UInt8](repeating:0,count:640*640*2)
+        for y in 0..<640 { for x in 0..<640 {
+            let footX = 320+Double(x-320)*0.82, footY = 320+Double(y-320)*0.82
+            let value:UInt16 = (90...115).contains(footX) && (532...559).contains(footY) ? 820 : 1000
+            let i = (y*640+x)*2; raisedDepth[i] = UInt8(value&255); raisedDepth[i+1] = UInt8(value>>8)
+        }}
+        let raisedFrame = ROBChessStudyDepth(width:640,height:640,millimetersLittleEndian:Data(raisedDepth),
+            fx:500,fy:500,cx:320,cy:320,cameraSequence:2,cameraTimestampNanoseconds:2)
+        let raisedHeights = raisedFrame.heights(map:map,position:start)!
+        check(abs(raisedHeights[0]!-180)<0.5,"3D footprint assigns projected tall piece to a1")
+        check(raisedHeights[1] == nil,"missing occupied-square depth stays unknown")
         let destination = URL(fileURLWithPath:CommandLine.arguments[1],isDirectory:true)
         try FileManager.default.createDirectory(at:destination,withIntermediateDirectories:true)
         try before.encoded("public.png" as CFString).write(to:destination.appendingPathComponent("starting.png"))

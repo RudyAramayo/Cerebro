@@ -68,7 +68,9 @@ appearances form a bounded nearest-example memory. Corrections replace
 superseded examples when that memory is rebuilt.
 
 For similar marble queens and bishops, the app can fit a camera-frame board
-plane from known empty squares and estimate heights above it. Inadequate
+plane from known empty squares and estimate heights above it. Depth samples
+are assigned using their 3D footprints on that plane, so a tall piece's image
+projection does not automatically assign its height to the next square. Inadequate
 fits are rejected and missing depth stays missing. These are appearance cues,
 not millimeter-accuracy claims or certified grasp surfaces.
 

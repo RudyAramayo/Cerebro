@@ -148,6 +148,8 @@ struct ROBChessStudyDepth: Codable {
     /// Robust camera-frame board plane from known empty-square centers. This
     /// is an appearance cue, not robot extrinsics or a certified grasp surface.
     func heights(map:ROBChessBoardMap,position:ROBChessPosition) -> [Double?]? {
+        guard valid, let fx,let fy,let cx,let cy,fx > 0,fy > 0,
+              [fx,fy,cx,cy].allSatisfy({ $0.isFinite }) else { return nil }
         var points = [SIMD3<Double>]()
         for square in 0..<64 where position.board[square] == "." {
             let p = map.imagePoint(u:(Double(square%8)+0.5)/8,v:(Double(7-square/8)+0.5)/8)
@@ -178,19 +180,37 @@ struct ROBChessStudyDepth: Codable {
         let normal = sqrt(plane[0]*plane[0]+plane[1]*plane[1]+1)
         let residual = points.reduce(0.0) { $0 + abs($1.z-plane[0]*$1.x-plane[1]*$1.y-plane[2])/normal }/Double(points.count)
         guard residual < 0.006 else { return nil }
+        // A tall piece can appear over the next square in RGB. Assign its 3D
+        // samples by their perpendicular footprints on the board plane, not
+        // by the square containing their image pixels. Sample at most ~64k
+        // pixels so the live UI remains bounded on larger camera frames.
+        let direction = SIMD3(plane[0]/normal,plane[1]/normal,-1/normal)
+        let step = max(1,Int(ceil(sqrt(Double(width*height)/64_000))))
+        var samples = [[Double]](repeating:[],count:64)
+        for y in stride(from:0,to:height,by:step) {
+            for x in stride(from:0,to:width,by:step) {
+                guard let p = point(x:x,y:y) else { continue }
+                let elevation = (plane[0]*p.x+plane[1]*p.y+plane[2]-p.z)/normal
+                guard elevation >= -0.015, elevation <= 0.200001 else { continue }
+                let foot = p-direction*elevation
+                guard foot.z > 0.1,
+                      let uv = map.boardPoint(image:.init(x:(foot.x*fx/foot.z+cx)/Double(width),
+                                                         y:(foot.y*fy/foot.z+cy)/Double(height))),
+                      uv.x >= 0,uv.x < 1,uv.y >= 0,uv.y < 1 else { continue }
+                let file = Int(uv.x*8), row = Int(uv.y*8)
+                let localX = uv.x*8-Double(file),localY = uv.y*8-Double(row)
+                guard (0.1...0.9).contains(localX),(0.1...0.9).contains(localY) else { continue }
+                samples[(7-row)*8+file].append(max(0,elevation*1000))
+            }
+        }
         return (0..<64).map { square in
-            var heights = [Double]()
-            for y in 0..<9 { for x in 0..<9 {
-                let p = map.imagePoint(u:(Double(square%8)+0.1+Double(x)*0.1)/8,
-                                      v:(Double(7-square/8)+0.1+Double(y)*0.1)/8)
-                if let p = point(x:Int(p.x*Double(width)),y:Int(p.y*Double(height))) {
-                    let h = (plane[0]*p.x+plane[1]*p.y+plane[2]-p.z)/normal*1000
-                    if h >= -15 && h <= 200 { heights.append(max(0,h)) }
-                }
-            }}
-            guard heights.count >= 20 else { return nil }
-            heights.sort()
-            return heights[Int(Double(heights.count-1)*0.90)]
+            let values = samples[square]
+            let raised = values.filter { $0 > 15 }.sorted()
+            if raised.count >= 8 { return raised[Int(Double(raised.count-1)*0.95)] }
+            // An occupied square without enough raised samples has missing
+            // evidence, not a zero-height piece. Never fill depth holes.
+            guard position.board[square] == ".",values.count >= 20 else { return nil }
+            return values.sorted()[Int(Double(values.count-1)*0.95)]
         }
     }
 }
