@@ -32,6 +32,7 @@ import Vision
         applyTorsoRotation rotation: Float
     )
     func followPersonCoordinatorDidRequestActuatorRelease(_ coordinator: ROBFollowPersonCoordinator)
+    func followPersonCoordinator(_ coordinator: ROBFollowPersonCoordinator, setMainCameraDemandActive active: Bool)
     func followPersonCoordinator(
         _ coordinator: ROBFollowPersonCoordinator,
         publishData data: Data,
@@ -76,6 +77,7 @@ import Vision
     private let ciContext = CIContext(options: [.cacheIntermediates: false])
     private var pendingPreviewRequest: ROBFollowTargetMessage?
     private var pendingPreview: PendingPreview?
+    private var mainCameraDemandActive = false
     private var controllerID: UUID?
     private var sessionID: UUID?
     private var requestID: UUID?
@@ -203,13 +205,23 @@ import Vision
                     )
                     return
                 }
-                stopOnQueue(reason: "A new target selection was requested", publish: false)
+                stopOnQueue(reason: "A new target selection was requested", publish: false, preserveMainCameraDemand: true)
             }
             controllerID = message.controllerID
             sessionID = message.sessionID
             requestID = message.requestID
             pendingPreviewRequest = message
             pendingPreview = nil
+            setMainCameraDemand(true)
+            queue.asyncAfter(deadline: .now() + 10) { [weak self] in
+                guard let self,
+                      self.pendingPreviewRequest?.requestID == message.requestID,
+                      self.pendingPreviewRequest?.controllerID == message.controllerID,
+                      self.pendingPreviewRequest?.sessionID == message.sessionID else { return }
+                self.pendingPreviewRequest = nil
+                self.setMainCameraDemand(false)
+                self.publish(state: .blocked, detail: "The main camera did not supply a frame. Check camera health and refresh the preview.", force: true)
+            }
             publish(
                 state: .idle,
                 detail: "Waiting for the next main-camera frame to show selectable people."
@@ -247,6 +259,7 @@ import Vision
             .prefix(8)
         guard !observations.isEmpty,
               let jpeg = previewJPEG(from: pixelBuffer) else {
+            setMainCameraDemand(false)
             publish(state: .blocked, detail: "No selectable person is visible in the main camera. Try Refresh Preview.")
             return
         }
@@ -277,6 +290,16 @@ import Vision
             candidates: candidates,
             createdAtMilliseconds: now
         )
+        // Keep capture alive while the operator selects the target, then
+        // release this consumer if the preview expires without authorization.
+        queue.asyncAfter(deadline: .now() + Double(ROBFollowTargetProtocol.previewLifetimeMilliseconds) / 1_000) { [weak self] in
+            guard let self, !self.activeOnQueue,
+                  self.pendingPreview?.request.requestID == request.requestID,
+                  self.pendingPreview?.createdAtMilliseconds == now else { return }
+            self.pendingPreview = nil
+            self.setMainCameraDemand(false)
+            self.publish(state: .blocked, detail: "The person selection expired. Refresh the preview to select again.", force: true)
+        }
         publishMessage(ROBFollowTargetMessage(
             kind: .preview,
             requestID: request.requestID,
@@ -308,7 +331,7 @@ import Vision
             return
         }
 
-        stopOnQueue(reason: "Replacing the previous follow target", publish: false)
+        stopOnQueue(reason: "Replacing the previous follow target", publish: false, preserveMainCameraDemand: true)
         controllerID = message.controllerID
         sessionID = message.sessionID
         requestID = message.requestID
@@ -330,6 +353,7 @@ import Vision
         torsoDemand = 0
         trackingPoseReady = false
         setActive(true)
+        setMainCameraDemand(true)
         ROBTraversabilityRuntime.shared.setAutonomousMotionActive(true)
         ROBInsta360CameraService.shared.setFollowVideoDemandActive(true)
         startPlanner()
@@ -505,7 +529,7 @@ import Vision
         publish(state: .following, detail: String(format: "Following at %.1f m • main camera locked • belly path clear.", distance))
     }
 
-    private func stopOnQueue(reason: String, publish shouldPublish: Bool) {
+    private func stopOnQueue(reason: String, publish shouldPublish: Bool, preserveMainCameraDemand: Bool = false) {
         let hadSession = controllerID != nil && sessionID != nil && requestID != nil
         plannerTimer?.cancel()
         plannerTimer = nil
@@ -517,6 +541,7 @@ import Vision
         latestDistanceMeters = nil
         trackingPoseReady = false
         setActive(false)
+        if !preserveMainCameraDemand { setMainCameraDemand(false) }
         ROBTraversabilityRuntime.shared.setAutonomousMotionActive(false)
         ROBInsta360CameraService.shared.setFollowVideoDemandActive(false)
         dispatchDelegate { coordinator, delegate in
@@ -529,6 +554,14 @@ import Vision
     private func requestBaseStop() {
         dispatchDelegate { coordinator, delegate in
             delegate.followPersonCoordinatorDidRequestBaseStop(coordinator)
+        }
+    }
+
+    private func setMainCameraDemand(_ active: Bool) {
+        guard mainCameraDemandActive != active else { return }
+        mainCameraDemandActive = active
+        dispatchDelegate { coordinator, delegate in
+            delegate.followPersonCoordinator(coordinator, setMainCameraDemandActive: active)
         }
     }
 

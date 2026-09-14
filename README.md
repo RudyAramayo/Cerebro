@@ -28,6 +28,8 @@ post-action runs.
 
 Cerebro is the macOS controller and operator interface for the R.O.B. droid.
 
+For iPhone-only stage operation, see [Follow without a robot monitor](docs/iphone-headless-follow.md).
+
 <img width="2393" height="1063" alt="Screenshot 2025-08-05 at 3 58 58 PM" src="https://github.com/user-attachments/assets/951fcac3-bdcf-470d-927f-fce3f94018d1" />
 
 ## Training and camera recording

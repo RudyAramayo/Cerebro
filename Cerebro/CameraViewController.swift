@@ -689,6 +689,7 @@ struct ROBCameraServiceStatusSnapshot: Sendable {
     let sessionRequested: Bool
     let visibleConsumer: Bool
     let automaticProcessingConsumer: Bool
+    let followConsumer: Bool
     let geminiConsumer: Bool
     let remoteMediaConsumer: Bool
     let videoServer: ROBVideoServerStatusSnapshot?
@@ -708,6 +709,7 @@ final class CameraViewController: NSViewController {
     private var lastMainCameraResolution = ROBMLXRuntime.shared.mainCameraResolution
     private var remoteVideoIsActive = false
     private var geminiVideoIsActive = false
+    private var followVideoIsActive = false
     private var recordingDemandActive = false
     private var cameraSessionIsRequested = false
     private var cameraStatusState = CameraSourceState.stopped
@@ -899,6 +901,18 @@ final class CameraViewController: NSViewController {
         reconcileCameraSession()
     }
 
+    /// Follow owns capture independently of all local diagnostics and detectors.
+    @objc(setFollowVideoDemandActive:)
+    func setFollowVideoDemandActive(_ isActive: Bool) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { [weak self] in self?.setFollowVideoDemandActive(isActive) }
+            return
+        }
+        guard followVideoIsActive != isActive else { return }
+        followVideoIsActive = isActive
+        reconcileCameraSession()
+    }
+
     /// Controls only the local diagnostics renderer. Camera capture remains
     /// governed by the independent perception, Gemini, recording, and remote
     /// media consumers.
@@ -952,6 +966,7 @@ final class CameraViewController: NSViewController {
         guard let cameraManager else { return }
         let shouldRun = cameraViewIsVisible
             || automaticProcessingNeedsFrames
+            || followVideoIsActive
             || remoteVideoIsActive
             || geminiVideoIsActive
             || recordingDemandActive
@@ -1093,6 +1108,7 @@ final class CameraViewController: NSViewController {
             sessionRequested: cameraSessionIsRequested,
             visibleConsumer: cameraViewIsVisible,
             automaticProcessingConsumer: automaticProcessingNeedsFrames,
+            followConsumer: followVideoIsActive,
             geminiConsumer: geminiVideoIsActive,
             remoteMediaConsumer: remoteVideoIsActive,
             videoServer: videoServer?.statusSnapshot(),

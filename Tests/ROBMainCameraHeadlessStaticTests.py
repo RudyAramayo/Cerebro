@@ -147,7 +147,7 @@ def main() -> None:
     runtime_candidates = [
         (name, body)
         for name, body in methods.items()
-        if "CameraWindowController" in body
+        if 'instantiateControllerWithIdentifier:@"CameraWindowController"' in body
         and "cameraViewController" in body
         and "showWindow" not in body
     ]
@@ -339,7 +339,7 @@ def main() -> None:
     )
 
     preview_visibility = braced_declaration(
-        MANAGER, "func setPreviewVisible(_ visible: Bool)"
+        MANAGER, "func setPreviewVisible(_ visible: Bool) {"
     )
     for token in (
         "previewVisible = visible",
@@ -432,7 +432,7 @@ def main() -> None:
         require(token in frame_fanout, f"Headless main-camera frame fan-out lost: {token}")
     require(
         "if cameraViewIsVisible" in frame_fanout
-        and "depthOverlayRenderer.offer" in frame_fanout,
+        and "faceDepthPointCloudRenderer.offer" in frame_fanout,
         "Depth overlay rendering is no longer gated by diagnostics visibility",
     )
 

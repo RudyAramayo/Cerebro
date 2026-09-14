@@ -3294,6 +3294,15 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 #pragma mark - Controller-authorized person follow
 
+- (void)followPersonCoordinator:(ROBFollowPersonCoordinator *)coordinator
+        setMainCameraDemandActive:(BOOL)active
+{
+    if (active) {
+        [self ensureMainCameraRuntime];
+    }
+    [self.cameraViewController setFollowVideoDemandActive:active];
+}
+
 - (BOOL)followPersonCoordinatorPrepareTrackingPose:(ROBFollowPersonCoordinator *)coordinator
 {
     if (!coordinator.active || self.serialBox == nil) {

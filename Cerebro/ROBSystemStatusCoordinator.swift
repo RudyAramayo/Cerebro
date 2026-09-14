@@ -357,6 +357,7 @@ import FoundationModels
         let consumers = [
             camera.visibleConsumer ? "preview" : nil,
             camera.automaticProcessingConsumer ? "perception" : nil,
+            camera.followConsumer ? "follow" : nil,
             camera.geminiConsumer ? "Gemini" : nil,
             camera.remoteMediaConsumer ? "controller media" : nil,
         ].compactMap { $0 }
