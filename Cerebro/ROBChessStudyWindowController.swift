@@ -8,6 +8,10 @@ private final class ROBChessCameraView: NSView {
     var highlighted: Set<Int> = [] { didSet { needsDisplay = true } }
     var onPoint: ((ROBChessPoint) -> Void)?
     override var isFlipped: Bool { true }
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        needsDisplay = true
+    }
     private var imageRect: CGRect {
         guard let image, image.size.width > 0, image.size.height > 0 else { return bounds }
         let scale = min(bounds.width/image.size.width,bounds.height/image.size.height)
@@ -81,6 +85,10 @@ private final class ROBChessDiagramView: NSView {
     }
 }
 
+private final class ROBChessReviewDocumentView: NSView {
+    override var isFlipped: Bool { true }
+}
+
 @objcMembers final class ROBChessStudyWindowController: NSWindowController, NSWindowDelegate, NSTextFieldDelegate {
     static let shared = ROBChessStudyWindowController()
     private let cameraView = ROBChessCameraView()
@@ -96,8 +104,13 @@ private final class ROBChessDiagramView: NSView {
     private let baselineButton = NSButton(title:"Save shown position",target:nil,action:nil)
     private let moveButton = NSButton(title:"Confirm move + teach",target:nil,action:nil)
     private let review = NSButton(checkboxWithTitle:"I checked all 64 squares against this diagram",target:nil,action:nil)
+    private let cameraFocusButton = NSButton(title:"Enlarge camera",target:nil,action:nil)
     private let moveField = NSTextField(string:"")
     private let suggestions = NSPopUpButton()
+    private var reviewPanel: NSScrollView?
+    private var cameraWithPanelTrailing: NSLayoutConstraint?
+    private var cameraFullWidthTrailing: NSLayoutConstraint?
+    private var cameraExpanded = false
     private let queue = DispatchQueue(label:"com.orbitusrobotics.chess-study-analysis",qos:.utility)
     private var busy = false
     private var epoch = 0
@@ -124,18 +137,47 @@ private final class ROBChessDiagramView: NSView {
         let window = NSWindow(contentRect:CGRect(x:80,y:70,width:1230,height:840),
             styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
         window.title = "ROB Chess Study"
-        window.minSize = CGSize(width:1050,height:780)
+        window.minSize = CGSize(width:880,height:560)
+        window.collectionBehavior.insert(.fullScreenPrimary)
+        window.setFrameAutosaveName("ROBChessStudy.Window")
         super.init(window:window)
         window.delegate = self
         buildUI()
+        setCameraExpanded(UserDefaults.standard.bool(forKey:"ROBChessStudyCameraExpandedV1"))
         ROBChessStudyLiveSource.shared.onFrame = { [weak self] in self?.receive($0) }
         ROBChessStudyLiveSource.shared.onError = { [weak self] in self?.status.stringValue = $0 }
         timer = Timer.scheduledTimer(withTimeInterval:1,repeats:true) { [weak self] _ in self?.updateAge() }
         updateControls()
     }
     required init?(coder:NSCoder) { fatalError("init(coder:) is unsupported") }
-    override func showWindow(_ sender:Any?) { super.showWindow(sender); window?.makeKeyAndOrderFront(sender) }
+    override func showWindow(_ sender:Any?) {
+        super.showWindow(sender)
+        if let window, let visible = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame,
+           !visible.contains(window.frame) {
+            window.setFrame(visible,display:true)
+        }
+        window?.makeKeyAndOrderFront(sender)
+    }
     func windowWillClose(_ notification:Notification) { stopLive(); epoch += 1 }
+    func windowWillUseStandardFrame(_ window:NSWindow, defaultFrame:NSRect) -> NSRect {
+        window.screen?.visibleFrame ?? defaultFrame
+    }
+
+    @objc private func fitToScreen() {
+        guard let window, let visible = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame else { return }
+        window.setFrame(visible,display:true)
+    }
+    @objc private func toggleCameraSize() { setCameraExpanded(!cameraExpanded) }
+    private func setCameraExpanded(_ expanded:Bool) {
+        cameraExpanded = expanded
+        UserDefaults.standard.set(expanded,forKey:"ROBChessStudyCameraExpandedV1")
+        cameraWithPanelTrailing?.isActive = false
+        cameraFullWidthTrailing?.isActive = false
+        reviewPanel?.isHidden = expanded
+        (expanded ? cameraFullWidthTrailing : cameraWithPanelTrailing)?.isActive = true
+        cameraFocusButton.title = expanded ? "Show review panel" : "Enlarge camera"
+        cameraView.needsDisplay = true
+    }
 
     private func button(_ title:String,_ action:Selector) -> NSButton {
         let result = NSButton(title:title,target:self,action:action); result.bezelStyle = .rounded; return result
@@ -161,16 +203,30 @@ private final class ROBChessDiagramView: NSView {
         #if ROB_CHESS_STANDALONE
         liveButton.isHidden = true
         #endif
-        sourceLabel.font = .monospacedSystemFont(ofSize:11,weight:.regular)
+        sourceLabel.font = .monospacedSystemFont(ofSize:13,weight:.regular)
+        sourceLabel.lineBreakMode = .byTruncatingMiddle
+        sourceLabel.setContentCompressionResistancePriority(.defaultLow,for:.horizontal)
         cameraView.wantsLayer = true; cameraView.layer?.cornerRadius = 12
         cameraView.onPoint = { [weak self] in self?.mark($0) }
-        let mapping = NSStackView(views:[button("Mark board corners",#selector(markCorners)),
-            NSTextField(labelWithString:"a8 → h8 → h1 → a1 • outer edges of the playing squares")])
+        cameraFocusButton.target = self; cameraFocusButton.action = #selector(toggleCameraSize)
+        cameraFocusButton.bezelStyle = .rounded
+        cameraFocusButton.identifier = NSUserInterfaceItemIdentifier("ROB.Chess.CameraSize")
+        let fitButton = button("Fit to Screen",#selector(fitToScreen))
+        fitButton.identifier = NSUserInterfaceItemIdentifier("ROB.Chess.FitScreen")
+        let mappingButtons = NSStackView(views:[button("Mark board corners",#selector(markCorners)),cameraFocusButton,fitButton])
+        mappingButtons.spacing = 8
+        let cornerInstructions = NSTextField(wrappingLabelWithString:"a8 → h8 → h1 → a1 • outer edges of the playing squares")
+        cornerInstructions.font = .systemFont(ofSize:14)
+        let mapping = column([mappingButtons,cornerInstructions],spacing:5)
         let left = column([sourceLabel,cameraView,mapping,status,detail])
         cameraView.translatesAutoresizingMaskIntoConstraints = false
-        cameraView.heightAnchor.constraint(greaterThanOrEqualToConstant:440).isActive = true
+        cameraView.heightAnchor.constraint(greaterThanOrEqualToConstant:140).isActive = true
         cameraView.widthAnchor.constraint(equalTo:left.widthAnchor).isActive = true
+        cameraView.setContentHuggingPriority(NSLayoutConstraint.Priority(1),for:.vertical)
+        cameraView.setContentCompressionResistancePriority(.defaultLow,for:.vertical)
+        left.setContentHuggingPriority(.defaultLow,for:.vertical)
         status.font = .systemFont(ofSize:15,weight:.semibold)
+        detail.font = .systemFont(ofSize:13)
         detail.textColor = .secondaryLabelColor
         let boardTitle = NSTextField(labelWithString:"Position to save • a8 at top left")
         boardTitle.font = .systemFont(ofSize:13,weight:.semibold)
@@ -195,17 +251,48 @@ private final class ROBChessDiagramView: NSView {
         let right = column([boardTitle,diagram,fenLabel,positionRow,suggestions,moveField,review,saveRow,memoryLabel,coachLabel],spacing:8)
         right.widthAnchor.constraint(equalToConstant:340).isActive = true
         for label in [fenLabel,memoryLabel,coachLabel] { label.widthAnchor.constraint(equalToConstant:332).isActive = true }
-        let body = NSStackView(views:[left,right]); body.orientation = .horizontal; body.alignment = .top; body.spacing = 22; body.distribution = .fill
-        left.setContentHuggingPriority(.defaultLow,for:.horizontal)
-        let root = column([title,subtitle,toolbar,body],spacing:12)
-        root.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(root)
+        // The review controls scroll on short monitors; the camera owns the
+        // remaining window area and always aspect-fits both pixels and overlay.
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true
+        scroll.drawsBackground = false
+        let document = ROBChessReviewDocumentView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        right.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(right); scroll.documentView = document
         NSLayoutConstraint.activate([
-            root.leadingAnchor.constraint(equalTo:content.leadingAnchor,constant:22),
-            root.trailingAnchor.constraint(equalTo:content.trailingAnchor,constant:-22),
-            root.topAnchor.constraint(equalTo:content.topAnchor,constant:20),
-            root.bottomAnchor.constraint(lessThanOrEqualTo:content.bottomAnchor,constant:-18),
-            body.widthAnchor.constraint(equalTo:root.widthAnchor),
+            document.widthAnchor.constraint(equalToConstant:340),
+            right.leadingAnchor.constraint(equalTo:document.leadingAnchor),
+            right.topAnchor.constraint(equalTo:document.topAnchor),
+            right.bottomAnchor.constraint(equalTo:document.bottomAnchor),
+            right.trailingAnchor.constraint(equalTo:document.trailingAnchor)
+        ])
+        reviewPanel = scroll
+        let header = column([title,subtitle,toolbar],spacing:12)
+        let body = NSView()
+        for view in [header,body] { view.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(view) }
+        for view in [left,scroll] { view.translatesAutoresizingMaskIntoConstraints = false; body.addSubview(view) }
+        cameraWithPanelTrailing = left.trailingAnchor.constraint(equalTo:scroll.leadingAnchor,constant:-22)
+        cameraFullWidthTrailing = left.trailingAnchor.constraint(equalTo:body.trailingAnchor)
+        NSLayoutConstraint.activate([
+            header.leadingAnchor.constraint(equalTo:content.leadingAnchor,constant:22),
+            header.trailingAnchor.constraint(equalTo:content.trailingAnchor,constant:-22),
+            header.topAnchor.constraint(equalTo:content.topAnchor,constant:20),
+            body.topAnchor.constraint(equalTo:header.bottomAnchor,constant:12),
+            body.leadingAnchor.constraint(equalTo:header.leadingAnchor),
+            body.trailingAnchor.constraint(equalTo:header.trailingAnchor),
+            body.bottomAnchor.constraint(equalTo:content.bottomAnchor,constant:-18),
+            left.leadingAnchor.constraint(equalTo:body.leadingAnchor),
+            left.topAnchor.constraint(equalTo:body.topAnchor),
+            left.bottomAnchor.constraint(equalTo:body.bottomAnchor),
+            scroll.topAnchor.constraint(equalTo:body.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo:body.bottomAnchor),
+            scroll.trailingAnchor.constraint(equalTo:body.trailingAnchor),
+            scroll.widthAnchor.constraint(equalToConstant:356),
+            cameraWithPanelTrailing!,
+            sourceLabel.widthAnchor.constraint(equalTo:left.widthAnchor),
+            mapping.widthAnchor.constraint(equalTo:left.widthAnchor),
+            cornerInstructions.widthAnchor.constraint(equalTo:left.widthAnchor),
             status.widthAnchor.constraint(equalTo:left.widthAnchor),
             detail.widthAnchor.constraint(equalTo:left.widthAnchor)
         ])
@@ -245,26 +332,35 @@ private final class ROBChessDiagramView: NSView {
         stopLive(); status.stringValue = "Checking saved images and rebuilding appearance examples…"
         busy = true; updateControls(); epoch += 1; let ticket = epoch
         queue.async { [weak self] in
-            let result = Result { () throws -> (ROBChessStudySession,ROBChessAppearanceMemory) in
+            let result = Result { () throws -> (ROBChessStudySession,ROBChessAppearanceMemory,ROBChessEvidence?) in
                 let loaded = try ROBChessStudySession(open:url)
                 var memory = ROBChessAppearanceMemory()
+                var latestEvidence: ROBChessEvidence?
                 // Bounded example replay; archived labels/images remain intact.
                 for record in loaded.manifest.trainingRecords.suffix(80) {
                     let boardURL = url.appendingPathComponent(record.id.uuidString).appendingPathComponent("board.png")
                     var evidence = try ROBChessRaster.load(boardURL).evidence()
                     evidence.heightsMillimeters = record.heightsMillimeters.map { heights in (0..<64).map { heights[ROBChessPosition.squareName($0)] } }
                     memory.learn(position:try ROBChessPosition(fen:record.fen),evidence:evidence)
+                    latestEvidence = evidence
                 }
-                return (loaded,memory)
+                return (loaded,memory,latestEvidence)
             }
             DispatchQueue.main.async {
                 guard let self else { return }; self.busy = false
                 guard self.epoch == ticket else { self.updateControls(); return }
                 switch result {
-                case .success(let (loaded,memory)):
+                case .success(let (loaded,memory,latestEvidence)):
                     self.resetForSession(); self.session = loaded; self.memory = memory
-                    if let last = loaded.manifest.records.last { self.position = (try? ROBChessPosition(fen:last.fen)) ?? .start }
-                    self.status.stringValue = "Session restored. Mark the board in a fresh frame and verify the current position."
+                    if let last = loaded.manifest.records.last {
+                        self.position = (try? ROBChessPosition(fen:last.fen)) ?? .start
+                        self.map = last.map; self.cornerPoints = last.map.corners
+                        self.cameraView.map = last.map; self.cameraView.corners = last.map.corners
+                        self.baseline = latestEvidence
+                    }
+                    // No current frame is restored. Teaching stays disabled
+                    // until a new image is received, frozen and reviewed.
+                    self.status.stringValue = "Session and saved board map restored. Open a fresh image or start the camera, then check the grid and current position."
                     self.updateDiagram(); self.updateControls()
                 case .failure(let error): self.showError(error)
                 }
@@ -308,6 +404,7 @@ private final class ROBChessDiagramView: NSView {
     @objc private func markCorners() {
         guard frame != nil, !busy else { status.stringValue = "Load a board image first."; return }
         freezeReview(); guard frozen else { return }
+        setCameraExpanded(true)
         epoch += 1; map = nil; cornerPoints = []; baseline = nil; previous = nil
         boardRaster = nil; evidence = nil; cameraView.map = nil; cameraView.corners = []
         marking = true; review.state = .off

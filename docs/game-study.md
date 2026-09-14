@@ -26,7 +26,7 @@ as calibrated robot coordinates.
 
 ## Chess Study
 
-Open **Development → Chess Study (Observe & Teach)…** in Cerebro build 3.
+Open **Development → Chess Study (Observe & Teach)…** in Cerebro.
 The independent **ROB Chess Study.app** uses the same study code for imported
 images without the robot application delegate or actuator clients.
 
@@ -47,6 +47,20 @@ images without the robot application delegate or actuator clients.
    supersedes its earlier training labels.
 7. **Suggest ROB move** uses a modest two-ply material/rules coach. It is not
    a strong trained chess engine and never moves a physical piece.
+
+In local build 4, **Fit to Screen** fills the current monitor's usable area.
+Resize any window edge to give the camera more room; the image, grid and
+corner clicks share an aspect-fit rectangle, so resizing does not stretch
+the image or move saved corners relative to it. **Enlarge camera** hides the
+review panel, and **Show review panel** brings it back. Marking corners opens
+the enlarged view automatically. Short windows scroll the review controls.
+Window size and the camera expansion preference are remembered.
+
+Opening a saved session restores its last reviewed board map and comparison
+baseline. No current frame is restored: obtain a fresh camera image, freeze
+it, and check the grid and all squares before teaching. Re-mark the board if
+the physical framing changed. Recall the named camera pose in Servo Control
+before checking the grid when returning to a repeatable setup.
 
 Castling, en passant, promotion, king safety, checkmate and stalemate are
 represented. Tournament clocks, repetition claims, draw agreements and all
