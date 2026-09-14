@@ -98,6 +98,9 @@ Python client from this repository, or call the installed cerebro-agent.py direc
     Scripts/cerebro-agent.py observe off
     Scripts/cerebro-agent.py camera-hold off
 
+On ROB, convenience links are installed at ~/bin/cerebro-agent and
+~/bin/rob-game-study. They resolve to the clients bundled in /Applications/Cerebro.app.
+
 **capture** returns a directory containing rgb.jpg, frame.json, and optionally
 depth-u16le-mm.raw. Depth is aligned UInt16 little-endian millimeters; zero
 means invalid. Captures are unreviewed. Robot command state is sampled at
@@ -168,3 +171,58 @@ game rules.
 
 This is not an App Store or website release. Real-board recognition accuracy
 and physical manipulation must be measured separately from software fixtures.
+
+## ROB installation and first real-board session — September 13, 2026
+
+The Apple Development signed build 3 from source commit `19e7b5b` was installed
+at /Applications/Cerebro.app and started through the existing per-user
+supervisor. Strict signature verification passed. The standalone image
+workbench in ~/Downloads/ROB Chess Study.app was rebuilt from the same source.
+The original build 2 remains in ~/Downloads/Cerebro Before Chess Study - 2026-09-13.app.
+
+The actual gray/white Maker Faire board is framed with white nearest ROB.
+The camera was lowered in individually inspected steps of 100 target units;
+after the final restart it was restored using the same bounded process.
+Commanded targets at handoff are pan 5799, lower 7014, upper 6798. Lower stayed
+at 7014 throughout the CLI adjustments. These are command references, not
+shaft measurements or a pose to replay without checking the hardware.
+Camera hold remains on; Follow, autonomy and stage shows are inactive.
+
+Local evidence is in ~/Documents/ROB-Games/MakerFaire-Marble-Chess:
+
+- Six initial RGB-D captures, metadata and intrinsics are copied into unreviewed/.
+- board-annotated.png shows the initial camera-plane map.
+- records/ contains the first reviewed starting-position example for the
+  general-game client. Starting identities use the operator-confirmed standard
+  setup and visual review, not independent neural classification.
+- Guided Chess Session/ contains the native live RGB-D baseline, all 64 square
+  labels, FEN, source/board hashes and optional height estimates.
+- installed-build.json records source identity and installed artifact hashes.
+
+An adjacent-frame appearance comparison left one square unknown and flagged
+glare on d4. It did not accept a move. That comparison is not an independent
+accuracy evaluation. The first native record had 54 of 64 height cues; some
+dark marble pieces still lacked usable depth, and the opposite-side bishop
+cue was ambiguous. Height alone is not sufficient to label this set.
+
+All 56 Swift fixture checks passed, including the projected tall-piece case,
+response publication and special chess moves. Depth IPC, general-game
+fixtures, existing Follow safety and headless-camera checks passed. Live CLI
+status, hold, capture, bounded nudges, harvest and native baseline persistence
+were exercised on ROB. The next human-demonstrated move remains a separate
+real-board validation step.
+
+## Connecting the conversation and motion layers
+
+The existing Main AI voice conversation has its own runtime. This milestone
+does not automatically inject Chess Study's verified state into that voice
+conversation. An assistant using the local CLI can inspect current frames and
+the saved teaching records now. Voice grounding should consume the same
+reviewed FEN, observation time, unknowns and legal proposals; it must distinguish
+saved state from a fresh visual observation. Learning another game's appearance
+uses the project workflow above; legal reasoning needs that game's rules adapter.
+
+Arm actions remain a separate stage: measure the board frame relative to ROB,
+calibrate the actual arm mounts and encoders, simulate reach and collision,
+then validate a low-speed grasp with feedback. No game recognition result is
+currently converted into an arm, gripper, tread or torso movement command.
