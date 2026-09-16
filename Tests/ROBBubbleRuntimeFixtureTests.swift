@@ -133,11 +133,13 @@ struct CameraFrameSet {
         now += 61
         live.localCommand(.init(.spinOn))
         precondition(live.snapshot().spin && hardware.writes.contains([8, 8000]), "Cerebro can start the verified fan without a controller")
+        precondition(live.snapshot().remainingSeconds == ROBBubbleSafety.workBudget)
         live.localCommand(.init(.blowerOn))
         precondition(!live.snapshot().blower)
         now += 0.51
         live.localCommand(.init(.blowerOn))
         precondition(live.snapshot().blower && hardware.writes.contains([9, 8000]))
+        precondition(live.snapshot().remainingSeconds == ROBBubbleSafety.workBudget, "Published countdown stays full until the blower starts")
         for _ in 0..<6 {
             now += 0.5
             RunLoop.main.run(until: Date().addingTimeInterval(0.06))

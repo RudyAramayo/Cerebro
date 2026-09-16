@@ -16,7 +16,7 @@ struct ROBBubbleSafety {
     private var lastTick: Double?
     private var spinReadyAt = Double.infinity
     private var cycleStartedAt = 0.0
-    private var releasedAt: Double?
+    private var blowerReleasedAt: Double?
     private var forcedCooldownUntil = 0.0
     private var cooling = false
     private var leaseUntil = 0.0
@@ -24,7 +24,7 @@ struct ROBBubbleSafety {
     func ready(at now: Double) -> Bool { spin && now >= spinReadyAt }
     func remaining() -> Double { max(0, Self.workBudget - used) }
     func cooldownRemaining(at now: Double) -> Double {
-        max(0, max(forcedCooldownUntil, cooling ? (releasedAt ?? now) + Self.cooldown : 0) - now)
+        max(0, max(forcedCooldownUntil, cooling ? (blowerReleasedAt ?? now) + Self.cooldown : 0) - now)
     }
     mutating func forceCooldown(at now: Double) {
         stop(at: now)
@@ -38,7 +38,8 @@ struct ROBBubbleSafety {
     }
     func shutdownDeadline(at now: Double) -> Double? {
         guard armed, spin || blower else { return nil }
-        return min(leaseUntil, now + remaining())
+        // Fan-only operation still needs a live lease, but has no bubble work limit.
+        return blower ? min(leaseUntil, now + remaining()) : leaseUntil
     }
     mutating func authorize(at now: Double) {
         tick(at: now)
@@ -74,11 +75,13 @@ struct ROBBubbleSafety {
     }
     mutating func tick(at now: Double) {
         account(at: now)
-        if let releasedAt, now >= releasedAt + Self.cooldown {
-            used = 0; cooling = false; self.releasedAt = nil
+        if let blowerReleasedAt, now >= blowerReleasedAt + Self.cooldown {
+            used = 0; cooling = false; self.blowerReleasedAt = nil
         }
         if armed && now >= leaseUntil { stop(at: now); detail = "Controller heartbeat lost; motors stopped" }
-        if armed && used >= Self.workBudget {
+        // The release tail can exhaust the budget after an explicit STOP has
+        // already disarmed the session. That still requires the full cooldown.
+        if !cooling && used >= Self.workBudget {
             cooling = true; stop(at: now); detail = "Working limit reached; cool for 60 seconds"
         }
         guard armed, mode == "pulse" || mode == "continuous" else { return }
@@ -93,14 +96,15 @@ struct ROBBubbleSafety {
     private mutating func account(at now: Double) {
         defer { lastTick = now }
         guard let lastTick, now >= lastTick else { return }
-        if spin || blower { used += now - lastTick }
-        else if let releasedAt { used += max(0, min(now, releasedAt) - lastTick) }
+        if blower { used += now - lastTick }
+        else if let blowerReleasedAt { used += max(0, min(now, blowerReleasedAt) - lastTick) }
     }
     private mutating func setOutputs(spin newSpin: Bool, blower newBlower: Bool, at now: Double) {
+        let effectiveBlower = newBlower && newSpin
         if newSpin && !spin { spinReadyAt = now + Self.relayDelay }
-        if (spin || blower) && !(newSpin || newBlower) { releasedAt = now + Self.relayDelay }
-        if newSpin || newBlower { releasedAt = nil }
-        spin = newSpin; blower = newBlower && newSpin
+        if blower && !effectiveBlower { blowerReleasedAt = now + Self.relayDelay }
+        if effectiveBlower { blowerReleasedAt = nil }
+        spin = newSpin; blower = effectiveBlower
     }
 }
 

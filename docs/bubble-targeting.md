@@ -78,10 +78,12 @@ never target 0. See [Pololu's Set Target protocol](https://www.pololu.com/docs/0
 
 ## Duty cycle and authorization
 
-Cerebro counts cumulative time with either motor commanded on, plus relay release tails. Brief stops,
-mode changes, disarming, and reauthorization do not reset the budget. It reserves 0.6 seconds inside
-the manual's 120-second limit for relay release and scheduler margin. After exhaustion it locks
-activation until both outputs have been off for a full 60 seconds. Maestro connection starts an
+Cerebro's **Bubbles** countdown counts only time with the bubble blower commanded on, plus its
+0.5-second relay release tail. Fan-only operation, including the initial spin lead, consumes no
+bubble budget and starts no bubble cooldown. Brief stops, mode changes, disarming, and reauthorization
+do not reset the budget. It reserves 0.6 seconds inside the manual's 120-second limit for relay release
+and scheduler margin. After exhaustion it locks activation until the blower has been off for a full
+60 seconds. Fan-only operation does not interrupt that cooling time. Maestro connection starts an
 initial cooldown when OFF is sent, which prevents a process restart from bypassing a previous run.
 Enabling motors later does not restart that cooldown. If OFF has not yet been established,
 enabling live motors sends OFF and starts the cooldown first.
@@ -137,7 +139,8 @@ is commanded, not encoder-verified. Calibrate direction, end stops, clearance, a
 ## Validation
 
 `bash Scripts/test-bubbles.sh` in Cerebro exercises the production duty-cycle policy, relay lead,
-local control, separate remote permissions, camera-free movement during cooldown, session ownership,
+fan-only budget isolation, blower release tails and cooldown, local control, separate remote permissions,
+camera-free movement during cooldown, session ownership,
 sequence replay rejection, disconnect, frame identity, synthetic RGB-D projection, model anchors,
 dry-run output isolation, pulse release, console freshness, and the watchdog with the main loop blocked. Serial I/O is
 replaced by a fake object in these fixtures. Full macOS, iOS Simulator, and visionOS Simulator builds
