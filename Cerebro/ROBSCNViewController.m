@@ -243,6 +243,8 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     self.neckPanNode = [self.robotNode childNodeWithName:@"Neck Pan" recursively:YES];
     self.cameraHeadNode = [self.robotNode childNodeWithName:@"Camera Head Pivot" recursively:YES];
     for (SCNNode *tread in @[self.leftTreadNode, self.rightTreadNode]) {
+        // Each captured tread needs an independent demand highlight.
+        tread.geometry.firstMaterial = [tread.geometry.firstMaterial copy];
         [tread enumerateChildNodesUsingBlock:^(SCNNode *child, BOOL *stop) {
             if ([child.name containsString:@"Tread Shoe"]) {
                 child.geometry.firstMaterial = [child.geometry.firstMaterial copy];
@@ -438,6 +440,8 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 {
     CGFloat bounded = MAX(-1.0, MIN(1.0, demand));
     // Highlight tread demand without stretching ROB's physical silhouette.
+    node.geometry.firstMaterial.emission.contents = fabs(bounded) < 0.02
+        ? NSColor.blackColor : [color colorWithAlphaComponent:fabs(bounded) * 0.65];
     [node enumerateChildNodesUsingBlock:^(SCNNode *child, BOOL *stop) {
         if ([child.name containsString:@"Tread Shoe"]) {
             SCNMaterial *material = child.geometry.firstMaterial;

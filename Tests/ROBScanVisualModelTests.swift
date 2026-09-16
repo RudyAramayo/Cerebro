@@ -4,7 +4,12 @@ import Metal
 
 @main struct ROBScanVisualModelTests {
     @MainActor static func main() throws {
+        let start = Date()
         let robot = ROBScanVisualModel.makeRobot()
+        let firstLoad = Date().timeIntervalSince(start)
+        let repeatStart = Date()
+        _ = ROBScanVisualModel.makeRobot()
+        print(String(format: "Captured model load: first %.3fs, cached %.3fs", firstLoad, Date().timeIntervalSince(repeatStart)))
         func node(_ name: String) -> SCNNode {
             guard let result = robot.childNode(withName: name, recursively: true) else { fatalError("Missing \(name)") }
             return result
@@ -25,9 +30,25 @@ import Metal
         precondition(robot.childNode(withName: "Base Lift Flipper Blade", recursively: true) == nil)
         // Head pan rotates the entire head, including the optics and antennas.
         let head = node("Camera Head Pivot"), lens = node("Left Camera Eye")
+        let capturedHead = node("Camera Head")
+        precondition(capturedHead.geometry!.sources(for: .texcoord).first!.vectorCount > 1000)
+        precondition(capturedHead.geometry!.firstMaterial!.diffuse.contents is NSImage)
+        precondition(capturedHead.geometry!.firstMaterial!.lightingModel == .constant)
+        var capturedTriangles = 0
+        robot.enumerateChildNodes { child, _ in
+            if child.geometry?.firstMaterial?.diffuse.contents is NSImage {
+                capturedTriangles += child.geometry!.elements.reduce(0) { $0 + $1.primitiveCount }
+            }
+        }
+        precondition(capturedTriangles > 100_000 && capturedTriangles < 150_000)
+        let point = SCNVector3(0.06, 0, 0)
+        let capturedBefore = capturedHead.convertPosition(point, to: nil)
+        let baseBefore = node("Tri-Wheel Chassis").worldTransform
         let before = lens.worldPosition
         node("Neck Pan").eulerAngles.y = 0.6
         precondition(abs(lens.worldPosition.x - before.x) > 0.001)
+        precondition(abs(capturedHead.convertPosition(point, to: nil).x - capturedBefore.x) > 0.001)
+        precondition(SCNMatrix4EqualToMatrix4(node("Tri-Wheel Chassis").worldTransform, baseBefore))
         precondition(head.parent?.name == "Neck Pan")
         node("Neck Pan").eulerAngles.y = 0
         print("ROB shared mesh, flipper pivots, rollers, optics and articulated hierarchy passed")

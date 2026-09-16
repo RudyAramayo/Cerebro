@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B09B09160000000000000007 /* rob-captured-colors.png in Resources */ = {isa = PBXBuildFile; fileRef = B09B09160000000000000008; };
+		B09B09160000000000000005 /* rob-captured.bin in Resources */ = {isa = PBXBuildFile; fileRef = B09B09160000000000000006; };
 		B09B09150000000000000001 /* ROBScanVisualModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B09B09150000000000000002; };
 		B09B09150000000000000003 /* rob-visual.json in Resources */ = {isa = PBXBuildFile; fileRef = B09B09150000000000000004; };
 		C0D3A0012F00000100000001 /* ROBPythonRuntime.m in Sources */ = {isa = PBXBuildFile; fileRef = C0D3B0022F00000100000001 /* ROBPythonRuntime.m */; };
@@ -218,6 +220,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		B09B09160000000000000008 /* rob-captured-colors.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "rob-captured-colors.png"; sourceTree = "<group>"; };
+		B09B09160000000000000006 /* rob-captured.bin */ = {isa = PBXFileReference; lastKnownFileType = file; path = "rob-captured.bin"; sourceTree = "<group>"; };
 		B09B09150000000000000002 /* ROBScanVisualModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBScanVisualModel.swift; sourceTree = "<group>"; };
 		B09B09150000000000000004 /* rob-visual.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "rob-visual.json"; sourceTree = "<group>"; };
 		C0D3B0012F00000100000001 /* ROBPythonRuntime.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBPythonRuntime.h; sourceTree = "<group>"; };
@@ -562,6 +566,8 @@
 				D4A38F741FFC8BD300092A46 /* ROBSCNViewController.h */,
 				B09B09150000000000000002 /* ROBScanVisualModel.swift */,
 				B09B09150000000000000004 /* rob-visual.json */,
+				B09B09160000000000000008 /* rob-captured-colors.png */,
+				B09B09160000000000000006 /* rob-captured.bin */,
 				D4E000012F00000100000001 /* GeminiRoboticsProtocol.swift */,
 				C0B004012F4C000400000001 /* ROBNewsSearchService.swift */,
 				C0B00A012F4C000A00000001 /* ROBWeatherSearchService.swift */,
@@ -861,6 +867,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				B09B09150000000000000003 /* rob-visual.json in Resources */,
+				B09B09160000000000000007 /* rob-captured-colors.png in Resources */,
+				B09B09160000000000000005 /* rob-captured.bin in Resources */,
 				C0D3A0042F00000100000001 /* PythonRequirements.txt in Resources */,
 				D4E700022F00000100000001 /* StageShows/MakerFaireOpening.robshow.json in Resources */,
 				D4E700042F00000100000001 /* StageShows/OrbitusTenMinuteComedy.robshow.json in Resources */,
