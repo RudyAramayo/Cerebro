@@ -248,6 +248,11 @@ private final class FixtureReplySender: ROBMessagesReplySending, @unchecked Send
 
     private let lock = NSLock()
     private var replies: [Reply] = []
+    private let beforeSend: (@Sendable (Reply) throws -> Void)?
+
+    init(beforeSend: (@Sendable (Reply) throws -> Void)? = nil) {
+        self.beforeSend = beforeSend
+    }
 
     func send(
         text: String,
@@ -255,15 +260,14 @@ private final class FixtureReplySender: ROBMessagesReplySending, @unchecked Send
         account: String,
         originatingAccountAliases: [String],
         expectedSender: String
-    ) {
+    ) throws {
+        let reply = Reply(
+            text: text, chatID: chatID, account: account,
+            originatingAccountAliases: originatingAccountAliases, expectedSender: expectedSender
+        )
+        try beforeSend?(reply)
         lock.lock()
-        replies.append(.init(
-            text: text,
-            chatID: chatID,
-            account: account,
-            originatingAccountAliases: originatingAccountAliases,
-            expectedSender: expectedSender
-        ))
+        replies.append(reply)
         lock.unlock()
     }
 
@@ -278,11 +282,17 @@ private final class FixtureAdministratorCommandExecutor:
     ROBMessagesAdministratorCommandExecuting, @unchecked Sendable {
     private let lock = NSLock()
     private var scripts: [String] = []
+    private let beforeExecute: (@Sendable (String) throws -> Void)?
 
-    func execute(script: String) {
+    init(beforeExecute: (@Sendable (String) throws -> Void)? = nil) {
+        self.beforeExecute = beforeExecute
+    }
+
+    func execute(script: String) throws {
         lock.lock()
         scripts.append(script)
         lock.unlock()
+        try beforeExecute?(script)
     }
 
     func snapshot() -> [String] {
@@ -551,6 +561,7 @@ private struct ROBMessagesBridgeProductionFixtureTests {
         "ROBMessagesBridgeRecentMessageGUIDs",
         "ROBMessagesBridgeAdministratorCommandsV1",
         "ROBMessagesBridgeAdministratorCommandsV2",
+        "ROBMessagesBridgeAdministratorCommandsV3",
     ]
 
     static func main() async throws {
@@ -567,6 +578,7 @@ private struct ROBMessagesBridgeProductionFixtureTests {
             "Formatted E.164 sender handles are not canonicalized"
         )
         try testAdministratorCommandConfiguration()
+        try await testSleepAdministratorCommand()
         resetFixtureDefaults()
         defer { resetFixtureDefaults() }
 
@@ -1390,6 +1402,8 @@ private struct ROBMessagesBridgeProductionFixtureTests {
     }
 
     private static func testAdministratorCommandConfiguration() throws {
+        resetFixtureDefaults()
+        defer { resetFixtureDefaults() }
         for sender in [
             "orbitus@orbitusrobotics.com",
             "+1 (925) 323-8322",
@@ -1412,8 +1426,8 @@ private struct ROBMessagesBridgeProductionFixtureTests {
             forKey: ROBMessagesAdministratorCommandStore.legacyDefaultsKey
         )
         try expect(
-            ROBMessagesAdministratorCommandStore.load() == [.shutdown, .reboot],
-            "The default Shutdown and Reboot commands were not available"
+            ROBMessagesAdministratorCommandStore.load() == [.shutdown, .reboot, .sleep],
+            "The default Shutdown, Reboot and Sleep commands were not available"
         )
 
         UserDefaults.standard.set(
@@ -1421,8 +1435,8 @@ private struct ROBMessagesBridgeProductionFixtureTests {
             forKey: ROBMessagesAdministratorCommandStore.legacyDefaultsKey
         )
         try expect(
-            ROBMessagesAdministratorCommandStore.load() == [.shutdown, .reboot],
-            "The Reboot command was not added to a legacy administrator command configuration"
+            ROBMessagesAdministratorCommandStore.load() == [.shutdown, .reboot, .sleep],
+            "Reboot and Sleep were not added to a V1 administrator command configuration"
         )
         try expect(
             UserDefaults.standard.data(
@@ -1449,12 +1463,204 @@ private struct ROBMessagesBridgeProductionFixtureTests {
         } catch is ROBMessagesAdministratorCommandValidationError {
             // Expected.
         }
+
+        var editedShutdown = ROBMessagesAdministratorCommand.shutdown
+        editedShutdown.isEnabled = false
+        editedShutdown.script = "echo custom shutdown"
+        let previousCommands = [editedShutdown, .reboot, custom]
+        UserDefaults.standard.removeObject(forKey: ROBMessagesAdministratorCommandStore.defaultsKey)
+        UserDefaults.standard.set(
+            try JSONEncoder().encode(previousCommands),
+            forKey: ROBMessagesAdministratorCommandStore.previousDefaultsKey
+        )
+        try expect(
+            ROBMessagesAdministratorCommandStore.load() == previousCommands + [.sleep],
+            "V2 migration lost custom/disabled commands or did not add Sleep"
+        )
+        try ROBMessagesAdministratorCommandStore.save(previousCommands)
+        try expect(
+            ROBMessagesAdministratorCommandStore.load() == previousCommands,
+            "An intentionally removed Sleep command was restored on a later load"
+        )
+
+        let customSleep = ROBMessagesAdministratorCommand(
+            id: "custom-sleep", isEnabled: false, command: "sLeEp",
+            confirmationPrompt: "Custom sleep?", confirmationResponse: "YES", script: "echo custom sleep"
+        )
+        for candidate in [customSleep, ROBMessagesAdministratorCommand(
+            id: "sleep", isEnabled: false, command: "Nap",
+            confirmationPrompt: "Nap?", confirmationResponse: "YES", script: "echo nap"
+        )] {
+            UserDefaults.standard.removeObject(forKey: ROBMessagesAdministratorCommandStore.defaultsKey)
+            UserDefaults.standard.set(
+                try JSONEncoder().encode([candidate]),
+                forKey: ROBMessagesAdministratorCommandStore.previousDefaultsKey
+            )
+            try expect(
+                ROBMessagesAdministratorCommandStore.load() == [candidate],
+                "Migration replaced or duplicated an existing Sleep command"
+            )
+            try expect(candidate.sleepAcknowledgement == nil, "A custom script claimed the Mac would sleep")
+        }
+
+        let fullTable = (0..<ROBMessagesAdministratorCommandStore.maximumCommands).map { index in
+            ROBMessagesAdministratorCommand(
+                id: "fixture-\(index)", isEnabled: true, command: "Fixture \(index)",
+                confirmationPrompt: "Run?", confirmationResponse: "YES", script: "true"
+            )
+        }
+        UserDefaults.standard.removeObject(forKey: ROBMessagesAdministratorCommandStore.defaultsKey)
+        UserDefaults.standard.set(
+            try JSONEncoder().encode(fullTable),
+            forKey: ROBMessagesAdministratorCommandStore.previousDefaultsKey
+        )
+        try expect(
+            ROBMessagesAdministratorCommandStore.load() == fullTable,
+            "Migration discarded custom commands from a full table"
+        )
         UserDefaults.standard.removeObject(
             forKey: ROBMessagesAdministratorCommandStore.defaultsKey
         )
         UserDefaults.standard.removeObject(
             forKey: ROBMessagesAdministratorCommandStore.legacyDefaultsKey
         )
+    }
+
+    private static func testSleepAdministratorCommand() async throws {
+        enum Scenario: CaseIterable, Sendable { case success, replyFails, sleepFails, revoked }
+        let command = ROBMessagesAdministratorCommand.sleep
+        let acknowledgement = try require(command.sleepAcknowledgement, "Sleep has no acknowledgement")
+        for scenario in Scenario.allCases {
+            resetFixtureDefaults()
+            let database = try FixtureMessagesDatabase()
+            let administrator = try database.addHandle("mkierie@gmail.com")
+            let chat = try database.addChat(guid: "sleep-chat", account: account, participants: [administrator])
+            let otherChat = try database.addChat(guid: "other-chat", account: account, participants: [administrator])
+            let friend = try database.addHandle("friend@example.com")
+            let friendChat = try database.addChat(guid: "friend-chat", account: account, participants: [friend])
+            let acknowledgementStarted = DispatchSemaphore(value: 0)
+            let releaseAcknowledgement = DispatchSemaphore(value: 0)
+            let replies = FixtureReplySender { reply in
+                if reply.text == acknowledgement {
+                    acknowledgementStarted.signal()
+                    if scenario == .replyFails {
+                        throw ProductionFixtureFailure.failed("Fixture acknowledgement delivery failed")
+                    }
+                    if scenario == .revoked {
+                        guard releaseAcknowledgement.wait(timeout: .now() + 5) == .success else {
+                            throw ProductionFixtureFailure.failed("Fixture acknowledgement release timed out")
+                        }
+                    }
+                }
+            }
+            let executor = FixtureAdministratorCommandExecutor { _ in
+                guard replies.snapshot().last?.text == acknowledgement else {
+                    throw ProductionFixtureFailure.failed("Sleep was requested before acknowledgement delivery")
+                }
+                if scenario == .sleepFails {
+                    throw ProductionFixtureFailure.failed("Fixture macOS sleep request rejected")
+                }
+            }
+            ROBMessagesBridge.setConfiguredAccountIdentifier(account)
+            ROBMessagesBridge.setConfiguredAllowedSendersText("friend@example.com")
+            ROBMessagesBridge.setConfiguredEnabled(true)
+            let ai = ROBMessagesAIResponder()
+            let bridge = ROBMessagesBridge(
+                inbox: ROBMessagesSQLiteInbox(databaseURL: database.url),
+                imageLoader: FixtureImageLoader(), transcriptStore: FixtureTranscriptStore(),
+                replySender: replies, administratorCommandExecutor: executor,
+                aiResponder: ai, automationPermissionCheck: { _ in nil }
+            )
+            bridge.start()
+            defer {
+                releaseAcknowledgement.signal()
+                bridge.stop()
+                resetFixtureDefaults()
+            }
+            try await waitUntil("Sleep fixture did not seed its inbox") {
+                bridge.statusSnapshot().state == "listening"
+            }
+
+            var expectedAIPrompts: [String] = []
+            if scenario == .success {
+                _ = try database.addMessage(guid: "non-admin-sleep", text: "Sleep",
+                    senderHandleRowID: friend, chatRowID: friendChat, account: account)
+                _ = try database.addMessage(guid: "partial-sleep", text: "please Sleep",
+                    senderHandleRowID: administrator, chatRowID: chat, account: account)
+                bridge.reloadConfiguration()
+                try await waitUntil("Ordinary text did not remain on the AI path") { ai.submissions.count == 2 }
+                expectedAIPrompts = ["Sleep", "please Sleep"]
+                try expect(replies.snapshot().isEmpty && executor.snapshot().isEmpty,
+                    "Non-administrator or partial Sleep text triggered a power command")
+            }
+
+            _ = try database.addMessage(guid: "sleep-request", text: "  sLeEp  ",
+                senderHandleRowID: administrator, chatRowID: chat, account: account)
+            _ = try database.addMessage(guid: "premature-sleep-yes", text: "YES",
+                senderHandleRowID: administrator, chatRowID: chat, account: account)
+            bridge.reloadConfiguration()
+            try await waitUntil("Sleep confirmation question was not delivered") {
+                bridge.statusSnapshot().state == "awaiting administrator confirmation"
+            }
+            try expect(replies.snapshot().map(\.text) == [command.confirmationPrompt],
+                "Sleep did not send exactly its confirmation question")
+            try expect(executor.snapshot().isEmpty, "Sleep ran before a fresh confirmation")
+
+            if scenario == .success {
+                _ = try database.addMessage(guid: "wrong-chat-yes", text: "YES",
+                    senderHandleRowID: administrator, chatRowID: otherChat, account: account)
+                expectedAIPrompts.append("YES")
+                try await waitUntil("Wrong-chat confirmation was not consumed", attempts: 2_000) {
+                    ai.submissions.count == expectedAIPrompts.count
+                }
+                try expect(executor.snapshot().isEmpty, "A confirmation from another chat triggered Sleep")
+            }
+
+            _ = try database.addMessage(guid: "sleep-confirmation", text: "yes",
+                senderHandleRowID: administrator, chatRowID: chat, account: account)
+            if scenario == .revoked {
+                try await waitUntil("Sleep acknowledgement did not start", attempts: 2_000) {
+                    acknowledgementStarted.wait(timeout: .now()) == .success
+                }
+                ROBMessagesBridge.setConfiguredEnabled(false)
+                bridge.reloadConfiguration()
+                releaseAcknowledgement.signal()
+                try await waitUntil("Sleep acknowledgement did not unblock") { replies.snapshot().count == 2 }
+                try await settleWorkerQueues()
+                try expect(executor.snapshot().isEmpty, "Sleep executed after authorization was revoked")
+            } else if scenario == .replyFails {
+                try await waitUntil("Failed Sleep acknowledgement was not reported", attempts: 2_000) {
+                    bridge.statusSnapshot().state == "error"
+                }
+                try expect(executor.snapshot().isEmpty, "Sleep executed despite acknowledgement delivery failure")
+                try expect(replies.snapshot().count == 1, "Failed acknowledgement was marked delivered")
+            } else {
+                let expectedState = scenario == .success ? "listening" : "error"
+                try await waitUntil("Confirmed Sleep did not finish", attempts: 2_000) {
+                    executor.snapshot().count == 1 && bridge.statusSnapshot().state == expectedState
+                }
+                try expect(executor.snapshot() == [command.script], "Sleep did not execute its exact saved script")
+                try expect(replies.snapshot()[1].text == acknowledgement, "Sleep acknowledgement was missing")
+                if scenario == .sleepFails {
+                    try expect(replies.snapshot().last?.text.hasPrefix("ROB couldn't enter sleep mode.") == true,
+                        "A rejected macOS sleep request did not correct the acknowledgement")
+                } else {
+                    _ = try database.addMessage(guid: "sleep-confirmation", text: "yes",
+                        senderHandleRowID: administrator, chatRowID: chat, account: account)
+                    bridge.reloadConfiguration()
+                    let highWater = try ROBMessagesSQLiteInbox(databaseURL: database.url).highestRowID()
+                    try await waitUntil("Duplicate confirmation was not polled") {
+                        UserDefaults.standard.integer(forKey: "ROBMessagesBridgeLastMessageRowID") == highWater
+                    }
+                    try expect(executor.snapshot().count == 1, "Sleep confirmation executed twice")
+                }
+            }
+            try expect(ai.submissions.map(\.prompt) == expectedAIPrompts,
+                "Sleep trigger or its matching confirmation reached the AI")
+            try expect(replies.snapshot().allSatisfy {
+                $0.chatID == "sleep-chat" && $0.account == account && $0.expectedSender == "mkierie@gmail.com"
+            }, "A Sleep reply escaped its originating administrator chat")
+        }
     }
 
     private static func testAttributedBodyDecoder() throws {

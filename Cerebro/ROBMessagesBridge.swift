@@ -67,6 +67,24 @@ struct ROBMessagesAdministratorCommand: Codable, Equatable, Sendable {
         script: #"/usr/bin/osascript -e 'tell application id "com.apple.systemevents" to restart'"#
     )
 
+    static let sleep = ROBMessagesAdministratorCommand(
+        id: "sleep",
+        isEnabled: true,
+        command: "Sleep",
+        confirmationPrompt: "Put ROB's Mac to sleep? Reply YES within 90 seconds to confirm.",
+        confirmationResponse: "YES",
+        // Give Messages a short opportunity to transmit the acknowledgement
+        // already accepted by its scripting interface before suspending macOS.
+        script: #"/bin/sleep 2"# + "\n" +
+            #"/usr/bin/osascript -e 'tell application id "com.apple.systemevents" to sleep'"#
+    )
+
+    var sleepAcknowledgement: String? {
+        // A locally replaced script must not claim it is putting the Mac to sleep.
+        guard id == Self.sleep.id, script == Self.sleep.script else { return nil }
+        return "Confirmed. ROB's Mac will enter sleep mode shortly."
+    }
+
     func matches(_ text: String) -> Bool {
         isEnabled && command.caseInsensitiveCompare(text) == .orderedSame
     }
@@ -100,14 +118,15 @@ enum ROBMessagesAdministratorCommandValidationError: LocalizedError {
 }
 
 enum ROBMessagesAdministratorCommandStore {
-    static let defaultsKey = "ROBMessagesBridgeAdministratorCommandsV2"
+    static let defaultsKey = "ROBMessagesBridgeAdministratorCommandsV3"
+    static let previousDefaultsKey = "ROBMessagesBridgeAdministratorCommandsV2"
     static let legacyDefaultsKey = "ROBMessagesBridgeAdministratorCommandsV1"
     static let maximumCommands = 32
     static let maximumCommandCharacters = 80
     static let maximumPromptCharacters = 500
     static let maximumResponseCharacters = 80
     static let maximumScriptBytes = 32 * 1_024
-    static let builtInCommands: [ROBMessagesAdministratorCommand] = [.shutdown, .reboot]
+    static let builtInCommands: [ROBMessagesAdministratorCommand] = [.shutdown, .reboot, .sleep]
 
     static func load(defaults: UserDefaults = .standard) -> [ROBMessagesAdministratorCommand] {
         if let data = defaults.data(forKey: defaultsKey),
@@ -119,8 +138,12 @@ enum ROBMessagesAdministratorCommandStore {
             return validated
         }
 
+        // Migrate once, preserving edited/disabled commands and custom Sleep
+        // triggers. V3 removals stay removed on later loads.
+        let migratesV1 = defaults.object(forKey: previousDefaultsKey) == nil
+        let sourceKey = migratesV1 ? legacyDefaultsKey : previousDefaultsKey
         guard defaults.object(forKey: defaultsKey) == nil,
-              let legacyData = defaults.data(forKey: legacyDefaultsKey),
+              let legacyData = defaults.data(forKey: sourceKey),
               let legacyCommands = try? JSONDecoder().decode(
                   [ROBMessagesAdministratorCommand].self,
                   from: legacyData
@@ -129,14 +152,14 @@ enum ROBMessagesAdministratorCommandStore {
             return builtInCommands
         }
 
-        let alreadyHasReboot = migrated.contains {
-            $0.id == ROBMessagesAdministratorCommand.reboot.id ||
-                $0.command.caseInsensitiveCompare(
-                    ROBMessagesAdministratorCommand.reboot.command
-                ) == .orderedSame
-        }
-        if !alreadyHasReboot && migrated.count < maximumCommands {
-            migrated.append(.reboot)
+        let additions: [ROBMessagesAdministratorCommand] = migratesV1 ? [.reboot, .sleep] : [.sleep]
+        for addition in additions {
+            let alreadyConfigured = migrated.contains {
+                $0.id == addition.id || $0.command.caseInsensitiveCompare(addition.command) == .orderedSame
+            }
+            if !alreadyConfigured && migrated.count < maximumCommands {
+                migrated.append(addition)
+            }
         }
         guard let validated = try? validate(migrated) else {
             return builtInCommands
@@ -2801,8 +2824,10 @@ enum ROBMessagesOperatorReplyError: LocalizedError {
 
         let requestGeneration = generation
         let executor = administratorCommandExecutor
+        let replySender = replySender
         let authorizationGate = replyAuthorizationGate
-        workerQueue.async { [weak self, executor, authorizationGate] in
+        workerQueue.async { [weak self, executor, replySender, authorizationGate] in
+            var lastCommandReplyAt: Date?
             let result = Result<Void, Error> {
                 guard authorizationGate.authorizes(
                     generation: requestGeneration,
@@ -2813,10 +2838,54 @@ enum ROBMessagesOperatorReplyError: LocalizedError {
                         "authorization changed before execution"
                     )
                 }
+                if let acknowledgement = pending.command.sleepAcknowledgement {
+                    guard pending.expiresAt > Date() else {
+                        throw ROBMessagesAdministratorCommandExecutionError.failed("confirmation expired")
+                    }
+                    try replySender.send(
+                        text: acknowledgement,
+                        toChat: pending.chatID,
+                        account: pending.receivingAccount,
+                        originatingAccountAliases: pending.originatingAccountAliases,
+                        expectedSender: pending.sender
+                    )
+                    lastCommandReplyAt = Date()
+                    // Sending can block. Recheck authorization and expiry after
+                    // Messages accepts the reply, before launching the sleep script.
+                    guard pending.expiresAt > Date(), authorizationGate.authorizes(
+                        generation: requestGeneration,
+                        account: pending.receivingAccount,
+                        sender: pending.sender
+                    ) else {
+                        throw ROBMessagesAdministratorCommandExecutionError.failed(
+                            "authorization changed or confirmation expired before sleep"
+                        )
+                    }
+                }
                 try executor.execute(script: pending.command.script)
             }
+            if case .failure = result, lastCommandReplyAt != nil,
+               authorizationGate.authorizes(
+                   generation: requestGeneration,
+                   account: pending.receivingAccount,
+                   sender: pending.sender
+               ) {
+                // If macOS refuses the request, correct the acknowledgement
+                // in the same chat. Do not retry the power command.
+                if (try? replySender.send(
+                    text: "ROB couldn't enter sleep mode. Check Cerebro's Messages service status on the Mac.",
+                    toChat: pending.chatID,
+                    account: pending.receivingAccount,
+                    originatingAccountAliases: pending.originatingAccountAliases,
+                    expectedSender: pending.sender
+                )) != nil {
+                    lastCommandReplyAt = Date()
+                }
+            }
+            let commandReplyAt = lastCommandReplyAt
             DispatchQueue.main.async { [weak self] in
                 guard let self, requestGeneration == self.generation else { return }
+                if let commandReplyAt { self.lastReplyAt = commandReplyAt }
                 switch result {
                 case .success:
                     self.lastDeliveryError = nil

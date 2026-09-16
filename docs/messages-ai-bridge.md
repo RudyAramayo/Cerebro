@@ -16,7 +16,7 @@ until an operator configures it locally.
    `mkierie@gmail.com`. Enter any additional approved sender's exact Messages
    email address or phone handle, one per line.
 5. Click **Administrator Commands…** to review the command table. The initial
-   `Shutdown` and `Reboot` commands ask the originating administrator to reply
+   `Shutdown`, `Reboot`, and `Sleep` commands ask the originating administrator to reply
    `YES` within 90 seconds, then run their locally editable zsh scripts. The
    command phrases, questions, confirmation replies, scripts, and enabled states
    are configurable.
@@ -73,10 +73,26 @@ Cerebro user with the fixed `/bin/zsh -f -s` interpreter and a 30-second limit.
 The script arrives through standard input; no inbound message text is ever
 interpolated into a shell command, argument, environment variable, or path.
 Because scripts have the user's macOS authority, saving changes presents a
-local critical warning. The initial Shutdown and Reboot scripts ask System
-Events to shut down or restart macOS, respectively, which may cause macOS to
+local critical warning. The initial Shutdown, Reboot, and Sleep scripts ask System
+Events to shut down, restart, or sleep macOS, respectively, which may cause macOS to
 request Automation access the first time. Command and confirmation messages are
 consumed by this deterministic path and are not supplied to the AI.
+
+To put ROB's Mac to sleep, text **Sleep** to **rob@orbitusrobotics.com** from an
+administrator account, then reply **YES** in the same chat within 90 seconds of
+ROB's question. Before running the default sleep script, ROB sends:
+“Confirmed. ROB's Mac will enter sleep mode shortly.” The script gives Messages
+two seconds to transmit the acknowledgement, then requests system sleep (not
+just display sleep). Messages accepting a reply is not a network delivery receipt.
+If the acknowledgement cannot be sent, the Mac is not put to sleep. Authorization
+is checked again after sending. If the sleep request fails while the bridge is
+still authorized, ROB sends a failure notice to the same chat.
+
+Existing V1/V2 command tables migrate once to V3, adding Sleep while retaining
+custom scripts, disabled commands, and existing Sleep triggers/IDs. A full
+32-command table is preserved without adding an extra row. Removing Sleep after
+migration keeps it removed. The pre-sleep acknowledgement applies to the default
+Sleep script; replacing that script locally disables that specific announcement.
 
 - Each active chat owns a separate Gemini Live session with text responses,
   microphone and live-camera sources off. It exposes only read-only publisher
