@@ -2931,6 +2931,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     [[ROBInsta360CameraService shared] setGeminiFrameConsumer:self.robAI];
     
     self.serialBox = [ROBSerialBox new];
+    [ROBBubbleRuntime shared].serialBox = self.serialBox;
     self.serialBox.delegate = self;
     [self.serialBox initialize_connection];
     

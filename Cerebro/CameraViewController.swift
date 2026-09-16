@@ -710,6 +710,7 @@ final class CameraViewController: NSViewController {
     private var remoteVideoIsActive = false
     private var geminiVideoIsActive = false
     private var followVideoIsActive = false
+    private var bubbleVideoIsActive = false
     private var recordingDemandActive = false
     private var cameraSessionIsRequested = false
     private var cameraStatusState = CameraSourceState.stopped
@@ -880,6 +881,11 @@ final class CameraViewController: NSViewController {
         setupSceneKitView()
         setupDepthOverlay()
         manager.setPreviewVisible(false)
+        ROBBubbleRuntime.shared.cameraDemand = { [weak self] active in
+            guard let self, self.bubbleVideoIsActive != active else { return }
+            self.bubbleVideoIsActive = active
+            self.reconcileCameraSession()
+        }
         applyProcessingSettings()
         applyRecordingDemand()
         reconcileCameraSession()
@@ -967,6 +973,7 @@ final class CameraViewController: NSViewController {
         let shouldRun = cameraViewIsVisible
             || automaticProcessingNeedsFrames
             || followVideoIsActive
+            || bubbleVideoIsActive
             || remoteVideoIsActive
             || geminiVideoIsActive
             || recordingDemandActive
@@ -1718,6 +1725,7 @@ extension CameraViewController: CameraManagerDelegate {
             sampleBuffer,
             depth: frameSet.alignedDepth
         )
+        ROBBubbleRuntime.shared.offer(frameSet)
         if swordTrackerEnabled {
             swordWristLock.lock(); let wrists = swordWristAnchors; swordWristLock.unlock()
             let color = swordTrackerColor

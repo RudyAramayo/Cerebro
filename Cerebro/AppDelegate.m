@@ -158,6 +158,11 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     openItem.target = self;
     [submenu addItem:openItem];
 
+    NSMenuItem *bubbleItem = [[NSMenuItem alloc] initWithTitle:@"Bubble Targeting…"
+        action:@selector(showBubbleTargeting:) keyEquivalent:@""];
+    bubbleItem.target = self;
+    [submenu addItem:bubbleItem];
+
     NSMenuItem *servosItem = [[NSMenuItem alloc] initWithTitle:@"Servos"
                                                         action:nil
                                                  keyEquivalent:@""];
@@ -179,6 +184,11 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         }
     }
     NSBeep();
+}
+
+- (IBAction)showBubbleTargeting:(id)sender
+{
+    [[ROBBubbleWindowController shared] showWindow:sender];
 }
 
 - (void)installDevelopmentMenu

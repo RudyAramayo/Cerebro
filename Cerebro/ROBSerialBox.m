@@ -1293,6 +1293,7 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
             // activation depend on any window controller receiving the event.
             ROBNeckCommandDisposition startupDisposition =
                 [self startSafeNeckStartup];
+            [[ROBBubbleRuntime shared] maestroReconnected];
             if (startupDisposition == ROBNeckCommandDispositionRejected) {
                 NSLog(@"Maestro connected, but automatic safe neck startup was rejected: %@",
                       self.neckCommandSafetyStatus);
@@ -1510,6 +1511,39 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
 {
     unsigned char command[] = { 0x84, channel, target & 0x7F, (target >> 7) & 0x7F };
     return [self writeMaestroBytes:command length:sizeof(command)];
+}
+
+- (BOOL)bubbleHardwareReady { return self.maestroConnectionValid; }
+
+- (void)stopBubbleRelaysForWatchdog
+{
+    // User-confirmed rest: channels 8 and 9 both use 4000, not pulse-disable 0.
+    unsigned char commands[] = { 0x87, 9, 0, 0, 0x89, 9, 0, 0, 0x84, 9, 0x20, 0x1F,
+                                 0x87, 8, 0, 0, 0x89, 8, 0, 0, 0x84, 8, 0x20, 0x1F };
+    [self writeMaestroBytes:commands length:sizeof(commands)];
+}
+
+- (BOOL)applyBubbleTarget:(NSInteger)target channel:(NSInteger)channel
+{
+    if (![NSThread isMainThread] || !self.maestroConnectionValid
+        || ![[ROBBubbleRuntime shared] ownsChannel:channel]) return NO;
+    BOOL mount = channel == 6 || channel == 7;
+    if (!(target >= 4000 && target <= 8000) && !(mount && target == 0)) return NO;
+    if (!mount) {
+        // Relays must not inherit the motion smoothing used by actual servos.
+        unsigned char profile[] = { 0x87, (unsigned char)channel, 0, 0,
+                                    0x89, (unsigned char)channel, 0, 0 };
+        if (![self writeMaestroBytes:profile length:sizeof(profile)]) return NO;
+    }
+    // Keep physical channel literals here so this gateway can never route a
+    // configuration error into any of the separately protected neck channels.
+    switch (channel) {
+        case 6: return [self sendMaestroTarget:(unsigned short)target channel:6];
+        case 7: return [self sendMaestroTarget:(unsigned short)target channel:7];
+        case 8: return [self sendMaestroTarget:(unsigned short)target channel:8];
+        case 9: return [self sendMaestroTarget:(unsigned short)target channel:9];
+        default: return NO;
+    }
 }
 
 - (BOOL)sendMaestroLowerTarget:(unsigned short)lowerTarget
@@ -4014,10 +4048,10 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     [self sendMaestroTarget:[arm_L_elbow_pan intValue] channel:4];
     [self sendMaestroTarget:[arm_R_elbow_pan intValue] channel:5];
 
-    [self sendMaestroTarget:[arm_R_shoulder_pan intValue] channel:6];
-    [self sendMaestroTarget:[arm_R_shoulder_tilt intValue] channel:7];
-    [self sendMaestroTarget:[arm_R_elbow_tilt intValue] channel:8];
-    [self sendMaestroTarget:[arm_R_wrist_pan intValue] channel:9];
+    // Channel 6 is exclusively owned by ROBBubbleRuntime; no timer bypass.
+    // Channel 7 is exclusively owned by ROBBubbleRuntime; no timer bypass.
+    // Channel 8 is exclusively owned by ROBBubbleRuntime; no timer bypass.
+    // Channel 9 is exclusively owned by ROBBubbleRuntime; no timer bypass.
     [self sendMaestroTarget:[arm_R_wrist_tilt intValue] channel:10];
     [self sendMaestroTarget:[arm_R_gripper intValue] channel:11];
     [self sendMaestroTarget:[arm_L_shoulder_pan intValue] channel:12];

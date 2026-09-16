@@ -56,6 +56,11 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
     NSTextStorage *storage;
 }
 @property (readwrite, retain) NSString *currentIncommingVerbalMessage;
+@property (readonly) BOOL bubbleHardwareReady;
+/// Dedicated bubble gateway. Zero is accepted only for Tilt/Pan pulse release.
+- (BOOL)applyBubbleTarget:(NSInteger)target channel:(NSInteger)channel;
+/// OFF-only path callable by the independent relay watchdog.
+- (void)stopBubbleRelaysForWatchdog;
 
 @property (nonatomic, weak) NSTextView *serialOutputArea_base;
 

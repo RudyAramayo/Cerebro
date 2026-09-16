@@ -189,6 +189,12 @@
 		C0AF03032F50000100000001 /* ROBOpenAIRealtimeProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0AF02032F50000100000001 /* ROBOpenAIRealtimeProtocol.swift */; };
 		C0AF03042F50000100000001 /* ROBOpenAIRealtimeSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0AF02042F50000100000001 /* ROBOpenAIRealtimeSession.swift */; };
 		C0AF03052F50000100000001 /* ROBRealtimeRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0AF02052F50000100000001 /* ROBRealtimeRouter.swift */; };
+		FE902C36696C300DD372986A /* ROBBubbleProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5943D81D505F72C0EC67206B /* ROBBubbleProtocol.swift */; };
+		1AB6C479CDCE42CBE8D087B0 /* ROBBubbleSafety.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8241014FC04A1404D6536440 /* ROBBubbleSafety.swift */; };
+		A3BCFE6FC0A160259CB18A01 /* ROBBubbleRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DA4838F3FDB442D4CE4BB7E /* ROBBubbleRuntime.swift */; };
+		6A2CBB38C4C026B877F9E509 /* ROBBubbleConsole.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FBE1DC137AC72CD56E01123 /* ROBBubbleConsole.swift */; };
+		DAF726DD24457C4761FE0086 /* ROBBubbleWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9AE6933FA5C9E8C62E1C258 /* ROBBubbleWindowController.swift */; };
+		CB0000000000000000000102 /* ROBBubbleRelayWatchdog.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB0000000000000000000101 /* ROBBubbleRelayWatchdog.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -423,6 +429,12 @@
 		C0AF02032F50000100000001 /* ROBOpenAIRealtimeProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBOpenAIRealtimeProtocol.swift; sourceTree = "<group>"; };
 		C0AF02042F50000100000001 /* ROBOpenAIRealtimeSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBOpenAIRealtimeSession.swift; sourceTree = "<group>"; };
 		C0AF02052F50000100000001 /* ROBRealtimeRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRealtimeRouter.swift; sourceTree = "<group>"; };
+		5943D81D505F72C0EC67206B /* ROBBubbleProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBBubbleProtocol.swift; sourceTree = "<group>"; };
+		8241014FC04A1404D6536440 /* ROBBubbleSafety.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBBubbleSafety.swift; sourceTree = "<group>"; };
+		5DA4838F3FDB442D4CE4BB7E /* ROBBubbleRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBBubbleRuntime.swift; sourceTree = "<group>"; };
+		0FBE1DC137AC72CD56E01123 /* ROBBubbleConsole.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBBubbleConsole.swift; sourceTree = "<group>"; };
+		E9AE6933FA5C9E8C62E1C258 /* ROBBubbleWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBBubbleWindowController.swift; sourceTree = "<group>"; };
+		CB0000000000000000000101 /* ROBBubbleRelayWatchdog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBBubbleRelayWatchdog.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -553,6 +565,12 @@
 				C0A111012F4C011100000001 /* ROBNavigationRuntime.swift */,
 				C0A112012F4C011200000001 /* ROBTraversabilityRuntime.swift */,
 				C0F011012F6A011000000001 /* ROBFollowPersonCoordinator.swift */,
+				E9AE6933FA5C9E8C62E1C258 /* ROBBubbleWindowController.swift */,
+				0FBE1DC137AC72CD56E01123 /* ROBBubbleConsole.swift */,
+				5DA4838F3FDB442D4CE4BB7E /* ROBBubbleRuntime.swift */,
+				CB0000000000000000000101 /* ROBBubbleRelayWatchdog.swift */,
+				8241014FC04A1404D6536440 /* ROBBubbleSafety.swift */,
+				5943D81D505F72C0EC67206B /* ROBBubbleProtocol.swift */,
 				C0A120012F4C012000000001 /* ROBRecordingCoordinator.swift */,
 				C0A121012F4C012100000001 /* ROBRecordingWindowController.swift */,
 				C0F020012F6B020000000001 /* ROBServoControlConfiguration.swift */,
@@ -917,6 +935,12 @@
 				C0A111022F4C011100000001 /* ROBNavigationRuntime.swift in Sources */,
 				C0A112022F4C011200000001 /* ROBTraversabilityRuntime.swift in Sources */,
 				C0F011022F6A011000000001 /* ROBFollowPersonCoordinator.swift in Sources */,
+				DAF726DD24457C4761FE0086 /* ROBBubbleWindowController.swift in Sources */,
+				6A2CBB38C4C026B877F9E509 /* ROBBubbleConsole.swift in Sources */,
+				A3BCFE6FC0A160259CB18A01 /* ROBBubbleRuntime.swift in Sources */,
+				CB0000000000000000000102 /* ROBBubbleRelayWatchdog.swift in Sources */,
+				1AB6C479CDCE42CBE8D087B0 /* ROBBubbleSafety.swift in Sources */,
+				FE902C36696C300DD372986A /* ROBBubbleProtocol.swift in Sources */,
 				C0A120022F4C012000000001 /* ROBRecordingCoordinator.swift in Sources */,
 				C0A121022F4C012100000001 /* ROBRecordingWindowController.swift in Sources */,
 				C0F020022F6B020000000001 /* ROBServoControlConfiguration.swift in Sources */,

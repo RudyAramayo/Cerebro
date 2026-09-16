@@ -327,6 +327,19 @@ struct ROBControlServerStatusSnapshot: Sendable {
                 sendingConnection.stop(error: AutoNetTransportError.authorizationFailed)
                 return
             }
+            if ROBBubbleProtocol.claims(data) {
+                guard sendingConnection.authenticatedRole == .operatorController,
+                      let controller = sendingConnection.authenticatedDeviceID,
+                      let session = sendingConnection.authenticatedSessionUUID,
+                      let message = try? ROBBubbleProtocol.decode(data),
+                      message.controllerID == controller, message.sessionID == session,
+                      message.command.operation != .status else { return }
+                ROBBubbleRuntime.shared.publish = { [weak self] bytes, controller, session in
+                    _ = self?.sendFollowTargetMessage(bytes as NSData, toDeviceID: controller, sessionID: session)
+                }
+                ROBBubbleRuntime.shared.receive(message)
+                return
+            }
             if ROBFollowTargetProtocol.claimsProtocol(data) {
                 guard sendingConnection.authenticatedRole == .operatorController,
                       let controllerID = sendingConnection.authenticatedDeviceID,

@@ -1124,6 +1124,25 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 
 - (IBAction) applyServoCommand:(NSControl *)slider
 {
+    ROBBubbleRuntime *bubbles = [ROBBubbleRuntime shared];
+    if (slider == (id)self.arm_R_Shoulder_Pan_enabled
+        || slider == (id)self.arm_R_Shoulder_Tilt_enabled) {
+        if (((NSButton *)slider).state == NSControlStateValueOff) [bubbles releaseMount];
+        else [bubbles manualPan:self.arm_R_Shoulder_Tilt.integerValue tilt:self.arm_R_Shoulder_Pan.integerValue];
+        return;
+    }
+    if (slider == self.arm_R_Shoulder_Pan || slider == self.arm_R_Shoulder_Tilt) {
+        [bubbles manualPan:self.arm_R_Shoulder_Tilt.integerValue tilt:self.arm_R_Shoulder_Pan.integerValue];
+        return;
+    }
+    if (slider == self.arm_R_Elbow_Tilt || slider == (id)self.arm_R_Elbow_Tilt_enabled) {
+        [bubbles legacyMotorControlWithFan:YES on:self.arm_R_Elbow_Tilt_enabled.state == NSControlStateValueOn && self.arm_R_Elbow_Tilt.integerValue > 4000];
+        return;
+    }
+    if (slider == self.arm_R_Wrist_Pan || slider == (id)self.arm_R_Wrist_Pan_enabled) {
+        [bubbles legacyMotorControlWithFan:NO on:self.arm_R_Wrist_Pan_enabled.state == NSControlStateValueOn && self.arm_R_Wrist_Pan.integerValue > 4000];
+        return;
+    }
     ROBSerialBox *serialBox = self.robMainViewController.serialBox;
     BOOL neckSliderAction = slider == self.headPan
         || slider == self.headTilt
