@@ -28,6 +28,33 @@ import FoundationModels
         }
     )
 
+    private lazy var latencyWindowController = ROBControlLatencyWindowController { [weak self] in
+        guard let self, let control = self.autoNetServer?.statusSnapshot() else {
+            return "Connection round trip: controller listener unavailable"
+        }
+        if control.isPaused { return "Controller transport is paused" }
+        let controllers = control.connections.filter {
+            $0.role == ROBControlPeerRole.operatorController.rawValue
+        }
+        guard !controllers.isEmpty else {
+            return "Connection round trip: no connected controllers"
+        }
+        let rows = controllers.prefix(3).map { connection in
+            let name = String(self.bounded(connection.deviceName ?? connection.stableID).prefix(32))
+            let age = connection.network.lastProbeResponseAge.map {
+                String(format: " • echo %.1f s ago", $0)
+            } ?? ""
+            return "\(name): \(self.networkRoundTrip(connection))\(age)"
+        }
+        return "Connection round trip (includes app scheduling):\n" + rows.joined(separator: "\n")
+    }
+
+    @objc(showControlLatency:)
+    func showControlLatency(_ sender: Any?) {
+        NSApp.activate(ignoringOtherApps: true)
+        latencyWindowController.showWindow(sender)
+    }
+
     @objc(initWithRobAI:cameraViewController:autoNetServer:stageShowCoordinator:)
     init(
         robAI: ROBAI?,

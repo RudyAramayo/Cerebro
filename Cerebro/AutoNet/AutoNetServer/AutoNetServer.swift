@@ -134,6 +134,7 @@ struct ROBControlServerStatusSnapshot: Sendable {
         }
 
         super.init()
+        ROBControlLatencyDiagnostics.shared.start()
         if let startupError {
             listenerStatus = "unavailable"
             listenerStatusDetail = startupError.localizedDescription
@@ -424,7 +425,11 @@ struct ROBControlServerStatusSnapshot: Sendable {
                 }
                 return
             }
+            let commandStarted = ProcessInfo.processInfo.systemUptime
             dataDelegate?.didReceiveData(data)
+            ROBControlLatencyDiagnostics.shared.recordCommandHandler(
+                milliseconds: (ProcessInfo.processInfo.systemUptime - commandStarted) * 1_000
+            )
             // Preserve controller observer behavior, but never expose generic
             // commands/results to a telemetry-only publisher.
             for connection in connectionsByID.values

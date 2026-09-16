@@ -3725,8 +3725,16 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
 // send a string to the serial port
 - (void) writeString: (NSString *) str serialFileDescriptor:(int)serialFileDescriptor {
     if(serialFileDescriptor!=-1) {
-        write(serialFileDescriptor, [str cStringUsingEncoding:NSUTF8StringEncoding], [str length]);
+        NSTimeInterval started = NSProcessInfo.processInfo.systemUptime;
+        NSUInteger byteCount = [str lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+        ssize_t written = write(serialFileDescriptor, [str cStringUsingEncoding:NSUTF8StringEncoding], byteCount);
+        if (serialFileDescriptor == serialFileDescriptor_base) {
+            [[ROBControlLatencyDiagnostics shared]
+                recordSerialWriteMilliseconds:(NSProcessInfo.processInfo.systemUptime - started) * 1000.0
+                succeeded:written >= 0 && (NSUInteger)written == byteCount];
+        }
     } else {
+        [[ROBControlLatencyDiagnostics shared] recordSerialWriteMilliseconds:0 succeeded:NO];
         // make sure the user knows they should select a serial port
         [self appendToIncomingText_base:@"\n ERROR: Base Arduino is not connected\n"];
     }

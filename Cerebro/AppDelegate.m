@@ -202,6 +202,13 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     [submenu addItem:self.developmentModeMenuItem];
     [submenu addItem:NSMenuItem.separatorItem];
 
+    NSMenuItem *latencyItem = [[NSMenuItem alloc]
+        initWithTitle:@"Control Latency…"
+               action:@selector(showControlLatency:)
+        keyEquivalent:@""];
+    latencyItem.target = self;
+    [submenu addItem:latencyItem];
+
     self.controllerDiagnosticsMenuItem = [[NSMenuItem alloc]
         initWithTitle:@"Open Controller Input Scene…"
                action:@selector(showControllerInputDiagnostics:)
@@ -384,6 +391,19 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     NSBeep();
 }
 
+- (IBAction)showControlLatency:(id)sender
+{
+    for (NSWindow *window in NSApp.windows) {
+        ROBMainViewController *mainViewController =
+            [self mainViewControllerInViewController:window.contentViewController];
+        if (mainViewController != nil) {
+            [mainViewController showControlLatency:sender];
+            return;
+        }
+    }
+    NSBeep();
+}
+
 - (ROBMainViewController *)mainViewControllerInViewController:(NSViewController *)viewController
 {
     if ([viewController isKindOfClass:[ROBMainViewController class]]) {
@@ -433,23 +453,17 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         //open RPLidar only after 10 seconds to let it start up
         // /usr/bin/open /Users/rob/Library/Developer/Xcode/DerivedData/RPLidar-fziuydzdocbagjfcyicbboaqukse/Build/Products/Debug-iphoneos/.XCInstall/RPLidar.app
         
-        NSTask *rpLidarIsRunning = [NSTask new];
-        rpLidarIsRunning.executableURL = [NSURL fileURLWithPath:@"/bin/ps"];
-        rpLidarIsRunning.arguments = @[@"aux"];
-        
-        NSPipe *pipe = [NSPipe pipe];
-        rpLidarIsRunning.standardOutput = pipe;
-        
-        NSError *processCheckError = nil;
-        if (!ROBLaunchTaskSafely(rpLidarIsRunning, &processCheckError)) {
-            NSLog(@"RPLidar process check could not start: %@", processCheckError.localizedDescription);
-            return;
+        // NSWorkspace supplies the running GUI-app snapshot. Spawning ps and
+        // draining its stdout here blocked the same main queue as ROBControl.
+        BOOL rplidarIsRunning = NO;
+        for (NSRunningApplication *application in NSWorkspace.sharedWorkspace.runningApplications) {
+            if (!application.terminated &&
+                [application.bundleURL.lastPathComponent isEqualToString:@"RPLidar.app"]) {
+                rplidarIsRunning = YES;
+                break;
+            }
         }
-        
-        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        
-        if ([output componentsSeparatedByString:@"RPLidar.app"].count < 2) { //If we have a count of 2 then 1 RPLidar instance is running
+        if (!rplidarIsRunning) {
             NSString *configuredPath = [[NSUserDefaults standardUserDefaults]
                 stringForKey:@"ROBRPLidarApplicationPath"];
             NSArray<NSString *> *candidates = configuredPath.length > 0

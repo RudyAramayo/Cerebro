@@ -27,6 +27,25 @@
 
 #import <Vision/Vision.h>
 #import <math.h>
+#import <unistd.h>
+
+// Acknowledging each controller frame must never perform DNS/reverse DNS.
+// gethostname reads the local kernel hostname; cache it for this process.
+static NSString *ROBControllerAcknowledgementHostName(void)
+{
+    static NSString *hostName;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        char name[256] = {0};
+        if (gethostname(name, sizeof(name) - 1) == 0) {
+            hostName = [NSString stringWithUTF8String:name];
+        }
+        if (hostName.length == 0) {
+            hostName = @"Mac";
+        }
+    });
+    return hostName;
+}
 
 
 #define kMaxFollowingSpeed 50
@@ -2897,8 +2916,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     self.followingSpeed = 0;
     self.currentPersonTrackingID = 1;
     self.ignoreText = true;
-    NSString *resolvedHostName = [[NSHost currentHost] name];
-    NSString *hostName = resolvedHostName.length > 0 ? resolvedHostName : @"Mac";
+    NSString *hostName = ROBControllerAcknowledgementHostName();
     self.robotActionSenderID = [NSString stringWithFormat:@"Cerebro:%@", hostName];
     self.autonomyCoordinator = [[ROBAutonomyCoordinator alloc] initWithRobotID:self.robotActionSenderID];
     self.autonomyCoordinator.delegate = self;
@@ -5033,6 +5051,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         CGPoint rightPoint = rightActive
             ? CGPointMake(rightX, rightY)
             : CGPointMake(-1000.0, -1000.0);
+        [[ROBControlLatencyDiagnostics shared] recordController:sender
+            sequence:sequenceText left:leftPoint right:rightPoint
+            brake:[brakeText isEqualToString:@"1"] speed:speed
+            sentAtMilliseconds:(double)sentAtMilliseconds];
         [self.serialBox controllerId:sender
                          treadPointL:leftPoint
                          treadPointR:rightPoint
@@ -5440,11 +5462,14 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         controllerModelData.rightControllerOrientationW = (float)rightControllerPose[6];
         controllerModelData.rightControllerPoseTimestamp = rightControllerPose[7];
         
+        [[ROBControlLatencyDiagnostics shared] recordController:sender
+            sequence:@"full snapshot" left:touchPadPointL right:touchPadPointR
+            brake:tredBrakeLock speed:speed sentAtMilliseconds:0];
         [self.serialBox controllerId:sender controllerModelData:controllerModelData];
         [self.scnViewController updateWithControllerModel:controllerModelData sender:sender];
         
         NSDictionary *messageDict = @{@"message": @"Hey I got your message",
-                                      @"sender":[[NSHost currentHost] name]};
+                                      @"sender": ROBControllerAcknowledgementHostName()};
         NSError *error = nil;
         [self.autoNetServer sendMessage:[NSKeyedArchiver archivedDataWithRootObject:messageDict requiringSecureCoding:false error:&error]]; //ACK acknowledge receipt to controller
     }
@@ -5623,6 +5648,18 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (IBAction)showSystemStatus:(id)sender
 {
+    [self ensureSystemStatusCoordinator];
+    [self.systemStatusCoordinator showWindow:sender];
+}
+
+- (IBAction)showControlLatency:(id)sender
+{
+    [self ensureSystemStatusCoordinator];
+    [self.systemStatusCoordinator showControlLatency:sender];
+}
+
+- (void)ensureSystemStatusCoordinator
+{
     if (self.systemStatusCoordinator == nil) {
         self.systemStatusCoordinator = [[ROBSystemStatusCoordinator alloc]
             initWithRobAI:self.robAI
@@ -5630,7 +5667,6 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             autoNetServer:self.autoNetServer
             stageShowCoordinator:self.stageShowCoordinator];
     }
-    [self.systemStatusCoordinator showWindow:sender];
 }
 
 - (IBAction)showStageShow:(id)sender

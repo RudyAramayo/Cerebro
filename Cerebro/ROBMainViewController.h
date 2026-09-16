@@ -72,6 +72,7 @@
 - (IBAction)showCameraDiagnostics:(id)sender;
 - (IBAction)showInsta360Diagnostics:(id)sender;
 - (IBAction)showSystemStatus:(id)sender;
+- (IBAction)showControlLatency:(id _Nullable)sender;
 - (IBAction)showStageShow:(id)sender;
 - (IBAction)showBaseSerialConsole:(id)sender;
 
