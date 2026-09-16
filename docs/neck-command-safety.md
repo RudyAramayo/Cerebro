@@ -110,10 +110,10 @@ One frame-rate-independent proportional controller is shared by recognized
 faces and legacy human blobs. It targets
 normalized image center `(0.5, 0.5)`, ignores a 12-percent-wide band on each
 axis to prevent detector jitter, and accepts at most one correction every 0.1
-seconds. The default horizontal response is `3000` raw target units per second
+seconds. The default horizontal response is `1500` raw target units per second
 at a normalized error of `1.0`; **Settings → Tracking** adjusts it live from
 `1500` through `6000`. The same panel adjusts vertical response from `400`
-through `2000`, with an `800` default and a 200-target upward acquisition
+through `2000`, with a `400` default and a 200-target upward acquisition
 range. Downward response remains one fifth of the selected vertical speed and
 inside a 40-target upper-camera range. A delayed or newly reacquired
 observation is capped to one 0.1-second correction.
@@ -122,9 +122,25 @@ baseline. It therefore cannot jump from the existing camera pose to the
 authorized-follow target `7375`.
 The shared gateway still applies the configured physical hard bounds. These
 tracking values are integer Maestro command targets, not measured joint angles.
+
+**Upright lookaround is the default.** Tracking enters the reviewed upright
+lower/upper pose (`6011`/`6906`) once through the existing safe gateway, preserving
+pan within the saved upright limits. Once lower tilt is upright, pan and upper
+tilt continue following people; upper tilt is not repeatedly reset. Near/far
+depth changes, lost-attention returns, idle returns, and sword attention cannot
+request lean-forward or lean-back sequences in this mode. This prevents the
+repeated apparent zoom in/out when someone stands close to ROB. Manual poses
+and the supervised startup/recovery sequence retain their existing behavior.
+
+**Settings → Tracking → Allow automatic lean/zoom gestures (scan mode)** is an
+explicit, persistent opt-in for the previous distance/search posture behavior.
+Turning it off cancels queued automatic lean steps. A target already sent to a
+servo can still finish; subsequent upright entry uses the normal settling gates.
+The serial sequence entry and continuation paths also enforce the preference.
+
 Both recognized-face and legacy human-blob entry points use the currently
-settled lower-neck-dependent pan envelope immediately. An outward correction
-that reaches a restricted edge requests the direction's saved
+settled lower-neck-dependent pan envelope immediately. In scan mode, an outward
+correction that reaches a restricted edge requests the direction's saved
 `fully_upright_right` or `fully_upright_left` direction. This automatic move
 requires known active pan/lower/upper commands and all three neck controls
 enabled. Both saved endpoints must retain the mount-compensated upright
@@ -139,8 +155,8 @@ command deadlines until the entry pose and widened envelope settle. Vertical
 tracking rebases around upright `6906`; proportional face centering then
 resumes and pans gradually. The saved endpoint pan values—not the generic hard
 joint bounds—remain the final tracking limits; the shipped values are `4000`
-right and `7652` left. After 15 seconds without a tracking update, a
-non-preemptive request runs the validated centered startup sequence back to its
+right and `7652` left. In scan mode only, after 15 seconds without a tracking
+update, a non-preemptive request runs the validated centered startup sequence back to its
 `lean_forward` final pose. Unknown, OFF, invalid, or non-clearance demands
 remain blocked.
 The installed servo turns right as the raw pan target decreases toward `4000`
@@ -242,7 +258,7 @@ pose becomes the baseline for later normal camera-leveling commands.
 
 The scrollable **Settings → Hardware → Maestro Servo Motion** section enables
 a controller-owned speed and acceleration profile for all 24 Maestro channels.
-It defaults on with maximum speed `35` and acceleration `3`; lower nonzero
+It defaults on with maximum speed `20` and acceleration `2`; lower nonzero
 values are gentler. Cerebro persists the profile and sends the Mini Maestro
 compact-protocol **Set Speed** (`0x87`) and **Set Acceleration** (`0x89`)
 commands for every channel immediately after each verified connection, before
@@ -271,9 +287,17 @@ ambiguous multi-controller result retains the prior explicit selection. Motor
 commands include `-d` with the remembered controller serial so they cannot be
 routed to a different Tic merely because USB enumeration order changed.
 
-On upgrade, a saved speed of `40` or acceleration of `4` is migrated once to
-the gentler shipped value. Other saved values are treated as operator
-calibration and remain unchanged.
+**Settings → Tracking** provides two live presets. **Gentle motion** uses pan
+`1500`, upper tilt `400`, servo speed `20`, and acceleration `2`. **Responsive
+motion** restores the former pan `3000`, upper tilt `800`, servo speed `35`, and
+acceleration `3`. Both enable servo ramps, persist across launches, and leave
+the automatic lean/zoom preference unchanged. Sliders and Hardware fields remain
+available for custom tuning. Slower profiles extend in-flight safety waits.
+
+On upgrade, a saved complete factory servo profile (`40`/`4` or `35`/`3`) is
+migrated once to `20`/`2`. Other servo profiles remain unchanged. Saved tracking
+speeds matching the former defaults (`3000` horizontal or `800` vertical) migrate
+to the new gentle defaults; other saved speeds remain unchanged.
 
 This central controller profile covers manual controls, Vision, gestures, and
 arm targets without generating competing UI-side intermediate writes. It
@@ -455,5 +479,7 @@ cc -std=c11 -Wall -Wextra -Werror \
   Cerebro/ROBPersonTrackingPolicy.c Tests/ROBPersonTrackingPolicyFixtureTests.c \
   -lm -o /tmp/ROBPersonTrackingPolicyFixtureTests
 /tmp/ROBPersonTrackingPolicyFixtureTests
+python3 Tests/ROBPersonTrackingPostureRuntimeTests.py
+python3 Tests/ROBPersonAttentionStaticTests.py
 python3 Tests/ROBNeckSafetyStaticTests.py
 ```

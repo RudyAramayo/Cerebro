@@ -2447,6 +2447,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void)updatePersonTrackingUprightRestAtUptime:(NSTimeInterval)now
 {
+    if (!ROBPersonTrackingAutomaticPostureChangesEnabledFromDefaults(
+            NSUserDefaults.standardUserDefaults)) {
+        return;
+    }
     if (!self.personTrackingUprightPostureActive || self.serialBox == nil) {
         return;
     }
@@ -2492,6 +2496,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void)updatePersonTrackingAttentionAtUptime:(NSTimeInterval)now
 {
     if (self.serialBox == nil
+        || !ROBPersonTrackingAutomaticPostureChangesEnabledFromDefaults(
+            NSUserDefaults.standardUserDefaults)
         || self.torsoControlsViewController.headTracking_enabled.state
             != NSControlStateValueOn) {
         self.personTrackingLostSinceUptime = 0;
@@ -3827,6 +3833,15 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             > kROBTrainingSwordFreshnessSeconds) {
         return;
     }
+    if (!ROBPersonTrackingAutomaticPostureChangesEnabledFromDefaults(
+            NSUserDefaults.standardUserDefaults)) {
+        self.lastSwordTrackingObservationUptime = now;
+        [self trackingPerson:@"main-camera-sword"
+                           x:(float)MAX(0.0, MIN(1.0, sword.targetX))
+                           y:(float)MAX(0.0, MIN(1.0, sword.targetY))
+                           z:-1.0f];
+        return;
+    }
     ROBServoCameraPosition *leanBack = [[ROBServoControlStore shared]
         cameraPositionNamed:@"lean_back"];
     if (leanBack == nil) return;
@@ -3917,6 +3932,12 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void)updatePersonTrackingPostureForDistance:(double)distance
                                        atUptime:(NSTimeInterval)now
 {
+    if (!ROBPersonTrackingAutomaticPostureChangesEnabledFromDefaults(
+            NSUserDefaults.standardUserDefaults)) {
+        self.personTrackingDistanceBand = 0;
+        self.personTrackingDistanceBandEnteredUptime = 0;
+        return;
+    }
     if (!isfinite(distance) || distance <= 0 || self.serialBox == nil) return;
     NSInteger nextBand = self.personTrackingDistanceBand;
     if (distance >= kROBPersonTrackingTooFarMeters) {
@@ -4082,6 +4103,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             return;
         }
         NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+        BOOL keepLowerNeckUpright =
+            !ROBPersonTrackingAutomaticPostureChangesEnabledFromDefaults(
+                NSUserDefaults.standardUserDefaults
+            );
         BOOL handWaveFocusSource = [userID hasSuffix:@"-wave"];
         BOOL swordFocusSource = [userID isEqualToString:@"main-camera-sword"];
         BOOL handWaveFocusOwnsAttention = self.handWaveFocusTimer != nil
@@ -4315,7 +4340,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         BOOL lowerAlreadyAtUprightEndpoint = uprightTransitionAuthorized
             && currentLowerTarget == requestedUprightEndpoint.lowerTarget;
         configuration.uprightTransitionEnabled =
-            !swordFocusSource
+            !keepLowerNeckUpright
+            && !swordFocusSource
             && uprightTransitionAuthorized
             && !lowerAlreadyAtUprightEndpoint;
 
@@ -4336,7 +4362,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             || self.serialBox.personTrackingPostureSequenceActive) {
             return;
         }
-        if (highMainPoseRequestsUpright
+        // Enter the reviewed upright pose once. Once the lower neck is at
+        // 6011, leave upper tilt free to track the person; never keep resetting
+        // the upper camera to the entry target on successive observations.
+        if ((keepLowerNeckUpright || highMainPoseRequestsUpright)
             && uprightTransitionAuthorized
             && currentLowerTarget != ROBNeckSafetyUprightLowerTarget) {
             int32_t highPosePanTarget = currentPanTarget;
@@ -4358,8 +4387,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                 if (now - self.lastPersonTrackingDiagnosticsUptime >= 1.0) {
                     self.lastPersonTrackingDiagnosticsUptime = now;
                     NSLog(
-                        @"Main-camera pose head remained high at y=%.3f; lifting upright at preserved safe pan P%d, then resuming face centering (%@)",
-                        self.lastMainPoseTrackingObservation.headY,
+                        @"%@; lifting upright at preserved safe pan P%d, then resuming face centering (%@)",
+                        keepLowerNeckUpright ? @"Upright lookaround"
+                                            : @"Main-camera head remained high",
                         highPosePanTarget,
                         self.serialBox.neckCommandSafetyStatus
                     );
@@ -4369,7 +4399,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             if (now - self.lastPersonTrackingDiagnosticsUptime >= 1.0) {
                 self.lastPersonTrackingDiagnosticsUptime = now;
                 NSLog(
-                    @"High-pose upright entry rejected at P%d, L%d U%d: %@",
+                    @"Person tracking upright entry rejected at P%d, L%d U%d: %@",
                     highPosePanTarget,
                     ROBNeckSafetyUprightLowerTarget,
                     ROBNeckSafetyUprightUpperTarget,

@@ -20,6 +20,17 @@ static NSString * const ROBPersonTrackingPanSpeedDefaultsKey =
     @"ROB.PersonTracking.PanTargetsPerSecond";
 static NSString * const ROBPersonTrackingVerticalSpeedDefaultsKey =
     @"ROB.PersonTracking.VerticalTargetsPerSecond";
+static NSString * const ROBPersonTrackingAutomaticPostureChangesDefaultsKey =
+    @"ROB.PersonTracking.AutomaticPostureChangesEnabled";
+
+// Opt in explicitly to the large distance/search lean gestures. New and
+// existing installations otherwise keep the lower neck upright while pan and
+// upper-camera tracking continue normally.
+static inline BOOL ROBPersonTrackingAutomaticPostureChangesEnabledFromDefaults(
+    NSUserDefaults *defaults
+) {
+    return [defaults boolForKey:ROBPersonTrackingAutomaticPostureChangesDefaultsKey];
+}
 
 static inline double ROBPersonTrackingClampPanTargetsPerSecond(double value)
 {

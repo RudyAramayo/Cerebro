@@ -19,10 +19,12 @@ extern "C" {
 
 enum {
     ROBPersonTrackingMinimumPanTargetsPerSecond = 1500,
-    ROBPersonTrackingDefaultPanTargetsPerSecond = 3000,
+    ROBPersonTrackingDefaultPanTargetsPerSecond = 1500,
+    ROBPersonTrackingResponsivePanTargetsPerSecond = 3000,
     ROBPersonTrackingMaximumPanTargetsPerSecond = 6000,
     ROBPersonTrackingMinimumVerticalTargetsPerSecond = 400,
-    ROBPersonTrackingDefaultVerticalTargetsPerSecond = 800,
+    ROBPersonTrackingDefaultVerticalTargetsPerSecond = 400,
+    ROBPersonTrackingResponsiveVerticalTargetsPerSecond = 800,
     ROBPersonTrackingMaximumVerticalTargetsPerSecond = 2000,
     // Reviewed camera band for controller-authorized full-pan follow
     // preparation. Ordinary face/blob acquisition instead centers a narrow

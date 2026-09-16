@@ -67,6 +67,8 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
 @property (nonatomic, strong) NSTextField *faceTrackingPanSpeedValueLabel;
 @property (nonatomic, strong) NSSlider *faceTrackingVerticalSpeedSlider;
 @property (nonatomic, strong) NSTextField *faceTrackingVerticalSpeedValueLabel;
+@property (nonatomic, strong) NSButton *automaticTrackingPosturesToggle;
+@property (nonatomic, strong) NSTextField *trackingMotionStatusLabel;
 @property (nonatomic, assign) NSUInteger operationGeneration;
 @property (nonatomic, assign) BOOL operationInProgress;
 - (BOOL)requireAppliedPythonSelection;
@@ -303,14 +305,34 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
     verticalMaximumLabel.textColor = NSColor.secondaryLabelColor;
     [trackingView addSubview:verticalMaximumLabel];
 
-    NSString *trackingNoteText = [NSString stringWithFormat:
-        @"Factory speeds are %d horizontal and %d vertical targets/second. Changes apply immediately and persist across launches. At a restricted pan edge, the neck moves to reviewed upright values and pan advances only 100 targets before proportional tracking resumes toward the saved fully_upright_left/right limits. After 15 seconds without a tracking update, the safe centered sequence returns to lean_forward. Physical smoothing and the collision-safe envelope still apply.",
-        ROBPersonTrackingDefaultPanTargetsPerSecond,
-        ROBPersonTrackingDefaultVerticalTargetsPerSecond];
-    NSTextField *trackingNote = [self labelWithString:trackingNoteText
-                                                frame:NSMakeRect(24, 125, 632, 90)];
+    self.automaticTrackingPosturesToggle = [NSButton
+        checkboxWithTitle:@"Allow automatic lean/zoom gestures (scan mode)"
+        target:self action:@selector(automaticTrackingPosturesChanged:)];
+    self.automaticTrackingPosturesToggle.frame = NSMakeRect(24, 186, 632, 24);
+    self.automaticTrackingPosturesToggle.accessibilityIdentifier =
+        @"ROB.Tracking.AutomaticPostures";
+    [trackingView addSubview:self.automaticTrackingPosturesToggle];
+
+    NSTextField *trackingNote = [self labelWithString:
+        @"Off by default: the lower neck stays upright while pan and upper-neck tilt follow people. Gentle and Responsive change tracking speed and servo ramps without enabling scan mode. Settings persist across launches; collision limits still apply."
+        frame:NSMakeRect(24, 116, 632, 58)];
     trackingNote.textColor = NSColor.secondaryLabelColor;
     [trackingView addSubview:trackingNote];
+
+    NSButton *gentleMotion = [self buttonWithTitle:@"Gentle motion"
+        frame:NSMakeRect(20, 74, 168, 32)
+        action:@selector(useGentleTrackingMotion:)];
+    gentleMotion.accessibilityIdentifier = @"ROB.Tracking.GentleMotion";
+    [trackingView addSubview:gentleMotion];
+    NSButton *responsiveMotion = [self buttonWithTitle:@"Responsive motion"
+        frame:NSMakeRect(196, 74, 184, 32)
+        action:@selector(useResponsiveTrackingMotion:)];
+    responsiveMotion.accessibilityIdentifier = @"ROB.Tracking.ResponsiveMotion";
+    [trackingView addSubview:responsiveMotion];
+    self.trackingMotionStatusLabel = [self labelWithString:@""
+        frame:NSMakeRect(24, 22, 632, 42)];
+    self.trackingMotionStatusLabel.textColor = NSColor.secondaryLabelColor;
+    [trackingView addSubview:self.trackingMotionStatusLabel];
     [self refreshFaceTrackingSpeedSettings];
 
     NSTabViewItem *hardwareTab = [NSTabViewItem tabViewItemWithViewController:[[NSViewController alloc] init]];
@@ -920,6 +942,10 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
 
 - (void)refreshFaceTrackingSpeedSettings
 {
+    self.automaticTrackingPosturesToggle.state =
+        ROBPersonTrackingAutomaticPostureChangesEnabledFromDefaults(
+            NSUserDefaults.standardUserDefaults
+        ) ? NSControlStateValueOn : NSControlStateValueOff;
     double panSpeed = ROBPersonTrackingPanTargetsPerSecondFromDefaults(
         NSUserDefaults.standardUserDefaults
     );
@@ -933,6 +959,76 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
     self.faceTrackingVerticalSpeedSlider.doubleValue = verticalSpeed;
     self.faceTrackingVerticalSpeedValueLabel.stringValue = [NSString
         stringWithFormat:@"%.0f targets/second", verticalSpeed];
+    ROBSerialBox *serialBox = self.boundSerialBox;
+    if (serialBox != nil) {
+        BOOL gentle = panSpeed == (double)ROBPersonTrackingDefaultPanTargetsPerSecond
+            && verticalSpeed == (double)ROBPersonTrackingDefaultVerticalTargetsPerSecond
+            && serialBox.maestroServoSpeedLimit == ROBMaestroDefaultServoSpeedLimit
+            && serialBox.maestroServoAccelerationLimit == ROBMaestroDefaultServoAccelerationLimit;
+        BOOL responsive = panSpeed == (double)ROBPersonTrackingResponsivePanTargetsPerSecond
+            && verticalSpeed == (double)ROBPersonTrackingResponsiveVerticalTargetsPerSecond
+            && serialBox.maestroServoSpeedLimit == ROBMaestroResponsiveServoSpeedLimit
+            && serialBox.maestroServoAccelerationLimit == ROBMaestroResponsiveServoAccelerationLimit;
+        NSString *profile = gentle ? @"Gentle motion" : responsive ? @"Responsive motion" : @"Custom motion";
+        self.trackingMotionStatusLabel.stringValue =
+            serialBox.maestroServoSmoothingEnabled
+                ? [NSString stringWithFormat:
+                    @"%@: servo speed %ld, acceleration %ld. Fine-tune ramps in Hardware.",
+                    profile,
+                    (long)serialBox.maestroServoSpeedLimit,
+                    (long)serialBox.maestroServoAccelerationLimit]
+                : @"Servo ramps are off. Select a motion preset to enable them.";
+    }
+}
+
+- (void)automaticTrackingPosturesChanged:(NSButton *)sender
+{
+    BOOL enabled = sender.state == NSControlStateValueOn;
+    [NSUserDefaults.standardUserDefaults setBool:enabled
+        forKey:ROBPersonTrackingAutomaticPostureChangesDefaultsKey];
+    if (!enabled) {
+        [self.boundSerialBox cancelPersonTrackingPostureSequence];
+    }
+    [self refreshFaceTrackingSpeedSettings];
+}
+
+- (void)applyTrackingMotionPresetResponsive:(BOOL)responsive
+{
+    ROBSerialBox *serialBox = self.boundSerialBox;
+    if (serialBox == nil) {
+        self.trackingMotionStatusLabel.stringValue =
+            @"Open the main robot window before applying a motion preset.";
+        return;
+    }
+    NSInteger speed = responsive ? ROBMaestroResponsiveServoSpeedLimit
+                                 : ROBMaestroDefaultServoSpeedLimit;
+    NSInteger acceleration = responsive ? ROBMaestroResponsiveServoAccelerationLimit
+                                        : ROBMaestroDefaultServoAccelerationLimit;
+    if (![serialBox applyMaestroServoSmoothingEnabled:YES
+        speedLimit:speed accelerationLimit:acceleration]) {
+        self.trackingMotionStatusLabel.stringValue =
+            @"Motion preset could not be applied. Check the Maestro connection and retry.";
+        return;
+    }
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    [defaults setDouble:responsive ? ROBPersonTrackingResponsivePanTargetsPerSecond
+                                  : ROBPersonTrackingDefaultPanTargetsPerSecond
+                forKey:ROBPersonTrackingPanSpeedDefaultsKey];
+    [defaults setDouble:responsive ? ROBPersonTrackingResponsiveVerticalTargetsPerSecond
+                                  : ROBPersonTrackingDefaultVerticalTargetsPerSecond
+                forKey:ROBPersonTrackingVerticalSpeedDefaultsKey];
+    [self refreshSerialHardwareSettings];
+    [self refreshFaceTrackingSpeedSettings];
+}
+
+- (void)useGentleTrackingMotion:(id)sender
+{
+    [self applyTrackingMotionPresetResponsive:NO];
+}
+
+- (void)useResponsiveTrackingMotion:(id)sender
+{
+    [self applyTrackingMotionPresetResponsive:YES];
 }
 
 - (void)faceTrackingPanSpeedChanged:(NSSlider *)sender

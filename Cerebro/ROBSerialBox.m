@@ -41,6 +41,7 @@ OUTPUT: ir sensor array in cm : (fl, fr, l, r, bl, br) from front left to back r
 
 #import "ROBSerialBox.h"
 #import "ROBPersonTrackingPolicy.h"
+#import "ROBPersonTrackingPreferences.h"
 #import "ROBMainViewController.h"
 #import "ROBSpeechBox.h"
 #import "ROBBaseControllerModel.h"
@@ -100,11 +101,13 @@ typedef NS_ENUM(NSInteger, ROBSafeNeckStartupPhase) {
     ROBSafeNeckStartupPhaseLowering,
 };
 
-static NSInteger const kROBMaestroServoMotionProfileDefaultsVersion = 2;
+static NSInteger const kROBMaestroServoMotionProfileDefaultsVersion = 3;
 static NSInteger const kROBLegacyMaestroDefaultServoSpeedLimit = 40;
 static NSInteger const kROBLegacyMaestroDefaultServoAccelerationLimit = 4;
-NSInteger const ROBMaestroDefaultServoSpeedLimit = 35;
-NSInteger const ROBMaestroDefaultServoAccelerationLimit = 3;
+NSInteger const ROBMaestroDefaultServoSpeedLimit = 20;
+NSInteger const ROBMaestroDefaultServoAccelerationLimit = 2;
+NSInteger const ROBMaestroResponsiveServoSpeedLimit = 35;
+NSInteger const ROBMaestroResponsiveServoAccelerationLimit = 3;
 
 static double ROBTargetOverflow(double target, double minimum, double maximum)
 {
@@ -328,7 +331,6 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 @property (readwrite, assign) BOOL visionGripperStateIsKnown;
 @property (readwrite, assign) BOOL lastVisionLeftGripperClosed;
 @property (readwrite, assign) BOOL lastVisionRightGripperClosed;
-- (void)cancelPersonTrackingPostureSequence;
 - (ROBNeckCommandDisposition)advancePersonTrackingPostureSequence;
 - (void)schedulePersonTrackingPostureAdvance;
 - (void)publishAcceptedPersonTrackingNeckDemand;
@@ -478,20 +480,33 @@ typedef enum : NSUInteger {
                 objectForKey:kROBMaestroServoSpeedLimitDefaultsKey];
             NSNumber *savedAccelerationLimit = [defaults
                 objectForKey:kROBMaestroServoAccelerationLimitDefaultsKey];
-            // Move only the former shipped values to the gentler profile.
-            // Any explicit operator calibration remains authoritative.
-            if (savedSpeedLimit != nil
-                && savedSpeedLimit.integerValue
-                    == kROBLegacyMaestroDefaultServoSpeedLimit) {
+            // Migrate only complete factory profiles; retain custom tuning.
+            BOOL formerFactoryProfile = savedSpeedLimit != nil
+                && savedAccelerationLimit != nil
+                && ((savedSpeedLimit.integerValue
+                        == kROBLegacyMaestroDefaultServoSpeedLimit
+                    && savedAccelerationLimit.integerValue
+                        == kROBLegacyMaestroDefaultServoAccelerationLimit)
+                    || (savedSpeedLimit.integerValue
+                        == ROBMaestroResponsiveServoSpeedLimit
+                    && savedAccelerationLimit.integerValue
+                        == ROBMaestroResponsiveServoAccelerationLimit));
+            if (formerFactoryProfile) {
                 [defaults setInteger:ROBMaestroDefaultServoSpeedLimit
                               forKey:kROBMaestroServoSpeedLimitDefaultsKey];
-            }
-            if (savedAccelerationLimit != nil
-                && savedAccelerationLimit.integerValue
-                    == kROBLegacyMaestroDefaultServoAccelerationLimit) {
                 [defaults
                     setInteger:ROBMaestroDefaultServoAccelerationLimit
                         forKey:kROBMaestroServoAccelerationLimitDefaultsKey];
+            }
+            if ([defaults doubleForKey:ROBPersonTrackingPanSpeedDefaultsKey]
+                    == (double)ROBPersonTrackingResponsivePanTargetsPerSecond) {
+                [defaults setDouble:ROBPersonTrackingDefaultPanTargetsPerSecond
+                             forKey:ROBPersonTrackingPanSpeedDefaultsKey];
+            }
+            if ([defaults doubleForKey:ROBPersonTrackingVerticalSpeedDefaultsKey]
+                    == (double)ROBPersonTrackingResponsiveVerticalTargetsPerSecond) {
+                [defaults setDouble:ROBPersonTrackingDefaultVerticalTargetsPerSecond
+                             forKey:ROBPersonTrackingVerticalSpeedDefaultsKey];
             }
             [defaults
                 setInteger:kROBMaestroServoMotionProfileDefaultsVersion
@@ -2308,6 +2323,12 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
             @"Person tracking rest requires the main thread.";
         return ROBNeckCommandDispositionRejected;
     }
+    if (!ROBPersonTrackingAutomaticPostureChangesEnabledFromDefaults(
+            NSUserDefaults.standardUserDefaults)) {
+        self.neckCommandSafetyStatus =
+            @"Upright lookaround keeps the lower neck steady; automatic lean gestures are disabled.";
+        return ROBNeckCommandDispositionRejected;
+    }
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
     if (self.safeNeckStartupInProgress
         || self.personTrackingUprightTransitionActive
@@ -2416,6 +2437,15 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
 
 - (ROBNeckCommandDisposition)advancePersonTrackingPostureSequence
 {
+    if (!ROBPersonTrackingAutomaticPostureChangesEnabledFromDefaults(
+            NSUserDefaults.standardUserDefaults)) {
+        // A setting change also cancels queued steps, including the second
+        // lean leg of a sequence that was already in progress.
+        [self cancelPersonTrackingPostureSequence];
+        self.neckCommandSafetyStatus =
+            @"Automatic lean sequence cancelled for upright lookaround.";
+        return ROBNeckCommandDispositionRejected;
+    }
     if (!self.personTrackingPostureSequenceActive) {
         return ROBNeckCommandDispositionRejected;
     }
@@ -2489,6 +2519,13 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     if (![NSThread isMainThread]) {
         self.neckCommandSafetyStatus =
             @"Person tracking posture sequence requires the main thread.";
+        return ROBNeckCommandDispositionRejected;
+    }
+    if (!ROBPersonTrackingAutomaticPostureChangesEnabledFromDefaults(
+            NSUserDefaults.standardUserDefaults)) {
+        [self cancelPersonTrackingPostureSequence];
+        self.neckCommandSafetyStatus =
+            @"Automatic lean gestures are disabled for upright lookaround.";
         return ROBNeckCommandDispositionRejected;
     }
     NSArray<NSArray<NSString *> *> *allowedOrders = @[

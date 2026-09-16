@@ -76,15 +76,15 @@ static void testDefaultCalibration(void) {
     EXPECT_INT(ROBPersonTrackingMaximumUpperTarget, 7400);
     EXPECT_FALSE(configuration.mirrorHorizontalCoordinate);
     EXPECT_TRUE(fabs(configuration.responseExponent - 1.5) < 0.000001);
-    EXPECT_INT(configuration.panTargetsPerSecond, 3000);
+    EXPECT_INT(configuration.panTargetsPerSecond, 1500);
     EXPECT_INT(ROBPersonTrackingMinimumPanTargetsPerSecond, 1500);
-    EXPECT_INT(ROBPersonTrackingDefaultPanTargetsPerSecond, 3000);
+    EXPECT_INT(ROBPersonTrackingDefaultPanTargetsPerSecond, 1500);
     EXPECT_INT(ROBPersonTrackingMaximumPanTargetsPerSecond, 6000);
     EXPECT_INT(ROBPersonTrackingMinimumVerticalTargetsPerSecond, 400);
-    EXPECT_INT(ROBPersonTrackingDefaultVerticalTargetsPerSecond, 800);
+    EXPECT_INT(ROBPersonTrackingDefaultVerticalTargetsPerSecond, 400);
     EXPECT_INT(ROBPersonTrackingMaximumVerticalTargetsPerSecond, 2000);
-    EXPECT_INT(configuration.upperTargetsPerSecond, 800);
-    EXPECT_INT(configuration.upperDownTargetsPerSecond, 160);
+    EXPECT_INT(configuration.upperTargetsPerSecond, 400);
+    EXPECT_INT(configuration.upperDownTargetsPerSecond, 80);
     EXPECT_FALSE(configuration.uprightTransitionEnabled);
 
     ROBPersonTrackingResult centered = track(
@@ -110,16 +110,16 @@ static void testCorrectionsPointCameraTowardBlob(void) {
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
         0.8, 0.8, 0.1
     );
-    EXPECT_INT(robotRight.panTarget, 5947);
+    EXPECT_INT(robotRight.panTarget, 5973);
     EXPECT_INT(robotRight.lowerTarget, 7014);
-    EXPECT_INT(robotRight.upperTarget, 7389);
+    EXPECT_INT(robotRight.upperTarget, 7382);
 
     ROBPersonTrackingResult robotLeft = track(
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
         0.2, 0.2, 0.1
     );
-    EXPECT_INT(robotLeft.panTarget, 6053);
-    EXPECT_INT(robotLeft.upperTarget, 7372);
+    EXPECT_INT(robotLeft.panTarget, 6027);
+    EXPECT_INT(robotLeft.upperTarget, 7374);
     EXPECT_FALSE(robotLeft.upperClamped);
 
     // A future mirrored detector can opt into one conversion explicitly.
@@ -128,7 +128,7 @@ static void testCorrectionsPointCameraTowardBlob(void) {
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
         0.2, 0.5, 0.1
     );
-    EXPECT_INT(mirroredRight.panTarget, 5947);
+    EXPECT_INT(mirroredRight.panTarget, 5973);
     configuration.mirrorHorizontalCoordinate = false;
 
     // Downward correction retains the one-fifth anti-dip speed ratio and
@@ -136,7 +136,7 @@ static void testCorrectionsPointCameraTowardBlob(void) {
     ROBPersonTrackingResult downwardWithinGuard = track(
         &configuration, 6000, 7360, 0.5, 0.2, 0.1
     );
-    EXPECT_INT(downwardWithinGuard.upperTarget, 7357);
+    EXPECT_INT(downwardWithinGuard.upperTarget, 7359);
 
     ROBPersonTrackingResult far = track(
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
@@ -153,8 +153,8 @@ static void testCorrectionsPointCameraTowardBlob(void) {
     EXPECT_TRUE(fabs(far.horizontalError) > fabs(closer.horizontalError));
     EXPECT_TRUE(fabs(closer.horizontalError)
         > fabs(almostCentered.horizontalError));
-    EXPECT_INT(far.panTarget, 5947);
-    EXPECT_INT(closer.panTarget, 5988);
+    EXPECT_INT(far.panTarget, 5973);
+    EXPECT_INT(closer.panTarget, 5994);
     EXPECT_INT(almostCentered.panTarget, 6000);
 }
 
@@ -174,7 +174,7 @@ static void testRightTrackingAccumulatesMonotonically(void) {
         pan = result.panTarget;
         EXPECT_TRUE(pan < previousPan);
     }
-    EXPECT_INT(pan, 5470);
+    EXPECT_INT(pan, 5730);
 }
 
 static void testPanLimitRequestsUprightTransition(void) {
@@ -205,9 +205,9 @@ static void testPanLimitRequestsUprightTransition(void) {
         &configuration, 6000, 7014, 7375, 0.8, 0.8, 0.1
     );
     EXPECT_FALSE(insideEnvelope.uprightTransitionRequested);
-    EXPECT_INT(insideEnvelope.panTarget, 5947);
+    EXPECT_INT(insideEnvelope.panTarget, 5973);
     EXPECT_INT(insideEnvelope.lowerTarget, 7014);
-    EXPECT_INT(insideEnvelope.upperTarget, 7389);
+    EXPECT_INT(insideEnvelope.upperTarget, 7382);
 
     // Without runtime authorization the controller remains clamped at the
     // live envelope, while ordinary vertical centering remains available.
@@ -219,18 +219,18 @@ static void testPanLimitRequestsUprightTransition(void) {
     EXPECT_TRUE(unauthorized.panClamped);
     EXPECT_INT(unauthorized.panTarget, 5900);
     EXPECT_INT(unauthorized.lowerTarget, 7014);
-    EXPECT_INT(unauthorized.upperTarget, 7389);
+    EXPECT_INT(unauthorized.upperTarget, 7382);
 }
 
 static void testTrackingGuards(void) {
     ROBPersonTrackingConfig configuration = ROBPersonTrackingDefaultConfig();
     // A newly acquired face at the bottom edge may move the camera down only
-    // seven raw targets, even when the detector was absent for a full second.
+    // four raw targets, even when the detector was absent for a full second.
     ROBPersonTrackingResult reacquiredLow = track(
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
         0.5, 0.0, 1.0
     );
-    EXPECT_INT(reacquiredLow.upperTarget, 7368);
+    EXPECT_INT(reacquiredLow.upperTarget, 7371);
 
     ROBPersonTrackingResult low = track(
         &configuration, 6000, ROBPersonTrackingMinimumUpperTarget,
@@ -252,7 +252,7 @@ static void testTrackingGuards(void) {
         &configuration, 6000, ROBPersonTrackingNeutralUpperTarget,
         1.0, 0.5, 1.0
     );
-    EXPECT_INT(cappedGap.panTarget, 5868);
+    EXPECT_INT(cappedGap.panTarget, 5934);
 
     // Runtime acquisition may center its narrow tilt band on the actual
     // accepted camera pose instead of jumping to the policy's legacy neutral.
@@ -262,7 +262,7 @@ static void testTrackingGuards(void) {
     ROBPersonTrackingResult dynamicUpper = track(
         &configuration, 6000, 6073, 0.5, 1.0, 0.1
     );
-    EXPECT_INT(dynamicUpper.upperTarget, 6093);
+    EXPECT_INT(dynamicUpper.upperTarget, 6091);
 
     EXPECT_FALSE(ROBPersonTrackingApply(
         &configuration, 6000, 7014, ROBPersonTrackingNeutralUpperTarget,
@@ -287,12 +287,56 @@ static void testTrackingGuards(void) {
     EXPECT_FALSE(ROBPersonTrackingConfigIsValid(&configuration));
 }
 
+static void testUprightLookaroundAndResponsivePreset(void) {
+    ROBPersonTrackingConfig gentle = ROBPersonTrackingDefaultConfig();
+    // Runtime centers this band on the reviewed upright camera pose.
+    gentle.upperMinimumTarget = 6906 - 40;
+    gentle.upperMaximumTarget = 6906 + 200;
+    int pan = 6000;
+    int upper = 6906;
+    bool panMoved = false;
+    bool upperMoved = false;
+    for (int frame = 0; frame < 600; frame++) {
+        double coordinate = (frame / 20) % 2 ? 0.2 : 0.8;
+        ROBPersonTrackingResult result = trackWithLower(
+            &gentle, pan, 6011, upper, coordinate, coordinate, 0.1
+        );
+        EXPECT_INT(result.lowerTarget, 6011);
+        EXPECT_FALSE(result.uprightTransitionRequested);
+        EXPECT_TRUE(result.upperTarget >= gentle.upperMinimumTarget);
+        EXPECT_TRUE(result.upperTarget <= gentle.upperMaximumTarget);
+        panMoved |= result.panTarget != pan;
+        upperMoved |= result.upperTarget != upper;
+        pan = result.panTarget;
+        upper = result.upperTarget;
+    }
+    EXPECT_TRUE(panMoved);
+    EXPECT_TRUE(upperMoved);
+
+    ROBPersonTrackingConfig responsive = gentle;
+    responsive.panTargetsPerSecond = ROBPersonTrackingResponsivePanTargetsPerSecond;
+    responsive.upperTargetsPerSecond = ROBPersonTrackingResponsiveVerticalTargetsPerSecond;
+    responsive.upperDownTargetsPerSecond = responsive.upperTargetsPerSecond * 0.2;
+    ROBPersonTrackingResult slow = trackWithLower(
+        &gentle, 6000, 6011, 6906, 0.8, 0.8, 0.1
+    );
+    ROBPersonTrackingResult fast = trackWithLower(
+        &responsive, 6000, 6011, 6906, 0.8, 0.8, 0.1
+    );
+    EXPECT_TRUE(fast.panTarget < slow.panTarget);
+    EXPECT_TRUE(fast.upperTarget > slow.upperTarget);
+    EXPECT_INT(fast.panTarget, 5947);
+    EXPECT_INT(fast.lowerTarget, 6011);
+    EXPECT_FALSE(fast.uprightTransitionRequested);
+}
+
 int main(void) {
     testDefaultCalibration();
     testCorrectionsPointCameraTowardBlob();
     testRightTrackingAccumulatesMonotonically();
     testPanLimitRequestsUprightTransition();
     testTrackingGuards();
+    testUprightLookaroundAndResponsivePreset();
 
     if (failures != 0) {
         fprintf(stderr, "ROB person tracking policy fixtures failed: %d\n", failures);

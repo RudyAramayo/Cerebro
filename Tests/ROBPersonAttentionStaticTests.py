@@ -24,6 +24,65 @@ insta_diagnostics = text("ROBInsta360DiagnosticsWindowController.swift")
 main = text("ROBMainViewController.mm")
 serial_header = text("ROBSerialBox.h")
 serial = text("ROBSerialBox.m")
+settings = text("ROBPythonSettingsWindowController.m")
+
+
+def method_body(source: str, signature: str) -> str:
+    start = source.rindex(signature)
+    opening = source.index("{", start)
+    depth = 0
+    for end in range(opening, len(source)):
+        depth += (source[end] == "{") - (source[end] == "}")
+        if depth == 0:
+            return source[opening : end + 1]
+    raise AssertionError(signature)
+
+
+posture_preference = "ROBPersonTrackingAutomaticPostureChangesEnabledFromDefaults"
+for signature, first_motion in (
+    ("- (ROBNeckCommandDisposition)requestPersonTrackingLeanForwardRest", "startSafeNeckStartup"),
+    ("- (ROBNeckCommandDisposition)requestPersonTrackingPostureSequence:", "advancePersonTrackingPostureSequence"),
+    ("- (ROBNeckCommandDisposition)advancePersonTrackingPostureSequence", "applySafeNeckPanTarget:"),
+):
+    body = method_body(serial, signature)
+    gate = body[:body.index(first_motion)]
+    require(
+        f"if (!{posture_preference}" in gate
+        and "return ROBNeckCommandDispositionRejected;" in gate,
+        f"Upright lookaround must reject automatic lean commands before motion: {signature}",
+    )
+require(
+    "cancelPersonTrackingPostureSequence" in method_body(
+        serial, "- (ROBNeckCommandDisposition)advancePersonTrackingPostureSequence"
+    ).split("NSTimeInterval now", 1)[0]
+    and "cancelPersonTrackingPostureSequence" in method_body(
+        settings, "- (void)automaticTrackingPosturesChanged:"
+    ),
+    "Turning scan mode off must cancel queued lean steps, including scheduled continuations.",
+)
+tracking = method_body(main, "- (void) trackingPerson:(NSString *)userID x:")
+require(
+    "if ((keepLowerNeckUpright || highMainPoseRequestsUpright)" in tracking
+    and "currentLowerTarget != ROBNeckSafetyUprightLowerTarget" in tracking
+    and "requestPersonTrackingUprightPanTarget:highPosePanTarget" in tracking
+    and "headPan.integerValue = result.panTarget" in tracking
+    and "headUpperNeckTilt.integerValue =\n            result.upperTarget" in tracking,
+    "Upright mode must enter once through the safe gateway and retain pan/upper tracking.",
+)
+sword_tracking = method_body(main, "- (void)trainingSwordDidUpdate:")
+require(
+    posture_preference in sword_tracking.split('cameraPositionNamed:@"lean_back"', 1)[0],
+    "Sword attention must not re-enable lean-back gestures in upright mode.",
+)
+preset = method_body(settings, "- (void)applyTrackingMotionPresetResponsive:")
+require(
+    "applyMaestroServoSmoothingEnabled:YES" in preset
+    and "ROBPersonTrackingResponsivePanTargetsPerSecond" in preset
+    and "ROBPersonTrackingResponsiveVerticalTargetsPerSecond" in preset
+    and "AutomaticPostureChangesDefaultsKey" not in preset
+    and "requestPersonTrackingPostureSequence" not in preset,
+    "Changing reaction speed must retain servo ramps and never opt into automatic lean gestures.",
+)
 insta_reacquisition = main.rsplit(
     "- (void)insta360HumanPoseDidUpdate:", 1
 )[1].split("- (void)updatePersonTrackingPostureForDistance:", 1)[0]

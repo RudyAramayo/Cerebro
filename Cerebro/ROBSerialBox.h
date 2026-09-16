@@ -38,6 +38,8 @@ FOUNDATION_EXPORT NSString * const ROBServoControlLowerTargetUserInfoKey;
 FOUNDATION_EXPORT NSString * const ROBServoControlUpperTargetUserInfoKey;
 FOUNDATION_EXPORT NSInteger const ROBMaestroDefaultServoSpeedLimit;
 FOUNDATION_EXPORT NSInteger const ROBMaestroDefaultServoAccelerationLimit;
+FOUNDATION_EXPORT NSInteger const ROBMaestroResponsiveServoSpeedLimit;
+FOUNDATION_EXPORT NSInteger const ROBMaestroResponsiveServoAccelerationLimit;
 
 typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
     ROBNeckCommandDispositionRejected = 0,
@@ -164,6 +166,8 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 /// calibration is unconfirmed; arbitrary calibrated gesture motion does not.
 - (ROBNeckCommandDisposition)requestPersonTrackingPostureSequence:
     (NSArray<NSString *> *)positionNames;
+/// Drops queued automatic lean steps without sending any new motor target.
+- (void)cancelPersonTrackingPostureSequence;
 
 @property (readwrite, retain) NSSlider *arm_R11_force;
 

@@ -308,11 +308,11 @@ def main() -> None:
         "kROBMaestroServoSmoothingEnabledDefaultsKey" in serial_source
         and "kROBMaestroServoSpeedLimitDefaultsKey" in serial_source
         and "kROBMaestroServoAccelerationLimitDefaultsKey" in serial_source
-        and "kROBMaestroServoMotionProfileDefaultsVersion = 2" in serial_source
+        and "kROBMaestroServoMotionProfileDefaultsVersion = 3" in serial_source
         and "kROBLegacyMaestroDefaultServoSpeedLimit = 40" in serial_source
         and "kROBLegacyMaestroDefaultServoAccelerationLimit = 4" in serial_source
-        and "ROBMaestroDefaultServoSpeedLimit = 35" in serial_source
-        and "ROBMaestroDefaultServoAccelerationLimit = 3" in serial_source,
+        and "ROBMaestroDefaultServoSpeedLimit = 20" in serial_source
+        and "ROBMaestroDefaultServoAccelerationLimit = 2" in serial_source,
         "The gentle Maestro defaults are no longer registered and persisted",
     )
     serial_init = braced_declaration(

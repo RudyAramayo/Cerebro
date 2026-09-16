@@ -147,12 +147,12 @@ assert "responseExponent = 1.5" in tracking_policy_source
 assert "pow(normalizedError, responseExponent)" in tracking_policy_source
 assert "ROBPersonTrackingDefaultPanTargetsPerSecond" in tracking_policy_source
 assert "ROBPersonTrackingMinimumPanTargetsPerSecond = 1500" in tracking_policy_header
-assert "ROBPersonTrackingDefaultPanTargetsPerSecond = 3000" in tracking_policy_header
+assert "ROBPersonTrackingDefaultPanTargetsPerSecond = 1500" in tracking_policy_header
 assert "ROBPersonTrackingMaximumPanTargetsPerSecond = 6000" in tracking_policy_header
 assert 'ROB.PersonTracking.PanTargetsPerSecond' in tracking_preferences
 assert "ROBPersonTrackingPanTargetsPerSecondFromDefaults" in main
 assert "ROBPersonTrackingMinimumVerticalTargetsPerSecond = 400" in tracking_policy_header
-assert "ROBPersonTrackingDefaultVerticalTargetsPerSecond = 800" in tracking_policy_header
+assert "ROBPersonTrackingDefaultVerticalTargetsPerSecond = 400" in tracking_policy_header
 assert "ROBPersonTrackingMaximumVerticalTargetsPerSecond = 2000" in tracking_policy_header
 assert 'ROB.PersonTracking.VerticalTargetsPerSecond' in tracking_preferences
 assert "ROBPersonTrackingVerticalTargetsPerSecondFromDefaults" in main
