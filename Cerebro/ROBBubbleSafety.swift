@@ -1,4 +1,5 @@
 import Foundation
+import simd
 
 /// Clock-injected duty-cycle policy. Only Cerebro owns timers and actuator state.
 struct ROBBubbleSafety {
@@ -128,7 +129,8 @@ struct ROBBubbleCalibration: Codable {
     var pitchDegrees = 0.0
     var rollDegrees = 0.0
     var neckReference: [Int] = []
-    var wiringConfirmed = false
+    // Operator verified both relay channels: 8000 ON, 4000 OFF (2026-09-15).
+    var wiringConfirmed = true
     var geometryConfirmed = false
 
     var valid: Bool {
@@ -174,5 +176,51 @@ struct ROBBubbleCalibration: Codable {
         guard (4000 ... 8000).contains(pan), (4000 ... 8000).contains(tilt) else { return nil }
         return (Int(pan.rounded()), Int(tilt.rounded()),
                 String(format: "Depth %.2f m • pan %+.1f° • elevation %+.1f°", z, yaw, elevation))
+    }
+}
+
+/// A draft from the unscaled visual model, never evidence of calibrated nozzle
+/// geometry. The model has a shoulder anchor and face depth lenses, but no
+/// bubble pivot or independently identified RGB optical center.
+struct ROBBubbleModelEstimate {
+    let right: Double
+    let below: Double
+    let forward: Double
+
+    init(data: Data) throws {
+        struct Node: Decodable {
+            let name: String
+            let position: [Double]
+            let rotation: [Double]
+            let scale: [Double]
+            let children: [Node]?
+        }
+        struct Document: Decodable { let units: String; let root: Node }
+        let invalid = NSError(domain: "Bubble model estimate", code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "The visual model does not contain usable camera and right-shoulder anchors."])
+        let document = try JSONDecoder().decode(Document.self, from: data)
+        guard document.units == "meters" else { throw invalid }
+        var shoulder: SIMD3<Double>?
+        var lenses: [SIMD3<Double>] = []
+        func visit(_ node: Node, parent: simd_double4x4) throws {
+            guard node.position.count == 3, node.rotation.count == 4, node.scale.count == 3,
+                  (node.position + node.rotation + node.scale).allSatisfy(\.isFinite),
+                  node.rotation.contains(where: { $0 != 0 }) else { throw invalid }
+            let q = node.rotation
+            var local = simd_double4x4(simd_quatd(ix: q[0], iy: q[1], iz: q[2], r: q[3]).normalized)
+            local.columns.0 *= node.scale[0]; local.columns.1 *= node.scale[1]; local.columns.2 *= node.scale[2]
+            local.columns.3 = SIMD4(node.position[0], node.position[1], node.position[2], 1)
+            let world = parent * local
+            let point = SIMD3(world.columns.3.x, world.columns.3.y, world.columns.3.z)
+            if node.name == "Right Arm Assembly" { shoulder = point }
+            if node.name == "Head Depth Lens" { lenses.append(point) }
+            for child in node.children ?? [] { try visit(child, parent: world) }
+        }
+        try visit(document.root, parent: matrix_identity_double4x4)
+        guard let shoulder, lenses.count == 2 else { throw invalid }
+        let cameraProxy = (lenses[0] + lenses[1]) / 2
+        let offset = shoulder - cameraProxy
+        // Visual coordinates: X right, Y up, Z backward. Optical: right/down/forward.
+        right = offset.x; below = -offset.y; forward = -offset.z
     }
 }

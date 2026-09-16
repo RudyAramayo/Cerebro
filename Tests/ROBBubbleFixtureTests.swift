@@ -56,6 +56,7 @@ import Foundation
 
         var calibration = ROBBubbleCalibration()
         precondition(calibration.valid && calibration.spinChannel == 8 && calibration.blowerChannel == 9)
+        precondition(calibration.wiringConfirmed && calibration.spinOn == 8000 && calibration.blowerOn == 8000)
         let center = calibration.solve(u: 0.5, v: 0.5, width: 641, height: 481,
             depthMeters: 2, fx: 500, fy: 500, cx: 320, cy: 240)!
         precondition(center.pan == 6000 && center.tilt == 6000)
@@ -63,6 +64,9 @@ import Foundation
         let parallax = calibration.solve(u: 0.5, v: 0.5, width: 641, height: 481,
             depthMeters: 2, fx: 500, fy: 500, cx: 320, cy: 240)!
         precondition(parallax.pan < 6000, "Right shoulder must aim left at camera center")
+        let near = calibration.solve(u: 0.5, v: 0.5, width: 641, height: 481,
+            depthMeters: 0.5, fx: 500, fy: 500, cx: 320, cy: 240)!
+        precondition(near.pan < parallax.pan, "The nearer the person, the larger the parallax correction")
         precondition(calibration.solve(u: .nan, v: 0.5, width: 641, height: 481,
             depthMeters: 2, fx: 500, fy: 500, cx: 320, cy: 240) == nil)
         calibration.yawDegrees = 180
@@ -81,6 +85,17 @@ import Foundation
         do { _ = try ROBBubbleProtocol.encode(invalid); fatalError("Invalid pan accepted") } catch { }
         let release = ROBBubbleMessage(controllerID: UUID(), sessionID: UUID(), sequence: 2, command: .init(.releaseMount))
         _ = try ROBBubbleProtocol.encode(release)
+        for operation in [ROBBubbleOperation.authorizeMount, .authorizeMotors] {
+            let command = ROBBubbleMessage(controllerID: UUID(), sessionID: UUID(), sequence: 1, command: .init(operation))
+            let decoded = try ROBBubbleProtocol.decode(ROBBubbleProtocol.encode(command))
+            precondition(decoded == command)
+        }
+        if CommandLine.arguments.count > 1 {
+            let estimate = try ROBBubbleModelEstimate(data: Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1])))
+            precondition(abs(estimate.right - 0.208) < 0.001)
+            precondition(abs(estimate.below - 0.181) < 0.001)
+            precondition(abs(estimate.forward + 0.044) < 0.001, "Use unscaled model coordinates, not the 1.2x presentation scale")
+        }
         print("Bubble fixtures passed: interlocks, relay delay, lease, cumulative duty, cooldown, projection, protocol")
     }
 }

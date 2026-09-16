@@ -1127,12 +1127,20 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
     ROBBubbleRuntime *bubbles = [ROBBubbleRuntime shared];
     if (slider == (id)self.arm_R_Shoulder_Pan_enabled
         || slider == (id)self.arm_R_Shoulder_Tilt_enabled) {
-        if (((NSButton *)slider).state == NSControlStateValueOff) [bubbles releaseMount];
+        BOOL enabled = ((NSButton *)slider).state == NSControlStateValueOn;
+        // These checkboxes control the coupled mount together. A slider must
+        // never silently restore pulses after the operator has released it.
+        self.arm_R_Shoulder_Pan_enabled.state = enabled ? NSControlStateValueOn : NSControlStateValueOff;
+        self.arm_R_Shoulder_Tilt_enabled.state = enabled ? NSControlStateValueOn : NSControlStateValueOff;
+        if (!enabled) [bubbles releaseMount];
         else [bubbles manualPan:self.arm_R_Shoulder_Tilt.integerValue tilt:self.arm_R_Shoulder_Pan.integerValue];
         return;
     }
     if (slider == self.arm_R_Shoulder_Pan || slider == self.arm_R_Shoulder_Tilt) {
-        [bubbles manualPan:self.arm_R_Shoulder_Tilt.integerValue tilt:self.arm_R_Shoulder_Pan.integerValue];
+        if (self.arm_R_Shoulder_Pan_enabled.state == NSControlStateValueOn
+            && self.arm_R_Shoulder_Tilt_enabled.state == NSControlStateValueOn) {
+            [bubbles manualPan:self.arm_R_Shoulder_Tilt.integerValue tilt:self.arm_R_Shoulder_Pan.integerValue];
+        }
         return;
     }
     if (slider == self.arm_R_Elbow_Tilt || slider == (id)self.arm_R_Elbow_Tilt_enabled) {
