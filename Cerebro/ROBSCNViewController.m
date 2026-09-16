@@ -185,17 +185,24 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     SCNNode *cameraNode = [SCNNode node];
     cameraNode.camera = [SCNCamera camera];
     cameraNode.camera.fieldOfView = 52;
-    cameraNode.position = SCNVector3Make(0, 1.25, 2.8);
-    cameraNode.eulerAngles = SCNVector3Make(-0.22, 0, 0);
+    cameraNode.camera.wantsHDR = YES;
+    cameraNode.camera.exposureOffset = -1;
+    cameraNode.position = SCNVector3Make(1.35, 1.25, -2.5);
+    [cameraNode lookAt:SCNVector3Make(0, 0.78, 0)];
     [scene.rootNode addChildNode:cameraNode];
 
     SCNNode *lightNode = [SCNNode node];
     lightNode.light = [SCNLight light];
     lightNode.light.type = SCNLightTypeOmni;
-    lightNode.light.intensity = 1100;
-    lightNode.position = SCNVector3Make(0, 2.5, 2);
+    lightNode.light.intensity = 800;
+    lightNode.position = SCNVector3Make(1, 2.5, -2);
     [scene.rootNode addChildNode:lightNode];
     scene.lightingEnvironment.intensity = 0.6;
+    SCNNode *fillLight = [SCNNode node];
+    fillLight.light = [SCNLight light];
+    fillLight.light.type = SCNLightTypeAmbient;
+    fillLight.light.intensity = 120;
+    [scene.rootNode addChildNode:fillLight];
 
     SCNFloor *floor = [SCNFloor floor];
     floor.reflectivity = 0.08;
@@ -219,7 +226,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
         [scene.rootNode addChildNode:lineZNode];
     }
 
-    self.robotNode = [SCNNode node];
+    self.robotNode = [ROBScanVisualModel makeRobot];
     [scene.rootNode addChildNode:self.robotNode];
 
     self.liveRGBCloudNode = [SCNNode node];
@@ -230,90 +237,20 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     self.liveBellyRGBCloudNode.name = @"Live Belly RGB point cloud";
     [scene.rootNode addChildNode:self.liveBellyRGBCloudNode];
 
-    SCNBox *robotBody = [SCNBox boxWithWidth:0.72 height:0.46 length:0.56 chamferRadius:0.08];
-    robotBody.materials = @[[self materialWithColor:[NSColor colorWithWhite:0.18 alpha:1] emission:0.05]];
-    SCNNode *bodyNode = [SCNNode nodeWithGeometry:robotBody];
-    bodyNode.position = SCNVector3Make(0, 0.34, 0);
-    [self.robotNode addChildNode:bodyNode];
-
-    SCNBox *torso = [SCNBox boxWithWidth:0.68 height:0.62 length:0.52 chamferRadius:0.035];
-    torso.firstMaterial = [self materialWithColor:[NSColor colorWithWhite:0.12 alpha:1] emission:0.04];
-    SCNNode *torsoNode = [SCNNode nodeWithGeometry:torso];
-    torsoNode.position = SCNVector3Make(0, 0.78, 0);
-    [self.robotNode addChildNode:torsoNode];
-
-    NSArray<NSColor *> *ringColors = @[NSColor.systemBlueColor, NSColor.systemCyanColor];
-    for (NSInteger index = 0; index < 2; index++) {
-        CGFloat x = index == 0 ? -0.19 : 0.19;
-        SCNTorus *ring = [SCNTorus torusWithRingRadius:0.115 pipeRadius:0.025];
-        ring.firstMaterial = [self materialWithColor:ringColors[index] emission:0.75];
-        SCNNode *ringNode = [SCNNode nodeWithGeometry:ring];
-        ringNode.position = SCNVector3Make(x, 0.84, -0.275);
-        ringNode.eulerAngles = SCNVector3Make((float)M_PI_2, 0, 0);
-        [self.robotNode addChildNode:ringNode];
-        SCNCylinder *speaker = [SCNCylinder cylinderWithRadius:0.08 height:0.018];
-        speaker.firstMaterial = [self materialWithColor:[NSColor colorWithWhite:0.025 alpha:1] emission:0];
-        SCNNode *speakerNode = [SCNNode nodeWithGeometry:speaker];
-        speakerNode.position = SCNVector3Make(x, 0.84, -0.285);
-        speakerNode.eulerAngles = SCNVector3Make((float)M_PI_2, 0, 0);
-        [self.robotNode addChildNode:speakerNode];
+    // All three products consume the same scan-informed mesh hierarchy.
+    self.leftTreadNode = [self.robotNode childNodeWithName:@"Left Tri-Wheel Tread" recursively:YES];
+    self.rightTreadNode = [self.robotNode childNodeWithName:@"Right Tri-Wheel Tread" recursively:YES];
+    self.neckPanNode = [self.robotNode childNodeWithName:@"Neck Pan" recursively:YES];
+    self.cameraHeadNode = [self.robotNode childNodeWithName:@"Camera Head Pivot" recursively:YES];
+    for (SCNNode *tread in @[self.leftTreadNode, self.rightTreadNode]) {
+        [tread enumerateChildNodesUsingBlock:^(SCNNode *child, BOOL *stop) {
+            if ([child.name containsString:@"Tread Shoe"]) {
+                child.geometry.firstMaterial = [child.geometry.firstMaterial copy];
+            }
+        }];
     }
-    SCNBox *depthCamera = [SCNBox boxWithWidth:0.20 height:0.10 length:0.06 chamferRadius:0.02];
-    depthCamera.firstMaterial = [self materialWithColor:[NSColor colorWithWhite:0.42 alpha:1] emission:0.05];
-    SCNNode *depthCameraNode = [SCNNode nodeWithGeometry:depthCamera];
-    depthCameraNode.position = SCNVector3Make(0, 0.62, -0.29);
-    [self.robotNode addChildNode:depthCameraNode];
-
-    SCNCylinder *frontActuator = [SCNCylinder cylinderWithRadius:0.045 height:0.70];
-    frontActuator.firstMaterial = [self materialWithColor:[NSColor colorWithWhite:0.48 alpha:1] emission:0.05];
-    SCNNode *actuatorNode = [SCNNode nodeWithGeometry:frontActuator];
-    actuatorNode.position = SCNVector3Make(0, 0.30, -0.62);
-    actuatorNode.eulerAngles = SCNVector3Make((float)M_PI_2, 0, 0);
-    [self.robotNode addChildNode:actuatorNode];
-
-    SCNBox *tread = [SCNBox boxWithWidth:0.17 height:0.26 length:0.78 chamferRadius:0.06];
-    self.leftTreadNode = [SCNNode nodeWithGeometry:[tread copy]];
-    self.rightTreadNode = [SCNNode nodeWithGeometry:[tread copy]];
-    self.leftTreadNode.position = SCNVector3Make(-0.43, 0.22, 0);
-    self.rightTreadNode.position = SCNVector3Make(0.43, 0.22, 0);
-    [self.robotNode addChildNode:self.leftTreadNode];
-    [self.robotNode addChildNode:self.rightTreadNode];
-
-    self.neckPanNode = [SCNNode node];
-    self.neckPanNode.position = SCNVector3Make(0, 1.10, 0);
-    [self.robotNode addChildNode:self.neckPanNode];
-    SCNCylinder *neck = [SCNCylinder cylinderWithRadius:0.08 height:0.28];
-    neck.firstMaterial = [self materialWithColor:NSColor.systemOrangeColor emission:0.25];
-    SCNNode *neckBody = [SCNNode nodeWithGeometry:neck];
-    neckBody.position = SCNVector3Make(0, 0.14, 0);
-    [self.neckPanNode addChildNode:neckBody];
-    SCNSphere *cameraHead = [SCNSphere sphereWithRadius:0.20];
-    cameraHead.firstMaterial = [self materialWithColor:[NSColor colorWithWhite:0.06 alpha:1] emission:0.1];
-    self.cameraHeadNode = [SCNNode nodeWithGeometry:cameraHead];
-    self.cameraHeadNode.scale = SCNVector3Make(1, 1, 0.82);
-    self.cameraHeadNode.position = SCNVector3Make(0, 0.38, -0.03);
-    [self.neckPanNode addChildNode:self.cameraHeadNode];
-    SCNCylinder *headLens = [SCNCylinder cylinderWithRadius:0.055 height:0.04];
-    headLens.firstMaterial = [self materialWithColor:NSColor.systemGreenColor emission:0.8];
-    SCNNode *headLensNode = [SCNNode nodeWithGeometry:headLens];
-    headLensNode.position = SCNVector3Make(0, 0, -0.18);
-    headLensNode.eulerAngles = SCNVector3Make((float)M_PI_2, 0, 0);
-    [self.cameraHeadNode addChildNode:headLensNode];
-
-    for (NSInteger side = -1; side <= 1; side += 2) {
-        SCNBox *upperArm = [SCNBox boxWithWidth:0.13 height:0.48 length:0.14 chamferRadius:0.025];
-        upperArm.firstMaterial = [self materialWithColor:[NSColor colorWithWhite:0.42 alpha:1] emission:0.03];
-        SCNNode *upperNode = [SCNNode nodeWithGeometry:upperArm];
-        upperNode.position = SCNVector3Make(side * 0.46, 0.83, 0);
-        upperNode.eulerAngles = SCNVector3Make(0, 0, side * -0.22);
-        [self.robotNode addChildNode:upperNode];
-        SCNBox *forearm = [SCNBox boxWithWidth:0.11 height:0.42 length:0.12 chamferRadius:0.02];
-        forearm.firstMaterial = upperArm.firstMaterial;
-        SCNNode *forearmNode = [SCNNode nodeWithGeometry:forearm];
-        forearmNode.position = SCNVector3Make(side * 0.56, 0.42, -0.02);
-        forearmNode.eulerAngles = SCNVector3Make(0, 0, side * 0.13);
-        [self.robotNode addChildNode:forearmNode];
-    }
+    // Flippers remain at the reference pose: this controller stream has no
+    // measured flipper angle. Do not portray open-loop demands as telemetry.
 
     // Sensor order matches the Base firmware telemetry: FL, FR, L, R, BL, BR.
     self.irBeamOrigins = @[
@@ -349,6 +286,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 
     self.robo_scnView.scene = scene;
     self.robo_scnView.allowsCameraControl = YES;
+    self.robo_scnView.defaultCameraController.target = SCNVector3Make(0, 0.78, 0);
     self.robo_scnView.showsStatistics = YES;
     self.robo_scnView.backgroundColor = NSColor.blackColor;
     [self installBottomHUD];
@@ -499,9 +437,14 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 - (void)updateTreadNode:(SCNNode *)node demand:(CGFloat)demand color:(NSColor *)color
 {
     CGFloat bounded = MAX(-1.0, MIN(1.0, demand));
-    NSColor *stateColor = fabs(bounded) < 0.02 ? NSColor.darkGrayColor : color;
-    node.geometry.firstMaterial = [self materialWithColor:stateColor emission:fabs(bounded) * 0.8];
-    node.scale = SCNVector3Make(1, 1, 1.0 + fabs(bounded) * 0.18);
+    // Highlight tread demand without stretching ROB's physical silhouette.
+    [node enumerateChildNodesUsingBlock:^(SCNNode *child, BOOL *stop) {
+        if ([child.name containsString:@"Tread Shoe"]) {
+            SCNMaterial *material = child.geometry.firstMaterial;
+            material.emission.contents = fabs(bounded) < 0.02
+                ? NSColor.blackColor : [color colorWithAlphaComponent:fabs(bounded) * 0.65];
+        }
+    }];
 }
 
 - (void)refreshFreshness:(NSTimer *)timer

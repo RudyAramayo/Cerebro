@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B09B09150000000000000001 /* ROBScanVisualModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B09B09150000000000000002; };
+		B09B09150000000000000003 /* rob-visual.json in Resources */ = {isa = PBXBuildFile; fileRef = B09B09150000000000000004; };
 		C0D3A0012F00000100000001 /* ROBPythonRuntime.m in Sources */ = {isa = PBXBuildFile; fileRef = C0D3B0022F00000100000001 /* ROBPythonRuntime.m */; };
 		C0D3A0022F00000100000001 /* ROBPythonSettingsWindowController.m in Sources */ = {isa = PBXBuildFile; fileRef = C0D3B0042F00000100000001 /* ROBPythonSettingsWindowController.m */; };
 		C0D3A0032F00000100000001 /* ROBMainWindowController.m in Sources */ = {isa = PBXBuildFile; fileRef = C0D3B0062F00000100000001 /* ROBMainWindowController.m */; };
@@ -211,6 +213,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		B09B09150000000000000002 /* ROBScanVisualModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBScanVisualModel.swift; sourceTree = "<group>"; };
+		B09B09150000000000000004 /* rob-visual.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "rob-visual.json"; sourceTree = "<group>"; };
 		C0D3B0012F00000100000001 /* ROBPythonRuntime.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBPythonRuntime.h; sourceTree = "<group>"; };
 		C0D3B0022F00000100000001 /* ROBPythonRuntime.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ROBPythonRuntime.m; sourceTree = "<group>"; };
 		C0D3B0032F00000100000001 /* ROBPythonSettingsWindowController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ROBPythonSettingsWindowController.h; sourceTree = "<group>"; };
@@ -546,6 +550,8 @@
 				D49D755A27FFD1BF00142E26 /* AutoNetDataTransferProtocol.swift */,
 				D49D755627FFD1AE00142E26 /* AutoNetServerConnection.swift */,
 				D4A38F741FFC8BD300092A46 /* ROBSCNViewController.h */,
+				B09B09150000000000000002 /* ROBScanVisualModel.swift */,
+				B09B09150000000000000004 /* rob-visual.json */,
 				D4E000012F00000100000001 /* GeminiRoboticsProtocol.swift */,
 				C0B004012F4C000400000001 /* ROBNewsSearchService.swift */,
 				C0B00A012F4C000A00000001 /* ROBWeatherSearchService.swift */,
@@ -839,6 +845,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B09B09150000000000000003 /* rob-visual.json in Resources */,
 				C0D3A0042F00000100000001 /* PythonRequirements.txt in Resources */,
 				D4E700022F00000100000001 /* StageShows/MakerFaireOpening.robshow.json in Resources */,
 				D4E700042F00000100000001 /* StageShows/OrbitusTenMinuteComedy.robshow.json in Resources */,
@@ -1013,6 +1020,7 @@
 				D4F136792325E39A0084A302 /* RTSPMessage.m in Sources */,
 				D4F1367D2325E4440084A302 /* flextGL.cpp in Sources */,
 				D4A38F761FFC8BD300092A46 /* ROBSCNViewController.m in Sources */,
+				B09B09150000000000000001 /* ROBScanVisualModel.swift in Sources */,
 				D4066C5C22863009002ACAD1 /* ROBBaseControllerModel.m in Sources */,
 				D4F136762325E39A0084A302 /* MP4Atom.m in Sources */,
 				D4F136782325E39A0084A302 /* ROBRTSPController.m in Sources */,
