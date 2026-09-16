@@ -199,6 +199,9 @@
 		6A2CBB38C4C026B877F9E509 /* ROBBubbleConsole.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FBE1DC137AC72CD56E01123 /* ROBBubbleConsole.swift */; };
 		DAF726DD24457C4761FE0086 /* ROBBubbleWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9AE6933FA5C9E8C62E1C258 /* ROBBubbleWindowController.swift */; };
 		CB0000000000000000000102 /* ROBBubbleRelayWatchdog.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB0000000000000000000101 /* ROBBubbleRelayWatchdog.swift */; };
+		84547BA5C6BB48088643E82C /* BubbleLaserCalibration.py in Resources */ = {isa = PBXBuildFile; fileRef = 7E84073B5D9E42B981116116 /* BubbleLaserCalibration.py */; };
+		35B83CA417894C40A84B94D7 /* ROBBubbleLaserObservation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 582C41C171E14BFB91B7B4CF /* ROBBubbleLaserObservation.swift */; };
+		67BD0180E8DD4B4B8E0A7E9B /* ROBBubbleLaserCalibration.swift in Sources */ = {isa = PBXBuildFile; fileRef = B42CDCA4F5F4499B8DCEDC52 /* ROBBubbleLaserCalibration.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -443,6 +446,9 @@
 		0FBE1DC137AC72CD56E01123 /* ROBBubbleConsole.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBBubbleConsole.swift; sourceTree = "<group>"; };
 		E9AE6933FA5C9E8C62E1C258 /* ROBBubbleWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBBubbleWindowController.swift; sourceTree = "<group>"; };
 		CB0000000000000000000101 /* ROBBubbleRelayWatchdog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBBubbleRelayWatchdog.swift; sourceTree = "<group>"; };
+		7E84073B5D9E42B981116116 /* BubbleLaserCalibration.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = BubbleLaserCalibration.py; sourceTree = "<group>"; };
+		582C41C171E14BFB91B7B4CF /* ROBBubbleLaserObservation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBBubbleLaserObservation.swift; sourceTree = "<group>"; };
+		B42CDCA4F5F4499B8DCEDC52 /* ROBBubbleLaserCalibration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBBubbleLaserCalibration.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -576,6 +582,9 @@
 				C0A112012F4C011200000001 /* ROBTraversabilityRuntime.swift */,
 				C0F011012F6A011000000001 /* ROBFollowPersonCoordinator.swift */,
 				E9AE6933FA5C9E8C62E1C258 /* ROBBubbleWindowController.swift */,
+				B42CDCA4F5F4499B8DCEDC52 /* ROBBubbleLaserCalibration.swift */,
+				582C41C171E14BFB91B7B4CF /* ROBBubbleLaserObservation.swift */,
+				7E84073B5D9E42B981116116 /* BubbleLaserCalibration.py */,
 				0FBE1DC137AC72CD56E01123 /* ROBBubbleConsole.swift */,
 				5DA4838F3FDB442D4CE4BB7E /* ROBBubbleRuntime.swift */,
 				CB0000000000000000000101 /* ROBBubbleRelayWatchdog.swift */,
@@ -871,6 +880,7 @@
 				D4066C5A22828E5F002ACAD1 /* AudioInputTaskController.command in Resources */,
 				D49F14342E456EE3001C1824 /* Webcam_color.py in Resources */,
 				D49F14362E456EE3001C1824 /* FindChessboardCorners.py in Resources */,
+				84547BA5C6BB48088643E82C /* BubbleLaserCalibration.py in Resources */,
 				D4A38F461FFB2AED00092A46 /* art.scnassets in Resources */,
 				D4A8DAD62E71F076000485DF /* open_gripper_v2.py in Resources */,
 				D4A8DADF2E722508000485DF /* calibrate_gripper_v2.py in Resources */,
@@ -949,6 +959,8 @@
 				C0A112022F4C011200000001 /* ROBTraversabilityRuntime.swift in Sources */,
 				C0F011022F6A011000000001 /* ROBFollowPersonCoordinator.swift in Sources */,
 				DAF726DD24457C4761FE0086 /* ROBBubbleWindowController.swift in Sources */,
+				67BD0180E8DD4B4B8E0A7E9B /* ROBBubbleLaserCalibration.swift in Sources */,
+				35B83CA417894C40A84B94D7 /* ROBBubbleLaserObservation.swift in Sources */,
 				6A2CBB38C4C026B877F9E509 /* ROBBubbleConsole.swift in Sources */,
 				A3BCFE6FC0A160259CB18A01 /* ROBBubbleRuntime.swift in Sources */,
 				CB0000000000000000000102 /* ROBBubbleRelayWatchdog.swift in Sources */,

@@ -30,6 +30,7 @@ import CoreImage
     private var stowGeneration = 0
     private var stowingUntil = 0.0
     private var localPreviewActive = false
+    private var laserCaptureActive = false
     private var lastDetail = "Cerebro controls are ready. Remote controllers must enable Tilt/Pan or authorize bubbles."
     private var aimUsesCalibration = false
     private let imageQueue = DispatchQueue(label: "com.orbitusrobotics.bubbles.camera", qos: .utility)
@@ -49,8 +50,56 @@ import CoreImage
         let intrinsics: CameraIntrinsics?
         let jpeg: Data
         let neck: [Int]
+        let pan: Int
+        let tilt: Int
+        let panChannel: Int
+        let tiltChannel: Int
+        let mountCommandsKnown: Bool
+        let capturedDate: Date
+        let calibrationPNG: Data?
+        let rgbWidth: Int
+        let rgbHeight: Int
     }
     private var frames: [Frame] = []
+
+    /// A frozen observation, never an actuator request. Pose values are the
+    /// commands at frame admission, not encoder measurements.
+    struct LaserFrame {
+        let id: UUID
+        let capturedDate: Date
+        let png: Data
+        let width: Int
+        let height: Int
+        let pan: Int
+        let tilt: Int
+        let panChannel: Int
+        let tiltChannel: Int
+        let neck: [Int]
+        let intrinsics: [Double]?
+        let depth: CameraDepthFrame?
+    }
+
+    func setLaserCaptureActive(_ active: Bool) {
+        laserCaptureActive = active
+        updateDemand()
+    }
+
+    @nonobjc func laserCalibrationFrame() -> LaserFrame? {
+        guard laserCaptureActive, let frame = frames.last, uptime() - frame.capturedAt <= 2,
+              let png = frame.calibrationPNG, frame.neck.count == 3,
+              frame.neck == currentNeck, frame.pan == pan, frame.tilt == tilt,
+              frame.mountCommandsKnown, liveMountOutputs, serialBox?.bubbleHardwareReady == true,
+              lastOutputs[frame.panChannel] == frame.pan,
+              lastOutputs[frame.tiltChannel] == frame.tilt else { return nil }
+        let intrinsics = frame.intrinsics.flatMap { value -> [Double]? in
+            value.isValid(forWidth: frame.rgbWidth, height: frame.rgbHeight)
+                ? [value.fx, value.fy, value.cx, value.cy] : nil
+        }
+        return LaserFrame(id: frame.id, capturedDate: frame.capturedDate, png: png,
+            width: frame.rgbWidth, height: frame.rgbHeight, pan: frame.pan, tilt: frame.tilt,
+            panChannel: frame.panChannel, tiltChannel: frame.tiltChannel,
+            neck: frame.neck, intrinsics: intrinsics, depth: frame.depth)
+    }
 
     @nonobjc init(context: CIContext = CIContext(options: [.cacheIntermediates: false]),
                  defaults: UserDefaults = .standard,
@@ -345,7 +394,7 @@ import CoreImage
     func setLocalPreview(_ active: Bool) { localPreviewActive = active; updateDemand() }
     private func updateDemand() {
         let now = uptime()
-        let active = localPreviewActive || viewers.values.contains { now - $0.seen < 2 }
+        let active = localPreviewActive || laserCaptureActive || viewers.values.contains { now - $0.seen < 2 }
         imageLock.lock(); imageDemand = active; imageLock.unlock()
         cameraDemand?(active)
     }
@@ -358,6 +407,12 @@ import CoreImage
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             let neck = self.currentNeck
+            let mountPan = self.pan, mountTilt = self.tilt
+            let panChannel = self.calibration.panChannel, tiltChannel = self.calibration.tiltChannel
+            let mountCommandsKnown = self.liveMountOutputs && self.serialBox?.bubbleHardwareReady == true
+                && self.lastOutputs[panChannel] == mountPan && self.lastOutputs[tiltChannel] == mountTilt
+            let capturePNG = self.laserCaptureActive
+            let capturedDate = Date()
             self.imageQueue.async {
                 defer { self.imageLock.lock(); self.imageBusy = false; self.imageLock.unlock() }
                 guard let buffer = CMSampleBufferGetImageBuffer(frameSet.rgbSampleBuffer) else { return }
@@ -369,8 +424,15 @@ import CoreImage
                 let aligned = frameSet.alignedDepth.flatMap { depth in
                     depth.width == CVPixelBufferGetWidth(buffer) && depth.height == CVPixelBufferGetHeight(buffer) ? depth : nil
                 }
+                let png = capturePNG ? self.context.createCGImage(input, from: input.extent).flatMap {
+                    NSBitmapImageRep(cgImage: $0).representation(using: .png, properties: [:])
+                } : nil
                 let frame = Frame(id: UUID(), capturedAt: now, depth: aligned,
-                    intrinsics: frameSet.intrinsics, jpeg: jpeg, neck: neck)
+                    intrinsics: frameSet.intrinsics, jpeg: jpeg, neck: neck,
+                    pan: mountPan, tilt: mountTilt, panChannel: panChannel, tiltChannel: tiltChannel,
+                    mountCommandsKnown: mountCommandsKnown,
+                    capturedDate: capturedDate, calibrationPNG: png,
+                    rgbWidth: CVPixelBufferGetWidth(buffer), rgbHeight: CVPixelBufferGetHeight(buffer))
                 DispatchQueue.main.async {
                     self.frames.append(frame)
                     self.frames = Array(self.frames.suffix(6))

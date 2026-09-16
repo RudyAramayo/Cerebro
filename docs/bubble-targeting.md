@@ -136,6 +136,91 @@ capture and command application. Moving the camera away from that reference stop
 calibrated run. No speculative moving-neck transform is substituted for a measurement. Servo position
 is commanded, not encoder-verified. Calibrate direction, end stops, clearance, and settling on hardware.
 
+## Cutting mat and red laser observations
+
+Open **Cerebro → Servos → Bubble Targeting… → Grid & laser calibration…**.
+The assistant uses a plain line grid; a checkerboard is not required. The default
+spacing is **25.4 mm (1 inch)**. Choose a visible rectangular patch on the large mat
+and count the **intersections**, including both ends: 9 columns × 6 rows span
+8 × 5 squares. The counts and spacing are editable.
+
+1. Place the mat upright and keep it and ROB's base fixed. Begin with the face
+   camera looking forward. Establish the neck commands and apply a manual Tilt/Pan
+   command so Cerebro has verified command state; wait for the servos to settle.
+2. Cover or switch off the laser and press **Capture laser-off reference**.
+   Click four intersections in this order: top-left, top-right, bottom-right,
+   bottom-left. These are the corners of your chosen patch, not necessarily the
+   physical edges of the mat. Mark the physical origin so it stays identifiable.
+3. Uncover the laser and press **Detect laser** to see the grid and highlighted
+   target. Use the normal ROBController or Cerebro manual Tilt/Pan controls to
+   align the dot with that intersection. Let the servos settle and detect again.
+   The image freezes for inspection; green marks the detected dot and yellow the
+   requested target. Detection does not move the nozzle.
+4. Confirm **Dot checked; servos were settled**, then **Save point & next target**.
+   The assistant visits a central intersection, four corners, and edge midpoints.
+   Saving requires one unambiguous dot within a quarter square of the target.
+   The actual detected coordinates and error are saved, never snapped to the grid.
+5. After completing the pass, use **New head pose**, move the neck slightly using
+   the normal controls, and repeat. Keep the mat fixed and mark the same four
+   physical intersections. Each head pose needs its own laser-off reference.
+
+The detector uses OpenCV [HSV thresholds](https://docs.opencv.org/4.13.0/da/d97/tutorial_threshold_inRange.html)
+on both sides of red's hue wrap, red-channel excess, laser-off subtraction,
+compact connected components, and a perspective transform of the marked plane
+([homography documentation](https://docs.opencv.org/4.13.0/d9/d0c/group__calib3d.html)).
+The centroid includes a white-hot core surrounded by red evidence. Static red
+printing, single-pixel noise, large red patches, and spots outside the selected
+patch are filtered. Multiple candidates are reported as ambiguous, without
+choosing the brightest reflection. Substantial scene/lighting changes require a
+new reference. These defaults need validation with the real laser and camera;
+there is no claim that color/shape alone identifies every possible reflection.
+
+**Show saved observations** opens the current session under
+`~/Library/Application Support/Cerebro/BubbleCalibration/<session UUID>/`.
+Each complete sample is saved as an atomic directory containing:
+
+- Original full-resolution `image.png` and `laser-off.png`.
+- OpenCV `overlay.png`, red-evidence `mask.png`, and full `analysis.json`.
+- `observation.json`: marked grid, actual dot coordinates in image pixels and
+  mat-plane millimeters, requested target, error, capture/admission timestamps,
+  frame IDs, head-pose pass ID/name, pan/tilt channels and commanded values,
+  neck commands in pan/lower-tilt/upper-tilt order, RGB intrinsics if available,
+  and a median 5 × 5 aligned-depth sample at the dot if available.
+
+Pulse values are Maestro quarter-microsecond **commands, not encoder readings**.
+Images are admitted only with established mount commands and a known neck pose;
+stale frames or commands changed since admission are rejected. The operator's
+settling confirmation is necessary because software cannot measure physical
+servo arrival. PNG encoding runs on the camera worker only while this assistant
+is open. OpenCV runs off the UI thread with a timeout. Opening, detecting, marking,
+and saving do not issue actuator commands. Closing this assistant releases its
+camera demand without closing the main bubble controls.
+
+These files are observations for fitting and checking the nozzle transform,
+servo scales, and moving-neck geometry. Recording them does not modify the live
+calibration or bypass its measured-reference-pose requirement. A single planar
+pass is not sufficient evidence for accurate aim at all depths: validate at
+additional board distances and reserve points for checking the fitted result.
+Grid homography assumes a flat mat and does not estimate lens distortion.
+
+The operator's initial directly-ahead observation was **Pan 5836 / Tilt 5191**.
+It is one target observation, not a proven neutral or pulse-to-angle scale.
+The draft `rob_droid.urdf` exported September 13 has no bubble-nozzle link and
+estimated neck geometry. `ROB Scans/IMG_9162.PNG` shows ruler segments of
+6¼ inches (158.75 mm) near the camera/neck, 9½ inches (241.3 mm) toward the
+right-shoulder assembly, and 6 inches (152.4 mm) along the lower neck region.
+These scalar scan annotations constrain a future measured model; perspective
+and incompletely identified joint/lens centers prevent treating them directly
+as signed camera-to-nozzle X/Y/Z offsets. Preserve the photos and the new
+observations when fitting the final nozzle link and neck kinematics.
+
+Run `bash Scripts/test-bubble-laser.sh` for synthetic detector, native capture,
+recording, and archive fixtures. Add `--show` to inspect the production SwiftUI
+window with a synthetic mat in a separate app containing no hardware/network
+implementation. The Python-only tests can also run with
+`/usr/bin/python3 Tests/BubbleLaserCalibrationTests.py`; Cerebro uses its selected
+Python interpreter with the existing `opencv-python` dependency.
+
 ## Validation
 
 `bash Scripts/test-bubbles.sh` in Cerebro exercises the production duty-cycle policy, relay lead,

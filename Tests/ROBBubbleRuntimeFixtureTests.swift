@@ -163,6 +163,49 @@ struct CameraFrameSet {
         liveRequest(.releaseMount)
         precondition(hardware.writes.suffix(2) == [[6, 0], [7, 0]] && !live.liveMountOutputs)
 
+        var captureTime = ProcessInfo.processInfo.systemUptime
+        let capture = ROBBubbleRuntime(context: CIContext(options: [.useSoftwareRenderer: true]), defaults: defaults,
+                                       uptime: { captureTime })
+        let captureBox = ROBSerialBox(); capture.serialBox = captureBox
+        capture.setLaserCaptureActive(true)
+        precondition(captureBox.writes.isEmpty, "Opening calibration must not write any actuator")
+        capture.manualPan(5836, tilt: 5191)
+        let commandedWrites = captureBox.writes
+        func captureImage() {
+            captureTime += 0.5
+            let previous = capture.snapshot(includeFrame: true).frameID
+            capture.offer(.init(rgbSampleBuffer: sample!, alignedDepth: depth,
+                                intrinsics: .init(fx: 10, fy: 10, cx: 9.5, cy: 9.5)))
+            let deadline = Date().addingTimeInterval(1.5)
+            while capture.snapshot(includeFrame: true).frameID == previous && Date() < deadline {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            }
+            precondition(capture.snapshot(includeFrame: true).frameID != previous, "A new RGB frame must arrive")
+        }
+        captureImage()
+        let captured = capture.laserCalibrationFrame()!
+        precondition(captured.pan == 5836 && captured.tilt == 5191 && captured.neck == [6000, 6000, 6000])
+        precondition(captured.panChannel == 7 && captured.tiltChannel == 6)
+        precondition(captured.width == 20 && captured.height == 20 && NSImage(data: captured.png) != nil)
+        precondition(captureBox.writes == commandedWrites, "Reading images and pose must not command actuators")
+        captureBox.commandedNeckPanTarget = 6100
+        precondition(capture.laserCalibrationFrame() == nil, "Changed head commands invalidate the current image")
+        captureBox.commandedNeckPanTarget = 6000
+        capture.manualPan(5840, tilt: 5191)
+        precondition(capture.laserCalibrationFrame() == nil, "Changed nozzle commands require a new image")
+        captureImage()
+        precondition(capture.laserCalibrationFrame() != nil)
+        captureTime += 2.1
+        precondition(capture.laserCalibrationFrame() == nil, "Stale calibration images are rejected")
+        captureBox.isNeckCommandStateKnown = false
+        captureImage()
+        precondition(capture.laserCalibrationFrame() == nil, "Unknown neck commands cannot become a calibration sample")
+        captureBox.isNeckCommandStateKnown = true
+        captureImage()
+        capture.releaseMount()
+        precondition(capture.laserCalibrationFrame() == nil, "Released mount pulses cannot be recorded as a known pose")
+        capture.setLaserCaptureActive(false)
+
         let watchdog = ROBBubbleRelayWatchdog()
         let cutoff = DispatchSemaphore(value: 0)
         watchdog.update(deadline: ProcessInfo.processInfo.systemUptime + 0.05) { cutoff.signal() }

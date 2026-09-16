@@ -45,6 +45,7 @@ private struct ROBBubbleCalibrationEditor: View {
         ScrollView {
           VStack(alignment: .leading, spacing: 12) {
             Text("Mount calibration").font(.title3.bold())
+            Button("Grid & laser calibration…") { ROBBubbleLaserCalibrationWindow.shared.showWindow(nil) }
             Text("Tilt → shoulder pan · ch 6\nPan → shoulder tilt · ch 7\nFan / Red → elbow tilt · ch 8\nBubbles / Blue → wrist pan · ch 9")
                 .font(.callout.monospaced())
             Text("Camera → bubble nozzle offset").font(.headline)
