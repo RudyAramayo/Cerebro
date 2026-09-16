@@ -66,6 +66,20 @@ revoking one revokes all of them. Existing role-less v2 credentials decode as
 `operatorController` for protocol compatibility; rotate any credential that
 might have been shared before enrolling additional devices.
 
+A peer that announces `ROBNET-PROBE-CAP-V1` must answer the nonce echo probes.
+Cerebro closes its authenticated session after ten seconds without a valid reply,
+even if QUIC still reports the old path as ready. Cleanup removes live-session
+authorization before a new, proven connection can replace it. Outbound traffic,
+late/replayed nonces, and repeated capability announcements do not renew this
+deadline. Peers without the probe capability retain transport-level expiry.
+
+A still-responsive session continues to exclude another connection using its
+credential. Cerebro returns a versioned `pairingRejected` payload `[1, 1]` for
+this case; current ROBController builds explain that the pairing is already in
+use. Legacy `[1]`, `[1, 0]`, and unknown rejection details remain generic failures.
+Rejection logs identify unknown/revoked credentials, invalid proofs, or an
+existing session without logging pairing secrets.
+
 The roles are deliberately narrow:
 
 - `operatorController` may send the established controller/action/autonomy
@@ -197,6 +211,25 @@ install that newly issued code on ROBController. Historical certificate items
 may be removed during this one-time maintenance, but preserve the tagged
 private key, server profile, and peer registry; subsequent launches must reuse
 the canonical leaf and fingerprint.
+
+## Session reconnect regression fixture
+
+This fixture compiles the production server connection, framer, HMAC handshake,
+and session admission policy. It uses synthetic peers on loopback TCP and never
+reads or writes the operator's Keychain. Unrelated media/status services have
+small fixture adapters. It confirms that a live duplicate and an invalid proof
+are rejected, a silent peer loses its session authorization after the heartbeat
+deadline, and the replacement can then authenticate without overlapping sessions.
+Allow about eleven seconds for the actual expiry timer.
+
+```sh
+swiftc -swift-version 5 -D ROB_CONTROL_SESSION_FIXTURE \
+  Cerebro/AutoNet/AutoNetShared/AutoNetDataTransferProtocol.swift \
+  Cerebro/AutoNet/AutoNetServer/AutoNetServerConnection.swift \
+  Tests/ROBControlSessionReconnectTests.swift \
+  -o /tmp/ROBControlSessionReconnectTests
+/tmp/ROBControlSessionReconnectTests
+```
 
 ## Identity persistence regression fixture
 

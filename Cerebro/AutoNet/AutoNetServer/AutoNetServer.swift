@@ -455,9 +455,9 @@ struct ROBControlServerStatusSnapshot: Sendable {
         deviceID: UUID,
         for candidate: AutoNetServerConnection
     ) -> Bool {
-        !connectionsByID.values.contains {
-            $0 !== candidate && $0.blocksDuplicateSession(for: deviceID)
-        }
+        AutoNetServerConnection.reserveAuthentication(
+            deviceID: deviceID, for: candidate, among: Array(connectionsByID.values)
+        )
     }
 
     /// Supplies non-periodic state to a newly authenticated operator. Arm

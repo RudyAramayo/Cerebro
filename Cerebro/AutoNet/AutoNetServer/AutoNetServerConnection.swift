@@ -41,6 +41,7 @@ public final class AutoNetServerConnection {
     private var pendingNetworkProbe: Data?
     private var pendingNetworkProbeSentUptime: TimeInterval?
     private var networkProbeSupported = false
+    private var sessionLiveness = ROBControlSessionLiveness()
     private var lastNetworkRoundTripMilliseconds: Double?
     private var lastNetworkProbeResponseUptime: TimeInterval?
     private var networkProbesSent: UInt64 = 0
@@ -105,6 +106,7 @@ public final class AutoNetServerConnection {
                 case .transportConnecting:
                     beginV2Authentication()
                 case .authenticated:
+                    guard !expireIfUnresponsive() else { return }
                     guard let deviceID = authenticatedControllerID,
                           serverDelegate?.reserveAuthentication(deviceID: deviceID, for: self) == true else {
                         stop(error: AutoNetTransportError.authorizationFailed)
@@ -229,9 +231,18 @@ public final class AutoNetServerConnection {
             guard type == .pairingHello,
                   data.count >= 36,
                   let identifier = String(data: data.prefix(36), encoding: .utf8),
-                  let deviceID = UUID(uuidString: identifier),
-                  (try? ROBControlPairing.activePeerAuthenticationRecord(for: deviceID)) != nil else {
-                rejectAuthentication()
+                  let deviceID = UUID(uuidString: identifier) else {
+                rejectAuthentication(detail: "malformed pairing hello")
+                return
+            }
+            do {
+                guard try ROBControlPairing.activePeerAuthenticationRecord(for: deviceID) != nil else {
+                    rejectAuthentication(detail: "unknown or revoked pairing \(deviceID.uuidString.lowercased())")
+                    return
+                }
+            } catch {
+                print("ROBControl connection \(id) could not read pairing registry: \(error.localizedDescription)")
+                stop(error: error)
                 return
             }
             sendV2Challenge()
@@ -240,7 +251,7 @@ public final class AutoNetServerConnection {
         guard type == .pairingProof,
               case .awaitingProof(let challenge) = authenticationState,
               let proof = ROBControlAuthProof(data) else {
-            rejectAuthentication()
+            rejectAuthentication(detail: "unexpected or malformed pairing proof")
             return
         }
 
@@ -252,7 +263,7 @@ public final class AutoNetServerConnection {
             guard let resolved = try ROBControlPairing.activePeerAuthenticationRecord(
                 for: proof.controllerID
             ) else {
-                rejectAuthentication()
+                rejectAuthentication(detail: "unknown or revoked pairing \(proof.controllerID.uuidString.lowercased())")
                 return
             }
             peer = resolved
@@ -265,7 +276,7 @@ public final class AutoNetServerConnection {
             challenge: challenge,
             credential: peer.credential
         ) else {
-            rejectAuthentication()
+            rejectAuthentication(detail: "invalid pairing proof for \(proof.controllerID.uuidString.lowercased())")
             return
         }
         authenticatingDeviceID = peer.credential.controllerID
@@ -273,7 +284,10 @@ public final class AutoNetServerConnection {
             deviceID: peer.credential.controllerID,
             for: self
         ) == true else {
-            rejectAuthentication()
+            rejectAuthentication(
+                reason: .sessionInUse,
+                detail: "pairing \(proof.controllerID.uuidString.lowercased()) is already in use"
+            )
             return
         }
 
@@ -312,8 +326,12 @@ public final class AutoNetServerConnection {
         }
     }
 
-    private func rejectAuthentication() {
-        sendFrame(type: .pairingRejected, data: Data([1])) { [weak self] _ in
+    private func rejectAuthentication(
+        reason: ROBControlPairingRejectionReason = .unspecified,
+        detail: String
+    ) {
+        print("ROBControl connection \(id) pairing rejected: \(detail)")
+        sendFrame(type: .pairingRejected, data: reason.encoded) { [weak self] _ in
             self?.stop(error: AutoNetTransportError.authenticationFailed)
         }
     }
@@ -394,6 +412,7 @@ public final class AutoNetServerConnection {
         if data == pendingNetworkProbe, let sentAt = pendingNetworkProbeSentUptime {
             lastNetworkRoundTripMilliseconds = max(0, now - sentAt) * 1_000
             lastNetworkProbeResponseUptime = now
+            sessionLiveness.receivedReply(at: now)
             networkProbeReplies &+= 1
             consecutiveNetworkProbeMisses = 0
             pendingNetworkProbe = nil
@@ -452,6 +471,7 @@ public final class AutoNetServerConnection {
     private func enableNetworkProbeSupport() {
         guard !networkProbeSupported else { return }
         networkProbeSupported = true
+        sessionLiveness.beginMonitoring(at: ProcessInfo.processInfo.systemUptime)
         scheduleNextNetworkProbe(after: 0.25)
     }
 
@@ -467,7 +487,12 @@ public final class AutoNetServerConnection {
     }
 
     private func sendNetworkProbe() {
-        guard networkProbeSupported, isReady, !didStop else { return }
+        guard networkProbeSupported, !didStop, !expireIfUnresponsive() else { return }
+        guard isReady else {
+            // A waiting QUIC path still needs a finite application deadline.
+            scheduleNextNetworkProbe()
+            return
+        }
         if pendingNetworkProbe != nil {
             consecutiveNetworkProbeMisses &+= 1
         }
@@ -504,6 +529,33 @@ public final class AutoNetServerConnection {
 
     func referencesCredential(_ deviceID: UUID) -> Bool {
         authenticatedControllerID == deviceID || authenticatingDeviceID == deviceID
+    }
+
+    static func reserveAuthentication(
+        deviceID: UUID,
+        for candidate: AutoNetServerConnection,
+        among connections: [AutoNetServerConnection]
+    ) -> Bool {
+        // Stop on a snapshot because stop() removes entries from the server's
+        // dictionary. Callers must first authenticate the candidate's key.
+        for previous in connections where previous !== candidate && previous.referencesCredential(deviceID) {
+            previous.expireIfUnresponsive()
+        }
+        return !connections.contains {
+            $0 !== candidate && $0.blocksDuplicateSession(for: deviceID)
+        }
+    }
+
+    /// Close the old session, including its live-session authorization, before
+    /// admitting a reconnect. Never merely ignore it in the duplicate check:
+    /// that would let a delayed old path resume alongside the replacement.
+    @discardableResult
+    func expireIfUnresponsive() -> Bool {
+        guard !didStop,
+              sessionLiveness.hasExpired(at: ProcessInfo.processInfo.systemUptime) else { return false }
+        print("ROBControl connection \(id) expired after heartbeat replies stopped")
+        stop(error: NWError.posix(.ETIMEDOUT))
+        return true
     }
 
     func blocksDuplicateSession(for deviceID: UUID) -> Bool {

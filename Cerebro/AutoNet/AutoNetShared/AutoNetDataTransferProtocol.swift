@@ -592,6 +592,44 @@ enum ROBRemoteDesktopControlProtocol {
   }
 }
 
+/// Versioned rejection details. Older clients already reject any pairingRejected
+/// frame; a one-byte legacy payload and unknown reasons remain generic failures.
+enum ROBControlPairingRejectionReason: UInt8 {
+  case unspecified = 0
+  case sessionInUse = 1
+
+  init(payload: Data) {
+    guard payload.count == 2, payload.first == 1,
+      let reason = Self(rawValue: payload[payload.startIndex + 1])
+    else { self = .unspecified; return }
+    self = reason
+  }
+
+  var encoded: Data { Data([1, rawValue]) }
+}
+
+/// Only peers that opt into application-level echo probes have a reply deadline.
+/// Transport readiness and outbound writes do not prove that the peer is alive.
+struct ROBControlSessionLiveness {
+  static let replyTimeout: TimeInterval = 10
+  private(set) var lastReplyUptime: TimeInterval?
+
+  mutating func beginMonitoring(at uptime: TimeInterval) {
+    guard lastReplyUptime == nil else { return }
+    lastReplyUptime = uptime
+  }
+
+  mutating func receivedReply(at uptime: TimeInterval) {
+    guard let lastReplyUptime else { return }
+    self.lastReplyUptime = max(lastReplyUptime, uptime)
+  }
+
+  func hasExpired(at uptime: TimeInterval) -> Bool {
+    guard let lastReplyUptime else { return false }
+    return uptime - lastReplyUptime >= Self.replyTimeout
+  }
+}
+
 enum AutoNetTransportError: LocalizedError {
   case unsupportedService(String)
   case legacyDisabled
@@ -1505,6 +1543,22 @@ private struct ROBControlStoredPeerRegistry: Codable {
   private static let registryQueue = DispatchQueue(
     label: "com.orbitusrobotics.robctl.v2.credential-registry")
   private static var cachedPeerRegistry: ROBControlStoredPeerRegistry?
+
+  #if ROB_CONTROL_SESSION_FIXTURE
+    /// Isolated session fixtures supply synthetic peers without reading or
+    /// writing the operator's Keychain. Not compiled into the application.
+    static func installSessionFixturePeers(_ credentials: [ROBControlCredential]) {
+      registryQueue.sync {
+        cachedPeerRegistry = ROBControlStoredPeerRegistry(peers: credentials.map {
+          ROBControlStoredPeerRecord(
+            deviceID: $0.controllerID, credential: $0,
+            role: .operatorController, deviceName: "Session fixture",
+            issuedAtMilliseconds: 0, revokedAtMilliseconds: nil
+          )
+        })
+      }
+    }
+  #endif
 
   #if os(macOS)
     private struct ServerIdentityContext {

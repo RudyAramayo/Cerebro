@@ -65,6 +65,7 @@ struct ROBControlTransportIntegrationTests {
         )
 
         try testAuthentication(with: credential)
+        try testSessionLivenessAndRejectionReasons()
         try testCredentialRoleCompatibility(using: credential)
         try testAuthorizationPolicy()
         try testLidarTelemetry()
@@ -73,6 +74,42 @@ struct ROBControlTransportIntegrationTests {
         #endif
 
         print("ROB control pairing, identity persistence, role authorization, and Lidar telemetry fixtures passed")
+    }
+
+    private static func testSessionLivenessAndRejectionReasons() throws {
+        var liveness = ROBControlSessionLiveness()
+        // Older peers without the echo capability retain transport-level expiry.
+        try expect(!liveness.hasExpired(at: 100_000), "A non-probing peer expired")
+        liveness.receivedReply(at: 99)
+        try expect(liveness.lastReplyUptime == nil, "An unsolicited reply enabled monitoring")
+
+        liveness.beginMonitoring(at: 100)
+        try expect(!liveness.hasExpired(at: 109.999), "A fresh session expired early")
+        try expect(liveness.hasExpired(at: 110), "A silent session could block reconnect forever")
+
+        // A fresh, validated echo extends the lease; capability announcements
+        // and replayed/out-of-order timestamps cannot reset its deadline.
+        liveness.receivedReply(at: 108)
+        liveness.receivedReply(at: 101)
+        liveness.beginMonitoring(at: 117)
+        try expect(!liveness.hasExpired(at: 117.999), "A valid echo failed to renew liveness")
+        try expect(liveness.hasExpired(at: 118), "Repeated capability messages renewed liveness")
+        try expect(liveness.hasExpired(at: 1_000), "Long-silent session was kept alive")
+
+        try expect(
+            ROBControlPairingRejectionReason(payload: Data([1, 1])) == .sessionInUse,
+            "A duplicate session lost its actionable rejection reason"
+        )
+        try expect(
+            ROBControlPairingRejectionReason.sessionInUse.encoded == Data([1, 1]),
+            "Pairing rejection wire format changed"
+        )
+        for payload in [Data(), Data([1]), Data([1, 99]), Data([2, 1]), Data([1, 1, 1])] {
+            try expect(
+                ROBControlPairingRejectionReason(payload: payload) == .unspecified,
+                "A legacy or unknown rejection was misclassified"
+            )
+        }
     }
 
     private static func testAuthentication(with credential: ROBControlCredential) throws {
