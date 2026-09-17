@@ -195,6 +195,10 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     /// renderer can require a flush after display/GPU resources are reclaimed
     /// while capture and Vision continue to receive frames.
     private var depthPreviewRecoveryInFlight = false
+    private var depthPreviewRecoveryGeneration: UInt64 = 0
+    private var depthPreviewAwaitingFrameAfterRecovery = false
+    private var depthPreviewLastEnqueueTime: CFTimeInterval = 0
+    private static let depthPreviewStallTimeout: CFTimeInterval = 1
     private var previewVisible = false
     private var previewVisibilityGeneration: UInt64 = 0
     private var lifecycleGeneration: UInt64 = 0
@@ -526,12 +530,12 @@ final class CameraManager: NSObject, CameraManagerProtocol {
                 self.installDepthPreviewLayer(generation: deliveryGeneration)
                 self.report(.streamingRGBD, detail: "Receiving synchronized RGB and aligned depth.")
             }
-            self.enqueueLatestPreview(frameSet.rgbSampleBuffer)
+            self.enqueueLatestPreview(frameSet.rgbSampleBuffer, generation: deliveryGeneration)
             self.deliverLatest(frameSet, generation: deliveryGeneration)
         }
     }
 
-    private func enqueueLatestPreview(_ sampleBuffer: CMSampleBuffer) {
+    private func enqueueLatestPreview(_ sampleBuffer: CMSampleBuffer, generation: UInt64) {
         previewLock.lock()
         guard previewVisible, !previewDeliveryInFlight else {
             previewLock.unlock()
@@ -548,17 +552,34 @@ final class CameraManager: NSObject, CameraManagerProtocol {
                 self.previewDeliveryInFlight = false
                 self.previewLock.unlock()
             }
-            guard self.previewVisibilityIsCurrent(previewGeneration, visible: true),
+            guard self.deliveryGenerationIsCurrent(generation),
+                  self.previewVisibilityIsCurrent(previewGeneration, visible: true),
                   let renderer = self.depthPreviewLayer?.sampleBufferRenderer else {
                 return
             }
+            // A flush is asynchronous. Enqueuing into it can discard the new
+            // frame or leave the display stalled again before it completes.
+            guard !self.depthPreviewRecoveryInFlight else { return }
             if renderer.status == .failed || renderer.requiresFlushToResumeDecoding {
                 self.recoverDepthPreviewRenderer(
                     renderer,
-                    previewGeneration: previewGeneration
+                    previewGeneration: previewGeneration,
+                    generation: generation
                 )
             } else if renderer.isReadyForMoreMediaData {
                 renderer.enqueue(sampleBuffer)
+                self.depthPreviewLastEnqueueTime = CACurrentMediaTime()
+                self.depthPreviewAwaitingFrameAfterRecovery = false
+            } else if CACurrentMediaTime() - self.depthPreviewLastEnqueueTime
+                        >= Self.depthPreviewStallTimeout {
+                // A full display queue need not report .failed. Without a
+                // deadline we drop every RGB frame forever while depth and
+                // perception continue updating independently.
+                self.recoverDepthPreviewRenderer(
+                    renderer,
+                    previewGeneration: previewGeneration,
+                    generation: generation
+                )
             }
         }
     }
@@ -568,23 +589,50 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     /// preview instead of leaving a permanent black image under active overlays.
     private func recoverDepthPreviewRenderer(
         _ renderer: AVSampleBufferVideoRenderer,
-        previewGeneration: UInt64
+        previewGeneration: UInt64,
+        generation: UInt64
     ) {
         dispatchPrecondition(condition: .onQueue(.main))
         guard !depthPreviewRecoveryInFlight else { return }
+        guard !depthPreviewAwaitingFrameAfterRecovery else {
+            NSLog("Camera %@ preview made no progress after flushing; replacing renderer", role.rawValue)
+            replaceDepthPreviewLayer()
+            return
+        }
         depthPreviewRecoveryInFlight = true
-        let detail = renderer.error?.localizedDescription ?? "renderer requested a decoder reset"
+        depthPreviewRecoveryGeneration &+= 1
+        let recoveryGeneration = depthPreviewRecoveryGeneration
+        let detail = renderer.error?.localizedDescription
+            ?? (renderer.requiresFlushToResumeDecoding
+                ? "renderer requested a decoder reset"
+                : "renderer stopped accepting live frames")
         NSLog("Camera %@ preview renderer stalled; flushing: %@", role.rawValue, detail)
-        renderer.flush(removingDisplayedImage: true) { [weak self] in
+        renderer.flush(removingDisplayedImage: true) { [weak self, weak renderer] in
             DispatchQueue.main.async {
-                guard let self else { return }
-                self.depthPreviewRecoveryInFlight = false
-                guard self.previewVisibilityIsCurrent(previewGeneration, visible: true),
-                      self.depthPreviewLayer?.sampleBufferRenderer === renderer else {
+                guard let self, let renderer else { return }
+                guard self.deliveryGenerationIsCurrent(generation),
+                      self.previewVisibilityIsCurrent(previewGeneration, visible: true),
+                      self.depthPreviewLayer?.sampleBufferRenderer === renderer,
+                      self.depthPreviewRecoveryGeneration == recoveryGeneration else {
                     return
                 }
-                NSLog("Camera %@ preview renderer recovered", self.role.rawValue)
+                self.depthPreviewRecoveryInFlight = false
+                self.depthPreviewLastEnqueueTime = CACurrentMediaTime()
+                self.depthPreviewAwaitingFrameAfterRecovery = true
+                NSLog("Camera %@ preview renderer flushed; waiting for a live frame", self.role.rawValue)
             }
+        }
+        // A wedged renderer may never complete its flush. Replace only that
+        // renderer; capture, depth processing, and other consumers stay live.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.depthPreviewStallTimeout) { [weak self, weak renderer] in
+            guard let self, let renderer,
+                  self.deliveryGenerationIsCurrent(generation),
+                  self.previewVisibilityIsCurrent(previewGeneration, visible: true),
+                  self.depthPreviewLayer?.sampleBufferRenderer === renderer,
+                  self.depthPreviewRecoveryGeneration == recoveryGeneration,
+                  self.depthPreviewRecoveryInFlight else { return }
+            NSLog("Camera %@ preview flush timed out; replacing renderer", self.role.rawValue)
+            self.replaceDepthPreviewLayer()
         }
     }
 
@@ -888,17 +936,20 @@ final class CameraManager: NSObject, CameraManagerProtocol {
             }
             self.previewLayer.removeFromSuperlayer()
 
-            let layer = AVSampleBufferDisplayLayer()
-            layer.videoGravity = .resizeAspectFill
-            self.depthPreviewLayer?.sampleBufferRenderer.flush(
-                removingDisplayedImage: true,
-                completionHandler: nil
-            )
-            self.depthPreviewLayer?.removeFromSuperlayer()
-            self.depthPreviewRecoveryInFlight = false
-            self.installPreviewBackgroundLayer(layer)
-            self.depthPreviewLayer = layer
+            self.replaceDepthPreviewLayer()
         }
+    }
+
+    private func replaceDepthPreviewLayer() {
+        dispatchPrecondition(condition: .onQueue(.main))
+        let layer = AVSampleBufferDisplayLayer()
+        layer.videoGravity = .resizeAspectFill
+        depthPreviewLayer?.removeFromSuperlayer()
+        depthPreviewLayer = layer
+        depthPreviewRecoveryInFlight = false
+        depthPreviewAwaitingFrameAfterRecovery = false
+        depthPreviewLastEnqueueTime = CACurrentMediaTime()
+        installPreviewBackgroundLayer(layer)
     }
 
     /// Keep AppKit's stable backing layer as the owner of overlay subviews.
@@ -1528,12 +1579,20 @@ private final class DepthCameraServiceClient {
         ) == noErr else {
             return nil
         }
-        if let sampleBuffer = optionalSampleBuffer {
-            CMSetAttachment(
-                sampleBuffer,
-                key: kCMSampleAttachmentKey_DisplayImmediately,
-                value: kCFBooleanTrue,
-                attachmentMode: kCMAttachmentMode_ShouldNotPropagate
+        if let sampleBuffer = optionalSampleBuffer,
+           let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: true),
+           CFArrayGetCount(attachments) > 0 {
+            // DisplayImmediately is a per-sample key. CMSetAttachment writes
+            // buffer-level metadata, which the display renderer ignores.
+            // Set this before the frame fans out to concurrent consumers.
+            let sampleAttachments = unsafeBitCast(
+                CFArrayGetValueAtIndex(attachments, 0),
+                to: CFMutableDictionary.self
+            )
+            CFDictionarySetValue(
+                sampleAttachments,
+                Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
+                Unmanaged.passUnretained(kCFBooleanTrue).toOpaque()
             )
         }
         return optionalSampleBuffer

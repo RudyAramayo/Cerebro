@@ -104,8 +104,22 @@ lease/release messages.
   another helper from unlinking a live service's socket during restart races.
 - Slow perception: `CameraManager` keeps at most one delivery in flight and
   drops older frames instead of accumulating latency.
+- Frozen RGB preview with a moving depth overlay: capture and the overlay run
+  independently of the RGB display renderer. Live RGB samples carry
+  `DisplayImmediately` in their **per-sample** attachment dictionary, as
+  required by [CoreMedia](https://developer.apple.com/library/archive/qa/qa1957/_index.html).
+  A display queue that refuses frames for one second is flushed. No frames
+  are enqueued during that flush. If it does not finish within another second,
+  or still cannot accept frames afterward, only the display layer is replaced.
+  Late recovery callbacks cannot reset a newer renderer or reopen a hidden
+  preview. This recovery applies to both face and belly camera previews.
 - Malformed IPC: the provider connection is discarded and retried; no bytes
   are force-cast into application objects.
+
+Run `python3 Tests/ROBCameraPreviewRuntimeTests.py` on macOS to exercise the
+production sample-buffer factory and preview recovery methods with a simulated
+renderer. The test uses real CoreMedia/IOSurface buffers and requires access to
+the system CoreVideo service; it does not start cameras or robot hardware.
 
 ## Hardware validation checklist
 
