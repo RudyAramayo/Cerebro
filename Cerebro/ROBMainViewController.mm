@@ -2735,6 +2735,11 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             ? @"Base motion stopped. I requested an arm hold; use the physical emergency stop if needed."
             : @"Base motion stopped. No verified position-mode arm hold was available.";
         [self.speechBox sayIt:stopResponse];
+        // Also honor a spoken enrollment stop after acknowledging the motion
+        // stop. Other motion-only phrases must not become enrollment replies.
+        if ([textInput containsString:@"stop"]) {
+            (void)[[ROBFaceRecognitionService shared] noteConversationTranscript:textInput];
+        }
         return;
     }
 

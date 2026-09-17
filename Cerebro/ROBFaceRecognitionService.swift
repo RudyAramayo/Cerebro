@@ -47,7 +47,6 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
 
     public static let enrollmentTargetSamples = ROBFaceIdentityProfile.requiredEnrollmentSamples
     private static let modelDefaultsKey = "ROBFaceIdentity.embeddingModel"
-    private static let friendInvitationLifetime: TimeInterval = 60
     private static let unknownInvitationCooldown: TimeInterval = 300
     private static let greetingCooldown: TimeInterval = 300
     private static let refinementTargetSamples = 8
@@ -102,10 +101,10 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
     private var pendingUnknownEmbedding: [Float]?
     private var pendingUnknownFrames = 0
     private var lastUnknownInvitationUptime: TimeInterval = -.greatestFiniteMagnitude
-    private var friendInvitationExpiresAtUptime: TimeInterval?
     private var friendInvitationEmbedding: [Float]?
-    private var friendConversationTranscript = ""
-    private var pendingSpokenName: String?
+    private var friendConversation = ROBFaceConversationPolicy()
+    private var pendingFriendPromptText: String?
+    private var friendPromptRevision = 0
     private var handsFreeEnrollmentIDs: Set<UUID> = []
     private var handsFreeEnrollmentReferenceEmbeddings: [UUID: [Float]] = [:]
     private var handsFreeEnrollmentMismatchWarned: Set<UUID> = []
@@ -171,6 +170,7 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
                 UserDefaults.standard.set(model.rawValue, forKey: Self.modelDefaultsKey)
                 self.resetTemporalCandidate()
                 self.clearPixelIdentityTrack()
+                self.clearFriendInvitation()
                 self.statusText = "Using \(model.displayName). Enrollments made with another model remain stored but inactive."
                 self.publishState()
                 DispatchQueue.main.async { completion(nil) }
@@ -325,29 +325,30 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
         }
     }
 
-    /// Consumes only the deterministic consent/name exchange for a pending
+    /// Remembers consent and name intent across fragments of a pending
     /// hands-free friend invitation. Returning true tells the room UI that the
     /// transcript belonged to this exchange rather than an ordinary request.
     public func noteConversationTranscript(_ transcript: String) -> Bool {
         analysisQueue.sync {
             let now = ProcessInfo.processInfo.systemUptime
-            if let expiration = friendInvitationExpiresAtUptime, now >= expiration {
+            if friendConversation.expireInvitationIfNeeded(at: now) {
                 clearFriendInvitation()
             }
-            let invitationWasActive = friendInvitationExpiresAtUptime != nil
+            let invitationWasActive = friendConversation.invitationExpiresAtUptime != nil
             let enrollmentWasActive = activeEnrollmentID.map(handsFreeEnrollmentIDs.contains) ?? false
             guard invitationWasActive || enrollmentWasActive else { return false }
 
-            appendFriendTranscript(transcript)
-            let action = ROBFaceConversationPolicy.action(
-                for: friendConversationTranscript,
-                invitationActive: invitationWasActive,
+            let action = friendConversation.action(
+                for: transcript,
                 enrollmentActive: enrollmentWasActive,
-                pendingName: pendingSpokenName
+                at: now
             )
             switch action {
             case .none:
-                return invitationWasActive
+                if friendConversation.invitationExpiresAtUptime == nil { clearFriendInvitation() }
+                return false
+            case .continueListening:
+                scheduleFriendPromptIfNeeded()
             case .decline:
                 clearFriendInvitation()
                 lastUnknownInvitationUptime = now
@@ -356,18 +357,14 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
                     text: "No problem. I won't store your face. It's still nice to meet you."
                 )
             case .askForName:
-                friendConversationTranscript = ""
-                postConversationCue(
-                    kind: "speak",
-                    text: "Great. Please say, ROB, my name is, followed by your name."
-                )
+                pendingFriendPromptText = "Okay. What name would you like me to remember? Take your time."
+                scheduleFriendPromptIfNeeded()
             case .proposeName(let name):
-                pendingSpokenName = name
-                friendConversationTranscript = ""
-                postConversationCue(
-                    kind: "speak",
-                    text: "I heard \(name). To confirm face storage, please say, ROB, yes, remember me."
-                )
+                pendingFriendPromptText = "Nice to meet you, \(name). Is it okay for me to remember your face on this robot?"
+                scheduleFriendPromptIfNeeded()
+            case .clarifyConsent:
+                pendingFriendPromptText = "I haven't saved your face. Would you like me to remember it on this robot? It's okay to say no."
+                scheduleFriendPromptIfNeeded()
             case .enroll(let name):
                 do {
                     guard let consentingFace = friendInvitationEmbedding else {
@@ -375,19 +372,9 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
                             "The consenting face is no longer available."
                         )
                     }
-                    let existingProfile = try existingCompletedProfile(named: name)
+                    let existingProfile = try existingCompletedProfile(matching: consentingFace)
                     let profile: ROBFaceIdentityProfile
                     if let existingProfile {
-                        guard faceCouldBelong(
-                            consentingFace,
-                            to: existingProfile,
-                            maximumDistanceKey: "ROBFaceIdentity.maximumRefinementConsentDistance",
-                            fallback: 0.52
-                        ) else {
-                            throw ROBFaceIdentityGalleryError.invalidInput(
-                                "I already know that name, but this face is not similar enough to update that profile. Please ask the operator to use Refine Selected Identity."
-                            )
-                        }
                         clearFriendInvitation()
                         try startRefinementUnlocked(profile: existingProfile, handsFree: true)
                         profile = existingProfile
@@ -411,11 +398,13 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
                             : "I found your existing \(profile.role.displayName.lowercased()) profile for \(profile.displayName). I'll refine it for how you look in this lighting without changing your role. Please stand closer, face an even light, and look straight at me."
                     )
                 } catch {
+                    clearFriendInvitation()
                     statusText = error.localizedDescription
                     publishState()
                     postConversationCue(kind: "speak", text: "I couldn't start face enrollment. \(error.localizedDescription)")
                 }
             case .cancelEnrollment:
+                clearFriendInvitation()
                 guard let profileID = activeEnrollmentID,
                       handsFreeEnrollmentIDs.contains(profileID) else { return true }
                 let shouldDelete = cachedProfiles.first(where: { $0.id == profileID })?
@@ -488,6 +477,23 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
             } catch {
                 self.statusText = error.localizedDescription
                 self.publishState()
+                DispatchQueue.main.async { completion(error) }
+            }
+        }
+    }
+
+    public func renameProfile(id: UUID, displayName: String, completion: @escaping (Error?) -> Void) {
+        analysisQueue.async {
+            do {
+                let profile = try self.gallery.renameProfile(id: id, displayName: displayName)
+                self.replaceCachedProfile(profile)
+                if self.lastRecognitionValue?.profileID == id { self.lastRecognitionValue = nil }
+                if self.pixelIdentityTrack?.profileID == id { self.clearPixelIdentityTrack() }
+                ROBSceneSnapshotStore.shared.updateIdentifiedPeople([])
+                self.statusText = "Renamed the selected person to \(profile.displayName). Face samples and permissions are unchanged."
+                self.publishState()
+                DispatchQueue.main.async { completion(nil) }
+            } catch {
                 DispatchQueue.main.async { completion(error) }
             }
         }
@@ -1235,14 +1241,6 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
                 "Finish or cancel the current enrollment (\(activeID.uuidString)) first."
             )
         }
-        let normalizedName = Self.normalizedIdentityName(displayName)
-        if let existing = cachedProfiles.first(where: {
-            Self.normalizedIdentityName($0.displayName) == normalizedName
-        }) {
-            throw ROBFaceIdentityGalleryError.invalidInput(
-                "\(existing.displayName) already has a \(existing.role.displayName.lowercased()) profile. Select it and use Refine Selected Identity instead of creating a duplicate."
-            )
-        }
         let profile = try gallery.createProfile(
             displayName: displayName,
             pronunciation: pronunciation,
@@ -1300,58 +1298,33 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
         publishState()
     }
 
-    private func existingCompletedProfile(named name: String) throws -> ROBFaceIdentityProfile? {
-        let normalizedName = Self.normalizedIdentityName(name)
-        let namedProfiles = cachedProfiles.filter {
-            Self.normalizedIdentityName($0.displayName) == normalizedName
-        }
-        guard !namedProfiles.isEmpty else { return nil }
-        let compatible = namedProfiles.filter {
-            $0.enrollmentIsComplete && $0.modelIdentifier == selectedModelValue.rawValue
-        }
-        guard compatible.count <= 1 else {
-            throw ROBFaceIdentityGalleryError.invalidInput(
-                "More than one completed profile uses that name. Please ask the operator to resolve the duplicate profiles."
-            )
-        }
-        guard let profile = compatible.first else {
-            throw ROBFaceIdentityGalleryError.invalidInput(
-                "That name already exists, but its enrollment is incomplete or uses another face model. Please ask the operator to refine it."
-            )
-        }
-        return profile
-    }
-
-    private func faceCouldBelong(
-        _ probe: [Float],
-        to profile: ROBFaceIdentityProfile,
-        maximumDistanceKey: String,
-        fallback: Float
-    ) -> Bool {
-        let nearest = profile.samples.compactMap { sample -> Float? in
-            guard let enrolled = sample.embedding else { return nil }
-            return Self.cosineDistance(probe, enrolled)
-        }.min() ?? .greatestFiniteMagnitude
-        let second = cachedProfiles.filter {
-            $0.id != profile.id &&
-                $0.enrollmentIsComplete &&
-                $0.modelIdentifier == profile.modelIdentifier
-        }.flatMap(\.samples).compactMap { sample -> Float? in
-            guard let enrolled = sample.embedding else { return nil }
-            return Self.cosineDistance(probe, enrolled)
-        }.min() ?? .greatestFiniteMagnitude
-        let maximum = configuredFloat(maximumDistanceKey, fallback: fallback, range: 0.1...0.8)
+    private func existingCompletedProfile(matching probe: [Float]) throws -> ROBFaceIdentityProfile? {
+        let maximum = configuredFloat("ROBFaceIdentity.maximumCosineDistance", fallback: 0.35, range: 0.01...1)
         let minimumMargin = configuredFloat(
-            "ROBFaceIdentity.minimumRefinementCosineMargin",
-            fallback: 0.03,
+            "ROBFaceIdentity.minimumCosineMargin",
+            fallback: 0.06,
             range: 0...0.25
         )
-        return nearest <= maximum && second - nearest >= minimumMargin
-    }
-
-    private static func normalizedIdentityName(_ value: String) -> String {
-        value.trimmingCharacters(in: .whitespacesAndNewlines)
-            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        let possibleMatch = configuredFloat(
+            "ROBFaceIdentity.maximumRefinementConsentDistance", fallback: 0.52, range: maximum...max(maximum, 0.8)
+        )
+        switch ROBFaceEnrollmentMatchPolicy.match(
+            probe: probe,
+            profiles: cachedProfiles,
+            modelIdentifier: selectedModelValue.rawValue,
+            maximumDistance: maximum,
+            minimumMargin: minimumMargin,
+            possibleMatchDistance: possibleMatch
+        ) {
+        case .newPerson:
+            return nil
+        case .existing(let id):
+            return cachedProfiles.first { $0.id == id }
+        case .ambiguous:
+            throw ROBFaceIdentityGalleryError.invalidInput(
+                "I can't confidently tell whether this face belongs to an existing person. Please ask the operator to use Refine Selected Identity for the correct profile, or start a separate enrollment in People & Face Enrollment."
+            )
+        }
     }
 
     private var enrollmentMilestones: Set<Int> {
@@ -1373,10 +1346,10 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
     private func noteUnknownFace(_ embedding: [Float]) {
         guard activeEnrollmentID == nil, enabled else { return }
         let now = ProcessInfo.processInfo.systemUptime
-        if let expiration = friendInvitationExpiresAtUptime, now >= expiration {
+        if friendConversation.expireInvitationIfNeeded(at: now) {
             clearFriendInvitation()
         }
-        guard friendInvitationExpiresAtUptime == nil,
+        guard friendConversation.invitationExpiresAtUptime == nil,
               now - lastUnknownInvitationUptime >= Self.unknownInvitationCooldown else {
             return
         }
@@ -1390,15 +1363,13 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
         guard pendingUnknownFrames >= 5 else { return }
         resetUnknownCandidate()
         lastUnknownInvitationUptime = now
-        friendInvitationExpiresAtUptime = now + Self.friendInvitationLifetime
+        friendConversation.beginInvitation(at: now)
         friendInvitationEmbedding = embedding
-        friendConversationTranscript = ""
-        pendingSpokenName = nil
         statusText = "A new person is ready for consent-first enrollment. Ask them to stand closer and follow ROB's spoken guidance."
         publishState()
         postConversationCue(
             kind: "speak",
-            text: "Hello! I don't think we've met. Please stand a little closer and face an even light so I can guide you. If you're an adult, or your grown-up says it's okay, I can remember your face only on this robot. To agree, say, ROB, yes, remember me, my name is, and then your name. Otherwise say, ROB, no thanks."
+            text: "Hello! I don't think we've met. Please stand a little closer and face an even light so I can guide you. If you're an adult, or your grown-up says it's okay, would you like me to remember your face only on this robot? If so, what's your name? Take your time. It's okay to say no."
         )
     }
 
@@ -1408,23 +1379,29 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
     }
 
     private func clearFriendInvitation() {
-        friendInvitationExpiresAtUptime = nil
+        friendConversation.reset()
         friendInvitationEmbedding = nil
-        friendConversationTranscript = ""
-        pendingSpokenName = nil
+        pendingFriendPromptText = nil
+        friendPromptRevision += 1
     }
 
-    private func appendFriendTranscript(_ transcript: String) {
-        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        if friendConversationTranscript.isEmpty {
-            friendConversationTranscript = trimmed
-        } else if trimmed.hasPrefix(friendConversationTranscript) {
-            friendConversationTranscript = trimmed
-        } else if !friendConversationTranscript.hasSuffix(trimmed) {
-            friendConversationTranscript += " \(trimmed)"
+    private func scheduleFriendPromptIfNeeded() {
+        friendPromptRevision += 1
+        let revision = friendPromptRevision
+        guard pendingFriendPromptText != nil else { return }
+        // Give the next speech fragment a chance to arrive before speaking
+        // over the visitor. A complete reply cancels this pending question.
+        analysisQueue.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self, self.friendPromptRevision == revision else { return }
+            let now = ProcessInfo.processInfo.systemUptime
+            if self.friendConversation.expireInvitationIfNeeded(at: now) {
+                self.clearFriendInvitation()
+                return
+            }
+            guard let text = self.pendingFriendPromptText else { return }
+            self.pendingFriendPromptText = nil
+            self.postConversationCue(kind: "speak", text: text)
         }
-        friendConversationTranscript = String(friendConversationTranscript.suffix(500))
     }
 
     private func postGreetingCueIfNeeded(for result: ROBFaceRecognitionResult, now: TimeInterval) {
@@ -1683,9 +1660,7 @@ public struct ROBFaceIdentityServiceSnapshot: Sendable {
     private func snapshotUnlocked() -> ROBFaceIdentityServiceSnapshot {
         return ROBFaceIdentityServiceSnapshot(
             enabled: enabled,
-            profiles: cachedProfiles.sorted {
-                $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
-            },
+            profiles: cachedProfiles.sorted(by: ROBFaceIdentityProfile.displayOrder),
             enrollingProfileID: activeEnrollmentID,
             enrollmentAcceptedSamples: activeEnrollmentAcceptedSamples,
             enrollmentTargetSamples: activeEnrollmentTargetSamples,

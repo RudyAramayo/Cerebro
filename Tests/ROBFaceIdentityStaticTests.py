@@ -54,8 +54,10 @@ assert "best.second - best.distance >= margin" in service
 assert "maximumAdaptiveCosineDistance" in service
 assert "adaptiveContinuityLifetime" in service
 assert "maybeAppendAdaptiveSample" in service
-assert "existingCompletedProfile(named:" in service
-assert "minimumRefinementCosineMargin" in service
+assert "existingCompletedProfile(matching: consentingFace)" in service
+assert "ROBFaceEnrollmentMatchPolicy.match" in service
+assert "namedProfiles" not in service
+assert "normalizedIdentityName" not in service
 assert "Refine Selected Identity" in service
 assert 'key: "move-closer"' in service and 'key: "too-dark"' in service
 assert "averageLuminance(of:" in service
@@ -67,7 +69,11 @@ assert "I can only enroll the person who gave permission" in service
 assert "noteConversationTranscript" in service
 assert "adult, or your grown-up says it's okay" in service
 assert "cancelled enrollment and deleted those face samples" in service
-assert "ROBFaceConversationPolicy.action" in service
+assert "friendConversation.action" in service
+assert "friendConversation.beginInvitation(at: now)" in service
+assert "friendConversation.expireInvitationIfNeeded(at: now)" in service
+assert "scheduleFriendPromptIfNeeded" in service
+assert "Please say, ROB" not in service
 assert "case enroll(String)" in conversation and "case cancelEnrollment" in conversation
 assert "consentConfirmed" in service
 assert "trustedEnrollmentReference" in service
@@ -85,6 +91,9 @@ assert "explicitly consents" in window
 assert "will not authorize robot motion" in window
 assert "Delete Selected Person" in window
 assert "Refine Selected Identity" in window
+assert "Rename Selected" in window and "renameProfile(id: profile.id" in window
+assert "selectedID" in window
+assert "renameProfile(id: UUID" in gallery
 assert "Authorize Active Controllers" in window
 assert "Live face enrollment guidance" in window
 assert 'case "lighting"' in window

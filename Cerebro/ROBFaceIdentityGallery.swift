@@ -82,6 +82,13 @@ public struct ROBFaceIdentityProfile: Codable, Identifiable, Sendable {
         samples.count >= Self.requiredEnrollmentSamples
     }
 
+    static func displayOrder(_ lhs: Self, _ rhs: Self) -> Bool {
+        let comparison = lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName)
+        return comparison == .orderedSame
+            ? lhs.id.uuidString < rhs.id.uuidString
+            : comparison == .orderedAscending
+    }
+
     public var administratorControllerIDs: [String] {
         guard role == .administrator else { return [] }
         let references = trustedControllerIDs ?? [trustedEnrollmentReference]
@@ -98,6 +105,41 @@ public struct ROBFaceIdentityProfile: Codable, Identifiable, Sendable {
         role == .administrator
             && enrollmentIsComplete
             && administratorControllerIDs.contains(controllerID.uuidString.lowercased())
+    }
+}
+
+/// Names are labels, never identity keys. Compare every compatible profile,
+/// including incomplete enrollments, before choosing a profile to refine.
+enum ROBFaceEnrollmentMatchPolicy {
+    enum Match: Equatable {
+        case newPerson
+        case existing(UUID)
+        case ambiguous
+    }
+
+    static func match(
+        probe: [Float],
+        profiles: [ROBFaceIdentityProfile],
+        modelIdentifier: String,
+        maximumDistance: Float,
+        minimumMargin: Float,
+        possibleMatchDistance: Float
+    ) -> Match {
+        guard !probe.isEmpty, probe.allSatisfy(\.isFinite) else { return .ambiguous }
+        let candidates = profiles.filter { $0.modelIdentifier == modelIdentifier }.compactMap { profile -> (ROBFaceIdentityProfile, Float)? in
+            let distances = profile.samples.compactMap { sample -> Float? in
+                guard let embedding = sample.embedding, embedding.count == probe.count,
+                      embedding.allSatisfy(\.isFinite) else { return nil }
+                return 1 - zip(probe, embedding).reduce(Float.zero) { $0 + $1.0 * $1.1 }
+            }
+            guard let nearest = distances.min() else { return nil }
+            return (profile, nearest)
+        }.sorted { $0.1 < $1.1 }
+        guard let best = candidates.first, best.1 <= possibleMatchDistance else { return .newPerson }
+        let secondDistance = candidates.dropFirst().first?.1 ?? .greatestFiniteMagnitude
+        guard best.0.enrollmentIsComplete, best.1 <= maximumDistance,
+              secondDistance - best.1 >= minimumMargin else { return .ambiguous }
+        return .existing(best.0.id)
     }
 }
 
@@ -168,9 +210,7 @@ public final class ROBFaceIdentityGallery: @unchecked Sendable {
                 let profileURL = directory.appendingPathComponent(Self.profileFileName)
                 guard FileManager.default.fileExists(atPath: profileURL.path) else { return nil }
                 return try readProfile(at: profileURL)
-            }.sorted {
-                $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
-            }
+            }.sorted(by: ROBFaceIdentityProfile.displayOrder)
         }
     }
 
@@ -235,6 +275,16 @@ public final class ROBFaceIdentityGallery: @unchecked Sendable {
             let normalized = try normalizedControllerIDs(controllerIDs)
             profile.trustedEnrollmentReference = normalized[0]
             profile.trustedControllerIDs = normalized
+            try writeProfile(profile)
+            return profile
+        }
+    }
+
+    /// Corrects a label by UUID, preserving consent, samples, role, and bindings.
+    @discardableResult public func renameProfile(id: UUID, displayName: String) throws -> ROBFaceIdentityProfile {
+        try queue.sync {
+            var profile = try profileUnlocked(id: id)
+            profile.displayName = try boundedRequired(displayName, maximum: 120, label: "name")
             try writeProfile(profile)
             return profile
         }

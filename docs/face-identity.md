@@ -21,6 +21,12 @@ Select any completed profile and choose **Refine Selected Identity** to add eigh
 current-lighting and pose samples without changing its name, role, model, or
 trusted controller allowlist.
 
+Names need not be unique: a parent and child named Rudy have separate UUID
+profiles and separate face samples. **Rename Selected…** corrects a label
+without changing that profile's ID, consent, samples, role, or controller
+bindings. Selection follows the profile ID across refreshes and renames; a
+row's tooltip shows its enrollment date and full ID for disambiguation.
+
 Administrator enrollment additionally requires at least one paired, non-revoked
 operator controller and a local confirmation dialog. Every active operator controller
 is recorded in an explicit allowlist. Select a completed Administrator and choose
@@ -56,8 +62,7 @@ seconds and camera-derived identity remains untrusted sensor data.
 Lighting adaptation has separate conservative developer controls:
 `ROBFaceIdentity.maximumAdaptiveCosineDistance` (0.46),
 `ROBFaceIdentity.maximumPossibleMatchDistance` (0.52),
-`ROBFaceIdentity.maximumRefinementConsentDistance` (0.52), and
-`ROBFaceIdentity.minimumRefinementCosineMargin` (0.03). Possible-match guidance
+and `ROBFaceIdentity.maximumRefinementConsentDistance` (0.52). Possible-match guidance
 never publishes an identity, and none of these thresholds grants authority.
 
 The gallery records its backend identifier and stores normalized 512-dimensional
@@ -98,9 +103,14 @@ authority.
 
 When recognition is enabled and an unfamiliar face remains stable for several
 quality-gated frames, ROB offers hands-free friend enrollment. No image is
-persisted before consent. ROB asks the visitor to say **“ROB, yes, remember me,
-my name is …”** and reminds children to get a grown-up's permission. A name
-without an affirmative answer triggers a separate confirmation question. A
+persisted before consent. ROB asks whether it may remember the visitor's face
+locally and what name to use, and reminds children to get a grown-up's permission.
+Replies such as **“Yes, my name is Rudy”**, **“Sure, I'm Rudy”**, and **“Go ahead,
+call me Rudy”** express the intent without a required wake word or exact command.
+Consent and names can arrive in either order, in separate replies, or across
+word-by-word fragments. After ROB asks for a name, **“Rudy”** is enough. Repeated
+or overlapping introduction fragments do not become part of the stored label.
+A name without an affirmative answer triggers a separate confirmation question. A
 decline stores nothing. After consent, ROB creates only a `knownPerson` profile,
 binds capture to the face that gave permission, collects the same 24 varied
 samples, gives spoken pose prompts, and announces completion. A different
@@ -109,13 +119,21 @@ person stepping into the camera is rejected rather than enrolled.
 partial profile and samples. Unknown-person invitations have a five-minute
 cooldown so ROB does not repeatedly ask the same nearby audience.
 
-If the spoken name already belongs to a completed profile, Cerebro does not
-create a duplicate. It requires a conservative face-similarity and cross-profile
-margin check, then refines the existing profile while preserving its role. This
-means an existing **Rudy — Administrator** profile remains Administrator; the
-hands-free flow cannot create or promote an administrator. If comparison is
-ambiguous, ROB refuses the update and directs the operator to **Refine Selected
-Identity**.
+Each relevant reply refreshes a two-minute idle timeout, with a ten-minute
+maximum for one invitation. Follow-up questions wait for two seconds without a
+new fragment and are not repeated for duplicate transcripts. Declines,
+uncertainty, expiration, and a new invitation cannot reuse earlier agreement;
+unrelated requests end the exchange. Uncertain or hypothetical statements prompt
+clarification instead of enrollment. **“Stop enrollment”**, **“Don't remember
+me”**, and **“I've changed my mind”** also cancel hands-free capture.
+
+Cerebro compares the consenting face against every compatible profile, regardless
+of its name. Only a strong, unique match to a completed profile starts refinement,
+preserving that profile's name, role, and controller bindings. A different face
+gets a separate UUID even when the spoken name is already in use. Weak matches,
+competing matches, and matches to incomplete enrollments require operator help;
+they never merge people based on a shared name. The hands-free flow cannot
+create or promote an administrator.
 
 ## Installing AdaFace models
 

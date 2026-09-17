@@ -16,6 +16,7 @@ import Foundation
     private let enabledCheckbox = NSButton(checkboxWithTitle: "Enable face recognition", target: nil, action: nil)
     private let modelPopup = NSPopUpButton()
     private let nameField = NSTextField()
+    private let renameButton = NSButton(title: "Rename Selected…", target: nil, action: nil)
     private let pronunciationField = NSTextField()
     private let rolePopup = NSPopUpButton()
     private let trustField = NSTextField()
@@ -86,6 +87,9 @@ import Foundation
         modelPopup.toolTip = "Choose the AdaFace embedding model used for new enrollment and recognition."
 
         nameField.placeholderString = "Name ROB should remember"
+        renameButton.target = self
+        renameButton.action = #selector(renameSelected(_:))
+        renameButton.toolTip = "Correct the selected person's name while preserving their face samples and permissions."
         pronunciationField.placeholderString = "Pronunciation (optional)"
         trustField.placeholderString = "Select Administrator to bind a paired controller"
         trustField.isEditable = false
@@ -155,9 +159,12 @@ import Foundation
         scroll.borderType = .bezelBorder
         scroll.documentView = table
 
+        let nameRow = NSStackView(views: [nameField, renameButton])
+        nameRow.orientation = .horizontal
+        nameRow.spacing = 8
         let enrollmentGrid = NSGridView(views: [
             [NSTextField(labelWithString: "Face model"), modelPopup],
-            [NSTextField(labelWithString: "Name"), nameField],
+            [NSTextField(labelWithString: "Name"), nameRow],
             [NSTextField(labelWithString: "Pronunciation"), pronunciationField],
             [NSTextField(labelWithString: "Role"), rolePopup],
             [NSTextField(labelWithString: "Trusted approval"), trustField]
@@ -225,6 +232,7 @@ import Foundation
     }
 
     private func apply(_ snapshot: ROBFaceIdentityServiceSnapshot) {
+        let selectedID = profiles.indices.contains(table.selectedRow) ? profiles[table.selectedRow].id : nil
         profiles = snapshot.profiles
         enrollingProfileID = snapshot.enrollingProfileID
         enabledCheckbox.state = snapshot.enabled ? .on : .off
@@ -243,6 +251,11 @@ import Foundation
             modelPopup.selectItem(at: index)
         }
         table.reloadData()
+        if let selectedID, let row = profiles.firstIndex(where: { $0.id == selectedID }) {
+            table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        } else {
+            table.deselectAll(nil)
+        }
         refreshControls()
     }
 
@@ -259,6 +272,7 @@ import Foundation
             && !pairedOperatorControllers.isEmpty
         cancelButton.isEnabled = isEnrolling
         deleteButton.isEnabled = !isEnrolling && table.selectedRow >= 0
+        renameButton.isEnabled = !isEnrolling && selectedProfile != nil
         nameField.isEnabled = !isEnrolling
         pronunciationField.isEnabled = !isEnrolling
         rolePopup.isEnabled = !isEnrolling
@@ -309,6 +323,27 @@ import Foundation
     }
 
     @objc private func tableSelectionChanged(_ sender: Any?) { refreshControls() }
+
+    public func tableViewSelectionDidChange(_ notification: Notification) { refreshControls() }
+
+    @objc private func renameSelected(_ sender: Any?) {
+        guard profiles.indices.contains(table.selectedRow) else { return }
+        let profile = profiles[table.selectedRow]
+        let alert = NSAlert()
+        alert.messageText = "Rename \(profile.displayName)"
+        alert.informativeText = "This changes only the selected person's name. Their face samples and permissions stay the same."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+        field.stringValue = profile.displayName
+        field.setAccessibilityLabel("New name for selected person")
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        service.renameProfile(id: profile.id, displayName: field.stringValue) { [weak self] error in
+            if let error { self?.showError(error.localizedDescription) }
+        }
+    }
 
     @objc private func startEnrollment(_ sender: Any?) {
         guard consentCheckbox.state == .on else {
@@ -494,6 +529,7 @@ import Foundation
             ])
         }
         cell.textField?.stringValue = value
+        cell.toolTip = "\(profile.displayName) • \(profile.role.displayName)\nEnrolled \(Self.dateFormatter.string(from: profile.consentedAt))\nProfile: \(profile.id.uuidString)"
         return cell
     }
 

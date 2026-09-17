@@ -139,9 +139,71 @@ enum ROBFaceIdentityGalleryFixtureTests {
             // Expected.
         }
 
+        // A parent and child can share a name without sharing storage or role.
+        let parent = try gallery.renameProfile(id: profile.id, displayName: "Rudy")
+        let child = try gallery.createProfile(
+            displayName: "Rudy", pronunciation: nil, role: .knownPerson,
+            trustedEnrollmentReference: "spoken-consent", modelIdentifier: "fixture-model-v1"
+        )
+        precondition(parent.id != child.id)
+        let sameNamed = try gallery.profiles().filter { $0.displayName == "Rudy" }
+        precondition(sameNamed.count == 2)
+        let childSample = ROBFaceIdentitySample(
+            id: UUID(), capturedAt: Date(), quality: 0.9, yawRadians: nil, rollRadians: nil,
+            embedding: [0, 1], encryptedImageFileName: "child.robface"
+        )
+        let childWithSample = try gallery.appendSample(childSample, encryptedImagePlaintext: imagePlaintext, to: child.id)
+        let renamed = try gallery.renameProfile(id: child.id, displayName: "Rudy Jr")
+        var expected = childWithSample
+        expected.displayName = "Rudy Jr"
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let renameOnlyChangedLabel = try encoder.encode(renamed) == encoder.encode(expected)
+        precondition(renameOnlyChangedLabel, "Rename must change only the selected label")
+        let reloadedParent = try gallery.profiles().first { $0.id == parent.id }!
+        let parentUnchanged = try encoder.encode(reloadedParent) == encoder.encode(parent)
+        precondition(parentUnchanged, "Renaming the child must not change the parent")
+        try gallery.deleteProfile(id: child.id)
+        let remainingIDs = try gallery.profiles().map(\.id)
+        precondition(remainingIDs == [parent.id], "Deleting a same-name profile must preserve the other person")
+
+        testEnrollmentMatching(parent: parent, child: child)
         try gallery.deleteProfile(id: profile.id)
         let remaining = try gallery.profiles()
         precondition(remaining.isEmpty)
         print("ROB face identity encrypted gallery fixtures passed")
+    }
+
+    private static func testEnrollmentMatching(parent: ROBFaceIdentityProfile, child: ROBFaceIdentityProfile) {
+        func completed(_ original: ROBFaceIdentityProfile, embedding: [Float]) -> ROBFaceIdentityProfile {
+            var profile = original
+            profile.samples = (0..<ROBFaceIdentityProfile.requiredEnrollmentSamples).map { _ in
+                ROBFaceIdentitySample(
+                    id: UUID(), capturedAt: Date(), quality: 0.9, yawRadians: nil, rollRadians: nil,
+                    embedding: embedding, encryptedImageFileName: "fixture.robface"
+                )
+            }
+            return profile
+        }
+        let parent = completed(parent, embedding: [1, 0])
+        let child = completed(child, embedding: [0, 1])
+        func match(_ probe: [Float], _ profiles: [ROBFaceIdentityProfile]) -> ROBFaceEnrollmentMatchPolicy.Match {
+            ROBFaceEnrollmentMatchPolicy.match(
+                probe: probe, profiles: profiles, modelIdentifier: "fixture-model-v1",
+                maximumDistance: 0.35, minimumMargin: 0.06, possibleMatchDistance: 0.52
+            )
+        }
+        precondition(match([0, 1], [parent]) == .newPerson, "A different face may use the parent's name")
+        precondition(match([0, 1], [parent, child]) == .existing(child.id), "Face evidence chooses the child despite matching names")
+        precondition(match([1, 0], [parent, child]) == .existing(parent.id), "Face evidence chooses the parent despite matching names")
+        precondition(match([0.71, 0.71], [parent, child]) == .ambiguous, "Close competing faces must not be merged")
+        precondition(match([0.6, 0.8], [parent]) == .ambiguous, "A weak match must not refine an existing profile")
+        var incomplete = child
+        incomplete.samples = Array(child.samples.prefix(1))
+        precondition(match([0, 1], [parent, incomplete]) == .ambiguous, "An incomplete matching enrollment needs operator help")
+        var otherModel = child
+        otherModel.modelIdentifier = "another-model"
+        precondition(match([0, 1], [parent, otherModel]) == .newPerson, "Different embedding models must not be compared")
+        precondition(match([.nan, 0], [parent, child]) == .ambiguous, "Invalid face evidence must not select a person")
     }
 }
