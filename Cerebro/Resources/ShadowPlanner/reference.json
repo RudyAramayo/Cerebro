@@ -1,11 +1,13 @@
 {
-  "activeArm": "left",
+  "activeArms": {
+    "left": "R-11",
+    "right": "L-10"
+  },
   "approvedURDFSHA256": "c9db8ebd6c7d436ea545cd0b118cc72021021fbbe1a263c85a6567d9e9f8a2b9",
   "axes": "X forward, Y ROB-left, Z up; meters/radians",
   "frame": "base_link",
-  "hardwareLabel": "R-11",
   "modelID": "c4a5c1bee9a9a0a6cca6ecdba9433f98ab647eea3084fb462ff592a0a0ea1e03",
-  "note": "Only left R-11 moves. Base, torso, right arm and all other joints stay at the scan reference. Right J2 +120.417 degrees exceeds the provisional +120 range and is not enabled. Cable travel and collisions are unverified.",
+  "note": "Both arms support shadow IK. Right J2's scan reference remains outside the provisional range; a visually reconciled in-range pose is required. No cable or hardware travel is certified.",
   "positions": {
     "belly_oak_mount": 0,
     "body_lean": 0,
@@ -46,5 +48,6 @@
   "referenceID": "ba63a659f10085da3fa7f7c5002f17b4af27596408bc447e0ac64cdb4198c2d7",
   "referenceSource": "approved_scan_estimate",
   "simulationOnly": true,
+  "surfacesSHA256": "97cf72b57d165405c83aee90be96cd887248536488f905adacec8e23eac0b91f",
   "toolNote": "Provisional 110 mm tool offset; not a measured grasp point."
 }

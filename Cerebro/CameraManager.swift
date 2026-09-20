@@ -202,6 +202,7 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     private var previewVisible = false
     private var previewVisibilityGeneration: UInt64 = 0
     private var lifecycleGeneration: UInt64 = 0
+    private let markerlessStreamID = UUID()
     private var acceptedDeliveryGeneration: UInt64 = 0
     private var fallbackSequence: UInt64 = 0
     private var cameraAuthorizationRequestInFlight = false
@@ -652,6 +653,7 @@ final class CameraManager: NSObject, CameraManagerProtocol {
         // latency of the synchronous Vision work performed by the UI delegate.
         videoSampleHandler?(frameSet.rgbSampleBuffer)
         recordingFrameHandler?(frameSet)
+        ROBMarkerlessVisionService.shared.offer(frameSet, role: role, streamID: "\(markerlessStreamID)-\(generation)")
         guard shouldDeliverToPerception else { return }
 
         deliveryQueue.async { [weak self] in

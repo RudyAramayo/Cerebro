@@ -1,4 +1,4 @@
-"""Actual Drake shadow solves and tracking failures; no hardware endpoint exists."""
+"""Isolated Drake kinematics/tracking tests. Real clearance lives in ROBShadowSafetyTests."""
 import importlib.util
 import json
 from pathlib import Path
@@ -32,10 +32,14 @@ class ShadowPlannerTests(unittest.TestCase):
         self.tracking_id = str(uuid.uuid4())
         self.sequence = self.sample_id = 0
         self.reference = self.send("start")
+        # Deliberately isolate IK tests from scan segmentation collisions; the
+        # safety suite exercises the real geometry and refuses the scan overlap.
+        self.engine.clearance.transition = lambda before, after: dict(clear=True, distance=.1, pair=None, required=.025)
 
     def request(self, action, **fields):
         self.sequence += 1
-        command = dict(action=action, shadowID=self.shadow, requestID=str(uuid.uuid4()), **fields)
+        command = dict(action=action, shadowID=self.shadow, requestID=str(uuid.uuid4()), arm="left", **fields)
+        if action == "start": command["visionRequired"] = False
         if action != "start":
             command["modelID"] = self.engine.reference["modelID"]
         return dict(protocol=worker.PROTOCOL, kind="request", controllerID=self.controller,
@@ -65,7 +69,7 @@ class ShadowPlannerTests(unittest.TestCase):
                 np.testing.assert_allclose(frame["pose"]["quaternion"], before[frame["name"]]["quaternion"], atol=1e-9)
         self.assertFalse(result["hardwareOutputEnabled"])
         self.assertEqual(result["referenceSource"], "approved_scan_estimate")
-        self.assertEqual(result["collisionStatus"], "not_checked")
+        self.assertIn(result["collisionStatus"], ("clear_model", "blocked"))
 
     def test_reference_is_not_silently_clamped(self):
         self.assertEqual(self.reference["status"], "ready")

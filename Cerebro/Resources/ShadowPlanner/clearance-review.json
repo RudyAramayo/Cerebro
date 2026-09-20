@@ -1,0 +1,146 @@
+{
+  "modelID": "c4a5c1bee9a9a0a6cca6ecdba9433f98ab647eea3084fb462ff592a0a0ea1e03",
+  "referenceID": "ba63a659f10085da3fa7f7c5002f17b4af27596408bc447e0ac64cdb4198c2d7",
+  "surfacesSHA256": "97cf72b57d165405c83aee90be96cd887248536488f905adacec8e23eac0b91f",
+  "marginMeters": 0.025,
+  "source": "approved_scan_estimate",
+  "hardwareOutputEnabled": false,
+  "violations": [
+    {
+      "clear": false,
+      "distance": -0.028406732823146267,
+      "pair": [
+        "torso_link",
+        "right_two_Link"
+      ],
+      "required": 0.025
+    },
+    {
+      "clear": false,
+      "distance": -0.0274809440691281,
+      "pair": [
+        "torso_link",
+        "left_two_Link"
+      ],
+      "required": 0.025
+    },
+    {
+      "clear": false,
+      "distance": -0.025137529532854985,
+      "pair": [
+        "left_tool",
+        "left_track_upper_idler_link"
+      ],
+      "required": 0.025
+    },
+    {
+      "clear": false,
+      "distance": -0.016319576790738734,
+      "pair": [
+        "right_base_link",
+        "right_two_Link"
+      ],
+      "required": 0.025
+    },
+    {
+      "clear": false,
+      "distance": -0.014714339118161106,
+      "pair": [
+        "right_tool",
+        "right_track_upper_idler_link"
+      ],
+      "required": 0.025
+    },
+    {
+      "clear": false,
+      "distance": -0.008743786261690178,
+      "pair": [
+        "torso_link",
+        "left_four_Link"
+      ],
+      "required": 0.025
+    },
+    {
+      "clear": false,
+      "distance": -0.006998183592160172,
+      "pair": [
+        "lower_neck_link",
+        "left_one_Link"
+      ],
+      "required": 0.025
+    },
+    {
+      "clear": false,
+      "distance": -0.00671342917368185,
+      "pair": [
+        "right_track_link",
+        "right_tool"
+      ],
+      "required": 0.025
+    },
+    {
+      "clear": false,
+      "distance": -0.004947337415126577,
+      "pair": [
+        "left_base_link",
+        "left_two_Link"
+      ],
+      "required": 0.025
+    },
+    {
+      "clear": false,
+      "distance": -0.003738358025826753,
+      "pair": [
+        "upper_neck_link",
+        "left_one_Link"
+      ],
+      "required": 0.025
+    },
+    {
+      "clear": false,
+      "distance": -0.0020451714977633606,
+      "pair": [
+        "left_track_link",
+        "left_tool"
+      ],
+      "required": 0.025
+    },
+    {
+      "clear": false,
+      "distance": -0.00124275998033725,
+      "pair": [
+        "torso_link",
+        "right_three_Link"
+      ],
+      "required": 0.025
+    },
+    {
+      "clear": false,
+      "distance": 0.0002871386634196695,
+      "pair": [
+        "left_two_Link",
+        "left_four_Link"
+      ],
+      "required": 0.025
+    },
+    {
+      "clear": false,
+      "distance": 0.002085975236508145,
+      "pair": [
+        "torso_link",
+        "left_three_Link"
+      ],
+      "required": 0.025
+    },
+    {
+      "clear": false,
+      "distance": 0.006095794057342128,
+      "pair": [
+        "left_seven_Link",
+        "left_track_upper_idler_link"
+      ],
+      "required": 0.025
+    }
+  ],
+  "note": "Convex rigid scan envelopes; these overlaps do not establish physical collisions. Review torso concavity and rigid segment assignments. No exclusions added to hide conflicts."
+}

@@ -25,15 +25,15 @@ import Foundation
             guard let response = responses.first(where: { $0.requestID == command.requestID }) else {
                 throw NSError(domain: "ShadowFixture", code: 2, userInfo: [NSLocalizedDescriptionKey: "No Mac worker response"])
             }
-            try expect(!response.hardwareOutputEnabled && response.collisionStatus == "not_checked", "Preview was promoted to execution or clearance")
+            try expect(!response.hardwareOutputEnabled && ["clear_model", "blocked"].contains(response.collisionStatus), "Preview was promoted to execution or clearance")
             return response
         }
-        let start = try exchange(.init(.start, shadowID: shadow))
+        let start = try exchange(.init(.start, shadowID: shadow, visionRequired: false))
         try expect(start.status == "ready" && start.referenceFrames.count == 45, "Approved model did not load")
         let result = try exchange(.init(.nudge, shadowID: shadow, modelID: start.modelID, delta: [0.005, 0, 0]))
-        try expect(result.status == "solved" && (result.positionErrorMeters ?? 1) < 0.00087, "Real Drake nudge failed")
+        try expect(result.status == "blocked" && result.collisionStatus == "blocked" && result.collisionPair != nil, "Known scan overlap did not block the nudge")
         let reference = Dictionary(uniqueKeysWithValues: start.referenceFrames.map { ($0.name, $0.pose) })
-        for name in ["torso_link", "base_link", "right_tool", "insta360_link"] {
+        for name in ["torso_link", "base_link", "left_tool", "right_tool", "insta360_link"] {
             try expect(result.ghostFrames.first(where: { $0.name == name })?.pose == reference[name], "Fixed body or other arm moved")
         }
         let count = responses.count
@@ -65,6 +65,6 @@ import Foundation
         while !failed && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
         try expect(failed, "Malformed worker did not report unavailable")
         broken.stop()
-        print("Shadow bridge passed: real Drake round trip, fixed body, session/freshness rejection, malformed worker, no actuator endpoint")
+        print("Shadow bridge passed: real Drake round trip, scan overlap held, fixed body, session/freshness rejection, malformed worker, no actuator endpoint")
     }
 }

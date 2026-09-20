@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Local stdio-only Drake shadow IK. No sockets, arm APIs or actuator imports.
 
-All positions are MODEL coordinates. The reference is a scan estimate, never
-live vision or vendor feedback. Every response permanently disables hardware.
+All positions are MODEL coordinates. Scan, live observations and ghost poses
+stay distinct. Every response permanently disables hardware.
 """
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import sys
 import time
@@ -19,9 +20,11 @@ from pydrake.multibody.inverse_kinematics import InverseKinematics
 from pydrake.multibody.parsing import Parser
 from pydrake.multibody.plant import MultibodyPlant
 from pydrake.solvers import SnoptSolver, Solve
+sys.path.insert(0, str(Path(__file__).parent))
+from clearance import ScanClearance
 
-PROTOCOL = "rob-shadow-ik/1"
-MAX_BYTES = 32768
+PROTOCOL = "rob-shadow-ik/2"
+MAX_BYTES = 65536
 
 
 def pose_dict(transform):
@@ -61,7 +64,9 @@ class ShadowPlanner:
         self.joints = {j.get("name"): self.plant.GetJointByName(j.get("name"), self.model)
                        for j in root.findall("joint") if j.get("type") != "fixed"}
         self.frames = [link.get("name") for link in root.findall("link")]
-        self.indices = [self.joints[f"left_joint{i}"].position_start() for i in range(1, 8)]
+        self.arm = "left"
+        self.arm_indices = {side: [self.joints[f"{side}_joint{i}"].position_start() for i in range(1, 8)] for side in ("left", "right")}
+        self.indices = self.arm_indices[self.arm]
         self.fixed_indices = [i for i in range(self.plant.num_positions()) if i not in self.indices]
         self.q0 = self.plant.GetPositions(self.context).copy()
         for name, joint in self.joints.items():
@@ -73,9 +78,8 @@ class ShadowPlanner:
             raise ValueError("Scan reference exceeds source URDF bounds")
         self.q0 = np.clip(self.q0, lower, upper)
         self.plant.SetPositions(self.context, self.q0)
-        for name, joint in self.joints.items():
-            if not name.startswith("left_joint"):
-                joint.Lock(self.context)
+        # Every solve pins all inactive positions explicitly. Joint Lock would
+        # retain old positions when a visual correction changes the seed.
         self.tip = self.plant.GetFrameByName("left_tool", self.model)
         self.reference_frames = self.frame_poses(self.q0)
         self.q = self.q0.copy()
@@ -86,6 +90,116 @@ class ShadowPlanner:
         self.clutch = None
         self.last_sample_id = 0
         self.last_input_time = 0
+        self.arm_tracking = {}
+        self.clearance = ScanClearance(self, directory, root)
+        self.collision = self.clearance.check(self.q)
+        self.vision_required = True
+        self.observation_path = os.environ.get("ROB_SHADOW_OBSERVATION_PATH")
+        self.visual = dict(status="unavailable", detail="Waiting for live markerless OAK-D observations", arms={})
+        self.visual_age = None
+        self.observed = {}
+        self.applied_observations = {}
+        self.observation_key = None
+        self.corrected = False
+
+    def select_arm(self, arm):
+        if arm not in self.arm_indices:
+            raise ValueError("Invalid arm")
+        keys = ("tracking_id", "alignment", "clutch", "last_sample_id", "last_input_time", "previous_controller")
+        self.arm_tracking[self.arm] = {key: getattr(self, key, None) for key in keys}
+        self.arm = arm
+        values = self.arm_tracking.get(arm, {})
+        for key in keys:
+            setattr(self, key, values.get(key, 0 if key in ("last_sample_id", "last_input_time") else None))
+        self.indices = self.arm_indices[arm]
+        self.fixed_indices = [i for i in range(len(self.q)) if i not in self.indices]
+        self.tip = self.plant.GetFrameByName(arm + "_tool", self.model)
+
+    def pause_all(self):
+        self.clutch = None
+        for state in self.arm_tracking.values():
+            state["clutch"] = None
+
+    def update_visual(self):
+        self.corrected = False
+        value = None
+        if self.observation_path:
+            try:
+                path = Path(self.observation_path)
+                if path.stat().st_size <= 32768:
+                    value = json.loads(path.read_text(), parse_constant=lambda _: (_ for _ in ()).throw(ValueError("Non-finite observation")))
+            except (OSError, ValueError):
+                pass
+        self.visual_age = None
+        if (not isinstance(value, dict) or value.get("schemaVersion") != 1
+                or value.get("modelID") != self.reference["modelID"] or value.get("referenceID") != self.reference["referenceID"]
+                or value.get("source") != "markerless_rgbd" or value.get("frame") != "base_link"):
+            self.visual = dict(status="unavailable", detail="No current markerless depth fit for this model", arms={})
+            if self.vision_required: self.pause_all()
+            return
+        if not isinstance(value.get("capturedAtMilliseconds"), (int, float)) or not isinstance(value.get("arms"), dict):
+            self.visual = dict(status="unavailable", detail="Malformed markerless observation", arms={})
+            self.pause_all()
+            return
+        age = self.wall() * 1000 - value.get("capturedAtMilliseconds", 0)
+        if not math.isfinite(age) or not 0 <= age <= 750:
+            self.visual = dict(status="stale", detail="Live depth observation expired; preview held", arms={})
+            if self.vision_required: self.pause_all()
+            return
+        self.visual_age = age
+        self.visual = value
+        key = (value.get("camera"), value.get("sequence"), value["capturedAtMilliseconds"])
+        for side in ("left", "right"):
+            arm = value.get("arms", {}).get(side, {})
+            if not isinstance(arm, dict):
+                arm = {}; value["arms"][side] = arm
+            try:
+                positions = np.asarray(arm.get("positions", []), float)
+                sigma = np.asarray(arm.get("standardDeviationRadians", []), float)
+            except (ValueError, TypeError):
+                positions = sigma = np.array([])
+            residual = arm.get("residualMeters", 1)
+            confirmed = (arm.get("status") == "confirmed" and value.get("status") in ("confirmed", "partial")
+                         and positions.shape == (7,) and sigma.shape == (7,) and np.isfinite(positions).all()
+                         and np.isfinite(sigma).all() and np.all(sigma >= 0) and max(sigma) < math.radians(5)
+                         and isinstance(residual, (float, int)) and math.isfinite(residual) and 0 <= residual <= .012)
+            if not confirmed:
+                arm["status"] = "unobserved"
+                if self.vision_required:
+                    if self.arm == side: self.clutch = None
+                    if side in self.arm_tracking: self.arm_tracking[side]["clutch"] = None
+                continue
+            indices = self.arm_indices[side]
+            lower, upper = self.plant.GetPositionLowerLimits()[indices], self.plant.GetPositionUpperLimits()[indices]
+            if np.any(positions < lower) or np.any(positions > upper):
+                arm["status"] = "inconsistent"
+                self.pause_all()
+                continue
+            changed = side not in self.applied_observations or max(abs(positions - self.applied_observations[side])) > math.radians(3)
+            if self.vision_required and key != self.observation_key and changed:
+                # Reconcile the model automatically, then require a new clutch.
+                # An observation outside limits is displayed faithfully, not clamped.
+                self.q[indices] = positions
+                self.applied_observations[side] = positions.copy()
+                self.corrected = True
+                self.pause_all()
+            self.observed[side] = positions
+        self.observation_key = key
+        if value.get("status") == "confirmed" and not all(value.get("arms", {}).get(s, {}).get("status") == "confirmed" for s in ("left", "right")):
+            value["status"] = "partial"
+            value["detail"] = "One or more joint estimates failed validation; preview held"
+
+    def visual_ready(self, side):
+        # Both arms must be known for live arm-arm clearance. Unseen cables and
+        # unobserved environment remain outside this model check.
+        return all(self.visual.get("arms", {}).get(s, {}).get("status") == "confirmed" for s in (side, "right" if side == "left" else "left")) and self.visual.get("status") == "confirmed"
+
+    def motion_block(self):
+        if self.vision_required and not self.visual_ready(self.arm):
+            return "Live pose unconfirmed: " + self.visual.get("detail", "Both arms need fresh observable depth fits")
+        if np.any(np.abs(self.q[self.indices]) > self.reference["provisionalCenteredLimitRadians"] + 1e-8):
+            return self.arm + " arm reference exceeds centered ±120°; reconcile the measured pose before moving"
+        return None
 
     def frame_poses(self, q):
         self.plant.SetPositions(self.context, q)
@@ -98,14 +212,28 @@ class ShadowPlanner:
         return self.plant.CalcRelativeTransform(self.context, self.plant.world_frame(), self.tip)
 
     def response(self, request, status, detail, **extra):
+        observed_q = self.q0.copy()
+        observed_names = set()
+        for side, positions in self.observed.items():
+            if self.visual.get("arms", {}).get(side, {}).get("status") == "confirmed" and self.visual_age is not None:
+                observed_q[self.arm_indices[side]] = positions
+                observed_names.update(n for n in self.frames if n.startswith(side + "_") and self.clearance.is_arm(n))
+        observed_frames = [f for f in self.frame_poses(observed_q) if f["name"] in observed_names]
+        collision_fields = {}
+        if self.collision.get("distance") is not None: collision_fields["clearanceMeters"] = self.collision["distance"]
+        if self.collision.get("pair"): collision_fields["collisionPair"] = self.collision["pair"]
+        if self.visual_age is not None: collision_fields["visualAgeMilliseconds"] = self.visual_age
         return dict(protocol=PROTOCOL, kind="response", controllerID=request["controllerID"],
                     sessionID=request["sessionID"], sequence=request["sequence"],
                     shadowID=request["command"]["shadowID"], requestID=request["command"]["requestID"], modelID=self.reference["modelID"],
                     referenceID=self.reference["referenceID"], status=status, detail=detail,
                     hardwareOutputEnabled=False, referenceSource="approved_scan_estimate",
-                    collisionStatus="not_checked", frame="base_link",
+                    arm=self.arm, collisionStatus="clear_model" if self.collision["clear"] else "blocked",
+                    collisionDetail="25 mm rigid scan clearance. Adjacent mounts excluded; cables, payloads and environment unverified.",
+                    visionStatus=self.visual.get("status", "unavailable"), visionDetail=self.visual.get("detail", "")[:600],
+                    visionRequired=self.vision_required, observedFrames=observed_frames, frame="base_link",
                     referenceFrames=self.reference_frames, ghostFrames=self.frame_poses(self.q),
-                    positions=self.q[self.indices].tolist(), solveMilliseconds=0, **extra)
+                    positions=self.q[self.indices].tolist(), solveMilliseconds=0, **collision_fields, **extra)
 
     def tracking(self, request):
         sample = request["command"].get("tracking", {})
@@ -132,7 +260,7 @@ class ShadowPlanner:
                 or any(not isinstance(x, str) for x in owner)
                 or not isinstance(request["sequence"], int) or request["sequence"] <= 0):
             raise ValueError("Invalid request envelope")
-        allowed = {"action", "shadowID", "requestID", "modelID"}
+        allowed = {"action", "shadowID", "requestID", "modelID", "arm"}
         if action in ("align", "clutch", "pose"):
             allowed.add("tracking")
         if action == "clutch":
@@ -141,8 +269,10 @@ class ShadowPlanner:
             allowed.add("delta")
         if action == "start" or (action == "end" and "modelID" not in command):
             allowed.remove("modelID")
-        if action not in ("start", "align", "clutch", "pose", "release", "nudge", "end") or set(command) != allowed:
+        if action == "start": allowed.add("visionRequired")
+        if action not in ("start", "align", "clutch", "pose", "release", "nudge", "end", "refresh") or set(command) != allowed:
             raise ValueError("Invalid command fields")
+        self.select_arm(command["arm"])
         age = self.wall() * 1000 - request["sentAtMilliseconds"]
         if not -100 <= age <= (5000 if action == "start" else 500):
             self.clutch = None
@@ -152,21 +282,39 @@ class ShadowPlanner:
             return self.response(request, "paused", "Out-of-order shadow request")
         self.sequence = request["sequence"]
         if action == "start":
+            if not isinstance(command["visionRequired"], bool): raise ValueError("Invalid observation mode")
+            self.vision_required = command["visionRequired"]
             self.owner = owner
             self.q = self.q0.copy()
             self.alignment = self.clutch = self.tracking_id = None
             self.last_sample_id = 0
-            return self.response(request, "ready", "Left R-11 scan reference loaded. Align forward, then hold the left grip. Clearance is unverified.")
+            self.arm_tracking = {}
+            self.observed = {}; self.applied_observations = {}; self.observation_key = None
+            self.update_visual()
+            self.collision = self.clearance.check(self.q)
+            return self.response(request, "ready", "Approved scan loaded. Select an arm and align its controller. Live mode waits for markerless confirmation of both arms.")
         if owner != self.owner or (action != "end" and command.get("modelID") != self.reference["modelID"]):
             self.clutch = None
             return self.response(request, "paused", "Preview session or model changed; start a new preview")
         try:
+            self.update_visual()
             if action == "end":
                 self.owner = self.alignment = self.clutch = None
                 return self.response(request, "ended", "Shadow preview ended")
             if action == "release":
                 self.clutch = None
-                return self.response(request, "paused", "Ghost held. Re-engage the left grip to reposition your hand.")
+                return self.response(request, "paused", "Ghost held. Release and re-engage this arm's grip to reposition your hand.")
+            if action == "refresh":
+                self.collision = self.clearance.check(self.q)
+                return self.response(request, "paused" if self.corrected else "ready",
+                                     "Visual correction applied; release and re-engage the grips" if self.corrected else self.visual.get("detail", "Markerless observation pending"))
+            if action in ("clutch", "pose", "nudge"):
+                reason = self.motion_block()
+                if reason:
+                    self.clutch = None
+                    return self.response(request, "blocked", reason)
+                if self.corrected and action == "pose":
+                    return self.response(request, "paused", "Physical pose changed; visual correction applied. Release and re-engage.")
             if action == "nudge":
                 self.clutch = None
                 delta = np.asarray(command["delta"], float)
@@ -186,7 +334,7 @@ class ShadowPlanner:
                 self.alignment = np.stack([forward, left, up])
                 self.tracking_id = tracking_id
                 self.clutch = None
-                return self.response(request, "aligned", "Forward aligned to ROB +X; up is +Z. Release, then hold the left grip.")
+                return self.response(request, "aligned", "Forward aligned to ROB +X; up is +Z. Release, then hold this arm's grip.")
             if tracking_id != self.tracking_id or self.alignment is None:
                 self.alignment = self.clutch = None
                 raise ValueError("Tracking origin changed; align forward again")
@@ -218,6 +366,8 @@ class ShadowPlanner:
     def solve(self, request, target):
         began = self.clock()
         before = self.q.copy()
+        reason = self.motion_block()
+        if reason: return self.response(request, "blocked", reason)
         self.plant.SetPositions(self.context, before)
         ik = InverseKinematics(self.plant, self.context, with_joint_limits=True)
         variables, program = ik.q(), ik.prog()
@@ -238,13 +388,18 @@ class ShadowPlanner:
             candidate = result.GetSolution(variables)
             if (np.isfinite(candidate).all() and np.all(candidate >= lower - 1e-8)
                     and np.all(candidate <= upper + 1e-8)
-                    and np.max(np.abs(candidate[self.fixed_indices] - self.q0[self.fixed_indices])) < 1e-8):
+                    and np.max(np.abs(candidate[self.fixed_indices] - before[self.fixed_indices])) < 1e-8):
                 self.q = candidate
                 actual = self.tool()
                 distance = np.linalg.norm(actual.translation() - target.translation())
                 angle = (target.rotation().inverse() @ actual.rotation()).ToAngleAxis().angle()
                 if distance <= .00087 and angle <= .01501:
-                    status, detail = "solved", "Kinematically reachable. Cable travel and collision clearance remain unverified."
+                    self.collision = self.clearance.transition(before, candidate)
+                    if self.collision["clear"]:
+                        status, detail = "solved", "Reachable with swept rigid-scan clearance. Cables, payload and environment remain unverified."
+                    else:
+                        self.q = before
+                        detail = "Swept clearance blocked: " + " / ".join(self.collision.get("pair") or ["query budget exceeded"])
                 else:
                     self.q = before
         elapsed = (self.clock() - began) * 1000

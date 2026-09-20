@@ -8,6 +8,8 @@ final class ROBShadowPlannerBridge {
     private let send: Sender
     private let resources: URL?
     private let python: URL
+    private let startVision: (() -> URL?)?
+    private let stopVision: (() -> Void)?
     private var process: Process?
     private var input: FileHandle?
     private var output: FileHandle?
@@ -24,8 +26,10 @@ final class ROBShadowPlannerBridge {
     init(resources: URL? = Bundle.main.url(forResource: "ShadowPlanner", withExtension: nil),
          python: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Cerebro/ShadowPlanner/venv/bin/python3"),
+         startVision: (() -> URL?)? = nil, stopVision: (() -> Void)? = nil,
          send: @escaping Sender) {
         self.resources = resources; self.python = python; self.send = send
+        self.startVision = startVision; self.stopVision = stopVision
     }
 
     func consume(_ data: Data, controllerID: UUID, sessionID: UUID) {
@@ -75,6 +79,7 @@ final class ROBShadowPlannerBridge {
         input = nil; output = nil; errors = nil
         if let process, process.isRunning { process.terminate() }
         process?.terminationHandler = nil; process = nil
+        stopVision?()
     }
 
     private func submit(_ request: ROBShadowRequest) {
@@ -110,6 +115,7 @@ final class ROBShadowPlannerBridge {
         worker.standardInput = incoming; worker.standardOutput = outgoing; worker.standardError = diagnostics
         var environment = ProcessInfo.processInfo.environment
         environment["PYTHONNOUSERSITE"] = "1"; environment["PYTHONUNBUFFERED"] = "1"
+        if let path = startVision?() { environment["ROB_SHADOW_OBSERVATION_PATH"] = path.path }
         worker.environment = environment
         let token = generation
         outgoing.fileHandleForReading.readabilityHandler = { [weak self] handle in
@@ -153,6 +159,7 @@ final class ROBShadowPlannerBridge {
               let response = try? ROBShadowProtocol.response(line),
               response.controllerID == request.controllerID, response.sessionID == request.sessionID,
               response.shadowID == request.command.shadowID, response.requestID == request.command.requestID,
+              response.arm == request.command.arm,
               response.sequence == request.sequence,
               request.command.modelID == nil || request.command.modelID == response.modelID else {
             fail("Invalid or mismatched Drake response"); return

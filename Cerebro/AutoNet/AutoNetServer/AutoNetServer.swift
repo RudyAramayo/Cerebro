@@ -83,7 +83,9 @@ struct ROBControlServerStatusSnapshot: Sendable {
             }
         }
     )
-    private lazy var shadowPlannerBridge = ROBShadowPlannerBridge { [weak self] data, deviceID, sessionID in
+    private lazy var shadowPlannerBridge = ROBShadowPlannerBridge(
+        startVision: { ROBMarkerlessVisionService.shared.start() },
+        stopVision: { ROBMarkerlessVisionService.shared.stop() }) { [weak self] data, deviceID, sessionID in
         guard let self, !self.paused else { return false }
         for connection in self.connectionsByID.values
             where connection.isReady && connection.authenticatedRole == .operatorController

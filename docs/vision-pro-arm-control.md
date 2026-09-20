@@ -6,8 +6,8 @@ joint, target lease, and completion remain independent. The path is deliberately
 measured joint-space jogging; tracked controller poses are not Cartesian arm targets
 and are not used for IK puppeteering.
 
-A separate [Shadow IK preview](vision-pro-shadow-ik.md) now maps the tracked left
-controller through Mac-side Drake into a virtual R-11 gripper. That preview has no
+A separate [Shadow IK preview](vision-pro-shadow-ik.md) now maps both tracked VR
+controllers through Mac-side Drake into virtual R-11 and L-10 grippers. That preview has no
 actuator output and does not change the physical joint-jog path described here.
 
 ```text

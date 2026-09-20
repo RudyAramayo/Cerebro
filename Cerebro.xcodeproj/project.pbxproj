@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D674002A3113000000000001 /* ROBMarkerlessVisionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D674002A3113000000000002 /* ROBMarkerlessVisionService.swift */; };
 		B09B09160000000000000007 /* rob-captured-colors.png in Resources */ = {isa = PBXBuildFile; fileRef = B09B09160000000000000008; };
 		B09B09160000000000000005 /* rob-captured.bin in Resources */ = {isa = PBXBuildFile; fileRef = B09B09160000000000000006; };
 		B09B09150000000000000001 /* ROBScanVisualModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B09B09150000000000000002; };
@@ -223,6 +224,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		D674002A3113000000000002 /* ROBMarkerlessVisionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBMarkerlessVisionService.swift; sourceTree = "<group>"; };
 		B09B09160000000000000008 /* rob-captured-colors.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "rob-captured-colors.png"; sourceTree = "<group>"; };
 		B09B09160000000000000006 /* rob-captured.bin */ = {isa = PBXFileReference; lastKnownFileType = file; path = "rob-captured.bin"; sourceTree = "<group>"; };
 		B09B09150000000000000002 /* ROBScanVisualModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBScanVisualModel.swift; sourceTree = "<group>"; };
@@ -657,6 +659,7 @@
 				C0AF01032F50000100000001 /* ROBSerialChainKinematics.swift */,
 				62224F54B1E408ED04F979A3 /* ShadowPlanner */,
 				49EDF1A1F5EDE1534B25E4A8 /* ROBShadowPlannerBridge.swift */,
+				D674002A3113000000000002 /* ROBMarkerlessVisionService.swift */,
 				2CCC75D97C538DD6A8F34256 /* ROBShadowPlanningProtocol.swift */,
 				D4EA00052F00000100000001 /* ROBMLXStageObservation.swift */,
 				D408B1202E15E7E300F6FEB3 /* ROBAI.swift */,
@@ -931,6 +934,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B291B99A5C63A9A985786591 /* ROBShadowPlannerBridge.swift in Sources */,
+				D674002A3113000000000001 /* ROBMarkerlessVisionService.swift in Sources */,
 				885DBCA98293841F6B44D92D /* ROBShadowPlanningProtocol.swift in Sources */,
 				C0D3A0012F00000100000001 /* ROBPythonRuntime.m in Sources */,
 				C0D3A0022F00000100000001 /* ROBPythonSettingsWindowController.m in Sources */,

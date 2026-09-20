@@ -27,9 +27,9 @@ reference = dict(simulationOnly=True, modelID=hashlib.sha256(model).hexdigest(),
                  approvedURDFSHA256=hashlib.sha256(source.read_bytes()).hexdigest(),
                  referenceSource="approved_scan_estimate", frame="base_link",
                  axes="X forward, Y ROB-left, Z up; meters/radians",
-                 activeArm="left", hardwareLabel="R-11", positions=profile["previewPositions"],
+                 activeArms={"left": "R-11", "right": "L-10"}, positions=profile["previewPositions"],
                  provisionalCenteredLimitRadians=2.0943951023931953,
                  toolNote="Provisional 110 mm tool offset; not a measured grasp point.",
-                 note="Only left R-11 moves. Base, torso, right arm and all other joints stay at the scan reference. Right J2 +120.417 degrees exceeds the provisional +120 range and is not enabled. Cable travel and collisions are unverified.")
+                 note="Both arms support shadow IK. Run prepare-shadow-surfaces.py next to pin visual and collision geometry. Right J2 remains outside the provisional range until visually reconciled. No physical cable or hardware travel is certified.")
 (output / "reference.json").write_text(json.dumps(reference, indent=2, sort_keys=True) + "\n")
 print(json.dumps({"modelID": reference["modelID"], "links": len(root.findall('link')), "output": str(output)}))
