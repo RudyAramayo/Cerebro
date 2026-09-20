@@ -204,6 +204,9 @@
 		84547BA5C6BB48088643E82C /* BubbleLaserCalibration.py in Resources */ = {isa = PBXBuildFile; fileRef = 7E84073B5D9E42B981116116 /* BubbleLaserCalibration.py */; };
 		35B83CA417894C40A84B94D7 /* ROBBubbleLaserObservation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 582C41C171E14BFB91B7B4CF /* ROBBubbleLaserObservation.swift */; };
 		67BD0180E8DD4B4B8E0A7E9B /* ROBBubbleLaserCalibration.swift in Sources */ = {isa = PBXBuildFile; fileRef = B42CDCA4F5F4499B8DCEDC52 /* ROBBubbleLaserCalibration.swift */; };
+		885DBCA98293841F6B44D92D /* ROBShadowPlanningProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CCC75D97C538DD6A8F34256 /* ROBShadowPlanningProtocol.swift */; };
+		B291B99A5C63A9A985786591 /* ROBShadowPlannerBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49EDF1A1F5EDE1534B25E4A8 /* ROBShadowPlannerBridge.swift */; };
+		1D117594B57441161B454028 /* ShadowPlanner in Resources */ = {isa = PBXBuildFile; fileRef = 62224F54B1E408ED04F979A3 /* ShadowPlanner */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -453,6 +456,9 @@
 		7E84073B5D9E42B981116116 /* BubbleLaserCalibration.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = BubbleLaserCalibration.py; sourceTree = "<group>"; };
 		582C41C171E14BFB91B7B4CF /* ROBBubbleLaserObservation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBBubbleLaserObservation.swift; sourceTree = "<group>"; };
 		B42CDCA4F5F4499B8DCEDC52 /* ROBBubbleLaserCalibration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBBubbleLaserCalibration.swift; sourceTree = "<group>"; };
+		2CCC75D97C538DD6A8F34256 /* ROBShadowPlanningProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ROBShadowPlanningProtocol.swift"; sourceTree = "<group>"; };
+		49EDF1A1F5EDE1534B25E4A8 /* ROBShadowPlannerBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ROBShadowPlannerBridge.swift"; sourceTree = "<group>"; };
+		62224F54B1E408ED04F979A3 /* ShadowPlanner */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Resources/ShadowPlanner"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -649,6 +655,9 @@
 				C0AF02012F50000100000001 /* ROBRealtimeSession.swift */,
 				C0AF01042F50000100000001 /* ROBArmIKWindowController.swift */,
 				C0AF01032F50000100000001 /* ROBSerialChainKinematics.swift */,
+				62224F54B1E408ED04F979A3 /* ShadowPlanner */,
+				49EDF1A1F5EDE1534B25E4A8 /* ROBShadowPlannerBridge.swift */,
+				2CCC75D97C538DD6A8F34256 /* ROBShadowPlanningProtocol.swift */,
 				D4EA00052F00000100000001 /* ROBMLXStageObservation.swift */,
 				D408B1202E15E7E300F6FEB3 /* ROBAI.swift */,
 				C0D5B0012F00000100000001 /* ROBSceneSnapshot.swift */,
@@ -866,6 +875,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1D117594B57441161B454028 /* ShadowPlanner in Resources */,
 				B09B09150000000000000003 /* rob-visual.json in Resources */,
 				B09B09160000000000000007 /* rob-captured-colors.png in Resources */,
 				B09B09160000000000000005 /* rob-captured.bin in Resources */,
@@ -920,6 +930,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B291B99A5C63A9A985786591 /* ROBShadowPlannerBridge.swift in Sources */,
+				885DBCA98293841F6B44D92D /* ROBShadowPlanningProtocol.swift in Sources */,
 				C0D3A0012F00000100000001 /* ROBPythonRuntime.m in Sources */,
 				C0D3A0022F00000100000001 /* ROBPythonSettingsWindowController.m in Sources */,
 				C0D3A0032F00000100000001 /* ROBMainWindowController.m in Sources */,

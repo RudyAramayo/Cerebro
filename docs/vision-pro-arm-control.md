@@ -6,6 +6,10 @@ joint, target lease, and completion remain independent. The path is deliberately
 measured joint-space jogging; tracked controller poses are not Cartesian arm targets
 and are not used for IK puppeteering.
 
+A separate [Shadow IK preview](vision-pro-shadow-ik.md) now maps the tracked left
+controller through Mac-side Drake into a virtual R-11 gripper. That preview has no
+actuator output and does not change the physical joint-jog path described here.
+
 ```text
 Amber measured telemetry + verified actuator modes
     → ROBArmControllerBridge
@@ -175,9 +179,9 @@ is another movement command, not a stop.
 ## Deliberate exclusions
 
 - No Vision-initiated arm activation, deactivation, or actuator-mode transition.
-- No PSVR/world-transform-to-joint IK, tracked-pose Cartesian puppeteering, collision
-  planner, or workspace model. Paired Sense input is measured joint jogging from the
-  two vertical thumbsticks only.
+- No physical PSVR/world-transform-to-joint execution, collision planner, or
+  workspace certification. Physical paired Sense input remains joint jogging from
+  the two vertical thumbsticks. Shadow IK uses a separate preview-only protocol.
 - No model-supplied joint arrays in `play_gesture`.
 - No simulator claim of physical Amber execution.
 - No claim that a software/network hold is equivalent to the physical E-stop.

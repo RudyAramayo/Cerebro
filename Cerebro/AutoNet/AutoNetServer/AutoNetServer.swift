@@ -68,6 +68,7 @@ struct ROBControlServerStatusSnapshot: Sendable {
     private var lastLidarSequenceByDeviceID: [UUID: UInt64] = [:]
     private var lastLidarScanUptimeByDeviceID: [UUID: TimeInterval] = [:]
     private var credentialRevocationObserver: NSObjectProtocol?
+    private var shadowSessionObserver: NSObjectProtocol?
     private var listenerStatus = "stopped"
     private var listenerStatusDetail: String?
     @nonobjc private lazy var localLidarIPCServer = ROBLidarLocalIPCServer(
@@ -82,6 +83,16 @@ struct ROBControlServerStatusSnapshot: Sendable {
             }
         }
     )
+    private lazy var shadowPlannerBridge = ROBShadowPlannerBridge { [weak self] data, deviceID, sessionID in
+        guard let self, !self.paused else { return false }
+        for connection in self.connectionsByID.values
+            where connection.isReady && connection.authenticatedRole == .operatorController
+                && connection.authenticatedDeviceID == deviceID
+                && connection.authenticatedSessionUUID == sessionID {
+            return connection.send(type: .sendData, data: data)
+        }
+        return false
+    }
     private lazy var armControllerBridge = ROBArmControllerBridge(server: self)
     private lazy var gripperControllerBridge = ROBGripperControllerBridge(server: self)
     private lazy var administratorTerminalCoordinator = ROBAdministratorTerminalCoordinator(server: self)
@@ -135,6 +146,13 @@ struct ROBControlServerStatusSnapshot: Sendable {
 
         super.init()
         ROBControlLatencyDiagnostics.shared.start()
+        shadowSessionObserver = NotificationCenter.default.addObserver(
+            forName: .robControlLiveSessionDidEnd, object: nil, queue: .main
+        ) { [weak self] notification in
+            guard let controllerID = notification.userInfo?[ROBControlLiveSessionNotification.controllerIDKey] as? UUID,
+                  let sessionID = notification.userInfo?[ROBControlLiveSessionNotification.sessionIDKey] as? UUID else { return }
+            self?.shadowPlannerBridge.sessionEnded(controllerID: controllerID, sessionID: sessionID)
+        }
         if let startupError {
             listenerStatus = "unavailable"
             listenerStatusDetail = startupError.localizedDescription
@@ -149,6 +167,7 @@ struct ROBControlServerStatusSnapshot: Sendable {
     }
 
     deinit {
+        if let shadowSessionObserver { NotificationCenter.default.removeObserver(shadowSessionObserver) }
         if let credentialRevocationObserver {
             NotificationCenter.default.removeObserver(credentialRevocationObserver)
         }
@@ -392,6 +411,16 @@ struct ROBControlServerStatusSnapshot: Sendable {
                 } else {
                     NSLog("Discarded remote-desktop input outside an authenticated v2 operator session")
                 }
+                return
+            }
+            if ROBShadowProtocol.claims(data) {
+                if sendingConnection.authenticatedRole == .operatorController,
+                   let controllerID = sendingConnection.authenticatedDeviceID,
+                   let sessionID = sendingConnection.authenticatedSessionUUID {
+                    shadowPlannerBridge.consume(data, controllerID: controllerID, sessionID: sessionID)
+                }
+                // Shadow frames, including malformed/future versions, never
+                // reach arm execution or the legacy motor-payload parser.
                 return
             }
             if armControllerBridge.claimsArmControlProtocol(data) {
@@ -683,6 +712,7 @@ struct ROBControlServerStatusSnapshot: Sendable {
             listenerStatus = "stopped"
             listenerStatusDetail = nil
         }
+        shadowPlannerBridge.stop()
         armControllerBridge.stop()
         gripperControllerBridge.stop()
         administratorTerminalCoordinator.stop()

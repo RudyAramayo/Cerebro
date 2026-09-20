@@ -1,0 +1,375 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="rob_droid_calibration_draft">
+  <link name="base_link">
+        </link>
+  <link name="left_track_link">
+        </link>
+  <link name="left_sprocket_link">
+        </link>
+  <link name="left_flipper_link">
+        </link>
+  <link name="right_track_link">
+        </link>
+  <link name="right_sprocket_link">
+        </link>
+  <link name="right_flipper_link">
+        </link>
+  <link name="lean_link">
+        </link>
+  <link name="torso_link">
+        </link>
+  <link name="lower_neck_link">
+        </link>
+  <link name="neck_pan_link">
+        </link>
+  <link name="upper_neck_link">
+        </link>
+  <link name="insta360_link">
+        </link>
+  <link name="oak_link">
+        </link>
+  <link name="oak_optical_frame">
+        </link>
+  <link name="belly_oak_link">
+        </link>
+  <link name="belly_oak_optical_frame">
+        </link>
+  <link name="left_base_link">
+        </link>
+  <link name="left_one_Link">
+        </link>
+  <link name="left_two_Link">
+        </link>
+  <link name="left_three_Link">
+        </link>
+  <link name="left_four_Link">
+        </link>
+  <link name="left_five_Link">
+        </link>
+  <link name="left_six_Link">
+        </link>
+  <link name="left_seven_Link">
+        </link>
+  <link name="left_tool">
+        </link>
+  <link name="right_base_link">
+        </link>
+  <link name="right_one_Link">
+        </link>
+  <link name="right_two_Link">
+        </link>
+  <link name="right_three_Link">
+        </link>
+  <link name="right_four_Link">
+        </link>
+  <link name="right_five_Link">
+        </link>
+  <link name="right_six_Link">
+        </link>
+  <link name="right_seven_Link">
+        </link>
+  <link name="right_tool">
+        </link>
+  <link name="rplidar_link">
+        </link>
+  <link name="shoulder_laser_mount_link">
+        </link>
+  <link name="shoulder_laser_pan_link">
+        </link>
+  <link name="shoulder_laser_link">
+        </link>
+  <link name="left_flipper_roller_link">
+        </link>
+  <link name="right_flipper_roller_link">
+        </link>
+  <link name="left_track_front_idler_link">
+        </link>
+  <link name="left_track_upper_idler_link">
+        </link>
+  <link name="right_track_front_idler_link">
+        </link>
+  <link name="right_track_upper_idler_link">
+        </link>
+  <joint name="left_track_mount" type="fixed">
+    <parent link="base_link" />
+    <child link="left_track_link" />
+    <origin rpy="0 0 0" xyz="0.0146 0.185 0.15" />
+  </joint>
+  <joint name="left_track_drive" type="continuous">
+    <parent link="left_track_link" />
+    <child link="left_sprocket_link" />
+    <origin rpy="0 0 0" xyz="-0.1992 0 -0.06" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" velocity="0" />
+  </joint>
+  <joint name="left_flipper" type="revolute">
+    <parent link="base_link" />
+    <child link="left_flipper_link" />
+    <origin rpy="0 0 0" xyz="-0.1846 0.2477 0.09" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" lower="-2" upper="1.5" velocity="0" />
+  </joint>
+  <joint name="right_track_mount" type="fixed">
+    <parent link="base_link" />
+    <child link="right_track_link" />
+    <origin rpy="0 0 0" xyz="0.0146 -0.1596 0.15" />
+  </joint>
+  <joint name="right_track_drive" type="continuous">
+    <parent link="right_track_link" />
+    <child link="right_sprocket_link" />
+    <origin rpy="0 0 0" xyz="-0.1992 0 -0.06" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" velocity="0" />
+  </joint>
+  <joint name="right_flipper" type="revolute">
+    <parent link="base_link" />
+    <child link="right_flipper_link" />
+    <origin rpy="0 0 0" xyz="-0.1846 -0.2223 0.09" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" lower="-2" upper="1.5" velocity="0" />
+  </joint>
+  <joint name="body_lean" type="revolute">
+    <parent link="base_link" />
+    <child link="lean_link" />
+    <origin rpy="0 0 0" xyz="-0.0304189917166 0.0129673688435 0.290297852647" />
+    <axis xyz="-4.63928826547E-18 0.999877658203 0.0156418869078" />
+    <limit effort="0" lower="0" upper="0.807974142359" velocity="0" />
+  </joint>
+  <joint name="torso_yaw" type="revolute">
+    <parent link="lean_link" />
+    <child link="torso_link" />
+    <origin rpy="0 0 0" xyz="-0.0532059671262 -0.0129673688435 0.240028169262" />
+    <axis xyz="0 0 1" />
+    <limit effort="0" lower="-1.2" upper="1.2" velocity="0" />
+  </joint>
+  <joint name="lower_neck" type="revolute">
+    <parent link="torso_link" />
+    <child link="lower_neck_link" />
+    <origin rpy="0 0 0" xyz="-0.0207044288303 0 0.355408962871" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" lower="-1.9" upper="1.9" velocity="0" />
+  </joint>
+  <joint name="neck_pan" type="revolute">
+    <parent link="lower_neck_link" />
+    <child link="neck_pan_link" />
+    <origin rpy="0 0 0" xyz="0 0 0.13" />
+    <axis xyz="0 0 1" />
+    <limit effort="0" lower="-1.05" upper="1.05" velocity="0" />
+  </joint>
+  <joint name="upper_neck" type="revolute">
+    <parent link="neck_pan_link" />
+    <child link="upper_neck_link" />
+    <origin rpy="0 0 0" xyz="0 0 0.026" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" lower="-1.9" upper="1.9" velocity="0" />
+  </joint>
+  <joint name="insta360_mount" type="fixed">
+    <parent link="upper_neck_link" />
+    <child link="insta360_link" />
+    <origin rpy="0 0 0" xyz="-0.00247132619834 0.00739125708507 0.120732694921" />
+  </joint>
+  <joint name="oak_mount" type="fixed">
+    <parent link="upper_neck_link" />
+    <child link="oak_link" />
+    <origin rpy="0 0 0" xyz="0.0873611818743 0 0.117131199394" />
+  </joint>
+  <joint name="oak_optical_mount" type="fixed">
+    <parent link="oak_link" />
+    <child link="oak_optical_frame" />
+    <origin rpy="-1.57079632679 0 -1.57079632679" xyz="0.015 0 0" />
+  </joint>
+  <joint name="belly_oak_mount" type="fixed">
+    <parent link="torso_link" />
+    <child link="belly_oak_link" />
+    <origin rpy="0 0 0" xyz="0.2081 0.009525 0.1689" />
+  </joint>
+  <joint name="belly_oak_optical_mount" type="fixed">
+    <parent link="belly_oak_link" />
+    <child link="belly_oak_optical_frame" />
+    <origin rpy="-1.57079632679 0 -1.57079632679" xyz="0.015 0 0" />
+  </joint>
+  <joint name="left_b1_mount" type="fixed">
+    <parent link="torso_link" />
+    <child link="left_base_link" />
+    <origin rpy="-0.349065850399 0 5.55111512313E-17" xyz="0.0509657445449 0.0555 0.259785085191" />
+  </joint>
+  <joint name="left_joint1" type="revolute">
+    <parent link="left_base_link" />
+    <child link="left_one_Link" />
+    <origin rpy="0 0 -1.57079632679" xyz="0 0 0.0825" />
+    <axis xyz="0 0 1" />
+    <limit effort="0" lower="-2.4435" upper="2.4435" velocity="0" />
+  </joint>
+  <joint name="left_joint2" type="revolute">
+    <parent link="left_one_Link" />
+    <child link="left_two_Link" />
+    <origin rpy="-1.57079632679 0 0" xyz="0 0 0.0853" />
+    <axis xyz="0 0 1" />
+    <limit effort="0" lower="-2.3213" upper="2.3213" velocity="0" />
+  </joint>
+  <joint name="left_joint3" type="revolute">
+    <parent link="left_two_Link" />
+    <child link="left_three_Link" />
+    <origin rpy="1.5708 0 0" xyz="0 -0.1289 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="0" lower="-2.2863" upper="2.2863" velocity="0" />
+  </joint>
+  <joint name="left_joint4" type="revolute">
+    <parent link="left_three_Link" />
+    <child link="left_four_Link" />
+    <origin rpy="1.5708 0 0" xyz="0 0 0.0853" />
+    <axis xyz="0 0 1" />
+    <limit effort="0" lower="-2.2863" upper="2.2863" velocity="0" />
+  </joint>
+  <joint name="left_joint5" type="revolute">
+    <parent link="left_four_Link" />
+    <child link="left_five_Link" />
+    <origin rpy="-1.5708 0 0" xyz="0 0.1251 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="0" lower="-2.2863" upper="2.2863" velocity="0" />
+  </joint>
+  <joint name="left_joint6" type="revolute">
+    <parent link="left_five_Link" />
+    <child link="left_six_Link" />
+    <origin rpy="-1.5708 0 0" xyz="0 0 0.0891" />
+    <axis xyz="0 0 1" />
+    <limit effort="0" lower="-2.2863" upper="2.2863" velocity="0" />
+  </joint>
+  <joint name="left_joint7" type="revolute">
+    <parent link="left_six_Link" />
+    <child link="left_seven_Link" />
+    <origin rpy="1.5708 0 0" xyz="0 -0.1591 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="0" lower="-3.05" upper="3.05" velocity="0" />
+  </joint>
+  <joint name="left_tool_mount" type="fixed">
+    <parent link="left_seven_Link" />
+    <child link="left_tool" />
+    <origin rpy="0 0 0" xyz="0 0 0.11" />
+  </joint>
+  <joint name="right_b1_mount" type="fixed">
+    <parent link="torso_link" />
+    <child link="right_base_link" />
+    <origin rpy="0.349065850399 0 -5.55111512313E-17" xyz="0.0509657445449 -0.0555 0.259785085191" />
+  </joint>
+  <joint name="right_joint1" type="revolute">
+    <parent link="right_base_link" />
+    <child link="right_one_Link" />
+    <origin rpy="0 0 -1.57079632679" xyz="0 0 0.0825" />
+    <axis xyz="0 0 1" />
+    <limit effort="0" lower="-2.4435" upper="2.4435" velocity="0" />
+  </joint>
+  <joint name="right_joint2" type="revolute">
+    <parent link="right_one_Link" />
+    <child link="right_two_Link" />
+    <origin rpy="-1.57079632679 0 0" xyz="0 0 0.0853" />
+    <axis xyz="0 0 1" />
+    <limit effort="0" lower="-2.3213" upper="2.3213" velocity="0" />
+  </joint>
+  <joint name="right_joint3" type="revolute">
+    <parent link="right_two_Link" />
+    <child link="right_three_Link" />
+    <origin rpy="1.5708 0 0" xyz="0 -0.1289 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="0" lower="-2.2863" upper="2.2863" velocity="0" />
+  </joint>
+  <joint name="right_joint4" type="revolute">
+    <parent link="right_three_Link" />
+    <child link="right_four_Link" />
+    <origin rpy="1.5708 0 0" xyz="0 0 0.0853" />
+    <axis xyz="0 0 1" />
+    <limit effort="0" lower="-2.2863" upper="2.2863" velocity="0" />
+  </joint>
+  <joint name="right_joint5" type="revolute">
+    <parent link="right_four_Link" />
+    <child link="right_five_Link" />
+    <origin rpy="-1.5708 0 0" xyz="0 0.1251 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="0" lower="-2.2863" upper="2.2863" velocity="0" />
+  </joint>
+  <joint name="right_joint6" type="revolute">
+    <parent link="right_five_Link" />
+    <child link="right_six_Link" />
+    <origin rpy="-1.5708 0 0" xyz="0 0 0.0891" />
+    <axis xyz="0 0 1" />
+    <limit effort="0" lower="-2.2863" upper="2.2863" velocity="0" />
+  </joint>
+  <joint name="right_joint7" type="revolute">
+    <parent link="right_six_Link" />
+    <child link="right_seven_Link" />
+    <origin rpy="1.5708 0 0" xyz="0 -0.1591 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="0" lower="-3.05" upper="3.05" velocity="0" />
+  </joint>
+  <joint name="right_tool_mount" type="fixed">
+    <parent link="right_seven_Link" />
+    <child link="right_tool" />
+    <origin rpy="0 0 0" xyz="0 0 0.11" />
+  </joint>
+  <joint name="rplidar_mount" type="fixed">
+    <parent link="lean_link" />
+    <child link="rplidar_link" />
+    <origin rpy="0 0 0" xyz="-0.0532059671262 -0.0129673688435 0.185028169262" />
+  </joint>
+  <joint name="shoulder_laser_mount" type="fixed">
+    <parent link="torso_link" />
+    <child link="shoulder_laser_mount_link" />
+    <origin rpy="0 0 0" xyz="-0.1689 -0.2 0.4624" />
+  </joint>
+  <joint name="shoulder_laser_pan" type="revolute">
+    <parent link="shoulder_laser_mount_link" />
+    <child link="shoulder_laser_pan_link" />
+    <origin rpy="0 0 0" xyz="0 0 0.012" />
+    <axis xyz="0 0 1" />
+    <limit effort="0" lower="-1.57079632679" upper="1.57079632679" velocity="0" />
+  </joint>
+  <joint name="shoulder_laser_tilt" type="revolute">
+    <parent link="shoulder_laser_pan_link" />
+    <child link="shoulder_laser_link" />
+    <origin rpy="0 0 0" xyz="0 0 0.035" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" lower="-1.57079632679" upper="1.57079632679" velocity="0" />
+  </joint>
+  <joint name="left_flipper_roller" type="continuous">
+    <parent link="left_flipper_link" />
+    <child link="left_flipper_roller_link" />
+    <origin rpy="0 0 0" xyz="0.349661896162 -0.003 0.0286507536689" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" velocity="0" />
+  </joint>
+  <joint name="right_flipper_roller" type="continuous">
+    <parent link="right_flipper_link" />
+    <child link="right_flipper_roller_link" />
+    <origin rpy="0 0 0" xyz="0.349661896162 0.003 0.0286507536689" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" velocity="0" />
+  </joint>
+  <joint name="left_track_front_idler" type="continuous">
+    <parent link="left_track_link" />
+    <child link="left_track_front_idler_link" />
+    <origin rpy="0 0 0" xyz="0.2338 0 -0.06" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" velocity="0" />
+  </joint>
+  <joint name="left_track_upper_idler" type="continuous">
+    <parent link="left_track_link" />
+    <child link="left_track_upper_idler_link" />
+    <origin rpy="0 0 0" xyz="-0.062 0 0.1373" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" velocity="0" />
+  </joint>
+  <joint name="right_track_front_idler" type="continuous">
+    <parent link="right_track_link" />
+    <child link="right_track_front_idler_link" />
+    <origin rpy="0 0 0" xyz="0.2338 0 -0.06" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" velocity="0" />
+  </joint>
+  <joint name="right_track_upper_idler" type="continuous">
+    <parent link="right_track_link" />
+    <child link="right_track_upper_idler_link" />
+    <origin rpy="0 0 0" xyz="-0.062 0 0.1373" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" velocity="0" />
+  </joint>
+</robot>
