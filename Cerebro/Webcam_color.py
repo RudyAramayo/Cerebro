@@ -205,9 +205,20 @@ def timestamp_nanoseconds(frame):
     )
 
 
+def capture_time_milliseconds(frames, clock_now, wall_seconds):
+    # getTimestamp() is synchronized to the SDK's host Clock. Convert in this
+    # process instead of assuming Swift uptime has the same clock epoch.
+    oldest = min(frame.getTimestamp() for frame in frames)
+    age_seconds = (clock_now - oldest).total_seconds()
+    if not math.isfinite(age_seconds) or age_seconds < 0:
+        return None
+    return (wall_seconds - age_seconds) * 1000
+
+
 def frame_payload(
     rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
-    sidewalk_deviation=None, sidewalk_confidence=None, chess_pieces=None
+    sidewalk_deviation=None, sidewalk_confidence=None, chess_pieces=None,
+    captured_at_milliseconds=None
 ):
     rgb_width = int(rgb_frame.getWidth())
     rgb_height = int(rgb_frame.getHeight())
@@ -249,6 +260,7 @@ def frame_payload(
         "protocol_version": PROTOCOL_VERSION,
         "sequence": int(rgb_frame.getSequenceNum()),
         "timestamp_ns": timestamp_nanoseconds(rgb_frame),
+        "captured_at_milliseconds": captured_at_milliseconds,
         "rgb_width": rgb_width,
         "rgb_height": rgb_height,
         "rgb_format": "RGB888",
@@ -276,11 +288,12 @@ def frame_payload(
 
 def send_frame(
     client, rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
-    sidewalk_deviation=None, sidewalk_confidence=None, chess_pieces=None
+    sidewalk_deviation=None, sidewalk_confidence=None, chess_pieces=None,
+    captured_at_milliseconds=None
 ):
     header, rgb_bytes, depth_bytes, left_bytes, right_bytes = frame_payload(
         rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
-        sidewalk_deviation, sidewalk_confidence, chess_pieces
+        sidewalk_deviation, sidewalk_confidence, chess_pieces, captured_at_milliseconds
     )
     client.sendall(PROTOCOL_MAGIC + struct.pack(">I", len(header)) + header)
     client.sendall(rgb_bytes)
@@ -552,7 +565,9 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                 send_frame(
                     client, rgb_frame, depth_frame, left_frame, right_frame,
                     rgb_intrinsics, latest_sidewalk_deviation, latest_sidewalk_confidence,
-                    latest_chess_pieces
+                    latest_chess_pieces,
+                    captured_at_milliseconds=capture_time_milliseconds(
+                        [rgb_frame, depth_frame], dai.Clock.now(), time.time())
                 )
 
             if not stop_event.is_set():

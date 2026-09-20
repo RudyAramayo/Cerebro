@@ -94,6 +94,14 @@ def receive_exact(sock, length):
 
 def main():
     service = load_service()
+    class CapturedFrame:
+        def __init__(self, seconds): self.seconds = seconds
+        def getTimestamp(self): return timedelta(seconds=self.seconds)
+    captured = service.capture_time_milliseconds(
+        [CapturedFrame(3.25), CapturedFrame(3.23)], timedelta(seconds=3.5), 1000.0)
+    assert abs(captured - 999730.0) < 1e-6, "The older depth capture must determine freshness"
+    assert service.capture_time_milliseconds(
+        [CapturedFrame(4)], timedelta(seconds=3.5), 1000.0) is None
     with tempfile.TemporaryDirectory(prefix="cerebro-depthcam-lock-") as directory:
         lock_path = str(Path(directory) / "depth-camera.sock")
         first_lock = service.acquire_service_lock(lock_path)
@@ -119,6 +127,7 @@ def main():
             left_source,
             right_source,
             intrinsics,
+            captured_at_milliseconds=captured,
         )
         prefix = receive_exact(receiver, 8)
         assert prefix[:4] == b"CDP1"
@@ -133,6 +142,7 @@ def main():
             "protocol_version": 2,
             "sequence": 42,
             "timestamp_ns": 3_250_000_000,
+            "captured_at_milliseconds": captured,
             "rgb_width": 2,
             "rgb_height": 1,
             "rgb_format": "RGB888",

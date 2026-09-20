@@ -130,6 +130,8 @@ import AVFoundation
             name: .robRecordingDemandDidChange,
             object: ROBRecordingCoordinator.shared
         )
+        NotificationCenter.default.addObserver(self, selector: #selector(recordingDemandDidChange(_:)),
+                                               name: ROBTorsoControlCenter.cameraDemandChanged, object: nil)
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(remoteVideoDemandDidChange(_:)),
@@ -246,6 +248,7 @@ import AVFoundation
         let shouldRun = cameraViewIsVisible
             || navigationDemandActive
             || recordingDemandActive
+            || ROBTorsoControlCenter.shared.cameraDemandActive
             || remoteVideoDemandActive
         guard shouldRun != cameraSessionIsRequested else { return }
         do {

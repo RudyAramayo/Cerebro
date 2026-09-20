@@ -104,6 +104,7 @@ struct CameraFrameSet {
     var sidewalkCenterDeviation: Double? = nil
     var sidewalkConfidence: Double? = nil
     var chessPieces: [ROBChessPieceDetection]? = nil
+    var capturedAtMilliseconds: Double? = nil
 }
 
 protocol CameraManagerDelegate: AnyObject {
@@ -654,6 +655,7 @@ final class CameraManager: NSObject, CameraManagerProtocol {
         videoSampleHandler?(frameSet.rgbSampleBuffer)
         recordingFrameHandler?(frameSet)
         ROBMarkerlessVisionService.shared.offer(frameSet, role: role, streamID: "\(markerlessStreamID)-\(generation)")
+        ROBTorsoControlCenter.shared.vision.offer(frameSet, role: role, streamID: "\(markerlessStreamID)-\(generation)")
         guard shouldDeliverToPerception else { return }
 
         deliveryQueue.async { [weak self] in
@@ -1470,7 +1472,8 @@ private final class DepthCameraServiceClient {
                 rectifiedRight: CameraStereoFrame(width: header.stereoWidth, height: header.stereoHeight, pixels: rightData),
                 sidewalkCenterDeviation: header.sidewalkCenterDeviation,
                 sidewalkConfidence: header.sidewalkConfidence,
-                chessPieces: header.chessPieces
+                chessPieces: header.chessPieces,
+                capturedAtMilliseconds: header.capturedAtMilliseconds
             )
 
             autoreleasepool {
@@ -1628,6 +1631,7 @@ private struct DepthCameraPacketHeader: Decodable {
     let protocolVersion: Int
     let sequence: UInt64
     let timestampNanoseconds: UInt64
+    let capturedAtMilliseconds: Double?
     let rgbWidth: Int
     let rgbHeight: Int
     let rgbFormat: String
@@ -1651,6 +1655,7 @@ private struct DepthCameraPacketHeader: Decodable {
         case protocolVersion = "protocol_version"
         case sequence
         case timestampNanoseconds = "timestamp_ns"
+        case capturedAtMilliseconds = "captured_at_milliseconds"
         case rgbWidth = "rgb_width"
         case rgbHeight = "rgb_height"
         case rgbFormat = "rgb_format"

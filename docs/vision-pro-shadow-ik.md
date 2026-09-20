@@ -71,6 +71,11 @@ currently confirms **arm angles**, conditional on body registration; it does not
 certify all of ROB's joints, camera mounting accuracy or a changing head/torso
 configuration. Live physical execution remains outside this milestone.
 
+The separate [camera-referenced torso control](torso-velocity-control.md) now
+estimates torso yaw and lean for a velocity-control panel. Its observations are
+not yet inputs to this arm solver. Moving the torso therefore does not establish
+valid whole-body arm clearance in the current shadow preview.
+
 ## Clearance and the concrete geometry blocker
 
 `clearance.py` loads 43 SHA-pinned convex scan envelopes through Drake SceneGraph.

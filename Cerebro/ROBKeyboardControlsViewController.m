@@ -9,6 +9,7 @@
 #import "ROBKeyboardControlsViewController.h"
 #import "ROBMainViewController.h"
 #import "ROBSerialBox.h"
+#import "Cerebro-Swift.h"
 
 static NSTimeInterval const kROBLocalTreadRampInterval = 0.03;
 static NSInteger const kROBLocalTreadMaximumCommand = 100;
@@ -93,6 +94,37 @@ static NSInteger const kROBLocalTreadRampStep = 20;
         button.keyEquivalent = @"";
     }
     
+    // Replace the historical absolute-step slider in place. Preserve the
+    // storyboard's unrelated controls and use a true release-to-zero lever.
+    NSSlider *oldSlider = self.waistRotationSlider;
+    ROBTorsoVelocitySlider *lever = [[ROBTorsoVelocitySlider alloc] initWithFrame:oldSlider.frame];
+    lever.autoresizingMask = oldSlider.autoresizingMask;
+    lever.minValue = -1; lever.maxValue = 1; lever.doubleValue = 0;
+    lever.continuous = YES; lever.numberOfTickMarks = 3;
+    lever.target = self; lever.action = @selector(waistRotationAction:);
+    lever.toolTip = @"Torso turn speed. Arm in Torso Rotation, then hold and slide. Release to stop.";
+    [lever setAccessibilityLabel:@"Torso turn speed"];
+    [oldSlider.superview addSubview:lever];
+    [oldSlider removeFromSuperview];
+    self.waistRotationSlider = lever;
+    self.exitSafeStartWaistRotationButton.title = @"Torso Rotation…";
+    [self.exitSafeStartWaistRotationButton setButtonType:NSButtonTypeMomentaryPushIn];
+    self.exitSafeStartWaistRotationButton.font = [NSFont systemFontOfSize:18];
+    self.energizeWaistRotationButton.title = @"Stop torso";
+    [self.energizeWaistRotationButton setButtonType:NSButtonTypeMomentaryPushIn];
+    self.energizeWaistRotationButton.font = [NSFont systemFontOfSize:18];
+    for (NSView *view in self.view.subviews) {
+        if ([view isKindOfClass:[NSButton class]] && ((NSButton *)view).action == @selector(waistRotationResetAction:)) {
+            ((NSButton *)view).title = @"Reobserve";
+            ((NSButton *)view).font = [NSFont systemFontOfSize:18];
+        }
+    }
+    NSTextField *hint = [NSTextField labelWithString:@"Turn speed: slide left/right · release to stop · choose a destination in Torso Rotation"];
+    hint.frame = NSMakeRect(242, 40, 750, 17);
+    hint.font = [NSFont systemFontOfSize:12];
+    hint.textColor = [NSColor secondaryLabelColor];
+    [self.view addSubview:hint];
+
     self.robMainViewController.serialBox.exitSafeStartWaistRotationButton = self.exitSafeStartWaistRotationButton;
     self.robMainViewController.serialBox.energizeWaistRotationButton = self.energizeWaistRotationButton;
     self.robMainViewController.serialBox.waistRotationSlider = self.waistRotationSlider;
@@ -115,6 +147,7 @@ static NSInteger const kROBLocalTreadRampStep = 20;
                                                     name:NSWindowDidResignKeyNotification
                                                   object:self.view.window];
     [self stopLocalTreadsImmediately];
+    [[ROBTorsoControlCenter shared] releaseLever];
     [super viewWillDisappear];
 }
 

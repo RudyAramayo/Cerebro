@@ -251,19 +251,11 @@ NSString * const ROBServoControlUpperTargetUserInfoKey = @"upperTarget";
 // after one neutral/braked write Cerebro stops writing so the Arduino hardware
 // deadman can de-energize independently.
 static NSTimeInterval const kControllerSnapshotFreshnessSeconds = 0.6;
-// The Tic rotating-plate UI permits one 36,800-unit turn in either direction.
-// Vision head-following intentionally uses at most the 18,400-unit half-turn.
-static int const kROBTicWaistFullTurnPositionUnits = 36800;
-static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 
 #define kBaseSerialContext 2
 #define kMaestroSerialContext 3
 
 @interface ROBSerialBox()
-{
-    bool exitSafeStart_waistRotation;
-    bool energize_waistRotation;
-}
 @property (readwrite, assign) float actualSpeedL;
 @property (readwrite, assign) float actualSpeedR;
 @property (readwrite, assign) BOOL masterControllerInputWasFresh;
@@ -334,9 +326,6 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 - (ROBNeckCommandDisposition)advancePersonTrackingPostureSequence;
 - (void)schedulePersonTrackingPostureAdvance;
 - (void)publishAcceptedPersonTrackingNeckDemand;
-@property (readwrite, assign) BOOL visionTorsoControlWasActive;
-@property (readwrite, assign) int visionTorsoBaselinePosition;
-@property (readwrite, assign) int lastVisionTorsoTarget;
 
 @property (readwrite, retain) NSTimer *verbalInputTimer;
 @property (readwrite, retain) NSTimer *controllerTimer;
@@ -368,7 +357,6 @@ static int const kROBTicWaistHeadFollowMaximumUnits = 18400;
 @property (readwrite, retain) NSTask *sshTask_L10_log;
 
 - (void)runPythonArguments:(NSArray<NSString *> *)arguments operation:(NSString *)operation;
-- (void)runTiccmdArguments:(NSArray<NSString *> *)arguments;
 - (NSString *)ticcmdExecutablePath;
 - (void)refreshTicControllerSelection;
 - (BOOL)runReadOnlyTiccmdAtPath:(NSString *)ticcmdPath
@@ -921,8 +909,6 @@ typedef enum : NSUInteger {
     readThreadRunning_base = FALSE;
     readThreadRunning_maestro = FALSE;
 
-    exitSafeStart_waistRotation = false;
-    energize_waistRotation = false;
     
     self.currentIncommingVerbalMessage = @"";
     self.baseSerialReceiveBuffer = [NSMutableData data];
@@ -4432,54 +4418,7 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
 
 - (void)applyVisionTorsoActive:(BOOL)active rotation:(float)rotation
 {
-    if (!active || !isfinite(rotation)) {
-        if (self.visionTorsoControlWasActive) {
-            self.visionTorsoControlWasActive = NO;
-            exitSafeStart_waistRotation = false;
-            energize_waistRotation = false;
-            [self.exitSafeStartWaistRotationButton setState:NSControlStateValueOff];
-            [self.energizeWaistRotationButton setState:NSControlStateValueOff];
-            [self runTiccmdArguments:@[@"--enter-safe-start", @"--deenergize"]];
-        }
-        return;
-    }
-
-    float boundedRotation = MAX(-1.0f, MIN(1.0f, rotation));
-    BOOL justActivated = !self.visionTorsoControlWasActive;
-    if (!self.visionTorsoControlWasActive) {
-        self.visionTorsoControlWasActive = YES;
-        self.visionTorsoBaselinePosition = self.waistRotationSlider != nil
-            ? self.waistRotationSlider.intValue
-            : self.lastVisionTorsoTarget;
-        self.lastVisionTorsoTarget = self.visionTorsoBaselinePosition;
-        exitSafeStart_waistRotation = true;
-        energize_waistRotation = true;
-        [self.exitSafeStartWaistRotationButton setState:NSControlStateValueOn];
-        [self.energizeWaistRotationButton setState:NSControlStateValueOn];
-    }
-
-    int minimumPosition = self.waistRotationSlider != nil
-        ? (int)self.waistRotationSlider.minValue
-        : -kROBTicWaistFullTurnPositionUnits;
-    int maximumPosition = self.waistRotationSlider != nil
-        ? (int)self.waistRotationSlider.maxValue
-        : kROBTicWaistFullTurnPositionUnits;
-    int requested = self.visionTorsoBaselinePosition
-        + (int)lroundf(boundedRotation * kROBTicWaistHeadFollowMaximumUnits);
-    requested = MAX(minimumPosition, MIN(maximumPosition, requested));
-    // At the 10 Hz controller render rate, this limits target movement to 6000
-    // Tic position units per second. The Tic's configured motor limits remain authoritative.
-    int maximumStep = 600;
-    int delta = MAX(-maximumStep, MIN(maximumStep, requested - self.lastVisionTorsoTarget));
-    int target = self.lastVisionTorsoTarget + delta;
-    if (!justActivated && target == self.lastVisionTorsoTarget && self.waistRotationSlider.intValue == target) {
-        return;
-    }
-    self.lastVisionTorsoTarget = target;
-    [self.waistRotationSlider setIntValue:target];
-    [self runTiccmdArguments:@[
-        @"--exit-safe-start", @"--energize", @"-p", [NSString stringWithFormat:@"%d", target]
-    ]];
+    [[ROBTorsoControlCenter shared] setRemoteActive:active rotation:rotation];
 }
 
 - (IBAction)forward:(id)sender
@@ -4645,97 +4584,29 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
     });
 }
 
-- (void)runTiccmdArguments:(NSArray<NSString *> *)arguments
-{
-    NSString *ticcmdPath = [self ticcmdExecutablePath];
-    if (ticcmdPath.length == 0) {
-        NSLog(@"Pololu ticcmd is unavailable. Install the Pololu Tic software or set %@.",
-              kROBTiccmdExecutablePathDefaultsKey);
-        return;
-    }
 
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSTask *ticcmd = [[NSTask alloc] init];
-        ticcmd.executableURL = [NSURL fileURLWithPath:ticcmdPath];
-        NSMutableArray<NSString *> *routedArguments = [NSMutableArray array];
-        NSString *savedSerial = [[NSUserDefaults standardUserDefaults]
-            stringForKey:kROBLastVerifiedTicSerialNumberDefaultsKey];
-        if (ROBTicSerialNumberIsValid(savedSerial)
-            && ![arguments containsObject:@"-d"]) {
-            [routedArguments addObjectsFromArray:@[@"-d", savedSerial]];
-        }
-        [routedArguments addObjectsFromArray:arguments];
-        ticcmd.arguments = routedArguments;
-        NSPipe *pipe = [NSPipe pipe];
-        ticcmd.standardOutput = pipe;
-        ticcmd.standardError = pipe;
-
-        NSError *launchError = nil;
-        if (!ROBLaunchTaskSafely(ticcmd, &launchError)) {
-            NSLog(@"Pololu ticcmd could not start: %@", launchError.localizedDescription);
-            return;
-        }
-        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-        // EOF only guarantees that ticcmd closed its output descriptors. The
-        // process can still be running briefly, and terminationStatus raises
-        // NSInvalidArgumentException until NSTask has observed its exit.
-        // Drain first to avoid a full-pipe deadlock, then establish the
-        // termination barrier before inspecting process status.
-        [ticcmd waitUntilExit];
-        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
-        int terminationStatus = ticcmd.terminationStatus;
-        if (terminationStatus != 0 || output.length > 0) {
-            NSLog(@"Pololu ticcmd exited with status %d: %@", terminationStatus, output);
-        }
-    });
-}
 
 - (IBAction)waistRotationResetAction:(id)sender
 {
-    [self runTiccmdArguments:@[@"--reset"]];
+    // Re-acquire camera evidence. Never reset the Tic or invent a motor zero.
+    [[ROBTorsoControlCenter shared] reobserve];
 }
 
 - (IBAction)waistRotationSliderAction:(NSSlider *)sender
 {
-    NSLog(@"waistRotationSlider = %i", [sender intValue]);
-    NSString *waistRotationValue = [NSString stringWithFormat:@"%i", [sender intValue]];
-    NSMutableArray *arguments = @[].mutableCopy;
-    if (exitSafeStart_waistRotation) {
-        [arguments addObject:@"--exit-safe-start"];
-    } else {
-        [arguments addObject:@"--enter-safe-start"];
-    }
-    
-    if (energize_waistRotation) {
-        [arguments addObject:@"--energize"];
-    } else {
-        [arguments addObject:@"--deenergize"];
-    }
-    
-    [arguments addObject:@"-p"];
-    [arguments addObject:waistRotationValue];
-    
-    [self runTiccmdArguments:arguments];
+    BOOL held = [sender isKindOfClass:[ROBTorsoVelocitySlider class]]
+        && ((ROBTorsoVelocitySlider *)sender).isHeld;
+    [[ROBTorsoControlCenter shared] setLever:sender.doubleValue held:held];
 }
 
 - (IBAction)exitSafeStartWaistRotationToggle:(id)sender
 {
-    exitSafeStart_waistRotation = !exitSafeStart_waistRotation;
-    if (exitSafeStart_waistRotation) {
-        [self.exitSafeStartWaistRotationButton setState:NSControlStateValueOn];
-    } else {
-        [self.exitSafeStartWaistRotationButton setState:NSControlStateValueOff];
-    }
+    [[ROBTorsoControlCenter shared] showControls:sender];
 }
 
 - (IBAction)energizeToggle:(id)sender
 {
-    energize_waistRotation = !energize_waistRotation;
-    if (energize_waistRotation) {
-        [self.energizeWaistRotationButton setState:NSControlStateValueOn];
-    } else {
-        [self.energizeWaistRotationButton setState:NSControlStateValueOff];
-    }
+    [[ROBTorsoControlCenter shared] stop];
 }
 
 - (void)performSSHpassOperation:(NSString *)operation block:(dispatch_block_t)block
@@ -5705,6 +5576,7 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
 
 - (void)stopBaseMotionAndDropHeartbeat
 {
+    [[ROBTorsoControlCenter shared] stop];
     [self applyVisionTorsoActive:NO rotation:0];
     // Values below -999 bypass joystick processing so the requested tread
     // brake bits remain set. This is written exactly once; renderController

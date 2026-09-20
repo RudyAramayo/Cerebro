@@ -38,11 +38,21 @@ for line in sys.stdin:
             let value = UInt16(900 + x + y)
             bytes.append(UInt8(value & 255)); bytes.append(UInt8(value >> 8))
         } }
-        let frame = CameraFrameSet(source: .depthAIService, sequence: 1, timestampNanoseconds: 100,
+        var frame = CameraFrameSet(source: .depthAIService, sequence: 1, timestampNanoseconds: 100,
             rgbSampleBuffer: buffer!, alignedDepth: CameraDepthFrame(width: 480, height: 320, millimetersLittleEndian: bytes),
-            intrinsics: CameraIntrinsics(fx: 400, fy: 410, cx: 240, cy: 160))
+            intrinsics: CameraIntrinsics(fx: 400, fy: 410, cx: 240, cy: 160),
+            capturedAtMilliseconds: Date().timeIntervalSince1970 * 1000 - 20)
         let service = ROBMarkerlessVisionService(resources: temporary, python: python)
         guard let path = service.start() else { throw CocoaError(.fileReadUnknown) }
+        var delayed = frame; delayed.capturedAtMilliseconds = Date().timeIntervalSince1970 * 1000 - 2000
+        service.offer(delayed, role: .belly, streamID: "fixture-stream")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        try expect(!FileManager.default.fileExists(atPath: path.path), "Buffered old pixels were relabeled as fresh")
+        var unknown = frame; unknown.capturedAtMilliseconds = nil
+        service.offer(unknown, role: .belly, streamID: "fixture-stream")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        try expect(!FileManager.default.fileExists(atPath: path.path), "Unknown capture age was allowed")
+        frame.capturedAtMilliseconds = Date().timeIntervalSince1970 * 1000 - 20
         service.offer(frame, role: .belly, streamID: "fixture-stream")
         let deadline = Date().addingTimeInterval(3)
         while !FileManager.default.fileExists(atPath: path.path) && Date() < deadline {
@@ -50,6 +60,8 @@ for line in sys.stdin:
         }
         let object = try JSONSerialization.jsonObject(with: Data(contentsOf: path)) as! [String: Any]
         try expect(object["detail"] as? String == "Depth packing verified", "Worker did not validate depth coordinates")
+        try expect(object["capturedAtMilliseconds"] as? Double == frame.capturedAtMilliseconds,
+                   "Camera capture age changed during transport")
         service.stop()
         try expect(!FileManager.default.fileExists(atPath: path.path), "Stopping left a stale observation")
 
@@ -58,10 +70,11 @@ for line in sys.stdin:
         try "import time\ntime.sleep(30)\n".write(to: temporary.appendingPathComponent("markerless.py"), atomically: true, encoding: .utf8)
         _ = service.start()
         let began = Date()
+        frame.capturedAtMilliseconds = Date().timeIntervalSince1970 * 1000 - 20
         service.offer(frame, role: .belly, streamID: "fixture-stream")
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         service.stop()
         try expect(Date().timeIntervalSince(began) < 2, "Stalled vision stdin blocked shutdown")
-        print("Markerless camera service passed: real frame types, depth/intrinsics packing, atomic observation cleanup, bounded stalled-worker shutdown")
+        print("Markerless camera service passed: capture age preserved, delayed/unknown-age frames rejected, depth/intrinsics packing, atomic cleanup, bounded stalled-worker shutdown")
     }
 }

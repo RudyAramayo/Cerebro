@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		4CD13F5582E197979947B506 /* ROBTorsoControlWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E892F0BA1E3D33BF7797B0 /* ROBTorsoControlWindowController.swift */; };
+		503F2719D45BA7356756FD2F /* ROBTorsoControlCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D237612E5D39BF4229766EF0 /* ROBTorsoControlCenter.swift */; };
+		8845317BA38558B2D3876B8C /* ROBTicVelocityTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 296CEFD9716806B67EE286A2 /* ROBTicVelocityTransport.swift */; };
+		E966D666CE0DE83251AE3BC9 /* ROBTorsoMotionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6B28F8115A26CE354F0776A /* ROBTorsoMotionPolicy.swift */; };
 		D674002A3113000000000001 /* ROBMarkerlessVisionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D674002A3113000000000002 /* ROBMarkerlessVisionService.swift */; };
 		B09B09160000000000000007 /* rob-captured-colors.png in Resources */ = {isa = PBXBuildFile; fileRef = B09B09160000000000000008; };
 		B09B09160000000000000005 /* rob-captured.bin in Resources */ = {isa = PBXBuildFile; fileRef = B09B09160000000000000006; };
@@ -224,6 +228,10 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		B7E892F0BA1E3D33BF7797B0 /* ROBTorsoControlWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBTorsoControlWindowController.swift; sourceTree = "<group>"; };
+		D237612E5D39BF4229766EF0 /* ROBTorsoControlCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBTorsoControlCenter.swift; sourceTree = "<group>"; };
+		296CEFD9716806B67EE286A2 /* ROBTicVelocityTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBTicVelocityTransport.swift; sourceTree = "<group>"; };
+		E6B28F8115A26CE354F0776A /* ROBTorsoMotionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBTorsoMotionPolicy.swift; sourceTree = "<group>"; };
 		D674002A3113000000000002 /* ROBMarkerlessVisionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBMarkerlessVisionService.swift; sourceTree = "<group>"; };
 		B09B09160000000000000008 /* rob-captured-colors.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "rob-captured-colors.png"; sourceTree = "<group>"; };
 		B09B09160000000000000006 /* rob-captured.bin */ = {isa = PBXFileReference; lastKnownFileType = file; path = "rob-captured.bin"; sourceTree = "<group>"; };
@@ -660,6 +668,10 @@
 				62224F54B1E408ED04F979A3 /* ShadowPlanner */,
 				49EDF1A1F5EDE1534B25E4A8 /* ROBShadowPlannerBridge.swift */,
 				D674002A3113000000000002 /* ROBMarkerlessVisionService.swift */,
+				B7E892F0BA1E3D33BF7797B0 /* ROBTorsoControlWindowController.swift */,
+				D237612E5D39BF4229766EF0 /* ROBTorsoControlCenter.swift */,
+				296CEFD9716806B67EE286A2 /* ROBTicVelocityTransport.swift */,
+				E6B28F8115A26CE354F0776A /* ROBTorsoMotionPolicy.swift */,
 				2CCC75D97C538DD6A8F34256 /* ROBShadowPlanningProtocol.swift */,
 				D4EA00052F00000100000001 /* ROBMLXStageObservation.swift */,
 				D408B1202E15E7E300F6FEB3 /* ROBAI.swift */,
@@ -935,6 +947,10 @@
 			files = (
 				B291B99A5C63A9A985786591 /* ROBShadowPlannerBridge.swift in Sources */,
 				D674002A3113000000000001 /* ROBMarkerlessVisionService.swift in Sources */,
+				4CD13F5582E197979947B506 /* ROBTorsoControlWindowController.swift in Sources */,
+				503F2719D45BA7356756FD2F /* ROBTorsoControlCenter.swift in Sources */,
+				8845317BA38558B2D3876B8C /* ROBTicVelocityTransport.swift in Sources */,
+				E966D666CE0DE83251AE3BC9 /* ROBTorsoMotionPolicy.swift in Sources */,
 				885DBCA98293841F6B44D92D /* ROBShadowPlanningProtocol.swift in Sources */,
 				C0D3A0012F00000100000001 /* ROBPythonRuntime.m in Sources */,
 				C0D3A0022F00000100000001 /* ROBPythonSettingsWindowController.m in Sources */,

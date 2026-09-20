@@ -845,6 +845,8 @@ final class CameraViewController: NSViewController {
             name: .robRecordingDemandDidChange,
             object: ROBRecordingCoordinator.shared
         )
+        NotificationCenter.default.addObserver(self, selector: #selector(recordingDemandDidChange(_:)),
+                                               name: ROBTorsoControlCenter.cameraDemandChanged, object: nil)
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(remoteVideoDemandDidChange(_:)),
@@ -977,6 +979,7 @@ final class CameraViewController: NSViewController {
             || remoteVideoIsActive
             || geminiVideoIsActive
             || recordingDemandActive
+            || ROBTorsoControlCenter.shared.cameraDemandActive
             || ROBHologramExporter.shared.isMovieRecording
         guard shouldRun != cameraSessionIsRequested else { return }
         do {

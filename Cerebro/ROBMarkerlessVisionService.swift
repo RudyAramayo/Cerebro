@@ -1,8 +1,8 @@
 import Foundation
 import Darwin
 
-/// Receives existing synchronized camera frames only while shadow preview is
-/// open. One depth fit at a time, no camera ownership or actuator capability.
+/// Receives synchronized camera frames while its owner requests estimation.
+/// One depth fit at a time, no camera ownership or actuator capability.
 final class ROBMarkerlessVisionService {
     static let shared = ROBMarkerlessVisionService()
     private let queue = DispatchQueue(label: "rob.shadow.markerless", qos: .userInitiated)
@@ -19,13 +19,17 @@ final class ROBMarkerlessVisionService {
     private var requestToken = UUID()
     private let resources: URL?
     private let python: URL
+    private let workerName: String
+    var onObservation: (([String: Any]) -> Void)?
+    var onFailure: (() -> Void)?
     private let directory = FileManager.default.temporaryDirectory.appendingPathComponent("rob-markerless-\(UUID())", isDirectory: true)
     private var observationURL: URL { directory.appendingPathComponent("observation.json") }
 
     init(resources: URL? = Bundle.main.url(forResource: "ShadowPlanner", withExtension: nil),
+         workerName: String = "markerless.py",
          python: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Cerebro/ShadowPlanner/venv/bin/python3")) {
-        self.resources = resources; self.python = python
+        self.resources = resources; self.python = python; self.workerName = workerName
     }
 
     func start() -> URL? {
@@ -34,7 +38,7 @@ final class ROBMarkerlessVisionService {
         guard let resources else { return nil }
         let worker = Process(), incoming = Pipe(), outgoing = Pipe(), diagnostics = Pipe()
         worker.executableURL = python
-        worker.arguments = ["-u", "-B", resources.appendingPathComponent("markerless.py").path]
+        worker.arguments = ["-u", "-B", resources.appendingPathComponent(workerName).path]
         worker.currentDirectoryURL = resources
         worker.standardInput = incoming; worker.standardOutput = outgoing; worker.standardError = diagnostics
         var environment = ProcessInfo.processInfo.environment
@@ -87,12 +91,14 @@ final class ROBMarkerlessVisionService {
         lock.lock()
         guard enabled, !busy, uptime - (lastOffer[role.rawValue] ?? 0) >= 0.25,
               frame.source == .depthAIService, let depth = frame.alignedDepth,
+              let capturedAt = frame.capturedAtMilliseconds, capturedAt.isFinite,
+              (0 ... 400).contains(Date().timeIntervalSince1970 * 1000 - capturedAt),
               let intrinsics = frame.intrinsics,
               intrinsics.isValid(forWidth: depth.width, height: depth.height) else { lock.unlock(); return }
         busy = true; lastOffer[role.rawValue] = uptime
         lock.unlock()
-        // Stamp before dispatch/encoding: processing cannot freshen old pixels.
-        let capturedAt = Date().timeIntervalSince1970 * 1000
+        // Preserve the SDK-derived capture time through IPC and encoding.
+        // Reception must never freshen pixels delayed in a camera/socket queue.
         queue.async { [weak self] in
             guard let self, self.process?.isRunning == true else { return }
             do {
@@ -114,7 +120,7 @@ final class ROBMarkerlessVisionService {
                 guard let input = self.input else { throw CocoaError(.fileWriteUnknown) }
                 try Self.writeBounded(data, to: input)
                 self.requestToken = UUID(); let token = self.requestToken
-                self.queue.asyncAfter(deadline: .now() + 3) { [weak self] in
+                self.queue.asyncAfter(deadline: .now() + (self.workerName == "torso_markerless.py" ? 6 : 3)) { [weak self] in
                     guard let self, self.requestToken == token else { return }
                     // Stop accepting frames after a hung fit. Closing/reopening
                     // the preview restarts the isolated service.
@@ -142,6 +148,11 @@ final class ROBMarkerlessVisionService {
         }
         // Atomic replacement prevents the planner from seeing a partial frame.
         try? line.write(to: observationURL, options: .atomic)
+        let token = generation
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.queue.sync(execute: { token == self.generation }) else { return }
+            self.onObservation?(object)
+        }
         requestToken = UUID()
         lock.lock(); busy = false; lock.unlock()
     }
@@ -154,6 +165,11 @@ final class ROBMarkerlessVisionService {
         input = nil; output = nil; errors = nil
         if process?.isRunning == true { process?.terminate() }
         try? FileManager.default.removeItem(at: observationURL)
+        let token = generation
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.queue.sync(execute: { token == self.generation }) else { return }
+            self.onFailure?()
+        }
     }
 
     private static func writeBounded(_ data: Data, to handle: FileHandle) throws {
