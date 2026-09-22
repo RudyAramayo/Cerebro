@@ -123,6 +123,11 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 /// shaft feedback, so this is deliberately conservative timing, not a measured
 /// physical-position guarantee.
 @property (readonly, assign) NSTimeInterval neckCommandReadyAtUptime;
+/// Face/blob centering may update only an active neck with no competing lease.
+@property (readonly, assign) BOOL personTrackingMayUpdateNeck;
+/// Estimated pulse-ramp completion plus one observation interval. This is not
+/// shaft feedback and does not replace the longer collision-clearance gates.
+@property (readonly, assign) NSTimeInterval personTrackingCorrectionReadyAtUptime;
 @property (readonly, copy) NSString *neckCommandSource;
 @property (readonly, copy) NSString *neckCommandSafetyStatus;
 
@@ -141,9 +146,14 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 /// feedback. Repeated calls while the sequence is active are harmless.
 - (ROBNeckCommandDisposition)startSafeNeckStartup;
 - (void)cancelSafeNeckStartup;
+/// Sends one fresh centering correction immediately through the safety gateway.
+/// Holds lower tilt fixed; rejects OFF targets and never queues a later replay.
+- (ROBNeckCommandDisposition)requestPersonTrackingPanTarget:(NSInteger)panTarget
+                                       desiredUpperTarget:(NSInteger)upperTarget;
 /// Submits exact raw operator targets through the same collision and settling
-/// gateway used by the torso sliders. Lower/upper are issued as one Maestro
-/// packet after any required pan-first clearance stage. Callers should retry a
+/// gateway used by the torso sliders. A changed lower target is issued with
+/// upper as one Maestro packet after any required pan-first clearance stage.
+/// Unchanged channels are not resent. Callers should retry a
 /// HeldForSafety result only after `neckCommandReadyAtUptime`.
 - (ROBNeckCommandDisposition)requestOperatorNeckPosePanTarget:(NSInteger)panTarget
                                                   lowerTarget:(NSInteger)lowerTarget

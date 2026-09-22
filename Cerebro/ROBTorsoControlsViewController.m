@@ -114,9 +114,9 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
            selector:@selector(servoControlNeckDemandDidChange:)
                name:ROBServoControlNeckDemandDidChangeNotification
              object:nil];
-    // Match the face/blob controller cadence so each small tracking delta can
-    // reach the Maestro without accumulating behind the former one-second
-    // render. Common modes keep the loop live during normal UI interaction.
+    // Refresh readouts and advance staged operator demands at 10 Hz. Face/blob
+    // centering submits directly through its paced serial gateway; mirrored
+    // tracking sliders are not an independent hardware producer.
     self.renderServoControlsTimer = [NSTimer
         timerWithTimeInterval:kROBServoRenderIntervalSeconds
                        target:self

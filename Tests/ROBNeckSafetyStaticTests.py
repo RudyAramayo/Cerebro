@@ -981,14 +981,15 @@ def check_stateful_safety_gateway(serial_source: str, torso_source: str) -> None
     )
     require(
         re.search(
-            r"if\s*\(\s*mayMoveLower\s*\)\s*\{.*?"
+            r"if\s*\(\s*lowerTargetChanged\s*\)\s*\{.*?"
             r"sendMaestroLowerTarget\s*:",
             masked_gateway,
             flags=re.DOTALL,
         )
-        is not None,
+        is not None
+        and "BOOL lowerTargetChanged = mayMoveLower" in compact_gateway,
         "The coupled lower/upper packet is no longer confined to the "
-        "mayMoveLower branch",
+        "changed, safety-approved lower branch",
     )
     require(
         "sendMaestroLowerTarget:(unsigned short)boundedLower "

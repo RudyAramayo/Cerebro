@@ -110,7 +110,13 @@ One frame-rate-independent proportional controller is shared by recognized
 faces and legacy human blobs. It targets
 normalized image center `(0.5, 0.5)`, ignores a 12-percent-wide band on each
 axis to prevent detector jitter, and accepts at most one correction every 0.1
-seconds. The default horizontal response is `1500` raw target units per second
+seconds. Each accepted correction now goes directly through the serial safety
+gateway, and the next correction waits for the estimated Maestro pan/upper
+pulse ramp plus a 0.1-second observation margin. Lower-axis clearance still
+uses its full safety deadline. Frames received during that wait are dropped;
+missed corrections are never accumulated or replayed. This can reduce the
+effective tracking rate below 10 Hz, especially with slow acceleration settings.
+The default horizontal response is `1500` raw target units per second
 at a normalized error of `1.0`; **Settings → Tracking** adjusts it live from
 `1500` through `6000`. The same panel adjusts vertical response from `400`
 through `2000`, with a `400` default and a 200-target upward acquisition
@@ -305,6 +311,63 @@ smooths changes between active commanded outputs; it cannot establish the
 physical position of an unpowered servo or make an unknown first reference
 safe. Startup reference/calibration gates remain necessary.
 
+## Isolating startup and face-tracking stutter
+
+The neck gateway suppresses a target when that channel's last successfully
+written target is already identical. A changed lower target still sends lower
+and upper together; an upper-only correction writes only channel 2. Safety
+staging still runs on repeated requests, but an unchanged request sends no new
+neck packet and does not restart its settling deadline. Disconnects and partial
+writes invalidate the remembered targets so recovery sends them again.
+
+Face/blob centering has one output owner. Its slider values mirror accepted
+commands; the passive Torso timer cannot resend them. Startup, manual controls,
+Servo Control sequences, gestures, Vision authority and follow clearance block
+centering before it can change sliders. A deliberate manual action still takes
+over immediately. Disabling tracking holds the last commanded pose rather than
+releasing servo pulses.
+
+For a supervised hardware comparison:
+
+1. Add `-ROBNeckCommandTrace YES` to the Cerebro Xcode Run scheme's arguments,
+   then build/run this revision. Filter the debug console for `Neck TX`.
+   Each line records a successful serial packet's monotonic time, interval,
+   source, first channel, contiguous targets and speed/acceleration settings.
+   It does not record measured shaft motion or commands from another program
+   or an onboard Maestro script.
+2. With Head tracking disabled, observe one startup. Expect the three staged
+   poses: pan OFF with coupled lower/upper clearance, forward pan, then coupled
+   lower/upper rest. Unchanged targets should not repeat during a hold. Keep
+   tracking disabled and compare a small manual slider movement.
+3. Enable face tracking and stand still. Expect `source=Torso face tracking`
+   only when an accepted target changes, with no intervening stale
+   `Torso tracking` writes. A centered face should produce no neck packets.
+   Disable tracking again: if the sound continues while the trace is quiet,
+   repeated Cerebro target writes are not causing that continuing sound.
+
+The ramp wait is based on commanded pulse travel and the configured Maestro
+profile, not the servo's measured rotation speed. The Maestro maintains the
+servo pulse train after receiving a target; suppressing duplicate host commands
+does not turn torque off. Its [serial command documentation](https://www.pololu.com/docs/0J40/5.e)
+also distinguishes commanded pulse position from physical servo speed and
+notes that the first target after OFF cannot be ramped from a known position.
+If startup alone still stutters with one clean staged stream, compare the
+coupled lower/upper startup move to the individual manual moves and inspect
+power/load or an onboard script as a separate cause. Software timing alone
+cannot establish which of those is responsible.
+
+Hardware-free regression checks:
+
+```sh
+python3 Tests/ROBNeckOutputRuntimeTests.py
+python3 Tests/ROBNeckSafetyStaticTests.py
+```
+
+The runtime fixture executes the production gateway, packet encoding, startup
+and ownership code against a byte recorder and fake clock. It covers repeated
+startup renders, competing tracking requests, ramp timing, unchanged poses,
+manual takeover, coupled motion, partial-write recovery and OFF transitions.
+
 ## Dynamic pan envelope
 
 The pan window is selected from the commanded lower-tilt target:
@@ -442,10 +505,11 @@ because there is no sensor data from which to level the first move.
   action.
 
 The Torso servo renderer runs every 0.1 seconds in the main run loop's common
-modes, matching the face/blob controller's 10 Hz cadence. Its 0.01-second
-tolerance permits normal timer coalescing without restoring the previous
-one-second control lag. Each tick still passes neck targets through the shared
-gateway, and unchanged periodic demands do not restart motion-settle deadlines.
+modes, with 0.01-second tolerance. It refreshes readouts and advances eligible
+operator staging. Face/blob corrections use their own immediate, paced gateway
+request; while that source owns the neck, the periodic renderer sends no neck
+targets. Other unchanged periodic neck demands are also suppressed at the
+gateway and do not restart motion-settle deadlines.
 
 The physical E-stop and a clear supervised workspace remain authoritative.
 

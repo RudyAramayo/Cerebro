@@ -449,6 +449,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 @property (readwrite, assign) float currentPerson_tilt;
 @property (readwrite, assign) float currentPerson_upperNeckTilt;
 @property (readwrite, assign) NSTimeInterval lastPersonTrackingUpdateUptime;
+@property (readwrite, assign) NSTimeInterval lastPersonTrackingObservationUptime;
 @property (readwrite, assign) BOOL faceIdentityTrackingActive;
 @property (readwrite, assign) BOOL faceDetectionTrackingActive;
 @property (readwrite, assign) BOOL personTrackingFilterInitialized;
@@ -4130,6 +4131,17 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             !ROBPersonTrackingAutomaticPostureChangesEnabledFromDefaults(
                 NSUserDefaults.standardUserDefaults
             );
+        if (!self.serialBox.personTrackingMayUpdateNeck
+            || self.torsoControlsViewController.headPan_enabled.state != NSControlStateValueOn
+            || self.torsoControlsViewController.headTilt_enabled.state != NSControlStateValueOn
+            || self.torsoControlsViewController.headUpperNeckTilt_enabled.state != NSControlStateValueOn) {
+            // Do not build hidden slider corrections during startup, a manual
+            // move, or another owner's sequence and replay them at handoff.
+            self.lastPersonTrackingUpdateUptime = 0;
+            self.personTrackingFilterInitialized = NO;
+            self.personTrackingSourceID = nil;
+            return;
+        }
         BOOL handWaveFocusSource = [userID hasSuffix:@"-wave"];
         BOOL swordFocusSource = [userID isEqualToString:@"main-camera-sword"];
         BOOL handWaveFocusOwnsAttention = self.handWaveFocusTimer != nil
@@ -4179,12 +4191,20 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
         self.personTrackingHasAcquiredSubject = YES;
         self.personTrackingLostSinceUptime = 0;
+        BOOL trackingWasInterrupted = self.lastPersonTrackingObservationUptime <= 0
+            || now - self.lastPersonTrackingObservationUptime
+                > kROBPersonTrackingFilterResetSeconds;
+        self.lastPersonTrackingObservationUptime = now;
+        if (trackingWasInterrupted) self.personTrackingFilterInitialized = NO;
         if (z > 0) {
             [self updatePersonTrackingPostureForDistance:z atUptime:now];
             if (self.serialBox.personTrackingPostureSequenceActive) {
                 return;
             }
         }
+        // Drop observations while the previous accepted target is ramping.
+        // Never accumulate missed deltas or queue a delayed camera correction.
+        if (now < self.serialBox.personTrackingCorrectionReadyAtUptime) return;
         NSTimeInterval elapsed = self.lastPersonTrackingUpdateUptime > 0
             ? now - self.lastPersonTrackingUpdateUptime
             : 0.1;
@@ -4219,8 +4239,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         );
         BOOL trackingSourceChanged = self.personTrackingSourceID == nil
             || ![self.personTrackingSourceID isEqualToString:userID];
-        BOOL trackingWasInterrupted = self.lastPersonTrackingUpdateUptime <= 0
-            || elapsed > kROBPersonTrackingFilterResetSeconds;
+        // Waiting for a slow servo is not a new acquisition. Keep the original
+        // upper-camera band while observations continue during the ramp wait.
         if (!self.personTrackingFilterInitialized
             || trackingSourceChanged
             || trackingWasInterrupted) {
@@ -4504,6 +4524,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                 configuration.mirrorHorizontalCoordinate ? @"YES" : @"NO"
             );
         }
+        ROBNeckCommandDisposition centeringDisposition = [self.serialBox
+            requestPersonTrackingPanTarget:result.panTarget
+            desiredUpperTarget:result.upperTarget];
+        if (centeringDisposition != ROBNeckCommandDispositionAppliedCommand) return;
         self.currentPerson_pan = result.panTarget;
         self.currentPerson_tilt = lowerTarget;
         self.currentPerson_upperNeckTilt = result.upperTarget;

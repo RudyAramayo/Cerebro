@@ -198,12 +198,15 @@ runs only as an acquisition fallback and body boxes run only when neither face
 source is active. The observation filter follows a face approaching center
 quickly and stops immediately inside the dead band; a softened response curve
 further reduces pan and tilt corrections near center. Bounded pan/tilt
-responses, 12-percent center dead bands, the live pan envelope, and a matching
-10 Hz servo renderer prevent detector jitter and physical command latency from
-producing large corrections. **Settings → Tracking** provides live horizontal
+responses, 12-percent center dead bands and the live pan envelope limit
+corrections. One tracking sender waits for each estimated Maestro pulse ramp
+before accepting another correction; the passive renderer cannot resend its
+targets, and unchanged neck commands are suppressed. See the
+[startup/tracking diagnostic procedure](docs/neck-command-safety.md#isolating-startup-and-face-tracking-stutter).
+**Settings → Tracking** provides live horizontal
 and vertical speed sliders. Horizontal ranges from `1500` to `6000` raw targets
-per second with a `3000` default. Vertical ranges from `400` to `2000`, with an
-`800` default; downward correction runs at one fifth of the selected vertical
+per second with a `1500` default. Vertical ranges from `400` to `2000`, with a
+`400` default; downward correction runs at one fifth of the selected vertical
 speed and stays inside a 40-target upper-camera range to avoid the prior dip.
 Upward centering uses the upper camera's 200-target acquisition range and does
 not change lower-neck posture after full-pan clearance. The
