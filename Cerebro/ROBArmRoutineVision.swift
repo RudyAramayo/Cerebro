@@ -49,7 +49,8 @@ final class ROBArmRoutineVision {
             lastIncomingSequence = frame.sequence
         }
         guard active, !busy.contains(key), now - (lastOffer[key] ?? 0) >= 0.2 else { lock.unlock(); return }
-        lastOffer[key] = now
+        // Only admitted work spends the sampling interval. A stale or invalid
+        // input must not suppress the next fresh RGB-D frame for another 200 ms.
         guard frame.source == .depthAIService, let depth = frame.alignedDepth else {
             inputNotes[key] = "synchronized depth is unavailable"; lock.unlock(); return
         }

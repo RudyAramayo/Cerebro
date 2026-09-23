@@ -66,6 +66,40 @@ struct ROBArmDemonstrationSample {
 '''
 fixtures = r'''
 extension ROBArmRoutineVision {
+    func fixtureRejectedInputDoesNotThrottleFreshFrame() {
+        var pixel: CVPixelBuffer?
+        precondition(CVPixelBufferCreate(nil, 32, 32, kCVPixelFormatType_32BGRA, nil, &pixel) == kCVReturnSuccess)
+        var format: CMVideoFormatDescription?
+        precondition(CMVideoFormatDescriptionCreateForImageBuffer(allocator: nil, imageBuffer: pixel!,
+            formatDescriptionOut: &format) == noErr)
+        var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: .zero, decodeTimeStamp: .invalid)
+        var sample: CMSampleBuffer?
+        precondition(CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: pixel!,
+            formatDescription: format!, sampleTiming: &timing, sampleBufferOut: &sample) == noErr)
+        let now = Date().timeIntervalSince1970 * 1000
+        let rejected: [(Double?, FixtureDepth?)] = [(now - 900, FixtureDepth()), (nil, FixtureDepth()), (now, nil)]
+        for (captured, depth) in rejected {
+            setActive(true)
+            // Keep the analysis queue still so admission can be observed without
+            // depending on Vision processing speed or the test host's load.
+            let gate = DispatchSemaphore(value: 0)
+            queue.async { gate.wait() }
+            offer(CameraFrameSet(capturedAtMilliseconds: captured, sequence: 1,
+                alignedDepth: depth, rgbSampleBuffer: sample!), role: .face)
+            precondition(!fresh)
+            offer(CameraFrameSet(capturedAtMilliseconds: Date().timeIntervalSince1970 * 1000,
+                sequence: 2, alignedDepth: FixtureDepth(), rgbSampleBuffer: sample!), role: .face)
+            lock.lock()
+            let admitted = busy.contains("face") && lastOffer["face"] != nil
+            lock.unlock()
+            setActive(false)
+            gate.signal()
+            queue.sync {}
+            precondition(admitted, "Rejected input suppressed the immediately following fresh frame")
+        }
+        print("Arm inspection: stale/missing-time/missing-depth input cannot throttle the next fresh frame passed")
+    }
+
     func fixtureFrame(sequence: UInt64, value: UInt8, age: Double = 0, coverage: Double = 1, hands: Bool = true) {
         let pixel = CGFloat(value) / 255
         let image = CIImage(color: CIColor(red: pixel, green: pixel, blue: pixel)).cropped(to: CGRect(x: 0, y: 0, width: 640, height: 400))
@@ -133,6 +167,7 @@ extension ROBArmRoutineVision {
     }
     @MainActor static func main() async {
         ROBArmObservationCodecFixtures.run()
+        ROBArmRoutineVision.shared.fixtureRejectedInputDoesNotThrottleFreshFrame()
         await run("GPU wait selects only new settled frames", configure: { _, engine in
             engine.gateDelay = 500_000_000
         }, verify: { result, engine in

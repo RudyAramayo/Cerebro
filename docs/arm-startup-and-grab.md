@@ -177,6 +177,24 @@ were not caused by accidentally selecting the belly camera or a larger capture
 resolution. Torque-off and the new inspection pan must not be recorded as
 verified until the remaining return and a reloaded-app trial complete.
 
+Inspection admission now charges its 200 ms sampling interval only after a
+frame passes the input checks. Previously a rejected stale frame, missing
+timestamp or missing depth also consumed that interval and could discard an
+immediately following fresh frame. The production-offer regression covers all
+three cases. The 400 ms incoming-frame bound, 700 ms analyzed-frame bound,
+depth requirement and person/hand checks are unchanged. This removes an
+avoidable sampling delay; it does not establish the cause of every live stall.
+
+The inspection runtime suite and signed macOS build passed with that fix, and
+the build phase installed `/Applications/Cerebro.app` (debug-library SHA-256
+`9e2edd6e595c4d5e5985acd78bbaffcb9706646b53914a52be7a9cc5f3a30483`).
+The app has not yet been restarted: the controller disconnected during the
+return, with the latest passive sample at approximately physical right
+`[0.052, -0.204, 0, 0, 0, 0, 0]` and mirrored physical left. All fourteen
+statuses remained position mode 2 with fresh feedback. A later request reported
+no controller offering Action Approvals, so no further motion was started.
+Startup calibration remains disabled.
+
 A separate Vision hand detector, current depth coverage, stationary
 neck view, current per-motor CAN replies and a 1.5-second gateway lease supervise
 motion. These checks are conservative observations, **not a certified geometric
