@@ -279,7 +279,7 @@ final class ROBGripperControllerBridge {
         }
 
         let commandID = ROBAmberGatewayClient.shared.controlGripper(
-            forArm: intent.arm.rawValue,
+            forArm: intent.arm.amberGatewayArm,
             action: intent.action.rawValue,
             force: intent.force
         )
@@ -340,7 +340,7 @@ final class ROBGripperControllerBridge {
     private func gripperDidUpdate(_ notification: Notification) {
         if let snapshot = notification.userInfo?["snapshot"] as? NSDictionary,
            let armName = snapshot["arm"] as? String,
-           let arm = ROBArmSide(rawValue: armName) {
+           let arm = ROBArmSide(amberGatewayArm: armName) {
             publishState(for: arm, snapshot: snapshot)
             return
         }
@@ -349,7 +349,7 @@ final class ROBGripperControllerBridge {
 
     private func queryBothStates() {
         for arm in ROBArmSide.allCases {
-            _ = ROBAmberGatewayClient.shared.queryGripperState(forArm: arm.rawValue)
+            _ = ROBAmberGatewayClient.shared.queryGripperState(forArm: arm.amberGatewayArm)
         }
     }
 
@@ -440,7 +440,7 @@ final class ROBGripperControllerBridge {
 
     private func gatewaySnapshot(for arm: ROBArmSide) -> ParsedSnapshot {
         parsedSnapshot(
-            ROBAmberGatewayClient.shared.gripperSnapshot(forArm: arm.rawValue),
+            ROBAmberGatewayClient.shared.gripperSnapshot(forArm: arm.amberGatewayArm),
             arm: arm
         )
     }

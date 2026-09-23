@@ -12,10 +12,9 @@ import AppKit
 import Foundation
 import UniformTypeIdentifiers
 
-private enum ROBAmberDiagnosticsArm: String, CaseIterable {
-    case left
-    case right
+private typealias ROBAmberDiagnosticsArm = ROBArmSide
 
+private extension ROBArmSide {
     var title: String { rawValue.capitalized }
 }
 
@@ -575,7 +574,7 @@ private final class ROBAmberArmSchematicView: NSView {
         labelWithString: "Copies fresh measured telemetry; does not move either arm"
     )
     private let commandArmSelector = NSSegmentedControl(
-        labels: ["Left arm", "Right arm"],
+        labels: ["Left • R11", "Right • L10"],
         trackingMode: .selectOne,
         target: nil,
         action: nil
@@ -660,7 +659,7 @@ private final class ROBAmberArmSchematicView: NSView {
     @objc(recordTargetForArm:positionsRadians:commandID:)
     public func recordTarget(forArm armName: String, positionsRadians: [NSNumber], commandID: UInt64) {
         let values = positionsRadians.map(\.doubleValue)
-        guard let arm = ROBAmberDiagnosticsArm(rawValue: armName.lowercased()),
+        guard let arm = ROBAmberDiagnosticsArm(amberGatewayArm: armName),
               values.count == 7, values.allSatisfy(\.isFinite) else { return }
         DispatchQueue.main.async {
             self.histories[arm]?.currentTarget = values
@@ -816,7 +815,7 @@ private final class ROBAmberArmSchematicView: NSView {
         keyframeCaptureRow.spacing = 8
 
         commandArmSelector.selectedSegment = 0
-        commandArmSelector.toolTip = "Select the arm for the manual mode command."
+        commandArmSelector.toolTip = "Robot Left: R11, UDP 26002. Robot Right: L10, UDP 26001."
         let queryModeButton = makeButton("Query Mode", action: #selector(querySelectedArmMode(_:)))
         let activateButton = makeButton("Activate…", action: #selector(activateSelectedArm(_:)))
         let positionButton = makeButton("Position + Hold…", action: #selector(positionSelectedArm(_:)))
@@ -1004,7 +1003,7 @@ private final class ROBAmberArmSchematicView: NSView {
 
     private func makeArmTablePanel(_ arm: ROBAmberDiagnosticsArm, table: NSTableView,
                                    summary: NSTextField) -> NSView {
-        let heading = NSTextField(labelWithString: "\(arm.title) arm — measured state")
+        let heading = NSTextField(labelWithString: "\(arm.amberRoutingDescription) — measured state")
         heading.font = .systemFont(ofSize: 12, weight: .semibold)
         summary.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
         summary.textColor = .secondaryLabelColor
@@ -1145,7 +1144,7 @@ private final class ROBAmberArmSchematicView: NSView {
         contentStack.translatesAutoresizingMaskIntoConstraints = false
 
         let box = NSBox()
-        box.title = "\(arm.title) gripper"
+        box.title = "\(arm.title) gripper • \(arm.amberCoreName) • UDP \(arm.amberUDPPort)"
         box.titlePosition = .atTop
         box.boxType = .primary
         box.setAccessibilityLabel("\(arm.title) gripper calibration and control")
@@ -1246,15 +1245,17 @@ private final class ROBAmberArmSchematicView: NSView {
                     info: info
                 )
                 if let captured, captured.count == 7,
-                   let diagnosticsArm = ROBAmberDiagnosticsArm(rawValue: arm) {
+                   let diagnosticsArm = ROBAmberDiagnosticsArm(amberGatewayArm: arm) {
                     self?.histories[diagnosticsArm]?.currentTarget = captured
                     self?.histories[diagnosticsArm]?.currentTargetCommandID = command
                 }
                 let suffix = error.isEmpty ? "" : " • \(error)"
+                let physicalArm = ROBAmberDiagnosticsArm(amberGatewayArm: arm)?.amberRoutingDescription
+                    ?? "Unknown gateway arm \(arm)"
                 if operation.hasPrefix("gripper_") {
                     let physical = ["gripper_calibrate", "gripper_control"].contains(operation)
                     var parts = [
-                        "\(arm) \(operation)",
+                        "\(physicalArm) \(operation)",
                         "command \(command) \(accepted ? "accepted" : "rejected")",
                     ]
                     if response >= 0 { parts.append("vendor response \(response)") }
@@ -1268,7 +1269,7 @@ private final class ROBAmberArmSchematicView: NSView {
                     self?.appendEvent(parts.joined(separator: " • "))
                 } else {
                     self?.appendEvent(String(format: "%@ %@ • command %llu %@ • Amber %d • %.2f ms%@",
-                                             arm, operation, command, accepted ? "accepted" : "rejected",
+                                             physicalArm, operation, command, accepted ? "accepted" : "rejected",
                                              response, latency, suffix))
                 }
                 self?.refreshDisplay()
@@ -1318,7 +1319,7 @@ private final class ROBAmberArmSchematicView: NSView {
         if let left = gateway.telemetry(forArm: "left") { ingest(left) }
         if let right = gateway.telemetry(forArm: "right") { ingest(right) }
         for arm in ROBAmberDiagnosticsArm.allCases {
-            if let snapshot = gateway.gripperSnapshot(forArm: arm.rawValue) as? [AnyHashable: Any] {
+            if let snapshot = gateway.gripperSnapshot(forArm: arm.amberGatewayArm) as? [AnyHashable: Any] {
                 ingestGripperSnapshot(snapshot, fallbackArm: arm)
             }
         }
@@ -1329,7 +1330,7 @@ private final class ROBAmberArmSchematicView: NSView {
         fallbackArm: ROBAmberDiagnosticsArm? = nil
     ) {
         guard let arm = stringValue(in: dictionary, keys: ["arm"])
-            .flatMap({ ROBAmberDiagnosticsArm(rawValue: $0.lowercased()) }) ?? fallbackArm else { return }
+            .flatMap({ ROBAmberDiagnosticsArm(amberGatewayArm: $0) }) ?? fallbackArm else { return }
         var snapshot = gripperSnapshots[arm] ?? ROBAmberDiagnosticsGripperSnapshot()
         if let value = boolValue(in: dictionary, keys: ["commandsAvailable"]) {
             snapshot.commandsAvailable = value
@@ -1385,7 +1386,7 @@ private final class ROBAmberArmSchematicView: NSView {
     }
 
     private func ingest(_ telemetry: ROBAmberGatewayTelemetry) {
-        guard let arm = ROBAmberDiagnosticsArm(rawValue: telemetry.arm.lowercased()),
+        guard let arm = ROBAmberDiagnosticsArm(amberGatewayArm: telemetry.arm),
               telemetry.sampleAgeMilliseconds.isFinite,
               telemetry.sampleAgeMilliseconds >= 0,
               telemetry.positionsRadians.count == 7,
@@ -1460,7 +1461,7 @@ private final class ROBAmberArmSchematicView: NSView {
         guard !displayPaused else { return }
 
         for arm in ROBAmberDiagnosticsArm.allCases {
-            modeSnapshots[arm] = gateway.modes(forArm: arm.rawValue).map(\.intValue)
+            modeSnapshots[arm] = gateway.modes(forArm: arm.amberGatewayArm).map(\.intValue)
         }
         leftTable.reloadData()
         rightTable.reloadData()
@@ -1478,7 +1479,7 @@ private final class ROBAmberArmSchematicView: NSView {
 
     private func synchronizeGatewayTargets() {
         for arm in ROBAmberDiagnosticsArm.allCases {
-            let bridged = gateway.targetPositions(forArm: arm.rawValue)
+            let bridged = gateway.targetPositions(forArm: arm.amberGatewayArm)
             guard bridged.count == 7 else { continue }
             let values = bridged.map(\.doubleValue)
             guard values.allSatisfy(\.isFinite) else { continue }
@@ -1989,8 +1990,8 @@ private final class ROBAmberArmSchematicView: NSView {
         return String(singleLine.prefix(600)) + "…"
     }
 
-    private var selectedCommandArm: String {
-        commandArmSelector.selectedSegment == 1 ? "right" : "left"
+    private var selectedCommandArm: ROBAmberDiagnosticsArm {
+        commandArmSelector.selectedSegment == 1 ? .right : .left
     }
 
     @objc private func gripperForceChanged(_ sender: NSSlider) {
@@ -2005,7 +2006,7 @@ private final class ROBAmberArmSchematicView: NSView {
         guard let arm = diagnosticsArm(forTag: sender.tag),
               validateGripperInterlocks(for: arm, requiresCalibration: false) else { return }
         recordSubmittedGripperCommand(
-            gateway.queryGripperState(forArm: arm.rawValue),
+            gateway.queryGripperState(forArm: arm.amberGatewayArm),
             operation: "gripper_state",
             arm: arm
         )
@@ -2015,7 +2016,7 @@ private final class ROBAmberArmSchematicView: NSView {
         guard let arm = diagnosticsArm(forTag: sender.tag),
               validateGripperInterlocks(for: arm, requiresCalibration: false) else { return }
         let alert = NSAlert()
-        alert.messageText = "Calibrate the \(arm.rawValue) gripper?"
+        alert.messageText = "Calibrate the robot's \(arm.rawValue) gripper (\(arm.amberCoreName), UDP \(arm.amberUDPPort))?"
         alert.informativeText = "Calibration may move this gripper through its full travel. Remove every object and keep fingers, clothing, and cables clear of the jaws. Keep the physical E-stop ready. A successful Amber response confirms command dispatch only; Cerebro cannot verify mechanical completion with the telemetry currently available."
         alert.alertStyle = .critical
         alert.addButton(withTitle: "Calibrate \(arm.title) Gripper")
@@ -2028,7 +2029,7 @@ private final class ROBAmberArmSchematicView: NSView {
         // motion/recovery state immediately before sending the physical action.
         guard validateGripperInterlocks(for: arm, requiresCalibration: false) else { return }
         recordSubmittedGripperCommand(
-            gateway.calibrateGripper(forArm: arm.rawValue),
+            gateway.calibrateGripper(forArm: arm.amberGatewayArm),
             operation: "gripper_calibrate",
             arm: arm
         )
@@ -2061,7 +2062,7 @@ private final class ROBAmberArmSchematicView: NSView {
         controls.forceLabel.stringValue = "Cmd force \(force)"
 
         let alert = NSAlert()
-        alert.messageText = "\(displayName.capitalized) with the \(arm.rawValue) gripper?"
+        alert.messageText = "\(displayName.capitalized) with the robot's \(arm.rawValue) gripper (\(arm.amberCoreName), UDP \(arm.amberUDPPort))?"
         if action == "hold" {
             alert.informativeText = "This requests Amber's physical hold action at bounded raw intensity \(force) (GUI limit 2–20), which may close the jaws. Clear the pinch/crush zone, verify the intended object can tolerate the request, and keep the physical E-stop ready. Amber does not report measured jaw opening, force, or completion."
         } else {
@@ -2076,7 +2077,7 @@ private final class ROBAmberArmSchematicView: NSView {
         }
         guard validateGripperInterlocks(for: arm, requiresCalibration: true) else { return }
         recordSubmittedGripperCommand(
-            gateway.controlGripper(forArm: arm.rawValue, action: action, force: force),
+            gateway.controlGripper(forArm: arm.amberGatewayArm, action: action, force: force),
             operation: "gripper_\(action)",
             arm: arm
         )
@@ -2120,7 +2121,7 @@ private final class ROBAmberArmSchematicView: NSView {
     private func hasActiveGripperCommand(refreshFromGateway: Bool = false) -> Bool {
         if refreshFromGateway {
             for arm in ROBAmberDiagnosticsArm.allCases {
-                if let dictionary = gateway.gripperSnapshot(forArm: arm.rawValue)
+                if let dictionary = gateway.gripperSnapshot(forArm: arm.amberGatewayArm)
                     as? [AnyHashable: Any] {
                     ingestGripperSnapshot(dictionary, fallbackArm: arm)
                 }
@@ -2159,7 +2160,7 @@ private final class ROBAmberArmSchematicView: NSView {
 
     @objc private func querySelectedArmMode(_ sender: Any?) {
         recordSubmittedCommand(
-            gateway.queryMode(forArm: selectedCommandArm),
+            gateway.queryMode(forArm: selectedCommandArm.amberGatewayArm),
             operation: "mode query",
             arm: selectedCommandArm
         )
@@ -2168,12 +2169,12 @@ private final class ROBAmberArmSchematicView: NSView {
     @objc private func activateSelectedArm(_ sender: Any?) {
         let arm = selectedCommandArm
         guard confirmArmCommand(
-            title: "Activate the \(arm) Amber arm?",
+            title: "Activate \(arm.amberRoutingDescription)?",
             detail: "The vendor warns that switching modes momentarily cuts actuator power. Support the arm at a safe initial pose, clear its workspace, and keep the physical E-stop ready. This command requests Active mode and verifies all seven joints.",
-            confirmation: "Activate \(arm.capitalized) Arm"
+            confirmation: "Activate \(arm.title) Arm"
         ) else { return }
         recordSubmittedCommand(
-            gateway.activateArm(arm),
+            gateway.activateArm(arm.amberGatewayArm),
             operation: "activate",
             arm: arm
         )
@@ -2182,12 +2183,12 @@ private final class ROBAmberArmSchematicView: NSView {
     @objc private func positionSelectedArm(_ sender: Any?) {
         let arm = selectedCommandArm
         guard confirmArmCommand(
-            title: "Enter position mode for the \(arm) arm?",
+            title: "Enter position mode for \(arm.amberRoutingDescription)?",
             detail: "Cerebro will request Active mode, verify all seven joints, capture a new telemetry pose, request Position mode, verify it, then hold that captured pose. Mode switching can briefly remove actuator power; physically support the arm and keep the E-stop ready.",
             confirmation: "Position + Hold"
         ) else { return }
         recordSubmittedCommand(
-            gateway.enterPositionMode(forArm: arm),
+            gateway.enterPositionMode(forArm: arm.amberGatewayArm),
             operation: "position + measured hold",
             arm: arm
         )
@@ -2196,7 +2197,7 @@ private final class ROBAmberArmSchematicView: NSView {
     @objc private func holdSelectedArm(_ sender: Any?) {
         let arm = selectedCommandArm
         recordSubmittedCommand(
-            gateway.holdCurrentPosition(forArm: arm),
+            gateway.holdCurrentPosition(forArm: arm.amberGatewayArm),
             operation: "hold measured pose",
             arm: arm
         )
@@ -2205,12 +2206,12 @@ private final class ROBAmberArmSchematicView: NSView {
     @objc private func deactivateSelectedArm(_ sender: Any?) {
         let arm = selectedCommandArm
         guard confirmArmCommand(
-            title: "Deactivate the \(arm) Amber arm?",
+            title: "Deactivate \(arm.amberRoutingDescription)?",
             detail: "Inactive mode removes holding torque and the arm may fall or collapse. Physically support it and keep the E-stop ready before continuing.",
-            confirmation: "Deactivate \(arm.capitalized) Arm"
+            confirmation: "Deactivate \(arm.title) Arm"
         ) else { return }
         recordSubmittedCommand(
-            gateway.deactivateArm(arm),
+            gateway.deactivateArm(arm.amberGatewayArm),
             operation: "deactivate",
             arm: arm
         )
@@ -2233,15 +2234,15 @@ private final class ROBAmberArmSchematicView: NSView {
     private func recordSubmittedCommand(
         _ commandID: UInt64,
         operation: String,
-        arm: String
+        arm: ROBAmberDiagnosticsArm
     ) {
         guard commandID != 0 else {
             NSSound.beep()
-            appendEvent("\(arm) \(operation) was not sent: gateway is not ready or validation failed")
+            appendEvent("\(arm.amberRoutingDescription) \(operation) was not sent: gateway is not ready or validation failed")
             return
         }
         pendingManualCommandIDs.insert(commandID)
-        appendEvent("Submitted \(arm) \(operation) command \(commandID)")
+        appendEvent("Submitted \(arm.amberRoutingDescription) \(operation) command \(commandID)")
         refreshDisplay()
     }
 
@@ -2255,7 +2256,7 @@ private final class ROBAmberArmSchematicView: NSView {
     ) {
         let pending = pendingGripperCommands.removeValue(forKey: commandID)
         guard operation.hasPrefix("gripper_") || pending != nil,
-              let arm = ROBAmberDiagnosticsArm(rawValue: armName.lowercased())
+              let arm = ROBAmberDiagnosticsArm(amberGatewayArm: armName)
                 ?? pending?.arm else { return }
         ingestGripperSnapshot(info, fallbackArm: arm)
         var snapshot = gripperSnapshots[arm] ?? ROBAmberDiagnosticsGripperSnapshot()
@@ -2460,25 +2461,25 @@ private final class ROBAmberArmSchematicView: NSView {
     }
 
     @objc private func captureLeftMeasuredPose(_ sender: Any?) {
-        captureMeasuredPose(forArm: "left")
+        captureMeasuredPose(forArm: .left)
     }
 
     @objc private func captureRightMeasuredPose(_ sender: Any?) {
-        captureMeasuredPose(forArm: "right")
+        captureMeasuredPose(forArm: .right)
     }
 
-    private func captureMeasuredPose(forArm arm: String) {
-        let captured = KeyframeAnimationManager.shared.captureCurrentAmberPose(forArm: arm)
+    private func captureMeasuredPose(forArm arm: ROBAmberDiagnosticsArm) {
+        let captured = KeyframeAnimationManager.shared.captureCurrentAmberPose(forArm: arm.amberGatewayArm)
         if captured {
             KeyframeAnimationManager.shared.saveCurrentKeyframeAnimation()
             keyframeCaptureStatusLabel.textColor = .systemGreen
-            keyframeCaptureStatusLabel.stringValue = "Captured fresh \(arm)-arm telemetry into the current keyframe"
-            appendEvent("Captured fresh \(arm)-arm measured pose into the current keyframe")
+            keyframeCaptureStatusLabel.stringValue = "Captured fresh \(arm.rawValue)-arm telemetry into the current keyframe"
+            appendEvent("Captured fresh \(arm.amberRoutingDescription) measured pose into the current keyframe")
         } else {
             NSSound.beep()
             keyframeCaptureStatusLabel.textColor = .systemRed
             keyframeCaptureStatusLabel.stringValue = "Capture failed: select an editable keyframe and require fresh seven-joint telemetry"
-            appendEvent("Could not capture \(arm)-arm pose: no editable keyframe or telemetry was stale/invalid")
+            appendEvent("Could not capture \(arm.rawValue)-arm pose: no editable keyframe or telemetry was stale/invalid")
         }
     }
 
@@ -2561,7 +2562,7 @@ private final class ROBAmberArmSchematicView: NSView {
     }
 
     private func csvData() -> Data {
-        var lines = ["arm,received_at,sequence,sample_age_ms,joint,position_rad,target_rad,error_rad,velocity_rad_s,current,status"]
+        var lines = ["arm,received_at,sequence,sample_age_ms,joint,position_rad,target_rad,error_rad,velocity_rad_s,current,status,robot_arm,core,udp_port"]
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         for arm in ROBAmberDiagnosticsArm.allCases {
@@ -2570,7 +2571,7 @@ private final class ROBAmberArmSchematicView: NSView {
                     let target = sample.targetPositionsRadians?[safe: joint]
                     let error = target.map { $0 - sample.positionsRadians[joint] }
                     let fields = [
-                        arm.rawValue,
+                        arm.amberGatewayArm,
                         formatter.string(from: sample.receivedAt),
                         String(sample.sequence),
                         csvNumber(sample.sampleAgeMilliseconds),
@@ -2581,6 +2582,9 @@ private final class ROBAmberArmSchematicView: NSView {
                         csvNumber(sample.velocitiesRadiansPerSecond[safe: joint]),
                         csvNumber(sample.currents[joint]),
                         csvNumber(sample.statuses[joint]),
+                        arm.rawValue,
+                        arm.amberCoreName,
+                        String(arm.amberUDPPort),
                     ]
                     lines.append(fields.joined(separator: ","))
                 }

@@ -80,12 +80,50 @@ The inspected binary matches SHA-256
 No CAN/UDP packets, mode changes, restarts or position commands were sent by
 these diagnostics. The operator reported a cable interruption and replugging.
 
+## Feedback returned after the operator's reboot
+
+The operator later confirmed that right servo 1 did not respond while servos
+2–7 still moved. After opening the robot, they observed red LEDs on servo 1 of
+both arms; after rebooting, those LEDs were blue.
+
+At 19:58:38, a new two-second passive capture received 401 `0x91` frames on
+right/can10 and 400 on left/can11. Every actuator feedback ID `0x91`–`0x98`
+was present on both interfaces at approximately 200 Hz. Interface error/drop
+deltas were zero. The final payloads were `ff00000000000000`; these frames
+establish restored communication in that sample, not verified position,
+motion, calibration, or continued reliability. The diagnostic sent zero CAN
+or UDP commands and performed no restart.
+
+## Reversed gripper controls
+
+The operator reported that Left gripper control moved the physical right
+gripper and Right gripper calibration moved the physical left gripper. The
+Diagnostics window had interpreted the gateway's legacy `left`/`right` core
+keys as physical robot sides. On this installation, `left` is L10/can10/UDP
+26001 on ROB-right; `right` is R11/can11/UDP 26002 on ROB-left.
+
+Diagnostics now converts physical sides at the gateway boundary for commands,
+telemetry, gripper snapshots, mode controls, targets, and measured keyframe
+capture. Labels and action confirmations include the physical side, core,
+and UDP port. The Vision gripper bridge uses the same conversion for commands
+and state. The gateway protocol, core configuration, and stored keyframe keys
+are unchanged. Hardware-free fixtures exercise both directions, independent
+per-side calibration gates, and acknowledgement/state routing.
+
 ## Still unresolved
 
 These defects explain the ineffective Activate/Deactivate buttons and the
 unreported partial mode transitions. They do **not** establish why motor
-feedback originally froze. Right servo 1's missing feedback still needs
-resolution before automated calibration or playback. The command hold remains
-in effect. The new manual-mode guards verify what the controller reports;
+feedback originally froze or whether the missing servo feedback will recur.
+The command hold remains in effect. The new manual-mode guards verify what
+the controller reports;
 they do not turn its cached mode values into per-motor freshness evidence.
 The camera calibration and folded endpoints must not bypass that distinction.
+
+This side-mapping correction covers Diagnostics and the Vision gripper bridge.
+Before commissioning automatic whole-arm control, audit the remaining raw
+side-string boundaries in `ROBArmControllerBridge.swift`,
+`ROBWakeUpCalibrationWindowController.swift`, and `ROBAmberArmReference.swift`.
+They are not certified by the gripper routing fixtures. Existing reference
+and verified-velocity gates remain closed; no live startup calibration or
+folding route has been commissioned.

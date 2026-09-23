@@ -34,6 +34,7 @@
 		C0A8A0012F48000100000001 /* ROBArmControlProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A8B0012F48000100000001 /* ROBArmControlProtocol.swift */; };
 		C0A8A0022F48000100000001 /* ROBArmControllerBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A8B0022F48000100000001 /* ROBArmControllerBridge.swift */; };
 		C0AD01022F49000100000001 /* ROBAmberDiagnosticsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0AD01012F49000100000001 /* ROBAmberDiagnosticsWindowController.swift */; };
+		ABC9036F889D40C79B5BC102 /* ROBAmberArmBinding.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABC9036F889D40C79B5BC101 /* ROBAmberArmBinding.swift */; };
 		C0B001022F4C000100000001 /* ROBWakeUpCalibrationWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B001012F4C000100000001 /* ROBWakeUpCalibrationWindowController.swift */; };
 		C0B002022F4C000200000001 /* ROBSceneProducerFreshness.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B002012F4C000200000001 /* ROBSceneProducerFreshness.swift */; };
 		C0B003032F4C000300000001 /* ROBSpeechLanguageDetector.m in Sources */ = {isa = PBXBuildFile; fileRef = C0B003022F4C000300000001 /* ROBSpeechLanguageDetector.m */; };
@@ -408,6 +409,7 @@
 		D4EB00012F00000100000001 /* ROBSaberChoreography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBSaberChoreography.swift; sourceTree = "<group>"; };
 		D4EC00012F00000100000001 /* ROBAmberGatewayClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAmberGatewayClient.swift; sourceTree = "<group>"; };
 		C0AD01012F49000100000001 /* ROBAmberDiagnosticsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAmberDiagnosticsWindowController.swift; sourceTree = "<group>"; };
+		ABC9036F889D40C79B5BC101 /* ROBAmberArmBinding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAmberArmBinding.swift; sourceTree = "<group>"; };
 		C0B001012F4C000100000001 /* ROBWakeUpCalibrationWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBWakeUpCalibrationWindowController.swift; sourceTree = "<group>"; };
 		C0B002012F4C000200000001 /* ROBSceneProducerFreshness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBSceneProducerFreshness.swift; sourceTree = "<group>"; };
 		C0AE01012F4A000100000001 /* ROBAmberStackMaintenanceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBAmberStackMaintenanceProtocol.swift; sourceTree = "<group>"; };
@@ -647,6 +649,7 @@
 				D4EB00012F00000100000001 /* ROBSaberChoreography.swift */,
 				D4EC00012F00000100000001 /* ROBAmberGatewayClient.swift */,
 				C0AD01012F49000100000001 /* ROBAmberDiagnosticsWindowController.swift */,
+				ABC9036F889D40C79B5BC101 /* ROBAmberArmBinding.swift */,
 				C0B001012F4C000100000001 /* ROBWakeUpCalibrationWindowController.swift */,
 				C0B002012F4C000200000001 /* ROBSceneProducerFreshness.swift */,
 				C0AE01012F4A000100000001 /* ROBAmberStackMaintenanceProtocol.swift */,
@@ -1049,6 +1052,7 @@
 				D4EB00022F00000100000001 /* ROBSaberChoreography.swift in Sources */,
 				D4EC00022F00000100000001 /* ROBAmberGatewayClient.swift in Sources */,
 				C0AD01022F49000100000001 /* ROBAmberDiagnosticsWindowController.swift in Sources */,
+				ABC9036F889D40C79B5BC102 /* ROBAmberArmBinding.swift in Sources */,
 				C0B001022F4C000100000001 /* ROBWakeUpCalibrationWindowController.swift in Sources */,
 				C0B002022F4C000200000001 /* ROBSceneProducerFreshness.swift in Sources */,
 				C0AE01032F4A000100000001 /* ROBAmberStackMaintenanceProtocol.swift in Sources */,

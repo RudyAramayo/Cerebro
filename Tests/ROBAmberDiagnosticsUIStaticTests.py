@@ -41,11 +41,26 @@ def main():
 
     calibrate = swift_function(source, "@objc private func calibrateGripper(")
     assert "diagnosticsArm(forTag: sender.tag)" in calibrate
-    assert 'alert.messageText = "Calibrate the \\(arm.rawValue) gripper?"' in calibrate
+    assert "Calibrate the robot's \\(arm.rawValue) gripper" in calibrate
+    assert "\\(arm.amberCoreName), UDP \\(arm.amberUDPPort)" in calibrate
     assert calibrate.count("validateGripperInterlocks") == 2
     assert "alert.alertStyle = .critical" in calibrate
     assert "full travel" in calibrate
-    assert "gateway.calibrateGripper(forArm: arm.rawValue)" in calibrate
+    assert "gateway.calibrateGripper(forArm: arm.amberGatewayArm)" in calibrate
+
+    # UI sides are physical ROB sides. Only the Amber boundary uses the
+    # historical vendor-core names; inbound state must use the inverse mapping.
+    assert "private typealias ROBAmberDiagnosticsArm = ROBArmSide" in source
+    assert "gateway.controlGripper(forArm: arm.amberGatewayArm" in source
+    assert "gateway.queryGripperState(forArm: arm.amberGatewayArm)" in source
+    assert "gateway.gripperSnapshot(forArm: arm.amberGatewayArm)" in source
+    assert "ROBAmberDiagnosticsArm(amberGatewayArm: telemetry.arm)" in source
+    assert "ROBAmberDiagnosticsArm(rawValue:" not in source
+    assert "forArm: arm.rawValue" not in source.replace(
+        "normalizedPoints(forArm: arm.rawValue)", "normalizedPoints(physicalArm)"
+    )
+    assert "captureCurrentAmberPose(forArm: arm.amberGatewayArm)" in source
+    assert "robot_arm,core,udp_port" in source
 
     # The client, not just the local window, serializes calibration against all
     # other left/right gripper requests and invalidates ambiguous lost acks.

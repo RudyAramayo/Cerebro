@@ -19,6 +19,29 @@ gateway now owns verified inactive, active, and position-mode transitions, but
 does not write `launch.json`, publish raw `PosCmd`, or alter
 velocity/acceleration/jerk limits.
 
+## Physical sides and legacy gateway keys
+
+On ROB, the vendor core name is opposite the mounted physical side:
+
+| Physical robot side | Vendor core | CAN interface | UDP command port | Gateway `arm` key |
+| --- | --- | --- | --- | --- |
+| Right | L10 | can10 | 26001 | `left` |
+| Left | R11 | can11 | 26002 | `right` |
+
+`ROBAmberArmBinding.swift` defines this conversion. Diagnostics controls and
+plots use physical robot sides; outbound commands and inbound feedback convert
+at the gateway boundary. Gripper action confirmations also name the core and
+port. Vision gripper intents/states retain physical sides on the ROBControl
+protocol, and their bridge applies the same boundary conversion. This fixes
+the reversed Left/Right gripper behavior reported on September 22.
+
+Gateway API string parameters, persisted controller references, and existing
+`arm_L10_*` / `arm_R11_*` keyframe channels retain their existing identities.
+Diagnostics CSV retains the legacy `arm` column and appends `robot_arm`, `core`,
+and `udp_port` so exports make both identities explicit. No robot movement is
+needed to build or run the routing fixtures:
+`bash Scripts/test-amber-arm-binding.sh`.
+
 ## Compatibility with older gateways
 
 Cerebro requires the gateway's `ready.supported_commands` advertisement before
