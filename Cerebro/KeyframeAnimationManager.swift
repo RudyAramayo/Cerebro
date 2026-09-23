@@ -486,6 +486,13 @@ private final class ROBAmberGestureRun {
         )
     }
 
+    /// Binds a controller-reviewed diagnostics request to the exact catalog pose.
+    public func executeControllerApprovedGesture(_ name: String, revision: Data,
+                                                 completion: @escaping (NSDictionary) -> Void) {
+        executeGesture(name, authoritySource: .controllerApprovedOneShot,
+                       expectedRevision: revision, completion: completion)
+    }
+
     /// Called only after the show coordinator verifies its per-run pose grant.
     /// All measured-feedback, ownership, speed, reference and lease gates apply.
     @objc(executeStageApprovedGesture:revision:completion:)

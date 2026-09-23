@@ -36,8 +36,8 @@ def main() -> None:
         "liveStartupReadinessSnapshot" in WINDOW
         and "preflightLocallyConfirmedGesture" in WINDOW
         and 'Set(preflight.arms) == Set(["left", "right"])' in WINDOW
-        and "finalPreflight" in WINDOW,
-        "Show Mode no longer performs and repeats its two-arm live preflight",
+        and "ROBHeadlessLiveStartupAuthorization.shared.arm(gestureName: gestureName)" in WINDOW,
+        "Show Mode no longer preflights both arms and requests controller authorization",
     )
     for step in (
         ".operatorSafety",

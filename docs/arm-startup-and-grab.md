@@ -2,12 +2,18 @@
 
 Settings → Arms contains **Calibrate arms on startup** (off until selected),
 Run startup now, Prepare to grab, Relax arms and Stop + hold. Enabling startup
-authorizes one attempt after launch or system wake. Failure ends that attempt;
+requests one controller-approved attempt after launch or system wake. Failure ends that attempt;
 there is no indefinite retry or delayed activation after the 90-second limit.
 Explicit `arm_control` prepare/grab/hold/relax commands are available independently
 of that preference. Direct chat and addressed local speech also recognize simple
 commands, including “relax”, “grab this” and “hold this”. Negations, quoted text,
 “hold on”, and discussion about grabbing are not local motion commands.
+
+Every complete startup, prepare/grab/hold, or relax operation now requires **one
+Approve decision on the connected Vision Pro or iPhone**, including both gripper
+calibrations where needed. No arm-mode or gripper confirmation opens on the
+droid's monitor. Stop + hold is immediate. See [headless arm approval](headless-arm-approval.md)
+for connection, timeout and cancellation behavior.
 
 Both physical arms use the following taught corridor. The right column uses
 L10, gateway `left`, UDP 26001. Physical left uses the negated vectors through

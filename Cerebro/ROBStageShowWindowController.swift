@@ -684,42 +684,8 @@ import UniformTypeIdentifiers
             return
         }
 
-        let alert = NSAlert()
-        alert.messageText = "Run ROB's LIVE startup test?"
-        alert.informativeText =
-            "This will speak aloud and can physically move BOTH Amber arms through the immutable “\(gestureName)” pose. "
-            + "Keep the physical E-stop in hand, support ROB as needed, and clear the full exclusion zone. "
-            + "Grippers, head/neck, waist, treads, flippers, lean, and legacy Maestro mechanisms will remain excluded because they do not yet expose measured completion and a bounded stop."
-        alert.alertStyle = .critical
-        alert.addButton(withTitle: "Run Physical Startup Test")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else {
-            appendLog("[startup] operator cancelled live startup before submission")
-            refreshStartupControls()
-            return
-        }
-        // Re-evaluate after the modal confirmation. The executor repeats the
-        // same safety checks again immediately before reserving and dispatching.
-        let finalWake = wakeUpCalibration.liveStartupReadinessSnapshot()
-        let finalPreflight = startupGesturePreflight(gestureName)
-        guard finalWake.isReady, finalPreflight.ready,
-              Set(finalPreflight.arms) == Set(["left", "right"]),
-              !stageShowCoordinator.isRunning,
-              !ROBAmberGestureExecutor.shared.isExecuting else {
-            NSSound.beep()
-            appendLog("[startup] state changed during confirmation; no live sequence was started")
-            refreshStartupControls()
-            return
-        }
-
-        do {
-            let startupShow = ROBStageShowSamples.liveStartupTest(gestureName: gestureName)
-            editor.string = String(decoding: try ROBStageShowCodec.encode(startupShow), as: UTF8.self)
-            try stageShowCoordinator.startLiveStartupTest(gestureName: gestureName)
-            appendLog("[startup] LIVE sequence started with locally confirmed two-arm gesture “\(gestureName)”")
-        } catch {
-            report(error)
-        }
+        ROBHeadlessLiveStartupAuthorization.shared.arm(gestureName: gestureName)
+        appendLog("[startup] requested controller approval for one LIVE startup test “\(gestureName)”")
         refreshStartupControls()
     }
 
@@ -745,29 +711,6 @@ import UniformTypeIdentifiers
             return
         }
 
-        let alert = NSAlert()
-        alert.messageText = "Arm one monitorless LIVE startup request?"
-        alert.informativeText =
-            "This stores the immutable two-arm gesture “\(gestureName)” across launch. It does not move ROB. "
-            + "When a fresh authenticated controller is accepting startup tests, Cerebro will send exactly one expiring request and consume this latch. "
-            + "The controller's Approve button is the final safety checkpoint and starts the physical test after an audible warning. Keep the exclusion zone clear and physical E-stop ready."
-        alert.alertStyle = .critical
-        alert.addButton(withTitle: "Arm One Remote Request")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-
-        // Repeat the deterministic preflight after the modal. The main runtime
-        // and executor will repeat it again before request and dispatch.
-        let finalPreflight = startupGesturePreflight(gestureName)
-        guard finalPreflight.ready,
-              Set(finalPreflight.arms) == Set(["left", "right"]),
-              !stageShowCoordinator.isRunning,
-              !ROBAmberGestureExecutor.shared.isExecuting else {
-            NSSound.beep()
-            appendLog("[startup] state changed during remote arming; nothing was armed")
-            refreshStartupControls()
-            return
-        }
         authorization.arm(gestureName: gestureName)
         appendLog("[startup] armed one monitorless controller request for “\(gestureName)”")
         refreshStartupControls()

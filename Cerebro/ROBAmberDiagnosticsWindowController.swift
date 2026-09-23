@@ -753,7 +753,7 @@ private final class ROBAmberArmSchematicView: NSView {
         buildInterface()
         installObservers()
         ingestExistingTelemetry()
-        appendEvent("Diagnostics initialized; gripper actions and torque-changing arm modes require local confirmation")
+        appendEvent("Diagnostics initialized; gripper actions and torque-changing arm modes require Vision Pro or iPhone approval")
         refreshGestureCatalog()
         refreshDisplay()
     }
@@ -822,7 +822,7 @@ private final class ROBAmberArmSchematicView: NSView {
         stateStack.alignment = .leading
         stateStack.spacing = 2
 
-        let safetyLabel = NSTextField(labelWithString: "SUPERVISED ROBOT DEBUG — gripper and torque-changing actions require confirmation")
+        let safetyLabel = NSTextField(labelWithString: "SUPERVISED ROBOT DEBUG — gripper and torque-changing actions require controller approval")
         safetyLabel.font = .systemFont(ofSize: 11, weight: .bold)
         safetyLabel.textColor = .systemOrange
         let stateRow = NSStackView(views: [stateStack, NSView(), safetyLabel])
@@ -865,7 +865,7 @@ private final class ROBAmberArmSchematicView: NSView {
         restartStackButton.action = #selector(restartCANCoreStack(_:))
         restartStackButton.bezelStyle = .rounded
         restartStackButton.contentTintColor = .systemOrange
-        restartStackButton.toolTip = "Stops and restarts the Amber gateway, CAN setup, and both vendor cores after an explicit typed confirmation."
+        restartStackButton.toolTip = "Stops and restarts the Amber gateway, CAN setup, and both vendor cores after approval on Vision Pro or iPhone."
         let wakeUpCalibrationButton = makeButton(
             "Wake-Up Calibration (Dry Run)…",
             action: #selector(showWakeUpCalibration(_:))
@@ -890,19 +890,11 @@ private final class ROBAmberArmSchematicView: NSView {
         stackMaintenanceRow.alignment = .centerY
         stackMaintenanceRow.spacing = 8
 
-        geminiAuthorityButton.toolTip = "Temporarily permits Gemini-originated arm requests after all command validation passes."
-        controllerAuthorityButton.toolTip = "Temporarily permits bounded authenticated Vision Pro gripper hold/release commands after local calibration. Joint-arm motion uses separate per-arm rob-arm-control/2 authority bound to the current authenticated session."
-        let grantButton = makeButton("Enable selected for 15 minutes", action: #selector(grantAuthority(_:)))
-        let revokeButton = makeButton("Revoke now", action: #selector(revokeAuthority(_:)))
-        revokeButton.contentTintColor = .systemRed
-        authorityStatusLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        authorityStatusLabel.font = .systemFont(ofSize: 11)
         authorityStatusLabel.textColor = .secondaryLabelColor
         authorityStatusLabel.lineBreakMode = .byTruncatingTail
         authorityStatusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let authorityRow = NSStackView(views: [
-            geminiAuthorityButton, controllerAuthorityButton, grantButton, revokeButton,
-            NSView(), authorityStatusLabel,
-        ])
+        let authorityRow = NSStackView(views: [authorityStatusLabel])
         authorityRow.orientation = .horizontal
         authorityRow.alignment = .centerY
         authorityRow.spacing = 10
@@ -910,7 +902,7 @@ private final class ROBAmberArmSchematicView: NSView {
         gestureNameField.placeholderString = "Gesture name"
         gestureNameField.font = .systemFont(ofSize: 11)
         gestureNameField.widthAnchor.constraint(equalToConstant: 190).isActive = true
-        gestureNameField.toolTip = "Name the immutable copy of the current keyframe that Gemini may request while debug authority is active."
+        gestureNameField.toolTip = "Name the immutable copy of the current keyframe that Cerebro may propose for controller approval."
         approvedGesturePopup.widthAnchor.constraint(equalToConstant: 190).isActive = true
         approvedGesturePopup.target = self
         approvedGesturePopup.action = #selector(approvedGestureChanged(_:))
@@ -920,7 +912,7 @@ private final class ROBAmberArmSchematicView: NSView {
         runSelectedGestureButton.action = #selector(runSelectedGesture(_:))
         runSelectedGestureButton.bezelStyle = .rounded
         runSelectedGestureButton.contentTintColor = .systemOrange
-        runSelectedGestureButton.toolTip = "Runs the selected immutable gesture on the physical Amber arms after a critical confirmation. All executor authority, mode, freshness, step, speed, and measured-completion checks still apply."
+        runSelectedGestureButton.toolTip = "Runs the selected immutable gesture on the physical Amber arms after controller approval. All executor authority, mode, freshness, step, speed, and measured-completion checks still apply."
         gestureStatusLabel.font = .systemFont(ofSize: 10)
         gestureStatusLabel.textColor = .secondaryLabelColor
         gestureStatusLabel.lineBreakMode = .byTruncatingTail
@@ -962,8 +954,7 @@ private final class ROBAmberArmSchematicView: NSView {
         let holdButton = makeButton("Hold Measured Pose", action: #selector(holdSelectedArm(_:)))
         let deactivateButton = makeButton("Deactivate…", action: #selector(deactivateSelectedArm(_:)))
         deactivateButton.contentTintColor = .systemRed
-        armCommandButtons = [queryModeButton, activateButton, positionButton,
-                             holdButton, deactivateButton]
+        armCommandButtons = [activateButton, positionButton, deactivateButton]
         let commandWarning = NSTextField(
             labelWithString: "Mode switching momentarily cuts power; support the arm and keep the physical E-stop ready."
         )
@@ -1254,14 +1245,14 @@ private final class ROBAmberArmSchematicView: NSView {
             action: #selector(calibrateGripper(_:))
         )
         calibrateButton.contentTintColor = .systemOrange
-        calibrateButton.toolTip = "Calibration can move this gripper through its travel and requires a critical confirmation."
+        calibrateButton.toolTip = "Calibration can move this gripper through its travel and requires controller approval."
         calibrateButton.setAccessibilityLabel("Calibrate \(arm.rawValue) gripper")
         let releaseButton = actionButton("Release…", action: #selector(releaseGripper(_:)))
         releaseButton.contentTintColor = .systemOrange
-        releaseButton.toolTip = "Requests Amber's bounded release action after confirmation; jaw position and force are not measured."
+        releaseButton.toolTip = "Requests Amber's bounded release action after controller approval; jaw position and force are not measured."
         let holdButton = actionButton("Hold…", action: #selector(holdGripper(_:)))
         holdButton.contentTintColor = .systemOrange
-        holdButton.toolTip = "Requests Amber's bounded hold action after confirmation; jaw position and force are not measured."
+        holdButton.toolTip = "Requests Amber's bounded hold action after controller approval; jaw position and force are not measured."
         let stopButton = actionButton("Stop N/A", action: #selector(stopGripperUnavailable(_:)))
         stopButton.isEnabled = false
         stopButton.toolTip = "Amber exposes release, hold, and calibration only. It has no verified stop primitive; release would itself cause motion and may drop an object."
@@ -1588,11 +1579,13 @@ private final class ROBAmberArmSchematicView: NSView {
                 && !gripperCommandIsActive
                 && !gestureIsExecuting
                 && !ROBArmRoutineCoordinator.shared.isRunning
+            && !ROBControllerArmApproval.shared.isPending
                 && !stackMaintenance.isRunning
                 && !stackRecoveryInProgress
         }
         restartStackButton.isEnabled = !stackMaintenance.isRunning
             && !ROBArmRoutineCoordinator.shared.isRunning
+            && !ROBControllerArmApproval.shared.isPending
             && !stackRecoveryInProgress
             && pendingManualCommandIDs.isEmpty
             && !gripperCommandIsActive
@@ -1820,19 +1813,8 @@ private final class ROBAmberArmSchematicView: NSView {
     }
 
     private func refreshAuthorityStatus() {
-        guard authority.isEnabled else {
-            authorityStatusLabel.stringValue = "Debug authority is off"
-            authorityStatusLabel.textColor = .secondaryLabelColor
-            return
-        }
-        let total = max(0, Int(authority.remainingSeconds.rounded(.up)))
-        let sources = [authority.authorizesGemini() ? "Gemini" : nil,
-                       authority.authorizesController() ? "Vision Pro grippers" : nil]
-            .compactMap { $0 }.joined(separator: " + ")
-        authorityStatusLabel.stringValue = String(format: "%@ authorized • %02d:%02d remaining",
-                                                   sources.isEmpty ? "No sources" : sources,
-                                                   total / 60, total % 60)
-        authorityStatusLabel.textColor = total < 60 ? .systemOrange : .systemGreen
+        authorityStatusLabel.stringValue = ROBControllerArmApproval.shared.status
+        authorityStatusLabel.textColor = ROBControllerArmApproval.shared.isPending ? .systemOrange : .secondaryLabelColor
     }
 
     private func refreshGestureCatalog(selecting preferredName: String? = nil) {
@@ -2038,85 +2020,40 @@ private final class ROBAmberArmSchematicView: NSView {
 
         let hostInput = hostField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let host = hostInput.isEmpty ? "amber-master.local" : hostInput
-        let confirmationField = NSTextField(string: "")
-        confirmationField.placeholderString = "RESTART"
-        confirmationField.font = .monospacedSystemFont(ofSize: 12, weight: .semibold)
-        confirmationField.setAccessibilityLabel("Type RESTART to confirm controller stack restart")
-        confirmationField.widthAnchor.constraint(equalToConstant: 380).isActive = true
-        let confirmationPrompt = NSTextField(
-            wrappingLabelWithString: "Type RESTART to confirm that both arms are physically supported."
-        )
-        confirmationPrompt.font = .systemFont(ofSize: 11, weight: .semibold)
-        let accessory = NSStackView(views: [confirmationPrompt, confirmationField])
-        accessory.orientation = .vertical
-        accessory.alignment = .leading
-        accessory.spacing = 6
-        accessory.frame = NSRect(x: 0, y: 0, width: 390, height: 54)
-
-        let alert = NSAlert()
-        alert.messageText = "Restart the Amber CAN/core stack?"
-        alert.informativeText = "This interrupts the gateway, both vendor cores, and the can10/can11 connections. Powered arms may lose holding torque or feedback. Physically support both arms, clear their workspace, and keep the physical E-stop ready. No arm command may be active."
-        alert.alertStyle = .critical
-        alert.accessoryView = accessory
-        alert.addButton(withTitle: "Restart Controller Stack")
-        alert.addButton(withTitle: "Cancel")
-        alert.window.initialFirstResponder = confirmationField
-        guard alert.runModal() == .alertFirstButtonReturn else {
-            appendEvent("Cancelled controller-stack restart before submission")
-            return
-        }
-        guard confirmationField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) == "RESTART" else {
-            rejectStackRestart("Controller-stack restart cancelled because the typed confirmation did not match RESTART")
-            return
-        }
-
-        // The alert runs a nested event loop. Revalidate every motion/recovery
-        // interlock after it closes so a command that began while the operator
-        // was reading the warning cannot be interrupted by maintenance.
-        guard !gestureExecutor.isExecuting,
-              !ROBArmRoutineCoordinator.shared.isRunning,
-              pendingManualCommandIDs.isEmpty,
-              !hasActiveGripperCommand(refreshFromGateway: true),
-              !stackMaintenance.isRunning,
-              !stackRecoveryInProgress else {
-            rejectStackRestart(
-                "Controller-stack restart was not submitted because arm-control state changed during confirmation"
-            )
-            return
-        }
-
-        // Remove every temporary motion grant before intentionally interrupting
-        // feedback, then close the existing control session. Maintenance uses a
-        // separate, fixed SSH operation and reconnects this tunnel only on success.
-        authority.revoke()
-        geminiAuthorityButton.state = .off
-        controllerAuthorityButton.state = .off
-        guard !gestureExecutor.isExecuting,
-              pendingManualCommandIDs.isEmpty,
-              !hasActiveGripperCommand(refreshFromGateway: true) else {
-            rejectStackRestart(
-                "Debug authority was revoked, but an arm command is still active; stop it before retrying recovery"
-            )
-            return
-        }
-        stackRecoveryInProgress = true
-        appendEvent("Confirmed controller-stack restart on amber@\(host); debug authority revoked")
-        tunnel.disconnect()
-        appendEvent("Disconnected the gateway tunnel before controller-stack recovery")
-        refreshDisplay()
-
-        let accepted = stackMaintenance.restart(host: host) { [weak self] result in
-            DispatchQueue.main.async {
-                self?.handleStackMaintenanceResult(result, host: host)
-            }
-        }
-        guard accepted else {
-            stackRecoveryInProgress = false
-            rejectStackRestart("Controller-stack recovery was not accepted: \(stackMaintenance.detail)")
-            return
-        }
-        appendEvent("Submitted guarded controller-stack recovery")
-        refreshDisplay()
+        ROBControllerArmApproval.shared.request(operation: "restart_stack", arm: "both",
+            summary: "Restart the CAN/core stack on \(host). Both arms must be supported: this interrupts feedback and may remove holding torque.",
+            execute: { [weak self] done in
+                guard let self else { done(["status": "cancelled", "detail": "Diagnostics closed."]); return }
+                guard !gestureExecutor.isExecuting, !ROBArmRoutineCoordinator.shared.isRunning,
+                      self.pendingManualCommandIDs.isEmpty, !self.hasActiveGripperCommand(refreshFromGateway: true),
+                      !self.stackMaintenance.isRunning, !self.stackRecoveryInProgress,
+                      self.configuration.hasSSHPassword else {
+                    done(["status": "blocked", "detail": "Control state changed before controller approval."]); return
+                }
+                self.authority.revoke()
+                self.geminiAuthorityButton.state = .off
+                self.controllerAuthorityButton.state = .off
+                self.stackRecoveryInProgress = true
+                self.appendEvent("Controller approved stack restart on amber@\(host)")
+                self.tunnel.disconnect()
+                self.refreshDisplay()
+                let accepted = self.stackMaintenance.restart(host: host) { [weak self] result in
+                    DispatchQueue.main.async {
+                        self?.handleStackMaintenanceResult(result, host: host)
+                        done(["status": result.success ? "completed" : "failed", "detail": result.detail])
+                    }
+                }
+                if !accepted {
+                    self.stackRecoveryInProgress = false
+                    done(["status": "blocked", "detail": self.stackMaintenance.detail])
+                }
+            }, cancel: { [weak self] in
+                // Do not kill an in-progress fixed recovery halfway through CAN setup.
+                self?.appendEvent("Controller connection ended during stack recovery; arms remain uncommanded")
+            }, completion: { [weak self] result in
+                self?.appendEvent(result["detail"] as? String ?? "Stack restart ended")
+                self?.refreshDisplay()
+            })
     }
 
     private func handleStackMaintenanceResult(
@@ -2181,24 +2118,14 @@ private final class ROBAmberArmSchematicView: NSView {
     @objc private func calibrateGripper(_ sender: NSControl) {
         guard let arm = diagnosticsArm(forTag: sender.tag),
               validateGripperInterlocks(for: arm, requiresCalibration: false) else { return }
-        let alert = NSAlert()
-        alert.messageText = "Calibrate the robot's \(arm.rawValue) gripper (\(arm.amberCoreName), UDP \(arm.amberUDPPort))?"
-        alert.informativeText = "Calibration may move this gripper through its full travel. Remove every object and keep fingers, clothing, and cables clear of the jaws. Keep the physical E-stop ready. A successful Amber response confirms command dispatch only; Cerebro cannot verify mechanical completion with the telemetry currently available."
-        alert.alertStyle = .critical
-        alert.addButton(withTitle: "Calibrate \(arm.title) Gripper")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else {
-            appendEvent("Cancelled \(arm.rawValue) gripper calibration before submission")
-            return
-        }
-        // The modal alert runs a nested event loop, so revalidate all shared
-        // motion/recovery state immediately before sending the physical action.
-        guard validateGripperInterlocks(for: arm, requiresCalibration: false) else { return }
-        recordSubmittedGripperCommand(
-            gateway.calibrateGripper(forArm: arm.amberGatewayArm),
-            operation: "gripper_calibrate",
-            arm: arm
-        )
+        ROBControllerArmApproval.shared.requestGatewayCommand(operation: "calibrate_gripper", arm: arm.rawValue,
+            summary: "Calibrate the physical \(arm.rawValue) gripper through its full travel. Empty the jaws and keep fingers and cables clear. Mechanical completion is unverified.",
+            command: { [weak self] in
+                guard let self, self.validateGripperInterlocks(for: arm, requiresCalibration: false) else { return 0 }
+                let id = self.gateway.calibrateGripper(forArm: arm.amberGatewayArm)
+                self.recordSubmittedGripperCommand(id, operation: "gripper_calibrate", arm: arm)
+                return id
+            }, completion: { [weak self] result in self?.appendEvent(result["detail"] as? String ?? "Gripper operation ended") })
     }
 
     @objc private func releaseGripper(_ sender: NSControl) {
@@ -2227,26 +2154,16 @@ private final class ROBAmberArmSchematicView: NSView {
         controls.forceSlider.integerValue = force
         controls.forceLabel.stringValue = "Cmd force \(force)"
 
-        let alert = NSAlert()
-        alert.messageText = "\(displayName.capitalized) with the robot's \(arm.rawValue) gripper (\(arm.amberCoreName), UDP \(arm.amberUDPPort))?"
-        if action == "hold" {
-            alert.informativeText = "This requests Amber's physical hold action at bounded raw intensity \(force) (GUI limit 2–20), which may close the jaws. Clear the pinch/crush zone, verify the intended object can tolerate the request, and keep the physical E-stop ready. Amber does not report measured jaw opening, force, or completion."
-        } else {
-            alert.informativeText = "This requests Amber's physical release action at bounded raw intensity \(force) (GUI limit 2–20), which may open the jaws. Support anything being held because it may drop, clear the gripper travel, and keep the physical E-stop ready. Amber does not report measured jaw opening, force, or completion."
-        }
-        alert.alertStyle = .critical
-        alert.addButton(withTitle: "\(displayName.capitalized) \(arm.title) Gripper")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else {
-            appendEvent("Cancelled \(arm.rawValue) gripper \(displayName) before submission")
-            return
-        }
-        guard validateGripperInterlocks(for: arm, requiresCalibration: true) else { return }
-        recordSubmittedGripperCommand(
-            gateway.controlGripper(forArm: arm.amberGatewayArm, action: action, force: force),
-            operation: "gripper_\(action)",
-            arm: arm
-        )
+        let caution = action == "hold" ? "The jaws may close; clear the pinch zone." : "The jaws may open; support any held object."
+        ROBControllerArmApproval.shared.requestGatewayCommand(
+            operation: action == "hold" ? "close_gripper" : "open_gripper", arm: arm.rawValue,
+            summary: "\(displayName.capitalized) the physical \(arm.rawValue) gripper at raw intensity \(force). \(caution) Jaw position and force remain unverified.",
+            command: { [weak self] in
+                guard let self, self.validateGripperInterlocks(for: arm, requiresCalibration: true) else { return 0 }
+                let id = self.gateway.controlGripper(forArm: arm.amberGatewayArm, action: action, force: force)
+                self.recordSubmittedGripperCommand(id, operation: "gripper_\(action)", arm: arm)
+                return id
+            }, completion: { [weak self] result in self?.appendEvent(result["detail"] as? String ?? "Gripper operation ended") })
     }
 
     private func validateGripperInterlocks(
@@ -2335,73 +2252,40 @@ private final class ROBAmberArmSchematicView: NSView {
     }
 
     @objc private func activateSelectedArm(_ sender: Any?) {
-        let arm = selectedCommandArm
-        guard confirmArmCommand(
-            title: "Activate \(arm.amberRoutingDescription)?",
-            detail: "The vendor warns that switching modes momentarily cuts actuator power. Support the arm at a safe initial pose, clear its workspace, and keep the physical E-stop ready. This command requests Active mode and verifies all seven joints.",
-            confirmation: "Activate \(arm.title) Arm"
-        ) else { return }
-        recordSubmittedCommand(
-            gateway.activateArm(arm.amberGatewayArm),
-            operation: "activate",
-            arm: arm
-        )
+        requestArmMode("activate", summary: "Activate the arm. Mode switching can briefly remove torque; support the arm.")
     }
 
     @objc private func positionSelectedArm(_ sender: Any?) {
-        let arm = selectedCommandArm
-        guard confirmArmCommand(
-            title: "Enter position mode for \(arm.amberRoutingDescription)?",
-            detail: "Cerebro will request Active mode, verify all seven joints, capture a new telemetry pose, request Position mode, verify it, then hold that captured pose. Mode switching can briefly remove actuator power; physically support the arm and keep the E-stop ready.",
-            confirmation: "Position + Hold"
-        ) else { return }
-        recordSubmittedCommand(
-            gateway.enterPositionMode(forArm: arm.amberGatewayArm),
-            operation: "position + measured hold",
-            arm: arm
-        )
+        requestArmMode("position", summary: "Enter position mode and hold the measured pose. Mode switching can briefly remove torque; support the arm.")
     }
 
     @objc private func holdSelectedArm(_ sender: Any?) {
+        ROBControllerArmApproval.shared.cancel(reason: "Immediate hold requested in Diagnostics")
         let arm = selectedCommandArm
-        recordSubmittedCommand(
-            gateway.holdCurrentPosition(forArm: arm.amberGatewayArm),
-            operation: "hold measured pose",
-            arm: arm
-        )
+        recordSubmittedCommand(gateway.priorityHold(forArm: arm.amberGatewayArm), operation: "hold measured pose", arm: arm)
     }
 
     @objc private func deactivateSelectedArm(_ sender: Any?) {
-        let arm = selectedCommandArm
-        guard confirmArmCommand(
-            title: "Deactivate \(arm.amberRoutingDescription)?",
-            detail: "Inactive mode removes holding torque and the arm may fall or collapse. Physically support it and keep the E-stop ready before continuing.",
-            confirmation: "Deactivate \(arm.title) Arm"
-        ) else { return }
-        recordSubmittedCommand(
-            gateway.deactivateArm(arm.amberGatewayArm),
-            operation: "deactivate",
-            arm: arm
-        )
+        requestArmMode("deactivate", summary: "Deactivate the arm and remove holding torque. Support it at hanging first.")
     }
 
-    private func confirmArmCommand(
-        title: String,
-        detail: String,
-        confirmation: String
-    ) -> Bool {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = detail
-        alert.alertStyle = .critical
-        alert.addButton(withTitle: confirmation)
-        alert.addButton(withTitle: "Cancel")
-        let confirmed = alert.runModal() == .alertFirstButtonReturn
-        guard !ROBArmRoutineCoordinator.shared.isRunning else {
-            appendEvent("Manual mode change blocked: startup/grab/relax owns the arms")
-            return false
-        }
-        return confirmed
+    private func requestArmMode(_ operation: String, summary: String) {
+        let arm = selectedCommandArm
+        ROBControllerArmApproval.shared.requestGatewayCommand(operation: operation, arm: arm.rawValue,
+            summary: "Physical \(arm.rawValue) arm: \(summary)", command: { [weak self] in
+                guard let self, !ROBArmRoutineCoordinator.shared.isRunning,
+                      !ROBAmberGestureExecutor.shared.isExecuting, self.pendingManualCommandIDs.isEmpty,
+                      !self.hasActiveGripperCommand(refreshFromGateway: true),
+                      !self.stackMaintenance.isRunning, !self.stackRecoveryInProgress else { return 0 }
+                let id: UInt64
+                switch operation {
+                case "activate": id = self.gateway.activateArm(arm.amberGatewayArm)
+                case "position": id = self.gateway.enterPositionMode(forArm: arm.amberGatewayArm)
+                default: id = self.gateway.deactivateArm(arm.amberGatewayArm)
+                }
+                self.recordSubmittedCommand(id, operation: operation, arm: arm)
+                return id
+            }, completion: { [weak self] result in self?.appendEvent(result["detail"] as? String ?? "Arm operation ended") })
     }
 
     private func recordSubmittedCommand(
@@ -2561,40 +2445,29 @@ private final class ROBAmberArmSchematicView: NSView {
         }
         guard approvedGesturePopup.isEnabled,
               let name = approvedGesturePopup.selectedItem?.title,
-              gestureCatalog.approvedGestureNames.contains(name) else {
+              let revision = gestureCatalog.stageRevision(forGesture: name) else {
             NSSound.beep()
             gestureStatusLabel.textColor = .systemRed
             gestureStatusLabel.stringValue = "Select an approved gesture first"
             return
         }
-        let alert = NSAlert()
-        alert.messageText = "Run “\(name)” on the physical Amber arms?"
-        alert.informativeText = "This can move one or both powered arms. Confirm that the workspace is clear, the physical E-stop is ready, and this is the intended gesture. Cerebro will still enforce Gemini debug authority, gateway readiness, verified position mode, fresh measured telemetry, step and speed bounds, and measured completion."
-        alert.alertStyle = .critical
-        alert.addButton(withTitle: "Run Physical Gesture")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else {
-            appendEvent("Cancelled GUI run of approved gesture “\(name)” before submission")
-            return
-        }
-        guard pendingManualCommandIDs.isEmpty, !hasActiveGripperCommand(refreshFromGateway: true),
-              !stackMaintenance.isRunning, !stackRecoveryInProgress,
-              !ROBAmberGestureExecutor.shared.isExecuting else {
-            NSSound.beep()
-            appendEvent("Gesture “\(name)” was not submitted because control state changed during confirmation")
-            return
-        }
-
-        runSelectedGestureButton.isEnabled = false
-        gestureStatusLabel.textColor = .systemOrange
-        gestureStatusLabel.stringValue = "Running “\(name)” • awaiting measured completion"
-        appendEvent("Requested GUI run of approved gesture “\(name)”; executor safety checks remain active")
-        ROBAmberGestureExecutor.shared.executeApprovedGesture(name) { [weak self] result in
-            DispatchQueue.main.async {
-                self?.displayGestureExecutionResult(result, gestureName: name)
-            }
-        }
-        refreshDisplay()
+        ROBControllerArmApproval.shared.request(operation: "gesture", arm: "both",
+            summary: "Run approved arm gesture ‘\(name)’. Clear the arm workspace and keep the E-stop ready.",
+            execute: { [weak self] done in
+                guard let self, self.pendingManualCommandIDs.isEmpty,
+                      !self.hasActiveGripperCommand(refreshFromGateway: true),
+                      !self.stackMaintenance.isRunning, !self.stackRecoveryInProgress,
+                      !ROBAmberGestureExecutor.shared.isExecuting,
+                      !ROBArmRoutineCoordinator.shared.isRunning else {
+                    done(["status": "blocked", "detail": "Arm control state changed before approval."]); return
+                }
+                self.runSelectedGestureButton.isEnabled = false
+                self.gestureStatusLabel.stringValue = "Running ‘\(name)’ — awaiting measured completion"
+                ROBAmberGestureExecutor.shared.executeControllerApprovedGesture(name, revision: revision, completion: done)
+                self.refreshDisplay()
+            }, cancel: {
+                _ = ROBAmberGestureExecutor.shared.cancelCurrentGesture(reason: "Controller cancelled or disconnected")
+            }, completion: { [weak self] result in self?.displayGestureExecutionResult(result, gestureName: name) })
     }
 
     private func displayGestureExecutionResult(

@@ -349,6 +349,16 @@ struct ROBControlServerStatusSnapshot: Sendable {
                 sendingConnection.stop(error: AutoNetTransportError.authorizationFailed)
                 return
             }
+            if let message = ROBRobotActionWireCodec.decodeEnvelopeData(data as NSData) {
+                guard sendingConnection.authenticatedRole == .operatorController,
+                      let device = sendingConnection.authenticatedDeviceID,
+                      let session = sendingConnection.authenticatedSessionUUID else { return }
+                ROBControllerArmApproval.shared.send = { [weak self] message, device, session in
+                    guard let bytes = ROBRobotActionWireCodec.archive(message, legacySender: message.senderID) else { return false }
+                    return self?.sendFollowTargetMessage(bytes as NSData, toDeviceID: device, sessionID: session) == true
+                }
+                if ROBControllerArmApproval.shared.receive(message, device: device, session: session) { return }
+            }
             if ROBBubbleProtocol.claims(data) {
                 guard sendingConnection.authenticatedRole == .operatorController,
                       let controller = sendingConnection.authenticatedDeviceID,

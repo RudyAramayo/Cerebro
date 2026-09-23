@@ -6,6 +6,9 @@ import AppKit
 extension Notification.Name {
     static let ROBAmberGatewayCommandDidComplete = Notification.Name("FixtureAck")
 }
+enum ROBControlLiveSessionRegistry {
+    static func isActiveOperator(controllerID: UUID, sessionID: UUID) -> Bool { true }
+}
 enum ROBArmSide: Hashable { case left, right }
 final class ROBAmberArmMotionArbiter {
     static let shared = ROBAmberArmMotionArbiter()
@@ -40,6 +43,9 @@ final class ROBAmberGatewayClient: NSObject {
     var sequence: UInt64 = 1, nextID: UInt64 = 1
     var feedbackReadyAt = 0.0
     func isReady() -> Bool { ready }
+    func manualArmControlReadiness(forUDPPort: Int, expectedSessionGeneration: UInt64) -> NSDictionary {
+        ["allowed": ready && !stale && expectedSessionGeneration == generation]
+    }
     func connectionSnapshot() -> NSDictionary { ["sessionGeneration": NSNumber(value: generation)] }
     func telemetry(forArm arm: String) -> ROBAmberGatewayTelemetry? {
         guard ProcessInfo.processInfo.systemUptime >= feedbackReadyAt else { return nil }
@@ -100,6 +106,26 @@ final class ROBArmRoutineVision {
     }
     @MainActor static func test() async {
         let r = ROBArmRoutineCoordinator.shared, g = ROBAmberGatewayClient.shared, v = ROBArmRoutineVision.shared
+        let approvals = ROBControllerArmApproval.shared
+        let device = UUID(), session = UUID()
+        let hello = ROBRobotActionMessage.controllerHello(senderID: "fixture-controller", acceptsActions: true, capabilities: ["arm_operation"])
+        _ = approvals.receive(hello, device: device, session: session)
+        // Simulated controller heartbeat and explicit one-shot approval. This is
+        // fixture-only; production never manufactures the accepted response.
+        let heartbeat = Timer(timeInterval: 1, repeats: true) { _ in
+            _ = approvals.receive(hello, device: device, session: session)
+        }
+        RunLoop.main.add(heartbeat, forMode: .common)
+        approvals.send = { request, _, _ in
+            if request.kind == .actionRequest {
+                DispatchQueue.main.async {
+                    _ = approvals.receive(.actionStatus(callID: request.callID!, state: .accepted,
+                        detail: "Fixture operator approves", result: [:], senderID: "fixture-controller", recipientID: request.senderID),
+                        device: device, session: session)
+                }
+            }
+            return true
+        }
         r.prepareView = { true }; r.viewIsStationary = { true }
         precondition(ROBArmRoutineCoordinator.commandForText("Rob, relax your arms") == "relax")
         for text in ["don't grab this", "hold on", "explain how to grab this", "do not relax", "I said 'grab this'", "grab the cup but do not move", "grab this if I say yes"] {

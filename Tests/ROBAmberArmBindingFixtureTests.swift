@@ -32,11 +32,12 @@ final class ROBAmberGatewayClient: NSObject {
 
 final class ROBAmberDebugAuthority: NSObject {
     static let shared = ROBAmberDebugAuthority()
-    func authorizesController() -> Bool { true }
+    func authorizesController() -> Bool { false } // No desktop debug grant.
 }
 
 enum ROBControlLiveSessionRegistry {
-    static func isActiveOperator(controllerID: UUID, sessionID: UUID) -> Bool { true }
+    static var active = true
+    static func isActiveOperator(controllerID: UUID, sessionID: UUID) -> Bool { active }
 }
 
 final class AutoNetServer {
@@ -101,11 +102,11 @@ struct ROBAmberArmBindingFixtureTests {
                "Right initial state came from R11")
 
         let controller = UUID(), session = UUID()
-        func submit(_ arm: ROBArmSide, sequence: UInt64) throws -> UUID {
+        func submit(_ arm: ROBArmSide, sequence: UInt64, deadManHeld: Bool = true) throws -> UUID {
             let intent = ROBGripperCommandIntentEnvelope(
                 senderID: controller, sessionID: session, sequence: sequence,
                 issuedAtUnixMilliseconds: ROBGripperControlWireCodec.currentUnixMilliseconds(),
-                leaseMilliseconds: 750, arm: arm, action: .hold, force: 8, deadManHeld: true
+                leaseMilliseconds: 750, arm: arm, action: .hold, force: 8, deadManHeld: deadManHeld
             )
             let data = try ROBGripperControlWireCodec.encode(intent)
             expect(bridge.consumeInbound(data, authenticatedControllerID: controller,
@@ -150,6 +151,20 @@ struct ROBAmberArmBindingFixtureTests {
         expect(server.dispositions.last?.requestMessageID == rightRequest
                && server.dispositions.last?.arm == .right, "Right acknowledgement crossed sides")
 
+        ROBControllerArmApproval.shared.isPending = true
+        _ = try submit(.right, sequence: 5)
+        expect(gateway.commands.count == 2 && server.dispositions.last?.disposition == .rejectedBusy,
+               "Direct gripper command interrupted a pending controller-approved routine")
+        ROBControllerArmApproval.shared.isPending = false
+        _ = try submit(.right, sequence: 6, deadManHeld: false)
+        expect(gateway.commands.count == 2 && server.dispositions.last?.disposition == .rejectedDeadMan,
+               "Headless authorization bypassed the gripper dead-man")
+        ROBControlLiveSessionRegistry.active = false
+        _ = try submit(.right, sequence: 7)
+        expect(gateway.commands.count == 2 && server.dispositions.last?.disposition == .rejectedSessionInactive,
+               "A disconnected controller retained gripper authority")
+        ROBControlLiveSessionRegistry.active = true
+
         for (wire, physical, force) in [("left", ROBArmSide.right, 11), ("right", .left, 19)] {
             let previousCount = server.states.count
             NotificationCenter.default.post(
@@ -167,4 +182,9 @@ struct ROBAmberArmBindingFixtureTests {
 final class ROBArmRoutineCoordinator {
     static let shared = ROBArmRoutineCoordinator()
     let isRunning = false
+}
+
+final class ROBControllerArmApproval {
+    static let shared = ROBControllerArmApproval()
+    var isPending = false
 }

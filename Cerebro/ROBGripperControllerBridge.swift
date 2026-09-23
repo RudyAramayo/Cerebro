@@ -20,7 +20,6 @@ final class ROBGripperControllerBridge {
     private var gripperObserver: NSObjectProtocol?
     private var commandObserver: NSObjectProtocol?
     private var gatewayObserver: NSObjectProtocol?
-    private var authorityObserver: NSObjectProtocol?
     private var lastInboundSequence: [SequenceKey: UInt64] = [:]
     private var stateSequence: [ROBArmSide: UInt64] = [:]
     private var pendingByCommandID: [UInt64: PendingCommand] = [:]
@@ -56,16 +55,6 @@ final class ROBGripperControllerBridge {
         ) { [weak self] notification in
             self?.gatewayStateChanged(notification)
         }
-        authorityObserver = center.addObserver(
-            forName: .ROBAmberDebugAuthorityDidChange,
-            object: ROBAmberDebugAuthority.shared,
-            queue: .main
-        ) { [weak self] _ in
-            guard ROBAmberDebugAuthority.shared.authorizesController() else {
-                self?.publishBothStates()
-                return
-            }
-        }
         if ROBAmberGatewayClient.shared.isReady() { queryBothStates() }
         publishBothStates()
     }
@@ -75,11 +64,9 @@ final class ROBGripperControllerBridge {
         if let gripperObserver { center.removeObserver(gripperObserver) }
         if let commandObserver { center.removeObserver(commandObserver) }
         if let gatewayObserver { center.removeObserver(gatewayObserver) }
-        if let authorityObserver { center.removeObserver(authorityObserver) }
         gripperObserver = nil
         commandObserver = nil
         gatewayObserver = nil
-        authorityObserver = nil
         lastInboundSequence.removeAll()
         stateSequence.removeAll()
         pendingByCommandID.removeAll()
@@ -220,17 +207,6 @@ final class ROBGripperControllerBridge {
             )
             return
         }
-        guard ROBAmberDebugAuthority.shared.authorizesController() else {
-            sendDisposition(
-                for: intent,
-                recipientID: authenticatedControllerID,
-                sessionID: authenticatedSessionID,
-                disposition: .rejectedAuthorityDisabled,
-                detail: "Cerebro's local, time-limited controller authority is disabled.",
-                snapshot: snapshot
-            )
-            return
-        }
         guard ROBAmberGatewayClient.shared.isReady() else {
             sendDisposition(
                 for: intent,
@@ -248,13 +224,13 @@ final class ROBGripperControllerBridge {
                 recipientID: authenticatedControllerID,
                 sessionID: authenticatedSessionID,
                 disposition: .rejectedCalibrationRequired,
-                detail: "Calibrate this gripper locally in Cerebro after the current power-up.",
+                detail: "Approve gripper calibration or Prepare Arms on the controller after the current power-up.",
                 snapshot: snapshot
             )
             return
         }
         guard pendingArm[intent.arm] == nil, !snapshot.commandInFlight,
-              !ROBArmRoutineCoordinator.shared.isRunning else {
+              !ROBArmRoutineCoordinator.shared.isRunning, !ROBControllerArmApproval.shared.isPending else {
             sendDisposition(
                 for: intent,
                 recipientID: authenticatedControllerID,
@@ -265,15 +241,16 @@ final class ROBGripperControllerBridge {
             )
             return
         }
-        // Close the authority-revocation race immediately before the only
-        // hardware-reachable call in this bridge.
-        guard ROBAmberDebugAuthority.shared.authorizesController() else {
+        // The authenticated controller's fresh, dead-man-held command is the
+        // authorization. No local monitor or expiring desktop checkbox is needed.
+        guard ROBControlLiveSessionRegistry.isActiveOperator(
+            controllerID: authenticatedControllerID, sessionID: authenticatedSessionID) else {
             sendDisposition(
                 for: intent,
                 recipientID: authenticatedControllerID,
                 sessionID: authenticatedSessionID,
-                disposition: .rejectedAuthorityDisabled,
-                detail: "Controller authority was revoked before dispatch.",
+                disposition: .rejectedSessionInactive,
+                detail: "The controller session ended before dispatch.",
                 snapshot: snapshot
             )
             return

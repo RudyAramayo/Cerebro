@@ -1586,65 +1586,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         return;
     }
 
-    // This is the only direct Gemini-to-arm path. The local grant expires and
-    // is never persisted; the executor resolves the name to an immutable
-    // operator-approved pose, limits the measured delta, and waits for fresh
-    // position/velocity feedback before returning physical completion.
-    if ([action isEqualToString:@"play_gesture"] && [call.providerIdentifier isEqualToString:@"gemini"] &&
-        [[ROBAmberDebugAuthority shared] authorizesGemini]) {
-        NSSet *playGestureArgumentKeys = [NSSet setWithArray:call.arguments.allKeys];
-        NSSet *expectedPlayGestureArgumentKeys = [NSSet setWithObjects:@"action", @"gesture", nil];
-        if (![playGestureArgumentKeys isEqualToSet:expectedPlayGestureArgumentKeys]) {
-            [robAI sendToolResponseWithCallID:call.callID
-                                         name:call.name
-                                       result:@{
-                                           @"status": @"rejected",
-                                           @"reason": @"play_gesture accepts only action and an approved gesture name; raw joint or unknown arguments are forbidden"
-                                       }];
-            return;
-        }
-        NSString *gesture = [call.arguments[@"gesture"] isKindOfClass:[NSString class]]
-            ? call.arguments[@"gesture"] : nil;
-        if (gesture.length == 0) {
-            [robAI sendToolResponseWithCallID:call.callID
-                                         name:call.name
-                                       result:@{
-                                           @"status": @"rejected",
-                                           @"reason": @"play_gesture requires an approved gesture name"
-                                       }];
-            return;
-        }
-        if ([self.localAmberGestureCallID isEqualToString:call.callID]) {
-            return;
-        }
-        if (self.localAmberGestureCallID.length > 0 ||
-            self.pendingRobotActionRequests.count > 0) {
-            [robAI sendToolResponseWithCallID:call.callID
-                                         name:call.name
-                                       result:@{
-                                           @"status": @"rejected",
-                                           @"reason": @"Another physical robot action is still active"
-                                       }];
-            return;
-        }
-        self.localAmberGestureCallID = call.callID;
-        __weak ROBMainViewController *weakSelf = self;
-        [[ROBAmberGestureExecutor shared]
-            executeApprovedGesture:gesture
-            completion:^(NSDictionary *result) {
-                ROBMainViewController *strongSelf = weakSelf;
-                if (strongSelf == nil ||
-                    ![strongSelf.localAmberGestureCallID isEqualToString:call.callID]) {
-                    return;
-                }
-                strongSelf.localAmberGestureCallID = nil;
-                [robAI sendToolResponseWithCallID:call.callID
-                                             name:call.name
-                                           result:result];
-            }];
-        return;
-    }
-
+    // All proposed arm gestures use the connected controller's approval flow,
+    // including requests made while local debug authority is enabled.
     // Once the operator activates an autonomy session, the local coordinator
     // owns all bounded robot behavior without per-action controller prompts.
     // Unsupported physical actions fail honestly instead of being presented
@@ -5621,7 +5564,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void)performLocalArmText:(NSString *)text command:(NSString *)command
 {
     [self appendConversationText:text fromUser:YES];
-    [self.speechBox sayIt:[command isEqualToString:@"relax"] ? @"Lowering my arms gently." : @"Checking the cameras and preparing my grippers."];
+    [self.speechBox sayIt:@"Waiting for approval on your Vision Pro or iPhone."];
     __weak ROBMainViewController *weakSelf = self;
     [[ROBArmRoutineCoordinator shared] performCommand:command target:text completion:^(NSDictionary *result) {
         NSString *detail = result[@"detail"] ?: @"The arm routine ended.";

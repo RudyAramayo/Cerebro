@@ -125,7 +125,8 @@ public final class ROBRobotActionMessage: NSObject {
         "request_pick",
         "navigate_relative",
         "stop_motion",
-        "run_startup_test"
+        "run_startup_test",
+        "arm_operation"
     ]
 
     public let kind: ROBRobotActionMessageKind
@@ -418,6 +419,14 @@ public final class ROBRobotActionMessage: NSObject {
             return "\(action) contains unknown or missing arguments"
         }
         switch action {
+        case "arm_operation":
+            guard let operation = arguments["operation"] as? String,
+                  ["activate", "position", "deactivate", "calibrate_gripper", "open_gripper", "close_gripper", "startup", "prepare", "grab", "hold", "relax", "gesture", "restart_stack", "manual"].contains(operation),
+                  let arm = arguments["arm"] as? String, ["left", "right", "both"].contains(arm),
+                  let summary = arguments["summary"] as? String,
+                  !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  summary.count <= 2048 else { return "Invalid arm operation approval" }
+
         case "look_at", "request_pick":
             guard let targetID = arguments["target_id"] as? String,
                   !targetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -463,6 +472,7 @@ public final class ROBRobotActionMessage: NSObject {
         guard stringKeys.count == arguments.count else { return false }
         let keys = Set(stringKeys)
         switch action {
+        case "arm_operation": return keys == ["operation", "arm", "summary"]
         case "look_at", "request_pick":
             return keys == ["target_id"]
         case "play_gesture", "run_startup_test":

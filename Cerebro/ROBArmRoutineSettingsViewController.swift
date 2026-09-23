@@ -11,9 +11,9 @@ import AppKit
         startup.state = UserDefaults.standard.bool(forKey: ROBArmRoutinePlan.startupDefaultsKey) ? .on : .off
         startup.target = self; startup.action = #selector(changeStartup)
         let explanation = NSTextField(wrappingLabelWithString:
-            "On launch or wake, check the forward and belly cameras, bring both hanging arms into view, then calibrate both empty grippers and open them. The arms stay ready in front. The taught arm motion takes about 26 seconds; camera and gripper checks add time.")
+            "On launch or wake, request approval on the connected Vision Pro or iPhone, then check the forward and belly cameras, bring both hanging arms into view, then calibrate both empty grippers and open them. The arms stay ready in front. The taught arm motion takes about 26 seconds; camera and gripper checks add time.")
         let commands = NSTextField(wrappingLabelWithString:
-            "Say or type ‘relax’ to lower the arms gently and turn off holding torque. ‘Grab this’ or ‘hold this’ brings the arms forward and attempts a gentle close when the camera sees the object between a gripper’s jaws. These commands are available without enabling startup calibration.")
+            "Say or type ‘relax’ to lower the arms gently and turn off holding torque. ‘Grab this’ or ‘hold this’ brings the arms forward and attempts a gentle close when the camera sees the object between a gripper’s jaws. These commands are available without enabling startup calibration. Each complete operation needs one controller approval. Stop + hold is immediate.")
         let limitation = NSTextField(wrappingLabelWithString:
             "Startup preserves the existing joint calibration. General reaching and folded poses still need validated camera-to-arm geometry and routes. Gripper calibration acceptance is not force or position feedback.")
         limitation.textColor = .secondaryLabelColor

@@ -41,10 +41,11 @@ def main():
 
     calibrate = swift_function(source, "@objc private func calibrateGripper(")
     assert "diagnosticsArm(forTag: sender.tag)" in calibrate
-    assert "Calibrate the robot's \\(arm.rawValue) gripper" in calibrate
-    assert "\\(arm.amberCoreName), UDP \\(arm.amberUDPPort)" in calibrate
+    assert "physical " in calibrate and "gripper through its full travel" in calibrate
+    assert "arm: arm.rawValue" in calibrate
     assert calibrate.count("validateGripperInterlocks") == 2
-    assert "alert.alertStyle = .critical" in calibrate
+    assert "ROBControllerArmApproval.shared.requestGatewayCommand" in calibrate
+    assert "runModal" not in calibrate
     assert "full travel" in calibrate
     assert "gateway.calibrateGripper(forArm: arm.amberGatewayArm)" in calibrate
 
@@ -104,10 +105,11 @@ def main():
     assert "stackMaintenance.restart(" not in reconnect
 
     restart = swift_function(source, "@objc private func restartCANCoreStack(")
-    assert restart.count("!gestureExecutor.isExecuting") == 3
-    assert restart.count("pendingManualCommandIDs.isEmpty") == 3
-    assert restart.count("!hasActiveGripperCommand(refreshFromGateway: true)") == 3
-    assert '== "RESTART"' in restart
+    assert restart.count("!gestureExecutor.isExecuting") == 2
+    assert restart.count("pendingManualCommandIDs.isEmpty") == 2
+    assert restart.count("hasActiveGripperCommand(refreshFromGateway: true)") == 2
+    assert 'request(operation: "restart_stack"' in restart
+    assert "runModal" not in restart
     assert restart.index("authority.revoke()") < restart.index("tunnel.disconnect()")
     assert restart.index("tunnel.disconnect()") < restart.index("stackMaintenance.restart(")
     result = swift_function(source, "private func handleStackMaintenanceResult(")

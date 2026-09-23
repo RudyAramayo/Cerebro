@@ -93,11 +93,32 @@ enum ROBArmRoutineError: LocalizedError {
         guard ["startup", "prepare", "grab", "hold", "relax"].contains(command) else {
             completion(["status": "rejected", "detail": "Unknown arm routine."]); return
         }
+        if command == "relax" { cancel(reason: "Relax requested; waiting for controller approval") }
+        let summary = command == "relax"
+            ? "Return both arms gently to hanging, then deactivate position mode."
+            : "\(command.capitalized): bring both arms forward, calibrate both empty grippers if needed, and \(command == "grab" || command == "hold" ? "attempt a camera-checked grip of \(String(target.prefix(160)))" : "leave both grippers open")."
+        setStatus("Awaiting Vision Pro or iPhone approval: \(summary)")
+        ROBControllerArmApproval.shared.request(operation: command, arm: "both", summary: summary,
+            execute: { [weak self] done in
+                guard let self else { done(["status": "cancelled", "detail": "Arm runtime closed."]); return }
+                self.performAuthorizedCommand(command, target: target, completion: done)
+            }, cancel: { [weak self] in self?.cancelAuthorized(reason: "Controller cancelled or disconnected") },
+            completion: { [weak self] result in
+                if self?.isRunning != true { self?.setStatus(result["detail"] as? String ?? "Arm operation ended") }
+                completion(result)
+            })
+    }
+
+    private func performAuthorizedCommand(_ command: String, target: String, completion: @escaping (NSDictionary) -> Void) {
+        precondition(Thread.isMainThread)
+        guard ["startup", "prepare", "grab", "hold", "relax"].contains(command) else {
+            completion(["status": "rejected", "detail": "Unknown arm routine."]); return
+        }
         if isRunning {
             if command == "relax" && activeCommand != "relax" {
                 // Stop the old trajectory first; wait for its task to release
                 // reservations before planning from the new measured pose.
-                cancel(reason: "Relax requested")
+                cancelAuthorized(reason: "Relax requested")
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     let until = ProcessInfo.processInfo.systemUptime + 3
@@ -105,7 +126,7 @@ enum ROBArmRoutineError: LocalizedError {
                         try? await Task.sleep(nanoseconds: 50_000_000)
                     }
                     if self.isRunning { completion(["status": "blocked", "detail": "The previous arm operation has not stopped."]) }
-                    else { self.performCommand(command, target: target, completion: completion) }
+                    else { self.performAuthorizedCommand(command, target: target, completion: completion) }
                 }
             } else { completion(["status": "busy", "detail": status]) }
             return
@@ -139,6 +160,11 @@ enum ROBArmRoutineError: LocalizedError {
     }
 
     func cancel(reason: String) {
+        ROBControllerArmApproval.shared.cancel(reason: reason)
+        cancelAuthorized(reason: reason)
+    }
+
+    private func cancelAuthorized(reason: String) {
         precondition(Thread.isMainThread)
         startupTicket = nil
         guard isRunning else { return }

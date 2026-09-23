@@ -5337,76 +5337,92 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
 
 - (void)runPythonArguments:(NSArray<NSString *> *)arguments operation:(NSString *)operation
 {
-    NSUInteger portIndex = [arguments indexOfObject:@"--port"];
-    NSInteger port = portIndex != NSNotFound && portIndex + 1 < arguments.count
-        ? [arguments[portIndex + 1] integerValue] : 0;
-    NSSet<NSString *> *guardedOperations = [NSSet setWithArray:@[
-        @"cmd_activate_mode_v2", @"zero_position_mode_v2", @"cmd_position_mode_v2",
-        @"cmd_current_mode_v2", @"cmd_position_input", @"cmd_cartesian_input"
-    ]];
-    if ([guardedOperations containsObject:operation]) {
-        ROBAmberGatewayClient *gateway = [ROBAmberGatewayClient shared];
-        NSDictionary *admission = [gateway manualArmControlReadinessForUDPPort:port expectedSessionGeneration:0];
-        unsigned long long generation = [admission[@"sessionGeneration"] unsignedLongLongValue];
-        // Sleep before the final feedback check, never inside the SDK after
-        // admission. A reconnect during this delay must cancel the request.
-        NSUInteger sleepIndex = [arguments indexOfObject:@"--cmd_sleep"];
-        if ([admission[@"allowed"] boolValue] && sleepIndex != NSNotFound && sleepIndex + 1 < arguments.count) {
-            double delay = [arguments[sleepIndex + 1] doubleValue];
-            if (isfinite(delay) && delay > 0 && delay <= 60) {
-                NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + delay;
-                while (NSProcessInfo.processInfo.systemUptime < deadline) {
-                    NSTimeInterval remaining = deadline - NSProcessInfo.processInfo.systemUptime;
-                    if (remaining <= 0) { break; }
-                    [NSThread sleepForTimeInterval:MIN(0.05, remaining)];
-                    admission = [gateway manualArmControlReadinessForUDPPort:port expectedSessionGeneration:generation];
-                    if (![admission[@"allowed"] boolValue]) { break; }
+    if ([operation isEqualToString:@"watch_position_out"]) {
+        NSError *error = nil;
+        NSString *output = [[ROBPythonRuntime sharedRuntime] runPythonWithArguments:arguments error:&error];
+        NSLog(@"%@: %@", operation, error.localizedDescription ?: output);
+        return;
+    }
+    // Capture all targets before the controller reviews this one-shot request.
+    NSArray<NSString *> *capturedArguments = [arguments copy];
+    NSUInteger portIndex = [capturedArguments indexOfObject:@"--port"];
+    NSInteger port = portIndex != NSNotFound && portIndex + 1 < capturedArguments.count
+        ? [capturedArguments[portIndex + 1] integerValue] : 0;
+    if (port != 26001 && port != 26002) { return; }
+    NSString *physicalArm = port == 26001 ? @"right" : @"left";
+    NSString *gatewayArm = port == 26001 ? @"left" : @"right";
+    NSMutableDictionary *execution = [@{@"cancelled": @NO} mutableCopy];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        ROBAmberGatewayClient *gateway = ROBAmberGatewayClient.shared;
+        unsigned long long generation = [gateway.connectionSnapshot[@"sessionGeneration"] unsignedLongLongValue];
+        NSString *summary = [NSString stringWithFormat:@"Physical %@ arm: %@ (%@). Mode changes can remove torque; clear the workspace and support the arm as needed.",
+            physicalArm, operation, [[capturedArguments subarrayWithRange:NSMakeRange(1, capturedArguments.count - 1)] componentsJoinedByString:@" "]];
+        [[ROBControllerArmApproval shared] requestWithOperation:@"manual" arm:physicalArm summary:summary
+            execute:^(void (^done)(NSDictionary *)) {
+                dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                    NSMutableArray *immediate = [capturedArguments mutableCopy];
+                    NSUInteger sleepIndex = [immediate indexOfObject:@"--cmd_sleep"];
+                    double delay = sleepIndex != NSNotFound && sleepIndex + 1 < immediate.count
+                        ? [immediate[sleepIndex + 1] doubleValue] : 0;
+                    NSString *failure = nil;
+                    if (!isfinite(delay) || delay < 0 || delay > 60 || generation == 0) {
+                        failure = @"Invalid delay or unavailable gateway session.";
+                    }
+                    NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + delay;
+                    do {
+                        @synchronized (execution) {
+                            if ([execution[@"cancelled"] boolValue]) { failure = @"Controller cancelled the manual command."; }
+                        }
+                        if (failure != nil) { break; }
+                        NSDictionary *admission = [gateway manualArmControlReadinessForUDPPort:port expectedSessionGeneration:generation];
+                        if (![admission[@"allowed"] boolValue]) { failure = admission[@"reason"]; break; }
+                        NSTimeInterval remaining = deadline - NSProcessInfo.processInfo.systemUptime;
+                        if (remaining <= 0) { break; }
+                        [NSThread sleepForTimeInterval:MIN(0.05, remaining)];
+                    } while (YES);
+                    if (sleepIndex != NSNotFound && sleepIndex + 1 < immediate.count) { immediate[sleepIndex + 1] = @"0"; }
+                    NSError *error = nil;
+                    NSTask *task = failure == nil ? [[ROBPythonRuntime sharedRuntime] newTaskWithArguments:immediate error:&error] : nil;
+                    NSPipe *pipe = [NSPipe pipe];
+                    task.standardOutput = pipe; task.standardError = pipe;
+                    BOOL launched = NO;
+                    @synchronized (execution) {
+                        if ([execution[@"cancelled"] boolValue]) { failure = @"Controller cancelled before dispatch."; }
+                        if (task != nil && failure == nil) {
+                            execution[@"task"] = task;
+                            launched = ROBLaunchTaskSafely(task, &error);
+                        }
+                    }
+                    NSString *output = @"";
+                    if (launched) {
+                        output = [[NSString alloc] initWithData:[pipe.fileHandleForReading readDataToEndOfFile] encoding:NSUTF8StringEncoding] ?: @"";
+                        [task waitUntilExit];
+                    }
+                    @synchronized (execution) { [execution removeObjectForKey:@"task"]; }
+                    BOOL accepted = launched && task.terminationStatus == 0 && failure == nil;
+                    NSString *detail = failure ?: error.localizedDescription ?: (accepted
+                        ? @"Manual SDK command returned successfully; measured completion is unverified." : output);
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        done(@{@"status": accepted ? @"accepted_unverified" : @"blocked", @"detail": detail ?: @"Manual command failed."});
+                    });
+                });
+            } cancel:^{
+                @synchronized (execution) {
+                    execution[@"cancelled"] = @YES;
+                    NSTask *task = execution[@"task"];
+                    if (task.running) { [task terminate]; }
                 }
-                NSMutableArray *immediate = [arguments mutableCopy];
-                immediate[sleepIndex + 1] = @"0";
-                arguments = immediate;
-            } else if (!isfinite(delay) || delay < 0 || delay > 60) {
-                admission = @{@"allowed": @NO, @"reason": @"Manual command delay must be between 0 and 60 seconds"};
-            }
-        }
-        if ([admission[@"allowed"] boolValue]) {
-            admission = [gateway manualArmControlReadinessForUDPPort:port expectedSessionGeneration:generation];
-        }
-        if (![admission[@"allowed"] boolValue]) {
-            NSString *message = [NSString stringWithFormat:@"\n%@: blocked — %@\n", operation, admission[@"reason"]];
-            NSLog(@"%@", message);
-            dispatch_async(dispatch_get_main_queue(), ^{
-                NSTextView *console = port == 26001 ? self.amberMasterCoreOutput_L10
-                    : (port == 26002 ? self.amberMasterCoreOutput_R11 : nil);
+                (void)[gateway priorityHoldForArm:gatewayArm];
+            } completion:^(NSDictionary *result) {
+                NSString *message = [NSString stringWithFormat:@"\n%@: %@\n", operation, result[@"detail"]];
+                NSLog(@"%@", message);
+                NSTextView *console = port == 26001 ? self.amberMasterCoreOutput_L10 : self.amberMasterCoreOutput_R11;
                 if (console != nil) {
                     console.string = [console.string stringByAppendingString:message];
                     [console scrollRangeToVisible:NSMakeRange(console.string.length, 0)];
                 }
-            });
-            return;
-        }
-    }
-    NSError *error = nil;
-    NSString *output = [[ROBPythonRuntime sharedRuntime] runPythonWithArguments:arguments error:&error];
-    if (error != nil) {
-        NSLog(@"%@: %@", operation, error.localizedDescription);
-        // Keep manual arm failures visible in the corresponding arm console,
-        // including SDK errors and partial-mode rejections.
-        NSUInteger portIndex = [arguments indexOfObject:@"--port"];
-        if (portIndex != NSNotFound && portIndex + 1 < arguments.count) {
-            NSInteger port = arguments[portIndex + 1].integerValue;
-            NSString *message = [NSString stringWithFormat:@"\n%@: %@\n", operation, error.localizedDescription];
-            dispatch_async(dispatch_get_main_queue(), ^{
-                NSTextView *console = port == 26001 ? self.amberMasterCoreOutput_L10
-                    : (port == 26002 ? self.amberMasterCoreOutput_R11 : nil);
-                if (console == nil) { return; }
-                console.string = [console.string stringByAppendingString:message];
-                [console scrollRangeToVisible:NSMakeRange(console.string.length, 0)];
-            });
-        }
-        return;
-    }
-    NSLog(@"%@: %@", operation, output ?: @"");
+            }];
+    });
 }
 
 - (void) watch_position_out:(id)sender port:(int)port {
