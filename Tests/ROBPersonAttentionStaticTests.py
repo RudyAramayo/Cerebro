@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Structural regressions for fused pose, attention, and posture tracking."""
+"""Structural regressions for person selection, attention, and posture tracking."""
 
 from pathlib import Path
 
@@ -109,12 +109,11 @@ require(
 )
 require(
     "kROBPersonTrackingFaceFreshnessSeconds = 0.75" in main
-    and "lastFaceTrackingSpatialChangeUptime" in main
-    and "faceSpatiallyStalled" in main
-    and "faceWeight = faceSpatiallyStalled ? 0.0 : 0.68" in main
-    and 'source = @"main-camera-face-pose"' in main
+    and "if (faceIsFresh) return;" in method_body(main, "- (void)didTrackHumanPoses:")
+    and "faceSpatiallyStalled" not in main
+    and 'trackingPerson:@"main-camera-face-pose"' in main
     and 'source = @"main-camera-pose"' in main,
-    "Face and main-camera pose results are no longer fused with a stalled-face fallback.",
+    "Fresh faces must own angular tracking; body pose is a fallback after face observations expire.",
 )
 require(
     "kROBPersonTrackingHighPoseDwellSeconds = 0.5" in main
@@ -209,4 +208,4 @@ require(
     "A posture sequence can run without bounded conservative settling.",
 )
 
-print("ROB fused person attention static checks passed")
+print("ROB person attention static checks passed")

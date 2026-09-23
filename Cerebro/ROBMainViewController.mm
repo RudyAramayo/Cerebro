@@ -461,7 +461,6 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 @property (readwrite, assign) BOOL personTrackingUprightPostureActive;
 @property (readwrite, retain) NSValue *lastFaceTrackingBoundingBoxValue;
 @property (readwrite, assign) NSTimeInterval lastFaceTrackingObservationUptime;
-@property (readwrite, assign) NSTimeInterval lastFaceTrackingSpatialChangeUptime;
 @property (readwrite, strong) ROBPersonTrackingObservation *lastMainPoseTrackingObservation;
 @property (readwrite, assign) NSTimeInterval lastMainPoseTrackingObservationUptime;
 @property (readwrite, assign) NSTimeInterval lastInstaPoseTrackingObservationUptime;
@@ -3548,14 +3547,6 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             // Generic face detection is a fallback for acquisition only. Once
             // identity tracking is active, its spatial box has sole authority.
             NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
-            CGRect prior = self.lastFaceTrackingBoundingBoxValue.rectValue;
-            if (self.lastFaceTrackingBoundingBoxValue == nil
-                || hypot(CGRectGetMidX(prior) - CGRectGetMidX(best.boundingBox),
-                         CGRectGetMidY(prior) - CGRectGetMidY(best.boundingBox)) > 0.006
-                || fabs(prior.size.width - best.boundingBox.size.width) > 0.006
-                || fabs(prior.size.height - best.boundingBox.size.height) > 0.006) {
-                self.lastFaceTrackingSpatialChangeUptime = now;
-            }
             self.lastFaceTrackingBoundingBoxValue =
                 [NSValue valueWithRect:best.boundingBox];
             self.lastFaceTrackingObservationUptime = now;
@@ -3579,14 +3570,6 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     }
 
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
-    CGRect prior = self.lastFaceTrackingBoundingBoxValue.rectValue;
-    if (self.lastFaceTrackingBoundingBoxValue == nil
-        || hypot(CGRectGetMidX(prior) - CGRectGetMidX(boundingBox),
-                 CGRectGetMidY(prior) - CGRectGetMidY(boundingBox)) > 0.006
-        || fabs(prior.size.width - boundingBox.size.width) > 0.006
-        || fabs(prior.size.height - boundingBox.size.height) > 0.006) {
-        self.lastFaceTrackingSpatialChangeUptime = now;
-    }
     self.lastFaceTrackingBoundingBoxValue = [NSValue valueWithRect:boundingBox];
     self.lastFaceTrackingObservationUptime = now;
 
@@ -3607,13 +3590,12 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             pose.boundsHeight
         );
         double distance = [self personTrackingDistanceMetersInNormalizedRect:bodyBounds];
-        BOOL faceSpatiallyStalled = now - self.lastFaceTrackingSpatialChangeUptime
-                > kROBPersonTrackingFaceFreshnessSeconds
-            && hypot(pose.headX - faceX, pose.headY - faceY) > 0.04;
-        double faceWeight = faceSpatiallyStalled ? 0.0 : 0.68;
+        // The face owns angular tracking while its observations are fresh.
+        // A matching body supplies depth/association, not a second head aim.
+        // An unchanged face box can simply mean the person is holding still.
         [self trackingPerson:@"main-camera-face-pose"
-                           x:(float)(faceX * faceWeight + pose.headX * (1.0 - faceWeight))
-                           y:(float)(faceY * faceWeight + pose.headY * (1.0 - faceWeight))
+                           x:(float)faceX
+                           y:(float)faceY
                            z:isfinite(distance) ? (float)distance : -1.0f];
         return;
     }
@@ -3674,6 +3656,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
     self.lastMainPoseTrackingObservation = selected;
     self.lastMainPoseTrackingObservationUptime = now;
+    // Keep body observations available for distance and reacquisition, but
+    // never let an independent pose callback compete with a fresh face.
+    if (faceIsFresh) return;
+
     CGRect bodyBounds = CGRectMake(
         selected.boundsX,
         selected.boundsY,
@@ -3684,18 +3670,6 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     float x = (float)selected.headX;
     float y = (float)selected.headY;
     NSString *source = @"main-camera-pose";
-    if (faceIsFresh) {
-        BOOL faceSpatiallyStalled = now - self.lastFaceTrackingSpatialChangeUptime
-                > kROBPersonTrackingFaceFreshnessSeconds
-            && hypot(selected.headX - CGRectGetMidX(faceBounds),
-                     selected.headY - CGRectGetMidY(faceBounds)) > 0.04;
-        double faceWeight = faceSpatiallyStalled ? 0.0 : 0.68;
-        x = (float)(CGRectGetMidX(faceBounds) * faceWeight
-            + selected.headX * (1.0 - faceWeight));
-        y = (float)(CGRectGetMidY(faceBounds) * faceWeight
-            + selected.headY * (1.0 - faceWeight));
-        source = @"main-camera-face-pose";
-    }
     [self trackingPerson:source
                        x:x
                        y:y
@@ -4162,9 +4136,8 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             && now - self.lastFaceTrackingObservationUptime
                 <= kROBPersonTrackingFaceFreshnessSeconds;
         BOOL fusedMainPose = [userID isEqualToString:@"main-camera-face-pose"];
-        // A fresh recognized face remains authoritative, but its boolean state
-        // no longer suppresses the associated body after the spatial box
-        // stalls in poor lighting.
+        // Fresh face observations own the aim. The face-pose source is a face
+        // callback using its associated body for depth, never a second aim.
         BOOL recognizedFace = [userID isEqualToString:@"recognized-face"];
         if (!recognizedFace && !handWaveFocusSource && !swordFocusSource
             && self.faceIdentityTrackingActive
@@ -4172,11 +4145,13 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             return;
         }
         BOOL detectedFace = [userID isEqualToString:@"detected-face"];
+        // A single missed detection may clear the active flags. Preserve the
+        // last fresh face's ownership until its observation actually expires,
+        // including against the legacy human-box callback.
         if (!recognizedFace
             && !detectedFace
             && !handWaveFocusSource
             && !swordFocusSource
-            && self.faceDetectionTrackingActive
             && faceTrackFresh
             && !fusedMainPose) {
             return;
@@ -4237,8 +4212,17 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         int32_t currentUpperTarget = (int32_t)lround(
             self.torsoControlsViewController.headUpperNeckTilt.doubleValue
         );
+        // These are observation providers for the same main-camera subject,
+        // not new acquisitions. Reinitializing on every detector handoff lets
+        // the upper-camera baseline creep toward its hard limit and discards
+        // the filter that should absorb disagreement between observations.
+        BOOL mainCameraPersonSource = recognizedFace || detectedFace
+            || fusedMainPose || [userID isEqualToString:@"main-camera-pose"]
+            || [userID isEqualToString:@"person1"];
+        NSString *trackingSourceID = mainCameraPersonSource
+            ? @"main-camera-person" : userID;
         BOOL trackingSourceChanged = self.personTrackingSourceID == nil
-            || ![self.personTrackingSourceID isEqualToString:userID];
+            || ![self.personTrackingSourceID isEqualToString:trackingSourceID];
         // Waiting for a slow servo is not a new acquisition. Keep the original
         // upper-camera band while observations continue during the ramp wait.
         if (!self.personTrackingFilterInitialized
@@ -4247,7 +4231,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             self.filteredPersonTrackingX = x;
             self.filteredPersonTrackingY = y;
             self.personTrackingFilterInitialized = YES;
-            self.personTrackingSourceID = userID;
+            self.personTrackingSourceID = trackingSourceID;
             self.personTrackingUpperBaselineTarget = currentUpperTarget;
         } else {
             self.filteredPersonTrackingX = ROBPersonTrackingFilterCoordinate(

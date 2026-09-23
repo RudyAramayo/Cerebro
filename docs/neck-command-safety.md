@@ -124,8 +124,12 @@ range. Downward response remains one fifth of the selected vertical speed and
 inside a 40-target upper-camera range. A delayed or newly reacquired
 observation is capped to one 0.1-second correction.
 Acquisition captures the current uncompensated upper-camera demand as its
-baseline. It therefore cannot jump from the existing camera pose to the
-authorized-follow target `7375`.
+baseline. Recognition, generic face detection, associated face/body data, and
+legacy main-camera person detections share that acquisition and filter. A
+detector handoff does not reset the baseline or walk its bounded camera range
+toward the hard joint limit. An actual observation gap or an intervening manual
+or sequence owner still rebases from the accepted pose. Acquisition therefore
+cannot jump from the existing camera pose to the authorized-follow target `7375`.
 The shared gateway still applies the configured physical hard bounds. These
 tracking values are integer Maestro command targets, not measured joint angles.
 
@@ -169,8 +173,13 @@ The installed servo turns right as the raw pan target decreases toward `4000`
 and left as it increases toward `8000`. Vision processes the raw unmirrored
 sample buffer, so a person on ROB's physical right directly lowers the raw pan
 target and turns the installed servo physically right. Recognized-face tracking
-has priority; generic face detection is used only as an acquisition fallback,
-and legacy body boxes run only when neither face source is active. The filter
+has priority; generic face detection is used only as an acquisition fallback.
+Fresh face observations exclusively determine the angular aim. Matching body
+poses remain available for distance and association, but their callbacks cannot
+issue competing corrections until face observations expire after 0.75 seconds.
+A repeatedly observed stationary face remains authoritative; unchanged box
+coordinates alone do not hand control to a different body-head estimate.
+Legacy body boxes run only when neither face source is active. The filter
 uses 65-percent response while an observation approaches center, 25 percent
 while it retreats, and snaps to the raw observation inside the dead band or
 after a center crossing. A `1.5` response exponent eases the remaining error,
@@ -360,6 +369,7 @@ Hardware-free regression checks:
 
 ```sh
 python3 Tests/ROBNeckOutputRuntimeTests.py
+python3 Tests/ROBPersonTrackingSourceRuntimeTests.py
 python3 Tests/ROBNeckSafetyStaticTests.py
 ```
 
@@ -367,6 +377,10 @@ The runtime fixture executes the production gateway, packet encoding, startup
 and ownership code against a byte recorder and fake clock. It covers repeated
 startup renders, competing tracking requests, ramp timing, unchanged poses,
 manual takeover, coupled motion, partial-write recovery and OFF transitions.
+The source fixture executes the production face/pose callbacks and centering
+controller. It covers conflicting head estimates, stationary fresh faces,
+expired-face fallback, smoothing and camera-range preservation across detector
+handoffs, and rebasing after a manual owner releases the neck.
 
 ## Dynamic pan envelope
 
@@ -544,6 +558,7 @@ cc -std=c11 -Wall -Wextra -Werror \
   -lm -o /tmp/ROBPersonTrackingPolicyFixtureTests
 /tmp/ROBPersonTrackingPolicyFixtureTests
 python3 Tests/ROBPersonTrackingPostureRuntimeTests.py
+python3 Tests/ROBPersonTrackingSourceRuntimeTests.py
 python3 Tests/ROBPersonAttentionStaticTests.py
 python3 Tests/ROBNeckSafetyStaticTests.py
 ```
