@@ -110,11 +110,90 @@ struct ROBArmRoutineObservation: Decodable {
     var permitsMotion: Bool {
         confidence.isFinite && (0.9 ... 1).contains(confidence) && pathVisible && pathClear && handsClear
     }
-    var permitsCalibration: Bool { permitsMotion && armsInFront && leftJawEmpty && rightJawEmpty }
+    /// Arms are stationary at the measured front pose. A cropped hanging route
+    /// is irrelevant to this jaw-only check; both grippers still need evidence.
+    var permitsGripperInspection: Bool {
+        confidence.isFinite && (0.9 ... 1).contains(confidence) && armsInFront && handsClear
+    }
+    var permitsCalibration: Bool { permitsGripperInspection && leftJawEmpty && rightJawEmpty }
     var graspArm: String? {
-        guard permitsMotion, armsInFront else { return nil }
+        guard permitsGripperInspection else { return nil }
         if leftObjectBetweenJaws && !rightObjectBetweenJaws && leftJawOpen { return "right" }
         if rightObjectBetweenJaws && !leftObjectBetweenJaws && rightJawOpen { return "left" }
         return nil
+    }
+
+    var motionBlockReason: String? {
+        if !pathVisible { return "The main camera cannot see the complete route for both arms. Both arms, grippers and the surrounding route must be in view." }
+        if !pathClear { return "The main camera cannot confirm that both arm routes are clear of people, furniture and cables." }
+        if !handsClear { return "The main camera cannot confirm that hands and body parts are clear of the arms and grippers." }
+        if !confidence.isFinite || !(0.9 ... 1).contains(confidence) {
+            return "The main camera assessment is not confident enough to move. Check that both arms and their surroundings are visible and well lit."
+        }
+        return nil
+    }
+}
+
+/// Accept harmless presentation wrappers, never repair facts or select a
+/// favourable object from prose/multiple answers. All fields remain required.
+enum ROBArmObservationCodec {
+    static let template = """
+    {"pathVisible":false,"pathClear":false,"hanging":false,"armsInFront":false,"leftJawEmpty":false,"rightJawEmpty":false,"leftObjectBetweenJaws":false,"rightObjectBetweenJaws":false,"leftJawOpen":false,"rightJawOpen":false,"leftJawClosedOnObject":false,"rightJawClosedOnObject":false,"handsClear":false,"confidence":0.0}
+    """
+    private static let keys: Set<String> = ["pathVisible", "pathClear", "hanging", "armsInFront",
+        "leftJawEmpty", "rightJawEmpty", "leftObjectBetweenJaws", "rightObjectBetweenJaws",
+        "leftJawOpen", "rightJawOpen", "leftJawClosedOnObject", "rightJawClosedOnObject", "handsClear", "confidence"]
+
+    struct Failure: Error {
+        let code: String
+        let detail: String
+        let retryable: Bool
+    }
+
+    static func decode(_ response: String) throws -> ROBArmRoutineObservation {
+        guard response.utf8.count <= 4_000 else {
+            throw Failure(code: "oversized", detail: "Vision model response exceeded the camera assessment size limit.", retryable: false)
+        }
+        var json = response.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !json.isEmpty else {
+            throw Failure(code: "empty", detail: "The vision model returned an empty camera assessment.", retryable: true)
+        }
+        if json.hasPrefix("```") {
+            let lines = json.components(separatedBy: .newlines)
+            guard lines.count >= 3, ["```", "```json"].contains(lines[0].lowercased()), lines.last == "```" else {
+                throw Failure(code: "invalid_wrapper", detail: "The vision model returned an incomplete camera assessment.", retryable: true)
+            }
+            json = lines.dropFirst().dropLast().joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let data = Data(json.utf8)
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw Failure(code: "invalid_json", detail: "The vision model returned an unreadable camera assessment.", retryable: true)
+        }
+        // This schema has no string/nested values. Scan JSON string tokens for
+        // property names before decoding, since Foundation collapses duplicates.
+        let names = try NSRegularExpression(pattern: #""(?:[^"\\]|\\.)*"\s*:"#)
+        var seen: Set<String> = []
+        for match in names.matches(in: json, range: NSRange(json.startIndex..., in: json)) {
+            let token = (json as NSString).substring(with: match.range).dropLast().trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let name = try? JSONDecoder().decode(String.self, from: Data(token.utf8)), seen.insert(name).inserted else {
+                throw Failure(code: "duplicate_field", detail: "The vision model returned conflicting camera assessment fields.", retryable: false)
+            }
+        }
+        guard Set(object.keys) == keys else {
+            throw Failure(code: "schema", detail: "The vision model did not return all required camera assessment fields.", retryable: true)
+        }
+        let observation: ROBArmRoutineObservation
+        do { observation = try JSONDecoder().decode(ROBArmRoutineObservation.self, from: data) }
+        catch {
+            throw Failure(code: "value_type", detail: "The vision model returned invalid camera assessment values.", retryable: true)
+        }
+        guard observation.confidence.isFinite, (0 ... 1).contains(observation.confidence) else {
+            throw Failure(code: "confidence_range", detail: "The vision model returned an invalid confidence value.", retryable: false)
+        }
+        return observation
+    }
+
+    static func diagnosticSample(_ response: String) -> String {
+        String(String(response.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }).prefix(1_000))
     }
 }

@@ -48,7 +48,8 @@ struct ROBArmDemonstrationSample {
     var changed: ((Int) -> Void)?
     var replies: [String] = []
     var sequencesAtGate: [UInt64] = []
-    func observeArmWorkspace<Evidence>(target: String,
+    var formatRetries: [Bool] = []
+    func observeArmWorkspace<Evidence>(target: String, grippers: Bool = true, formatRetry: Bool = false,
         frameProvider: () async throws -> (jpeg: Data, evidence: Evidence)
     ) async throws -> (raw: String, evidence: Evidence) {
         try await Task.sleep(nanoseconds: gateDelay)
@@ -56,6 +57,7 @@ struct ROBArmDemonstrationSample {
         let frame = try await frameProvider()
         precondition(!frame.jpeg.isEmpty)
         calls += 1
+        formatRetries.append(formatRetry)
         changed?(calls)
         try await Task.sleep(nanoseconds: delay)
         return (replies[min(calls - 1, replies.count - 1)], frame.evidence)
@@ -87,7 +89,9 @@ extension ROBArmRoutineVision {
                 guard let self else { return }
                 if !self.paused {
                     self.sequence += 1
-                    if self.changing { self.value = self.value == 40 ? 180 : 40 }
+                    // Avoid a two-colour alias when a loaded test host skips
+                    // every other frame; every adjacent sample still changes.
+                    if self.changing { self.value = UInt8((self.sequence % 7) * 40) }
                     ROBArmRoutineVision.shared.fixtureFrame(sequence: self.sequence, value: self.value,
                         age: self.age, coverage: self.coverage, hands: self.hands)
                 }
@@ -98,11 +102,11 @@ extension ROBArmRoutineVision {
     func stop() { task?.cancel(); task = nil }
 }
 @main struct Tests {
-    @MainActor static func reply(clear: Bool) -> String {
+    @MainActor static func reply(clear: Bool, confidence: Double = 0.99) -> String {
         let observation: [String: Any] = ["pathVisible": clear, "pathClear": clear, "hanging": true, "armsInFront": true,
             "leftJawEmpty": true, "rightJawEmpty": true, "leftObjectBetweenJaws": false, "rightObjectBetweenJaws": false,
             "leftJawOpen": true, "rightJawOpen": true, "leftJawClosedOnObject": false, "rightJawClosedOnObject": false,
-            "handsClear": true, "confidence": 0.99]
+            "handsClear": true, "confidence": confidence]
         return String(data: try! JSONSerialization.data(withJSONObject: observation), encoding: .utf8)!
     }
     @MainActor static func run(_ name: String, blocked: String? = nil,
@@ -111,7 +115,7 @@ extension ROBArmRoutineVision {
         vision.setActive(true)
         let feed = Feed()
         engine.calls = 0; engine.gateDelay = 0; engine.delay = 240_000_000; engine.changed = nil
-        engine.replies = [reply(clear: true)]; engine.sequencesAtGate = []
+        engine.replies = [reply(clear: true)]; engine.sequencesAtGate = []; engine.formatRetries = []
         configure(feed, engine)
         feed.start()
         defer { feed.stop(); vision.setActive(false) }
@@ -128,6 +132,7 @@ extension ROBArmRoutineVision {
         print("Arm inspection: \(name) passed")
     }
     @MainActor static func main() async {
+        ROBArmObservationCodecFixtures.run()
         await run("GPU wait selects only new settled frames", configure: { _, engine in
             engine.gateDelay = 500_000_000
         }, verify: { result, engine in
@@ -147,7 +152,7 @@ extension ROBArmRoutineVision {
         }, verify: { result, engine in
             precondition(engine.calls == 2 && result?.permitsMotion == false, "An old clear answer authorized a new scene")
         })
-        await run("continuous changes cannot retry forever", blocked: "two camera inspections", configure: { feed, engine in
+        await run("continuous changes cannot retry forever", blocked: "second camera inspection", configure: { feed, engine in
             engine.changed = { _ in feed.value = feed.value == 40 ? 180 : 40 }
         }, verify: { _, engine in precondition(engine.calls == 2) })
         await run("unsettled view never reaches the model", blocked: "did not settle", configure: { feed, _ in
@@ -161,9 +166,36 @@ extension ROBArmRoutineVision {
         await run("an expired inspection image is rejected", blocked: "timed out", configure: { _, engine in
             engine.delay = 8_100_000_000
         })
-        await run("ambiguous answer is not retried as clear", blocked: "ambiguous", configure: { _, engine in
+        await run("Markdown wrapper preserves all facts without another model call", configure: { _, engine in
+            engine.replies = ["```json\n" + reply(clear: true) + "\n```"]
+        }, verify: { result, engine in precondition(result?.permitsMotion == true && engine.calls == 1) })
+        await run("unreadable answer retries once with a new independent assessment", configure: { _, engine in
+            engine.replies = ["not JSON", reply(clear: false)]
+        }, verify: { result, engine in
+            precondition(result?.permitsMotion == false && engine.calls == 2 && engine.formatRetries == [false, true])
+            precondition(engine.sequencesAtGate[1] > engine.sequencesAtGate[0])
+        })
+        await run("unreadable answers cannot authorize or retry forever", blocked: "automatic retry also failed", configure: { _, engine in
             engine.replies = ["not JSON"]
+        }, verify: { _, engine in
+            precondition(engine.calls == 2)
+            let health = ROBArmRoutineVision.shared.healthSnapshot()["inspection"] as! [String: Any]
+            precondition(health["response_error"] as? String == "invalid_json")
+            precondition(health["response_sample"] as? String == "not JSON")
+        })
+        await run("negative assessment is never retried for a favourable answer", configure: { _, engine in
+            engine.replies = [reply(clear: false), reply(clear: true)]
+        }, verify: { result, engine in precondition(result?.permitsMotion == false && engine.calls == 1) })
+        await run("low confidence is never retried for approval", configure: { _, engine in
+            engine.replies = [reply(clear: true, confidence: 0.5), reply(clear: true)]
+        }, verify: { result, engine in precondition(result?.permitsMotion == false && engine.calls == 1) })
+        await run("conflicting keys cannot authorize or retry", blocked: "conflicting", configure: { _, engine in
+            engine.replies = [reply(clear: true).replacingOccurrences(of: "{", with: "{\"pathClear\":false,")]
         }, verify: { _, engine in precondition(engine.calls == 1) })
+        await run("scene and format failures share a two-attempt limit", blocked: "second camera inspection", configure: { feed, engine in
+            engine.replies = ["not JSON", reply(clear: true)]
+            engine.changed = { call in if call == 2 { feed.value = 180 } }
+        }, verify: { _, engine in precondition(engine.calls == 2) })
         await run("a new camera epoch cannot accept an old answer", blocked: "cancel", configure: { _, engine in
             engine.changed = { _ in ROBArmRoutineVision.shared.setActive(false) }
         })
@@ -186,5 +218,6 @@ with tempfile.TemporaryDirectory(prefix='rob-arm-inspection-') as temporary:
     executable = folder / 'inspection-fixture'
     subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-parse-as-library',
                     '-module-cache-path', '/private/tmp/cerebro-swift-module-cache',
-                    str(ROOT / 'Cerebro/ROBArmRoutinePlan.swift'), str(source), '-o', str(executable)], check=True, timeout=120)
-    subprocess.run([str(executable)], check=True, timeout=45)
+                    str(ROOT / 'Cerebro/ROBArmRoutinePlan.swift'), str(ROOT / 'Tests/ROBArmObservationCodecFixtureTests.swift'),
+                    str(source), '-o', str(executable)], check=True, timeout=120)
+    subprocess.run([str(executable)], check=True, timeout=60)

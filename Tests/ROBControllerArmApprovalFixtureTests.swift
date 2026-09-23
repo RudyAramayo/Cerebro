@@ -93,6 +93,23 @@ final class ROBAmberGatewayClient: NSObject {
             check(executed == 1, "Acceptance replay after completion must not restart")
         }
 
+        // Poor-view travel is covered only by the wording the operator actually
+        // approved, never by a pending, old, ordinary or expired approval.
+        for supervised in [false, true] {
+            let b = broker()
+            var request: ROBRobotActionMessage?, done: ((NSDictionary) -> Void)?
+            b.send = { message, _, _ in if message.kind == .actionRequest { request = message }; return true }
+            _ = b.receive(hello, device: device, session: session)
+            let summary = "Prepare both arms. " + (supervised ? ROBControllerArmApproval.supervisedRouteNotice : "Check camera clearance first.")
+            b.request(operation: "prepare", arm: "both", summary: summary,
+                execute: { done = $0 }, cancel: {}, completion: { _ in })
+            check(!b.authorizesSupervisedArmRoute(), "Pending request cannot authorize degraded visibility")
+            _ = b.receive(reply(request!), device: device, session: session)
+            check(b.authorizesSupervisedArmRoute() == supervised, "Supervision scope must match the reviewed wording")
+            done?(["status": "completed"])
+            check(!b.authorizesSupervisedArmRoute(), "Supervision must end with the approved operation")
+        }
+
         // Rejection, expiry, decline, send failure, disconnect and lost opt-in.
         for scenario in ["reject", "expired", "claimed_complete", "disconnect_pending", "disconnect_running", "disabled", "cancel", "send_failed"] {
             let b = broker()

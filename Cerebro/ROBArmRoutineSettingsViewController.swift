@@ -11,11 +11,11 @@ import AppKit
         startup.state = UserDefaults.standard.bool(forKey: ROBArmRoutinePlan.startupDefaultsKey) ? .on : .off
         startup.target = self; startup.action = #selector(changeStartup)
         let explanation = NSTextField(wrappingLabelWithString:
-            "On launch or wake, request approval on Vision Pro or iPhone, then check the main face camera, bring both hanging arms into view, calibrate both empty grippers and open them. The arms stay ready in front. Planned arm travel takes about 21 seconds plus camera and gripper checks; automatic timing has not been verified on hardware.")
+            "One Vision Pro or iPhone approval covers the complete taught arm route under your supervision, including an incomplete camera view. Watch the arms and keep Stop + hold ready. Startup brings hanging arms forward, then checks, calibrates and opens both empty grippers. Planned arm travel takes about 21 seconds plus checks; automatic timing has not been verified on hardware.")
         let commands = NSTextField(wrappingLabelWithString:
             "Say or type ‘relax’ to lower the arms gently and turn off holding torque. ‘Grab this’ or ‘hold this’ brings the arms forward and attempts a gentle close when the camera sees the object between a gripper’s jaws. These commands are available without enabling startup calibration. Each complete operation needs one controller approval. Stop + hold is immediate.")
         let limitation = NSTextField(wrappingLabelWithString:
-            "‘Copy my pose’ records five seconds from the main camera. ‘Replay that movement’ performs a bounded symmetric rendition; ‘wave’ uses a small front-arm greeting. Full human pose copying and general reaching need validated geometry. Gripper acceptance is not force feedback.")
+            "‘Copy my pose’ records five seconds from the main camera. Replay and greeting use only the taught arm route and leave the grippers unchanged; confirm empty jaws when approving. Live camera, person/hand detection, motor feedback and Stop remain active. Full human pose copying and general reaching need validated geometry.")
         limitation.textColor = .secondaryLabelColor
         let buttons = NSStackView(views: [button("Run startup now", #selector(runStartup)),
             button("Prepare to grab", #selector(prepareArms)), button("Relax arms", #selector(relax)),

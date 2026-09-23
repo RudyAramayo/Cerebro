@@ -10,7 +10,16 @@ One approval covers the entire startup, prepare, grab/hold, or relax sequence:
 mode entry, all taught arm waypoints, both gripper calibrations when needed, and
 the intended final action. Relax returns along the taught route to measured
 hanging before deactivating. No additional approval is requested per waypoint
-or per gripper. The startup preference requests approval after launch/wake;
+or per gripper. Its supervised-route wording also covers incomplete camera
+visibility during taught arm travel. The operator confirms physical hanging at
+zero for a new session, watches clearance and keeps Stop + hold available.
+Only a live accepted request with that explicit wording grants this scope;
+ordinary, pending, completed or disconnected approvals do not. The scope covers
+the complete described operation, not future operations or arbitrary reaching.
+Motor feedback, current RGB-D frames, person/hand detection, route limits and
+Stop remain enforced. Startup/grab gripper calibration and closing still require
+a visible stationary jaw assessment. Supervised greeting/replay leave jaws unchanged.
+The startup preference requests approval after launch/wake;
 it does not grant unattended motion authority.
 
 Diagnostics and legacy Torso controls use the same controller approval service.

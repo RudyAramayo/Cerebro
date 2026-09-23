@@ -4,6 +4,8 @@ import Foundation
 /// measured result. No desktop alert, persisted grant, or per-waypoint prompt.
 @objcMembers final class ROBControllerArmApproval: NSObject {
     static let shared = ROBControllerArmApproval()
+    static let supervisedRouteNotice = "Supervised taught route: by approving, confirm both arms are physically hanging at zero for a new session, the route is clear and grippers are empty for a greeting. Watch the arms even if camera visibility is poor; keep Stop + hold ready. Gripper calibration and closing still require a camera check."
+    static let supervisedGreetingName = "Supervised greet: confirm hanging/clear route/empty jaws; watch despite poor view; neck scan, arms front, wave"
     private(set) var status = "Arm operations require approval on Vision Pro or iPhone"
     var isPending: Bool { pending != nil }
     @nonobjc var send: ((ROBRobotActionMessage, UUID, UUID) -> Bool)?
@@ -58,6 +60,16 @@ import Foundation
         guard let p = pending, p.started != nil, p.action == "play_gesture",
               p.arguments["gesture"] as? String == name, let peer = p.peer else { return false }
         return peerIsFresh(peer) && now().timeIntervalSince(p.started!) < 120
+    }
+
+    /// Only an active approval whose on-controller wording explicitly covers
+    /// operator-supervised travel may replace the semantic route inspection.
+    /// Never persist or infer this scope from a model's request or a preference.
+    func authorizesSupervisedArmRoute() -> Bool {
+        guard let p = pending, let started = p.started, let peer = p.peer,
+              peerIsFresh(peer), (0..<120).contains(now().timeIntervalSince(started)) else { return false }
+        return (p.action == "arm_operation" && p.summary.hasSuffix(Self.supervisedRouteNotice))
+            || (p.action == "play_gesture" && p.summary == Self.supervisedGreetingName)
     }
 
     private func request(action: String, arguments: NSDictionary, summary: String,

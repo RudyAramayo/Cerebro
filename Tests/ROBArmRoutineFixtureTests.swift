@@ -102,8 +102,8 @@ final class ROBArmRoutineVision {
     func healthSnapshot() -> NSDictionary { ["fixture": true] }
     var demonstrationSample: ROBArmDemonstrationSample?
     func setActive(_ active: Bool, teaching: Bool = false) {}
-    func observe(target: String, progress: (@MainActor (String) -> Void)? = nil) async throws -> ROBArmRoutineObservation {
-        ROBArmRoutineObservation(pathVisible: !blocked, pathClear: !blocked, hanging: true, armsInFront: true,
+    func observe(target: String, grippers: Bool = true, progress: (@MainActor (String) -> Void)? = nil) async throws -> ROBArmRoutineObservation {
+        ROBArmRoutineObservation(pathVisible: !blocked, pathClear: !blocked, hanging: true, armsInFront: !blocked,
             leftJawEmpty: !objectInRight, rightJawEmpty: !objectInRight,
             leftObjectBetweenJaws: false, rightObjectBetweenJaws: objectInRight,
             leftJawOpen: true, rightJawOpen: true, leftJawClosedOnObject: false, rightJawClosedOnObject: objectInRight,
@@ -236,8 +236,13 @@ final class ROBArmRoutineVision {
         precondition(unknown["status"] as? String == "blocked" && !g.commands.contains { $0.hasPrefix("waypoint") || $0.hasPrefix("position_mode") })
         g.q["left"] = zero; v.blocked = true; g.commands = []
         let occluded = await run("startup")
-        precondition(occluded["status"] as? String == "blocked" && !g.commands.contains { $0.hasPrefix("position_mode") })
-        v.blocked = false; g.commands = []
+        precondition(occluded["status"] as? String == "blocked")
+        precondition(g.commands.filter { $0.hasPrefix("waypoint") }.count == 12,
+                     "Explicit controller supervision did not allow the taught route in poor visibility")
+        precondition(!g.commands.contains { $0.hasPrefix("calibrate") || $0.hasPrefix("gripper_") },
+                     "Poor jaw visibility allowed a gripper operation")
+        precondition(!ROBControllerArmApproval.shared.authorizesSupervisedArmRoute(), "Supervision survived completion")
+        v.blocked = false; g.q = ["left": zero, "right": zero]; g.mode = ["left": 0, "right": 0]; g.commands = []
         let startup = await run("startup")
         precondition(startup["status"] as? String == "completed", startup.description)
         precondition(g.commands.filter { $0.hasPrefix("calibrate:") }.count == 2)
@@ -246,11 +251,13 @@ final class ROBArmRoutineVision {
         precondition(g.mode.values.allSatisfy { $0 == 2 })
         print("Startup: both arms reached front before either gripper calibration")
 
-        g.commands = []
+        g.commands = []; v.blocked = true
         let wave = await run("wave")
         precondition(wave["status"] as? String == "completed" && wave["measured"] as? Bool == true)
         precondition(g.commands.filter { $0.hasPrefix("waypoint") }.count == 8)
         precondition(!g.commands.contains { $0.hasPrefix("calibrate") }, "Greeting repeated gripper calibration")
+        precondition(!g.commands.contains { $0.hasPrefix("gripper_") }, "Supervised gesture unexpectedly moved a jaw")
+        v.blocked = false
         precondition(g.q.allSatisfy { ROBArmRoutinePlan.near($0.value, ROBArmRoutinePlan.target(index: 6, physicalLeft: $0.key == "right")!) })
         print("Greeting: locally timed paired motion returned to the measured front pose")
         // Camera-only capture must produce a reusable clip without emitting a

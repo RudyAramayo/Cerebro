@@ -11,7 +11,11 @@ commands, including “relax”, “grab this” and “hold this”. Negations,
 
 Every complete startup, prepare/grab/hold, or relax operation now requires **one
 Approve decision on the connected Vision Pro or iPhone**, including both gripper
-calibrations where needed. No arm-mode or gripper confirmation opens on the
+calibrations where needed. The approval now explicitly covers operator-supervised
+travel on the already taught route despite incomplete camera visibility. It asks
+the operator to confirm physical hanging at zero for a new session, clear the
+route, watch the arms and keep Stop + hold ready. This scope lasts only for the
+approved operation and authenticated controller session. No arm-mode or gripper confirmation opens on the
 droid's monitor. Stop + hold is immediate. See [headless arm approval](headless-arm-approval.md)
 for connection, timeout and cancellation behavior.
 
@@ -40,22 +44,28 @@ the segment instead of adding an unconditional delay afterward. There is no
 measured peak speed, acceleration, jerk or torque claim. Missing vendor velocity
 is never replaced by zero.
 
-Startup verifies camera-observed hanging at encoder zero for the authenticated
-controller session. It preserves the commissioned B1/URDF references. This is a
+Startup verifies measured encoder zero and uses the controller operator's
+explicit confirmation of physical hanging for the authenticated session. An
+ordinary approval without the supervised-route wording still requires camera
+confirmation. It preserves the commissioned B1/URDF references. This is a
 bounded startup readiness routine, **not a new seven-joint visual offset fit**.
 The separately recorded folded pose is not part of this route. An unknown pose,
-off-route wrist/elbow, new session away from hanging, or ambiguous view blocks
-motion. Interrupted positions on the taught segments can return along that
+off-route wrist/elbow or new session away from hanging blocks motion.
+Interrupted positions on the taught segments can return along that
 same corridor within the verified session.
 
 The main face RGB-D camera owns arm inspection and runs independently of preview
 visibility and optional detector settings. The belly stream is not required or
-included in an arm observation. The main view must show the **complete** route,
-including both arms and nearby obstacles; a cropped or occluded hanging arm
-still blocks activation. During a routine the main camera requests 640×400,
+included in an arm observation. The current RGB-D stream and independent
+person/hand detector remain active during travel, but an explicitly supervised
+taught route does not wait for the language model to judge the whole route or
+reject travel because a hanging arm is cropped. The operator observes clearance;
+absence of a detection is not proof of no collision. During a routine the main camera requests 640×400,
 then restores normal capture demand.
-An explicit recording resolution retains priority. A read-only local MLX inspection requires visible,
-clear arm paths; missing/occluded evidence blocks. The input frames retain their
+An explicit recording resolution retains priority. Once the arms are stationary
+in front, a read-only local MLX inspection requires both grippers to be visible,
+hands clear and empty jaws before calibration. A cropped hanging route does not
+invalidate a stationary jaw assessment. The input frames retain their
 capture times and sequence, old inference is rejected, and scene changes veto
 the result. Inspection acquires the vision model/GPU slot before selecting
 pixels, then waits for three new frames captured after settling began, spanning
@@ -68,14 +78,31 @@ one fresh, settled inspection is attempted under the same controller approval.
 The existing 2.5% thumbnail-change veto, 700 ms current-frame bound, eight-second
 inspection-image bound and 90-second operation deadline remain in place. No
 brightness correction or weaker collision criterion is introduced. A second
-changed view, missing depth, stale/frozen stream, cancellation or ambiguous
-answer still stops the operation. Status messages show the reinspection; failure
+changed view, missing depth, stale/frozen stream or cancellation
+still stops the operation. Status messages show the reinspection; failure
 results include camera health and the last measured change fraction/source age.
+
+The vision prompt includes the complete JSON schema and requests a compact
+answer with a 320-token ceiling. The decoder accepts one complete JSON object,
+optionally enclosed in a single Markdown JSON fence. It never invents missing
+facts, converts strings/numbers into booleans, extracts a favourable object from
+prose, or accepts duplicate keys. A malformed/incomplete response gets one fresh
+inspection with a format reminder, sharing the same two-attempt budget as scene
+changes. A valid negative or low-confidence assessment is never retried to seek
+a more favourable answer. Camera freshness, hand/person vetoes, measured motor
+feedback, ownership, route/timing bounds, cancellation and controller liveness
+remain mandatory. Decode failures record a bounded, single-line model response and
+specific failure code in camera health and the local log. User-visible failures
+distinguish an unreadable model reply from missing route visibility, clearance,
+or confidence; they no longer call a JSON decoding failure an ambiguous scene.
 
 `python3 Tests/ROBArmInspectionRuntimeTests.py` runs the production inspector with
 synthetic frames and an inert model, including GPU wait ordering, settling,
 discarding a changed-scene answer, the single retry limit, stale/frozen frames,
-missing depth, cancellation/epoch changes and the independent hand veto.
+missing depth, cancellation/epoch changes and the independent hand veto. It also
+runs the response-codec fixtures and checks wrapper handling, strict field/type
+validation, duplicate-key rejection, the shared retry budget and preservation
+of negative/low-confidence observations.
 `bash Scripts/test-arm-routines.sh` checks the controller-approved coordinator
 without hardware. These fixtures do not establish physical clearance.
 
@@ -84,6 +111,14 @@ phase installed the update in `/Applications/Cerebro.app`, and Cerebro was
 restarted to load it. The supervised Prepare retry ended before inspection with
 “Connect Vision Pro or iPhone and enable Action Approvals.” No new arm motion
 ran; successful physical preparation remains unverified for this change.
+
+The subsequent supervised-route build passed the production coordinator,
+controller approval, show rehearsal and camera response fixtures, including
+taught travel with an obscured semantic view and refusal of unseen jaw motion.
+It was installed and restarted from `/Applications/Cerebro.app`. The first
+supervised Prepare request also ended before motion because no connected
+controller offered Action Approvals; physical execution still requires the
+operator's live controller decision.
 
 A separate Vision hand detector, current depth coverage, stationary
 neck view, current per-motor CAN replies and a 1.5-second gateway lease supervise
@@ -100,6 +135,13 @@ operation before any activation. Camera content and stage dialogue cannot grant
 that authority. Treads, flippers and linear-actuator output are held at zero with
 brakes during the physical routine; torso arming is refused. Neck view changes
 invalidate the camera check and stop the arm route.
+
+Supervised `wave`, recorded replay and the arm part of look-and-greet move only
+the taught waypoints and leave the grippers unchanged. The approval explicitly
+asks the operator to confirm empty jaws. These gestures do not wait for a VLM
+route or jaw assessment. Startup/prepare/grab still perform their camera-checked
+gripper work after measured arrival in front. If the jaw check fails, the arms
+remain in front without a blind calibration or close.
 
 Only after both arms arrive in front does the routine calibrate the physical
 right and left grippers, one at a time, then open them at vendor intensity 10.

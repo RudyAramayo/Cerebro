@@ -9,7 +9,7 @@ import CryptoKit
     static let changed = Notification.Name("ROBShowMotionDidChange")
     static let scanID = "show.neck-scan.v1"
     static let greetingID = "show.look-and-greet.v1"
-    static let greetingSummary = "Greet v1: neck upright +/-10deg, center; arms forward, calibrate/open both empty grippers, small greeting; end front"
+    static let greetingSummary = ROBControllerArmApproval.supervisedGreetingName
     private(set) var isRunning = false
     private(set) var status = "Rehearse a bounded look, then an arm greeting with your controller."
     private(set) var lastReceiptPath = ""

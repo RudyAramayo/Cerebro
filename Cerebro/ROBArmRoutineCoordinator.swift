@@ -36,6 +36,7 @@ enum ROBArmRoutineError: LocalizedError {
     private var deadline = 0.0
     private var failure: String?
     private var superviseCamera = false
+    private var supervisedRoute = false
     private var moving = false
     private var completion: ((NSDictionary) -> Void)?
     private var startupTicket: UUID?
@@ -50,6 +51,7 @@ enum ROBArmRoutineError: LocalizedError {
          "camera_ready": vision.fresh, "camera_detail": vision.readinessDescription,
          "motion_owner": "local coordinator; paired arms and bounded segments",
          "corridor_revision": ROBArmRendition.revision,
+         "route_supervision": "One explicit controller approval covers the taught route despite incomplete camera visibility. Operator watches clearance; live camera, hand/person veto, motor feedback and Stop remain active. Grippers require a stationary camera assessment.",
          "limits": "Fixed hanging/front corridor only. Teach/replay maps symmetric relative lift order; no general human joint copying, arbitrary reach or full-environment collision guarantee. Empty jaws required for greetings/replay.",
          "gripper_completion": "command acceptance and visual observations; force and secure grasp unverified"]
     }
@@ -123,11 +125,12 @@ enum ROBArmRoutineError: LocalizedError {
         if command == "replay" && rendition == nil {
             completion(["status": "blocked", "detail": "Record a body demonstration first, or select a clip_id returned by robot_capabilities."]); return
         }
-        let summary: String
+        var summary: String
         if let rendition {
-            summary = "\(rendition.name): prepare both arms and empty grippers, then replay \(rendition.waypoints.count) bounded front-corridor steps. This is a symmetric rendition, not a full human joint copy. Both arms end in front."
+            summary = "\(rendition.name): move both arms along the taught route, then replay \(rendition.waypoints.count) bounded front-corridor steps. Grippers stay unchanged; confirm they are empty. Both arms end in front."
         } else if command == "relax" { summary = "Return both arms gently to hanging, then deactivate position mode." }
         else { summary = "\(command.capitalized): bring both arms forward, calibrate both empty grippers if needed, and \(command == "grab" || command == "hold" ? "attempt a camera-checked grip of \(String(target.prefix(160)))" : "leave both grippers open")." }
+        summary += " " + ROBControllerArmApproval.supervisedRouteNotice
         setStatus("Awaiting Vision Pro or iPhone approval: \(summary)")
         ROBControllerArmApproval.shared.request(operation: rendition == nil ? command : "gesture", arm: "both", summary: summary,
             execute: { [weak self] done in
@@ -230,6 +233,7 @@ enum ROBArmRoutineError: LocalizedError {
         }
         startupTicket = nil
         activeRendition = rendition
+        supervisedRoute = ROBControllerArmApproval.shared.authorizesSupervisedArmRoute()
         owner = id; isRunning = true; activeCommand = command; failure = nil; self.completion = completion
         deadline = ProcessInfo.processInfo.systemUptime + 90
         superviseCamera = false; moving = false; generation = 0
@@ -278,6 +282,9 @@ enum ROBArmRoutineError: LocalizedError {
     private func check() throws {
         try Task.checkCancellation()
         if let failure { throw ROBArmRoutineError.blocked(failure) }
+        if supervisedRoute && !ROBControllerArmApproval.shared.authorizesSupervisedArmRoute() {
+            throw ROBArmRoutineError.blocked("Controller supervision ended; an arm hold was requested.")
+        }
         if activeCommand != "teach", generation == 0, !gateway.isReady(),
            let connectionFailure = ROBAmberGatewayTunnel.shared.failureDetail {
             throw ROBArmRoutineError.blocked(connectionFailure)
@@ -339,17 +346,22 @@ enum ROBArmRoutineError: LocalizedError {
         }
     }
 
-    @MainActor private func inspect(target: String, calibration: Bool = false) async throws -> ROBArmRoutineObservation {
+    @MainActor private func inspect(target: String, calibration: Bool = false, grippers: Bool = true) async throws -> ROBArmRoutineObservation {
         moving = false
-        let observation = try await vision.observe(target: target) { [weak self] detail in
+        let observation = try await vision.observe(target: target, grippers: grippers) { [weak self] detail in
             self?.setStatus(detail)
         }
         try check()
-        guard observation.permitsMotion, vision.handsClear,
-              !calibration || observation.permitsCalibration else {
-            throw ROBArmRoutineError.blocked(calibration
-                ? "Both grippers must be visible and empty in front, with hands clear, before calibration."
-                : "The cameras cannot confirm the complete arm path is visible and clear.")
+        if grippers {
+            guard observation.permitsGripperInspection else {
+                throw ROBArmRoutineError.blocked("Arms are held in front. The camera must see both grippers with hands clear before jaw movement; the arm route itself does not need to be visible.")
+            }
+        } else if let reason = observation.motionBlockReason { throw ROBArmRoutineError.blocked(reason) }
+        guard vision.handsClear else {
+            throw ROBArmRoutineError.blocked("The live camera detector cannot confirm person and hand clearance. Keep hands away from the arms and grippers.")
+        }
+        if calibration && !observation.permitsCalibration {
+            throw ROBArmRoutineError.blocked("Both grippers must be visible and empty in front, with hands clear, before calibration.")
         }
         return observation
     }
@@ -393,24 +405,36 @@ enum ROBArmRoutineError: LocalizedError {
             throw ROBArmRoutineError.blocked("Inspection cameras are not ready. \(vision.readinessDescription).")
         }
         superviseCamera = true
-        setStatus("Inspecting the complete arm path in the main camera")
-        let observation = try await inspect(target: target)
         let atHanging = arms.allSatisfy { arm in
             (try? measured(arm)).map { ROBArmRoutinePlan.near($0, Array(repeating: 0, count: 7)) } == true
         }
-        guard !atHanging || observation.hanging else {
-            referencedGeneration = 0; calibratedGeneration = 0
-            throw ROBArmRoutineError.blocked("Encoder zero does not match visually hanging arms; the session datum is invalid.")
-        }
-        if referencedGeneration != generation {
-            guard observation.hanging, atHanging else {
-                throw ROBArmRoutineError.blocked("A new controller session needs camera-observed hanging arms at encoder zero. The B1 calibration was preserved.")
+        if supervisedRoute {
+            try check()
+            guard vision.handsClear else { throw ROBArmRoutineError.blocked("A person or hand is too close to the arms. Clear the route before supervised movement.") }
+            if referencedGeneration != generation {
+                guard atHanging else {
+                    throw ROBArmRoutineError.blocked("A new arm session must start at measured hanging zero with the operator confirming the physical pose. No unverified datum was accepted.")
+                }
+                referencedGeneration = generation
             }
-            referencedGeneration = generation
+            setStatus("Controller-approved taught route; operator watching clearance")
+        } else {
+            setStatus("Inspecting the complete arm path in the main camera")
+            let observation = try await inspect(target: target, grippers: false)
+            guard !atHanging || observation.hanging else {
+                referencedGeneration = 0; calibratedGeneration = 0
+                throw ROBArmRoutineError.blocked("Encoder zero does not match visually hanging arms; the session datum is invalid.")
+            }
+            if referencedGeneration != generation {
+                guard observation.hanging, atHanging else {
+                    throw ROBArmRoutineError.blocked("A new controller session needs camera-observed hanging arms at encoder zero. The B1 calibration was preserved.")
+                }
+                referencedGeneration = generation
+            }
         }
         if command == "relax", routes.values.allSatisfy(\.isEmpty) {
             try await deactivateAtHanging()
-            return ["status": "completed", "detail": "Both arms are at observed hanging zero and inactive."]
+            return ["status": "completed", "detail": "Both arms are at measured hanging zero and inactive."]
         }
         for arm in arms {
             let modes = gateway.modes(forArm: arm).map(\.intValue)
@@ -425,6 +449,13 @@ enum ROBArmRoutineError: LocalizedError {
         if command == "relax" {
             try await deactivateAtHanging()
             return ["status": "completed", "detail": "Both arms reached hanging zero gently and are inactive."]
+        }
+        if let rendition = activeRendition, supervisedRoute {
+            guard rendition.isValid else { throw ROBArmRoutineError.blocked("The taught rendition is invalid.") }
+            try await moveRoutes(Dictionary(uniqueKeysWithValues: arms.map { ($0, rendition.waypoints) }),
+                                 detail: "Replaying taught gesture under controller supervision")
+            return ["status": "completed", "measured": true, "clip_id": rendition.id,
+                "detail": "Both arms completed the taught gesture and reached the front pose under controller supervision. Grippers were unchanged; camera clearance was not certified."]
         }
         setStatus("Checking both grippers in front")
         let inFront = try await inspect(target: target, calibration: calibratedGeneration != generation)
@@ -599,7 +630,7 @@ enum ROBArmRoutineError: LocalizedError {
             ROBAmberArmMotionArbiter.shared.release(.left, owner: owner)
             ROBAmberArmMotionArbiter.shared.release(.right, owner: owner)
         }
-        owner = nil; activeRendition = nil; isRunning = false; task = nil; moving = false; superviseCamera = false
+        owner = nil; activeRendition = nil; isRunning = false; task = nil; moving = false; superviseCamera = false; supervisedRoute = false
         setStatus(result["detail"] as? String ?? "Arm routine ended")
         let callback = completion; completion = nil; callback?(result)
     }

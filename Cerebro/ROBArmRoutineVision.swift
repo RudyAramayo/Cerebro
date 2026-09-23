@@ -249,15 +249,18 @@ final class ROBArmRoutineVision {
         throw ROBArmRoutineError.blocked("The camera view did not settle within 3 seconds. Keep the workspace still and retry; no new motion was sent.")
     }
 
-    func observe(target: String, progress: (@MainActor (String) -> Void)? = nil) async throws -> ROBArmRoutineObservation {
+    func observe(target: String, grippers: Bool = true, progress: (@MainActor (String) -> Void)? = nil) async throws -> ROBArmRoutineObservation {
         let token = try inspectionEpoch()
-        // One changed scene gets one fresh inspection under the same operation
-        // approval. Discard the old answer; never reuse it with newer pixels.
+        // One shared retry budget for a changed scene or unreadable response.
+        // Never retry an actual negative/uncertain observation to seek approval.
+        var formatRetry = false
         for attempt in 1...2 {
             try Task.checkCancellation()
-            await progress?(attempt == 1 ? "Waiting for a steady main-camera view" : "Scene changed; checking a fresh steady view once more")
+            await progress?(attempt == 1 ? "Waiting for a steady main-camera view"
+                : formatRetry ? "Vision reply was incomplete; checking a fresh view once more"
+                : "Scene changed; checking a fresh steady view once more")
             recordInspection(["attempt": attempt, "phase": "waiting_for_model_and_steady_view"])
-            let result = try await ROBMLXEngine.shared.observeArmWorkspace(target: String(target.prefix(160))) {
+            let result = try await ROBMLXEngine.shared.observeArmWorkspace(target: String(target.prefix(160)), grippers: grippers, formatRetry: formatRetry) {
                 let face = try await self.settledInspectionFrame(epoch: token)
                 guard let cg = self.context.createCGImage(face.image, from: face.image.extent),
                       let jpeg = NSBitmapImageRep(cgImage: cg).representation(using: .jpeg, properties: [.compressionFactor: 0.8]) else {
@@ -279,17 +282,33 @@ final class ROBArmRoutineVision {
                 throw ROBArmRoutineError.blocked("The inspected camera view changed.")
             }
             let age = Date().timeIntervalSince1970 * 1000 - face.capturedAt
-            recordInspection(["attempt": attempt, "phase": changed < 0.025 ? "steady" : "scene_changed",
+            var diagnostics: [String: Any] = ["attempt": attempt, "phase": changed < 0.025 ? "steady" : "scene_changed",
                 "source_sequence": NSNumber(value: face.sequence), "current_sequence": NSNumber(value: current.sequence),
-                "source_age_ms": age, "changed_fraction": changed, "limit": 0.025])
+                "source_age_ms": age, "changed_fraction": changed, "limit": 0.025]
+            recordInspection(diagnostics)
             NSLog("Arm camera inspection %d: %.1f%% changed, %.0f ms source age", attempt, changed * 100, age)
             guard changed < 0.025 else { continue }
-            let data = Data(result.raw.trimmingCharacters(in: .whitespacesAndNewlines).utf8)
-            guard data.count < 4000, let observation = try? JSONDecoder().decode(ROBArmRoutineObservation.self, from: data) else {
-                throw ROBArmRoutineError.blocked("Camera inspection was ambiguous; the arms remain held.")
+            do {
+                let observation = try ROBArmObservationCodec.decode(result.raw)
+                diagnostics["phase"] = "decoded"
+                diagnostics["motion_block_reason"] = observation.motionBlockReason ?? ""
+                diagnostics["confidence"] = observation.confidence
+                diagnostics["response_sample"] = ROBArmObservationCodec.diagnosticSample(result.raw)
+                recordInspection(diagnostics)
+                NSLog("Arm camera assessment: %@", ROBArmObservationCodec.diagnosticSample(result.raw))
+                return observation
+            } catch let issue as ROBArmObservationCodec.Failure {
+                let sample = ROBArmObservationCodec.diagnosticSample(result.raw)
+                diagnostics["phase"] = "invalid_model_response"
+                diagnostics["response_error"] = issue.code
+                diagnostics["response_detail"] = issue.detail
+                diagnostics["response_sample"] = sample
+                recordInspection(diagnostics)
+                NSLog("Arm camera response rejected (%@), attempt %d: %@", issue.code, attempt, sample)
+                if attempt == 1, issue.retryable { formatRetry = true; continue }
+                throw ROBArmRoutineError.blocked("\(issue.detail)\(attempt == 2 ? " The automatic retry also failed." : "") No further arm movement was requested.")
             }
-            return observation
         }
-        throw ROBArmRoutineError.blocked("The workspace kept changing across two camera inspections. Keep people and objects clear and retry; no new motion was sent.")
+        throw ROBArmRoutineError.blocked("The scene changed during the second camera inspection; no further arm movement was requested.")
     }
 }
