@@ -89,6 +89,17 @@ It cannot cancel an already dispatched vendor trajectory or move an
 unreachable motor to a safe pose. The failed probe and earlier unverified
 downstream readbacks are excluded from any offset fit.
 
+The [deployment verification](evidence/2026-09-22-right-arm/feedback-fix-deployment.json)
+records the installed gateway/app commits, signed build, 51 gateway tests on
+both hosts, client/manual runtime checks and a post-update CSV. Only the gateway
+service restarted; core PIDs were unchanged. After a follow-up interval with
+no left replies, the live app again showed all 16 device replies current.
+Read-only mode queries showed all 14 joints inactive; final two-second sample
+ages were below 10 ms. No motion was sent during installation/verification.
+The operator then reported the right arm hanging and clear after applying
+DeoxIT and reconnecting the connectors. Cable treatment is an operator report,
+not an established root-cause diagnosis or durability test.
+
 ## Camera references
 
 The following completed recordings remain local under

@@ -1,0 +1,98 @@
+{
+  "gatewayCommit": "17517e20f0c0d4e4bc4464a3e5486ae0be1e7d03",
+  "appCommit": "bc5bb1947ee7931ee5240355820591ce36532983",
+  "validation": {
+    "gatewayUnitTestsOnMac": 51,
+    "gatewayUnitTestsOnAmber": 51,
+    "swiftCompatibilityRuntime": "passed",
+    "manualSDKTests": 12,
+    "manualAdmissionRuntime": "passed, fake SDK and gateway; no robot I/O",
+    "diagnosticsUIStatic": "passed",
+    "macOSDebugBuild": "passed",
+    "macOSCodeSignatureVerified": true,
+    "archiveChecks": "14 CSV hashes, row counts and physical-side bindings; 15 probes; three recording manifests and local inventories verified"
+  },
+  "gatewayDeployment": {
+    "core_processes_before": "2705 ./amber_core_R\n4331 ./amber_core_L\n",
+    "core_processes_after": "2705 ./amber_core_R\n4331 ./amber_core_L\n",
+    "installed_sha256": {
+      "PROTOCOL.md": "aeb29cf6764580c35e5b90b681725c44db10915bbb5174f6bd9ce803edfa1c29",
+      "rob_amber_gateway.py": "703d1ba0e8956f8ae54693fd5d1442c51dcf84d9bb9a5ff716a17ad981703eb6",
+      "test_rob_amber_gateway.py": "dbdaed83e641f609a6a941a7304bfd9de6835c2c0b2f1f5116206e25d04bdcfd"
+    },
+    "previous_gateway_sha256": "adf88674dfe4e5228e5d4ebd7bdec41395f0b5d26625080a0fb96f8fcab460ee",
+    "backup": "/home/amber/rob_gateway_staging/2026-09-22-can-feedback/pre-update",
+    "service": {
+      "MainPID": "4718",
+      "NRestarts": "0",
+      "ActiveState": "active",
+      "SubState": "running"
+    },
+    "restarted": [
+      "rob-amber-gateway.service"
+    ],
+    "arm_mode_or_motion_commands_sent": false
+  },
+  "appDeployment": {
+    "appCommit": "bc5bb1947ee7931ee5240355820591ce36532983",
+    "installedPath": "/Users/rob/Library/Developer/Xcode/DerivedData/Cerebro-fsgbedtgzhrpmcdbaftxyqzxpjlg/Build/Products/Debug/Cerebro.app",
+    "previousAppBackup": "/private/tmp/Cerebro-before-can-feedback-8eff7b8.app",
+    "macOSCodeHashes": {
+      "Contents/MacOS/Cerebro": "0577aa9e62e377d650907c3d930fd68da553f8bb99592af514e2ffc99d2c82e5",
+      "Contents/MacOS/Cerebro.debug.dylib": "d665a4316b9304a8b8133acee612b76afb29e93a20be70193729c8ea12856493",
+      "Contents/MacOS/__preview.dylib": "36fc949a1066d21e3258948a36ce0bf2b26a81b92c1ffb06524e2f0cee303713"
+    },
+    "codesignVerified": true,
+    "unrelatedStoryboardPreserved": true
+  },
+  "passiveListenerCheck": {
+    "diagnosticFramesSent": 0,
+    "physicalRight": "All eight kernel-timestamped device replies were current",
+    "physicalLeft": "No device replies at the follow-up capture; new monitor returned eight unknown ages",
+    "referenceCaptureLocalPath": "/private/tmp/rob-amber-can-timestamps-readonly.json",
+    "referenceCaptureSHA256": "09658dd3b97bd236fd85317482d768259ebb0ec2161aef2a592ab8015e7b71ef"
+  },
+  "motionCalibrationResumed": false,
+  "liveAppVerification": {
+    "connected": true,
+    "all14JointModeQueries": "inactive",
+    "all16DeviceRepliesCurrent": true,
+    "modeQueryTimesLocal": [
+      "2026-09-22T21:59:30.975-07:00",
+      "2026-09-22T21:59:42.421-07:00"
+    ],
+    "csv": {
+      "path": "post-update-feedback.csv.gz",
+      "gzipSHA256": "9b849a0783be2cde3e95c22a5086dda23fd05c0624f27bbb16186b6a7bf57ff9",
+      "uncompressedSHA256": "c6ea53728ef1579d0c18d6485d1e920f117b85d815f46e9d435c4a4864bf9718",
+      "rows": 24486
+    },
+    "arms": {
+      "left": {
+        "lastReceivedAt": "2026-09-23T05:00:14.188000+00:00",
+        "lastTwoSecondsRows": 280,
+        "maximumAgesMilliseconds": {
+          "sample_age_ms": 9.304398,
+          "controller_sample_age_ms": 9.304398,
+          "joint_feedback_age_ms": 5.42603,
+          "gripper_feedback_age_ms": 5.147964
+        },
+        "allSevenStatuses": 0,
+        "missingJointRowsInFullExport": 0
+      },
+      "right": {
+        "lastReceivedAt": "2026-09-23T05:00:14.188000+00:00",
+        "lastTwoSecondsRows": 280,
+        "maximumAgesMilliseconds": {
+          "sample_age_ms": 9.512324,
+          "controller_sample_age_ms": 9.512324,
+          "joint_feedback_age_ms": 6.531923,
+          "gripper_feedback_age_ms": 5.28854
+        },
+        "allSevenStatuses": 0,
+        "missingJointRowsInFullExport": 0
+      }
+    },
+    "motionCommandsSent": false
+  }
+}
