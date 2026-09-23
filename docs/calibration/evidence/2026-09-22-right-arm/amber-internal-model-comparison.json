@@ -1,0 +1,860 @@
+{
+  "purpose": "Read-only comparison of Amber internal Drake configuration and the whole-robot Cerebro URDF. No model or launch settings deployed.",
+  "observedAt": "2026-09-23T05:55:24.594192+00:00",
+  "cerebroModelPath": "Cerebro/Resources/ShadowPlanner/model.urdf",
+  "cerebroModelSHA256": "c4a5c1bee9a9a0a6cca6ecdba9433f98ab647eea3084fb462ff592a0a0ea1e03",
+  "physicalRoutingVerified": {
+    "right": "L-10 / can10 / UDP26001",
+    "left": "R-11 / can11 / UDP26002"
+  },
+  "arms": [
+    {
+      "physicalArm": "right",
+      "core": "L-10",
+      "launchPath": "/home/amber/L-10/launch.json",
+      "launchSHA256": "baea5d73603f3e44eb603fde26c8d06268e2949b1adc4fb880f65a73a901f572",
+      "configuredURDFPath": "/home/amber/L-10/urdf/dual_b1/DualArmL.urdf",
+      "configuredURDFSHA256": "e792056cea50b24172c29b6d66b6d7161550338be9ef63fc0936e38a6cffcb1e",
+      "repoURDFSHA256": "24f6d1bf064306d3b83867b5939e66a8e1ee7a1765782e881285ef4266da6660",
+      "configuredAndRepoURDFLinesIdentical": true,
+      "byteDifference": "Final line termination differs; parsed joint definitions agree.",
+      "solver": {
+        "Enable": true,
+        "Type": "Drake",
+        "ITER": 1000,
+        "EPS": 0.001,
+        "URDF_Path": "./urdf/dual_b1/DualArmL.urdf",
+        "Base_Name": "base_link",
+        "EEF_Name": "Lseven_Link",
+        "Rotation_Direction": [
+          1,
+          -1,
+          1,
+          -1,
+          1,
+          -1,
+          1
+        ],
+        "IgnoreRuckig": 0.05
+      },
+      "robotDirection": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "robotDOF": 7,
+      "udpPort": 26001,
+      "coreJoints": [
+        {
+          "name": "Lone",
+          "type": "revolute",
+          "origin": {
+            "xyz": "0 -0.13364 0.061738",
+            "rpy": "1.138 0 0"
+          },
+          "parent": {
+            "link": "base_link"
+          },
+          "child": {
+            "link": "Lone_Link"
+          },
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "limit": {
+            "lower": "-2.09",
+            "upper": "2.09",
+            "effort": "100000",
+            "velocity": "1000000"
+          }
+        },
+        {
+          "name": "Ltwo",
+          "type": "revolute",
+          "origin": {
+            "xyz": "0 0 0.0853",
+            "rpy": "-1.5708 0 0"
+          },
+          "parent": {
+            "link": "Lone_Link"
+          },
+          "child": {
+            "link": "Ltwo_Link"
+          },
+          "axis": {
+            "xyz": "0 0 -1"
+          },
+          "limit": {
+            "lower": "-2.09",
+            "upper": "2.09",
+            "effort": "100000",
+            "velocity": "1000000"
+          }
+        },
+        {
+          "name": "Lthree",
+          "type": "revolute",
+          "origin": {
+            "xyz": "0 -0.1289 0",
+            "rpy": "1.5708 0 0"
+          },
+          "parent": {
+            "link": "Ltwo_Link"
+          },
+          "child": {
+            "link": "Lthree_Link"
+          },
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "limit": {
+            "lower": "-2.09",
+            "upper": "2.09",
+            "effort": "100000",
+            "velocity": "1000000"
+          }
+        },
+        {
+          "name": "Lfour",
+          "type": "revolute",
+          "origin": {
+            "xyz": "0 0 0.0853000000000002",
+            "rpy": "1.5707963267949 0 0"
+          },
+          "parent": {
+            "link": "Lthree_Link"
+          },
+          "child": {
+            "link": "Lfour_Link"
+          },
+          "axis": {
+            "xyz": "0 0 -1"
+          },
+          "limit": {
+            "lower": "-2.09",
+            "upper": "2.09",
+            "effort": "100000",
+            "velocity": "1000000"
+          }
+        },
+        {
+          "name": "Lfive",
+          "type": "revolute",
+          "origin": {
+            "xyz": "0 0.1251 0",
+            "rpy": "-1.5708 0 0"
+          },
+          "parent": {
+            "link": "Lfour_Link"
+          },
+          "child": {
+            "link": "Lfive_Link"
+          },
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "limit": {
+            "lower": "-2.09",
+            "upper": "2.09",
+            "effort": "100000",
+            "velocity": "1000000"
+          }
+        },
+        {
+          "name": "Lsix",
+          "type": "revolute",
+          "origin": {
+            "xyz": "0 0 0.0891000000000001",
+            "rpy": "-1.5707963267949 0 0"
+          },
+          "parent": {
+            "link": "Lfive_Link"
+          },
+          "child": {
+            "link": "Lsix_Link"
+          },
+          "axis": {
+            "xyz": "0 0 -1"
+          },
+          "limit": {
+            "lower": "-2.09",
+            "upper": "2.09",
+            "effort": "100000",
+            "velocity": "1000000"
+          }
+        },
+        {
+          "name": "Lseven",
+          "type": "revolute",
+          "origin": {
+            "xyz": "0 -0.1591 0",
+            "rpy": "1.5707963267949 0 0"
+          },
+          "parent": {
+            "link": "Lsix_Link"
+          },
+          "child": {
+            "link": "Lseven_Link"
+          },
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "limit": {
+            "lower": "-2.09",
+            "upper": "2.09",
+            "effort": "100000",
+            "velocity": "1000000"
+          }
+        }
+      ],
+      "cerebroMount": {
+        "name": "right_b1_mount",
+        "type": "fixed",
+        "parent": {
+          "link": "torso_link"
+        },
+        "child": {
+          "link": "right_base_link"
+        },
+        "origin": {
+          "rpy": "0.349065850399 0 -5.55111512313E-17",
+          "xyz": "0.0509657445449 -0.0555 0.259785085191"
+        }
+      },
+      "cerebroJoints": [
+        {
+          "name": "right_joint1",
+          "type": "revolute",
+          "parent": {
+            "link": "right_base_link"
+          },
+          "child": {
+            "link": "right_one_Link"
+          },
+          "origin": {
+            "rpy": "0 0 -1.57079632679",
+            "xyz": "0 0 0.0825"
+          },
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "limit": {
+            "effort": "0",
+            "lower": "-2.4435",
+            "upper": "2.4435",
+            "velocity": "0"
+          }
+        },
+        {
+          "name": "right_joint2",
+          "type": "revolute",
+          "parent": {
+            "link": "right_one_Link"
+          },
+          "child": {
+            "link": "right_two_Link"
+          },
+          "origin": {
+            "rpy": "-1.57079632679 0 0",
+            "xyz": "0 0 0.0853"
+          },
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "limit": {
+            "effort": "0",
+            "lower": "-2.3213",
+            "upper": "2.3213",
+            "velocity": "0"
+          }
+        },
+        {
+          "name": "right_joint3",
+          "type": "revolute",
+          "parent": {
+            "link": "right_two_Link"
+          },
+          "child": {
+            "link": "right_three_Link"
+          },
+          "origin": {
+            "rpy": "1.5708 0 0",
+            "xyz": "0 -0.1289 0"
+          },
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "limit": {
+            "effort": "0",
+            "lower": "-2.2863",
+            "upper": "2.2863",
+            "velocity": "0"
+          }
+        },
+        {
+          "name": "right_joint4",
+          "type": "revolute",
+          "parent": {
+            "link": "right_three_Link"
+          },
+          "child": {
+            "link": "right_four_Link"
+          },
+          "origin": {
+            "rpy": "1.5708 0 0",
+            "xyz": "0 0 0.0853"
+          },
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "limit": {
+            "effort": "0",
+            "lower": "-2.2863",
+            "upper": "2.2863",
+            "velocity": "0"
+          }
+        },
+        {
+          "name": "right_joint5",
+          "type": "revolute",
+          "parent": {
+            "link": "right_four_Link"
+          },
+          "child": {
+            "link": "right_five_Link"
+          },
+          "origin": {
+            "rpy": "-1.5708 0 0",
+            "xyz": "0 0.1251 0"
+          },
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "limit": {
+            "effort": "0",
+            "lower": "-2.2863",
+            "upper": "2.2863",
+            "velocity": "0"
+          }
+        },
+        {
+          "name": "right_joint6",
+          "type": "revolute",
+          "parent": {
+            "link": "right_five_Link"
+          },
+          "child": {
+            "link": "right_six_Link"
+          },
+          "origin": {
+            "rpy": "-1.5708 0 0",
+            "xyz": "0 0 0.0891"
+          },
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "limit": {
+            "effort": "0",
+            "lower": "-2.2863",
+            "upper": "2.2863",
+            "velocity": "0"
+          }
+        },
+        {
+          "name": "right_joint7",
+          "type": "revolute",
+          "parent": {
+            "link": "right_six_Link"
+          },
+          "child": {
+            "link": "right_seven_Link"
+          },
+          "origin": {
+            "rpy": "1.5708 0 0",
+            "xyz": "0 -0.1591 0"
+          },
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "limit": {
+            "effort": "0",
+            "lower": "-3.05",
+            "upper": "3.05",
+            "velocity": "0"
+          }
+        }
+      ],
+      "cerebroTool": {
+        "name": "right_tool_mount",
+        "type": "fixed",
+        "parent": {
+          "link": "right_seven_Link"
+        },
+        "child": {
+          "link": "right_tool"
+        },
+        "origin": {
+          "rpy": "0 0 0",
+          "xyz": "0 0 0.11"
+        }
+      }
+    },
+    {
+      "physicalArm": "left",
+      "core": "R-11",
+      "launchPath": "/home/amber/R-11/launch.json",
+      "launchSHA256": "5de7ef5c9e8f2315b5fc88d6b4db4dac54065cb2d0b1569484636435f649410d",
+      "configuredURDFPath": "/home/amber/R-11/urdf/dual_b1/DualArmR.urdf",
+      "configuredURDFSHA256": "13855c949b70fe7df8194960e4379ca4bab19f3f5bdbd26b89cf25cb8ca5240c",
+      "repoURDFSHA256": "c36f5d3649a45daf1689c3712b07e7058f200c7fefd74cb59253e3b70b67385b",
+      "configuredAndRepoURDFLinesIdentical": true,
+      "byteDifference": "Final line termination differs; parsed joint definitions agree.",
+      "solver": {
+        "Enable": true,
+        "Type": "Drake",
+        "ITER": 1000,
+        "EPS": 0.001,
+        "URDF_Path": "./urdf/dual_b1/DualArmR.urdf",
+        "Base_Name": "base_link",
+        "EEF_Name": "Rseven_Link",
+        "Rotation_Direction": [
+          1,
+          -1,
+          1,
+          -1,
+          1,
+          -1,
+          1
+        ],
+        "IgnoreRuckig": 0.05
+      },
+      "robotDirection": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "robotDOF": 7,
+      "udpPort": 26002,
+      "coreJoints": [
+        {
+          "name": "Rone",
+          "type": "revolute",
+          "origin": {
+            "xyz": "0 0.133644731508115 0.0617380553162488",
+            "rpy": "-1.13804396130002 0 0"
+          },
+          "parent": {
+            "link": "base_link"
+          },
+          "child": {
+            "link": "Rone_Link"
+          },
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "limit": {
+            "lower": "-2.09",
+            "upper": "2.09",
+            "effort": "100000",
+            "velocity": "1000000"
+          }
+        },
+        {
+          "name": "Rtwo",
+          "type": "revolute",
+          "origin": {
+            "xyz": "0 0 0.0853",
+            "rpy": "1.5707963267949 0 0"
+          },
+          "parent": {
+            "link": "Rone_Link"
+          },
+          "child": {
+            "link": "Rtwo_Link"
+          },
+          "axis": {
+            "xyz": "0 0 -1"
+          },
+          "limit": {
+            "lower": "-2.09",
+            "upper": "2.09",
+            "effort": "100000",
+            "velocity": "1000000"
+          }
+        },
+        {
+          "name": "Rthree",
+          "type": "revolute",
+          "origin": {
+            "xyz": "0 0.1289 0",
+            "rpy": "-1.5707963267949 0 0"
+          },
+          "parent": {
+            "link": "Rtwo_Link"
+          },
+          "child": {
+            "link": "Rthree_Link"
+          },
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "limit": {
+            "lower": "-2.09",
+            "upper": "2.09",
+            "effort": "100000",
+            "velocity": "1000000"
+          }
+        },
+        {
+          "name": "Rfour",
+          "type": "revolute",
+          "origin": {
+            "xyz": "0 0 0.0853",
+            "rpy": "-1.5708 0 0"
+          },
+          "parent": {
+            "link": "Rthree_Link"
+          },
+          "child": {
+            "link": "Rfour_Link"
+          },
+          "axis": {
+            "xyz": "0 0 -1"
+          },
+          "limit": {
+            "lower": "-2.09",
+            "upper": "2.09",
+            "effort": "100000",
+            "velocity": "1000000"
+          }
+        },
+        {
+          "name": "Rfive",
+          "type": "revolute",
+          "origin": {
+            "xyz": "0 -0.1251 0",
+            "rpy": "1.5707963267949 0 0"
+          },
+          "parent": {
+            "link": "Rfour_Link"
+          },
+          "child": {
+            "link": "Rfive_Link"
+          },
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "limit": {
+            "lower": "-2.09",
+            "upper": "2.09",
+            "effort": "100000",
+            "velocity": "1000000"
+          }
+        },
+        {
+          "name": "Rsix",
+          "type": "revolute",
+          "origin": {
+            "xyz": "0 0 0.0891",
+            "rpy": "1.5708 0 0"
+          },
+          "parent": {
+            "link": "Rfive_Link"
+          },
+          "child": {
+            "link": "Rsix_Link"
+          },
+          "axis": {
+            "xyz": "0 0 -1"
+          },
+          "limit": {
+            "lower": "-2.09",
+            "upper": "2.09",
+            "effort": "100000",
+            "velocity": "1000000"
+          }
+        },
+        {
+          "name": "Rseven",
+          "type": "revolute",
+          "origin": {
+            "xyz": "0 0.1591 0",
+            "rpy": "-1.5708 0 0"
+          },
+          "parent": {
+            "link": "Rsix_Link"
+          },
+          "child": {
+            "link": "Rseven_Link"
+          },
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "limit": {
+            "lower": "-2.09",
+            "upper": "2.09",
+            "effort": "100000",
+            "velocity": "1000000"
+          }
+        }
+      ],
+      "cerebroMount": {
+        "name": "left_b1_mount",
+        "type": "fixed",
+        "parent": {
+          "link": "torso_link"
+        },
+        "child": {
+          "link": "left_base_link"
+        },
+        "origin": {
+          "rpy": "-0.349065850399 0 5.55111512313E-17",
+          "xyz": "0.0509657445449 0.0555 0.259785085191"
+        }
+      },
+      "cerebroJoints": [
+        {
+          "name": "left_joint1",
+          "type": "revolute",
+          "parent": {
+            "link": "left_base_link"
+          },
+          "child": {
+            "link": "left_one_Link"
+          },
+          "origin": {
+            "rpy": "0 0 -1.57079632679",
+            "xyz": "0 0 0.0825"
+          },
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "limit": {
+            "effort": "0",
+            "lower": "-2.4435",
+            "upper": "2.4435",
+            "velocity": "0"
+          }
+        },
+        {
+          "name": "left_joint2",
+          "type": "revolute",
+          "parent": {
+            "link": "left_one_Link"
+          },
+          "child": {
+            "link": "left_two_Link"
+          },
+          "origin": {
+            "rpy": "-1.57079632679 0 0",
+            "xyz": "0 0 0.0853"
+          },
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "limit": {
+            "effort": "0",
+            "lower": "-2.3213",
+            "upper": "2.3213",
+            "velocity": "0"
+          }
+        },
+        {
+          "name": "left_joint3",
+          "type": "revolute",
+          "parent": {
+            "link": "left_two_Link"
+          },
+          "child": {
+            "link": "left_three_Link"
+          },
+          "origin": {
+            "rpy": "1.5708 0 0",
+            "xyz": "0 -0.1289 0"
+          },
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "limit": {
+            "effort": "0",
+            "lower": "-2.2863",
+            "upper": "2.2863",
+            "velocity": "0"
+          }
+        },
+        {
+          "name": "left_joint4",
+          "type": "revolute",
+          "parent": {
+            "link": "left_three_Link"
+          },
+          "child": {
+            "link": "left_four_Link"
+          },
+          "origin": {
+            "rpy": "1.5708 0 0",
+            "xyz": "0 0 0.0853"
+          },
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "limit": {
+            "effort": "0",
+            "lower": "-2.2863",
+            "upper": "2.2863",
+            "velocity": "0"
+          }
+        },
+        {
+          "name": "left_joint5",
+          "type": "revolute",
+          "parent": {
+            "link": "left_four_Link"
+          },
+          "child": {
+            "link": "left_five_Link"
+          },
+          "origin": {
+            "rpy": "-1.5708 0 0",
+            "xyz": "0 0.1251 0"
+          },
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "limit": {
+            "effort": "0",
+            "lower": "-2.2863",
+            "upper": "2.2863",
+            "velocity": "0"
+          }
+        },
+        {
+          "name": "left_joint6",
+          "type": "revolute",
+          "parent": {
+            "link": "left_five_Link"
+          },
+          "child": {
+            "link": "left_six_Link"
+          },
+          "origin": {
+            "rpy": "-1.5708 0 0",
+            "xyz": "0 0 0.0891"
+          },
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "limit": {
+            "effort": "0",
+            "lower": "-2.2863",
+            "upper": "2.2863",
+            "velocity": "0"
+          }
+        },
+        {
+          "name": "left_joint7",
+          "type": "revolute",
+          "parent": {
+            "link": "left_six_Link"
+          },
+          "child": {
+            "link": "left_seven_Link"
+          },
+          "origin": {
+            "rpy": "1.5708 0 0",
+            "xyz": "0 -0.1591 0"
+          },
+          "axis": {
+            "xyz": "0 0 1"
+          },
+          "limit": {
+            "effort": "0",
+            "lower": "-3.05",
+            "upper": "3.05",
+            "velocity": "0"
+          }
+        }
+      ],
+      "cerebroTool": {
+        "name": "left_tool_mount",
+        "type": "fixed",
+        "parent": {
+          "link": "left_seven_Link"
+        },
+        "child": {
+          "link": "left_tool"
+        },
+        "origin": {
+          "rpy": "0 0 0",
+          "xyz": "0 0 0.11"
+        }
+      }
+    }
+  ],
+  "processObservations": [
+    {
+      "command": [
+        "pgrep",
+        "-a",
+        "amber_core"
+      ],
+      "returncode": 0,
+      "output": "5327 ./amber_core_L\n5328 ./amber_core_R\n",
+      "error": ""
+    },
+    {
+      "command": [
+        "ps",
+        "-L",
+        "-p",
+        "5327,5328",
+        "-o",
+        "pid,tid,pcpu,stat,comm"
+      ],
+      "returncode": 0,
+      "output": "    PID     TID %CPU STAT COMMAND\n   5327    5327  0.0 Sl   amber_core_L\n   5327    5329 27.5 Rl   amber_core_L\n   5327    5330 27.4 Rl   amber_core_L\n   5327    5331  4.0 Sl   amber_core_L\n   5327    5332 30.5 Rl   amber_core_L\n   5327    5333  0.0 Sl   amber_core_L\n   5327    5334  0.0 Sl   amber_core_L\n   5327    5335  0.0 Sl   amber_core_L\n   5327    5351 31.8 Rl   amber_core_L\n   5327    5353 27.7 Rl   amber_core_L\n   5327    5354  0.0 Sl   amber_core_L\n   5327    5356  0.0 Sl   amber_core_L\n   5327    5357 27.7 Rl   amber_core_L\n   5327    5359  0.3 Sl   amber_core_L\n   5327    5360  0.4 Sl   amber_core_L\n   5327    5361  0.4 Sl   amber_core_L\n   5327    5362  0.0 Sl   amber_core_L\n   5327    5363  0.5 Sl   amber_core_L\n   5327    5365  0.4 Sl   amber_core_L\n   5328    5328  0.0 Sl   amber_core_R\n   5328    5336 27.4 Rl   amber_core_R\n   5328    5337 27.5 Rl   amber_core_R\n   5328    5338  4.0 Sl   amber_core_R\n   5328    5339 30.4 Rl   amber_core_R\n   5328    5340  0.0 Sl   amber_core_R\n   5328    5341  0.0 Sl   amber_core_R\n   5328    5342  0.0 Sl   amber_core_R\n   5328    5343 32.1 Rl   amber_core_R\n   5328    5344  0.0 Sl   amber_core_R\n   5328    5345 27.7 Rl   amber_core_R\n   5328    5346 27.9 Rl   amber_core_R\n   5328    5347  0.0 Sl   amber_core_R\n   5328    5348  0.0 Sl   amber_core_R\n   5328    5349  0.3 Sl   amber_core_R\n   5328    5350  0.3 Sl   amber_core_R\n   5328    5355  0.4 Sl   amber_core_R\n   5328    5358  0.3 Sl   amber_core_R\n   5328    5367  0.6 Sl   amber_core_R\n",
+      "error": ""
+    },
+    {
+      "command": [
+        "systemctl",
+        "show",
+        "rob-amber-gateway.service",
+        "--property=MainPID,NRestarts,ActiveState"
+      ],
+      "returncode": 0,
+      "output": "MainPID=5383\nNRestarts=0\nActiveState=active\n",
+      "error": ""
+    }
+  ],
+  "findings": [
+    "The seven-joint vendor models use a dual-arm base frame; the Cerebro model places each B1 base under torso_link and adds an 0.11 m fixed tool offset. Identical base_link names do not establish the same physical reference frame.",
+    "Both configured solver direction arrays are [1,-1,1,-1,1,-1,1]. The vendor URDF also uses negative Z axes on joints 2, 4 and 6. Account for both conventions; do not infer physical actuator direction from axis text alone.",
+    "Vendor limits are +/-2.09 rad on each URDF joint. Cerebro model limits differ. These limits are in their respective model coordinates and cannot be copied into raw startup encoder coordinates without the calibrated transformation.",
+    "J2-J7 link-translation magnitudes agree to source rounding. Different frame conventions and base/tool placement are not, by themselves, proof of different physical link lengths or a defective solver.",
+    "User B1-upright vectors remain physically verified priors from an earlier controller session; the current startup offset and all seven model-direction signs have not been independently fitted.",
+    "Both vendor cores were alive and multithreaded during this read. Thread labels do not identify the Drake solver, and this snapshot does not exclude blocking locks or CPU contention."
+  ],
+  "updateRequirements": [
+    "Generate a separate seven-DOF model for each physical arm; preserve the core joint order and expected base/tip identifiers or explicitly update their configuration together.",
+    "Choose and document the Cartesian base frame, shoulder mounting transform and endpoint. Keep fixed mount geometry separate from session encoder offsets.",
+    "Verify the vendor solver\u2019s direction conversion and current-session encoder-to-model reference using FK/readback and the planned camera-visible probes before accepting Cartesian targets.",
+    "Translate conservative joint limits into the selected solver coordinate convention; do not broaden the current motor command envelope on the basis of the display model.",
+    "Compare predicted FK over observed poses and an independent validation pose before any guarded core restart installs a change."
+  ],
+  "deploymentStatus": "not prepared for activation: coordinate/reference validation still required",
+  "configuredFilesReadOnly": true,
+  "filesChangedOnAmber": 0,
+  "motorCommandsSentByInspection": 0,
+  "servicesRestarted": 0,
+  "wholeRobotURDFDropInCompatible": false,
+  "coreURDFProvenCauseOfCANLoss": false
+}

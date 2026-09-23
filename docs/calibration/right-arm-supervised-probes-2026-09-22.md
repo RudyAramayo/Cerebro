@@ -174,6 +174,30 @@ remain unchanged; rejection text now distinguishes gateway ages from local
 time since receipt. These tests do not establish that the earlier connection
 faults have been eliminated, and the visual calibration remains incomplete.
 
+The [live deployment record](evidence/2026-09-22-right-arm/diagnostics-responsive-deployment.json)
+verifies installed app commit `900777d`, the signed binary hashes and three
+complete 33,600-row exports. With live graphs enabled, the first two traces
+had median receipt intervals of 51 ms and maxima of 309 ms and 283 ms. The
+five-second window spanning the first export had a maximum receipt interval
+of 84 ms. These are gateway-queue decode timestamps; they do not measure every
+UI callback. Occasional gaps still exceed the unchanged 250 ms admission limit.
+Both persistent cores and the gateway retained their PIDs; all eight devices
+on each bus replied in a passive capture with no error/drop count increase.
+
+After the operator reconfirmed presence and clearance, a new eight-second
+joint-space request moved J1 from +0.45 to +0.60 while holding J2 at −0.60 and
+J3–J7 at zero. In the two-second endpoint window, the maximum readback error
+was 0.000776 rad and all individual CAN ages were below 5.25 ms. The next
++0.75 target was staged but not sent, then cleared from the sliders when the
+operator raised the Amber-internal Drake model question. The arm remains at
+the completed `[+0.60, −0.60, 0, 0, 0, 0, 0]` target. No new camera capture or
+absolute offset fit accompanied this step.
+
+The [internal-model review](amber-internal-model-review-2026-09-22.md) records
+the configured vendor URDFs and their differences from the whole-robot model.
+No Amber model, launch setting, solver parameter or core process was changed
+as part of that comparison.
+
 ## Camera references
 
 The following completed recordings remain local under

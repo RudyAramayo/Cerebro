@@ -1,0 +1,501 @@
+{
+  "purpose": "Verify the installed diagnostics responsiveness fix while holding, then record one separately authorized joint-space step. Not visual calibration or an executable trajectory.",
+  "installation": {
+    "installedAt": "2026-09-23T05:44:58.604698+00:00",
+    "appCommit": "900777d5d441879f0bc147d3d078b719c9e60114",
+    "installedPath": "/Users/rob/Library/Developer/Xcode/DerivedData/Cerebro-fsgbedtgzhrpmcdbaftxyqzxpjlg/Build/Products/Debug/Cerebro.app",
+    "previousAppBackup": "/private/tmp/Cerebro-before-diagnostics-responsive-bc5bb19.app",
+    "macOSCodeHashes": {
+      "Contents/MacOS/Cerebro": "9257645dd94aac6f8b1579307d3456a7dc5db0f975db255561b596cdac2418c7",
+      "Contents/MacOS/Cerebro.debug.dylib": "90ab96a76b0b87d376fd117737ad9d662186d7f5fc8726f8b1a2da04a51988d9",
+      "Contents/MacOS/__preview.dylib": "98731b47d5954ffa4b2c8a70554c7880a55138598e5accc314336c62a86b3dd1"
+    },
+    "codesignVerified": true,
+    "coreRestartRequested": false,
+    "motorCommandsSentDuringInstallation": false,
+    "unrelatedStoryboardSHA256": "2e22dd8f610af5624753cd6878f1d8f5e835ebaeb0621238e2fb2d193c1d705f"
+  },
+  "appPID": 75720,
+  "gatewayReadyAt": "2026-09-22T22:45:26.770-07:00",
+  "passiveDiagnostics": [
+    {
+      "observed_at": "2026-09-23T05:49:39.824054+00:00"
+    },
+    {
+      "command": [
+        "systemctl",
+        "show",
+        "rob-amber-gateway.service",
+        "rc-local.service",
+        "--property=Id,ActiveState,SubState,MainPID,ExecMainStartTimestamp,NRestarts"
+      ],
+      "returncode": 0,
+      "output": "MainPID=5383\nNRestarts=0\nExecMainStartTimestamp=Wed 2026-09-23 05:13:01 UTC\nId=rob-amber-gateway.service\nActiveState=active\nSubState=running\n\nMainPID=0\nNRestarts=0\nExecMainStartTimestamp=n/a\nId=rc-local.service\nActiveState=active\nSubState=running\n",
+      "error": ""
+    },
+    {
+      "command": [
+        "pgrep",
+        "-a",
+        "amber_core"
+      ],
+      "returncode": 0,
+      "output": "5327 ./amber_core_L\n5328 ./amber_core_R\n",
+      "error": ""
+    },
+    {
+      "interface": "can10",
+      "sample_seconds": 2,
+      "received_ids": {
+        "0x91": 402,
+        "0x97": 401,
+        "0x94": 401,
+        "0x98": 400,
+        "0x95": 402,
+        "0x92": 402,
+        "0x93": 400,
+        "0x96": 401
+      },
+      "local_tx_ids": {
+        "0x11": 398,
+        "0x12": 398,
+        "0x13": 398,
+        "0x14": 398,
+        "0x15": 398,
+        "0x16": 398,
+        "0x17": 398
+      },
+      "last_received_payload": {
+        "0x91": "ff0ce30000ff8a02",
+        "0x97": "ff00000000ffa302",
+        "0x94": "ff00000000fea502",
+        "0x98": "ff00000000000000",
+        "0x95": "ff00000000008402",
+        "0x92": "ffeed00000054e02",
+        "0x93": "ff00000000002b02",
+        "0x96": "ff00000000007c02"
+      },
+      "sent_frames": 0
+    },
+    {
+      "interface": "can11",
+      "sample_seconds": 2,
+      "received_ids": {
+        "0x95": 401,
+        "0x98": 401,
+        "0x91": 401,
+        "0x93": 402,
+        "0x92": 401,
+        "0x94": 401,
+        "0x96": 401,
+        "0x97": 400
+      },
+      "local_tx_ids": {
+        "0x11": 398,
+        "0x12": 398,
+        "0x13": 398,
+        "0x14": 398,
+        "0x15": 398,
+        "0x16": 398,
+        "0x17": 398
+      },
+      "last_received_payload": {
+        "0x95": "ff00000000000000",
+        "0x98": "ff00000000000000",
+        "0x91": "ff00000000000000",
+        "0x93": "ff00000000000000",
+        "0x92": "ff00000000000000",
+        "0x94": "ff00000000000000",
+        "0x96": "ff00000000000000",
+        "0x97": "ff00000000000000"
+      },
+      "sent_frames": 0
+    },
+    {
+      "can_counters": {
+        "can10": {
+          "rx_packets": 3551578,
+          "rx_dropped": 0,
+          "rx_errors": 0,
+          "tx_packets": 3008278,
+          "tx_dropped": 0,
+          "tx_errors": 0
+        },
+        "can11": {
+          "rx_packets": 3552601,
+          "rx_dropped": 0,
+          "rx_errors": 0,
+          "tx_packets": 3002951,
+          "tx_dropped": 0,
+          "tx_errors": 0
+        }
+      },
+      "can_delta": {
+        "can10": {
+          "rx_packets": 3213,
+          "rx_dropped": 0,
+          "rx_errors": 0,
+          "tx_packets": 2789,
+          "tx_dropped": 0,
+          "tx_errors": 0
+        },
+        "can11": {
+          "rx_packets": 3213,
+          "rx_dropped": 0,
+          "rx_errors": 0,
+          "tx_packets": 2793,
+          "tx_dropped": 0,
+          "tx_errors": 0
+        }
+      },
+      "can_or_udp_commands_sent": 0
+    },
+    {
+      "core_process": "amber_core_L",
+      "pid": 5327,
+      "parent_pid": 5324,
+      "parent_command": "/usr/sbin/runuser -u amber -- /usr/bin/env LCM_DEFAULT_URL=udpm://239.255.76.67:7667?ttl=10 /usr/bin/nohup /bin/sh -c cd /home/amber/L-10 && exec ./amber_core_L >core.log 2>&1 ",
+      "cgroup": "0::/system.slice/rc-local.service\n",
+      "cwd": "/home/amber/L-10",
+      "stdout": "/home/amber/L-10/core.log",
+      "stderr": "/home/amber/L-10/core.log"
+    },
+    {
+      "core_process": "amber_core_R",
+      "pid": 5328,
+      "parent_pid": 5325,
+      "parent_command": "/usr/sbin/runuser -u amber -- /usr/bin/env LCM_DEFAULT_URL=udpm://239.255.76.67:7667?ttl=10 /usr/bin/nohup /bin/sh -c cd /home/amber/R-11 && exec ./amber_core_R >core.log 2>&1 ",
+      "cgroup": "0::/system.slice/rc-local.service\n",
+      "cwd": "/home/amber/R-11",
+      "stdout": "/home/amber/R-11/core.log",
+      "stderr": "/home/amber/R-11/core.log"
+    }
+  ],
+  "liveExports": [
+    {
+      "path": "diagnostics-responsive-live-20260922.csv.gz",
+      "sha256": "6e95c0b1cb8ab0f32ae350ba1b65d7a83e4c3f749df93da46de84ede2629b317",
+      "uncompressedSHA256": "8bc3a09b72a842d59fe5af33f8335ddf07de4e3e318abbb1fbdcd3b5bb31ea5a",
+      "rows": 33600,
+      "columns": [
+        "arm",
+        "received_at",
+        "sequence",
+        "sample_age_ms",
+        "joint",
+        "position_rad",
+        "target_rad",
+        "error_rad",
+        "velocity_rad_s",
+        "current",
+        "status",
+        "robot_arm",
+        "core",
+        "udp_port",
+        "controller_sample_age_ms",
+        "joint_feedback_age_ms",
+        "gripper_feedback_age_ms"
+      ],
+      "arms": {
+        "left": {
+          "samples": 2400,
+          "rows": 16800,
+          "start": "2026-09-23T05:49:02.436Z",
+          "end": "2026-09-23T05:51:04.345Z",
+          "receiptGapsMilliseconds": {
+            "median": 51.0,
+            "p99": 83.0,
+            "maximum": 309.0,
+            "over250ms": 2
+          },
+          "maximumControllerAgeMilliseconds": 11.168464,
+          "maximumJointCANAgeMilliseconds": 5.841329,
+          "reportedModes": [
+            0.0
+          ],
+          "lastPositionsRadians": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "velocityUnavailable": true,
+          "targetsUnavailable": true
+        },
+        "right": {
+          "samples": 2400,
+          "rows": 16800,
+          "start": "2026-09-23T05:49:02.436Z",
+          "end": "2026-09-23T05:51:04.345Z",
+          "receiptGapsMilliseconds": {
+            "median": 51.0,
+            "p99": 83.0,
+            "maximum": 309.0,
+            "over250ms": 2
+          },
+          "maximumControllerAgeMilliseconds": 10.543631,
+          "maximumJointCANAgeMilliseconds": 17.612898,
+          "reportedModes": [
+            2.0
+          ],
+          "lastPositionsRadians": [
+            0.44983134393197605,
+            -0.5998205765252387,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "velocityUnavailable": true,
+          "targetsUnavailable": true
+        }
+      }
+    },
+    {
+      "path": "diagnostics-responsive-export-continuity-20260922.csv.gz",
+      "sha256": "fd023c5e34f9e8e11e3a04e9bb4e4819af4ea2f4a4baca65d2a822c7ef417648",
+      "uncompressedSHA256": "496fc6255f6ee17c91ab5d089744908b84827dd0146d844cc1a180bf4673ac39",
+      "rows": 33600,
+      "columns": [
+        "arm",
+        "received_at",
+        "sequence",
+        "sample_age_ms",
+        "joint",
+        "position_rad",
+        "target_rad",
+        "error_rad",
+        "velocity_rad_s",
+        "current",
+        "status",
+        "robot_arm",
+        "core",
+        "udp_port",
+        "controller_sample_age_ms",
+        "joint_feedback_age_ms",
+        "gripper_feedback_age_ms"
+      ],
+      "arms": {
+        "left": {
+          "samples": 2400,
+          "rows": 16800,
+          "start": "2026-09-23T05:50:20.383Z",
+          "end": "2026-09-23T05:52:22.299Z",
+          "receiptGapsMilliseconds": {
+            "median": 51.0,
+            "p99": 78.0,
+            "maximum": 282.0,
+            "over250ms": 1
+          },
+          "maximumControllerAgeMilliseconds": 9.752813,
+          "maximumJointCANAgeMilliseconds": 5.963872,
+          "reportedModes": [
+            0.0
+          ],
+          "lastPositionsRadians": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "velocityUnavailable": true,
+          "targetsUnavailable": true
+        },
+        "right": {
+          "samples": 2400,
+          "rows": 16800,
+          "start": "2026-09-23T05:50:20.383Z",
+          "end": "2026-09-23T05:52:22.298Z",
+          "receiptGapsMilliseconds": {
+            "median": 51.0,
+            "p99": 75.0,
+            "maximum": 283.0,
+            "over250ms": 1
+          },
+          "maximumControllerAgeMilliseconds": 11.095717,
+          "maximumJointCANAgeMilliseconds": 8.580877,
+          "reportedModes": [
+            2.0
+          ],
+          "lastPositionsRadians": [
+            0.44983134393197605,
+            -0.5998205765252387,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "velocityUnavailable": true,
+          "targetsUnavailable": true
+        }
+      }
+    }
+  ],
+  "exportContinuity": {
+    "firstExportCompletionEventAt": "2026-09-22T22:51:06.358-07:00",
+    "secondExportCompletionEventAt": "2026-09-22T22:52:24.501-07:00",
+    "windowStart": "2026-09-23T05:51:03Z",
+    "windowEnd": "2026-09-23T05:51:08Z",
+    "receiptIntervals": 98,
+    "maximumReceiptIntervalMilliseconds": 84.0,
+    "liveGraphsEnabled": true,
+    "gatewayDisconnectObserved": false,
+    "measurement": "Decode receipt intervals across the preceding CSV export; not a measurement of every UI callback or robot acquisition latency."
+  },
+  "validation": {
+    "diagnosticsResponsivenessRuntime": "passed; 33,600-row fixture exported in 1.522 seconds with 82 main-run-loop timer callbacks",
+    "gatewayCompatibilityRuntime": "passed including receipt-time preservation across delayed main-thread delivery",
+    "manualSDKAdmissionRuntime": "passed without hardware access",
+    "diagnosticsUIStatic": "passed",
+    "signedDebugBuild": "passed",
+    "codesignDeepStrict": "passed"
+  },
+  "resumedProbe": {
+    "physicalArm": "right",
+    "core": "L10",
+    "canInterface": "can10",
+    "udpPort": 26001,
+    "gatewayArm": "left",
+    "operatorReply": "Yes, I\u2019m here and the path is clear",
+    "requestedFromRadians": [
+      0.45,
+      -0.6,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "targetRadians": [
+      0.6,
+      -0.6,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "durationSeconds": 8,
+    "delaySeconds": 0,
+    "appCommandLogAt": "2026-09-22T22:53:35.793-07:00",
+    "exactVendorDispatchTimestampAvailable": false,
+    "arrivalVerifiedByFreshReadback": true,
+    "telemetry": {
+      "path": "diagnostics-responsive-forward-step-20260922.csv.gz",
+      "sha256": "259d52d1568a547f3057e7e2c29973e409ccda691871e2402c612f82a3b99001",
+      "uncompressedSHA256": "a028cf7480a56777fa58d6533569deb5218fdbb712d6e83ec818c481284bb461",
+      "rows": 33600,
+      "columns": [
+        "arm",
+        "received_at",
+        "sequence",
+        "sample_age_ms",
+        "joint",
+        "position_rad",
+        "target_rad",
+        "error_rad",
+        "velocity_rad_s",
+        "current",
+        "status",
+        "robot_arm",
+        "core",
+        "udp_port",
+        "controller_sample_age_ms",
+        "joint_feedback_age_ms",
+        "gripper_feedback_age_ms"
+      ],
+      "arms": {
+        "left": {
+          "samples": 2400,
+          "rows": 16800,
+          "start": "2026-09-23T05:53:06.444Z",
+          "end": "2026-09-23T05:55:08.352Z",
+          "receiptGapsMilliseconds": {
+            "median": 51.0,
+            "p99": 74.0,
+            "maximum": 232.0,
+            "over250ms": 0
+          },
+          "maximumControllerAgeMilliseconds": 12.096312,
+          "maximumJointCANAgeMilliseconds": 5.885571,
+          "reportedModes": [
+            0.0
+          ],
+          "lastPositionsRadians": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "velocityUnavailable": true,
+          "targetsUnavailable": true
+        },
+        "right": {
+          "samples": 2400,
+          "rows": 16800,
+          "start": "2026-09-23T05:53:06.443Z",
+          "end": "2026-09-23T05:55:08.352Z",
+          "receiptGapsMilliseconds": {
+            "median": 51.0,
+            "p99": 72.0,
+            "maximum": 233.0,
+            "over250ms": 0
+          },
+          "maximumControllerAgeMilliseconds": 12.297375,
+          "maximumJointCANAgeMilliseconds": 5.693973,
+          "reportedModes": [
+            2.0
+          ],
+          "lastPositionsRadians": [
+            0.5998205765252387,
+            -0.5998205765252387,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "velocityUnavailable": true,
+          "targetsUnavailable": true
+        }
+      }
+    },
+    "settledWindowStart": "2026-09-23T05:53:46.000Z",
+    "settledWindowEnd": "2026-09-23T05:53:48.000Z",
+    "settledRows": 273,
+    "maximumSettledAbsoluteErrorRadians": 0.0007750534599231251,
+    "maximumSettledJointCANAgeMilliseconds": 5.243048,
+    "nextPoint075Sent": false,
+    "unsent075TargetClearedFromSliders": true,
+    "pauseReason": "Operator raised the Amber-internal Drake URDF question; held the completed +0.60 step while inspecting model configuration."
+  },
+  "headTrackingEnabled": false,
+  "keepUprightEnabled": false,
+  "neckCommandTargets": {
+    "pan": 5733,
+    "lower": 6011,
+    "upper": 6906
+  },
+  "newCameraRecording": false,
+  "absoluteOffsetsApplied": false,
+  "visualCalibrationAccepted": false,
+  "automaticReplayAllowed": false,
+  "limitations": [
+    "Receipt gaps occasionally exceeded the unchanged 250 ms command-admission limit; this is not proof that all responsiveness or connectivity faults are resolved.",
+    "Old exports stamped UI ingestion; new exports stamp gateway-queue decoding. Their gap statistics are not directly interchangeable.",
+    "Manual SDK targets are supplied separately in this record; CSV target/error columns remain empty after app relaunch.",
+    "No measured joint velocity, synchronized camera evidence, or absolute pose accuracy was established.",
+    "The Mac Drake preview worker is separate from the vendor core\u2019s internal Drake solver. No internal solver scheduling cause was established."
+  ]
+}
