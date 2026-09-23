@@ -166,16 +166,16 @@ retains its centered inspection pose.
 Neck output fixtures verify the right trim, exact-target readiness and rejection
 of out-of-range/nonfinite angles without serial writes. Arm routine fixtures,
 the 45 controller approval checks and the signed macOS build passed. The
-requested 10° right setting and both gripper calibrations still require a live
-trial after the application is reloaded from a verified hanging pose.
+requested 10° right setting and both gripper calibrations require a live trial
+after the application is reloaded from a verified hanging pose.
 
 The following controller-approved Relax attempts moved back along the taught
 corridor but held on main-camera freshness failures (712 and 726 ms) and then
 on controller cancellation/disconnection. Fresh CAN feedback continued during
 each hold. The main camera helper was already running at 640×400; these stops
 were not caused by accidentally selecting the belly camera or a larger capture
-resolution. Torque-off and the new inspection pan must not be recorded as
-verified until the remaining return and a reloaded-app trial complete.
+resolution. Those partial returns did not establish completed torque-off or
+validate the new inspection pan.
 
 Inspection admission now charges its 200 ms sampling interval only after a
 frame passes the input checks. Previously a rejected stale frame, missing
@@ -188,12 +188,36 @@ avoidable sampling delay; it does not establish the cause of every live stall.
 The inspection runtime suite and signed macOS build passed with that fix, and
 the build phase installed `/Applications/Cerebro.app` (debug-library SHA-256
 `9e2edd6e595c4d5e5985acd78bbaffcb9706646b53914a52be7a9cc5f3a30483`).
-The app has not yet been restarted: the controller disconnected during the
-return, with the latest passive sample at approximately physical right
+That build initially remained unloaded: the controller disconnected during the
+return, with passive feedback at approximately physical right
 `[0.052, -0.204, 0, 0, 0, 0, 0]` and mirrored physical left. All fourteen
 statuses remained position mode 2 with fresh feedback. A later request reported
 no controller offering Action Approvals, so no further motion was started.
 Startup calibration remains disabled.
+
+After the operator reconnected and approved a new Relax request, the app
+reported completed hanging and deactivation. Independent fresh CAN feedback
+confirmed physical right `[-0.001, -0.004, 0, 0, 0, 0, 0]`, physical left
+`[0, 0.006, 0, 0, 0, 0, 0]`, and all fourteen modes inactive. Cerebro was
+then reloaded, its dedicated-key SSH tunnel started automatically, and the
+10° right inspection preference was selected. The first Prepare request
+expired without approval; no new arm or gripper movement ran.
+
+Delivered phone requests now allow 90 seconds for review to reduce repeated
+resends. Hardware admission is still performed after the operator accepts,
+and a lost controller still cancels the request. The 48 approval fixtures
+cover acceptance after 60 seconds, refusal at the exact expiry, unchanged
+identity/session binding and the existing 30-second no-controller timeout.
+
+The next accepted Prepare reached position mode on all fourteen motors but
+stopped at zero with the mode/fault monitor message before observable taught
+travel. Passive feedback then remained fresh in mode 2. The coordinator now
+waits up to two seconds for a newer, fresh mode-2 telemetry sample from each arm
+after the mode acknowledgements, before sending the first waypoint. A previous
+inactive/active sample can arrive before the stream reflects the acknowledged
+transition. The fixture now models that lag and also verifies that missing
+confirmation sends no waypoint or calibration. Continuous mode/fault monitoring
+still applies throughout motion.
 
 A separate Vision hand detector, current depth coverage, stationary
 neck view, current per-motor CAN replies and a 1.5-second gateway lease supervise

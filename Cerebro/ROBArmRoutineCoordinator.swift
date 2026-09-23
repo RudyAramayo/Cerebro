@@ -454,6 +454,23 @@ enum ROBArmRoutineError: LocalizedError {
                 try await accepted([try send(gateway.enterPositionMode(forArm: arm))])
             }
         }
+        // Mode acknowledgements and streamed CAN telemetry arrive separately.
+        // Require a new matching sample after the acknowledgements before the
+        // first waypoint, rather than treating a pre-entry sample as a fault.
+        let modeSequences = Dictionary(uniqueKeysWithValues: arms.map {
+            ($0, gateway.telemetry(forArm: $0)?.sequence ?? 0)
+        })
+        try await wait(seconds: 2, reason: "Fresh position-mode feedback did not arrive for both arms; no waypoint was sent.") {
+            arms.allSatisfy { arm in
+                guard let sample = gateway.telemetry(forArm: arm),
+                      sample.sequence > modeSequences[arm]!,
+                      sample.effectiveSampleAgeMilliseconds <= 250,
+                      sample.statuses.count == 7,
+                      sample.statuses.allSatisfy({ $0.intValue == 2 }) else { return false }
+                let modes = gateway.modes(forArm: arm)
+                return modes.count == 7 && modes.allSatisfy({ $0.intValue == 2 })
+            }
+        }
         try await moveRoutes(routes, detail: command == "relax" ? "Lowering both arms toward hanging" : "Bringing both arms into the camera view")
         if command == "relax" {
             try await deactivateAtHanging()

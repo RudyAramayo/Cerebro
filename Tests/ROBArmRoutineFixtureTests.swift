@@ -36,11 +36,12 @@ final class ROBAmberGatewayTunnel {
 final class ROBAmberGatewayTelemetry {
     let sequence: UInt64
     let positionsRadians: [NSNumber]
-    let statuses = Array(repeating: NSNumber(value: 2), count: 7)
+    let statuses: [NSNumber]
     let effectiveSampleAgeMilliseconds: Double
     let effectiveGripperFeedbackAgeMilliseconds = 1.0
-    init(sequence: UInt64, positions: [Double], stale: Bool) {
+    init(sequence: UInt64, positions: [Double], stale: Bool, status: Int) {
         self.sequence = sequence; positionsRadians = positions.map(NSNumber.init(value:))
+        statuses = Array(repeating: NSNumber(value: status), count: 7)
         effectiveSampleAgeMilliseconds = stale ? 1000 : 1
     }
 }
@@ -53,6 +54,8 @@ final class ROBAmberGatewayClient: NSObject {
     var commands: [String] = []
     var sequence: UInt64 = 1, nextID: UInt64 = 1
     var feedbackReadyAt = 0.0
+    var modeFeedbackDelay = 0.0
+    var modeFeedbackReadyAt: [String: Double] = [:]
     func isReady() -> Bool { ready }
     func manualArmControlReadiness(forUDPPort: Int, expectedSessionGeneration: UInt64) -> NSDictionary {
         ["allowed": ready && !stale && expectedSessionGeneration == generation]
@@ -61,7 +64,8 @@ final class ROBAmberGatewayClient: NSObject {
     func telemetry(forArm arm: String) -> ROBAmberGatewayTelemetry? {
         guard ProcessInfo.processInfo.systemUptime >= feedbackReadyAt else { return nil }
         sequence += 1
-        return ROBAmberGatewayTelemetry(sequence: sequence, positions: q[arm]!, stale: stale)
+        let status = ProcessInfo.processInfo.systemUptime < (modeFeedbackReadyAt[arm] ?? 0) ? 1 : mode[arm]!
+        return ROBAmberGatewayTelemetry(sequence: sequence, positions: q[arm]!, stale: stale, status: status)
     }
     func modes(forArm arm: String) -> [NSNumber] { Array(repeating: NSNumber(value: mode[arm]!), count: 7) }
     func ack(_ operation: String, _ arm: String, accepted: Bool = true) -> UInt64 {
@@ -74,9 +78,15 @@ final class ROBAmberGatewayClient: NSObject {
         return id
     }
     func queryMode(forArm arm: String) -> UInt64 { ack("mode_query", arm) }
-    func enterPositionMode(forArm arm: String) -> UInt64 { mode[arm] = 2; return ack("position_mode", arm) }
+    func enterPositionMode(forArm arm: String) -> UInt64 {
+        mode[arm] = 2
+        modeFeedbackReadyAt[arm] = ProcessInfo.processInfo.systemUptime + modeFeedbackDelay
+        return ack("position_mode", arm)
+    }
     func sendRoutineWaypoint(arm: String, index: Int, duration: Double, expectedSessionGeneration: UInt64) -> UInt64 {
         precondition(expectedSessionGeneration == generation && mode[arm] == 2)
+        precondition(q.keys.allSatisfy { telemetry(forArm: $0)!.statuses.allSatisfy { $0.intValue == 2 } },
+                     "Waypoint sent before both arms reported position mode")
         q[arm] = ROBArmRoutinePlan.target(index: index, physicalLeft: arm == "right")!
         return ack("waypoint_\(index)", arm)
     }
@@ -242,7 +252,14 @@ final class ROBArmRoutineVision {
         g.q["left"]![4] = 0.5; g.commands = []
         let unknown = await run("prepare")
         precondition(unknown["status"] as? String == "blocked" && !g.commands.contains { $0.hasPrefix("waypoint") || $0.hasPrefix("position_mode") })
-        g.q["left"] = zero; v.blocked = true; g.commands = []
+        g.q["left"] = zero; g.commands = []; g.modeFeedbackDelay = 10
+        let missingPositionFeedback = await run("prepare")
+        precondition(missingPositionFeedback["status"] as? String == "blocked")
+        precondition((missingPositionFeedback["detail"] as? String)?.contains("Fresh position-mode feedback") == true)
+        precondition(!g.commands.contains { $0.hasPrefix("waypoint") || $0.hasPrefix("calibrate") })
+        g.modeFeedbackDelay = 0; g.modeFeedbackReadyAt = [:]; g.mode = ["left": 0, "right": 0]
+        print("Mode entry: missing streamed position-mode confirmation cannot dispatch a waypoint")
+        v.blocked = true; g.commands = []
         let occluded = await run("startup")
         precondition(occluded["status"] as? String == "blocked")
         precondition(g.commands.filter { $0.hasPrefix("waypoint") }.count == 12,
@@ -253,7 +270,9 @@ final class ROBArmRoutineVision {
         // A core may have entered active mode before a prior acknowledgement
         // failed. A whole active arm must still verify position mode to move.
         v.blocked = false; g.q = ["left": zero, "right": zero]; g.mode = ["left": 1, "right": 0]; g.commands = []
+        g.modeFeedbackDelay = 0.3
         let startup = await run("startup")
+        g.modeFeedbackDelay = 0
         precondition(startup["status"] as? String == "completed", startup.description)
         precondition(g.commands.filter { $0.hasPrefix("calibrate:") }.count == 2)
         precondition(g.commands.filter { $0.hasPrefix("waypoint") }.count == 12)
