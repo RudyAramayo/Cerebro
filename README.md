@@ -7,8 +7,28 @@ installed copy and an Xcode Debug copy cannot initialize robot hardware or
 network listeners at the same time. It also performs an immediate camera,
 dependency, and lidar health pass after macOS wakes.
 
-After copying a signed Release build to `/Applications/Cerebro.app`, enable the
-user LaunchAgent once:
+The shared **Cerebro** Xcode scheme installs every successful Debug or Release
+build into `/Applications/Cerebro.app`. Its **Install Cerebro** target depends on
+the finished application, so the install build phase runs after code signing.
+It verifies and stages the entire app, then atomically replaces the installed
+bundle. Failed builds/signature checks keep the old app; an installation failure
+fails the build. Existing files are replaced rather than merged, so removed
+resources cannot linger in the installed app.
+
+Normal Xcode Build/Run and `xcodebuild -project Cerebro.xcodeproj -scheme Cerebro
+build` include installation. The default project target is also **Install
+Cerebro**. Archives and Analyze do not install. For CI or build-only work, pass
+`CEREBRO_INSTALL_AFTER_BUILD=NO`; isolated builds can instead set
+`CEREBRO_INSTALL_DIRECTORY=/some/writable/directory`. Explicitly building only
+the native `-target Cerebro` omits the dependent installer; use the scheme or
+`-target 'Install Cerebro'` for installation. No sudo or desktop dialog is used;
+the build user needs write access to the destination directory.
+
+Installing does not stop or restart a running robot session. Relaunch Cerebro
+to load the installed update. The existing Xcode Run handoff below still handles
+switching between the production app and the debugger.
+
+After building a signed Release configuration, enable the user LaunchAgent once:
 
 ```sh
 ./Scripts/install-cerebro-launch-agent.sh
@@ -21,10 +41,14 @@ again or the user logs in again. A run lasting at least five minutes resets the
 crash count. Intentional exits never trigger a restart. Cerebro also does not
 restore AppKit window state, because hardware startup must not be blocked by a
 stale-window crash dialog.
-The local Xcode scheme automatically unloads the production agent before a
+The shared Xcode scheme automatically unloads the production agent before a
 Debug run and restores it afterward. A detached watchdog also restores the
 production agent if Xcode or the debugged process crashes before the scheme's
 post-action runs.
+
+Run `python3 Tests/CerebroBuildInstallTests.py` for signed-bundle installation,
+replacement, verification-failure rollback and scheme integration checks in
+temporary directories; these tests never start Cerebro or access robot hardware.
 
 Cerebro is the macOS controller and operator interface for the R.O.B. droid.
 

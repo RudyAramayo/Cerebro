@@ -6,6 +6,21 @@
 	objectVersion = 54;
 	objects = {
 
+/* Begin PBXAggregateTarget section */
+		C0B017012F80000100000001 /* Install Cerebro */ = {
+			isa = PBXAggregateTarget;
+			buildConfigurationList = C0B017052F80000100000001 /* Build configuration list for PBXAggregateTarget "Install Cerebro" */;
+			buildPhases = (
+				C0B017022F80000100000001 /* Install signed Cerebro in Applications */,
+			);
+			dependencies = (
+				C0B017032F80000100000001 /* PBXTargetDependency */,
+			);
+			name = "Install Cerebro";
+			productName = "Install Cerebro";
+		};
+/* End PBXAggregateTarget section */
+
 /* Begin PBXBuildFile section */
 		AC2509230000000000000002 /* ROBShowMotionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2509230000000000000001 /* ROBShowMotionCoordinator.swift */; };
 		AC2409230000000000000002 /* ROBArmImitationPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2409230000000000000001 /* ROBArmImitationPlan.swift */; };
@@ -222,6 +237,16 @@
 		B291B99A5C63A9A985786591 /* ROBShadowPlannerBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49EDF1A1F5EDE1534B25E4A8 /* ROBShadowPlannerBridge.swift */; };
 		1D117594B57441161B454028 /* ShadowPlanner in Resources */ = {isa = PBXBuildFile; fileRef = 62224F54B1E408ED04F979A3 /* ShadowPlanner */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		C0B017042F80000100000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D4A38F341FFB2AED00092A46 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D4A38F3B1FFB2AED00092A46;
+			remoteInfo = Cerebro;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
 		D45E1CE528014CEC002189C0 /* Embed Frameworks */ = {
@@ -907,6 +932,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				C0B017012F80000100000001 /* Install Cerebro */,
 				D4A38F3B1FFB2AED00092A46 /* Cerebro */,
 			);
 		};
@@ -967,6 +993,21 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		C0B017022F80000100000001 /* Install signed Cerebro in Applications */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = ();
+			inputPaths = ();
+			name = "Install signed Cerebro in Applications";
+			outputPaths = ();
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "exec /usr/bin/python3 \"${PROJECT_DIR}/Scripts/install-built-cerebro.py\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		D4A38F381FFB2AED00092A46 /* Sources */ = {
@@ -1138,6 +1179,14 @@
 			sourceTree = "<group>";
 		};
 /* End PBXVariantGroup section */
+
+/* Begin PBXTargetDependency section */
+		C0B017032F80000100000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D4A38F3B1FFB2AED00092A46 /* Cerebro */;
+			targetProxy = C0B017042F80000100000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		D4A38F501FFB2AEE00092A46 /* Debug */ = {
@@ -1340,9 +1389,38 @@
 			};
 			name = Release;
 		};
+		C0B017062F80000100000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CEREBRO_INSTALL_AFTER_BUILD = YES;
+				CEREBRO_INSTALL_DIRECTORY = /Applications;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				SUPPORTED_PLATFORMS = macosx;
+			};
+			name = Debug;
+		};
+		C0B017072F80000100000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CEREBRO_INSTALL_AFTER_BUILD = YES;
+				CEREBRO_INSTALL_DIRECTORY = /Applications;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				SUPPORTED_PLATFORMS = macosx;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		C0B017052F80000100000001 /* Build configuration list for PBXAggregateTarget "Install Cerebro" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C0B017062F80000100000001 /* Debug */,
+				C0B017072F80000100000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		D4A38F371FFB2AED00092A46 /* Build configuration list for PBXProject "Cerebro" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

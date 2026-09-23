@@ -20,6 +20,20 @@
                ReferencedContainer = "container:Cerebro.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "C0B017012F80000100000001"
+               BuildableName = "Install Cerebro"
+               BlueprintName = "Install Cerebro"
+               ReferencedContainer = "container:Cerebro.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
