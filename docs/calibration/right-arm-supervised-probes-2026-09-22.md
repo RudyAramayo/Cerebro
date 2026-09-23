@@ -146,7 +146,7 @@ and the CAN devices remained alive. The display ingested telemetry in bursts;
 pausing the diagnostic drawings reduced the median interval to 51 ms, with
 one gap over 250 ms in approximately 35 seconds. The comparison with drawings
 running had 215 such gaps over approximately 122 seconds, including CSV export.
-CSV receipt times are currently assigned on the main thread, so these figures
+Those CSV receipt times were assigned on the main thread, so these figures
 measure display ingestion delay, not proven network transit delay.
 
 A short Mac process profile showed substantial main-thread graph drawing;
@@ -156,6 +156,23 @@ contributed. Reconnecting only the gateway session restored connectivity at
 22:30:33 without restarting either core or sending a motor command. Movement
 remained suspended for the display/receipt-time investigation. The rejected
 target was not replayed, and this route is not a taught folding animation.
+
+The diagnostics follow-up moves CSV formatting/writing and graph preparation
+off the main thread. Graph requests coalesce while busy; each time bucket
+preserves endpoints and extrema, and missing samples break the line. The
+full history remains available in CSV with unchanged column names and
+round-trip numeric precision. New CSV wall times come from telemetry decoding
+on the gateway queue instead of later UI ingestion. They are still Mac receipt
+times, not camera exposure times or synchronized robot acquisition times.
+
+Hardware-free runtime checks exercise narrow positive/negative spikes,
+missing velocity/targets, line breaks, obsolete plot results, live history
+mutation during export, main-loop responsiveness and delayed notification
+delivery. The full 33,600-row export fixture completed in 1.52 seconds with
+82 main-loop timer callbacks. The existing mode/command freshness limits
+remain unchanged; rejection text now distinguishes gateway ages from local
+time since receipt. These tests do not establish that the earlier connection
+faults have been eliminated, and the visual calibration remains incomplete.
 
 ## Camera references
 

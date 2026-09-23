@@ -123,6 +123,157 @@ private final class ROBAmberDiagnosticsHistory {
     }
 }
 
+private enum ROBAmberDiagnosticsCSV {
+    static func write(snapshot: [ROBAmberDiagnosticsArm: [ROBAmberDiagnosticsSample]],
+                      to url: URL, completion: @escaping (Result<Void, Error>) -> Void) {
+        exportQueue.async {
+            let result = Result { try csvData(snapshot: snapshot).write(to: url, options: .atomic) }
+            DispatchQueue.main.async { completion(result) }
+        }
+    }
+
+    private static let exportQueue = DispatchQueue(
+        label: "com.orbitusrobotics.amber-diagnostics-export", qos: .utility
+    )
+
+    static func csvData(snapshot: [ROBAmberDiagnosticsArm: [ROBAmberDiagnosticsSample]]) -> Data {
+        var lines = ["arm,received_at,sequence,sample_age_ms,joint,position_rad,target_rad,error_rad,velocity_rad_s,current,status,robot_arm,core,udp_port,controller_sample_age_ms,joint_feedback_age_ms,gripper_feedback_age_ms"]
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        for arm in ROBAmberDiagnosticsArm.allCases {
+            for sample in snapshot[arm] ?? [] {
+                let receivedAt = formatter.string(from: sample.receivedAt)
+                for joint in 0..<7 {
+                    let target = sample.targetPositionsRadians?[safe: joint]
+                    let error = target.map { $0 - sample.positionsRadians[joint] }
+                    let fields = [
+                        arm.amberGatewayArm,
+                        receivedAt,
+                        String(sample.sequence),
+                        csvNumber(sample.sampleAgeMilliseconds),
+                        String(joint + 1),
+                        csvNumber(sample.positionsRadians[joint]),
+                        csvNumber(target),
+                        csvNumber(error),
+                        csvNumber(sample.velocitiesRadiansPerSecond[safe: joint]),
+                        csvNumber(sample.currents[joint]),
+                        csvNumber(sample.statuses[joint]),
+                        arm.rawValue,
+                        arm.amberCoreName,
+                        String(arm.amberUDPPort),
+                        csvNumber(sample.controllerSampleAgeMilliseconds),
+                        csvNumber(sample.jointFeedbackAgeMilliseconds[safe: joint]),
+                        csvNumber(sample.gripperFeedbackAgeMilliseconds),
+                    ]
+                    lines.append(fields.joined(separator: ","))
+                }
+            }
+        }
+        return Data((lines.joined(separator: "\n") + "\n").utf8)
+    }
+
+    private static func csvNumber(_ value: Double?) -> String {
+        guard let value, value.isFinite else { return "" }
+        // Swift's numeric representation is locale-independent and retains
+        // the Double's round-trip precision without a formatter per cell.
+        return String(value)
+    }
+
+}
+
+/// Immutable paths prepared away from AppKit. Each time bucket retains its
+/// first/last points and both extrema; missing values always break the line.
+/// This limits drawing cost without hiding a narrow telemetry spike.
+private struct ROBAmberPlotGeometry {
+    let range: ClosedRange<Double>
+    let paths: [CGPath]
+    let hasSamples: Bool
+
+    static func make(samples: [ROBAmberDiagnosticsSample],
+                     metric: ROBAmberTelemetryPlotView.Metric) -> Self {
+        let seriesCount = metric == .sampleAge ? 1 : 7
+        let pathCount = metric == .position ? 14 : seriesCount
+        var series = [[CGPoint?]](repeating: [], count: pathCount)
+        let start = samples.first?.receivedAtUptime ?? 0
+        let span = max(0.001, (samples.last?.receivedAtUptime ?? start) - start)
+        var minimum = Double.infinity
+        var maximum = -Double.infinity
+        for sample in samples {
+            let x = (sample.receivedAtUptime - start) / span
+            for index in 0..<pathCount {
+                let value: Double?
+                switch metric {
+                case .position:
+                    value = index < 7 ? sample.positionsRadians[safe: index]
+                        : sample.targetPositionsRadians?[safe: index - 7]
+                case .velocity: value = sample.velocitiesRadiansPerSecond[safe: index]
+                case .current: value = sample.currents[safe: index]
+                case .sampleAge: value = sample.sampleAgeMilliseconds
+                }
+                if let value, value.isFinite {
+                    minimum = min(minimum, value)
+                    maximum = max(maximum, value)
+                    series[index].append(CGPoint(x: x, y: value))
+                } else {
+                    series[index].append(nil)
+                }
+            }
+        }
+        let range: ClosedRange<Double>
+        if !minimum.isFinite || !maximum.isFinite {
+            range = -1...1
+        } else if metric == .velocity || metric == .current {
+            let extent = max(0.01, max(abs(minimum), abs(maximum)) * 1.08)
+            range = -extent...extent
+        } else if metric == .sampleAge {
+            range = 0...max(1, maximum * 1.12)
+        } else {
+            let padding = max(0.02, maximum - minimum) * 0.08
+            range = (minimum - padding)...(maximum + padding)
+        }
+        return Self(range: range, paths: series.map { path(points: $0, range: range) },
+                    hasSamples: samples.count > 1)
+    }
+
+    static func path(points: [CGPoint?], range: ClosedRange<Double>) -> CGPath {
+        let path = CGMutablePath()
+        let span = max(0.000_001, range.upperBound - range.lowerBound)
+        var bucket = -1
+        var pending: [CGPoint] = []
+        var hasPoint = false
+        func flush() {
+            guard !pending.isEmpty else { return }
+            var low = 0
+            var high = 0
+            for index in pending.indices {
+                if pending[index].y < pending[low].y { low = index }
+                if pending[index].y > pending[high].y { high = index }
+            }
+            for index in Set([0, low, high, pending.count - 1]).sorted() {
+                let value = pending[index]
+                let normalized = (Double(value.y) - range.lowerBound) / span
+                let point = CGPoint(x: value.x, y: min(1, max(0, normalized)))
+                if hasPoint { path.addLine(to: point) } else { path.move(to: point) }
+                hasPoint = true
+            }
+            pending.removeAll(keepingCapacity: true)
+        }
+        for point in points {
+            guard let point else {
+                flush()
+                hasPoint = false
+                bucket = -1
+                continue
+            }
+            let nextBucket = min(95, max(0, Int(point.x * 96)))
+            if nextBucket != bucket { flush(); bucket = nextBucket }
+            pending.append(point)
+        }
+        flush()
+        return path
+    }
+}
+
 private final class ROBAmberTelemetryPlotView: NSView {
     enum Metric {
         case position
@@ -156,7 +307,38 @@ private final class ROBAmberTelemetryPlotView: NSView {
 
     let metric: Metric
     var samples: [ROBAmberDiagnosticsSample] = [] {
-        didSet { needsDisplay = true }
+        didSet {
+            pendingSamples = samples
+            prepareNextGeometry()
+        }
+    }
+    private var geometry: ROBAmberPlotGeometry?
+    private var pendingSamples: [ROBAmberDiagnosticsSample]?
+    private var preparingGeometry = false
+    private static let preparationQueue = DispatchQueue(
+        label: "com.orbitusrobotics.amber-diagnostics-plots", qos: .utility
+    )
+
+    private func prepareNextGeometry() {
+        guard !preparingGeometry, let next = pendingSamples else { return }
+        pendingSamples = nil
+        preparingGeometry = true
+        let metric = self.metric
+        Self.preparationQueue.async { [weak self] in
+            let prepared = ROBAmberPlotGeometry.make(samples: next, metric: metric)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.preparingGeometry = false
+                // Coalesce redraw requests while busy. Never accumulate an
+                // unbounded queue of obsolete histories or replace new data
+                // with an older preparation result.
+                if self.pendingSamples == nil {
+                    self.geometry = prepared
+                    self.needsDisplay = true
+                }
+                self.prepareNextGeometry()
+            }
+        }
     }
 
     init(metric: Metric) {
@@ -188,7 +370,7 @@ private final class ROBAmberTelemetryPlotView: NSView {
         let chart = NSRect(x: 48, y: 22, width: max(1, bounds.width - 58), height: max(1, bounds.height - 50))
         guard chart.width > 20, chart.height > 20 else { return }
         drawGrid(in: chart)
-        guard samples.count > 1 else {
+        guard let geometry, geometry.hasSamples else {
             let attributes: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 11),
                 .foregroundColor: NSColor.secondaryLabelColor,
@@ -199,20 +381,16 @@ private final class ROBAmberTelemetryPlotView: NSView {
             return
         }
 
-        let range = valueRange()
+        let range = geometry.range
         drawScaleLabels(range: range, in: chart)
-        let firstTime = samples.first?.receivedAt.timeIntervalSinceReferenceDate ?? 0
-        let lastTime = samples.last?.receivedAt.timeIntervalSinceReferenceDate ?? firstTime + 1
-        let timeSpan = max(0.001, lastTime - firstTime)
 
         let seriesCount = metric == .sampleAge ? 1 : 7
         for series in 0..<seriesCount {
             let color = metric == .sampleAge ? NSColor.systemMint : Self.seriesColors[series]
-            drawSeries(series, target: false, color: color, range: range,
-                       chart: chart, firstTime: firstTime, timeSpan: timeSpan)
+            drawPath(geometry.paths[series], target: false, color: color, chart: chart)
             if metric == .position {
-                drawSeries(series, target: true, color: color.withAlphaComponent(0.68), range: range,
-                           chart: chart, firstTime: firstTime, timeSpan: timeSpan)
+                drawPath(geometry.paths[series + 7], target: true,
+                         color: color.withAlphaComponent(0.68), chart: chart)
             }
         }
         drawLegend()
@@ -238,35 +416,6 @@ private final class ROBAmberTelemetryPlotView: NSView {
         }
     }
 
-    private func valueRange() -> ClosedRange<Double> {
-        var values: [Double] = []
-        for sample in samples {
-            switch metric {
-            case .position:
-                values.append(contentsOf: sample.positionsRadians.filter(\.isFinite))
-                if let target = sample.targetPositionsRadians {
-                    values.append(contentsOf: target.filter(\.isFinite))
-                }
-            case .velocity:
-                values.append(contentsOf: sample.velocitiesRadiansPerSecond.filter(\.isFinite))
-            case .current:
-                values.append(contentsOf: sample.currents.filter(\.isFinite))
-            case .sampleAge:
-                if sample.sampleAgeMilliseconds.isFinite { values.append(sample.sampleAgeMilliseconds) }
-            }
-        }
-        guard let rawMin = values.min(), let rawMax = values.max() else { return -1...1 }
-        if metric == .velocity || metric == .current {
-            let extent = max(0.01, max(abs(rawMin), abs(rawMax)) * 1.08)
-            return -extent...extent
-        }
-        if metric == .sampleAge {
-            return 0...max(1, rawMax * 1.12)
-        }
-        let span = max(0.02, rawMax - rawMin)
-        return (rawMin - span * 0.08)...(rawMax + span * 0.08)
-    }
-
     private func drawScaleLabels(range: ClosedRange<Double>, in chart: NSRect) {
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular),
@@ -283,45 +432,18 @@ private final class ROBAmberTelemetryPlotView: NSView {
         }
     }
 
-    private func drawSeries(_ series: Int, target: Bool, color: NSColor,
-                            range: ClosedRange<Double>, chart: NSRect,
-                            firstTime: TimeInterval, timeSpan: TimeInterval) {
-        let span = max(0.000_001, range.upperBound - range.lowerBound)
-        let path = NSBezierPath()
-        var hasPoint = false
-        for sample in samples {
-            let value: Double?
-            switch metric {
-            case .position:
-                let source = target ? sample.targetPositionsRadians : sample.positionsRadians
-                value = source.flatMap { $0.indices.contains(series) ? $0[series] : nil }
-            case .velocity:
-                value = sample.velocitiesRadiansPerSecond.indices.contains(series)
-                    ? sample.velocitiesRadiansPerSecond[series] : nil
-            case .current:
-                value = sample.currents.indices.contains(series) ? sample.currents[series] : nil
-            case .sampleAge:
-                value = sample.sampleAgeMilliseconds
-            }
-            guard let value, value.isFinite else {
-                hasPoint = false
-                continue
-            }
-            let seconds = sample.receivedAt.timeIntervalSinceReferenceDate - firstTime
-            let x = chart.minX + chart.width * CGFloat(seconds / timeSpan)
-            let normalized = (value - range.lowerBound) / span
-            let y = chart.minY + chart.height * CGFloat(min(1, max(0, normalized)))
-            let point = NSPoint(x: x, y: y)
-            if hasPoint { path.line(to: point) } else { path.move(to: point) }
-            hasPoint = true
-        }
-        color.setStroke()
-        path.lineWidth = target ? 1.0 : 1.35
-        if target {
-            var dash: [CGFloat] = [4, 3]
-            path.setLineDash(&dash, count: dash.count, phase: 0)
-        }
-        path.stroke()
+    private func drawPath(_ path: CGPath, target: Bool, color: NSColor, chart: NSRect) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        var transform = CGAffineTransform(a: chart.width, b: 0, c: 0, d: chart.height,
+                                          tx: chart.minX, ty: chart.minY)
+        guard let transformed = path.copy(using: &transform) else { return }
+        context.saveGState()
+        context.setStrokeColor(color.cgColor)
+        context.setLineWidth(target ? 1.0 : 1.35)
+        context.setLineDash(phase: 0, lengths: target ? [4, 3] : [])
+        context.addPath(transformed)
+        context.strokePath()
+        context.restoreGState()
     }
 
     private func drawLegend() {
@@ -1420,7 +1542,7 @@ private final class ROBAmberArmSchematicView: NSView {
               currents.allSatisfy(\.isFinite),
               statuses.allSatisfy(\.isFinite) else { return }
         let sample = ROBAmberDiagnosticsSample(
-            receivedAt: Date(),
+            receivedAt: telemetry.receivedAt,
             receivedAtUptime: telemetry.receivedAtUptime,
             sequence: telemetry.sequence,
             sampleAgeMilliseconds: telemetry.sampleAgeMilliseconds,
@@ -2592,54 +2714,21 @@ private final class ROBAmberArmSchematicView: NSView {
         panel.canCreateDirectories = true
         panel.beginSheetModal(for: window!) { [weak self] response in
             guard response == .OK, let self, let url = panel.url else { return }
-            do {
-                try self.csvData().write(to: url, options: .atomic)
-                self.appendEvent("Exported bounded telemetry to \(url.lastPathComponent)")
-            } catch {
-                self.presentError(error)
-                self.appendEvent("Telemetry export failed: \(error.localizedDescription)")
-            }
-        }
-    }
-
-    private func csvData() -> Data {
-        var lines = ["arm,received_at,sequence,sample_age_ms,joint,position_rad,target_rad,error_rad,velocity_rad_s,current,status,robot_arm,core,udp_port,controller_sample_age_ms,joint_feedback_age_ms,gripper_feedback_age_ms"]
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        for arm in ROBAmberDiagnosticsArm.allCases {
-            for sample in histories[arm]?.samples ?? [] {
-                for joint in 0..<7 {
-                    let target = sample.targetPositionsRadians?[safe: joint]
-                    let error = target.map { $0 - sample.positionsRadians[joint] }
-                    let fields = [
-                        arm.amberGatewayArm,
-                        formatter.string(from: sample.receivedAt),
-                        String(sample.sequence),
-                        csvNumber(sample.sampleAgeMilliseconds),
-                        String(joint + 1),
-                        csvNumber(sample.positionsRadians[joint]),
-                        csvNumber(target),
-                        csvNumber(error),
-                        csvNumber(sample.velocitiesRadiansPerSecond[safe: joint]),
-                        csvNumber(sample.currents[joint]),
-                        csvNumber(sample.statuses[joint]),
-                        arm.rawValue,
-                        arm.amberCoreName,
-                        String(arm.amberUDPPort),
-                        csvNumber(sample.controllerSampleAgeMilliseconds),
-                        csvNumber(sample.jointFeedbackAgeMilliseconds[safe: joint]),
-                        csvNumber(sample.gripperFeedbackAgeMilliseconds),
-                    ]
-                    lines.append(fields.joined(separator: ","))
+            // Capture the bounded value arrays on the UI thread, then format
+            // and write off-thread. Export must not stall operator controls
+            // or delay delivery of telemetry notifications for seconds.
+            let snapshot = self.histories.mapValues(\.samples)
+            ROBAmberDiagnosticsCSV.write(snapshot: snapshot, to: url) { [weak self] result in
+                guard let self else { return }
+                switch result {
+                case .success:
+                    self.appendEvent("Exported bounded telemetry to \(url.lastPathComponent)")
+                case .failure(let error):
+                    self.presentError(error)
+                    self.appendEvent("Telemetry export failed: \(error.localizedDescription)")
                 }
             }
         }
-        return Data((lines.joined(separator: "\n") + "\n").utf8)
-    }
-
-    private func csvNumber(_ value: Double?) -> String {
-        guard let value, value.isFinite else { return "" }
-        return String(format: "%.9g", locale: Locale(identifier: "en_US_POSIX"), value)
     }
 
     private static func fileTimestamp() -> String {

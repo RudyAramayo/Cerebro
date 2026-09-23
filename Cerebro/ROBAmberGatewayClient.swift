@@ -17,6 +17,7 @@ import Security
     public let controllerSampleAgeMilliseconds: Double
     public let jointFeedbackAgeMilliseconds: [NSNumber]
     public let gripperFeedbackAgeMilliseconds: Double
+    public let receivedAt: Date
     public let receivedAtUptime: TimeInterval
     public let positionsRadians: [NSNumber]
     public let velocitiesRadiansPerSecond: [NSNumber]
@@ -33,6 +34,7 @@ import Security
         jointFeedbackAgeMilliseconds = (message.jointFeedbackAgeMilliseconds ?? [])
             .map { NSNumber(value: $0 ?? .infinity) }
         gripperFeedbackAgeMilliseconds = message.gripperFeedbackAgeMilliseconds ?? .infinity
+        receivedAt = Date()
         receivedAtUptime = ProcessInfo.processInfo.systemUptime
         positionsRadians = (message.positionsRadians ?? []).map(NSNumber.init(value:))
         velocitiesAvailable = message.velocitiesAvailable != false
@@ -767,7 +769,15 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
             } else if telemetry?.jointFeedbackAgeMilliseconds.count != 7 {
                 reason = "Per-motor CAN feedback is unavailable; update the Amber gateway"
             } else if telemetry!.effectiveSampleAgeMilliseconds > 250 {
-                reason = "Motor CAN feedback is missing or stale; cached controller positions cannot authorize motion"
+                let sample = telemetry!
+                let localAge = max(0, ProcessInfo.processInfo.systemUptime - sample.receivedAtUptime) * 1_000
+                let canAge = sample.jointFeedbackAgeMilliseconds.map(\.doubleValue).max() ?? .infinity
+                func age(_ value: Double) -> String {
+                    value.isFinite ? String(format: "%.1f ms", value) : "unavailable"
+                }
+                reason = "Arm feedback is missing or stale; motion blocked. "
+                    + "At gateway: controller \(age(sample.controllerSampleAgeMilliseconds)), "
+                    + "oldest joint CAN \(age(canAge)); local time since receipt \(age(localAge))."
             } else if telemetry!.effectiveGripperFeedbackAgeMilliseconds > 250 {
                 reason = "Gripper CAN feedback is missing or stale; check the arm connection"
             } else {

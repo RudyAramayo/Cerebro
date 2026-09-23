@@ -59,6 +59,18 @@ struct GatewayCompatibilityFixtures {
             expect(client.gripperSnapshot(forArm: arm)["commandsAvailable"] as? Bool == false,
                    "Legacy snapshot advertised gripper support")
         }
+        let beforeReceipt = Date()
+        var delayedReceipt: Date?
+        var notificationDeliveredAt: Date?
+        let receiptObserver = NotificationCenter.default.addObserver(
+            forName: .ROBAmberGatewayTelemetryDidUpdate, object: client, queue: nil
+        ) { notification in
+            if let telemetry = notification.userInfo?["telemetry"] as? ROBAmberGatewayTelemetry,
+               telemetry.arm == "right", telemetry.sequence == 1 {
+                delayedReceipt = telemetry.receivedAt
+                notificationDeliveredAt = Date()
+            }
+        }
         try client.fixtureReceive([
             "type": "telemetry", "arm": "right", "sequence": 1, "sample_age_ms": 1.0,
             "positions_rad": [Double](repeating: 0.0, count: 7),
@@ -66,6 +78,16 @@ struct GatewayCompatibilityFixtures {
             "currents": [Double](repeating: 0.0, count: 7),
             "statuses": [Double](repeating: 0.0, count: 7),
         ])
+        let afterReceipt = Date()
+        // Simulate a busy UI while the gateway queue has already decoded the
+        // packet. Delivery delay must not rewrite its receipt timestamp.
+        Thread.sleep(forTimeInterval: 0.08)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        NotificationCenter.default.removeObserver(receiptObserver)
+        expect(delayedReceipt.map { $0 >= beforeReceipt && $0 <= afterReceipt } == true,
+               "UI delivery time replaced the telemetry receipt timestamp")
+        expect(notificationDeliveredAt.map { $0.timeIntervalSince(delayedReceipt!) >= 0.07 } == true,
+               "Fixture failed to exercise delayed UI delivery")
         expect(client.telemetry(forArm: "right")?.sequence == 1, "Legacy telemetry was dropped")
         expect(client.queryMode(forArm: "right") > 0, "Legacy mode query was blocked")
         try client.fixtureReceive([
