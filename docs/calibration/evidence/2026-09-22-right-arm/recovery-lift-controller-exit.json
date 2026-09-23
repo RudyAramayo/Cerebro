@@ -1,0 +1,149 @@
+{
+  "purpose": "Separate post-recovery trial; not a completed calibration or automatically replayable route",
+  "physicalArm": "right",
+  "core": "L10",
+  "canInterface": "can10",
+  "udpPort": 26001,
+  "gatewayArm": "left",
+  "appCodeCommit": "bc5bb1947ee7931ee5240355820591ce36532983",
+  "gatewayCommit": "17517e20f0c0d4e4bc4464a3e5486ae0be1e7d03",
+  "operatorInitialState": "Hanging and clear after DeoxIT treatment and connector reseating; operator reported touching nothing during the lift",
+  "modeEntry": {
+    "requestedAt": "2026-09-22T22:02:00.938-07:00",
+    "acknowledgedAt": "2026-09-22T22:02:01.689-07:00",
+    "accepted": false,
+    "error": "Amber rejected position mode request (0)",
+    "followupModeQueryAt": "2026-09-22T22:02:18.751-07:00",
+    "allSevenModesAfterQuery": 2,
+    "operatorConfirmedPositionMode": true,
+    "modeRequestRepeated": false
+  },
+  "freshMeasuredHold": {
+    "acknowledgedAt": "2026-09-22T22:03:05.813-07:00",
+    "accepted": true,
+    "amberResponse": 1,
+    "capturedPositionRadians": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "lift": {
+    "appDispatchLogAt": "2026-09-22T22:04:08.975-07:00",
+    "targetRadians": [
+      0,
+      -0.06,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "requestedDurationSeconds": 4,
+    "commandDelaySeconds": 0,
+    "lastAdvancingSequence": 66918,
+    "lastAdvancingSampleReceivedAt": "2026-09-23T05:04:13.951Z",
+    "lastReportedJ2Radians": -0.054677893,
+    "targetArrivalVerified": false,
+    "furtherMotionCommandsSent": false
+  },
+  "cameraState": {
+    "headTrackingDisabledBeforeLift": true,
+    "newNeckPoseCommandSent": false,
+    "recordingStarted": false,
+    "visualCalibrationAccepted": false
+  },
+  "telemetry": {
+    "path": "recovery-lift-controller-exit.csv.gz",
+    "gzipSHA256": "6fe7d7c0a60f78aeab13bb293f91573e11a41d521a1dffcf0b29457b46eb0f18",
+    "uncompressedSHA256": "31f1b92a655d1793f8ccf6c2240e6cdd8e11ae692e002b34c02c256c5d9c2263",
+    "rows": 33600,
+    "lastControllerAgeMilliseconds": 66334.0302,
+    "maximumRightJointCANAgeMilliseconds": 11.50976
+  },
+  "passiveDiagnostics": {
+    "observedAt": "2026-09-23T05:05:04.952473+00:00",
+    "interfaces": [
+      {
+        "interface": "can10",
+        "sample_seconds": 2,
+        "received_ids": {
+          "0x97": 401,
+          "0x96": 401,
+          "0x98": 400,
+          "0x95": 401,
+          "0x93": 400,
+          "0x92": 401,
+          "0x91": 401,
+          "0x94": 401
+        },
+        "local_tx_ids": {},
+        "last_received_payload": {
+          "0x97": "ff00000000ffe102",
+          "0x96": "ff00000000ffd502",
+          "0x98": "ff00000000000000",
+          "0x95": "ff00000000004e02",
+          "0x93": "ff00000000007002",
+          "0x92": "fffe480000026202",
+          "0x91": "ff00000000ff7302",
+          "0x94": "ff00000000ffef02"
+        },
+        "sent_frames": 0
+      },
+      {
+        "interface": "can11",
+        "sample_seconds": 2,
+        "received_ids": {
+          "0x92": 401,
+          "0x95": 401,
+          "0x93": 402,
+          "0x91": 401,
+          "0x96": 401,
+          "0x94": 400,
+          "0x98": 400,
+          "0x97": 400
+        },
+        "local_tx_ids": {
+          "0x11": 400,
+          "0x12": 400,
+          "0x13": 400,
+          "0x14": 400,
+          "0x15": 400,
+          "0x16": 400,
+          "0x17": 400
+        },
+        "last_received_payload": {
+          "0x92": "ff00000000000000",
+          "0x95": "ff00000000000000",
+          "0x93": "ff00000000000000",
+          "0x91": "ff00000000000000",
+          "0x96": "ff00000000000000",
+          "0x94": "ff00000000000000",
+          "0x98": "ff00000000000000",
+          "0x97": "ff00000000000000"
+        },
+        "sent_frames": 0
+      }
+    ],
+    "onlyRemainingCore": "2705 ./amber_core_R",
+    "rightCore4331Absent": true,
+    "gatewayPID": 4718,
+    "gatewayRestartedDuringLift": false,
+    "diagnosticCANOrUDPCommandsSent": 0
+  },
+  "exitEvidence": {
+    "sshSessionPID": 4330,
+    "sessionClosedAt": "2026-09-23T05:04:13Z",
+    "kernelCrashOrOOMRecordFound": false,
+    "coreDumpFound": false,
+    "rootCauseProven": false,
+    "assessment": "Right core exited contemporaneously with its SSH session closing. The legacy Torso core launcher executes the core in the foreground of SSH; this is a lifecycle risk, not proof of the exact exit cause. Both CAN buses still had device replies."
+  },
+  "recoveryPrepared": "Existing guarded Restart CAN/Core Stack dialog; waiting for a new both-arms-supported confirmation because right motors were activated after the earlier power-off",
+  "automaticReplayAllowed": false,
+  "calibrationApplied": false
+}

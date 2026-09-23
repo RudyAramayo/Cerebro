@@ -100,6 +100,29 @@ The operator then reported the right arm hanging and clear after applying
 DeoxIT and reconnecting the connectors. Cable treatment is an operator report,
 not an established root-cause diagnosis or durability test.
 
+## Post-recovery lift interrupted by controller exit
+
+The separate [post-recovery trial](evidence/2026-09-22-right-arm/recovery-lift-controller-exit.json)
+began after the operator reported hanging/clear. Position-mode entry returned
+a rejection code, but a subsequent mode query and the operator both confirmed
+position mode. The mode switch was not repeated. A fresh zero-vector hold was
+accepted at 22:03:05, then a four-second J2 −0.06 target was dispatched at
+22:04:08.975. Head tracking had been disabled again after app startup.
+
+J2 moved to a last reported −0.054677893 rad. At 22:04:13 the right core's
+sequence stopped at 66918 and its process disappeared. Both buses still had
+all eight CAN replies; right-core setpoint transmissions stopped. The new
+gateway kept individual CAN ages current while correctly marking the stopped
+controller sample stale. No further movement command was sent.
+
+The right core's SSH session closed at the same time. The operator reported
+touching nothing. No kernel crash/OOM entry or core dump was found; the exact
+exit cause is unproven. The legacy Torso starter runs a core in the foreground
+of SSH, while the installed guarded stack recovery uses the persistent
+`rc.local` startup with redirected logs. That existing recovery was prepared
+in the UI pending both-arms support, because right motors had been activated
+since the earlier power-off. This trial is not accepted calibration evidence.
+
 ## Camera references
 
 The following completed recordings remain local under
