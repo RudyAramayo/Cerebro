@@ -216,6 +216,7 @@ import AVFoundation
     /// This is enabled at runtime so manually driven terrain can be learned.
     public func setNavigationDemandActive(_ active: Bool) {
         navigationDemandActive = active
+        applyRecordingDemand()
         reconcileCameraSession()
     }
 
@@ -241,7 +242,7 @@ import AVFoundation
     private func applyRecordingDemand() {
         let demand = ROBRecordingCoordinator.shared.cameraCaptureDemand(for: .belly)
         recordingDemandActive = demand.active
-        bellyCameraManager?.setCaptureResolutionOverride(demand.resolutionOverride ?? (armRoutineDemand ? "640x400" : nil))
+        bellyCameraManager?.setCaptureResolutionOverride(demand.resolutionOverride ?? ((armRoutineDemand || navigationDemandActive) ? "640x400" : nil))
     }
     
     private var armRoutineDemand = false

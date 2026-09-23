@@ -2,6 +2,7 @@
 """Static safety/UI contracts for the operator-confirmed live startup lane."""
 
 from pathlib import Path
+from ROBMainCameraHeadlessStaticTests import braced_declaration
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -105,6 +106,14 @@ def main() -> None:
         "Stage stop no longer cancels the gesture, holds the arms, and stops the base",
     )
 
+    arm_stop = braced_declaration(MAIN, 'if (armTool && [command isEqual:@"stop"])')
+    require(
+        "stageShowCoordinator cancelWithReason" in arm_stop
+        and "applyPrioritySoftwareStopWithReason" in arm_stop
+        and "cancelCurrentGestureWithReason" in arm_stop
+        and "requestPriorityHold" in arm_stop,
+        "Live arm stop must cancel every producer before requesting holds",
+    )
     print("ROB wake-up live startup static tests passed")
 
 

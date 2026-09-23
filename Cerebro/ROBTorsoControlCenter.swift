@@ -102,6 +102,9 @@ import Cocoa
 
     func arm() {
         precondition(Thread.isMainThread)
+        guard !ROBArmRoutineCoordinator.shared.ownsPhysicalMotion else {
+            stop(); policy.invalidate("Arm routine owns body clearance"); publish(); return
+        }
         startTimer()
         let now = ProcessInfo.processInfo.systemUptime
         guard !arming, policy.hasFreshObservation(at: now) else {

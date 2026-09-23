@@ -907,6 +907,7 @@ final class CameraViewController: NSViewController {
         }
         guard geminiVideoIsActive != isActive else { return }
         geminiVideoIsActive = isActive
+        applyRecordingDemand()
         reconcileCameraSession()
     }
 
@@ -919,6 +920,7 @@ final class CameraViewController: NSViewController {
         }
         guard followVideoIsActive != isActive else { return }
         followVideoIsActive = isActive
+        applyRecordingDemand()
         reconcileCameraSession()
     }
 
@@ -1083,10 +1085,11 @@ final class CameraViewController: NSViewController {
     private func applyRecordingDemand() {
         let demand = ROBRecordingCoordinator.shared.cameraCaptureDemand(for: .face)
         recordingDemandActive = demand.active
-        // Keep both RGB-D links responsive during arm motion. An explicit
-        // recording resolution retains priority, and ordinary capture resumes
-        // when the routine releases its demand.
-        cameraManager?.setCaptureResolutionOverride(demand.resolutionOverride ?? (armRoutineDemand ? "640x400" : nil))
+        // Live conversation, following and arm motion share a small RGB-D
+        // profile. Explicit footage resolution still has priority; freshness
+        // gates may refuse motion if that recording configuration is too slow.
+        let realtime = armRoutineDemand || geminiVideoIsActive || followVideoIsActive
+        cameraManager?.setCaptureResolutionOverride(demand.resolutionOverride ?? (realtime ? "640x400" : nil))
     }
 
     private func applyProcessingSettings() {

@@ -4,7 +4,7 @@ Settings → Arms contains **Calibrate arms on startup** (off until selected),
 Run startup now, Prepare to grab, Relax arms and Stop + hold. Enabling startup
 requests one controller-approved attempt after launch or system wake. Failure ends that attempt;
 there is no indefinite retry or delayed activation after the 90-second limit.
-Explicit `arm_control` prepare/grab/hold/relax commands are available independently
+Explicit `arm_control` prepare/grab/hold/relax/wave/teach/replay commands are available independently
 of that preference. Direct chat and addressed local speech also recognize simple
 commands, including “relax”, “grab this” and “hold this”. Negations, quoted text,
 “hold on”, and discussion about grabbing are not local motion commands.
@@ -29,11 +29,15 @@ R11, gateway `right`, UDP 26002. J3–J7 remain zero throughout:
 | 5 | 0.75 | −0.60 |
 | Front | 1.05 | −0.60 |
 
-Each segment takes four seconds, with both arms dispatched together and three
-distinct, stable measured position samples spanning at least 150 ms before
-advancing. The motion portion is about 26 seconds. Camera inference, gateway
-setup and gripper checks add time. Average joint speed is at most 0.075 rad/s;
-this is not a measured peak speed or acceleration claim. Missing vendor velocity
+Both arms are dispatched together. Segment duration is the maximum of 0.8 s,
+maximum joint displacement / 0.075 rad/s, and 4 × (displacement / 0.3)^(1/3).
+This preserves the nominal longest-segment timing scale while reducing the
+short 0.15-radian segments to about 3.175 s. Planned hanging-to-front travel is
+20.7 s, plus camera, gripper and arrival checks. These timings have not been
+verified automatically on hardware. Three distinct stable measured position
+samples spanning at least 150 ms are still required; they can accumulate during
+the segment instead of adding an unconditional delay afterward. There is no
+measured peak speed, acceleration, jerk or torque claim. Missing vendor velocity
 is never replaced by zero.
 
 Startup verifies camera-observed hanging at encoder zero for the authenticated
@@ -44,9 +48,12 @@ off-route wrist/elbow, new session away from hanging, or ambiguous view blocks
 motion. Interrupted positions on the taught segments can return along that
 same corridor within the verified session.
 
-The forward and belly RGB-D streams run independently of preview visibility and
-optional detector settings. During a routine they request 640×400 capture to
-reduce dual-camera transport latency, then restore the normal capture demand.
+The main face RGB-D camera owns arm inspection and runs independently of preview
+visibility and optional detector settings. The belly stream is not required or
+included in an arm observation. The main view must show the **complete** route,
+including both arms and nearby obstacles; a cropped or occluded hanging arm
+still blocks activation. During a routine the main camera requests 640×400,
+then restores normal capture demand.
 An explicit recording resolution retains priority. A read-only local MLX inspection requires visible,
 clear arm paths; missing/occluded evidence blocks. The input frames retain their
 capture times and sequence, old inference is rejected, and scene changes veto
@@ -59,8 +66,12 @@ The neck uses the existing reviewed upright clearance staging, then moves only
 camera tilt to the inspection view. Head tracking pauses during inspection.
 Passive torso slider refreshes cannot overwrite that pose; explicit manual
 neck input retains priority and a changed view stops the arm routine.
-Model tool requests also require a matching recent addressed user transcript;
-camera content, stage dialogue and unsolicited model output cannot authorize them.
+Models can now propose contextual actions without a second transcript-derived
+grant. The authenticated Vision Pro or iPhone must still approve the complete
+operation before any activation. Camera content and stage dialogue cannot grant
+that authority. Treads, flippers and linear-actuator output are held at zero with
+brakes during the physical routine; torso arming is refused. Neck view changes
+invalidate the camera check and stop the arm route.
 
 Only after both arms arrive in front does the routine calibrate the physical
 right and left grippers, one at a time, then open them at vendor intensity 10.
@@ -133,7 +144,7 @@ hanging zero and inactive” with live gateway feedback. This tested the
 already-hanging case; the new automatic moving return is covered by fixtures,
 with the route itself exercised manually as recorded above.
 
-**Full automatic startup and grasp remain blocked in the current camera setup.**
+**Earlier automatic attempts, before the main-camera change below, were blocked.**
 One check reported a forward frame age of 324 ms with 97% usable depth, while
 belly frames arrived 689 ms old and failed the 400 ms input-age limit. A further
 check with 640×400 capture still reported belly input age 931 ms. The cameras
@@ -143,3 +154,18 @@ forward motion, new automatic gripper calibration, or physical grab completion
 to report. Startup preference remains off. Clear full-path camera coverage and
 the existing missing camera-to-arm extrinsics also remain requirements for
 broader reaching; the taught route does not resolve those limitations.
+
+## Live model binding and camera update
+
+See [live model motion](live-model-motion.md) for the shared Gemini/OpenAI tool
+contract, camera teaching and bounded replay. `wave` is a small paired front-arm
+greeting; it does not run a free-form wrist pose. `teach` is camera-only and
+`replay` needs one controller approval. Replay cannot carry an object.
+
+Main-camera inspection retains the 400 ms incoming-age limit, 700 ms current
+frame limit, usable depth, hand/person vetoes, scene stability, advancing frame
+sequences and measured motor checks. It does not silently substitute stale belly
+pixels or waive full-path visibility. See [camera measurements](depth-camera.md#2026-09-23-latency-measurements).
+This revision was validated with simulated arm hardware and real camera-only
+capture. No automatic arm trajectory, new grip or human demonstration replay was
+performed on the robot during this update. Startup preference remains off.

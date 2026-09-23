@@ -18,6 +18,10 @@ final class ROBAmberArmMotionArbiter {
     }
     func release(_ arm: ROBArmSide, owner: UUID) { if owners[arm] == owner { owners.removeValue(forKey: arm) } }
 }
+final class ROBAmberGestureExecutor {
+    static let shared = ROBAmberGestureExecutor()
+    var isExecuting = false
+}
 final class ROBAmberGatewayTunnel {
     static let shared = ROBAmberGatewayTunnel()
     func connect(host: String) {}
@@ -64,7 +68,7 @@ final class ROBAmberGatewayClient: NSObject {
     }
     func queryMode(forArm arm: String) -> UInt64 { ack("mode_query", arm) }
     func enterPositionMode(forArm arm: String) -> UInt64 { mode[arm] = 2; return ack("position_mode", arm) }
-    func sendRoutineWaypoint(arm: String, index: Int, expectedSessionGeneration: UInt64) -> UInt64 {
+    func sendRoutineWaypoint(arm: String, index: Int, duration: Double, expectedSessionGeneration: UInt64) -> UInt64 {
         precondition(expectedSessionGeneration == generation && mode[arm] == 2)
         q[arm] = ROBArmRoutinePlan.target(index: index, physicalLeft: arm == "right")!
         return ack("waypoint_\(index)", arm)
@@ -88,7 +92,8 @@ final class ROBArmRoutineVision {
     static let shared = ROBArmRoutineVision()
     var fresh = true, handsClear = true, blocked = false, objectInRight = false
     var readinessDescription: String { "Simulated camera unavailable" }
-    func setActive(_ active: Bool) {}
+    var demonstrationSample: ROBArmDemonstrationSample?
+    func setActive(_ active: Bool, teaching: Bool = false) {}
     func observe(target: String) async throws -> ROBArmRoutineObservation {
         ROBArmRoutineObservation(pathVisible: !blocked, pathClear: !blocked, hanging: true, armsInFront: true,
             leftJawEmpty: !objectInRight, rightJawEmpty: !objectInRight,
@@ -99,12 +104,61 @@ final class ROBArmRoutineVision {
 }
 
 @main struct ArmRoutineFixtures {
-    @MainActor static func run(_ command: String) async -> NSDictionary {
+    @MainActor static func run(_ command: String, target: String = "fixture object") async -> NSDictionary {
         await withCheckedContinuation { continuation in
-            ROBArmRoutineCoordinator.shared.performCommand(command, target: "fixture object") { continuation.resume(returning: $0) }
+            ROBArmRoutineCoordinator.shared.performCommand(command, target: target) { continuation.resume(returning: $0) }
         }
     }
+    static func testRenditions() {
+        let now = 1_000_000.0
+        func sample(_ n: Int, _ lift: Double, x: Double = 0.5) -> ROBArmDemonstrationSample {
+            .init(sequence: UInt64(n + 1), capturedAt: now + Double(n) * 200,
+                  elevation: lift, bodyCenterX: x, bodyCenterY: 0.5, torsoHeight: 0.3)
+        }
+        var builder = ROBArmDemonstrationBuilder()
+        for n in 0...25 {
+            let lift = n < 8 ? 0.0 : n < 16 ? 1.0 : 0.5
+            precondition(builder.append(sample(n, lift), now: now + Double(n) * 200 + 50))
+        }
+        let clip = builder.rendition(name: "Slow demonstration")!
+        precondition(clip.isValid && clip.levels == [4, 6, 5])
+        precondition(clip.waypoints == [5, 4, 5, 6, 5, 6])
+        precondition(clip.waypoints.count <= 8 && clip.nominalMotionSeconds <= 32)
+        var invalid = ROBArmDemonstrationBuilder()
+        precondition(!invalid.append(sample(0, .nan), now: now))
+        precondition(!invalid.append(sample(0, 0), now: now + 701))
+        precondition(!invalid.append(sample(0, 0), now: now - 1))
+        precondition(invalid.append(sample(0, 0), now: now))
+        precondition(!invalid.append(sample(0, 1), now: now)) // repeated pixels
+        precondition(!invalid.append(sample(1, 1, x: 0.9), now: now + 200)) // body discontinuity
+        precondition(!invalid.append(sample(5, 1), now: now + 1000)) // missing tracking interval
+        precondition(invalid.rendition(name: "incomplete") == nil)
+        let suite = "arm-rendition-fixture-" + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = ROBArmImitationStore(defaults: defaults)
+        precondition(store.save(clip) && store.find("last") == clip && store.find(clip.id) == clip)
+        precondition(store.find("unknown") == nil)
+        let corrupt = ROBArmRendition(id: clip.id, name: "tampered", corridor: "unreviewed",
+                                     levels: [0, 99], createdAt: Date())
+        precondition(!store.save(corrupt))
+        defaults.set(try! JSONEncoder().encode([corrupt]), forKey: "ROBArmFrontCorridorRenditionsV1")
+        precondition(store.summaries().isEmpty && store.find("last") == nil)
+        let zero = Array(repeating: 0.0, count: 7)
+        precondition(ROBArmRoutinePlan.duration(from: [], to: zero) == nil)
+        precondition(ROBArmRoutinePlan.duration(from: zero, to: [.nan, 0, 0, 0, 0, 0, 0]) == nil)
+        var total = 0.0
+        for n in 1...6 {
+            let a = ROBArmRoutinePlan.rightWaypoints[n-1], b = ROBArmRoutinePlan.rightWaypoints[n]
+            let time = ROBArmRoutinePlan.duration(from: a, to: b)!
+            precondition(time >= 3.17 && time <= 4.01)
+            total += time
+        }
+        precondition(total < 21 && total > 20)
+        print("Renditions: stable bounded lift mapping, discontinuity/staleness rejection, stored-clip validation and timing passed")
+    }
     @MainActor static func test() async {
+        testRenditions()
         let r = ROBArmRoutineCoordinator.shared, g = ROBAmberGatewayClient.shared, v = ROBArmRoutineVision.shared
         let approvals = ROBControllerArmApproval.shared
         let device = UUID(), session = UUID()
@@ -131,6 +185,9 @@ final class ROBArmRoutineVision {
         for text in ["don't grab this", "hold on", "explain how to grab this", "do not relax", "I said 'grab this'", "grab the cup but do not move", "grab this if I say yes"] {
             precondition(ROBArmRoutineCoordinator.commandForText(text) == nil, text)
         }
+        precondition(ROBArmRoutineCoordinator.commandForText("Rob, wave at Sam") == "wave")
+        precondition(ROBArmRoutineCoordinator.commandForText("copy my pose") == "teach")
+        precondition(ROBArmRoutineCoordinator.commandForText("replay that movement") == "replay")
         precondition(ROBArmRoutineCoordinator.commandForText("hold this") == "hold")
         precondition(ROBArmRoutineCoordinator.commandForText("could you please grab that cup") == "grab")
         for left in [false, true] {
@@ -168,6 +225,40 @@ final class ROBArmRoutineVision {
         precondition(g.mode.values.allSatisfy { $0 == 2 })
         print("Startup: both arms reached front before either gripper calibration")
 
+        g.commands = []
+        let wave = await run("wave")
+        precondition(wave["status"] as? String == "completed" && wave["measured"] as? Bool == true)
+        precondition(g.commands.filter { $0.hasPrefix("waypoint") }.count == 8)
+        precondition(!g.commands.contains { $0.hasPrefix("calibrate") }, "Greeting repeated gripper calibration")
+        precondition(g.q.allSatisfy { ROBArmRoutinePlan.near($0.value, ROBArmRoutinePlan.target(index: 6, physicalLeft: $0.key == "right")!) })
+        print("Greeting: locally timed paired motion returned to the measured front pose")
+        // Camera-only capture must produce a reusable clip without emitting a
+        // motor command. The production collector and builder run unchanged.
+        let key = "ROBArmFrontCorridorRenditionsV1"
+        let previousRecordings = UserDefaults.standard.data(forKey: key)
+        defer {
+            if let previousRecordings { UserDefaults.standard.set(previousRecordings, forKey: key) }
+            else { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        var poseSequence: UInt64 = 100
+        let bodyFrames = Timer(timeInterval: 0.2, repeats: true) { _ in
+            poseSequence += 1
+            v.demonstrationSample = .init(sequence: poseSequence,
+                capturedAt: Date().timeIntervalSince1970 * 1000, elevation: 0.5,
+                bodyCenterX: 0.5, bodyCenterY: 0.5, torsoHeight: 0.3)
+        }
+        RunLoop.main.add(bodyFrames, forMode: .common)
+        g.commands = []
+        let taught = await run("teach")
+        bodyFrames.invalidate(); v.demonstrationSample = nil
+        precondition(taught["status"] as? String == "recorded" && g.commands.isEmpty, taught.description)
+        precondition(!r.ownsPhysicalMotion)
+        let replay = await run("replay", target: taught["clip_id"] as! String)
+        precondition(replay["status"] as? String == "completed" && replay["measured"] as? Bool == true)
+        precondition(g.commands.filter { $0.hasPrefix("waypoint") }.count == 4)
+        if let previousRecordings { UserDefaults.standard.set(previousRecordings, forKey: key) }
+        else { UserDefaults.standard.removeObject(forKey: key) }
+        print("Teaching: no motor commands; saved bounded clip replayed with measured arrival")
         g.commands = []; v.objectInRight = true
         let grip = await run("grab")
         precondition(grip["status"] as? String == "grip_attempted", grip.description)
@@ -187,7 +278,10 @@ final class ROBArmRoutineVision {
         precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty)
         print("Relax: failed return held torque; successful return deactivated only at hanging")
 
-        g.commands = []; g.stale = true
+        g.commands = []
+        let missing = await run("replay")
+        precondition(missing["status"] as? String == "blocked" && g.commands.isEmpty)
+        g.stale = true
         let stale = await run("startup")
         precondition(stale["status"] as? String == "blocked" && !g.commands.contains { $0.hasPrefix("position_mode") })
         print("Arm routine fixtures passed (no hardware access)")

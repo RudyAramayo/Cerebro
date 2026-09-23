@@ -284,7 +284,7 @@ public actor ROBMLXEngine {
         try Task.checkCancellation()
         let container = try await loadVLM()
         let prompt = """
-        Inspect two FIRST-PERSON robot camera views: forward camera on TOP, belly camera BELOW.
+        Inspect the FIRST-PERSON main face camera view of the robot. There is no belly view in this image.
         Report only visible facts. Robot-left and robot-right are the robot's own sides.
         Output exactly one JSON object, no Markdown, using all these boolean keys:
         pathVisible, pathClear, hanging, armsInFront, leftJawEmpty, rightJawEmpty,
@@ -293,7 +293,7 @@ public actor ROBMLXEngine {
         plus confidence (a number 0 to 1). No other keys.
         pathVisible requires both arm routes from hanging beside the treads to extended in front,
         including shoulder, forearm, wrist, gripper, treads and surrounding space, to be visible
-        across the two views. Occluded or cropped routes are NOT visible.
+        in this single view. Occluded or cropped routes are NOT visible. Never infer clearance outside the image.
         pathClear means those routes have no person, chair, table, cable or other obstruction.
         hanging means BOTH arms visibly hang straight down alongside the robot.
         armsInFront means BOTH arms and their grippers are visibly extended forward.

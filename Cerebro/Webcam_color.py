@@ -215,6 +215,21 @@ def capture_time_milliseconds(frames, clock_now, wall_seconds):
     return (wall_seconds - age_seconds) * 1000
 
 
+def configure_latest_input(node_input, size=2):
+    # Bound every processing input, not only the final host output queue.
+    # DepthAI 3.8 Node.Input uses setMaxSize (not the v2 setQueueSize).
+    node_input.setMaxSize(size)
+    node_input.setBlocking(False)
+
+
+def frame_timing(rgb, depth, clock_now):
+    return {
+        "rgb_age_ms": round((clock_now - rgb.getTimestamp()).total_seconds() * 1000, 1),
+        "depth_age_ms": round((clock_now - depth.getTimestamp()).total_seconds() * 1000, 1),
+        "sync_skew_ms": round(abs((rgb.getTimestamp() - depth.getTimestamp()).total_seconds()) * 1000, 1),
+    }
+
+
 def frame_payload(
     rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
     sidewalk_deviation=None, sidewalk_confidence=None, chess_pieces=None,
@@ -389,6 +404,11 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
         device.setMaxReconnectionAttempts(
             DEVICE_RECONNECT_ATTEMPTS, reconnection_callback
         )
+        usb_speed = device.getUsbSpeed()
+        # RGB + depth + two rectified mono streams exceed the observed USB 2
+        # throughput at 640x400/30. Reduce capture rate before queues accumulate;
+        # USB 3 retains 30 fps. Keep depth and original capture timestamps.
+        frame_rate = 10.0 if usb_speed == dai.UsbSpeed.HIGH else FRAME_RATE
 
         with dai.Pipeline(device) as pipeline:
             rgb_socket = color_camera_socket(device, dai)
@@ -397,7 +417,7 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                 frame_size,
                 type=dai.ImgFrame.Type.RGB888i,
                 resizeMode=dai.ImgResizeMode.CROP,
-                fps=FRAME_RATE,
+                fps=frame_rate,
                 enableUndistortion=True,
             )
 
@@ -407,21 +427,25 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
             left_camera = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_B)
             right_camera = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_C)
             left_output = left_camera.requestOutput(
-                mono_size, type=dai.ImgFrame.Type.GRAY8, fps=FRAME_RATE,
+                mono_size, type=dai.ImgFrame.Type.GRAY8, fps=frame_rate,
                 enableUndistortion=False,
             )
             right_output = right_camera.requestOutput(
-                mono_size, type=dai.ImgFrame.Type.GRAY8, fps=FRAME_RATE,
+                mono_size, type=dai.ImgFrame.Type.GRAY8, fps=frame_rate,
                 enableUndistortion=False,
             )
             stereo = pipeline.create(dai.node.StereoDepth)
             stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.ROBOTICS)
             stereo.setLeftRightCheck(True)
             stereo.setSubpixel(True)
+            configure_latest_input(stereo.left)
+            configure_latest_input(stereo.right)
             left_output.link(stereo.left)
             right_output.link(stereo.right)
 
             align = pipeline.create(dai.node.ImageAlign)
+            configure_latest_input(align.input)
+            configure_latest_input(align.inputAlignTo)
             stereo.depth.link(align.input)
             rgb_output.link(align.inputAlignTo)
 
@@ -473,6 +497,9 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
             sync = pipeline.create(dai.node.Sync)
             sync.setSyncThreshold(SYNC_THRESHOLD)
             sync.setSyncAttempts(3)
+            # Leave a short timestamp-matching window while bounding history.
+            for name in ("rgb", "depth", "left", "right"):
+                configure_latest_input(sync.inputs[name], size=4)
             rgb_output.link(sync.inputs["rgb"])
             align.outputAligned.link(sync.inputs["depth"])
             stereo.rectifiedLeft.link(sync.inputs["left"])
@@ -480,6 +507,8 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
             queue = sync.out.createOutputQueue(maxSize=1, blocking=False)
             
             if nn_model is not None:
+                configure_latest_input(nn_model.input, size=1)
+                configure_latest_input(nn_model.inputDepth, size=1)
                 nn_queue = nn_model.out.createOutputQueue(maxSize=1, blocking=False)
 
             pipeline.start()
@@ -498,6 +527,7 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
             latest_sidewalk_confidence = None
             latest_chess_pieces = []
             latest_chess_pieces_updated_at = None
+            last_timing_at = 0.0
 
             while not stop_event.is_set() and pipeline.isRunning():
                 group = queue.get(QUEUE_WAIT)
@@ -562,13 +592,22 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                     latest_chess_pieces = []
                     latest_chess_pieces_updated_at = None
 
+                send_started = time.monotonic()
+                clock_now = dai.Clock.now()
+                timing = frame_timing(rgb_frame, depth_frame, clock_now)
                 send_frame(
                     client, rgb_frame, depth_frame, left_frame, right_frame,
                     rgb_intrinsics, latest_sidewalk_deviation, latest_sidewalk_confidence,
                     latest_chess_pieces,
                     captured_at_milliseconds=capture_time_milliseconds(
-                        [rgb_frame, depth_frame], dai.Clock.now(), time.time())
+                        [rgb_frame, depth_frame], clock_now, time.time())
                 )
+                send_finished = time.monotonic()
+                if send_finished - last_timing_at >= 5:
+                    last_timing_at = send_finished
+                    timing.update(role=role, width=width, height=height, usb_speed=str(usb_speed), fps=frame_rate,
+                                  send_ms=round((send_finished - send_started) * 1000, 1))
+                    emit("CEREBRO_DEPTHCAM_TIMING " + json.dumps(timing, separators=(",", ":")))
 
             if not stop_event.is_set():
                 raise RuntimeError("DepthAI pipeline stopped unexpectedly")

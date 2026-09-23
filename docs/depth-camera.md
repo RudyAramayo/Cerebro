@@ -26,9 +26,11 @@ The integration is pinned to DepthAI `3.8.0`, released 2026-07-11:
 - <https://docs.luxonis.com/software-v3/depthai/examples/misc/auto_reconnect/>
 
 The 3.8 release adds the unified `Depth` node and device health diagnostics.
-The camera service uses `Camera` + `Depth` + `Sync`, requests undistorted
-640 x 400 RGB, aligns depth to that RGB output, and transfers a single paired
-`MessageGroup`. Depth is RAW16 millimeters by default and invalid samples are
+The OAK-D service wires `Camera` + `StereoDepth` + `ImageAlign` + `Sync`,
+requests undistorted RGB, aligns depth to that RGB output, and transfers one
+synchronized `MessageGroup` with RGB, depth and both rectified mono images.
+Arm routines, main-camera live conversation/follow and belly navigation request
+640 × 400; explicit footage capture can request another resolution. Depth is RAW16 millimeters by default and invalid samples are
 zero. UVC still exists in DepthAI 3.8, but it exposes one image input and is not
 a transport for paired RGB plus metric RAW16 depth.
 
@@ -148,3 +150,51 @@ on the target Mac with the real camera:
 For OAK4/RVC4 hardware, also compare the device's Luxonis OS version against
 the versions listed in the DepthAI 3.8.0 release notes before diagnosing SDK
 failures.
+
+## 2026-09-23 latency measurements
+
+Camera-only tests on ROB found the main face OAK connected at `UsbSpeed.SUPER`
+(USB 3), while the belly OAK negotiated `UsbSpeed.HIGH` (USB 2). Both were already
+capturing 640 × 400 with depth enabled. The capture-to-socket age used the older
+RGB/depth capture timestamp, not the arrival time. Each comparison ran both
+cameras together for approximately ten seconds; no motor operations occurred.
+
+| Profile | Main median / p95 age | Main delivered fps | Belly median / p95 age | Belly delivered fps |
+| --- | ---: | ---: | ---: | ---: |
+| Previous helper, requested 30 fps | 80.2 / 84.3 ms | 30.2 | 518.5 / 539.4 ms | 15.1 |
+| Bounded inputs, requested 30 fps | 82.4 / 120.4 ms | 30.2 | 521.0 / 576.1 ms | 14.6 |
+| Bounded inputs, USB 2 capped at 10 fps | 82.5 / 89.5 ms | 30.2 | 106.0 / 119.1 ms | 10.0 |
+
+In the final comparison, all 304 main and 102 belly frames were under the
+400 ms arm input limit. RGB/depth timestamp skew was about 0.1–0.2 ms; helper
+packing/socket sends were several milliseconds. The evidence points to USB 2
+throughput and accumulated frames, rather than depth synchronization skew or
+large application preview images, as the main belly delay. Merely bounding
+queues did not fix the hardware bottleneck. Keeping 640 × 400 and capping USB 2
+capture to 10 fps fixed the measured helper latency without disabling depth.
+USB 3 capture stays at 30 fps. These short trials do not prove long-run timing
+or end-to-end navigation/arm performance under every concurrent workload.
+
+`Webcam_color.py` now bounds stereo/align/sync/NN input queues as well as the
+host output queue. It prints `CEREBRO_DEPTHCAM_TIMING` records every five seconds:
+USB speed, effective fps, image size, original RGB/depth age, sync skew and send
+time. `CameraManager` coalesces pending session-queue frames to the newest input,
+checks capture generations and logs capture-to-consumer age separately. Freshness
+limits retain original capture timestamps and have not been relaxed.
+
+The main face camera is now the sole arm-inspection view. Entire-path visibility
+is still mandatory; missing arm pixels cannot be replaced by an assumption.
+Main-camera model video/follow uses the small profile. Destination terrain
+navigation retains its calibrated belly perception source and Lidar checks:
+substituting head-camera pixels without the correct ground transform would be
+incorrect. Its belly capture demand also requests 640 × 400 and benefits from
+the USB 2 cap. High-resolution recording can still override capture size, in
+which case motion may fail its existing freshness gate.
+
+[Luxonis latency guidance](https://docs.luxonis.com/software-v3/depthai/tutorials/optimizing)
+describes measuring frame age against the SDK host clock and bounding input
+queues. To verify transport recovery, check USB negotiation in the timing log;
+a USB 3 port/cable may permit higher belly frame rates, but was not changed here.
+Run `python3 Tests/ROBCameraIngressRuntimeTests.py` for the stalled-session-queue
+regression, and `python3 Tests/DepthCameraIPCFixtureTests.py` for timestamp and
+packet validation without hardware.

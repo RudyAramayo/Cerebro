@@ -2,6 +2,10 @@ import Cocoa
 import CoreMedia
 
 struct ROBChessPieceDetection {}
+final class ROBArmRoutineCoordinator {
+    static let shared = ROBArmRoutineCoordinator()
+    var ownsPhysicalMotion = false
+}
 
 /// Compiles the real coordinator, views and camera service. The injected Tic
 /// executor records calls; it cannot reach USB. --show opens an inert UI fixture.
@@ -53,21 +57,26 @@ struct ROBChessPieceDetection {}
         center.acceptObservation(observation())
         try expect(center.canArm && abs(center.observedHeading - 180 / .pi) < 0.01,
                    "Camera yaw did not replace the debug reference")
+        ROBArmRoutineCoordinator.shared.ownsPhysicalMotion = true
+        center.arm()
+        try expect(!center.isArmed && fake.calls.isEmpty, "Torso activated during arm clearance ownership")
+        ROBArmRoutineCoordinator.shared.ownsPhysicalMotion = false
+        center.acceptObservation(observation(sequence: 2))
         center.arm(); try wait { center.isArmed && center.hardwareReady }
         center.setRemoteActive(true, rotation: 0.1)
         try expect(abs(center.targetHeading - (180 / .pi + 18)) < 0.01,
                    "VR heading was not based on the camera angle")
         center.setRemoteActive(false, rotation: 0)
         try expect(center.policy.mode == .hold, "VR release retained motion")
-        center.acceptObservation(observation(sequence: 2, camera: "belly", confirmed: false))
+        center.acceptObservation(observation(sequence: 3, camera: "belly", confirmed: false))
         try expect(center.isArmed, "An unavailable alternate camera erased fresh accepted evidence")
-        center.acceptObservation(observation(sequence: 2, confirmed: false))
+        center.acceptObservation(observation(sequence: 3, confirmed: false))
         try expect(!center.isArmed && !center.canArm, "Failed accepted camera retained authority")
         try wait { fake.calls.contains(["--enter-safe-start"]) }
         RunLoop.current.run(until: Date().addingTimeInterval(0.03))
         try expect(center.status.contains("failed validation"), "Stop acknowledgement hid the visual failure reason")
 
-        center.acceptObservation(observation(sequence: 3, yaw: -1))
+        center.acceptObservation(observation(sequence: 4, yaw: -1))
         try expect(center.canArm && !center.isArmed, "New camera observation automatically resumed motion")
         center.setLiveCamera(false); center.advance()
         let count = fake.calls.count

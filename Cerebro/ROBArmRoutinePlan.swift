@@ -6,7 +6,16 @@ import Foundation
 enum ROBArmRoutinePlan {
     static let startupDefaultsKey = "ROBCalibrateArmsOnStartup"
     static let tolerance = 0.025
-    static let segmentSeconds = 4.0
+    static let segmentSeconds = 4.0 // nominal longest taught segment
+    static let maximumAverageSpeed = 0.075
+    /// Short segments retain the old longest-segment timing scale. The cubic
+    /// bound is conservative command timing, not measured acceleration or jerk.
+    static func duration(from: [Double], to: [Double]) -> Double? {
+        guard from.count == 7, to.count == 7,
+              (from + to).allSatisfy(\.isFinite) else { return nil }
+        let delta = zip(from, to).map { abs($0 - $1) }.max() ?? 0
+        return max(0.8, delta / maximumAverageSpeed, 4 * pow(delta / 0.3, 1.0 / 3.0))
+    }
     static let rightWaypoints: [[Double]] = [
         [0, 0, 0, 0, 0, 0, 0],
         [0, -0.15, 0, 0, 0, 0, 0],

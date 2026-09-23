@@ -640,7 +640,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
     /// Fixed, taught hanging/front corridor only. No caller-supplied raw joint
     /// vectors, no model-reference promotion, and no replay across reconnects.
     /// The coordinator owns camera clearance and the physical hanging datum.
-    @nonobjc func sendRoutineWaypoint(arm: String, index: Int, expectedSessionGeneration: UInt64) -> UInt64 {
+    @nonobjc func sendRoutineWaypoint(arm: String, index: Int, duration: Double, expectedSessionGeneration: UInt64) -> UInt64 {
         guard Thread.isMainThread, ROBArmRoutineCoordinator.shared.isRunning,
               ["left", "right"].contains(arm),
               let target = ROBArmRoutinePlan.target(index: index, physicalLeft: arm == "right"),
@@ -648,10 +648,12 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
               sample.effectiveGripperFeedbackAgeMilliseconds <= 250,
               let progress = ROBArmRoutinePlan.progress(sample.positionsRadians.map(\.doubleValue), physicalLeft: arm == "right"),
               abs(progress - Double(index)) <= 1.05,
+              let minimumDuration = ROBArmRoutinePlan.duration(from: sample.positionsRadians.map(\.doubleValue), to: target),
+              duration.isFinite, duration >= minimumDuration - 0.05, duration <= 5,
               modes(forArm: arm).count == 7,
               modes(forArm: arm).allSatisfy({ $0.intValue == 2 }) else { return 0 }
         return sendVendorLeasedTrajectory(arm: arm, positionsRadians: target.map(NSNumber.init(value:)),
-            duration: ROBArmRoutinePlan.segmentSeconds, leaseMilliseconds: 1500,
+            duration: duration, leaseMilliseconds: 1500,
             expectedSessionGeneration: expectedSessionGeneration)
     }
 

@@ -64,6 +64,8 @@ struct GeminiRoboticsProtocolFixtureTests {
         let grab = GeminiRoboticsToolCall(id: "grab-object", name: "arm_control", arguments: ["command": "grab", "object": "cup"])
         try expect(GeminiRoboticsToolPolicy.requiresPriorityDispatch(relax), "Relax waited behind a running grab")
         try expect(!GeminiRoboticsToolPolicy.requiresPriorityDispatch(grab), "Grab bypassed ordinary tool work")
+        let armStop = GeminiRoboticsToolCall(id: "stop-arms", name: "arm_control", arguments: ["command": "stop"])
+        try expect(GeminiRoboticsToolPolicy.requiresPriorityDispatch(armStop), "Arm hold waited behind another tool")
         try expect(GeminiRoboticsToolPolicy.dispatchRoute(for: pause) == .delegate, "Loiter skipped the local authority gate")
         let news = GeminiRoboticsToolCall(
             id: "news-1",
@@ -210,6 +212,7 @@ struct GeminiRoboticsProtocolFixtureTests {
             "Default setup did not declare robot_action"
         )
         try expect(defaultFunctionNames.contains("arm_control"), "Default setup did not declare the local arm routine")
+        try expect(defaultFunctionNames.contains("robot_capabilities"), "Models cannot discover motion limits")
         try expect(
             defaultFunctionNames.contains(ROBNewsSearchService.toolName),
             "Default setup did not declare search_news"
@@ -541,6 +544,11 @@ struct GeminiRoboticsProtocolFixtureTests {
             "Missing robot_action declaration"
         )
         try expect(robotDeclaration["behavior"] as? String == "BLOCKING", "Physical tools must be blocking")
+        let arm = try require(declarations.first { $0["name"] as? String == "arm_control" }, "Missing arm tool")
+        let armProperties = (arm["parameters"] as! [String: Any])["properties"] as! [String: Any]
+        try expect(Set(armProperties.keys) == ["command", "object", "clip_id"], "Raw motor parameters escaped the executor")
+        let commands = (armProperties["command"] as! [String: Any])["enum"] as! [String]
+        try expect(Set(commands) == ["status", "prepare", "grab", "hold", "relax", "wave", "teach", "replay", "stop"], "Arm vocabulary drifted")
         let loiter = try require(declarations.first { $0["name"] as? String == "loiter_control" }, "Missing loiter declaration")
         try expect(loiter["behavior"] as? String == "BLOCKING", "Loiter decisions must wait for local validation")
         let loiterParameters = try require(loiter["parameters"] as? [String: Any], "Missing loiter schema")

@@ -6,12 +6,13 @@ enum ROBArmRoutineError: LocalizedError {
 }
 
 /// One owner for startup, prepare/grab/hold and gentle relax. Both arms move
-/// together in four-second segments. Camera/telemetry monitoring and the
+/// together with bounded, distance-based segment timing. Camera/telemetry monitoring and the
 /// gateway watchdog continue independently of language-model latency.
 @objcMembers final class ROBArmRoutineCoordinator: NSObject {
     static let shared = ROBArmRoutineCoordinator()
     private(set) var isRunning = false
     private(set) var status = "Arms idle"
+    var ownsPhysicalMotion: Bool { isRunning && activeCommand != "teach" }
     var cameraDemand: ((Bool) -> Void)?
     var prepareView: (() -> Bool)?
     var viewIsStationary: (() -> Bool)?
@@ -38,7 +39,19 @@ enum ROBArmRoutineError: LocalizedError {
     private var completion: ((NSDictionary) -> Void)?
     private var startupTicket: UUID?
     private var activeCommand = ""
+    private var activeRendition: ROBArmRendition?
     private let arms = ["left", "right"] // gateway keys; physical sides convert at the boundary
+
+    func capabilitySnapshot() -> NSDictionary {
+        ["status": isRunning ? "running" : "idle", "detail": status,
+         "commands": ["status", "prepare", "grab", "hold", "relax", "wave", "teach", "replay", "stop"],
+         "gateway_ready": gateway.isReady(), "camera": "main face RGB-D",
+         "camera_ready": vision.fresh, "camera_detail": vision.readinessDescription,
+         "motion_owner": "local coordinator; paired arms and bounded segments",
+         "corridor_revision": ROBArmRendition.revision,
+         "limits": "Fixed hanging/front corridor only. Teach/replay maps symmetric relative lift order; no general human joint copying, arbitrary reach or full-environment collision guarantee. Empty jaws required for greetings/replay.",
+         "gripper_completion": "command acceptance and visual observations; force and secure grasp unverified"]
+    }
 
     override init() {
         super.init()
@@ -63,6 +76,9 @@ enum ROBArmRoutineError: LocalizedError {
         guard value.range(of: "\\b(?:not|don't|don’t|stop|wait|never|unless|until|if|explain|quote|say)\\b", options: .regularExpression) == nil,
               !value.contains("\""), !value.contains("‘"), !value.contains("'") else { return nil }
         let prefix = "^(?:(?:rob|robbie|robot)[, ]+)?(?:(?:please|can you|could you|would you|i want you to) )?(?:please )?"
+        if value.range(of: prefix + "wave(?: (?:at|to) .+)?[.!?]*$", options: .regularExpression) != nil { return "wave" }
+        if value.range(of: prefix + "(?:copy (?:me|my (?:pose|movement))|learn (?:this|my) (?:pose|movement)|record (?:this|my) (?:pose|movement))[.!?]*$", options: .regularExpression) != nil { return "teach" }
+        if value.range(of: prefix + "(?:replay|repeat|imitate) (?:that|the|my|last|this) (?:pose|movement)[.!?]*$", options: .regularExpression) != nil { return "replay" }
         if value.range(of: prefix + "relax(?: (?:your |the )?arms)?[.!?]*$", options: .regularExpression) != nil { return "relax" }
         if value.range(of: prefix + "(?:prepare to (?:grab|hold)|bring (?:your |the )?arms (?:in |to the )?front)[.!?]*$", options: .regularExpression) != nil { return "prepare" }
         if value.range(of: prefix + "(?:grab|pick up|hold) (?:this|that|something|the|a|an|my)\\b.*$", options: .regularExpression) != nil {
@@ -90,18 +106,29 @@ enum ROBArmRoutineError: LocalizedError {
 
     func performCommand(_ command: String, target: String, completion: @escaping (NSDictionary) -> Void) {
         precondition(Thread.isMainThread)
-        guard ["startup", "prepare", "grab", "hold", "relax"].contains(command) else {
+        if command == "teach" { recordDemonstration(name: target, completion: completion); return }
+        guard ["startup", "prepare", "grab", "hold", "relax", "wave", "replay"].contains(command) else {
             completion(["status": "rejected", "detail": "Unknown arm routine."]); return
         }
         if command == "relax" { cancel(reason: "Relax requested; waiting for controller approval") }
-        let summary = command == "relax"
-            ? "Return both arms gently to hanging, then deactivate position mode."
-            : "\(command.capitalized): bring both arms forward, calibrate both empty grippers if needed, and \(command == "grab" || command == "hold" ? "attempt a camera-checked grip of \(String(target.prefix(160)))" : "leave both grippers open")."
+        guard !ROBControllerArmApproval.shared.isPending else {
+            completion(["status": "busy", "detail": ROBControllerArmApproval.shared.status]); return
+        }
+        let rendition = command == "wave" ? ROBArmRendition.greeting
+            : command == "replay" ? ROBArmImitationStore.shared.find(target.isEmpty ? "last" : target) : nil
+        if command == "replay" && rendition == nil {
+            completion(["status": "blocked", "detail": "Record a body demonstration first, or select a clip_id returned by robot_capabilities."]); return
+        }
+        let summary: String
+        if let rendition {
+            summary = "\(rendition.name): prepare both arms and empty grippers, then replay \(rendition.waypoints.count) bounded front-corridor steps. This is a symmetric rendition, not a full human joint copy. Both arms end in front."
+        } else if command == "relax" { summary = "Return both arms gently to hanging, then deactivate position mode." }
+        else { summary = "\(command.capitalized): bring both arms forward, calibrate both empty grippers if needed, and \(command == "grab" || command == "hold" ? "attempt a camera-checked grip of \(String(target.prefix(160)))" : "leave both grippers open")." }
         setStatus("Awaiting Vision Pro or iPhone approval: \(summary)")
-        ROBControllerArmApproval.shared.request(operation: command, arm: "both", summary: summary,
+        ROBControllerArmApproval.shared.request(operation: rendition == nil ? command : "gesture", arm: "both", summary: summary,
             execute: { [weak self] done in
                 guard let self else { done(["status": "cancelled", "detail": "Arm runtime closed."]); return }
-                self.performAuthorizedCommand(command, target: target, completion: done)
+                self.performAuthorizedCommand(command, target: target, rendition: rendition, completion: done)
             }, cancel: { [weak self] in self?.cancelAuthorized(reason: "Controller cancelled or disconnected") },
             completion: { [weak self] result in
                 if self?.isRunning != true { self?.setStatus(result["detail"] as? String ?? "Arm operation ended") }
@@ -109,9 +136,57 @@ enum ROBArmRoutineError: LocalizedError {
             })
     }
 
-    private func performAuthorizedCommand(_ command: String, target: String, completion: @escaping (NSDictionary) -> Void) {
+    /// Camera-only capture. Nothing in this path enters a motor mode or sends a
+    /// target. Replay is a separate controller-approved operation.
+    private func recordDemonstration(name: String, completion: @escaping (NSDictionary) -> Void) {
+        guard !isRunning, !ROBControllerArmApproval.shared.isPending,
+              !ROBAmberGestureExecutor.shared.isExecuting else {
+            completion(["status": "busy", "detail": "Finish the current arm operation before teaching."]); return
+        }
+        isRunning = true; activeCommand = "teach"; self.completion = completion; failure = nil
+        activeRendition = nil; generation = 0; superviseCamera = false; moving = false
+        deadline = ProcessInfo.processInfo.systemUptime + 15
+        vision.setActive(true, teaching: true); cameraDemand?(true)
+        setStatus("Camera-only teaching: show both shoulders, hips and wrists; slowly raise and lower your arms for five seconds.")
+        task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.wait(seconds: 7, reason: "One clear body pose did not arrive in the forward camera.") {
+                    guard let sample = self.vision.demonstrationSample else { return false }
+                    return (0...700).contains(Date().timeIntervalSince1970 * 1000 - sample.capturedAt)
+                }
+                var builder = ROBArmDemonstrationBuilder(), lastSequence: UInt64 = 0
+                var lastSeen = ProcessInfo.processInfo.systemUptime
+                let end = lastSeen + 5
+                while ProcessInfo.processInfo.systemUptime < end {
+                    try self.check()
+                    if let sample = self.vision.demonstrationSample, sample.sequence != lastSequence {
+                        guard builder.append(sample, now: Date().timeIntervalSince1970 * 1000) else {
+                            throw ROBArmRoutineError.blocked("Body tracking became stale or discontinuous; no rendition was saved.")
+                        }
+                        lastSequence = sample.sequence; lastSeen = ProcessInfo.processInfo.systemUptime
+                    }
+                    guard ProcessInfo.processInfo.systemUptime - lastSeen <= 0.8 else {
+                        throw ROBArmRoutineError.blocked("The demonstrated body left view; no rendition was saved.")
+                    }
+                    try await Task.sleep(nanoseconds: 50_000_000)
+                }
+                guard let clip = builder.rendition(name: name.isEmpty ? "Camera demonstration" : name),
+                      ROBArmImitationStore.shared.save(clip) else {
+                    throw ROBArmRoutineError.blocked("The body demonstration did not provide enough stable poses.")
+                }
+                self.finish(["status": "recorded", "clip_id": clip.id,
+                    "detail": "Recorded a symmetric front-corridor rendition. No motors moved. Replay needs controller approval and current camera clearance.",
+                    "nominal_replay_motion_seconds": clip.nominalMotionSeconds, "operation_timeout_seconds": 90], hold: false)
+            } catch {
+                self.finish(["status": "blocked", "detail": self.failure ?? error.localizedDescription], hold: false)
+            }
+        }
+    }
+
+    private func performAuthorizedCommand(_ command: String, target: String, rendition: ROBArmRendition? = nil, completion: @escaping (NSDictionary) -> Void) {
         precondition(Thread.isMainThread)
-        guard ["startup", "prepare", "grab", "hold", "relax"].contains(command) else {
+        guard ["startup", "prepare", "grab", "hold", "relax", "wave", "replay"].contains(command) else {
             completion(["status": "rejected", "detail": "Unknown arm routine."]); return
         }
         if isRunning {
@@ -140,6 +215,7 @@ enum ROBArmRoutineError: LocalizedError {
             completion(["status": "blocked", "detail": "Another controller owns the right arm."]); return
         }
         startupTicket = nil
+        activeRendition = rendition
         owner = id; isRunning = true; activeCommand = command; failure = nil; self.completion = completion
         deadline = ProcessInfo.processInfo.systemUptime + 90
         superviseCamera = false; moving = false; generation = 0
@@ -174,7 +250,7 @@ enum ROBArmRoutineError: LocalizedError {
     private func abort(_ detail: String) {
         guard isRunning, failure == nil else { return }
         failure = detail; task?.cancel()
-        for arm in arms { _ = gateway.priorityHold(forArm: arm) }
+        if activeCommand != "teach" { for arm in arms { _ = gateway.priorityHold(forArm: arm) } }
         leased.removeAll(); moving = false
         setStatus(detail)
     }
@@ -187,7 +263,13 @@ enum ROBArmRoutineError: LocalizedError {
     private func check() throws {
         try Task.checkCancellation()
         if let failure { throw ROBArmRoutineError.blocked(failure) }
-        guard ProcessInfo.processInfo.systemUptime < deadline else { throw ROBArmRoutineError.blocked("Arm routine exceeded its 90-second deadline.") }
+        guard ProcessInfo.processInfo.systemUptime < deadline else { throw ROBArmRoutineError.blocked("Arm operation exceeded its deadline.") }
+        if superviseCamera {
+            guard vision.fresh, viewIsStationary?() == true else {
+                throw ROBArmRoutineError.blocked("Current main-camera feedback and the stationary inspection view are required.")
+            }
+            if moving && !vision.handsClear { throw ROBArmRoutineError.blocked("Person or hand clearance was lost.") }
+        }
     }
 
     @MainActor private func wait(seconds: Double, reason: String = "Timed out waiting for command acknowledgement or measured arrival.", until condition: () -> Bool) async throws {
@@ -277,7 +359,7 @@ enum ROBArmRoutineError: LocalizedError {
         }
         setStatus("Positioning the camera for arm inspection")
         try await wait(seconds: 12, reason: "The neck could not settle at the arm inspection view.") { prepareView?() == true }
-        setStatus("Waiting for both inspection cameras")
+        setStatus("Waiting for the main RGB-D inspection camera")
         do {
             try await wait(seconds: 10) { vision.fresh && viewIsStationary?() == true }
         } catch {
@@ -285,7 +367,7 @@ enum ROBArmRoutineError: LocalizedError {
             throw ROBArmRoutineError.blocked("Inspection cameras are not ready. \(vision.readinessDescription).")
         }
         superviseCamera = true
-        setStatus("Inspecting the arm path in both cameras")
+        setStatus("Inspecting the complete arm path in the main camera")
         let observation = try await inspect(target: target)
         let atHanging = arms.allSatisfy { arm in
             (try? measured(arm)).map { ROBArmRoutinePlan.near($0, Array(repeating: 0, count: 7)) } == true
@@ -313,36 +395,7 @@ enum ROBArmRoutineError: LocalizedError {
                 try await accepted([try send(gateway.enterPositionMode(forArm: arm))])
             }
         }
-        while routes.values.contains(where: { !$0.isEmpty }) {
-            try check()
-            var targets: [String: [Double]] = [:], ids: [UInt64] = []
-            moving = true
-            for arm in arms where routes[arm]?.isEmpty == false {
-                let index = routes[arm]!.removeFirst()
-                guard let q = ROBArmRoutinePlan.target(index: index, physicalLeft: arm == "right") else { throw ROBArmRoutineError.blocked("Invalid route waypoint.") }
-                targets[arm] = q
-                let id = try send(gateway.sendRoutineWaypoint(arm: arm, index: index, expectedSessionGeneration: generation))
-                ids.append(id)
-            }
-            setStatus(command == "relax" ? "Lowering both arms toward hanging" : "Bringing both arms into the camera view")
-            let sentAt = ProcessInfo.processInfo.systemUptime
-            try await accepted(ids)
-            leased.formUnion(targets.keys)
-            lastRenewal = ProcessInfo.processInfo.systemUptime
-            var settlers = Dictionary(uniqueKeysWithValues: targets.keys.map { ($0, ROBArmRoutineSettler()) })
-            var arrived: Set<String> = []
-            try await wait(seconds: ROBArmRoutinePlan.segmentSeconds + 3) {
-                guard ProcessInfo.processInfo.systemUptime - sentAt >= ROBArmRoutinePlan.segmentSeconds else { return false }
-                for (arm, q) in targets {
-                    guard let sample = gateway.telemetry(forArm: arm) else { continue }
-                    if settlers[arm]!.observe(sequence: sample.sequence, positions: sample.positionsRadians.map(\.doubleValue),
-                        target: q, now: ProcessInfo.processInfo.systemUptime) { arrived.insert(arm) }
-                    else { arrived.remove(arm) }
-                }
-                return arrived.count == targets.count
-            }
-            moving = false
-        }
+        try await moveRoutes(routes, detail: command == "relax" ? "Lowering both arms toward hanging" : "Bringing both arms into the camera view")
         if command == "relax" {
             try await deactivateAtHanging()
             return ["status": "completed", "detail": "Both arms reached hanging zero gently and are inactive."]
@@ -376,6 +429,15 @@ enum ROBArmRoutineError: LocalizedError {
         guard ready.armsInFront, ready.leftJawOpen, ready.rightJawOpen else {
             throw ROBArmRoutineError.blocked("Gripper commands were accepted, but the cameras cannot verify both jaws opened.")
         }
+        if let rendition = activeRendition {
+            guard rendition.isValid, ready.permitsCalibration else {
+                throw ROBArmRoutineError.blocked("Rendition requires both empty grippers and a visible clear corridor.")
+            }
+            try await moveRoutes(Dictionary(uniqueKeysWithValues: arms.map { ($0, rendition.waypoints) }),
+                                 detail: "Replaying bounded front-arm rendition")
+            return ["status": "completed", "measured": true, "clip_id": rendition.id,
+                "detail": "Both arms reached the final front pose of the bounded rendition. This reproduces the order of relative lifts within the taught corridor, not the demonstrator's full joint pose or speed."]
+        }
         if command == "grab" || command == "hold" {
             guard let arm = ready.graspArm else {
                 return ["status": "ready_for_object", "detail": "Arms are in front and both grippers are open. The requested object is not clearly between one gripper's jaws. Reaching outside this pose needs camera-to-arm calibration.", "gripper_calibration": "accepted_unverified"]
@@ -394,6 +456,44 @@ enum ROBArmRoutineError: LocalizedError {
                 "visual_object_retained": retained, "physical_arm": arm == "left" ? "right" : "left"]
         }
         return ["status": "completed", "detail": "Both arms are measured in front; both gripper calibrations were accepted and both open jaws were observed. Absolute seven-joint camera calibration is unchanged.", "gripper_calibration": "accepted_unverified"]
+    }
+
+    @MainActor private func moveRoutes(_ initialRoutes: [String: [Int]], detail: String) async throws {
+        var routes = initialRoutes
+        while routes.values.contains(where: { !$0.isEmpty }) {
+            moving = true
+            try check()
+            var targets: [String: [Double]] = [:], ids: [UInt64] = []
+            let duration = try routes.compactMap { arm, route -> Double? in
+                guard let index = route.first, let target = ROBArmRoutinePlan.target(index: index, physicalLeft: arm == "right") else { return nil }
+                return ROBArmRoutinePlan.duration(from: try measured(arm), to: target)
+            }.max() ?? ROBArmRoutinePlan.segmentSeconds
+            moving = true
+            for arm in arms where routes[arm]?.isEmpty == false {
+                let index = routes[arm]!.removeFirst()
+                guard let q = ROBArmRoutinePlan.target(index: index, physicalLeft: arm == "right") else { throw ROBArmRoutineError.blocked("Invalid route waypoint.") }
+                targets[arm] = q
+                let id = try send(gateway.sendRoutineWaypoint(arm: arm, index: index, duration: duration, expectedSessionGeneration: generation))
+                ids.append(id)
+            }
+            setStatus(detail)
+            let sentAt = ProcessInfo.processInfo.systemUptime
+            try await accepted(ids)
+            leased.formUnion(targets.keys)
+            lastRenewal = ProcessInfo.processInfo.systemUptime
+            var settlers = Dictionary(uniqueKeysWithValues: targets.keys.map { ($0, ROBArmRoutineSettler()) })
+            var arrived: Set<String> = []
+            try await wait(seconds: duration + 3) {
+                for (arm, q) in targets {
+                    guard let sample = gateway.telemetry(forArm: arm) else { continue }
+                    if settlers[arm]!.observe(sequence: sample.sequence, positions: sample.positionsRadians.map(\.doubleValue),
+                        target: q, now: ProcessInfo.processInfo.systemUptime) { arrived.insert(arm) }
+                    else { arrived.remove(arm) }
+                }
+                return arrived.count == targets.count && ProcessInfo.processInfo.systemUptime - sentAt >= duration
+            }
+            moving = false
+        }
     }
 
     @MainActor private func deactivateAtHanging() async throws {
@@ -473,7 +573,7 @@ enum ROBArmRoutineError: LocalizedError {
             ROBAmberArmMotionArbiter.shared.release(.left, owner: owner)
             ROBAmberArmMotionArbiter.shared.release(.right, owner: owner)
         }
-        owner = nil; isRunning = false; task = nil; moving = false; superviseCamera = false
+        owner = nil; activeRendition = nil; isRunning = false; task = nil; moving = false; superviseCamera = false
         setStatus(result["detail"] as? String ?? "Arm routine ended")
         let callback = completion; completion = nil; callback?(result)
     }

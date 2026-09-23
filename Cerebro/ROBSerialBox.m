@@ -4092,6 +4092,13 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     NSString *lactSpeed = (lact1 || lact3) ? @"3200" : @"0000";
     
     
+    // Arm clearance assumes a fixed base and body. The controller can stop the
+    // routine immediately; driving/leaning cannot race its camera inspection.
+    if ([ROBArmRoutineCoordinator shared].ownsPhysicalMotion) {
+        actual_tred_speed_M1L = @"0000"; actual_tred_speed_M2R = @"0000";
+        actual_flipper_speed = @"0000"; lactSpeed = @"0000";
+        tredBrakeLockL = YES; tredBrakeLockR = YES; flipperBrakeLock = YES;
+    }
     NSString *base_command = [NSString stringWithFormat:@"~+000%i,%@%@,+000%i,%@%@,+000%i,%@%@,%@%@", (int)tredBrakeLockL,
                               motorDirection_forwardBackward_M1L, actual_tred_speed_M1L, (int)tredBrakeLockR, motorDirection_forwardBackward_M2R,
                               actual_tred_speed_M2R, (int)flipperBrakeLock, flipper_direction, actual_flipper_speed, lactDirection, lactSpeed];

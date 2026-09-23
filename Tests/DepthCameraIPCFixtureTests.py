@@ -102,6 +102,14 @@ def main():
     assert abs(captured - 999730.0) < 1e-6, "The older depth capture must determine freshness"
     assert service.capture_time_milliseconds(
         [CapturedFrame(4)], timedelta(seconds=3.5), 1000.0) is None
+    class FakeInput:
+        def setMaxSize(self, value): self.size = value
+        def setBlocking(self, value): self.blocking = value
+    node_input = FakeInput()
+    service.configure_latest_input(node_input)
+    assert node_input.size == 2 and node_input.blocking is False
+    timing = service.frame_timing(CapturedFrame(3.25), CapturedFrame(3.23), timedelta(seconds=3.5))
+    assert timing == {"rgb_age_ms": 250.0, "depth_age_ms": 270.0, "sync_skew_ms": 20.0}
     with tempfile.TemporaryDirectory(prefix="cerebro-depthcam-lock-") as directory:
         lock_path = str(Path(directory) / "depth-camera.sock")
         first_lock = service.acquire_service_lock(lock_path)

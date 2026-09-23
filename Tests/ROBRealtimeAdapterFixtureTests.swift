@@ -139,6 +139,12 @@ private final class SessionPool: @unchecked Sendable {
         try expect((input["format"] as! [String: Any])["rate"] as? Int == 24000, "Incorrect Realtime audio rate")
         try expect((input["turn_detection"] as! [String: Any])["create_response"] as? Bool == false, "Unowned automatic responses enabled")
         let tools = session["tools"] as! [[String: Any]]
+        try expect(tools.contains { $0["name"] as? String == "robot_capabilities" }, "OpenAI cannot discover robot capabilities")
+        let arm = tools.first { $0["name"] as? String == "arm_control" }!
+        let properties = (arm["parameters"] as! [String: Any])["properties"] as! [String: Any]
+        let commands = (properties["command"] as! [String: Any])["enum"] as! [String]
+        try expect(Set(commands) == ["status", "prepare", "grab", "hold", "relax", "wave", "teach", "replay", "stop"], "OpenAI arm commands diverged from Gemini")
+        try expect((session["instructions"] as? String)?.contains(GeminiRoboticsConfiguration.embodiedMotionContract) == true, "OpenAI missed shared motion constraints")
         let loiter = tools.first { $0["name"] as? String == "loiter_control" }!
         try expect((loiter["parameters"] as! [String: Any])["type"] as? String == "object", "Google schema was not converted")
         try expect(loiter["behavior"] == nil, "Google-only function field leaked")

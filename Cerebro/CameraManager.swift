@@ -212,6 +212,10 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     private var acceptedFallbackOutputID: ObjectIdentifier?
     private var acceptedFallbackOutputGeneration: UInt64?
     private var captureResolutionOverride: String?
+    private let depthIngressLock = NSLock()
+    private var pendingDepthFrame: (CameraFrameSet, UInt64, UInt64)?
+    private var depthIngressScheduled = false
+    private var lastDepthTimingLog = 0.0
 
     weak var delegate: CameraManagerDelegate?
     var videoSampleHandler: ((CMSampleBuffer) -> Void)?
@@ -517,24 +521,51 @@ final class CameraManager: NSObject, CameraManagerProtocol {
         sourceGeneration: UInt64
     ) {
         let ingressGeneration = currentDeliveryGeneration()
-        sessionQueue.async { [weak self] in
-            guard let self,
-                  self.wantsRunning,
-                  !self.usesLegacyLuxonisUVCMode,
-                  self.expectedDepthRunGeneration == sourceGeneration,
-                  self.deliveryGenerationIsCurrent(ingressGeneration) else { return }
-            var deliveryGeneration = ingressGeneration
-            if self.activeSource != .depthAIService {
-                self.advanceDeliveryGeneration()
-                deliveryGeneration = self.currentDeliveryGeneration()
-                self.activeSource = .depthAIService
-                self.stopFallbackCaptureAndDrainCallbacks()
-                self.installDepthPreviewLayer(generation: deliveryGeneration)
-                self.report(.streamingRGBD, detail: "Receiving synchronized RGB and aligned depth.")
-            }
-            self.enqueueLatestPreview(frameSet.rgbSampleBuffer, generation: deliveryGeneration)
-            self.deliverLatest(frameSet, generation: deliveryGeneration)
+        depthIngressLock.lock()
+        // Replace unprocessed input. Session setup/teardown must never leave
+        // hundreds of old RGB-D frames queued ahead of live clearance checks.
+        pendingDepthFrame = (frameSet, sourceGeneration, ingressGeneration)
+        let schedule = !depthIngressScheduled
+        depthIngressScheduled = true
+        depthIngressLock.unlock()
+        if schedule { sessionQueue.async { [weak self] in self?.deliverNewestDepthFrame() } }
+    }
+
+    private func deliverNewestDepthFrame() {
+        depthIngressLock.lock()
+        let pending = pendingDepthFrame
+        pendingDepthFrame = nil
+        depthIngressLock.unlock()
+        defer {
+            depthIngressLock.lock()
+            let again = pendingDepthFrame != nil
+            if !again { depthIngressScheduled = false }
+            depthIngressLock.unlock()
+            if again { sessionQueue.async { [weak self] in self?.deliverNewestDepthFrame() } }
         }
+        guard let (frameSet, sourceGeneration, ingressGeneration) = pending,
+              self.wantsRunning,
+                  !self.usesLegacyLuxonisUVCMode,
+              self.expectedDepthRunGeneration == sourceGeneration,
+              self.deliveryGenerationIsCurrent(ingressGeneration) else { return }
+        var deliveryGeneration = ingressGeneration
+        if self.activeSource != .depthAIService {
+            self.advanceDeliveryGeneration()
+            deliveryGeneration = self.currentDeliveryGeneration()
+            self.activeSource = .depthAIService
+            self.stopFallbackCaptureAndDrainCallbacks()
+            self.installDepthPreviewLayer(generation: deliveryGeneration)
+            self.report(.streamingRGBD, detail: "Receiving synchronized RGB and aligned depth.")
+        }
+        let now = ProcessInfo.processInfo.systemUptime
+        if now - lastDepthTimingLog >= 5, let captured = frameSet.capturedAtMilliseconds {
+            lastDepthTimingLog = now
+            NSLog("Camera %@ capture-to-consumer age %.1f ms, RGB-D %dx%d", role.rawValue,
+                  Date().timeIntervalSince1970 * 1000 - captured,
+                  frameSet.alignedDepth?.width ?? 0, frameSet.alignedDepth?.height ?? 0)
+        }
+        self.enqueueLatestPreview(frameSet.rgbSampleBuffer, generation: deliveryGeneration)
+        self.deliverLatest(frameSet, generation: deliveryGeneration)
     }
 
     private func enqueueLatestPreview(_ sampleBuffer: CMSampleBuffer, generation: UInt64) {

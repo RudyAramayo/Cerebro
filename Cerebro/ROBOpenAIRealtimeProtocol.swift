@@ -20,7 +20,7 @@ enum ROBOpenAIRealtimeProtocol {
         }
         return ["type": "session.update", "session": [
             "type": "realtime", "model": configuration.model, "output_modalities": ["text"],
-            "instructions": configuration.runtime.systemInstruction, "tools": tools, "tool_choice": "auto",
+            "instructions": configuration.runtime.motionSystemInstruction, "tools": tools, "tool_choice": "auto",
             "max_output_tokens": 1024,
             "audio": ["input": [
                 "format": ["type": "audio/pcm", "rate": 24000],
