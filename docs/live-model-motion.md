@@ -8,16 +8,18 @@ No provider can send raw joints, speed, force, shell commands or direct gateway
 packets through these tools.
 
 `robot_capabilities {}` reports current arm/gateway/camera state, controller
-approval state, approved gesture names and stored demonstration clip IDs. Read
-it before selecting a new behavior. Availability is narrower than the robot's
-mechanical range:
+approval state, approved gesture names and stored demonstration clip IDs.
+Its `show_paths` field reports configuration-bound rehearsal availability; see
+[show rehearsal](show-motion-rehearsal.md) for live status and evidence. Read the
+capabilities before selecting a new behavior. Availability is narrower than the
+robot's mechanical range:
 
 | Actuator | Live model path | Current limits |
 | --- | --- | --- |
 | Arms and grippers | `arm_control` | Fixed hanging/front corridor, paired execution, camera and measured feedback; one controller approval per operation |
 | Treads | `loiter_control` | Only an existing controller-authorized social-roam session; Lidar/zone vetoes, bounded turns, no measured relative-distance claim |
 | Approved recorded gestures | `robot_action` / `play_gesture` | Immutable local catalog and authenticated controller approval |
-| Neck | Local inspection preset and controller head tracking | General model `look_at` has no calibrated deterministic executor |
+| Neck | Local inspection preset, controller head tracking, and rehearsed `show.*` IDs via `play_gesture` | Fixed supervised scan/greeting paths require a matching rehearsal receipt; no general `look_at` or measured neck shaft feedback |
 | Torso yaw | Controller camera-feedback velocity control | No general live-model tool; camera registration and combined arm/body collision coverage are not validated |
 | Forward/back body lean | Controller/manual reviewed mechanisms | No model body-lean executor; neck posture presets are not measured body lean |
 
@@ -92,7 +94,7 @@ that a stalled session queue discards 999 older frames rather than replaying the
 Real cameras were measured without motor operations; results are in
 [depth camera integration](depth-camera.md#2026-09-23-latency-measurements).
 
-The final macOS Debug build passed and was installed at `/Applications/Cerebro.app`.
+The earlier live-motion macOS Debug build passed and was installed at `/Applications/Cerebro.app`.
 `codesign --verify --deep --strict` passed. The app relaunched successfully;
 Settings showed the teaching/replay/greeting controls, startup calibration off
 and “Arms idle”. Live main-camera imagery was inspected. Application-level
@@ -100,7 +102,7 @@ capture-age logging was not available from this launch, so the latency numbers
 above are the separate camera-only measurements, not an in-app timing claim.
 No controller approval was synthesized and no automatic arm motion was tested.
 
-Installed `Cerebro.debug.dylib` SHA-256:
+That earlier build's `Cerebro.debug.dylib` SHA-256:
 `63d9471ad6f0b405123505c114766fce5c9bc184f85f49832a2052c15f5eb31f`.
 Installed `Webcam_color.py` SHA-256:
 `6c0b62a4676d179721e97712332c6e354f7f0331d15b6c4da13b6d5a51c013b8`.

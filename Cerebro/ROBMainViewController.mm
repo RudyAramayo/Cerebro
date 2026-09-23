@@ -414,6 +414,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 // immutable operator-approved named poses.
 @property (readwrite, copy) NSString *robotActionSenderID;
 @property (readwrite, copy) NSString *robotActionControllerID;
+@property (readwrite, copy) NSString *localShowMotionCallID;
 @property (readwrite, retain) NSDate *robotActionControllerLastSeen;
 @property (readwrite, assign) BOOL robotActionControllerAcceptsActions;
 @property (readwrite, copy) NSArray<NSString *> *robotActionControllerCapabilities;
@@ -1367,6 +1368,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     if (self.localArmRoutineCallID != nil) {
         [[ROBArmRoutineCoordinator shared] cancelWithReason:reason];
     }
+    if (self.localShowMotionCallID != nil) { [[ROBShowMotionCoordinator shared] stop]; }
     BOOL hasLocalAmberGesture = self.localAmberGestureCallID.length > 0;
     if (callIDs.count == 0 && !hasLocalAmberGesture) {
         return;
@@ -1435,17 +1437,36 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                 @"pending": @([ROBControllerArmApproval shared].isPending), @"detail": [ROBControllerArmApproval shared].status},
             @"arms": [[ROBArmRoutineCoordinator shared] capabilitySnapshot],
             @"recorded_clips": [[ROBArmImitationStore shared] summaries],
+            @"show_paths": [[ROBShowMotionCoordinator shared] capabilitySnapshot],
             @"named_gestures": [ROBAmberGestureCatalog shared].approvedGestureNames,
             @"treads": @{@"tool": @"loiter_control", @"session_active": @(self.autonomyCoordinator.active),
                 @"limits": @"Only an existing controller-authorized social_roam session, with Lidar and zone vetoes. Read status for session_id. No arbitrary motor speeds or measured distance completion."},
             @"neck": @{@"live_model_executor": @NO, @"command_state_known": @(self.serialBox.neckCommandStateKnown),
-                @"limits": @"Controller head tracking and local inspection presets exist. General model look_at does not have a calibrated local executor."},
+                @"limits": @"Use only rehearsed named show_paths via play_gesture. General look_at and measured neck shaft position are unavailable."},
             @"torso_yaw": @{@"live_model_executor": @NO, @"armed": @([ROBTorsoControlCenter shared].isArmed),
                 @"detail": [ROBTorsoControlCenter shared].status,
                 @"limits": @"Controller-driven camera-feedback velocity control only. Whole-body and arm collision integration is not validated."},
             @"lean": @{@"live_model_executor": @NO, @"limits": @"Reviewed neck posture presets exist; model-directed body lean is unavailable."}
         } : @{@"status": @"rejected", @"detail": @"robot_capabilities takes no arguments"};
         [robAI sendToolResponseWithCallID:call.callID name:call.name result:result];
+        return;
+    }
+    NSString *showPath = [call.arguments[@"gesture"] isKindOfClass:NSString.class] ? call.arguments[@"gesture"] : nil;
+    if ([call.name isEqualToString:@"robot_action"] && [call.arguments[@"action"] isEqual:@"play_gesture"] &&
+        [showPath hasPrefix:@"show."]) {
+        if ([self.localShowMotionCallID isEqualToString:call.callID]) { return; }
+        if (self.localShowMotionCallID != nil || call.isStageOrigin || self.stageShowCoordinator.isRunning || self.pendingRobotActionRequests.count > 0 ||
+            ![[NSSet setWithArray:call.arguments.allKeys] isEqualToSet:[NSSet setWithArray:@[@"action", @"gesture"]]]) {
+            [robAI sendToolResponseWithCallID:call.callID name:call.name result:
+                @{@"status": @"rejected", @"detail": @"Another action owns motion, or the show path arguments are invalid."}];
+            return;
+        }
+        self.localShowMotionCallID = call.callID;
+        __weak ROBMainViewController *weakSelf = self;
+        [[ROBShowMotionCoordinator shared] performPath:showPath rehearsal:NO completion:^(NSDictionary *result) {
+            if ([weakSelf.localShowMotionCallID isEqualToString:call.callID]) { weakSelf.localShowMotionCallID = nil; }
+            [robAI sendToolResponseWithCallID:call.callID name:call.name result:result];
+        }];
         return;
     }
     BOOL armTool = [call.name isEqualToString:@"arm_control"];
@@ -1700,6 +1721,12 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 {
     [self.autonomyCoordinator cancelLoiterControlCalls:callIDs];
     for (NSString *callID in callIDs) {
+        if ([self.localShowMotionCallID isEqualToString:callID]) {
+            [[ROBShowMotionCoordinator shared] stop];
+            self.localShowMotionCallID = nil;
+            [robAI confirmToolCallCancellation:callID];
+            continue;
+        }
         if ([self.localArmRoutineCallID isEqualToString:callID]) {
             [[ROBArmRoutineCoordinator shared] cancelWithReason:@"The arm request was cancelled"];
             self.localArmRoutineCallID = nil;
@@ -2496,6 +2523,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void)updatePersonTrackingUprightRestAtUptime:(NSTimeInterval)now
 {
+    if ([ROBArmRoutineCoordinator shared].ownsPhysicalMotion) { return; }
     if (!ROBPersonTrackingAutomaticPostureChangesEnabledFromDefaults(
             NSUserDefaults.standardUserDefaults)) {
         return;
@@ -3200,6 +3228,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void)applyPrioritySoftwareStopWithReason:(NSString *)reason
 {
+    [[ROBShowMotionCoordinator shared] stop];
     [[ROBArmRoutineCoordinator shared] cancelWithReason:reason];
     self.currentPersonTrackingID = -1;
     self.followingMode = false;
@@ -5577,6 +5606,51 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             fabs(serial.commandedNeckPanDegrees) <= 5 &&
             NSProcessInfo.processInfo.systemUptime >= serial.neckCommandReadyAtUptime;
     };
+    routine.viewStatus = ^NSString * {
+        ROBSerialBox *serial = weakSelf.serialBox;
+        return [NSString stringWithFormat:@"P %ld, L %ld, U %ld; %@; %@",
+            (long)serial.commandedNeckPanTarget, (long)serial.commandedLowerNeckTiltTarget,
+            (long)serial.commandedUpperNeckTiltTarget, serial.neckCommandSource ?: @"unknown source",
+            serial.neckCommandSafetyStatus ?: @"unknown neck state"];
+    };
+    ROBShowMotionCoordinator *rehearsal = [ROBShowMotionCoordinator shared];
+    rehearsal.cameraDemand = routine.cameraDemand;
+    rehearsal.prepare = ^BOOL {
+        ROBMainViewController *strongSelf = weakSelf;
+        if (strongSelf == nil || strongSelf.stageShowCoordinator.isRunning ||
+            strongSelf.pendingRobotActionRequests.count > 0 || [ROBTorsoControlCenter shared].isArmed ||
+            [ROBAmberStackMaintenanceController shared].isRunning) { return NO; }
+        [strongSelf.serialBox stopBaseMotionAndDropHeartbeat];
+        if (strongSelf.autonomyCoordinator.active) { [strongSelf.autonomyCoordinator stopWithReason:@"Show rehearsal"]; }
+        if (strongSelf.followPersonCoordinator.active) { [strongSelf.followPersonCoordinator stopWithReason:@"Show rehearsal"]; }
+        strongSelf.torsoControlsViewController.headTracking_enabled.state = NSControlStateValueOff;
+        [strongSelf.serialBox cancelPersonTrackingPostureSequence];
+        return YES;
+    };
+    rehearsal.readNeck = ^NSDictionary * {
+        ROBSerialBox *serial = weakSelf.serialBox;
+        ROBServoControlStore *poses = [ROBServoControlStore shared];
+        ROBServoCameraPosition *center = [poses cameraPositionNamed:@"fully_upright_center"];
+        ROBServoCameraPosition *left = [poses cameraPositionNamed:@"fully_upright_left"];
+        ROBServoCameraPosition *right = [poses cameraPositionNamed:@"fully_upright_right"];
+        BOOL uprightMatches = center.lowerTarget == 6011 && center.upperTarget == 6906 &&
+            left.lowerTarget == 6011 && left.upperTarget == 6906 &&
+            right.lowerTarget == 6011 && right.upperTarget == 6906;
+        return @{@"known": @(serial.neckCommandStateKnown && serial.commandedNeckPanTarget > 0 &&
+                            serial.commandedLowerNeckTiltTarget > 0 && serial.commandedUpperNeckTiltTarget > 0),
+                 @"saved_upright_valid": @(uprightMatches),
+                 @"saved_center": @(center.panTarget), @"saved_left": @(left.panTarget),
+                 @"saved_right": @(right.panTarget),
+                 @"pan": @(serial.commandedNeckPanTarget), @"lower": @(serial.commandedLowerNeckTiltTarget),
+                 @"upper": @(serial.commandedUpperNeckTiltTarget), @"ready_at": @(serial.neckCommandReadyAtUptime),
+                 @"source": serial.neckCommandSource ?: @"", @"detail": serial.neckCommandSafetyStatus ?: @""};
+    };
+    rehearsal.commandNeck = ^NSInteger(NSInteger pan, NSInteger lower, NSInteger upper) {
+        ROBSerialBox *serial = weakSelf.serialBox;
+        if (serial == nil || !serial.neckCommandStateKnown) { return ROBNeckCommandDispositionRejected; }
+        return [serial requestOperatorNeckPosePanTarget:pan lowerTarget:lower upperTarget:upper];
+    };
+    rehearsal.releaseNeck = ^{ [weakSelf.serialBox cancelNeckGestureAuthority]; };
     [routine wakeIfEnabled];
 }
 

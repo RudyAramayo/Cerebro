@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AC2509230000000000000002 /* ROBShowMotionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2509230000000000000001 /* ROBShowMotionCoordinator.swift */; };
 		AC2409230000000000000002 /* ROBArmImitationPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2409230000000000000001 /* ROBArmImitationPlan.swift */; };
 		AC2309230000000000000012 /* ROBControllerArmApproval.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2309230000000000000011 /* ROBControllerArmApproval.swift */; };
 		AC2309260000000000000008 /* ROBArmRoutineSettingsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2309260000000000000007 /* ROBArmRoutineSettingsViewController.swift */; };
@@ -236,6 +237,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		AC2509230000000000000001 /* ROBShowMotionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBShowMotionCoordinator.swift; sourceTree = "<group>"; };
 		AC2409230000000000000001 /* ROBArmImitationPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBArmImitationPlan.swift; sourceTree = "<group>"; };
 		AC2309230000000000000011 /* ROBControllerArmApproval.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBControllerArmApproval.swift; sourceTree = "<group>"; };
 		AC2309260000000000000007 /* ROBArmRoutineSettingsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBArmRoutineSettingsViewController.swift; sourceTree = "<group>"; };
@@ -666,6 +668,7 @@
 				AC2309260000000000000001 /* ROBArmRoutinePlan.swift */,
 				AC2309260000000000000003 /* ROBArmRoutineVision.swift */,
 				AC2309260000000000000005 /* ROBArmRoutineCoordinator.swift */,
+				AC2509230000000000000001 /* ROBShowMotionCoordinator.swift */,
 				AC2309260000000000000007 /* ROBArmRoutineSettingsViewController.swift */,
 				ABC9036F889D40C79B5BC101 /* ROBAmberArmBinding.swift */,
 				C0B001012F4C000100000001 /* ROBWakeUpCalibrationWindowController.swift */,
@@ -1075,6 +1078,7 @@
 				AC2309260000000000000002 /* ROBArmRoutinePlan.swift in Sources */,
 				AC2309260000000000000004 /* ROBArmRoutineVision.swift in Sources */,
 				AC2309260000000000000006 /* ROBArmRoutineCoordinator.swift in Sources */,
+				AC2509230000000000000002 /* ROBShowMotionCoordinator.swift in Sources */,
 				AC2309260000000000000008 /* ROBArmRoutineSettingsViewController.swift in Sources */,
 				ABC9036F889D40C79B5BC102 /* ROBAmberArmBinding.swift in Sources */,
 				C0B001022F4C000100000001 /* ROBWakeUpCalibrationWindowController.swift in Sources */,

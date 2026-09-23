@@ -21,7 +21,7 @@ import AppKit
             button("Prepare to grab", #selector(prepareArms)), button("Relax arms", #selector(relax)),
             button("Stop + hold", #selector(stop))])
         buttons.spacing = 10
-        let teaching = NSStackView(views: [button("Record body demonstration", #selector(teach)),
+        let teaching = NSStackView(views: [button("Motion rehearsal…", #selector(rehearsal)), button("Record body demonstration", #selector(teach)),
             button("Replay last", #selector(replay)), button("Front-arm greeting", #selector(wave))])
         teaching.spacing = 10
         let stack = NSStackView(views: [title, startup, explanation, commands, buttons, teaching, state, limitation])
@@ -46,6 +46,7 @@ import AppKit
     @objc private func teach() { run("teach") }
     @objc private func replay() { run("replay") }
     @objc private func wave() { run("wave") }
+    @objc private func rehearsal() { ROBShowMotionCoordinator.shared.showControls(self) }
     @objc private func stop() {
         ROBArmRoutineCoordinator.shared.cancel(reason: "Stop requested in Arms settings")
         _ = ROBAmberGestureExecutor.shared.cancelCurrentGesture(reason: "Stop requested in Arms settings")

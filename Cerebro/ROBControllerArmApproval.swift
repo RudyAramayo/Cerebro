@@ -17,11 +17,12 @@ import Foundation
         let session: UUID
         let sender: String
         let seen: Date
+        let capabilities: Set<String>
     }
     private struct Pending {
         let id: String
-        let operation: String
-        let arm: String
+        let action: String
+        let arguments: NSDictionary
         let summary: String
         let created: Date
         let execute: (@escaping (NSDictionary) -> Void) -> Void
@@ -40,17 +41,39 @@ import Foundation
                  execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
                  cancel: @escaping () -> Void,
                  completion: @escaping (NSDictionary) -> Void) {
+        request(action: "arm_operation", arguments: ["operation": operation, "arm": arm, "summary": summary],
+                summary: summary, execute: execute, cancel: cancel, completion: completion)
+    }
+
+    /// Existing controllers already review named play_gesture requests and
+    /// leave their execution/result to Cerebro. Use that same authenticated,
+    /// one-shot lane for an immutable, bounded neck rehearsal.
+    func requestMotionPath(name: String, execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
+                           cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
+        request(action: "play_gesture", arguments: ["gesture": name], summary: name,
+                execute: execute, cancel: cancel, completion: completion)
+    }
+
+    func authorizesMotionPath(_ name: String) -> Bool {
+        guard let p = pending, p.started != nil, p.action == "play_gesture",
+              p.arguments["gesture"] as? String == name, let peer = p.peer else { return false }
+        return peerIsFresh(peer) && now().timeIntervalSince(p.started!) < 120
+    }
+
+    private func request(action: String, arguments: NSDictionary, summary: String,
+                         execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
+                         cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
         precondition(Thread.isMainThread)
         guard pending == nil else {
             completion(["status": "busy", "detail": status]); return
         }
         let probe = ROBRobotActionMessage.actionRequest(callID: UUID().uuidString,
-            action: "arm_operation", arguments: ["operation": operation, "arm": arm, "summary": summary],
+            action: action, arguments: arguments,
             senderID: senderID, recipientID: nil, expiresAt: now().addingTimeInterval(30))
         guard probe.validationError == nil else {
-            completion(["status": "rejected", "detail": "Invalid controller arm approval request."]); return
+            completion(["status": "rejected", "detail": "Invalid controller motion approval request."]); return
         }
-        pending = Pending(id: probe.callID!, operation: operation, arm: arm, summary: summary,
+        pending = Pending(id: probe.callID!, action: action, arguments: arguments.copy() as! NSDictionary, summary: summary,
             created: now(), execute: execute, cancel: cancel, completion: completion)
         update("Waiting for Vision Pro or iPhone to approve: \(summary)")
         let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in self?.tick() }
@@ -64,8 +87,12 @@ import Foundation
         precondition(Thread.isMainThread)
         guard sessionIsActive(device, session), message.validationError == nil else { return false }
         if message.kind == .controllerHello {
-            if message.acceptsActions && message.capabilities.contains("arm_operation") {
-                peers[device] = Peer(device: device, session: session, sender: message.senderID, seen: now())
+            if message.acceptsActions {
+                peers[device] = Peer(device: device, session: session, sender: message.senderID, seen: now(),
+                                     capabilities: Set(message.capabilities))
+                if let p = pending, p.peer?.device == device, !message.capabilities.contains(p.action) {
+                    cancel(reason: "The controller stopped accepting this motion operation.")
+                }
             } else {
                 peers.removeValue(forKey: device)
                 if pending?.peer?.device == device, pending?.peer?.session == session {
@@ -106,7 +133,18 @@ import Foundation
             // A controller can reject/cancel, but cannot assert hardware success.
             if p.started != nil { cancel(reason: "The controller ended the arm operation; hold requested.") }
             else {
-                finish(["status": "rejected", "detail": "The controller did not approve this arm operation."], state: .rejected)
+                let terminal: ROBRobotActionState
+                let outcome: String
+                switch message.state {
+                case .expired: terminal = .expired; outcome = "expired"
+                case .cancelled: terminal = .cancelled; outcome = "cancelled"
+                case .failed: terminal = .failed; outcome = "failed"
+                default: terminal = .rejected; outcome = "rejected"
+                }
+                let controllerDetail = message.detail ?? ""
+                let detail = controllerDetail.isEmpty ? "The controller did not approve this motion operation."
+                    : "Controller: \(String(controllerDetail.prefix(512)))"
+                finish(["status": outcome, "detail": detail], state: terminal)
             }
         }
         return true
@@ -139,10 +177,11 @@ import Foundation
             finish(["status": "blocked", "detail": "Connect Vision Pro or iPhone and enable Action Approvals. No arm operation was started."], state: .expired)
             return
         }
-        guard let peer = peers.values.filter({ now().timeIntervalSince($0.seen) < 15 && sessionIsActive($0.device, $0.session) })
+        guard let peer = peers.values.filter({ now().timeIntervalSince($0.seen) < 15 &&
+            $0.capabilities.contains(p.action) && sessionIsActive($0.device, $0.session) })
             .sorted(by: { $0.seen > $1.seen }).first else { return }
-        let request = ROBRobotActionMessage.actionRequest(callID: p.id, action: "arm_operation",
-            arguments: ["operation": p.operation, "arm": p.arm, "summary": p.summary],
+        let request = ROBRobotActionMessage.actionRequest(callID: p.id, action: p.action,
+            arguments: p.arguments,
             senderID: senderID, recipientID: peer.sender, expiresAt: now().addingTimeInterval(30))
         pending?.peer = peer; pending?.request = request
         guard send?(request, peer.device, peer.session) == true else {
@@ -161,7 +200,8 @@ import Foundation
     }
     private func peerIsFresh(_ peer: Peer) -> Bool {
         guard let current = peers[peer.device], current.session == peer.session,
-              current.sender == peer.sender else { return false }
+              current.sender == peer.sender,
+              pending.map({ current.capabilities.contains($0.action) }) != false else { return false }
         return now().timeIntervalSince(current.seen) < 15 && sessionIsActive(peer.device, peer.session)
     }
 

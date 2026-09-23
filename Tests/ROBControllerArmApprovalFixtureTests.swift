@@ -143,6 +143,18 @@ final class ROBAmberGatewayClient: NSObject {
             check(commands == 0 && result["status"] as? String == "blocked", "Reconnection must invalidate the reviewed command")
         }
 
+        // A controller's expiry detail must not be presented as an operator rejection.
+        do {
+            let b = broker()
+            var request: ROBRobotActionMessage?, result: NSDictionary = [:], executed = false
+            b.send = { message, _, _ in if message.kind == .actionRequest { request = message }; return true }
+            _ = b.receive(.controllerHello(senderID: sender, acceptsActions: true, capabilities: ["play_gesture"]), device: device, session: session)
+            b.requestMotionPath(name: "Bounded neck rehearsal", execute: { _ in executed = true }, cancel: {}, completion: { result = $0 })
+            _ = b.receive(reply(request!, .expired), device: device, session: session)
+            check(!executed && result["status"] as? String == "expired", "Controller expiry cannot execute or become rejection")
+            check(result["detail"] as? String == "Controller: Fixture decision", "Preserve the controller's reason")
+        }
+
         for arguments: NSDictionary in [
             ["operation": "activate", "arm": "both", "summary": "Reviewed operation", "force": 999],
             ["operation": "invented", "arm": "both", "summary": "Reviewed operation"],

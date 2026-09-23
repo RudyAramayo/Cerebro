@@ -15,6 +15,9 @@ final class ROBArmRoutineVision {
     private var busy: Set<String> = []
     private var lastOffer: [String: TimeInterval] = [:]
     private var inputNotes: [String: String] = [:]
+    private var lastIncomingCapture: Double?
+    private var lastIncomingSequence: UInt64 = 0
+    private var processingMilliseconds: Double = 0
     private var frames: [String: Frame] = [:]
 
     struct Frame {
@@ -30,6 +33,7 @@ final class ROBArmRoutineVision {
     func setActive(_ value: Bool, teaching: Bool = false) {
         lock.lock(); defer { lock.unlock() }
         active = value; self.teaching = teaching; epoch = UUID(); frames = [:]; busy = []; lastOffer = [:]; inputNotes = [:]
+        lastIncomingCapture = nil; lastIncomingSequence = 0; processingMilliseconds = 0
     }
 
     func offer(_ frame: CameraFrameSet, role: CameraRole) {
@@ -38,6 +42,10 @@ final class ROBArmRoutineVision {
         guard role == .face else { return }
         let key = role.rawValue, now = ProcessInfo.processInfo.systemUptime
         lock.lock()
+        if active {
+            lastIncomingCapture = frame.capturedAtMilliseconds.flatMap { $0.isFinite ? $0 : nil }
+            lastIncomingSequence = frame.sequence
+        }
         guard active, !busy.contains(key), now - (lastOffer[key] ?? 0) >= 0.2 else { lock.unlock(); return }
         lastOffer[key] = now
         guard frame.source == .depthAIService, let depth = frame.alignedDepth else {
@@ -119,6 +127,7 @@ final class ROBArmRoutineVision {
             self.lock.lock(); defer { self.lock.unlock() }
             guard self.epoch == token else { return }
             self.busy.remove(key)
+            self.processingMilliseconds = (ProcessInfo.processInfo.systemUptime - now) * 1000
             guard let immutable else { return }
             var thumbnail = [UInt8](repeating: 0, count: 64 * 48 * 4)
             let small = CIImage(cgImage: immutable).transformed(by:
@@ -159,8 +168,21 @@ final class ROBArmRoutineVision {
         return ["face"].map { key in
             let name = key == "face" ? "Forward camera" : "Belly camera"
             guard let frame = frames[key] else { return "\(name): \(inputNotes[key] ?? "no frames received")" }
-            return "\(name): \(Int(now - frame.capturedAt)) ms old, \(Int(frame.depthCoverage * 100))% usable depth"
+            return "\(name): \(Int(now - frame.capturedAt)) ms old, \(Int(frame.depthCoverage * 100))% usable depth, analysis \(Int(processingMilliseconds)) ms"
         }.joined(separator: "; ")
+    }
+
+    /// Read-only evidence for rehearsal and failure reports. Capture and
+    /// analysis ages stay separate; a recent callback never freshens old pixels.
+    func healthSnapshot() -> NSDictionary {
+        lock.lock(); defer { lock.unlock() }
+        let now = Date().timeIntervalSince1970 * 1000
+        let frame = frames["face"]
+        return ["active": active, "input_sequence": NSNumber(value: lastIncomingSequence),
+                "input_age_ms": lastIncomingCapture.map { now - $0 } ?? -1,
+                "analysis_age_ms": frame.map { now - $0.capturedAt } ?? -1,
+                "analysis_ms": processingMilliseconds, "depth_coverage": frame?.depthCoverage ?? 0,
+                "hands_clear": frame?.handsClear ?? false, "note": inputNotes["face"] ?? "No frames received"]
     }
 
     func observe(target: String) async throws -> ROBArmRoutineObservation {

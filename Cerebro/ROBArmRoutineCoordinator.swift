@@ -12,10 +12,11 @@ enum ROBArmRoutineError: LocalizedError {
     static let shared = ROBArmRoutineCoordinator()
     private(set) var isRunning = false
     private(set) var status = "Arms idle"
-    var ownsPhysicalMotion: Bool { isRunning && activeCommand != "teach" }
+    var ownsPhysicalMotion: Bool { (isRunning && activeCommand != "teach") || ROBShowMotionCoordinator.shared.isRunning }
     var cameraDemand: ((Bool) -> Void)?
     var prepareView: (() -> Bool)?
     var viewIsStationary: (() -> Bool)?
+    var viewStatus: (() -> String)?
 
     private let gateway = ROBAmberGatewayClient.shared
     private let vision = ROBArmRoutineVision.shared
@@ -106,6 +107,9 @@ enum ROBArmRoutineError: LocalizedError {
 
     func performCommand(_ command: String, target: String, completion: @escaping (NSDictionary) -> Void) {
         precondition(Thread.isMainThread)
+        guard !ROBShowMotionCoordinator.shared.isRunning else {
+            completion(["status": "busy", "detail": "The show rehearsal owns motion. Use Stop + hold first."]); return
+        }
         if command == "teach" { recordDemonstration(name: target, completion: completion); return }
         guard ["startup", "prepare", "grab", "hold", "relax", "wave", "replay"].contains(command) else {
             completion(["status": "rejected", "detail": "Unknown arm routine."]); return
@@ -134,6 +138,16 @@ enum ROBArmRoutineError: LocalizedError {
                 if self?.isRunning != true { self?.setStatus(result["detail"] as? String ?? "Arm operation ended") }
                 completion(result)
             })
+    }
+
+    /// Continue only the exact, already-approved combined greeting. No public
+    /// model tool can use this entry to skip the controller's one-shot grant.
+    func continueApprovedGreeting(completion: @escaping (NSDictionary) -> Void) {
+        guard ROBShowMotionCoordinator.shared.isRunning,
+              ROBControllerArmApproval.shared.authorizesMotionPath(ROBShowMotionCoordinator.greetingSummary) else {
+            completion(["status": "blocked", "detail": "The combined greeting has no active controller approval."]); return
+        }
+        performAuthorizedCommand("wave", target: "", rendition: .greeting, completion: completion)
     }
 
     /// Camera-only capture. Nothing in this path enters a motor mode or sends a
@@ -270,10 +284,15 @@ enum ROBArmRoutineError: LocalizedError {
         guard ProcessInfo.processInfo.systemUptime < deadline else { throw ROBArmRoutineError.blocked("Arm operation exceeded its deadline.") }
         if superviseCamera {
             guard vision.fresh, viewIsStationary?() == true else {
-                throw ROBArmRoutineError.blocked("Current main-camera feedback and the stationary inspection view are required.")
+                throw ROBArmRoutineError.blocked(cameraFailureDetail)
             }
             if moving && !vision.handsClear { throw ROBArmRoutineError.blocked("Person or hand clearance was lost.") }
         }
+    }
+
+    private var cameraFailureDetail: String {
+        if !vision.fresh { return "Main-camera feedback lost. \(vision.readinessDescription)." }
+        return "Inspection view changed. \(viewStatus?() ?? "The neck or torso moved.")"
     }
 
     @MainActor private func wait(seconds: Double, reason: String = "Timed out waiting for command acknowledgement or measured arrival.", until condition: () -> Bool) async throws {
@@ -551,7 +570,7 @@ enum ROBArmRoutineError: LocalizedError {
                 }
             }
         }
-        if superviseCamera && (!vision.fresh || viewIsStationary?() != true) { abort("Camera feedback or the stationary inspection view was lost."); return }
+        if superviseCamera && (!vision.fresh || viewIsStationary?() != true) { abort(cameraFailureDetail); return }
         if moving && !vision.handsClear { abort("Person or hand clearance was lost; an arm hold was requested."); return }
         if !leased.isEmpty, now - lastRenewal >= 0.4 {
             if renewalSentAt.values.contains(where: { now - $0 > 1 }) { abort("An arm lease acknowledgement timed out."); return }

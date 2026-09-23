@@ -1,5 +1,11 @@
 import AppKit
 
+final class ROBShowMotionCoordinator {
+    static let shared = ROBShowMotionCoordinator()
+    static let greetingSummary = "Fixture combined greeting"
+    var isRunning = false
+}
+
 // The production coordinator and planner run unchanged, with no sockets,
 // cameras or hardware SDK. Mock commands acknowledge asynchronously so races
 // between dispatch, cancellation, telemetry and leases remain exercised.

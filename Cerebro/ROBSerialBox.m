@@ -2060,6 +2060,7 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
 - (BOOL)personTrackingMayUpdateNeck
 {
     @synchronized (self) {
+        if ([ROBArmRoutineCoordinator shared].ownsPhysicalMotion) { return NO; }
         NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
         return self.maestroConnectionValid
             && self.neckCommandStateKnown
@@ -4156,6 +4157,8 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     BOOL servoControlOwnsNeck = !operatorInitiated
         && [self.neckCommandSource isEqualToString:kROBServoControlSource]
         && now < self.manualNeckOverrideUntil;
+    BOOL routineOwnsNeck = !operatorInitiated
+        && [ROBArmRoutineCoordinator shared].ownsPhysicalMotion;
     BOOL followClearanceOwnsNeck = !operatorInitiated
         && [self.neckCommandSource
             isEqualToString:kROBFollowTrackingClearanceSource]
@@ -4172,7 +4175,8 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     // presentation only; a passive render must not become a second producer.
     BOOL personCenteringOwnsNeck = !operatorInitiated
         && [self.neckCommandSource isEqualToString:kROBPersonTrackingCenteringSource];
-    if (!servoControlOwnsNeck
+    if (!routineOwnsNeck
+        && !servoControlOwnsNeck
         && !gestureOwnsNeck
         && !visionOwnsNeck
         && !followClearanceOwnsNeck

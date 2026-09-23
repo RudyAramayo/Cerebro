@@ -77,6 +77,17 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 /* CONSTANTS */
 /* HELPERS */
 /* NOTIFICATIONS */
+@interface ROBArmRoutineCoordinator : NSObject
+@property BOOL ownsPhysicalMotion;
++ (instancetype)shared;
+@end
+@implementation ROBArmRoutineCoordinator
++ (instancetype)shared {
+    static ROBArmRoutineCoordinator *coordinator;
+    if (!coordinator) coordinator = [self new];
+    return coordinator;
+}
+@end
 @class ROBServoCameraPosition;
 @interface ROBServoSequencePhase : NSObject
 @property NSInteger phaseIndex, panTarget, lowerTarget, upperTarget;
@@ -267,6 +278,15 @@ int main(void) { @autoreleasepool {
         assert(!box.personTrackingMayUpdateNeck);
         [box setValue:@NO forKey:flag];
     }
+    assert(box.personTrackingMayUpdateNeck);
+    [ROBArmRoutineCoordinator shared].ownsPhysicalMotion = YES;
+    assert(!box.personTrackingMayUpdateNeck);
+    NSUInteger beforeRoutine = neckPackets(box).count;
+    assert([box requestPersonTrackingPanTarget:5900 desiredUpperTarget:6906]
+        == ROBNeckCommandDispositionHeldForSafety);
+    render(box, 5800, 7014, 6100, NO);
+    assert(neckPackets(box).count == beforeRoutine);
+    [ROBArmRoutineCoordinator shared].ownsPhysicalMotion = NO;
     assert(box.personTrackingMayUpdateNeck);
     box.neckCommandSource = kROBFollowTrackingClearanceSource;
     assert(!box.personTrackingMayUpdateNeck);
