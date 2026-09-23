@@ -1,0 +1,861 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Operator-supervised return to hanging startup zero and preparation for power-off.",
+  "physicalArm": "right",
+  "core": "L10",
+  "gatewayArm": "left",
+  "canInterface": "can10",
+  "udpPort": 26001,
+  "sourceMeasurementCommit": "1ef66b0ec21f918a99266b3928bcb0d95298f7f2",
+  "initialCommandRadians": [
+    1.35,
+    -0.6,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "finalCommandRadians": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "hardwareOutputEnabled": false,
+  "automaticReplayAuthorized": false,
+  "operatorClarifications": [
+    "Hanging startup pose, not upright B1 zero.",
+    "Full return path clear, operator watching.",
+    "Operator requested faster progress after step 6; remaining duration requests reduced to four seconds, preserving waypoint order.",
+    "Operator confirmed supported; deactivate it before the final torque-off action."
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "uiSendClickedAt": "2026-09-23T07:05:23.044Z",
+      "targetRadians": [
+        1.05,
+        -0.6,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "durationSeconds": 16,
+      "arrivalMeasuredRadians": [
+        1.04992,
+        -0.59982,
+        0,
+        0,
+        -0.00218,
+        0,
+        0
+      ],
+      "positionModeRows": 7,
+      "allJointCANRepliesCurrentBothArmsAtChecks": true,
+      "sendTimeCoveredByExportedTelemetry": true
+    },
+    {
+      "step": 2,
+      "uiSendClickedAt": "2026-09-23T07:06:09.007Z",
+      "targetRadians": [
+        0.75,
+        -0.6,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "durationSeconds": 16,
+      "arrivalMeasuredRadians": [
+        0.74981,
+        -0.59982,
+        0,
+        0,
+        -0.00232,
+        0,
+        0
+      ],
+      "positionModeRows": 7,
+      "allJointCANRepliesCurrentBothArmsAtChecks": true,
+      "sendTimeCoveredByExportedTelemetry": true
+    },
+    {
+      "step": 3,
+      "uiSendClickedAt": "2026-09-23T07:06:53.725Z",
+      "targetRadians": [
+        0.6,
+        -0.6,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "durationSeconds": 8,
+      "arrivalMeasuredRadians": [
+        0.59955,
+        -0.59982,
+        0,
+        0,
+        -0.00218,
+        0,
+        0
+      ],
+      "positionModeRows": 7,
+      "allJointCANRepliesCurrentBothArmsAtChecks": true,
+      "sendTimeCoveredByExportedTelemetry": true
+    },
+    {
+      "step": 4,
+      "uiSendClickedAt": "2026-09-23T07:07:22.865Z",
+      "targetRadians": [
+        0.45,
+        -0.6,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "durationSeconds": 8,
+      "arrivalMeasuredRadians": [
+        0.44983,
+        -0.59982,
+        0,
+        0,
+        0.00245,
+        0,
+        0
+      ],
+      "positionModeRows": 7,
+      "allJointCANRepliesCurrentBothArmsAtChecks": true,
+      "sendTimeCoveredByExportedTelemetry": true
+    },
+    {
+      "step": 5,
+      "uiSendClickedAt": "2026-09-23T07:08:07.132Z",
+      "targetRadians": [
+        0.45,
+        -0.45,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "durationSeconds": 8,
+      "arrivalMeasuredRadians": [
+        0.44983,
+        -0.44969,
+        0,
+        0,
+        0.00273,
+        0,
+        0
+      ],
+      "positionModeRows": 7,
+      "allJointCANRepliesCurrentBothArmsAtChecks": true,
+      "sendTimeCoveredByExportedTelemetry": true
+    },
+    {
+      "step": 6,
+      "uiSendClickedAt": "2026-09-23T07:08:48.175Z",
+      "targetRadians": [
+        0.3,
+        -0.45,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "durationSeconds": 8,
+      "arrivalMeasuredRadians": [
+        0.29984,
+        -0.44983,
+        0,
+        0,
+        0.00259,
+        0,
+        0
+      ],
+      "positionModeRows": 7,
+      "allJointCANRepliesCurrentBothArmsAtChecks": true,
+      "sendTimeCoveredByExportedTelemetry": true
+    },
+    {
+      "step": 7,
+      "uiSendClickedAt": "2026-09-23T07:09:22.148Z",
+      "targetRadians": [
+        0.3,
+        -0.3,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "durationSeconds": 4,
+      "arrivalMeasuredRadians": [
+        0.29984,
+        -0.29984,
+        0,
+        0,
+        -0.00232,
+        0,
+        0
+      ],
+      "positionModeRows": 7,
+      "allJointCANRepliesCurrentBothArmsAtChecks": true,
+      "sendTimeCoveredByExportedTelemetry": true
+    },
+    {
+      "step": 8,
+      "uiSendClickedAt": "2026-09-23T07:09:54.140Z",
+      "targetRadians": [
+        0.15,
+        -0.3,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "durationSeconds": 4,
+      "arrivalMeasuredRadians": [
+        0.1504,
+        -0.29984,
+        0,
+        0,
+        0.00259,
+        0,
+        0
+      ],
+      "positionModeRows": 7,
+      "allJointCANRepliesCurrentBothArmsAtChecks": true,
+      "sendTimeCoveredByExportedTelemetry": true
+    },
+    {
+      "step": 9,
+      "uiSendClickedAt": "2026-09-23T07:10:19.820Z",
+      "targetRadians": [
+        0.15,
+        -0.15,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "durationSeconds": 4,
+      "arrivalMeasuredRadians": [
+        0.14999,
+        -0.14876,
+        0,
+        0,
+        -0.00177,
+        0,
+        0
+      ],
+      "positionModeRows": 7,
+      "allJointCANRepliesCurrentBothArmsAtChecks": true,
+      "sendTimeCoveredByExportedTelemetry": true
+    },
+    {
+      "step": 10,
+      "uiSendClickedAt": "2026-09-23T07:10:38.747Z",
+      "targetRadians": [
+        0.04,
+        -0.15,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "durationSeconds": 4,
+      "arrivalMeasuredRadians": [
+        0.039,
+        -0.14985,
+        0,
+        0,
+        0.00191,
+        0,
+        0
+      ],
+      "positionModeRows": 7,
+      "allJointCANRepliesCurrentBothArmsAtChecks": true,
+      "sendTimeCoveredByExportedTelemetry": true
+    },
+    {
+      "step": 11,
+      "uiSendClickedAt": "2026-09-23T07:10:56.567Z",
+      "targetRadians": [
+        0.04,
+        -0.06,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "durationSeconds": 4,
+      "arrivalMeasuredRadians": [
+        0.03982,
+        -0.05713,
+        0,
+        0,
+        -0.00218,
+        0,
+        0
+      ],
+      "positionModeRows": 7,
+      "allJointCANRepliesCurrentBothArmsAtChecks": true,
+      "sendTimeCoveredByExportedTelemetry": true
+    },
+    {
+      "step": 12,
+      "uiSendClickedAt": "2026-09-23T07:11:16.533Z",
+      "targetRadians": [
+        0,
+        -0.06,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "durationSeconds": 4,
+      "arrivalMeasuredRadians": [
+        -0.00123,
+        -0.06027,
+        0,
+        0,
+        0.00218,
+        0,
+        0
+      ],
+      "positionModeRows": 7,
+      "allJointCANRepliesCurrentBothArmsAtChecks": true,
+      "sendTimeCoveredByExportedTelemetry": false
+    },
+    {
+      "step": 13,
+      "uiSendClickedAt": "2026-09-23T07:11:31.051Z",
+      "targetRadians": [
+        0,
+        -0.02,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "durationSeconds": 4,
+      "arrivalMeasuredRadians": [
+        0,
+        -0.01895,
+        0,
+        0,
+        -0.00245,
+        0,
+        0
+      ],
+      "positionModeRows": 7,
+      "allJointCANRepliesCurrentBothArmsAtChecks": true,
+      "sendTimeCoveredByExportedTelemetry": true
+    },
+    {
+      "step": 14,
+      "uiSendClickedAt": "2026-09-23T07:11:45.725Z",
+      "targetRadians": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "durationSeconds": 4,
+      "arrivalMeasuredRadians": [
+        0,
+        0,
+        0,
+        0,
+        0.00218,
+        0,
+        0
+      ],
+      "positionModeRows": 7,
+      "allJointCANRepliesCurrentBothArmsAtChecks": true,
+      "sendTimeCoveredByExportedTelemetry": true
+    }
+  ],
+  "telemetryExports": [
+    {
+      "path": "shutdown-000641.csv.gz",
+      "sourceLocalPath": "/private/tmp/AmberTelemetry-20260923-000641.csv",
+      "sha256": "2d5a4d2c74e76eaa64886a164e3874d6acf30931c944d2a8f359bd84446770cd",
+      "uncompressedSHA256": "edf71bf550325affa3c8a3b8ab5317890545265a7a8953cc0b108a2bea2c311b",
+      "rowCount": 33600,
+      "columns": [
+        "arm",
+        "received_at",
+        "sequence",
+        "sample_age_ms",
+        "joint",
+        "position_rad",
+        "target_rad",
+        "error_rad",
+        "velocity_rad_s",
+        "current",
+        "status",
+        "robot_arm",
+        "core",
+        "udp_port",
+        "controller_sample_age_ms",
+        "joint_feedback_age_ms",
+        "gripper_feedback_age_ms"
+      ],
+      "sides": {
+        "right": {
+          "firstReceivedAt": "2026-09-23T07:04:40.897Z",
+          "lastReceivedAt": "2026-09-23T07:06:42.858Z",
+          "modesPresent": [
+            2.0
+          ],
+          "lastModes": [
+            2.0,
+            2.0,
+            2.0,
+            2.0,
+            2.0,
+            2.0,
+            2.0
+          ],
+          "lastPositionsRadians": [
+            0.7498098091185014,
+            -0.5998205765252387,
+            0.0,
+            0.0,
+            -0.001908953869368798,
+            0.0,
+            0.0
+          ],
+          "maximumJointFeedbackAgeMs": 5.838015
+        },
+        "left": {
+          "firstReceivedAt": "2026-09-23T07:04:40.897Z",
+          "lastReceivedAt": "2026-09-23T07:06:42.858Z",
+          "modesPresent": [
+            0.0
+          ],
+          "lastModes": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "lastPositionsRadians": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "maximumJointFeedbackAgeMs": 5.700267
+        }
+      }
+    },
+    {
+      "path": "shutdown-000748.csv.gz",
+      "sourceLocalPath": "/private/tmp/AmberTelemetry-20260923-000748.csv",
+      "sha256": "30c12b5cec502f5106e33f88cf9dc6d4a5860bec3d75703633ff5134a8cad234",
+      "uncompressedSHA256": "b0fa1520f7180b4aed0196fb3a86a666c051d776c0d18e39f8582b81c72c33a2",
+      "rowCount": 33600,
+      "columns": [
+        "arm",
+        "received_at",
+        "sequence",
+        "sample_age_ms",
+        "joint",
+        "position_rad",
+        "target_rad",
+        "error_rad",
+        "velocity_rad_s",
+        "current",
+        "status",
+        "robot_arm",
+        "core",
+        "udp_port",
+        "controller_sample_age_ms",
+        "joint_feedback_age_ms",
+        "gripper_feedback_age_ms"
+      ],
+      "sides": {
+        "right": {
+          "firstReceivedAt": "2026-09-23T07:05:47.531Z",
+          "lastReceivedAt": "2026-09-23T07:07:49.465Z",
+          "modesPresent": [
+            2.0
+          ],
+          "lastModes": [
+            2.0,
+            2.0,
+            2.0,
+            2.0,
+            2.0,
+            2.0,
+            2.0
+          ],
+          "lastPositionsRadians": [
+            0.44983134393197605,
+            -0.5998205765252387,
+            0.0,
+            0.0,
+            -0.002318015412804969,
+            0.0,
+            0.0
+          ],
+          "maximumJointFeedbackAgeMs": 5.838015
+        },
+        "left": {
+          "firstReceivedAt": "2026-09-23T07:05:47.531Z",
+          "lastReceivedAt": "2026-09-23T07:07:49.471Z",
+          "modesPresent": [
+            0.0
+          ],
+          "lastModes": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "lastPositionsRadians": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "maximumJointFeedbackAgeMs": 5.700267
+        }
+      }
+    },
+    {
+      "path": "shutdown-000942.csv.gz",
+      "sourceLocalPath": "/private/tmp/AmberTelemetry-20260923-000942.csv",
+      "sha256": "c1c646b11e7bf83ee19d19c0631589ef85d1b9d5d41d1ff997903cbdd4ed2514",
+      "uncompressedSHA256": "96af0e92e8b7a2ba8137ed44d18c4f05b76a86eaf6bff780fbe1c719409910bf",
+      "rowCount": 33600,
+      "columns": [
+        "arm",
+        "received_at",
+        "sequence",
+        "sample_age_ms",
+        "joint",
+        "position_rad",
+        "target_rad",
+        "error_rad",
+        "velocity_rad_s",
+        "current",
+        "status",
+        "robot_arm",
+        "core",
+        "udp_port",
+        "controller_sample_age_ms",
+        "joint_feedback_age_ms",
+        "gripper_feedback_age_ms"
+      ],
+      "sides": {
+        "right": {
+          "firstReceivedAt": "2026-09-23T07:07:42.340Z",
+          "lastReceivedAt": "2026-09-23T07:09:44.265Z",
+          "modesPresent": [
+            2.0
+          ],
+          "lastModes": [
+            2.0,
+            2.0,
+            2.0,
+            2.0,
+            2.0,
+            2.0,
+            2.0
+          ],
+          "lastPositionsRadians": [
+            0.29984211133871336,
+            -0.2999784651865254,
+            0.0,
+            0.0,
+            -0.002454369260617026,
+            0.0,
+            0.0
+          ],
+          "maximumJointFeedbackAgeMs": 5.849144
+        },
+        "left": {
+          "firstReceivedAt": "2026-09-23T07:07:42.340Z",
+          "lastReceivedAt": "2026-09-23T07:09:44.265Z",
+          "modesPresent": [
+            0.0
+          ],
+          "lastModes": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "lastPositionsRadians": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "maximumJointFeedbackAgeMs": 6.76846
+        }
+      }
+    },
+    {
+      "path": "shutdown-001107.csv.gz",
+      "sourceLocalPath": "/private/tmp/AmberTelemetry-20260923-001107.csv",
+      "sha256": "c21d97ee1707b9b7dce802b1c8c8063548cb746ab39e7d2aa2522f4861a9340a",
+      "uncompressedSHA256": "ff34dd5d39d2b7ed7e79ddb18082b508c5667457ce13f17877d6bb258af0d14a",
+      "rowCount": 33600,
+      "columns": [
+        "arm",
+        "received_at",
+        "sequence",
+        "sample_age_ms",
+        "joint",
+        "position_rad",
+        "target_rad",
+        "error_rad",
+        "velocity_rad_s",
+        "current",
+        "status",
+        "robot_arm",
+        "core",
+        "udp_port",
+        "controller_sample_age_ms",
+        "joint_feedback_age_ms",
+        "gripper_feedback_age_ms"
+      ],
+      "sides": {
+        "right": {
+          "firstReceivedAt": "2026-09-23T07:09:07.369Z",
+          "lastReceivedAt": "2026-09-23T07:11:09.294Z",
+          "modesPresent": [
+            2.0
+          ],
+          "lastModes": [
+            2.0,
+            2.0,
+            2.0,
+            2.0,
+            2.0,
+            2.0,
+            2.0
+          ],
+          "lastPositionsRadians": [
+            0.03981532356112064,
+            -0.06040475458074125,
+            0.0,
+            0.0,
+            0.00272707695624114,
+            0.0,
+            0.0
+          ],
+          "maximumJointFeedbackAgeMs": 5.905142
+        },
+        "left": {
+          "firstReceivedAt": "2026-09-23T07:09:07.369Z",
+          "lastReceivedAt": "2026-09-23T07:11:09.295Z",
+          "modesPresent": [
+            0.0
+          ],
+          "lastModes": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "lastPositionsRadians": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "maximumJointFeedbackAgeMs": 6.76846
+        }
+      }
+    },
+    {
+      "path": "shutdown-001322.csv.gz",
+      "sourceLocalPath": "/private/tmp/AmberTelemetry-20260923-001322.csv",
+      "sha256": "a736ebc3bad550c194ba64d67abd96d435f3da5ecda09f10156b0930fa5e208a",
+      "uncompressedSHA256": "defb59d22cd41039b7c3932f4a7e63bb5d4f7c36e9f6ab9461acb001984e07b3",
+      "rowCount": 33600,
+      "columns": [
+        "arm",
+        "received_at",
+        "sequence",
+        "sample_age_ms",
+        "joint",
+        "position_rad",
+        "target_rad",
+        "error_rad",
+        "velocity_rad_s",
+        "current",
+        "status",
+        "robot_arm",
+        "core",
+        "udp_port",
+        "controller_sample_age_ms",
+        "joint_feedback_age_ms",
+        "gripper_feedback_age_ms"
+      ],
+      "sides": {
+        "right": {
+          "firstReceivedAt": "2026-09-23T07:11:23.123Z",
+          "lastReceivedAt": "2026-09-23T07:13:25.044Z",
+          "modesPresent": [
+            0.0,
+            2.0
+          ],
+          "lastModes": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "lastPositionsRadians": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            -0.00136353847812057,
+            0.0,
+            0.0
+          ],
+          "maximumJointFeedbackAgeMs": 5.872629
+        },
+        "left": {
+          "firstReceivedAt": "2026-09-23T07:11:23.123Z",
+          "lastReceivedAt": "2026-09-23T07:13:25.046Z",
+          "modesPresent": [
+            0.0
+          ],
+          "lastModes": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "lastPositionsRadians": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "maximumJointFeedbackAgeMs": 5.977292
+        }
+      }
+    }
+  ],
+  "limitations": [
+    "UI timestamps are recorded immediately before the Send click, not verified robot dispatch times.",
+    "Arrival positions are rounded live UI readings; raw overlapping CSV windows retain full precision.",
+    "Velocity remained unavailable; durations do not establish peak speed or acceleration.",
+    "This supervised reverse traversal does not certify automatic reversal in another session or a folded-pose route.",
+    "No new camera recording or model/offset fit was made during the return.",
+    "Step 12 Send time falls in the gap between bounded exports; its arrival was observed in the UI. Do not claim its full transition is archived."
+  ],
+  "deactivation": {
+    "physicalArm": "right",
+    "commandID": 5,
+    "submittedAt": "2026-09-23T00:12:50.342-07:00",
+    "acceptedAt": "2026-09-23T00:12:50.611-07:00",
+    "amberResult": 1,
+    "latencyMilliseconds": 59.11,
+    "rightJointModes": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "leftJointModes": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "immediatelyObservedRightPositions": [
+      0,
+      0,
+      0,
+      0,
+      -0.00136,
+      0,
+      0
+    ],
+    "allFourteenCurrentsReportedZero": true,
+    "allJointCANRepliesCurrentBothArms": true
+  },
+  "preparation": {
+    "trainingRecordingStopped": true,
+    "cameraFootageStopped": true,
+    "headTrackingOff": true,
+    "debugAuthorityOff": true,
+    "gatewayDisconnectedAt": "2026-09-23T00:13:33.182-07:00",
+    "gripperCommandsSent": false,
+    "coreRestartIssued": false,
+    "hostShutdownIssued": false,
+    "physicalArmPowerOffObserved": false
+  }
+}

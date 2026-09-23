@@ -130,3 +130,26 @@ pose exists. The next calibration stage must establish that alignment and
 observability before fitting and validating absolute offsets. The upright B1
 vectors remain prior observations. No upright reset or direct folded-pose
 movement was inserted, and folding still requires its own validated route.
+
+## Return to hanging and shutdown preparation — September 23
+
+The operator subsequently requested hanging startup zero and shutdown
+preparation, confirmed the full return path clear, and watched the staged
+return. The right arm traversed fourteen shoulder waypoints, keeping the
+outward lift during the initial rearward swing. After the operator requested
+faster progress, the remaining short legs used four-second duration requests.
+All fourteen arrivals were checked with current individual-joint feedback.
+
+The [return and shutdown record](evidence/2026-09-23-right-arm-shutdown/return-and-shutdown.json)
+retains the commands, rounded UI arrivals and five full telemetry exports.
+Step 12's transition falls in a bounded-export gap; its arrival was observed
+in the UI. This supervised return does not authorize automatic replay after
+another startup and is not a validated folded-pose route.
+
+At hanging zero, the operator confirmed physical support for deactivation.
+The right-arm deactivate command was accepted at 00:12:50 PDT. All fourteen
+joints then reported inactive with current CAN feedback; the left had remained
+inactive throughout. Training and camera-footage recording were stopped,
+Head Tracking and debug authority were off, and the gateway tunnel was
+disconnected at 00:13:33 PDT. Host shutdown was not issued and physical arm
+power-off was not observed.
