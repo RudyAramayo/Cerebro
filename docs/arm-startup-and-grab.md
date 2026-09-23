@@ -137,6 +137,14 @@ passed, was installed by the build phase and relaunched from
 `999fa81d65fd5007785933ef055472fb07b7f031aacbf01707543d99a2919fca`.
 These fixtures and installation do not establish physical route completion.
 
+After installing ROBController's persisted receive-request preference on
+Onix16, a new Prepare request was delivered to an authenticated controller
+offering approvals, but expired without an Approve response. An 80-second
+passive capture recorded no joint-position change: physical right remained
+active and physical left inactive, both at reported zero. The live main-camera
+preview was visible but did not show the hanging arms. Automatic preparation,
+gripper calibration and physical travel timing remain unverified for this build.
+
 A separate Vision hand detector, current depth coverage, stationary
 neck view, current per-motor CAN replies and a 1.5-second gateway lease supervise
 motion. These checks are conservative observations, **not a certified geometric
