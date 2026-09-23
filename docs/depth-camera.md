@@ -182,8 +182,9 @@ time. `CameraManager` coalesces pending session-queue frames to the newest input
 checks capture generations and logs capture-to-consumer age separately. Freshness
 limits retain original capture timestamps and have not been relaxed.
 
-The main face camera is now the sole arm-inspection view. Entire-path visibility
-is still mandatory; missing arm pixels cannot be replaced by an assumption.
+The main face camera is now the sole arm-inspection view. Explicit controller
+approval permits operator-supervised travel on the taught route with incomplete
+camera coverage; stationary gripper commands still require visible, clear jaws.
 Main-camera model video/follow uses the small profile. Destination terrain
 navigation retains its calibrated belly perception source and Lidar checks:
 substituting head-camera pixels without the correct ground transform would be
@@ -198,3 +199,33 @@ a USB 3 port/cable may permit higher belly frame rates, but was not changed here
 Run `python3 Tests/ROBCameraIngressRuntimeTests.py` for the stalled-session-queue
 regression, and `python3 Tests/DepthCameraIPCFixtureTests.py` for timestamp and
 packet validation without hardware.
+
+### Application-side RGB conversion
+
+Later controller-approved trials still stopped at analyzed frame ages of
+707–729 ms, despite the main camera capturing 640 × 400 over USB 3. Pausing
+optional background MLX descriptions improved a five-second no-motion sample
+(median analyzed age 356 → 263 ms), but the next stationary inspection still
+stopped at 729 ms. The preference was restored; this was not a complete fix.
+
+A live process sample found the IPC reader spending substantial time in the
+per-pixel Swift RGB888-to-BGRA loop. An unoptimized standalone benchmark of the
+production sample factory, 60 frames per case, measured:
+
+| Frame size | Swift loop median / p95 | CPU vImage median / p95 |
+| --- | ---: | ---: |
+| 640 × 400 | 63.94 / 82.49 ms | 0.30 / 0.66 ms |
+| 1280 × 720 | 242.69 / 399.12 ms | 0.48 / 0.61 ms |
+
+The former 640 × 400 conversion already exceeded the 33.3 ms interval for
+30 FPS, before later perception work. `CameraManager` now uses Accelerate's
+CPU `vImageConvert_RGB888toBGRA8888`, with opaque alpha and the destination
+buffer's actual row stride. This avoids GPU work and leaves RGB-D pairing,
+capture timestamps, depth, frame admission and every motion safeguard intact.
+These are conversion timings, not end-to-end camera or movement guarantees.
+
+The production preview fixture checks every pixel at 640 × 400 and 1280 × 720,
+plus single-pixel and odd-width vector tails, row padding, host presentation
+time, display attachments and preview recovery. Preview, newest-frame ingress
+and DepthAI packet fixtures passed. Live application timing after reload is
+recorded separately from these isolated measurements.

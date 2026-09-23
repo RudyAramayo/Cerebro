@@ -219,6 +219,26 @@ transition. The fixture now models that lag and also verifies that missing
 confirmation sends no waypoint or calibration. Continuous mode/fault monitoring
 still applies throughout motion.
 
+After loading the mode-feedback fix (installed debug-library SHA-256
+`e9cfd10fa8970c4f2920b9ad47a91249902eb4674b0d8a1983ce06bc9acb0dbe`),
+controller-approved paired travel reached an intermediate pose, then held on
+a 707 ms main-camera frame. A newly approved continuation reached the measured
+front endpoint, physical right approximately `[1.05, -0.60, 0, 0, 0, 0, 0]`
+and mirrored physical left, with all fourteen statuses in mode 2. The 10° right
+inspection trim brought both gripper regions into the preview. The subsequent
+jaw assessment did not authorize calibration. Legs and a chair were visible
+near the grippers; after the operator cleared them, a new approved attempt
+stopped on camera freshness at 712 ms. No new calibration ran in these trials.
+
+A controlled optional-background-analysis test improved idle camera timing,
+but another approved stationary inspection still stopped at 729 ms. The
+setting was restored. Profiling and a production-factory benchmark then found
+the Debug RGB conversion loop exceeding the camera's frame interval. The
+[CPU-vectorized conversion and measurements](depth-camera.md#application-side-rgb-conversion)
+address that measured bottleneck without changing camera age limits. These
+interrupted runs do not establish continuous forward timing or a completed
+automatic gripper sequence. Startup calibration remains disabled.
+
 A separate Vision hand detector, current depth coverage, stationary
 neck view, current per-motor CAN replies and a 1.5-second gateway lease supervise
 motion. These checks are conservative observations, **not a certified geometric

@@ -8,6 +8,7 @@
 //
 
 import AVFoundation
+import Accelerate
 import Cocoa
 import Darwin
 import Network
@@ -1568,21 +1569,17 @@ private final class DepthCameraServiceClient {
         let destinationBytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
 
         let converted = rgbData.withUnsafeBytes { sourceRaw -> Bool in
-            guard let sourceBase = sourceRaw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return false }
-            let destination = destinationBase.assumingMemoryBound(to: UInt8.self)
-            for row in 0..<height {
-                let sourceRow = sourceBase.advanced(by: row * width * 3)
-                let destinationRow = destination.advanced(by: row * destinationBytesPerRow)
-                for column in 0..<width {
-                    let sourcePixel = sourceRow.advanced(by: column * 3)
-                    let destinationPixel = destinationRow.advanced(by: column * 4)
-                    destinationPixel[0] = sourcePixel[2]
-                    destinationPixel[1] = sourcePixel[1]
-                    destinationPixel[2] = sourcePixel[0]
-                    destinationPixel[3] = 255
-                }
-            }
-            return true
+            guard let sourceBase = sourceRaw.baseAddress else { return false }
+            // The per-pixel Swift loop can exceed a camera frame interval in
+            // Debug builds and back up the IPC reader before newest-frame
+            // admission. Vectorize on CPU, preserving channel order, opaque
+            // alpha and CVPixelBuffer row padding without competing for GPU.
+            var source = vImage_Buffer(data: UnsafeMutableRawPointer(mutating: sourceBase),
+                height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: width * 3)
+            var destination = vImage_Buffer(data: destinationBase,
+                height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: destinationBytesPerRow)
+            return vImageConvert_RGB888toBGRA8888(&source, nil, 255, &destination, false,
+                vImage_Flags(kvImageDoNotTile)) == kvImageNoError
         }
         guard converted else { return nil }
 

@@ -18,6 +18,7 @@ SOURCE = (ROOT / "Cerebro/CameraManager.swift").read_text()
 
 HARNESS = r'''
 import AVFoundation
+import Accelerate
 import Cocoa
 
 enum Failure: Error { case assertion(String) }
@@ -130,6 +131,31 @@ enum RGBSampleFactory {
         }
         CVPixelBufferUnlockBaseAddress(buffer, .readOnly)
         print("PASS: live sample attachment, host timestamp, and RGB pixels")
+
+        // Exercise vector tails, padded rows and a complete live-size image.
+        // Compare every byte against independently generated RGB source data.
+        for (width, height) in [(1, 1), (17, 3), (640, 400), (1280, 720)] {
+            let rgb = Data((0..<(width * height * 3)).map { UInt8($0 % 251) })
+            guard let converted = RGBSampleFactory.makeRGBSampleBuffer(
+                rgbData: rgb, width: width, height: height, timestampNanoseconds: 0),
+                  let pixels = CMSampleBufferGetImageBuffer(converted) else {
+                throw Failure.assertion("RGB conversion failed at \(width)x\(height)")
+            }
+            CVPixelBufferLockBaseAddress(pixels, .readOnly)
+            let output = CVPixelBufferGetBaseAddress(pixels)!.assumingMemoryBound(to: UInt8.self)
+            let rowBytes = CVPixelBufferGetBytesPerRow(pixels)
+            for y in 0..<height {
+                for x in 0..<width {
+                    let i = (y * width + x) * 3, o = y * rowBytes + x * 4
+                    try require(output[o] == UInt8((i + 2) % 251) &&
+                                output[o + 1] == UInt8((i + 1) % 251) &&
+                                output[o + 2] == UInt8(i % 251) && output[o + 3] == 255,
+                                "Vectorized conversion changed a pixel at \(x),\(y)")
+                }
+            }
+            CVPixelBufferUnlockBaseAddress(pixels, .readOnly)
+        }
+        print("PASS: vector tails, row padding and every pixel at both capture resolutions")
 
         let preview = PreviewHarness()
         preview.enqueueLatestPreview(sample, generation: 1)
