@@ -63,9 +63,10 @@ forwarding; the local gateway tunnel remains available.
 
 The tunnel runtime fixtures also verify key-only startup with no saved SSH
 password, direct SSH arguments, readiness only after gateway authentication,
-and key-specific failure reporting. The new signed app build must be reloaded
-after a verified return to hanging; the existing running session can continue
-holding the arms in the meantime.
+and key-specific failure reporting. After the controller-approved Relax
+completed, passive feedback confirmed hanging within 0.006 radians and all
+fourteen motors inactive. Cerebro was reloaded and automatically opened the
+dedicated-key tunnel without a password prompt.
 
 Before sleep, Cerebro cancels pending arm approval/routines, requests hold and
 closes the tunnel. Wake starts a new gateway session, and the startup calibration
@@ -107,7 +108,9 @@ call ID. A duplicated or late Accept cannot start another run. A replacement
 session cannot reuse approval. There are no saved broad grants.
 
 If no compatible controller enables approvals within 30 seconds, the request
-ends without arm dispatch. A delivered request expires after 30 seconds. A
+ends without arm dispatch. A delivered request expires after 90 seconds, giving
+the operator time to notice the phone banner and review the whole sequence.
+The expiry is fixed when sent; there is no automatic approval or renewal. A
 disconnect, withdrawn opt-in, or missing controller hello for 15 seconds cancels
 pending work and requests hold for active work. Execution has a 120-second outer
 limit; the arm routine retains its stricter 90-second bound. Rejection or expiry

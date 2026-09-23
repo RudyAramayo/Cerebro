@@ -110,6 +110,29 @@ final class ROBAmberGatewayClient: NSObject {
             check(!b.authorizesSupervisedArmRoute(), "Supervision must end with the approved operation")
         }
 
+        // A connected operator can review after the old 30-second window,
+        // but elapsed time alone never starts or renews an operation.
+        do {
+            let b = broker()
+            var time = Date(), request: ROBRobotActionMessage?, executed = 0
+            var done: ((NSDictionary) -> Void)?
+            b.now = { time }
+            b.send = { message, _, _ in if message.kind == .actionRequest { request = message }; return true }
+            _ = b.receive(hello, device: device, session: session)
+            b.request(operation: "prepare", arm: "both", summary: "Front and calibrate both empty grippers",
+                execute: { executed += 1; done = $0 }, cancel: {}, completion: { _ in })
+            let r = request!
+            check(abs(Double(r.expiresAtMilliseconds - r.sentAtMilliseconds) - 90_000) < 100,
+                "The delivered phone review window must be 90 seconds")
+            time.addTimeInterval(60)
+            _ = b.receive(hello, device: device, session: session)
+            check(b.isPending && executed == 0 && request?.callID == r.callID,
+                "Waiting with a fresh controller must retain the same unapproved operation")
+            _ = b.receive(reply(r), device: device, session: session)
+            check(executed == 1, "A current approval within 90 seconds should execute once")
+            done?(["status": "completed"])
+        }
+
         // Rejection, expiry, decline, send failure, disconnect and lost opt-in.
         for scenario in ["reject", "expired", "claimed_complete", "disconnect_pending", "disconnect_running", "disabled", "cancel", "send_failed"] {
             let b = broker()
@@ -129,7 +152,7 @@ final class ROBAmberGatewayClient: NSObject {
             case "reject": _ = b.receive(reply(r, .rejected), device: device, session: session)
             case "claimed_complete": _ = b.receive(reply(r, .completed), device: device, session: session)
             case "expired":
-                time.addTimeInterval(31)
+                time = Date(timeIntervalSince1970: Double(r.expiresAtMilliseconds) / 1000)
                 _ = b.receive(hello, device: device, session: session)
                 _ = b.receive(reply(r), device: device, session: session)
             case "disconnect_pending": connected = false; b.tick()

@@ -38,6 +38,9 @@ import Foundation
     private var pending: Pending?
     private var timer: Timer?
     private let senderID = "Cerebro.arm-operations"
+    // Give the operator time to notice the phone banner and review the complete
+    // operation. No execution begins until a current controller accepts it.
+    private static let operatorApprovalSeconds: TimeInterval = 90
 
     func request(operation: String, arm: String, summary: String,
                  execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
@@ -81,7 +84,7 @@ import Foundation
         }
         let probe = ROBRobotActionMessage.actionRequest(callID: UUID().uuidString,
             action: action, arguments: arguments,
-            senderID: senderID, recipientID: nil, expiresAt: now().addingTimeInterval(30))
+            senderID: senderID, recipientID: nil, expiresAt: now().addingTimeInterval(Self.operatorApprovalSeconds))
         guard probe.validationError == nil else {
             completion(["status": "rejected", "detail": "Invalid controller motion approval request."]); return
         }
@@ -194,7 +197,7 @@ import Foundation
             .sorted(by: { $0.seen > $1.seen }).first else { return }
         let request = ROBRobotActionMessage.actionRequest(callID: p.id, action: p.action,
             arguments: p.arguments,
-            senderID: senderID, recipientID: peer.sender, expiresAt: now().addingTimeInterval(30))
+            senderID: senderID, recipientID: peer.sender, expiresAt: now().addingTimeInterval(Self.operatorApprovalSeconds))
         pending?.peer = peer; pending?.request = request
         guard send?(request, peer.device, peer.session) == true else {
             finish(["status": "blocked", "detail": "Could not deliver the arm approval request to the controller."], state: .failed)
