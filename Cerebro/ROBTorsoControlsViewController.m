@@ -68,6 +68,7 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 @property (readwrite, assign) BOOL is_in_activated_mode_L10;
 @property (nonatomic, strong) NSMutableArray<NSNetServiceBrowser *> *amberServiceBrowsers;
 @property (nonatomic, strong) NSMutableSet<NSNetService *> *resolvingAmberServices;
+@property (nonatomic, strong) NSButton *reconnectAmberArmsButton;
 @property (nonatomic, strong) NSTextField *headPanCommandLabel;
 @property (nonatomic, strong) NSTextField *lowerNeckCommandLabel;
 @property (nonatomic, strong) NSTextField *upperNeckCommandLabel;
@@ -83,6 +84,9 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 @property (nonatomic, assign) BOOL pendingNeckOperatorCommandAfterStartup;
 @property (nonatomic, assign) BOOL pendingLowerTiltOperatorCommandAfterStartup;
 - (void)startAmberHostDiscovery;
+- (void)setupAmberReconnectControl;
+- (IBAction)reconnectAmberArms:(id)sender;
+- (void)amberStackMaintenanceDidChange:(NSNotification *)notification;
 - (void)applyDiscoveredAmberHost:(NSString *)host source:(NSString *)source;
 - (void)setupNeckCommandReadouts;
 - (void)refreshNeckCameraLevelingControl;
@@ -131,6 +135,7 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
     if (savedAmberHost.length > 0) {
         self.amberHostIP_TextField.stringValue = savedAmberHost;
     }
+    [self setupAmberReconnectControl];
     [self startAmberHostDiscovery];
     
     KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
@@ -720,7 +725,52 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
     }
 }
 
-#pragma mark - Amber Ubuntu host discovery
+#pragma mark - Amber controller recovery and host discovery
+
+- (void)setupAmberReconnectControl
+{
+    // Place this above the existing host selector without changing the legacy
+    // storyboard or its manually positioned servo panels.
+    NSView *hostPanel = self.amberHostIP_TextField.superview;
+    if (hostPanel == nil) return;
+    NSRect hostFrame = [hostPanel convertRect:hostPanel.bounds toView:self.view];
+    self.reconnectAmberArmsButton = [NSButton
+        buttonWithTitle:@"Reconnect Amber Arms…"
+        target:self
+        action:@selector(reconnectAmberArms:)];
+    self.reconnectAmberArmsButton.frame = NSMakeRect(
+        NSMidX(hostFrame) - 85, NSMaxY(hostFrame) + 7, 170, 26);
+    self.reconnectAmberArmsButton.controlSize = NSControlSizeSmall;
+    self.reconnectAmberArmsButton.font = [NSFont systemFontOfSize:11];
+    self.reconnectAmberArmsButton.accessibilityLabel = @"Reconnect both Amber arms";
+    self.reconnectAmberArmsButton.toolTip =
+        @"Restart both CAN adapters and arm cores, verify traffic, and reconnect telemetry. Opens the restart confirmation and recovery status in Amber Arm Diagnostics.";
+    [self.view addSubview:self.reconnectAmberArmsButton];
+    [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(amberStackMaintenanceDidChange:)
+               name:@"ROBAmberStackMaintenanceDidChange"
+             object:[ROBAmberStackMaintenanceController shared]];
+    [self amberStackMaintenanceDidChange:nil];
+}
+
+- (void)amberStackMaintenanceDidChange:(NSNotification *)notification
+{
+    BOOL running = [ROBAmberStackMaintenanceController shared].isRunning;
+    self.reconnectAmberArmsButton.enabled = !running;
+    self.reconnectAmberArmsButton.title = running
+        ? @"Reconnecting Amber Arms…" : @"Reconnect Amber Arms…";
+}
+
+- (IBAction)reconnectAmberArms:(id)sender
+{
+    NSString *host = [self.amberHostIP_TextField.stringValue
+        stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    // Use the diagnostics workflow so its motion interlocks, confirmation,
+    // authority revocation, and success-only reconnect remain the single path.
+    [[ROBAmberDiagnosticsWindowController shared] reconnectArmsWithHost:host
+                                                                sender:sender];
+}
 
 - (void)startAmberHostDiscovery
 {

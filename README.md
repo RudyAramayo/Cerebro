@@ -270,6 +270,17 @@ The SSH login password is supplied to `sshpass` through an anonymous pipe
 instead of the process argument list. SSH connection attempts also use bounded
 connect and keepalive settings so an unreachable robot does not wait forever.
 
+Amber SSH connections automatically save a first-time host key using OpenSSH's
+[`StrictHostKeyChecking=accept-new`](https://man.openbsd.org/ssh_config#StrictHostKeyChecking).
+This covers the arm log/core controls, gateway tunnel, and stack recovery, so a
+new controller address does not require a Terminal prompt before use. The key is
+remembered in the SSH known-hosts database (normally `~/.ssh/known_hosts`). A
+different key for a previously trusted address is still rejected; Cerebro does
+not delete or overwrite trusted keys. If a controller was reinstalled or its
+address was reused, verify its new fingerprint before updating that entry.
+`Host is down` is a separate reachability error: power on the Amber controller
+and check its configured address and network connection before reconnecting.
+
 The optional Pololu `ticcmd` controls likewise validate the executable and
 report an unavailable tool instead of raising an `NSTask` exception. A custom
 path can be supplied with the `ROBTiccmdExecutablePath` user default.

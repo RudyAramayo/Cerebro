@@ -639,6 +639,21 @@ private final class ROBAmberArmSchematicView: NSView {
         refreshTimer = nil
     }
 
+    /// Torso controls use the same guarded restart as this window, including
+    /// its confirmation and verified-result handling, with their selected host.
+    @objc(reconnectArmsWithHost:sender:)
+    public func reconnectArms(host: String, sender: Any?) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        showWindow(sender)
+        guard !stackMaintenance.isRunning, !stackRecoveryInProgress else {
+            rejectStackRestart("A controller-stack recovery is already in progress")
+            return
+        }
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        hostField.stringValue = trimmedHost.isEmpty ? "amber-master.local" : trimmedHost
+        restartCANCoreStack(sender)
+    }
+
     /// Lets command producers mirror a requested target in the diagnostics UI.
     /// Recording a target is display-only and does not send anything to Amber.
     @objc(recordTargetForArm:positionsRadians:commandID:)

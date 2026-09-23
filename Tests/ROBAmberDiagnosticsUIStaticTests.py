@@ -73,7 +73,33 @@ def main():
     assert 'calibrationState = "calibrating"' not in source
     assert 'calibrationState = "fault"' not in source
 
-    print("Amber diagnostics expose per-arm calibration and simultaneous dual-arm plots")
+    # The Torso shortcut passes the chosen controller into the existing guarded
+    # recovery flow. It must never start maintenance directly or reuse a stale
+    # Diagnostics host, bypassing that window's motion interlocks.
+    torso = (ROOT / "Cerebro/ROBTorsoControlsViewController.m").read_text()
+    assert 'buttonWithTitle:@"Reconnect Amber Arms…"' in torso
+    assert "[self setupAmberReconnectControl]" in torso
+    assert "reconnectArmsWithHost:host" in torso
+    assert "self.reconnectAmberArmsButton.enabled = !running" in torso
+    reconnect = swift_function(source, "public func reconnectArms(host:")
+    assert "showWindow(sender)" in reconnect
+    assert "!stackMaintenance.isRunning, !stackRecoveryInProgress" in reconnect
+    assert 'hostField.stringValue = trimmedHost.isEmpty ? "amber-master.local" : trimmedHost' in reconnect
+    assert "restartCANCoreStack(sender)" in reconnect
+    assert "stackMaintenance.restart(" not in reconnect
+
+    restart = swift_function(source, "@objc private func restartCANCoreStack(")
+    assert restart.count("!gestureExecutor.isExecuting") == 3
+    assert restart.count("pendingManualCommandIDs.isEmpty") == 3
+    assert restart.count("!hasActiveGripperCommand(refreshFromGateway: true)") == 3
+    assert '== "RESTART"' in restart
+    assert restart.index("authority.revoke()") < restart.index("tunnel.disconnect()")
+    assert restart.index("tunnel.disconnect()") < restart.index("stackMaintenance.restart(")
+    result = swift_function(source, "private func handleStackMaintenanceResult(")
+    assert result.index("if result.success") < result.index("tunnel.connect(host: host)")
+    assert "tunnel.connect" not in result.split("} else {", 1)[1]
+
+    print("Amber diagnostics checks passed: dual-arm controls and guarded Torso reconnect")
 
 
 if __name__ == "__main__":

@@ -606,8 +606,11 @@ NSString *ROBSystemPackageManagerDisplayName(ROBSystemPackageManager packageMana
         return nil;
     }
 
+    // GUI SSH sessions cannot answer a first-use host-key prompt. Let OpenSSH
+    // save a new host's key during the handshake, but reject changed known keys.
     NSMutableArray<NSString *> *arguments = [NSMutableArray arrayWithObjects:
         @"-d", @"0", @"/usr/bin/ssh",
+        @"-o", @"StrictHostKeyChecking=accept-new",
         @"-o", @"ConnectTimeout=10",
         @"-o", @"ServerAliveInterval=15",
         @"-o", @"ServerAliveCountMax=2",

@@ -82,6 +82,8 @@ typedef void (^ROBSystemDependencyCompletion)(BOOL success,
 
 /// Creates a task that uses the resolved sshpass and macOS OpenSSH binaries.
 /// The password is supplied later through an anonymous pipe, not argv.
+/// OpenSSH automatically remembers first-time host keys in its known-hosts
+/// database and rejects changed keys for previously trusted hosts.
 - (nullable NSTask *)newSSHpassTaskWithSSHArguments:(NSArray<NSString *> *)sshArguments
                                               error:(NSError **)error;
 

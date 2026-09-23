@@ -199,9 +199,13 @@ Cerebro does not activate either arm or issue a mode command.
 
 ## 7. Recover the CAN/core stack from Cerebro
 
-The diagnostics window includes **Restart CAN/Core Stack…** for the case where
-one USB-CAN adapter or only part of an arm comes back after power-on. This is a
-guarded maintenance operation, not an arm-motion command.
+**Torso Servo Controls → Reconnect Amber Arms…**, above the Amber host field,
+opens the same guarded recovery as **Amber Arm Diagnostics → Restart CAN/Core
+Stack…** using the host selected in Torso controls. This recovers the case where
+one USB-CAN adapter or only part of an arm comes back after power-on. Recovery
+status and the final result appear in Amber Arm Diagnostics; the Torso button
+is disabled while recovery runs. This is a guarded maintenance operation, not
+an arm-motion command.
 
 Install its reviewed Ubuntu side from the `Amber-HomeFolder` repository first:
 
@@ -222,7 +226,8 @@ To recover from the GUI:
    E-stop ready. Recovery interrupts torque and feedback.
 2. Ensure no gesture or manual command is active and that the Amber SSH password
    has been saved in Keychain.
-3. Choose **Restart CAN/Core Stack…** and type the exact confirmation `RESTART`.
+3. Choose **Reconnect Amber Arms…** in Torso controls (or **Restart CAN/Core
+   Stack…** in Diagnostics) and type the exact confirmation `RESTART`.
 
 Cerebro rechecks the motion interlocks after the confirmation dialog, revokes
 all temporary Gemini/controller authority, disconnects the gateway tunnel, and
@@ -234,6 +239,12 @@ advancing counters, and starts the loopback-only gateway. Any partial failure
 rolls back and remains disconnected; there is no automatic retry. A verified
 success reconnects telemetry but does not activate an arm, enter position mode,
 or restore debug authority.
+
+The CAN verification requires both RX and TX counters to advance on both
+adapters, so an idle or slowly blinking adapter is not assumed to be working
+from its LED alone. First-time SSH host keys are remembered automatically;
+changed keys for a trusted address are still rejected. A powered-off or
+unreachable controller must be brought online before retrying.
 
 The helper contract, root-ownership boundary, and non-actuating validation
 commands are documented in
