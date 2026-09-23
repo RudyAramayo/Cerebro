@@ -321,6 +321,7 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 
 - (void)applicationWillTerminate:(NSNotification *)notification
 {
+    [[ROBAmberGatewayTunnel shared] disconnect];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [[[NSWorkspace sharedWorkspace] notificationCenter] removeObserver:self];
     [self.rplidarCheckTimer invalidate];

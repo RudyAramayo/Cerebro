@@ -90,6 +90,20 @@ extension Notification.Name {
     public func gatewayToken() -> String? { secret(account: "gateway-token") }
     public func sshPassword() -> String? { secret(account: "ssh-password") }
 
+    /// Share the robot address with Torso controls and retain manual tunnel
+    /// selection for the next controller-approved, headless operation.
+    public var sshHost: String {
+        get {
+            let host = UserDefaults.standard.string(forKey: "ROBAmberHostIP")?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return host.isEmpty ? "amber-master.local" : host
+        }
+        set {
+            UserDefaults.standard.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines),
+                                      forKey: "ROBAmberHostIP")
+        }
+    }
+
     public func saveGatewayToken(_ token: String) throws {
         let value = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard value.count >= 32 else { throw ConfigurationError.invalidGatewayToken }
@@ -229,22 +243,41 @@ extension Notification.Name {
 }
 
 /// Owns the development SSH tunnel so the gateway can remain bound to Ubuntu
-/// loopback. Credentials are loaded from Keychain and never placed in argv.
+/// loopback. Credentials are loaded from Keychain into an anonymous pipe,
+/// never argv or the child environment. All lifecycle state is main-thread owned.
 @objcMembers public final class ROBAmberGatewayTunnel: NSObject {
     public static let shared = ROBAmberGatewayTunnel()
     public private(set) var isRunning = false
     public private(set) var detail = "Tunnel disconnected"
+    public private(set) var failureDetail: String?
     private var task: Process?
+    private var activeHost: String?
+    private var connectionTimer: Timer?
 
-    public func connect(host: String = "amber-master.local") {
+    public func connect(host requestedHost: String? = nil) {
         guard Thread.isMainThread else {
-            DispatchQueue.main.async { [weak self] in self?.connect(host: host) }
+            DispatchQueue.main.async { [weak self] in self?.connect(host: requestedHost) }
+            return
+        }
+        let configuration = ROBAmberGatewayConfiguration.shared
+        let trimmedHost = requestedHost?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let host = trimmedHost.isEmpty ? configuration.sshHost : trimmedHost
+        // A second request must not interrupt authentication, invalidate an
+        // approved session, or race a still-exiting SSH child for port 7443.
+        if let process = task, process.isRunning, activeHost == host {
+            if connectionTimer != nil || ROBAmberGatewayClient.shared.isReady() { return }
+            guard let token = configuration.gatewayToken() else {
+                fail("Save the Amber gateway token in Keychain first")
+                return
+            }
+            failureDetail = nil
+            beginGatewayConnection(process: process, host: host, token: token, delay: 0)
             return
         }
         disconnect()
-        guard let token = ROBAmberGatewayConfiguration.shared.gatewayToken(),
-              let password = ROBAmberGatewayConfiguration.shared.sshPassword() else {
-            update(running: false, detail: "Save the Amber gateway token and SSH password first")
+        guard let token = configuration.gatewayToken(),
+              let password = configuration.sshPassword(), !password.isEmpty else {
+            fail("Save the Amber gateway token and SSH password in Keychain first")
             return
         }
         let candidates = [
@@ -253,24 +286,31 @@ extension Notification.Name {
         guard let sshpass = candidates.first(where: {
             FileManager.default.isExecutableFile(atPath: $0)
         }) else {
-            update(running: false, detail: "sshpass is unavailable; install it from Cerebro Settings")
+            fail("sshpass is unavailable; install it from Cerebro Settings")
             return
         }
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: sshpass)
         process.arguments = [
-            "-e", "/usr/bin/ssh", "-N",
+            "-d", "0", "/usr/bin/ssh", "-N", "-T",
             "-o", "ExitOnForwardFailure=yes",
+            "-o", "ConnectTimeout=5",
+            "-o", "ConnectionAttempts=1",
+            "-o", "NumberOfPasswordPrompts=1",
             "-o", "ServerAliveInterval=5",
             "-o", "ServerAliveCountMax=3",
             "-o", "StrictHostKeyChecking=accept-new",
-            "-L", "7443:127.0.0.1:7443",
+            "-o", "GatewayPorts=no",
+            "-L", "127.0.0.1:7443:127.0.0.1:7443",
             "amber@\(host)",
         ]
         var environment = ProcessInfo.processInfo.environment
-        environment["SSHPASS"] = password
+        environment.removeValue(forKey: "SSHPASS")
+        environment["SSH_ASKPASS_REQUIRE"] = "never"
         process.environment = environment
+        let passwordPipe = Pipe()
+        process.standardInput = passwordPipe
         process.standardOutput = FileHandle.nullDevice
         let errorPipe = Pipe()
         process.standardError = errorPipe
@@ -281,24 +321,62 @@ extension Notification.Name {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             DispatchQueue.main.async { [weak self, weak process] in
                 guard let self, let process, process === self.task else { return }
-                self.task = nil
-                ROBAmberGatewayClient.shared.disconnect()
-                self.update(running: false, detail: errorText?.isEmpty == false
-                    ? "SSH tunnel ended: \(errorText!)" : "SSH tunnel ended")
+                let message: String
+                if process.terminationStatus == 5 || errorText?.contains("Permission denied") == true {
+                    message = "SSH login rejected for amber@\(host). Check the saved SSH password in Amber Arm Diagnostics. Controller approval does not authenticate SSH."
+                } else {
+                    let reason = errorText?.isEmpty == false ? String(errorText!.prefix(2_048)) : "exit \(process.terminationStatus)"
+                    message = "SSH tunnel ended: \(reason)"
+                }
+                self.fail(message)
             }
         }
         do {
             try process.run()
             task = process
+            activeHost = host
+            try passwordPipe.fileHandleForWriting.write(contentsOf: Data((password + "\n").utf8))
+            try passwordPipe.fileHandleForWriting.close()
+            configuration.sshHost = host
             update(running: true, detail: "Opening secure tunnel to amber@\(host)")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self, weak process] in
-                guard let self, let process, process === self.task, process.isRunning else { return }
-                ROBAmberGatewayClient.shared.connect(token: token)
-                self.update(running: true, detail: "SSH tunnel active to \(host)")
-            }
+            beginGatewayConnection(process: process, host: host, token: token, delay: 0.75)
         } catch {
-            update(running: false, detail: "Could not start SSH tunnel: \(error.localizedDescription)")
+            try? passwordPipe.fileHandleForWriting.close()
+            fail("Could not start SSH tunnel: \(error.localizedDescription)")
         }
+    }
+
+    private func beginGatewayConnection(process: Process, host: String, token: String, delay: Double) {
+        let started = ProcessInfo.processInfo.systemUptime
+        var gatewayStarted = false
+        update(running: true, detail: "Authenticating Amber gateway through \(host)")
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self, weak process] _ in
+            guard let self, let process, process === self.task, process.isRunning else { return }
+            let elapsed = ProcessInfo.processInfo.systemUptime - started
+            let gateway = ROBAmberGatewayClient.shared
+            if !gatewayStarted, elapsed >= delay {
+                gatewayStarted = true
+                gateway.connect(token: token)
+            }
+            guard gatewayStarted else { return }
+            let snapshot = gateway.connectionSnapshot()
+            if gateway.isReady() {
+                self.connectionTimer?.invalidate(); self.connectionTimer = nil
+                self.update(running: true, detail: "SSH tunnel active to \(host); gateway authenticated")
+            } else if (snapshot["state"] as? NSNumber)?.intValue == ROBAmberGatewayState.failed.rawValue {
+                self.fail(snapshot["detail"] as? String ?? "Amber gateway authentication failed")
+            } else if elapsed >= 11 {
+                self.fail("Amber gateway connection to \(host) timed out. Check SSH login and the gateway service.")
+            }
+        }
+        connectionTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func fail(_ message: String) {
+        disconnect()
+        failureDetail = message
+        update(running: false, detail: message)
     }
 
     public func disconnect() {
@@ -307,9 +385,12 @@ extension Notification.Name {
             return
         }
         ROBAmberGatewayClient.shared.disconnect()
+        connectionTimer?.invalidate(); connectionTimer = nil
         task?.terminationHandler = nil
         if task?.isRunning == true { task?.terminate() }
         task = nil
+        activeHost = nil
+        failureDetail = nil
         update(running: false, detail: "Tunnel disconnected")
     }
 

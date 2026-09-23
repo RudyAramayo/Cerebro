@@ -221,7 +221,7 @@ enum ROBArmRoutineError: LocalizedError {
         superviseCamera = false; moving = false; generation = 0
         vision.setActive(true); cameraDemand?(true)
         setStatus(command == "relax" ? "Returning arms gently to hanging" : "Checking cameras and arm feedback")
-        if !gateway.isReady() { ROBAmberGatewayTunnel.shared.connect(host: "amber-master.local") }
+        if !gateway.isReady() { ROBAmberGatewayTunnel.shared.connect() }
         let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in self?.monitor() }
         self.timer = timer; RunLoop.main.add(timer, forMode: .common)
         task = Task { @MainActor [weak self] in
@@ -263,6 +263,10 @@ enum ROBArmRoutineError: LocalizedError {
     private func check() throws {
         try Task.checkCancellation()
         if let failure { throw ROBArmRoutineError.blocked(failure) }
+        if activeCommand != "teach", generation == 0, !gateway.isReady(),
+           let connectionFailure = ROBAmberGatewayTunnel.shared.failureDetail {
+            throw ROBArmRoutineError.blocked(connectionFailure)
+        }
         guard ProcessInfo.processInfo.systemUptime < deadline else { throw ROBArmRoutineError.blocked("Arm operation exceeded its deadline.") }
         if superviseCamera {
             guard vision.fresh, viewIsStationary?() == true else {

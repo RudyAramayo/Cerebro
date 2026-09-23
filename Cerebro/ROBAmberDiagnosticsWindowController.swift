@@ -691,7 +691,7 @@ private final class ROBAmberArmSchematicView: NSView {
     private let authorityStatusLabel = NSTextField(labelWithString: "Debug authority is off")
     private let tokenField = NSSecureTextField()
     private let passwordField = NSSecureTextField()
-    private let hostField = NSTextField(string: "amber-master.local")
+    private let hostField = NSTextField(string: ROBAmberGatewayConfiguration.shared.sshHost)
     private let restartStackButton = NSButton(
         title: "Restart CAN/Core Stack…",
         target: nil,
@@ -1980,7 +1980,7 @@ private final class ROBAmberArmSchematicView: NSView {
 
     @objc private func connectTunnel(_ sender: Any?) {
         let host = hostField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        tunnel.connect(host: host.isEmpty ? "amber-master.local" : host)
+        tunnel.connect(host: host)
         appendEvent("Requested secure gateway tunnel")
     }
 

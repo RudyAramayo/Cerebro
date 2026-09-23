@@ -289,7 +289,9 @@ Diagnostics…**:
 
 1. Save the gateway token and the `amber` SSH password. Cerebro stores both in
    the macOS Keychain rather than user defaults or the repository.
-2. Leave the SSH host as `amber-master.local` unless Bonjour is unavailable.
+2. Confirm the SSH host. It shares the saved Amber host with Torso controls and
+   defaults to `amber-master.local` when no address is saved. Manual connection
+   selections are retained for controller-approved startup/grab routines.
 3. Choose **Connect Tunnel**. Cerebro creates the loopback-only SSH forwarding
    session and then authenticates `ROBAmberGatewayClient` to the gateway.
 4. Confirm that the window reports **Ready · exclusive controller** and that
@@ -297,8 +299,55 @@ Diagnostics…**:
    and right position, velocity, current, and sample-age plot groups remain
    visible together; neither arm requires a graph-selector switch.
 
-The tunnel and gateway connection are deliberately operator-initiated; launching
-Cerebro does not activate either arm or issue a mode command.
+The tunnel connects from Diagnostics or during a controller-approved arm routine;
+launching Cerebro does not activate either arm or issue a mode command.
+
+Repeated requests for the same host reuse an opening or authenticated tunnel.
+The app passes the Keychain SSH password through an anonymous pipe, permits one
+password prompt, bounds SSH establishment to five seconds, and retains changed
+host-key rejection. Forwarding explicitly binds `127.0.0.1`. The tunnel becomes
+**active** only after the gateway authenticates, with an 11-second overall
+connection deadline. Quitting Cerebro closes its tunnel so the next launch can
+bind the local port. An ended control session is never automatically replayed.
+
+`Permission denied (publickey,password)` is an SSH login rejection, before the
+gateway token or motor commands can be accepted. Controller approval grants the
+described physical operation; it does not replace SSH authentication. Login and
+gateway failures now return their specific detail to the controller immediately
+instead of consuming the routine's generic 12-second preflight wait. Retry the
+connection in Diagnostics; if login rejection persists, check the saved SSH
+password and the selected robot address. Restarting CAN/core is not an SSH fix.
+
+On 2026-09-23 the reported 13:30 rejection could not be reproduced with the saved
+credentials: the unmodified app connected at 13:48:38.653 and authenticated at
+13:48:39.614, with both arms delivering fresh CAN feedback at about 20 Hz.
+This establishes that the current saved credentials work; it does not establish
+the cause of the earlier rejection. No motor or gripper action was used for
+this check.
+
+Hardware-free regression checks:
+
+- `python3 Tests/ROBAmberGatewayTunnelRuntimeTests.py` exercises production tunnel
+  lifecycle with fake SSH/Keychain/gateway dependencies: credential transport,
+  same-host reuse, authentication errors, cancellation, stale process callbacks,
+  missing credentials and the connection deadline.
+- `bash Scripts/test-arm-routines.sh` checks that an SSH failure returns promptly
+  through the controller-authorized routine without activating arms or grippers,
+  alongside the existing motion and camera interlock fixtures.
+
+The signed update was installed in `/Applications/Cerebro.app` and authenticated
+at 13:56:23.284, 0.893 seconds after Connect. Both arms reported current CAN
+feedback at 19.7 Hz. A second Connect retained the same SSH PID and telemetry
+session; quitting released port 7443, and the app was relaunched for testing.
+The tunnel, arm-routine, gateway-compatibility, diagnostics and real OpenSSH
+host-key fixtures passed, along with the macOS build and strict signature check.
+Installed `Cerebro.debug.dylib` SHA-256:
+`a6e142ccf82f1ad85b889441df2c4b8e025469f430ad7736237a513dc6303df3`.
+
+The operator's intervening grip/startup attempts reached mode queries but
+stopped at the camera freshness/stationary-view check before arm activation.
+That separate preflight blocker and automatic hardware movement were not
+validated or changed by the tunnel update.
 
 ## 7. Recover the CAN/core stack from Cerebro
 

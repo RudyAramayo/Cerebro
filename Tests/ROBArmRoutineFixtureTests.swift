@@ -24,7 +24,8 @@ final class ROBAmberGestureExecutor {
 }
 final class ROBAmberGatewayTunnel {
     static let shared = ROBAmberGatewayTunnel()
-    func connect(host: String) {}
+    var failureDetail: String?
+    func connect(host: String? = nil) {}
 }
 final class ROBAmberGatewayTelemetry {
     let sequence: UInt64
@@ -205,6 +206,19 @@ final class ROBArmRoutineVision {
         precondition(!settler.observe(sequence: 2, positions: zero, target: zero, now: 11))
         precondition(!settler.observe(sequence: 3, positions: zero, target: zero, now: 11.05))
         precondition(settler.observe(sequence: 4, positions: zero, target: zero, now: 11.2))
+
+        g.ready = false
+        ROBAmberGatewayTunnel.shared.failureDetail = "SSH login rejected for fixture robot"
+        let connectionStarted = ProcessInfo.processInfo.systemUptime
+        let disconnected = await run("grab")
+        precondition(disconnected["status"] as? String == "blocked")
+        precondition(disconnected["detail"] as? String == "SSH login rejected for fixture robot")
+        precondition(ProcessInfo.processInfo.systemUptime - connectionStarted < 1,
+                     "SSH failure waited through the generic 12-second timeout")
+        precondition(!g.commands.contains { $0.hasPrefix("position_mode") || $0.hasPrefix("calibrate") || $0.hasPrefix("waypoint") || $0.hasPrefix("gripper_") })
+        ROBAmberGatewayTunnel.shared.failureDetail = nil
+        g.ready = true; g.commands = []
+        print("Gateway failure: exact SSH error returned promptly with no activation or gripper motion")
 
         g.feedbackReadyAt = ProcessInfo.processInfo.systemUptime + 0.3
         let inactive = await run("relax")
