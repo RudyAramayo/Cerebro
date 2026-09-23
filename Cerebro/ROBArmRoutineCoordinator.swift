@@ -244,7 +244,8 @@ enum ROBArmRoutineError: LocalizedError {
                 let result = try await self.execute(command, target: target)
                 self.finish(result, hold: false)
             } catch {
-                self.finish(["status": "blocked", "detail": self.failure ?? error.localizedDescription], hold: true)
+                self.finish(["status": "blocked", "detail": self.failure ?? error.localizedDescription,
+                             "camera": self.vision.healthSnapshot()], hold: true)
             }
         }
     }
@@ -340,7 +341,9 @@ enum ROBArmRoutineError: LocalizedError {
 
     @MainActor private func inspect(target: String, calibration: Bool = false) async throws -> ROBArmRoutineObservation {
         moving = false
-        let observation = try await vision.observe(target: target)
+        let observation = try await vision.observe(target: target) { [weak self] detail in
+            self?.setStatus(detail)
+        }
         try check()
         guard observation.permitsMotion, vision.handsClear,
               !calibration || observation.permitsCalibration else {

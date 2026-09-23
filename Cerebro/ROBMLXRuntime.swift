@@ -276,13 +276,19 @@ public actor ROBMLXEngine {
 
     /// Read-only workspace facts for the explicitly requested fixed arm routine.
     /// This method cannot dispatch tools, generate joint targets or fit offsets.
-    func observeArmWorkspace(jpeg: Data, target: String) async throws -> String {
-        guard let image = CIImage(data: jpeg) else { throw ROBMLXMessageVisionError.invalidInput }
-        let staged = try floatBackedVisionImage(image)
+    func observeArmWorkspace<Evidence>(target: String,
+        frameProvider: () async throws -> (jpeg: Data, evidence: Evidence)
+    ) async throws -> (raw: String, evidence: Evidence) {
         try await beginGPUOperation()
         defer { finishGPUOperation() }
         try Task.checkCancellation()
         let container = try await loadVLM()
+        // Select pixels only after model loading and the shared GPU wait. Return
+        // their evidence with the answer so callers validate that exact image.
+        let frame = try await frameProvider()
+        try Task.checkCancellation()
+        guard let image = CIImage(data: frame.jpeg) else { throw ROBMLXMessageVisionError.invalidInput }
+        let staged = try floatBackedVisionImage(image)
         let prompt = """
         Inspect the FIRST-PERSON main face camera view of the robot. There is no belly view in this image.
         Report only visible facts. Robot-left and robot-right are the robot's own sides.
@@ -309,7 +315,7 @@ public actor ROBMLXEngine {
         let input = try await container.prepare(input: UserInput(prompt: prompt, images: [.ciImage(staged)]))
         let generation = try await startGeneration(container: container, input: input,
             parameters: GenerateParameters(maxTokens: 220, temperature: 0))
-        return try await collectGeneration(generation, toolCallPolicy: .rejectAsVisionInput)
+        return (try await collectGeneration(generation, toolCallPolicy: .rejectAsVisionInput), frame.evidence)
     }
 
     /// Accepts at most one selected frame per interval. The caller returns

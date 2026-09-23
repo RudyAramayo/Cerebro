@@ -57,7 +57,35 @@ then restores normal capture demand.
 An explicit recording resolution retains priority. A read-only local MLX inspection requires visible,
 clear arm paths; missing/occluded evidence blocks. The input frames retain their
 capture times and sequence, old inference is rejected, and scene changes veto
-the result. A separate Vision hand detector, current depth coverage, stationary
+the result. Inspection acquires the vision model/GPU slot before selecting
+pixels, then waits for three new frames captured after settling began, spanning
+at least 300 ms. It allows up to three seconds for this steady view. This avoids
+comparing a frame from the neck's final movement with the settled viewpoint or
+aging an image while another model holds the GPU.
+
+If the scene changes while the model is answering, the answer is discarded and
+one fresh, settled inspection is attempted under the same controller approval.
+The existing 2.5% thumbnail-change veto, 700 ms current-frame bound, eight-second
+inspection-image bound and 90-second operation deadline remain in place. No
+brightness correction or weaker collision criterion is introduced. A second
+changed view, missing depth, stale/frozen stream, cancellation or ambiguous
+answer still stops the operation. Status messages show the reinspection; failure
+results include camera health and the last measured change fraction/source age.
+
+`python3 Tests/ROBArmInspectionRuntimeTests.py` runs the production inspector with
+synthetic frames and an inert model, including GPU wait ordering, settling,
+discarding a changed-scene answer, the single retry limit, stale/frozen frames,
+missing depth, cancellation/epoch changes and the independent hand veto.
+`bash Scripts/test-arm-routines.sh` checks the controller-approved coordinator
+without hardware. These fixtures do not establish physical clearance.
+
+On 2026-09-23 the signed build and inspection/routine fixtures passed. The build
+phase installed the update in `/Applications/Cerebro.app`, and Cerebro was
+restarted to load it. The supervised Prepare retry ended before inspection with
+“Connect Vision Pro or iPhone and enable Action Approvals.” No new arm motion
+ran; successful physical preparation remains unverified for this change.
+
+A separate Vision hand detector, current depth coverage, stationary
 neck view, current per-motor CAN replies and a 1.5-second gateway lease supervise
 motion. These checks are conservative observations, **not a certified geometric
 collision model**. An unprepared neck or unavailable vision model ends the run

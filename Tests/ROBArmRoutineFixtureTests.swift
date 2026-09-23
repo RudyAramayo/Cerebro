@@ -99,9 +99,10 @@ final class ROBArmRoutineVision {
     static let shared = ROBArmRoutineVision()
     var fresh = true, handsClear = true, blocked = false, objectInRight = false
     var readinessDescription: String { "Simulated camera unavailable" }
+    func healthSnapshot() -> NSDictionary { ["fixture": true] }
     var demonstrationSample: ROBArmDemonstrationSample?
     func setActive(_ active: Bool, teaching: Bool = false) {}
-    func observe(target: String) async throws -> ROBArmRoutineObservation {
+    func observe(target: String, progress: (@MainActor (String) -> Void)? = nil) async throws -> ROBArmRoutineObservation {
         ROBArmRoutineObservation(pathVisible: !blocked, pathClear: !blocked, hanging: true, armsInFront: true,
             leftJawEmpty: !objectInRight, rightJawEmpty: !objectInRight,
             leftObjectBetweenJaws: false, rightObjectBetweenJaws: objectInRight,

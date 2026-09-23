@@ -19,6 +19,7 @@ final class ROBArmRoutineVision {
     private var lastIncomingSequence: UInt64 = 0
     private var processingMilliseconds: Double = 0
     private var frames: [String: Frame] = [:]
+    private var lastInspection: [String: Any] = [:]
 
     struct Frame {
         let image: CIImage
@@ -34,6 +35,7 @@ final class ROBArmRoutineVision {
         lock.lock(); defer { lock.unlock() }
         active = value; self.teaching = teaching; epoch = UUID(); frames = [:]; busy = []; lastOffer = [:]; inputNotes = [:]
         lastIncomingCapture = nil; lastIncomingSequence = 0; processingMilliseconds = 0
+        if value { lastInspection = [:] }
     }
 
     func offer(_ frame: CameraFrameSet, role: CameraRole) {
@@ -151,15 +153,12 @@ final class ROBArmRoutineVision {
     var demonstrationSample: ROBArmDemonstrationSample? { snapshot()["face"]?.demonstration }
 
     var fresh: Bool {
-        let frames = snapshot(), now = Date().timeIntervalSince1970 * 1000
-        return ["face"].allSatisfy { key in
-            guard let f = frames[key] else { return false }
-            return (0 ... 700).contains(now - f.capturedAt) && f.depthCoverage >= 0.25
-        }
+        snapshot()["face"].map(isFresh) ?? false
     }
 
     var handsClear: Bool {
-        fresh && snapshot().values.allSatisfy(\.handsClear)
+        guard let frame = snapshot()["face"] else { return false }
+        return isFresh(frame) && frame.handsClear
     }
 
     var readinessDescription: String {
@@ -182,49 +181,115 @@ final class ROBArmRoutineVision {
                 "input_age_ms": lastIncomingCapture.map { now - $0 } ?? -1,
                 "analysis_age_ms": frame.map { now - $0.capturedAt } ?? -1,
                 "analysis_ms": processingMilliseconds, "depth_coverage": frame?.depthCoverage ?? 0,
-                "hands_clear": frame?.handsClear ?? false, "note": inputNotes["face"] ?? "No frames received"]
+                "hands_clear": frame?.handsClear ?? false, "note": inputNotes["face"] ?? "No frames received",
+                "inspection": lastInspection]
     }
 
-    func observe(target: String) async throws -> ROBArmRoutineObservation {
-        // Warm/load before selecting pixels; model initialization must not age
-        // the actual inspection frame. The coordinator's deadline still runs.
-        try await ROBMLXEngine.shared.ensureVLMReady()
-        try Task.checkCancellation()
-        guard fresh else { throw ROBArmRoutineError.blocked("The main face RGB-D camera must be current.") }
-        let frames = snapshot()
-        guard let face = frames["face"] else {
-            throw ROBArmRoutineError.blocked("The main camera frame is unavailable.")
+    private func isFresh(_ frame: Frame) -> Bool {
+        (0 ... 700).contains(Date().timeIntervalSince1970 * 1000 - frame.capturedAt)
+            && frame.depthCoverage >= 0.25
+    }
+
+    private func inspectionEpoch() throws -> UUID {
+        lock.lock(); defer { lock.unlock() }
+        guard active else { throw CancellationError() }
+        return epoch
+    }
+
+    private func inspectionFrame(epoch token: UUID) throws -> Frame? {
+        lock.lock(); defer { lock.unlock() }
+        guard active, epoch == token else { throw CancellationError() }
+        return frames["face"]
+    }
+
+    private func recordInspection(_ details: [String: Any]) {
+        lock.lock(); lastInspection = details; lock.unlock()
+    }
+
+    // Preserve the existing veto exactly. This is not a clearance classifier;
+    // no brightness compensation, image registration or relaxed threshold can
+    // hide an object or viewpoint change from the semantic freshness check.
+    static func sceneChangeFraction(_ before: [UInt8], _ after: [UInt8]) -> Double? {
+        guard before.count == 64 * 48 * 4, before.count == after.count else { return nil }
+        let changed = zip(before, after).reduce(0) { $0 + (abs(Int($1.0) - Int($1.1)) > 24 ? 1 : 0) }
+        return Double(changed) / Double(before.count)
+    }
+
+    private func settledInspectionFrame(epoch token: UUID) async throws -> Frame {
+        // Called only when the coordinator has stopped motion and the GPU is
+        // ready. A previously captured frame may still depict the neck/arms
+        // settling, even though the latest commanded pose is now stationary.
+        let notBefore = Date().timeIntervalSince1970 * 1000
+        let deadline = ProcessInfo.processInfo.systemUptime + 3
+        var anchor: Frame?, previous: Frame?
+        var distinctSamples = 0
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            try Task.checkCancellation()
+            if let frame = try inspectionFrame(epoch: token), isFresh(frame), frame.capturedAt >= notBefore {
+                if let previous, frame.sequence < previous.sequence || frame.capturedAt < previous.capturedAt {
+                    throw ROBArmRoutineError.blocked("The camera stream restarted during inspection.")
+                }
+                if previous?.sequence != frame.sequence {
+                    guard let difference = Self.sceneChangeFraction(anchor?.thumbnail ?? frame.thumbnail, frame.thumbnail) else {
+                        throw ROBArmRoutineError.blocked("The inspected camera view is unavailable.")
+                    }
+                    if anchor == nil || difference >= 0.025 ||
+                        previous.map({ frame.capturedAt - $0.capturedAt > 700 }) == true {
+                        anchor = frame; distinctSamples = 0
+                    }
+                    distinctSamples += 1
+                    previous = frame
+                    if let anchor, distinctSamples >= 3, frame.capturedAt - anchor.capturedAt >= 300 {
+                        return frame
+                    }
+                }
+            }
+            try await Task.sleep(nanoseconds: 50_000_000)
         }
-        guard let cg = context.createCGImage(face.image, from: face.image.extent),
-              let jpeg = NSBitmapImageRep(cgImage: cg).representation(using: .jpeg, properties: [.compressionFactor: 0.8]) else {
-            throw ROBArmRoutineError.blocked("Could not inspect the camera frames.")
-        }
-        let raw = try await ROBMLXEngine.shared.observeArmWorkspace(jpeg: jpeg, target: String(target.prefix(160)))
-        try Task.checkCancellation()
-        // A result is not a new frame. Long inference cannot refresh old pixels.
-        guard fresh, Date().timeIntervalSince1970 * 1000 - face.capturedAt <= 8_000 else {
-            throw ROBArmRoutineError.blocked("Camera inspection timed out; no motion was authorized.")
-        }
-        let current = snapshot()
-        guard current["face"].map({ $0.sequence > face.sequence }) == true else {
-            throw ROBArmRoutineError.blocked("The camera stream stopped advancing during inspection.")
-        }
-        // A moving object or changed viewpoint invalidates a delayed semantic
-        // observation. This is a veto, never geometric clearance certification.
-        for key in ["face"] {
-            guard let before = frames[key]?.thumbnail, let after = current[key]?.thumbnail,
-                  before.count == after.count, !before.isEmpty else {
+        throw ROBArmRoutineError.blocked("The camera view did not settle within 3 seconds. Keep the workspace still and retry; no new motion was sent.")
+    }
+
+    func observe(target: String, progress: (@MainActor (String) -> Void)? = nil) async throws -> ROBArmRoutineObservation {
+        let token = try inspectionEpoch()
+        // One changed scene gets one fresh inspection under the same operation
+        // approval. Discard the old answer; never reuse it with newer pixels.
+        for attempt in 1...2 {
+            try Task.checkCancellation()
+            await progress?(attempt == 1 ? "Waiting for a steady main-camera view" : "Scene changed; checking a fresh steady view once more")
+            recordInspection(["attempt": attempt, "phase": "waiting_for_model_and_steady_view"])
+            let result = try await ROBMLXEngine.shared.observeArmWorkspace(target: String(target.prefix(160))) {
+                let face = try await self.settledInspectionFrame(epoch: token)
+                guard let cg = self.context.createCGImage(face.image, from: face.image.extent),
+                      let jpeg = NSBitmapImageRep(cgImage: cg).representation(using: .jpeg, properties: [.compressionFactor: 0.8]) else {
+                    throw ROBArmRoutineError.blocked("Could not inspect the camera frames.")
+                }
+                await progress?("Inspecting the current arm workspace (\(attempt)/2)")
+                return (jpeg: jpeg, evidence: face)
+            }
+            try Task.checkCancellation()
+            let face = result.evidence
+            guard let current = try inspectionFrame(epoch: token), isFresh(current),
+                  Date().timeIntervalSince1970 * 1000 - face.capturedAt <= 8_000 else {
+                throw ROBArmRoutineError.blocked("Camera inspection timed out; no motion was authorized.")
+            }
+            guard current.sequence > face.sequence, current.capturedAt > face.capturedAt else {
+                throw ROBArmRoutineError.blocked("The camera stream stopped advancing during inspection.")
+            }
+            guard let changed = Self.sceneChangeFraction(face.thumbnail, current.thumbnail) else {
                 throw ROBArmRoutineError.blocked("The inspected camera view changed.")
             }
-            let changed = zip(before, after).filter { abs(Int($0) - Int($1)) > 24 }.count
-            guard Double(changed) / Double(before.count) < 0.025 else {
-                throw ROBArmRoutineError.blocked("The scene changed during camera inspection; no new motion was sent.")
+            let age = Date().timeIntervalSince1970 * 1000 - face.capturedAt
+            recordInspection(["attempt": attempt, "phase": changed < 0.025 ? "steady" : "scene_changed",
+                "source_sequence": NSNumber(value: face.sequence), "current_sequence": NSNumber(value: current.sequence),
+                "source_age_ms": age, "changed_fraction": changed, "limit": 0.025])
+            NSLog("Arm camera inspection %d: %.1f%% changed, %.0f ms source age", attempt, changed * 100, age)
+            guard changed < 0.025 else { continue }
+            let data = Data(result.raw.trimmingCharacters(in: .whitespacesAndNewlines).utf8)
+            guard data.count < 4000, let observation = try? JSONDecoder().decode(ROBArmRoutineObservation.self, from: data) else {
+                throw ROBArmRoutineError.blocked("Camera inspection was ambiguous; the arms remain held.")
             }
+            return observation
         }
-        let data = Data(raw.trimmingCharacters(in: .whitespacesAndNewlines).utf8)
-        guard data.count < 4000, let observation = try? JSONDecoder().decode(ROBArmRoutineObservation.self, from: data) else {
-            throw ROBArmRoutineError.blocked("Camera inspection was ambiguous; the arms remain held.")
-        }
-        return observation
+        throw ROBArmRoutineError.blocked("The workspace kept changing across two camera inspections. Keep people and objects clear and retry; no new motion was sent.")
     }
 }
