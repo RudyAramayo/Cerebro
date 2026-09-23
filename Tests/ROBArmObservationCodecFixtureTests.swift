@@ -6,6 +6,8 @@ enum ROBArmObservationCodecFixtures {
         for wrapped in [plain, " \n" + plain + "\n ", "```json\n" + plain + "\n```", "```\n" + plain + "\n```"] {
             let observation = try! ROBArmObservationCodec.decode(wrapped)
             precondition(!observation.permitsMotion && !observation.permitsCalibration && observation.graspArm == nil)
+            precondition(observation.gripperInspectionBlockReason?.contains("confidence 0%") == true)
+            precondition(observation.gripperInspectionBlockReason?.contains("complete route") == false)
         }
         let cases: [(String, String)] = [
             ("", "empty"),
@@ -44,6 +46,27 @@ enum ROBArmObservationCodecFixtures {
             handsClear: true, confidence: 0.99)
         precondition(!frontOnly.permitsMotion && frontOnly.permitsCalibration && frontOnly.graspArm == nil,
                      "Stationary jaw inspection incorrectly required the hanging route or authorized arm travel")
+        precondition(frontOnly.gripperInspectionBlockReason == nil)
+        let visible = try! JSONSerialization.data(withJSONObject: [
+            "pathVisible": false, "pathClear": false, "hanging": false, "armsInFront": true,
+            "leftJawEmpty": true, "rightJawEmpty": true, "leftObjectBetweenJaws": false,
+            "rightObjectBetweenJaws": false, "leftJawOpen": true, "rightJawOpen": true,
+            "leftJawClosedOnObject": false, "rightJawClosedOnObject": false, "handsClear": true,
+            "confidence": 0.99])
+        for (key, value) in [("confidence", 0.89 as Any), ("armsInFront", false), ("handsClear", false), ("leftJawEmpty", false), ("rightJawEmpty", false)] {
+            var facts = try! JSONSerialization.jsonObject(with: visible) as! [String: Any]
+            facts[key] = value
+            let blocked = try! ROBArmObservationCodec.decode(String(data: try! JSONSerialization.data(withJSONObject: facts), encoding: .utf8)!)
+            precondition(!blocked.permitsCalibration, "Missing \(key) evidence permitted jaw calibration")
+            if ["confidence", "armsInFront", "handsClear"].contains(key) {
+                precondition(blocked.gripperInspectionBlockReason != nil)
+            }
+        }
+        let jawPrompt = ROBArmObservationCodec.inspectionPrompt(target: "", grippers: true, formatRetry: false)
+        let routePrompt = ROBArmObservationCodec.inspectionPrompt(target: "", grippers: false, formatRetry: false)
+        precondition(!jawPrompt.contains("pathVisible requires") && routePrompt.contains("pathVisible requires"),
+                     "Stationary jaw prompt inherited complete-route requirements")
+        precondition(jawPrompt.contains("A cropped or obscured jaw is NOT visible"))
         print("Arm response codec: wrappers, required facts, strict types, duplicates, conflicting prose and bounded diagnostics passed")
     }
 }

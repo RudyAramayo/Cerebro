@@ -21,7 +21,7 @@ import AppKit
         let inspectionRow = NSStackView(views: [NSTextField(labelWithString: "Arm inspection camera pan:"), inspectionPan])
         inspectionRow.spacing = 10
         let explanation = NSTextField(wrappingLabelWithString:
-            "One Vision Pro or iPhone approval covers the complete taught arm route under your supervision, including an incomplete camera view. Watch the arms and keep Stop + hold ready. Startup brings hanging arms forward, then checks, calibrates and opens both empty grippers. Planned arm travel takes about 21 seconds plus checks; automatic timing has not been verified on hardware.")
+            "One Vision Pro or iPhone approval covers the complete taught arm route under your supervision, including an incomplete camera view. Watch the arms and keep Stop + hold ready. Startup brings hanging arms forward, then checks, calibrates and opens both empty grippers. Paired forward travel took about 22 seconds in one supervised trial; camera checks and gripper work take additional time.")
         let commands = NSTextField(wrappingLabelWithString:
             "Say or type ‘relax’ to lower the arms gently and turn off holding torque. ‘Grab this’ or ‘hold this’ brings the arms forward and attempts a gentle close when the camera sees the object between a gripper’s jaws. These commands are available without enabling startup calibration. Each complete operation needs one controller approval. Stop + hold is immediate.")
         let limitation = NSTextField(wrappingLabelWithString:

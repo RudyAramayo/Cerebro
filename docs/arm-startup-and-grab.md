@@ -37,8 +37,9 @@ Both arms are dispatched together. Segment duration is the maximum of 0.8 s,
 maximum joint displacement / 0.075 rad/s, and 4 × (displacement / 0.3)^(1/3).
 This preserves the nominal longest-segment timing scale while reducing the
 short 0.15-radian segments to about 3.175 s. Planned hanging-to-front travel is
-20.7 s, plus camera, gripper and arrival checks. These timings have not been
-verified automatically on hardware. Three distinct stable measured position
+20.7 s, plus camera, gripper and arrival checks. One controller-approved live
+trial measured approximately 22 s of paired forward travel, as recorded below;
+this does not establish total startup/gripper timing. Three distinct stable measured position
 samples spanning at least 150 ms are still required; they can accumulate during
 the segment instead of adding an unconditional delay afterward. There is no
 measured peak speed, acceleration, jerk or torque claim. Missing vendor velocity
@@ -238,6 +239,42 @@ the Debug RGB conversion loop exceeding the camera's frame interval. The
 address that measured bottleneck without changing camera age limits. These
 interrupted runs do not establish continuous forward timing or a completed
 automatic gripper sequence. Startup calibration remains disabled.
+
+The vectorized-camera build was installed, then loaded only after a new
+controller-approved Relax completed the reverse route and independent CAN
+feedback confirmed hanging zero with all fourteen motors inactive. The
+post-reload camera-only check stayed below the freshness limit. The next
+approved Prepare stopped before activation on nearby-person/hand detection;
+the current main-camera preview showed legs and a chair directly ahead.
+Both arms remained hanging and inactive until the workspace was cleared.
+
+After clearance and a new phone approval, the updated build completed paired
+forward travel without a camera-freshness stop. A passive 5 Hz capture recorded
+departure from the hanging tolerance at 16:47:10.550 PDT and both arms within
+0.01 rad of the front endpoint at 16:47:32.202, approximately 21.7 seconds apart.
+All 109 samples in that interval had fresh CAN feedback and all fourteen motors
+in mode 2. This measures one supervised trajectory, excluding approval, mode
+entry, final settling and gripper inspection; it does not certify every route
+or peak joint dynamics.
+
+The stationary gripper check still rejected jaw movement. A read-only
+`robot_capabilities` query through Gemini reported a decoded assessment with
+zero confidence and all facts false. Its `motion_block_reason` misleadingly
+described complete-route visibility even though this was a gripper assessment.
+The operator identified an object beside the right gripper as the intended
+ball and then removed it for empty-jaw calibration. No new automatic gripper
+calibration or ball grasp has been established by this trial.
+
+The gripper prompt now excludes the complete-route criteria and defines its
+visual requirement as both working ends and both finger tips visible; cropped
+or obscured jaws still fail. Full-arm route assessment retains its separate
+criteria. Measured front pose, 90% model confidence, current independent
+person/hand and depth checks, empty jaws, scene stability and controller
+supervision remain mandatory. Diagnostics and the operator status now report
+gripper confidence, visibility and hand-clearance facts, instead of attributing
+a jaw-assessment failure to the hanging route. Negative assessments still do
+not trigger retries to obtain a favourable answer. This prompt correction
+requires a new live trial; fixtures do not establish recognition accuracy.
 
 A separate Vision hand detector, current depth coverage, stationary
 neck view, current per-motor CAN replies and a 1.5-second gateway lease supervise

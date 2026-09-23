@@ -362,9 +362,7 @@ enum ROBArmRoutineError: LocalizedError {
         }
         try check()
         if grippers {
-            guard observation.permitsGripperInspection else {
-                throw ROBArmRoutineError.blocked("Arms are held in front. The camera must see both grippers with hands clear before jaw movement; the arm route itself does not need to be visible.")
-            }
+            if let reason = observation.gripperInspectionBlockReason { throw ROBArmRoutineError.blocked(reason) }
         } else if let reason = observation.motionBlockReason { throw ROBArmRoutineError.blocked(reason) }
         guard vision.handsClear else {
             throw ROBArmRoutineError.blocked("The live camera detector cannot confirm person and hand clearance. Keep hands away from the arms and grippers.")

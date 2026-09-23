@@ -292,7 +292,8 @@ final class ROBArmRoutineVision {
             do {
                 let observation = try ROBArmObservationCodec.decode(result.raw)
                 diagnostics["phase"] = "decoded"
-                diagnostics["motion_block_reason"] = observation.motionBlockReason ?? ""
+                diagnostics["assessment"] = grippers ? "grippers" : "arm_route"
+                diagnostics["motion_block_reason"] = (grippers ? observation.gripperInspectionBlockReason : observation.motionBlockReason) ?? ""
                 diagnostics["confidence"] = observation.confidence
                 diagnostics["response_sample"] = ROBArmObservationCodec.diagnosticSample(result.raw)
                 recordInspection(diagnostics)

@@ -70,13 +70,16 @@ approval. There are no desktop dialogs or per-waypoint model calls.
 The local coordinator owns timing, camera checks, arm reservations, fresh
 per-motor CAN feedback, 1.5-second renewable gateway leases and the 90-second
 whole-operation deadline. Both arms dispatch together; short segments use
-bounded distance-based timing. Planned hanging/front travel is about 20.7 s,
-plus checks, with no automatic hardware timing claim. Treads/flippers/body lean
+bounded distance-based timing. Planned hanging/front travel is about 20.7 s;
+one supervised live forward trial measured about 22 s, excluding checks and
+gripper work (see [recorded evidence](arm-startup-and-grab.md)). Treads/flippers/body lean
 are held still during physical arm work, and torso re-arming is refused.
 Explicit neck input invalidates the stationary inspection view.
 
-Main-camera RGB-D must be current and show the entire route. Camera evidence
-can veto motion; it is not a certified geometric model of the environment,
+Main-camera RGB-D must be current. Explicit controller approval permits
+operator-supervised travel on the taught route with incomplete camera coverage;
+gripper motion still requires a stationary jaw assessment. Camera evidence can
+veto motion; it is not a certified geometric model of the environment,
 people, cables or held objects. Empty grippers are required for greetings and
 replay. General reaching and full body imitation remain unavailable.
 

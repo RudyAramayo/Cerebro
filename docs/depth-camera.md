@@ -229,3 +229,14 @@ plus single-pixel and odd-width vector tails, row padding, host presentation
 time, display attachments and preview recovery. Preview, newest-frame ingress
 and DepthAI packet fixtures passed. Live application timing after reload is
 recorded separately from these isolated measurements.
+
+The signed Debug build passed and the build phase installed
+`/Applications/Cerebro.app`; `codesign --verify --deep --strict` passed. Installed
+debug-library SHA-256:
+`b46fcef42ed2eaf109cc24b7bf19f94740932785b10d4ed4e9e939511a30cba1`.
+After a controller-approved Relax reached hanging zero with all fourteen motors
+inactive, Cerebro was restarted to load it. With normal optional analysis
+restored, a five-second camera-only receipt (52 samples) measured incoming age
+median 124 ms, maximum 258 ms; analyzed age median 241 ms, maximum 457 ms; and
+analysis duration median 19 ms, maximum 71 ms. No analyzed frame exceeded
+700 ms. This short check did not include gripper inspection inference.
