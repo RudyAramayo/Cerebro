@@ -5596,15 +5596,13 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             if (strongSelf.followPersonCoordinator.active) { [strongSelf.followPersonCoordinator stopWithReason:@"Arm inspection"]; }
             strongSelf.torsoControlsViewController.headTracking_enabled.state = NSControlStateValueOff;
         }
-        return [strongSelf.serialBox prepareNeckForArmInspection];
+        return [strongSelf.serialBox prepareNeckForArmInspectionWithPanDegrees:routine.inspectionPanDegrees];
     };
     routine.viewIsStationary = ^BOOL {
         ROBSerialBox *serial = weakSelf.serialBox;
         return serial != nil && ![ROBTorsoControlCenter shared].isArmed &&
-            fabs([ROBTorsoControlCenter shared].commandedVelocity) < 0.001 && serial.neckCommandStateKnown &&
-            serial.commandedLowerNeckTiltTarget == 6011 && serial.commandedUpperNeckTiltTarget == 5650 &&
-            fabs(serial.commandedNeckPanDegrees) <= 5 &&
-            NSProcessInfo.processInfo.systemUptime >= serial.neckCommandReadyAtUptime;
+            fabs([ROBTorsoControlCenter shared].commandedVelocity) < 0.001 &&
+            [serial isNeckReadyForArmInspectionWithPanDegrees:routine.inspectionPanDegrees];
     };
     routine.viewStatus = ^NSString * {
         ROBSerialBox *serial = weakSelf.serialBox;

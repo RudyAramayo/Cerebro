@@ -12,6 +12,7 @@ enum ROBArmRoutineError: LocalizedError {
     static let shared = ROBArmRoutineCoordinator()
     private(set) var isRunning = false
     private(set) var status = "Arms idle"
+    private(set) var inspectionPanDegrees = 0.0
     var ownsPhysicalMotion: Bool { (isRunning && activeCommand != "teach") || ROBShowMotionCoordinator.shared.isRunning }
     var cameraDemand: ((Bool) -> Void)?
     var prepareView: (() -> Bool)?
@@ -125,17 +126,22 @@ enum ROBArmRoutineError: LocalizedError {
         if command == "replay" && rendition == nil {
             completion(["status": "blocked", "detail": "Record a body demonstration first, or select a clip_id returned by robot_capabilities."]); return
         }
+        let inspectionPan = ROBArmRoutinePlan.inspectionPanDegrees()
         var summary: String
         if let rendition {
             summary = "\(rendition.name): move both arms along the taught route, then replay \(rendition.waypoints.count) bounded front-corridor steps. Grippers stay unchanged; confirm they are empty. Both arms end in front."
         } else if command == "relax" { summary = "Return both arms gently to hanging, then deactivate position mode." }
         else { summary = "\(command.capitalized): bring both arms forward, calibrate both empty grippers if needed, and \(command == "grab" || command == "hold" ? "attempt a camera-checked grip of \(String(target.prefix(160)))" : "leave both grippers open")." }
+        if inspectionPan != 0 {
+            summary += " Inspection camera pans 10° \(inspectionPan < 0 ? "right" : "left")."
+        }
         summary += " " + ROBControllerArmApproval.supervisedRouteNotice
         setStatus("Awaiting Vision Pro or iPhone approval: \(summary)")
         ROBControllerArmApproval.shared.request(operation: rendition == nil ? command : "gesture", arm: "both", summary: summary,
             execute: { [weak self] done in
                 guard let self else { done(["status": "cancelled", "detail": "Arm runtime closed."]); return }
-                self.performAuthorizedCommand(command, target: target, rendition: rendition, completion: done)
+                self.performAuthorizedCommand(command, target: target, rendition: rendition,
+                    inspectionPanDegrees: inspectionPan, completion: done)
             }, cancel: { [weak self] in self?.cancelAuthorized(reason: "Controller cancelled or disconnected") },
             completion: { [weak self] result in
                 if self?.isRunning != true { self?.setStatus(result["detail"] as? String ?? "Arm operation ended") }
@@ -201,7 +207,8 @@ enum ROBArmRoutineError: LocalizedError {
         }
     }
 
-    private func performAuthorizedCommand(_ command: String, target: String, rendition: ROBArmRendition? = nil, completion: @escaping (NSDictionary) -> Void) {
+    private func performAuthorizedCommand(_ command: String, target: String, rendition: ROBArmRendition? = nil,
+                                          inspectionPanDegrees: Double = 0, completion: @escaping (NSDictionary) -> Void) {
         precondition(Thread.isMainThread)
         guard ["startup", "prepare", "grab", "hold", "relax", "wave", "replay"].contains(command) else {
             completion(["status": "rejected", "detail": "Unknown arm routine."]); return
@@ -218,7 +225,8 @@ enum ROBArmRoutineError: LocalizedError {
                         try? await Task.sleep(nanoseconds: 50_000_000)
                     }
                     if self.isRunning { completion(["status": "blocked", "detail": "The previous arm operation has not stopped."]) }
-                    else { self.performAuthorizedCommand(command, target: target, completion: completion) }
+                    else { self.performAuthorizedCommand(command, target: target, rendition: rendition,
+                        inspectionPanDegrees: inspectionPanDegrees, completion: completion) }
                 }
             } else { completion(["status": "busy", "detail": status]) }
             return
@@ -233,6 +241,7 @@ enum ROBArmRoutineError: LocalizedError {
         }
         startupTicket = nil
         activeRendition = rendition
+        self.inspectionPanDegrees = inspectionPanDegrees
         supervisedRoute = ROBControllerArmApproval.shared.authorizesSupervisedArmRoute()
         owner = id; isRunning = true; activeCommand = command; failure = nil; self.completion = completion
         deadline = ProcessInfo.processInfo.systemUptime + 90

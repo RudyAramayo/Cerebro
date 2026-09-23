@@ -144,6 +144,14 @@ final class ROBArmRoutineVision {
         let suite = "arm-rendition-fixture-" + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
+        for value in [-10.0, 0, 10] {
+            defaults.set(value, forKey: ROBArmRoutinePlan.inspectionPanDefaultsKey)
+            precondition(ROBArmRoutinePlan.inspectionPanDegrees(defaults: defaults) == value)
+        }
+        for value in [-100.0, -9, 1, 11, 100] {
+            defaults.set(value, forKey: ROBArmRoutinePlan.inspectionPanDefaultsKey)
+            precondition(ROBArmRoutinePlan.inspectionPanDegrees(defaults: defaults) == 0)
+        }
         let store = ROBArmImitationStore(defaults: defaults)
         precondition(store.save(clip) && store.find("last") == clip && store.find(clip.id) == clip)
         precondition(store.find("unknown") == nil)

@@ -145,6 +145,38 @@ active and physical left inactive, both at reported zero. The live main-camera
 preview was visible but did not show the hanging arms. Automatic preparation,
 gripper calibration and physical travel timing remain unverified for this build.
 
+The subsequent live trial verified both arms entering position mode. A taught
+forward run held at an intermediate pose on person/hand detection; the operator
+later reported a nearby bystander, so this was not established as a false
+positive. After clearance and a new phone approval, both arms reached the front
+endpoint: physical right `[1.05, -0.60, 0, 0, 0, 0, 0]`, physical left the
+mirrored pose, with fresh per-motor feedback. The stationary jaw assessment
+blocked gripper commands. The main-camera preview clipped one gripper at its
+right edge, and the operator observed the neck pointing about 10 degrees left.
+
+**Settings → Arms → Arm inspection camera pan** now offers Center, 10° right,
+and 10° left. Center is the default. The selected correction is captured in the
+whole-operation phone request and cannot change that operation after approval.
+The neck uses the existing calibrated pan conversion, upright clearance
+staging, collision policy and settling checks. Inspection and motion monitoring
+require the exact selected pan target at lower 6011 / camera 5650. Values beyond
+the offered trims are not admitted. The existing combined look-and-greet path
+retains its centered inspection pose.
+
+Neck output fixtures verify the right trim, exact-target readiness and rejection
+of out-of-range/nonfinite angles without serial writes. Arm routine fixtures,
+the 45 controller approval checks and the signed macOS build passed. The
+requested 10° right setting and both gripper calibrations still require a live
+trial after the application is reloaded from a verified hanging pose.
+
+The following controller-approved Relax attempts moved back along the taught
+corridor but held on main-camera freshness failures (712 and 726 ms) and then
+on controller cancellation/disconnection. Fresh CAN feedback continued during
+each hold. The main camera helper was already running at 640×400; these stops
+were not caused by accidentally selecting the belly camera or a larger capture
+resolution. Torque-off and the new inspection pan must not be recorded as
+verified until the remaining return and a reloaded-app trial complete.
+
 A separate Vision hand detector, current depth coverage, stationary
 neck view, current per-motor CAN replies and a 1.5-second gateway lease supervise
 motion. These checks are conservative observations, **not a certified geometric

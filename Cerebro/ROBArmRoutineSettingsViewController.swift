@@ -3,6 +3,7 @@ import AppKit
 @objcMembers final class ROBArmRoutineSettingsViewController: NSViewController {
     private let startup = NSButton(checkboxWithTitle: "Calibrate arms on startup", target: nil, action: nil)
     private let state = NSTextField(wrappingLabelWithString: "")
+    private let inspectionPan = NSPopUpButton(frame: .zero, pullsDown: false)
 
     override func loadView() {
         view = NSView(frame: NSRect(x: 0, y: 0, width: 680, height: 580))
@@ -10,6 +11,15 @@ import AppKit
         title.font = .boldSystemFont(ofSize: 20)
         startup.state = UserDefaults.standard.bool(forKey: ROBArmRoutinePlan.startupDefaultsKey) ? .on : .off
         startup.target = self; startup.action = #selector(changeStartup)
+        for (title, degrees) in [("Center", 0), ("10° right", -10), ("10° left", 10)] {
+            inspectionPan.addItem(withTitle: title)
+            inspectionPan.lastItem?.representedObject = NSNumber(value: degrees)
+        }
+        inspectionPan.selectItem(at: [0.0, -10, 10].firstIndex(of: ROBArmRoutinePlan.inspectionPanDegrees()) ?? 0)
+        inspectionPan.target = self; inspectionPan.action = #selector(changeInspectionPan)
+        inspectionPan.setAccessibilityLabel("Arm inspection camera pan")
+        let inspectionRow = NSStackView(views: [NSTextField(labelWithString: "Arm inspection camera pan:"), inspectionPan])
+        inspectionRow.spacing = 10
         let explanation = NSTextField(wrappingLabelWithString:
             "One Vision Pro or iPhone approval covers the complete taught arm route under your supervision, including an incomplete camera view. Watch the arms and keep Stop + hold ready. Startup brings hanging arms forward, then checks, calibrates and opens both empty grippers. Planned arm travel takes about 21 seconds plus checks; automatic timing has not been verified on hardware.")
         let commands = NSTextField(wrappingLabelWithString:
@@ -24,7 +34,7 @@ import AppKit
         let teaching = NSStackView(views: [button("Motion rehearsal…", #selector(rehearsal)), button("Record body demonstration", #selector(teach)),
             button("Replay last", #selector(replay)), button("Front-arm greeting", #selector(wave))])
         teaching.spacing = 10
-        let stack = NSStackView(views: [title, startup, explanation, commands, buttons, teaching, state, limitation])
+        let stack = NSStackView(views: [title, startup, inspectionRow, explanation, commands, buttons, teaching, state, limitation])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 20
         stack.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(stack)
         NSLayoutConstraint.activate([
@@ -34,12 +44,22 @@ import AppKit
         ])
         for label in [explanation, commands, state, limitation] { label.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: Notification.Name("ROBArmRoutineDidChange"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: Notification.Name("ROBControllerArmApprovalDidChange"), object: nil)
         refresh()
     }
 
     private func button(_ title: String, _ action: Selector) -> NSButton { NSButton(title: title, target: self, action: action) }
     @objc private func changeStartup() { UserDefaults.standard.set(startup.state == .on, forKey: ROBArmRoutinePlan.startupDefaultsKey) }
-    @objc private func refresh() { state.stringValue = ROBArmRoutineCoordinator.shared.status }
+    @objc private func changeInspectionPan() {
+        guard !ROBArmRoutineCoordinator.shared.isRunning, !ROBControllerArmApproval.shared.isPending else { refresh(); return }
+        UserDefaults.standard.set(inspectionPan.selectedItem?.representedObject as? NSNumber ?? 0,
+                                  forKey: ROBArmRoutinePlan.inspectionPanDefaultsKey)
+    }
+    @objc private func refresh() {
+        state.stringValue = ROBArmRoutineCoordinator.shared.status
+        inspectionPan.selectItem(at: [0.0, -10, 10].firstIndex(of: ROBArmRoutinePlan.inspectionPanDegrees()) ?? 0)
+        inspectionPan.isEnabled = !ROBArmRoutineCoordinator.shared.isRunning && !ROBControllerArmApproval.shared.isPending
+    }
     @objc private func runStartup() { run("startup") }
     @objc private func prepareArms() { run("prepare") }
     @objc private func relax() { run("relax") }

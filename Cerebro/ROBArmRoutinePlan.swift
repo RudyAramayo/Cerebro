@@ -5,6 +5,11 @@ import Foundation
 /// The folded endpoint in the calibration notebook has no validated route.
 enum ROBArmRoutinePlan {
     static let startupDefaultsKey = "ROBCalibrateArmsOnStartup"
+    static let inspectionPanDefaultsKey = "ROBArmInspectionPanDegrees"
+    static func inspectionPanDegrees(defaults: UserDefaults = .standard) -> Double {
+        let value = (defaults.object(forKey: inspectionPanDefaultsKey) as? NSNumber)?.doubleValue ?? 0
+        return [-10.0, 0, 10].contains(value) ? value : 0
+    }
     static let tolerance = 0.025
     static let segmentSeconds = 4.0 // nominal longest taught segment
     static let maximumAverageSpeed = 0.075

@@ -286,6 +286,9 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 /// the arm workspace using camera tilt only. Repeated calls advance settling;
 /// unknown/OFF state and competing leases remain blocked.
 - (BOOL)prepareNeckForArmInspection;
+/// Camera framing trim only, bounded to +/-10 calibrated pan degrees.
+- (BOOL)prepareNeckForArmInspectionWithPanDegrees:(double)panDegrees;
+- (BOOL)isNeckReadyForArmInspectionWithPanDegrees:(double)panDegrees;
 /// Typed ingress for autonomous neck gestures. Pan is calibrated degrees;
 /// lower/upper are Maestro command targets because those axes do not yet have
 /// verified degree calibration. Acceptance reports a commanded (unverified)

@@ -4442,14 +4442,35 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
 
 - (BOOL)prepareNeckForArmInspection
 {
+    return [self prepareNeckForArmInspectionWithPanDegrees:0];
+}
+
+- (BOOL)isNeckReadyForArmInspectionWithPanDegrees:(double)panDegrees
+{
+    ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
+    int32_t target = ROBNeckSafetyTargetOff;
+    return NSThread.isMainThread && self.maestroConnectionValid && self.neckCommandStateKnown &&
+        isfinite(panDegrees) && fabs(panDegrees) <= 10 &&
+        ROBNeckSafetyPanDegreesToTarget(&configuration, panDegrees, &target) &&
+        self.commandedNeckPanTarget == target && self.commandedLowerNeckTiltTarget == 6011 &&
+        self.commandedUpperNeckTiltTarget == 5650 &&
+        NSProcessInfo.processInfo.systemUptime >= self.neckCommandReadyAtUptime;
+}
+
+- (BOOL)prepareNeckForArmInspectionWithPanDegrees:(double)panDegrees
+{
+    ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
+    int32_t panTarget = ROBNeckSafetyTargetOff;
     if (!NSThread.isMainThread || !self.maestroConnectionValid || !self.neckCommandStateKnown ||
+        !isfinite(panDegrees) || fabs(panDegrees) > 10 ||
+        !ROBNeckSafetyPanDegreesToTarget(&configuration, panDegrees, &panTarget) ||
         self.commandedNeckPanTarget == ROBNeckSafetyTargetOff ||
         self.commandedLowerNeckTiltTarget == ROBNeckSafetyTargetOff ||
         self.commandedUpperNeckTiltTarget == ROBNeckSafetyTargetOff) { return NO; }
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
     if (self.commandedLowerNeckTiltTarget == 6011 && self.commandedUpperNeckTiltTarget == 5650 &&
-        fabs(self.commandedNeckPanDegrees) <= 5) {
-        return now >= self.neckCommandReadyAtUptime;
+        self.commandedNeckPanTarget == panTarget) {
+        return [self isNeckReadyForArmInspectionWithPanDegrees:panDegrees];
     }
     if (now < self.manualNeckOverrideUntil || now < self.gestureNeckAuthorityUntil ||
         now < self.visionNeckAuthorityUntil) { return NO; }
@@ -4460,15 +4481,13 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     // center-first, lower-dependent envelope and command-space settle checks.
     // No new lower-neck recovery exception is added for arm startup.
     if (![self prepareNeckForPersonFollow]) { return NO; }
-    ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
-    (void)[self applySafeNeckPanTarget:configuration.panCenterTarget
+    (void)[self applySafeNeckPanTarget:panTarget
                      lowerTiltTarget:(int)self.commandedLowerNeckTiltTarget
                    desiredUpperTarget:5650
                          includeLower:NO
         allowSupervisedLowerRecovery:NO
                               source:@"Arm inspection camera"];
-    return self.commandedLowerNeckTiltTarget == 6011 && self.commandedUpperNeckTiltTarget == 5650 &&
-        fabs(self.commandedNeckPanDegrees) <= 5 && now >= self.neckCommandReadyAtUptime;
+    return [self isNeckReadyForArmInspectionWithPanDegrees:panDegrees];
 }
 
 - (ROBNeckCommandDisposition)requestNeckGesturePanDegrees:(double)panDegrees

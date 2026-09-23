@@ -43,6 +43,7 @@ selectors = [
     "applySafeNeckPanTarget:", "startSafeNeckStartup",
     "advanceSafeNeckStartupForGeneration:", "cancelSafeNeckStartup",
     "prepareNeckForPersonFollow", "prepareNeckForArmInspection",
+    "prepareNeckForArmInspectionWithPanDegrees:", "isNeckReadyForArmInspectionWithPanDegrees:",
     "torso_controllerPassthrough_head_pan:",
 ]
 methods = [method(selector) for selector in selectors]
@@ -204,6 +205,24 @@ int main(void) { @autoreleasepool {
     render(inspection, 6000, 6011, 6807, YES);
     assert(inspection.commandedUpperNeckTiltTarget == 6807);
     assert(![inspection prepareNeckForArmInspection]);
+
+    // The inspection-only trim passes through the same clearance gateway and
+    // settles at an exact target; invalid offsets emit no packet.
+    inspection = activeNeck();
+    assert(![inspection prepareNeckForArmInspectionWithPanDegrees:-10]);
+    settle(inspection);
+    assert(![inspection prepareNeckForArmInspectionWithPanDegrees:-10]);
+    settle(inspection);
+    assert([inspection prepareNeckForArmInspectionWithPanDegrees:-10]);
+    assert(inspection.commandedNeckPanTarget == 5667);
+    assert([inspection isNeckReadyForArmInspectionWithPanDegrees:-10]);
+    assert(![inspection isNeckReadyForArmInspectionWithPanDegrees:0]);
+    NSUInteger trimPackets = neckPackets(inspection).count;
+    for (NSNumber *invalid in @[@(-11), @11, @(NAN), @(INFINITY)]) {
+        assert(![inspection prepareNeckForArmInspectionWithPanDegrees:invalid.doubleValue]);
+        assert(![inspection isNeckReadyForArmInspectionWithPanDegrees:invalid.doubleValue]);
+    }
+    assert(neckPackets(inspection).count == trimPackets);
 
     // Each startup phase reaches the wire once despite passive renders and
     // face detections throughout the staged movement.
