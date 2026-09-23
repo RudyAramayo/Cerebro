@@ -42,6 +42,21 @@ and `udp_port` so exports make both identities explicit. No robot movement is
 needed to build or run the routing fixtures:
 `bash Scripts/test-amber-arm-binding.sh`.
 
+## Initial connection and diagnostic responsiveness
+
+The local SSH tunnel may bind its port after the client's first TCP attempt.
+Cerebro retries that initial refused connection up to five times, with a
+ten-second overall deadline and visible progress/failure. Disconnect cancels
+recovery. Recovery stops when TCP connects, before authentication; it never
+reconnects an established control session or replays commands. The loopback
+fixture `python3 -B Tests/ROBAmberGatewayConnectionRuntimeTests.py` exercises
+delayed-listener recovery, cancellation, and failure at the retry/deadline bound
+using the production Network.framework client without robot access.
+
+Diagnostics buffers every received sample but redraws its plots, tables, and
+schematic at 2 Hz. This reduces main-thread work while keeping the operator's
+controls responsive; it does not change gateway telemetry or control rates.
+
 ## Compatibility with older gateways
 
 Cerebro requires the gateway's `ready.supported_commands` advertisement before

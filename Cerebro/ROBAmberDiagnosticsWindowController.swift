@@ -1418,9 +1418,13 @@ private final class ROBAmberArmSchematicView: NSView {
 
     private func startRefreshTimer() {
         refreshTimer?.invalidate()
-        let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+        // Eight full-history plots plus the tables and schematic must leave
+        // time for operator input and accessibility requests. Keep buffering
+        // every received sample, but redraw this diagnostic view at 2 Hz.
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.refreshDisplay()
         }
+        timer.tolerance = 0.05
         refreshTimer = timer
         RunLoop.main.add(timer, forMode: .common)
     }

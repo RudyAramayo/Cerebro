@@ -458,6 +458,9 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
     private var pendingGripperCommands: [UInt64: ROBAmberGatewayPendingGripperCommand] = [:]
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private var initialConnectionRetryCount = 0
+    private var initialConnectionTimer: DispatchSourceTimer?
+    private var nextInitialConnectionRetryUptime: TimeInterval = 0
 
     public func connect(host: String = "127.0.0.1", port: UInt16 = 7443, token: String) {
         queue.async {
@@ -476,8 +479,16 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                 guard let self, let connection, connection === self.connection else { return }
                 switch state {
                 case .ready:
+                    self.initialConnectionTimer?.cancel()
+                    self.initialConnectionTimer = nil
                     self.transition(.authenticating, detail: "Waiting for gateway challenge")
                     self.receive(on: connection)
+                case .waiting(let error):
+                    guard self.state == .connecting else {
+                        self.disconnectOnQueue(detail: "Gateway connection interrupted: \(error.localizedDescription)", failed: true)
+                        return
+                    }
+                    self.transition(.connecting, detail: "Waiting for SSH tunnel; connection retry \(self.initialConnectionRetryCount)/5")
                 case .failed(let error):
                     self.disconnectOnQueue(detail: "Gateway failed: \(error.localizedDescription)", failed: true)
                 case .cancelled:
@@ -486,8 +497,42 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                     break
                 }
             }
+            self.startInitialConnectionRecovery(connection)
             connection.start(queue: self.queue)
         }
+    }
+
+    private func startInitialConnectionRecovery(_ connection: NWConnection) {
+        // SSH can take longer than the tunnel launch grace period to bind its
+        // loopback port. NWConnection otherwise waits indefinitely after that
+        // first refused connection. Retry only before authentication, never
+        // reconnect an established control session or replay a command.
+        let started = ProcessInfo.processInfo.systemUptime
+        nextInitialConnectionRetryUptime = started + 0.5
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 0.5, repeating: 0.25)
+        timer.setEventHandler { [weak self, weak connection] in
+            guard let self, let connection, connection === self.connection,
+                  self.state == .connecting else { return }
+            let now = ProcessInfo.processInfo.systemUptime
+            guard now - started < 10 else {
+                self.disconnectOnQueue(detail: "Gateway initial connection timed out after 10 seconds", failed: true)
+                return
+            }
+            guard case .waiting = connection.state,
+                  now >= self.nextInitialConnectionRetryUptime else { return }
+            guard self.initialConnectionRetryCount < 5 else {
+                self.disconnectOnQueue(detail: "Gateway connection failed after 5 initial retries", failed: true)
+                return
+            }
+            self.initialConnectionRetryCount += 1
+            let delay = min(2.0, 0.5 * pow(2.0, Double(self.initialConnectionRetryCount)))
+            self.nextInitialConnectionRetryUptime = now + delay
+            self.transition(.connecting, detail: "Waiting for SSH tunnel; connection retry \(self.initialConnectionRetryCount)/5")
+            connection.restart()
+        }
+        initialConnectionTimer = timer
+        timer.resume()
     }
 
     public func disconnect() {
@@ -1212,6 +1257,9 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
     }
 
     private func disconnectOnQueue(detail: String, failed: Bool = false) {
+        initialConnectionRetryCount = 0
+        initialConnectionTimer?.cancel()
+        initialConnectionTimer = nil
         heartbeatTimer?.cancel()
         heartbeatTimer = nil
         connection?.stateUpdateHandler = nil

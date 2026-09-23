@@ -110,13 +110,31 @@ and state. The gateway protocol, core configuration, and stored keyframe keys
 are unchanged. Hardware-free fixtures exercise both directions, independent
 per-side calibration gates, and acknowledgement/state routing.
 
+## Updated app connection verification
+
+The signed app was rebuilt and installed at its existing development app path.
+At 20:44:15, Diagnostics authenticated successfully through the SSH tunnel and
+reported an exclusive gateway session. Both physical-side telemetry streams
+were arriving at approximately 20 Hz. Explicit mode queries at 20:44:40 and
+20:44:51 reported all seven joints inactive on ROB-left/R11 and ROB-right/L10,
+respectively. These checks sent read-only mode/gripper-state queries, with no
+activation, position, or gripper-actuation commands.
+
+The app also fixes an initial TCP refusal race while SSH is still opening its
+local port. Real loopback Network.framework fixtures passed delayed-listener
+recovery, disconnect cancellation, and bounded failure. Compatibility and
+physical-side routing fixtures passed, as did the signed macOS build. The
+diagnostic display now redraws at 2 Hz while retaining every received sample.
+
 ## Still unresolved
 
 These defects explain the ineffective Activate/Deactivate buttons and the
 unreported partial mode transitions. They do **not** establish why motor
 feedback originally froze or whether the missing servo feedback will recur.
-The command hold remains in effect. The new manual-mode guards verify what
-the controller reports;
+The operator subsequently authorized takeover. App connection recovery and
+passive feedback inspection have not yet established a calibrated pose or
+validated a motion route. The new manual-mode guards verify what the controller
+reports;
 they do not turn its cached mode values into per-motor freshness evidence.
 The camera calibration and folded endpoints must not bypass that distinction.
 
