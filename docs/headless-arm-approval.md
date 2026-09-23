@@ -57,6 +57,10 @@ The iPhone controller now calls attention to pending approvals with a persistent
 orange banner, countdown, two-note sound and warning haptic, plus one reminder
 after ten seconds. Tapping the banner opens the existing review controls; it
 does not approve. The controller must be active with Action Approvals enabled.
+ROBController remembers the receive-requests preference across authenticated
+reconnects and foreground transitions (default On); explicit Off persists.
+Pending requests are cancelled on disconnect/background and cannot be revived
+by restoring the preference. Each new operation still needs an Approve tap.
 
 Startup/notice update verified on 2026-09-23: tunnel lifecycle fixtures passed,
 including missing credentials and repeated startup/wake calls; the approval

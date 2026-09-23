@@ -242,7 +242,9 @@ final class ROBArmRoutineVision {
         precondition(!g.commands.contains { $0.hasPrefix("calibrate") || $0.hasPrefix("gripper_") },
                      "Poor jaw visibility allowed a gripper operation")
         precondition(!ROBControllerArmApproval.shared.authorizesSupervisedArmRoute(), "Supervision survived completion")
-        v.blocked = false; g.q = ["left": zero, "right": zero]; g.mode = ["left": 0, "right": 0]; g.commands = []
+        // A core may have entered active mode before a prior acknowledgement
+        // failed. A whole active arm must still verify position mode to move.
+        v.blocked = false; g.q = ["left": zero, "right": zero]; g.mode = ["left": 1, "right": 0]; g.commands = []
         let startup = await run("startup")
         precondition(startup["status"] as? String == "completed", startup.description)
         precondition(g.commands.filter { $0.hasPrefix("calibrate:") }.count == 2)

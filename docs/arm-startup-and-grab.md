@@ -120,6 +120,23 @@ supervised Prepare request also ended before motion because no connected
 controller offered Action Approvals; physical execution still requires the
 operator's live controller decision.
 
+The next controller-approved trial passed camera admission but stopped on
+`Amber rejected active mode request (0)`. Read-only telemetry showed physical
+right (gateway `left` / L10) fully active at zero and physical left (gateway
+`right` / R11) fully inactive at zero, with fresh CAN feedback. No taught
+waypoint ran. The gateway now reconciles a zero mode reply only when all seven
+mode readbacks and a new fresh joint-status sample confirm the requested mode;
+the original response is retained. Cerebro admits a uniformly active arm for
+verified position-mode entry, so this interrupted state can be recovered under
+a new whole-operation controller approval. Mixed modes remain blocked.
+
+The recovery fixture starts with one active and one inactive arm and passes
+the complete simulated startup with two gripper calibrations. The signed build
+passed, was installed by the build phase and relaunched from
+`/Applications/Cerebro.app`. Installed debug-library SHA-256:
+`999fa81d65fd5007785933ef055472fb07b7f031aacbf01707543d99a2919fca`.
+These fixtures and installation do not establish physical route completion.
+
 A separate Vision hand detector, current depth coverage, stationary
 neck view, current per-motor CAN replies and a 1.5-second gateway lease supervise
 motion. These checks are conservative observations, **not a certified geometric

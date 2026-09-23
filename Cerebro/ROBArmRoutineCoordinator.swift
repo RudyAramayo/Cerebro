@@ -438,10 +438,10 @@ enum ROBArmRoutineError: LocalizedError {
         }
         for arm in arms {
             let modes = gateway.modes(forArm: arm).map(\.intValue)
-            guard modes.count == 7, modes.allSatisfy({ $0 == 0 }) || modes.allSatisfy({ $0 == 2 }) else {
+            guard modes.count == 7, modes.allSatisfy({ $0 == 0 }) || modes.allSatisfy({ $0 == 1 }) || modes.allSatisfy({ $0 == 2 }) else {
                 throw ROBArmRoutineError.blocked("Arm modes are mixed or unsupported.")
             }
-            if modes.allSatisfy({ $0 == 0 }) {
+            if !modes.allSatisfy({ $0 == 2 }) {
                 try await accepted([try send(gateway.enterPositionMode(forArm: arm))])
             }
         }
