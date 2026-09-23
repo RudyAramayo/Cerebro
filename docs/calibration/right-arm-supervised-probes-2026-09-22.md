@@ -9,6 +9,12 @@ During the held two-camera recording, the controller readback means were
 those seven-value packets were not proof of seven current measurements.
 Physical left remained reported inactive. No gripper commands were sent.
 
+The later [camera-probe continuation](right-arm-camera-probes-2026-09-22.md)
+records a new supervised presentation and completed two-sided probes of all
+seven joints after persistent recovery and the telemetry fixes. It retains
+fresh per-device feedback, relative image responses and their remaining
+calibration limits separately from the interrupted trial below.
+
 This is a commissioning record, **not an executable trajectory, a fitted
 calibration, or an approved folding animation**. The current controller
 coordinates and operator clearance observations cannot authorize another
@@ -189,9 +195,9 @@ joint-space request moved J1 from +0.45 to +0.60 while holding J2 at −0.60 and
 J3–J7 at zero. In the two-second endpoint window, the maximum readback error
 was 0.000776 rad and all individual CAN ages were below 5.25 ms. The next
 +0.75 target was staged but not sent, then cleared from the sliders when the
-operator raised the Amber-internal Drake model question. The arm remains at
-the completed `[+0.60, −0.60, 0, 0, 0, 0, 0]` target. No new camera capture or
-absolute offset fit accompanied this step.
+operator raised the Amber-internal Drake model question. At that pause, the
+arm held the completed `[+0.60, −0.60, 0, 0, 0, 0, 0]` target. No new camera
+capture or absolute offset fit accompanied this step.
 
 The [internal-model review](amber-internal-model-review-2026-09-22.md) records
 the configured vendor URDFs and their differences from the whole-robot model.
@@ -244,13 +250,14 @@ files are not an accepted synchronized startup calibration trial.
 
 ## Remaining calibration work
 
-Re-establish live feedback and a supervised hanging startup before further
-movement. Establish camera alignment from independently verified mount geometry or
-observed fixed robot landmarks; account for the main camera's neck pose.
+The later continuation re-established feedback and collected independent
+responses at the inspection pose. Establish camera alignment from independently
+verified mount geometry or observed fixed robot landmarks; account for the
+main camera's neck pose.
 Retain capture-time and stream-generation provenance when pairing frames
 with encoder samples. Then verify sufficient arm coverage and observable
 joint response during independent positive, negative and return probes, with
-a separate validation pose. No signs beyond the observed J1/J2 directions,
-absolute offsets, seven-joint visual fit, or automatic correction have been
-accepted. The saved B1 vectors remain priors, and no return to B1 zero was
-inserted.
+a separate validation pose. The later image-plane responses do not establish
+model-frame signs beyond the earlier physical J1/J2 observations. No absolute
+offsets, seven-joint visual fit, or automatic correction have been accepted.
+The saved B1 vectors remain priors, and no return to B1 zero was inserted.

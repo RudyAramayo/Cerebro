@@ -1,0 +1,1062 @@
+{
+  "method": "Integer-pixel normalized template correlation; visual repeatability aid only. Fixed manually chosen image regions. It does not estimate a joint angle, robot-frame offset or collision clearance.",
+  "positiveImageAxes": {
+    "x": "image right",
+    "y": "image down"
+  },
+  "patches": {
+    "gripper_tip": [
+      432,
+      162,
+      463,
+      188
+    ],
+    "gripper_plate": [
+      510,
+      179,
+      550,
+      209
+    ],
+    "housing": [
+      583,
+      239,
+      621,
+      279
+    ],
+    "stationary_cardboard": [
+      57,
+      180,
+      91,
+      218
+    ]
+  },
+  "comparisons": [
+    {
+      "baselinePhase": "inspection_baseline_before_J6_positive",
+      "phase": "J6_positive_held",
+      "recordingSession": "20260923T061129Z_4ed20294",
+      "baselineFrame": "face-000000053160",
+      "frame": "face-000000054989",
+      "receivedAt": "2026-09-23T06:15:46.738Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": -2,
+          "dyPixels": 8,
+          "normalizedCorrelation": 0.70759,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": 0,
+          "dyPixels": 5,
+          "normalizedCorrelation": 0.81045,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": 2,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.9924,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": -2,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.96978,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "inspection_baseline_before_J6_positive",
+      "phase": "J6_return_after_positive",
+      "recordingSession": "20260923T061129Z_4ed20294",
+      "baselineFrame": "face-000000053160",
+      "frame": "face-000000058298",
+      "receivedAt": "2026-09-23T06:17:36.743Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.95826,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.98394,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.99311,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": -1,
+          "dyPixels": 1,
+          "normalizedCorrelation": 0.86586,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "inspection_baseline_before_J6_positive",
+      "phase": "J6_negative_held",
+      "recordingSession": "20260923T061129Z_4ed20294",
+      "baselineFrame": "face-000000053160",
+      "frame": "face-000000061603",
+      "receivedAt": "2026-09-23T06:19:27.286Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": 3,
+          "dyPixels": -9,
+          "normalizedCorrelation": 0.65333,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": 2,
+          "dyPixels": -5,
+          "normalizedCorrelation": 0.80493,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.9956,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.96799,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "inspection_baseline_before_J6_positive",
+      "phase": "J6_final_recorded_return",
+      "recordingSession": "20260923T061129Z_4ed20294",
+      "baselineFrame": "face-000000053160",
+      "frame": "face-000000063278",
+      "receivedAt": "2026-09-23T06:20:23.677Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.67324,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.97587,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.99678,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": -1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.97011,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "J7_baseline",
+      "phase": "J7_positive_held",
+      "recordingSession": "20260923T062158Z_4e801b78",
+      "baselineFrame": "face-000000067139",
+      "frame": "face-000000069422",
+      "receivedAt": "2026-09-23T06:23:48.249Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": 3,
+          "dyPixels": -2,
+          "normalizedCorrelation": 0.76507,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": 3,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.86109,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": 3,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.98774,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": -2,
+          "dyPixels": 1,
+          "normalizedCorrelation": 0.92183,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "J7_baseline",
+      "phase": "J7_return_after_positive",
+      "recordingSession": "20260923T062158Z_4e801b78",
+      "baselineFrame": "face-000000067139",
+      "frame": "face-000000071635",
+      "receivedAt": "2026-09-23T06:25:01.415Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.57254,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.98453,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.99723,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.98966,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "J7_baseline",
+      "phase": "J7_negative_held",
+      "recordingSession": "20260923T062158Z_4e801b78",
+      "baselineFrame": "face-000000067139",
+      "frame": "face-000000073095",
+      "receivedAt": "2026-09-23T06:25:50.349Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": -1,
+          "dyPixels": 2,
+          "normalizedCorrelation": 0.75421,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.85763,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.98843,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": -1,
+          "dyPixels": 1,
+          "normalizedCorrelation": 0.90272,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "J7_baseline",
+      "phase": "J7_return_after_negative",
+      "recordingSession": "20260923T062158Z_4e801b78",
+      "baselineFrame": "face-000000067139",
+      "frame": "face-000000074294",
+      "receivedAt": "2026-09-23T06:26:30.749Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.45867,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.879,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.99044,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": -6,
+          "dyPixels": 13,
+          "normalizedCorrelation": 0.91745,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "J5_baseline",
+      "phase": "J5_positive_held",
+      "recordingSession": "20260923T062910Z_45e756f3",
+      "baselineFrame": "face-000000083850",
+      "frame": "face-000000084788",
+      "receivedAt": "2026-09-23T06:32:19.917Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": 1,
+          "dyPixels": -2,
+          "normalizedCorrelation": 0.93075,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": 2,
+          "dyPixels": -1,
+          "normalizedCorrelation": 0.89393,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": 3,
+          "dyPixels": -1,
+          "normalizedCorrelation": 0.98113,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": -1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.96693,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "J5_baseline",
+      "phase": "J5_return_after_positive",
+      "recordingSession": "20260923T062910Z_45e756f3",
+      "baselineFrame": "face-000000083850",
+      "frame": "face-000000085662",
+      "receivedAt": "2026-09-23T06:32:49.616Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.99095,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.98524,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.99517,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": -15,
+          "dyPixels": 16,
+          "normalizedCorrelation": 0.78438,
+          "searchBoundaryHit": true
+        }
+      }
+    },
+    {
+      "baselinePhase": "J5_baseline",
+      "phase": "J5_negative_held",
+      "recordingSession": "20260923T062910Z_45e756f3",
+      "baselineFrame": "face-000000083850",
+      "frame": "face-000000086711",
+      "receivedAt": "2026-09-23T06:33:23.838Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": 0,
+          "dyPixels": 2,
+          "normalizedCorrelation": 0.94464,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": -1,
+          "dyPixels": 1,
+          "normalizedCorrelation": 0.88495,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": -2,
+          "dyPixels": 1,
+          "normalizedCorrelation": 0.98967,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": -12,
+          "dyPixels": 16,
+          "normalizedCorrelation": 0.87497,
+          "searchBoundaryHit": true
+        }
+      }
+    },
+    {
+      "baselinePhase": "J5_baseline",
+      "phase": "J5_return_after_negative",
+      "recordingSession": "20260923T062910Z_45e756f3",
+      "baselineFrame": "face-000000083850",
+      "frame": "face-000000087834",
+      "receivedAt": "2026-09-23T06:34:01.731Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.97983,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.96739,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.99429,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": -13,
+          "dyPixels": 16,
+          "normalizedCorrelation": 0.89017,
+          "searchBoundaryHit": true
+        }
+      }
+    },
+    {
+      "baselinePhase": "J4_baseline",
+      "phase": "J4_positive_held",
+      "recordingSession": "20260923T063906Z_9e15b878",
+      "baselineFrame": "face-000000097373",
+      "frame": "face-000000098371",
+      "receivedAt": "2026-09-23T06:39:52.715Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": 4,
+          "dyPixels": -7,
+          "normalizedCorrelation": 0.96138,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": 4,
+          "dyPixels": -6,
+          "normalizedCorrelation": 0.97257,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": 4,
+          "dyPixels": -5,
+          "normalizedCorrelation": 0.97888,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.95044,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "J4_baseline",
+      "phase": "J4_return_after_positive",
+      "recordingSession": "20260923T063906Z_9e15b878",
+      "baselineFrame": "face-000000097373",
+      "frame": "face-000000099376",
+      "receivedAt": "2026-09-23T06:40:26.195Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.95198,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.99148,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.99787,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.98229,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "J4_baseline",
+      "phase": "J4_negative_held",
+      "recordingSession": "20260923T063906Z_9e15b878",
+      "baselineFrame": "face-000000097373",
+      "frame": "face-000000100775",
+      "receivedAt": "2026-09-23T06:41:12.867Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": -3,
+          "dyPixels": 7,
+          "normalizedCorrelation": 0.79155,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": -3,
+          "dyPixels": 6,
+          "normalizedCorrelation": 0.95656,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": -3,
+          "dyPixels": 5,
+          "normalizedCorrelation": 0.98847,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": -1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.93205,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "J4_baseline",
+      "phase": "J4_return_after_negative",
+      "recordingSession": "20260923T063906Z_9e15b878",
+      "baselineFrame": "face-000000097373",
+      "frame": "face-000000101742",
+      "receivedAt": "2026-09-23T06:41:45.131Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": -1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.44706,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": -1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.95221,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": -1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.99281,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.78939,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "J3_baseline",
+      "phase": "J3_positive_held",
+      "recordingSession": "20260923T064548Z_927c7d37",
+      "baselineFrame": "face-000000105028",
+      "frame": "face-000000109273",
+      "receivedAt": "2026-09-23T06:45:56.092Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": -4,
+          "dyPixels": -2,
+          "normalizedCorrelation": 0.81587,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": -4,
+          "dyPixels": -2,
+          "normalizedCorrelation": 0.84875,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": -3,
+          "dyPixels": -2,
+          "normalizedCorrelation": 0.98992,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.54004,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "J3_baseline",
+      "phase": "J3_return_after_positive",
+      "recordingSession": "20260923T064548Z_927c7d37",
+      "baselineFrame": "face-000000105028",
+      "frame": "face-000000110197",
+      "receivedAt": "2026-09-23T06:46:26.725Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.82305,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": 2,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.80173,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": 2,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.99303,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": -2,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.51342,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "J3_baseline",
+      "phase": "J3_negative_held",
+      "recordingSession": "20260923T064548Z_927c7d37",
+      "baselineFrame": "face-000000105028",
+      "frame": "face-000000111342",
+      "receivedAt": "2026-09-23T06:47:05.100Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": -10,
+          "dyPixels": -11,
+          "normalizedCorrelation": 0.39144,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": 3,
+          "dyPixels": 2,
+          "normalizedCorrelation": 0.94778,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": 2,
+          "dyPixels": 2,
+          "normalizedCorrelation": 0.99293,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.89841,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "J3_baseline",
+      "phase": "J3_return_after_negative",
+      "recordingSession": "20260923T064548Z_927c7d37",
+      "baselineFrame": "face-000000105028",
+      "frame": "face-000000113963",
+      "receivedAt": "2026-09-23T06:48:32.382Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.84822,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.9847,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.99519,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.86213,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "J2_baseline",
+      "phase": "J2_positive_held",
+      "recordingSession": "20260923T064548Z_927c7d37",
+      "baselineFrame": "face-000000113963",
+      "frame": "face-000000114905",
+      "receivedAt": "2026-09-23T06:49:03.869Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": -6,
+          "dyPixels": 9,
+          "normalizedCorrelation": 0.40993,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": -8,
+          "dyPixels": 9,
+          "normalizedCorrelation": 0.82259,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": -9,
+          "dyPixels": 9,
+          "normalizedCorrelation": 0.9886,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.77124,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "J2_baseline",
+      "phase": "J2_return_after_positive",
+      "recordingSession": "20260923T064548Z_927c7d37",
+      "baselineFrame": "face-000000113963",
+      "frame": "face-000000115986",
+      "receivedAt": "2026-09-23T06:49:39.728Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.49091,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": -1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.81725,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": -1,
+          "dyPixels": -1,
+          "normalizedCorrelation": 0.9934,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.61083,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "J2_baseline",
+      "phase": "J2_negative_held",
+      "recordingSession": "20260923T064548Z_927c7d37",
+      "baselineFrame": "face-000000113963",
+      "frame": "face-000000117036",
+      "receivedAt": "2026-09-23T06:50:14.724Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": 6,
+          "dyPixels": -9,
+          "normalizedCorrelation": 0.43726,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": 6,
+          "dyPixels": -10,
+          "normalizedCorrelation": 0.80795,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": 8,
+          "dyPixels": -9,
+          "normalizedCorrelation": 0.9853,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.67129,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "J2_baseline",
+      "phase": "J2_return_after_negative",
+      "recordingSession": "20260923T064548Z_927c7d37",
+      "baselineFrame": "face-000000113963",
+      "frame": "face-000000118006",
+      "receivedAt": "2026-09-23T06:50:47.215Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.50163,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.84655,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.99666,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.72543,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "J1_baseline",
+      "phase": "J1_positive_held",
+      "recordingSession": "20260923T064548Z_927c7d37",
+      "baselineFrame": "face-000000118006",
+      "frame": "face-000000119007",
+      "receivedAt": "2026-09-23T06:51:21.217Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": -9,
+          "dyPixels": -4,
+          "normalizedCorrelation": 0.78471,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": -10,
+          "dyPixels": -5,
+          "normalizedCorrelation": 0.96013,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": -10,
+          "dyPixels": -5,
+          "normalizedCorrelation": 0.98423,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.7953,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "J1_baseline",
+      "phase": "J1_return_after_positive",
+      "recordingSession": "20260923T064548Z_927c7d37",
+      "baselineFrame": "face-000000118006",
+      "frame": "face-000000119913",
+      "receivedAt": "2026-09-23T06:51:50.767Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.91214,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.98393,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.98673,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": -1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.64598,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "J1_baseline",
+      "phase": "J1_negative_held",
+      "recordingSession": "20260923T064548Z_927c7d37",
+      "baselineFrame": "face-000000118006",
+      "frame": "face-000000121034",
+      "receivedAt": "2026-09-23T06:52:27.938Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": 10,
+          "dyPixels": 4,
+          "normalizedCorrelation": 0.7318,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": 10,
+          "dyPixels": 4,
+          "normalizedCorrelation": 0.91482,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": 11,
+          "dyPixels": 4,
+          "normalizedCorrelation": 0.98461,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.67392,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "J1_baseline",
+      "phase": "J1_return_after_negative",
+      "recordingSession": "20260923T064548Z_927c7d37",
+      "baselineFrame": "face-000000118006",
+      "frame": "face-000000122080",
+      "receivedAt": "2026-09-23T06:53:03.216Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.91957,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.97845,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": -1,
+          "dyPixels": -1,
+          "normalizedCorrelation": 0.98842,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.69141,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "inspection_baseline_before_J6_positive",
+      "phase": "J6_return_after_negative_paired",
+      "recordingSession": "20260923T061129Z_4ed20294",
+      "baselineFrame": "face-000000053160",
+      "frame": "face-000000063034",
+      "receivedAt": "2026-09-23T06:20:14.698Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.61617,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.87009,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.99588,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": -1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.96714,
+          "searchBoundaryHit": false
+        }
+      }
+    },
+    {
+      "baselinePhase": "J7_baseline",
+      "phase": "J7_return_after_negative_paired",
+      "recordingSession": "20260923T062158Z_4e801b78",
+      "baselineFrame": "face-000000067139",
+      "frame": "face-000000074012",
+      "receivedAt": "2026-09-23T06:26:20.755Z",
+      "features": {
+        "gripper_tip": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.47759,
+          "searchBoundaryHit": false
+        },
+        "gripper_plate": {
+          "dxPixels": 0,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.88381,
+          "searchBoundaryHit": false
+        },
+        "housing": {
+          "dxPixels": 1,
+          "dyPixels": 0,
+          "normalizedCorrelation": 0.98921,
+          "searchBoundaryHit": false
+        },
+        "stationary_cardboard": {
+          "dxPixels": -6,
+          "dyPixels": 13,
+          "normalizedCorrelation": 0.93951,
+          "searchBoundaryHit": false
+        }
+      }
+    }
+  ],
+  "limitations": [
+    "Translations are integer-pixel image observations, not model-frame joint angle measurements.",
+    "The cardboard patch fails or changes in several J5/J7 frames; it does not certify a stationary camera.",
+    "J5/J7 motion is only a few pixels and camera angular uncertainty has not been quantified.",
+    "People and background move; gripper-tip patches can include changing background.",
+    "Thin jaw-tip depth can sample background; no depth-based collision clearance is asserted."
+  ]
+}
