@@ -40,13 +40,32 @@ calibration/control acceptance is reported as unverified mechanical completion.
 ## Transport and failure behavior
 
 Cerebro automatically opens its Amber SSH tunnel and authenticates the gateway
-on launch and after system wake when the gateway token and SSH password are
-already saved in Keychain. This prepares telemetry without activating either
-arm. No Diagnostics window or terminal login is needed. The current connection
-uses `sshpass` with the saved password on an anonymous pipe; an authorized SSH
-key is not required. The SSH attempt and initial gateway retries are bounded;
+on launch and after system wake when the gateway token is saved in Keychain and
+either `~/.ssh/cerebro_amber_ed25519` is readable or an SSH password is saved.
+This prepares telemetry without activating either arm. No Diagnostics window
+or terminal login is needed. The dedicated key uses direct, noninteractive SSH
+with `IdentitiesOnly=yes` and `BatchMode=yes`; it requires neither a saved SSH
+password nor `sshpass`. Without that key, the existing `sshpass` path uses the
+saved password through an anonymous pipe. A rejected key is reported explicitly
+instead of silently falling back to a password. The SSH attempt and initial gateway retries are bounded;
 failure remains visible in Amber Diagnostics and an approved operation can make
 a fresh attempt. There is no indefinite reconnect loop or motion replay.
+
+On 2026-09-23 the dedicated Ed25519 public key was installed for `amber`,
+preserving the robot's existing authorized keys. Its fingerprint is
+`SHA256:DUsivvUse1PZfcP22O1aL46/zSQCpygoaIWUvM39YLw`. Private key material
+remains in the Mac's `.ssh` directory and is not part of this repository.
+The local SSH configuration selects it for `amber`, `amber-master.local` and
+`10.0.0.26`. Passwordless login was verified through both hostname and IP, as
+was forwarding to the gateway's challenge without authenticating another
+gateway controller or taking motor ownership. The key disables agent and X11
+forwarding; the local gateway tunnel remains available.
+
+The tunnel runtime fixtures also verify key-only startup with no saved SSH
+password, direct SSH arguments, readiness only after gateway authentication,
+and key-specific failure reporting. The new signed app build must be reloaded
+after a verified return to hanging; the existing running session can continue
+holding the arms in the meantime.
 
 Before sleep, Cerebro cancels pending arm approval/routines, requests hold and
 closes the tunnel. Wake starts a new gateway session, and the startup calibration

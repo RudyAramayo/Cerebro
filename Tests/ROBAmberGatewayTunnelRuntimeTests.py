@@ -71,6 +71,7 @@ TESTS = r'''
     }
     static func main() {
         let tunnel = ROBAmberGatewayTunnel()
+        tunnel.sshIdentityPath = { nil }
         let gateway = ROBAmberGatewayClient.shared
         let config = ROBAmberGatewayConfiguration.shared
         tunnel.connect()
@@ -169,6 +170,24 @@ TESTS = r'''
         precondition(FixtureProcess.launched.count == startupLaunches + 2)
         tunnel.disconnect()
         print("Tunnel: configured startup/wake, missing credentials and duplicate launch passed")
+
+        config.password = nil
+        tunnel.sshIdentityPath = { "/fixture/cerebro_amber_ed25519" }
+        tunnel.connectIfConfigured()
+        let keyed = FixtureProcess.launched.last!
+        precondition(keyed.executableURL?.path == "/usr/bin/ssh")
+        precondition(keyed.arguments!.contains("/fixture/cerebro_amber_ed25519"))
+        precondition(keyed.arguments!.contains("BatchMode=yes") && keyed.arguments!.contains("IdentitiesOnly=yes"))
+        precondition(!keyed.arguments!.contains("-d") && !(keyed.standardInput is Pipe))
+        let keyConnects = gateway.connects
+        wait({ gateway.connects > keyConnects })
+        gateway.state = .ready
+        wait({ tunnel.detail.contains("gateway authenticated") })
+        keyed.exit(255, error: "Permission denied (publickey).")
+        wait({ tunnel.failureDetail != nil })
+        precondition(tunnel.failureDetail!.contains("installed Amber public key"))
+        precondition(!tunnel.isRunning)
+        print("Tunnel: key-only startup without password, direct noninteractive SSH and key-specific failure passed")
     }
 }
 '''

@@ -253,6 +253,11 @@ extension Notification.Name {
     private var task: Process?
     private var activeHost: String?
     private var connectionTimer: Timer?
+    @nonobjc var sshIdentityPath: () -> String? = {
+        let path = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".ssh/cerebro_amber_ed25519").path
+        return FileManager.default.isReadableFile(atPath: path) ? path : nil
+    }
 
     /// Transport only: prepare telemetry before the operator reviews startup
     /// motion. Unconfigured installations stay idle without a desktop prompt.
@@ -262,7 +267,8 @@ extension Notification.Name {
             return
         }
         let configuration = ROBAmberGatewayConfiguration.shared
-        guard configuration.hasGatewayToken, configuration.hasSSHPassword else { return }
+        guard configuration.hasGatewayToken,
+              configuration.hasSSHPassword || sshIdentityPath() != nil else { return }
         connect()
     }
 
@@ -287,25 +293,31 @@ extension Notification.Name {
             return
         }
         disconnect()
+        let identity = sshIdentityPath()
+        let password = identity == nil ? configuration.sshPassword() : nil
         guard let token = configuration.gatewayToken(),
-              let password = configuration.sshPassword(), !password.isEmpty else {
-            fail("Save the Amber gateway token and SSH password in Keychain first")
+              identity != nil || password?.isEmpty == false else {
+            fail("Save the Amber gateway token in Keychain and install the Amber SSH key or save an SSH password first")
             return
         }
         let candidates = [
             "/opt/homebrew/bin/sshpass", "/opt/local/bin/sshpass", "/usr/local/bin/sshpass",
         ]
-        guard let sshpass = candidates.first(where: {
+        let sshpass = candidates.first(where: {
             FileManager.default.isExecutableFile(atPath: $0)
-        }) else {
+        })
+        guard identity != nil || sshpass != nil else {
             fail("sshpass is unavailable; install it from Cerebro Settings")
             return
         }
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: sshpass)
-        process.arguments = [
-            "-d", "0", "/usr/bin/ssh", "-N", "-T",
+        process.executableURL = URL(fileURLWithPath: identity == nil ? sshpass! : "/usr/bin/ssh")
+        var arguments = identity == nil ? ["-d", "0", "/usr/bin/ssh"] : []
+        if let identity {
+            arguments += ["-i", identity, "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes"]
+        }
+        process.arguments = arguments + ["-N", "-T",
             "-o", "ExitOnForwardFailure=yes",
             "-o", "ConnectTimeout=5",
             "-o", "ConnectionAttempts=1",
@@ -322,7 +334,7 @@ extension Notification.Name {
         environment["SSH_ASKPASS_REQUIRE"] = "never"
         process.environment = environment
         let passwordPipe = Pipe()
-        process.standardInput = passwordPipe
+        process.standardInput = identity == nil ? passwordPipe : FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         let errorPipe = Pipe()
         process.standardError = errorPipe
@@ -335,7 +347,8 @@ extension Notification.Name {
                 guard let self, let process, process === self.task else { return }
                 let message: String
                 if process.terminationStatus == 5 || errorText?.contains("Permission denied") == true {
-                    message = "SSH login rejected for amber@\(host). Check the saved SSH password in Amber Arm Diagnostics. Controller approval does not authenticate SSH."
+                    let credential = identity == nil ? "the saved SSH password in Amber Arm Diagnostics" : "the installed Amber public key in ~/.ssh/authorized_keys"
+                    message = "SSH login rejected for amber@\(host). Check \(credential). Controller approval does not authenticate SSH."
                 } else {
                     let reason = errorText?.isEmpty == false ? String(errorText!.prefix(2_048)) : "exit \(process.terminationStatus)"
                     message = "SSH tunnel ended: \(reason)"
@@ -347,7 +360,9 @@ extension Notification.Name {
             try process.run()
             task = process
             activeHost = host
-            try passwordPipe.fileHandleForWriting.write(contentsOf: Data((password + "\n").utf8))
+            if let password {
+                try passwordPipe.fileHandleForWriting.write(contentsOf: Data((password + "\n").utf8))
+            }
             try passwordPipe.fileHandleForWriting.close()
             configuration.sshHost = host
             update(running: true, detail: "Opening secure tunnel to amber@\(host)")
