@@ -1,0 +1,874 @@
+{
+  "purpose": "Persistent-stack recovery and supervised shoulder clearance probes; not a completed visual calibration or folding trajectory",
+  "physicalArm": "right",
+  "core": "L10",
+  "canInterface": "can10",
+  "udpPort": 26001,
+  "gatewayArm": "left",
+  "appCodeCommit": "bc5bb1947ee7931ee5240355820591ce36532983",
+  "gatewayCommit": "17517e20f0c0d4e4bc4464a3e5486ae0be1e7d03",
+  "recovery": {
+    "operatorConfirmedBothArmsSupported": true,
+    "operatorReportedRestartingCore": true,
+    "uiSubmittedAt": "2026-09-22T22:12:41.655-07:00",
+    "uiSucceededAt": "2026-09-22T22:13:03.410-07:00",
+    "gatewayReadyAt": "2026-09-22T22:13:05.050-07:00",
+    "additionalRestartAfterOperatorReport": false,
+    "startupPath": "rc-local.service with runuser/nohup and per-core stdout/stderr files",
+    "rightCorePID": 5327,
+    "leftCorePID": 5328,
+    "gatewayPID": 5383,
+    "modeQueries": {
+      "right": {
+        "at": "2026-09-22T22:14:31.074-07:00",
+        "allSevenModes": 2
+      },
+      "left": {
+        "at": "2026-09-22T22:14:59.497-07:00",
+        "allSevenModes": 0
+      }
+    },
+    "newControllerZeroReference": true,
+    "physicalHangingClearanceConfirmedBeforeLift": true
+  },
+  "passiveDiagnostics": {
+    "beforeLift": {
+      "observedAt": "2026-09-23T05:15:56.812232+00:00",
+      "cores": [
+        {
+          "core_process": "amber_core_L",
+          "pid": 5327,
+          "parent_pid": 5324,
+          "parent_command": "/usr/sbin/runuser -u amber -- /usr/bin/env LCM_DEFAULT_URL=udpm://239.255.76.67:7667?ttl=10 /usr/bin/nohup /bin/sh -c cd /home/amber/L-10 && exec ./amber_core_L >core.log 2>&1 ",
+          "cgroup": "0::/system.slice/rc-local.service\n",
+          "cwd": "/home/amber/L-10",
+          "stdout": "/home/amber/L-10/core.log",
+          "stderr": "/home/amber/L-10/core.log"
+        },
+        {
+          "core_process": "amber_core_R",
+          "pid": 5328,
+          "parent_pid": 5325,
+          "parent_command": "/usr/sbin/runuser -u amber -- /usr/bin/env LCM_DEFAULT_URL=udpm://239.255.76.67:7667?ttl=10 /usr/bin/nohup /bin/sh -c cd /home/amber/R-11 && exec ./amber_core_R >core.log 2>&1 ",
+          "cgroup": "0::/system.slice/rc-local.service\n",
+          "cwd": "/home/amber/R-11",
+          "stdout": "/home/amber/R-11/core.log",
+          "stderr": "/home/amber/R-11/core.log"
+        }
+      ],
+      "deviceReplies": [
+        {
+          "interface": "can10",
+          "sample_seconds": 2,
+          "received_ids": {
+            "0x91": 401,
+            "0x92": 402,
+            "0x98": 400,
+            "0x93": 400,
+            "0x97": 401,
+            "0x95": 401,
+            "0x94": 401,
+            "0x96": 400
+          },
+          "local_tx_ids": {
+            "0x11": 399,
+            "0x12": 399,
+            "0x13": 399,
+            "0x14": 399,
+            "0x15": 399,
+            "0x16": 399,
+            "0x17": 399
+          },
+          "last_received_payload": {
+            "0x91": "ff00000000ff9e02",
+            "0x92": "ff00000000ffe302",
+            "0x98": "ff00000000000000",
+            "0x93": "ff00000000004902",
+            "0x97": "ff00000000ffcf02",
+            "0x95": "ff0000000000a202",
+            "0x94": "ff00000000fff402",
+            "0x96": "ff00000000ffb102"
+          },
+          "sent_frames": 0
+        },
+        {
+          "interface": "can11",
+          "sample_seconds": 2,
+          "received_ids": {
+            "0x96": 401,
+            "0x93": 402,
+            "0x92": 401,
+            "0x97": 400,
+            "0x94": 401,
+            "0x98": 400,
+            "0x95": 401,
+            "0x91": 400
+          },
+          "local_tx_ids": {
+            "0x16": 389,
+            "0x17": 389,
+            "0x11": 389,
+            "0x12": 388,
+            "0x13": 388,
+            "0x14": 388,
+            "0x15": 388
+          },
+          "last_received_payload": {
+            "0x96": "ff00000000000000",
+            "0x93": "ff00000000000000",
+            "0x92": "ff00000000000000",
+            "0x97": "ff00000000000000",
+            "0x94": "ff00000000000000",
+            "0x98": "ff00000000000000",
+            "0x95": "ff00000000000000",
+            "0x91": "ff00000000000000"
+          },
+          "sent_frames": 0
+        }
+      ],
+      "canCounters": {
+        "can_counters": {
+          "can10": {
+            "rx_packets": 311074,
+            "rx_dropped": 0,
+            "rx_errors": 0,
+            "tx_packets": 243313,
+            "tx_dropped": 0,
+            "tx_errors": 0
+          },
+          "can11": {
+            "rx_packets": 311117,
+            "rx_dropped": 0,
+            "rx_errors": 0,
+            "tx_packets": 243824,
+            "tx_dropped": 0,
+            "tx_errors": 0
+          }
+        },
+        "can_delta": {
+          "can10": {
+            "rx_packets": 3212,
+            "rx_dropped": 0,
+            "rx_errors": 0,
+            "tx_packets": 2800,
+            "tx_dropped": 0,
+            "tx_errors": 0
+          },
+          "can11": {
+            "rx_packets": 3213,
+            "rx_dropped": 0,
+            "rx_errors": 0,
+            "tx_packets": 2730,
+            "tx_dropped": 0,
+            "tx_errors": 0
+          }
+        },
+        "can_or_udp_commands_sent": 0
+      },
+      "serviceState": "MainPID=5383\nNRestarts=0\nExecMainStartTimestamp=Wed 2026-09-23 05:13:01 UTC\nId=rob-amber-gateway.service\nActiveState=active\nSubState=running\n\nMainPID=0\nNRestarts=0\nExecMainStartTimestamp=n/a\nId=rc-local.service\nActiveState=active\nSubState=running\n",
+      "coreLogs": [
+        {
+          "core": "L-10",
+          "log_mtime": 1790140379.8772793,
+          "tail": "    ___    __  _______  __________ \n   /   |  /  |/  / __ )/ ____/ __ \\\n  / /| | / /|_/ / __  / __/ / /_/ /\n / ___ |/ /  / / /_/ / /___/ _, _/ \n/_/  |_/_/  /_/_____/_____/_/ |_|  \n=============  V0.2.0  ============\n[ Loading ] Using Launch File launch.json \nBase Link = base_link\nEnd Effector = Lseven_Link\nUDP_SERVER_ENABLE\n[ Loading ] Control Frequency @ 200hz \n[ Loading ] Using URDF File   @ ./urdf/dual_b1/DualArmL.urdf \n[ DELAY ] 5106\n[ Started ] LCM_ROS_Data_Publisher\n[ Started ] UDP_Server\n[ Started ] Drake_Kinematic_Solver\n[ Started ] LCM_ROS_Command_Listener\n",
+          "error": ""
+        },
+        {
+          "core": "R-11",
+          "log_mtime": 1790140379.861279,
+          "tail": "    ___    __  _______  __________ \n   /   |  /  |/  / __ )/ ____/ __ \\\n  / /| | / /|_/ / __  / __/ / /_/ /\n / ___ |/ /  / / /_/ / /___/ _, _/ \n/_/  |_/_/  /_/_____/_____/_/ |_|  \n=============  V0.2.0  ============\n[ Loading ] Using Launch File launch.json \nBase Link = base_link\nEnd Effector = Rseven_Link\nUDP_SERVER_ENABLE\n[ Loading ] Control Frequency @ 200hz \n[ Loading ] Using URDF File   @ ./urdf/dual_b1/DualArmR.urdf \n[ Started ] UDP_Server\n[ DELAY ] 5000\n[ DELAY ] 13925\n[ Started ] LCM_ROS_Data_Publisher\n[ Started ] LCM_ROS_Command_Listener\n[ Started ] Drake_Kinematic_Solver\n",
+          "error": ""
+        }
+      ]
+    },
+    "afterLift": {
+      "observedAt": "2026-09-23T05:17:37.247207+00:00",
+      "cores": [
+        {
+          "core_process": "amber_core_L",
+          "pid": 5327,
+          "parent_pid": 5324,
+          "parent_command": "/usr/sbin/runuser -u amber -- /usr/bin/env LCM_DEFAULT_URL=udpm://239.255.76.67:7667?ttl=10 /usr/bin/nohup /bin/sh -c cd /home/amber/L-10 && exec ./amber_core_L >core.log 2>&1 ",
+          "cgroup": "0::/system.slice/rc-local.service\n",
+          "cwd": "/home/amber/L-10",
+          "stdout": "/home/amber/L-10/core.log",
+          "stderr": "/home/amber/L-10/core.log"
+        },
+        {
+          "core_process": "amber_core_R",
+          "pid": 5328,
+          "parent_pid": 5325,
+          "parent_command": "/usr/sbin/runuser -u amber -- /usr/bin/env LCM_DEFAULT_URL=udpm://239.255.76.67:7667?ttl=10 /usr/bin/nohup /bin/sh -c cd /home/amber/R-11 && exec ./amber_core_R >core.log 2>&1 ",
+          "cgroup": "0::/system.slice/rc-local.service\n",
+          "cwd": "/home/amber/R-11",
+          "stdout": "/home/amber/R-11/core.log",
+          "stderr": "/home/amber/R-11/core.log"
+        }
+      ],
+      "deviceReplies": [
+        {
+          "interface": "can10",
+          "sample_seconds": 2,
+          "received_ids": {
+            "0x98": 400,
+            "0x97": 401,
+            "0x91": 401,
+            "0x94": 401,
+            "0x96": 400,
+            "0x93": 399,
+            "0x92": 401,
+            "0x95": 400
+          },
+          "local_tx_ids": {
+            "0x11": 393,
+            "0x12": 393,
+            "0x13": 393,
+            "0x14": 393,
+            "0x15": 393,
+            "0x16": 392,
+            "0x17": 392
+          },
+          "last_received_payload": {
+            "0x98": "ff00000000000000",
+            "0x97": "ff00000000ffe602",
+            "0x91": "ff00000000ff3502",
+            "0x94": "ff00000000ffae02",
+            "0x96": "ff00000000ff9702",
+            "0x93": "ff00000000004002",
+            "0x92": "fffe480000021902",
+            "0x95": "ff00000000009902"
+          },
+          "sent_frames": 0
+        },
+        {
+          "interface": "can11",
+          "sample_seconds": 2,
+          "received_ids": {
+            "0x97": 401,
+            "0x93": 402,
+            "0x96": 401,
+            "0x92": 400,
+            "0x98": 400,
+            "0x91": 400,
+            "0x95": 400,
+            "0x94": 400
+          },
+          "local_tx_ids": {
+            "0x11": 393,
+            "0x12": 393,
+            "0x13": 393,
+            "0x14": 393,
+            "0x15": 393,
+            "0x16": 392,
+            "0x17": 392
+          },
+          "last_received_payload": {
+            "0x97": "ff00000000000000",
+            "0x93": "ff00000000000000",
+            "0x96": "ff00000000000000",
+            "0x92": "ff00000000000000",
+            "0x98": "ff00000000000000",
+            "0x91": "ff00000000000000",
+            "0x95": "ff00000000000000",
+            "0x94": "ff00000000000000"
+          },
+          "sent_frames": 0
+        }
+      ],
+      "canCounters": {
+        "can_counters": {
+          "can10": {
+            "rx_packets": 471955,
+            "rx_dropped": 0,
+            "rx_errors": 0,
+            "tx_packets": 381052,
+            "tx_dropped": 0,
+            "tx_errors": 0
+          },
+          "can11": {
+            "rx_packets": 472056,
+            "rx_dropped": 0,
+            "rx_errors": 0,
+            "tx_packets": 381794,
+            "tx_dropped": 0,
+            "tx_errors": 0
+          }
+        },
+        "can_delta": {
+          "can10": {
+            "rx_packets": 3212,
+            "rx_dropped": 0,
+            "rx_errors": 0,
+            "tx_packets": 2751,
+            "tx_dropped": 0,
+            "tx_errors": 0
+          },
+          "can11": {
+            "rx_packets": 3212,
+            "rx_dropped": 0,
+            "rx_errors": 0,
+            "tx_packets": 2753,
+            "tx_dropped": 0,
+            "tx_errors": 0
+          }
+        },
+        "can_or_udp_commands_sent": 0
+      },
+      "serviceState": "MainPID=5383\nNRestarts=0\nExecMainStartTimestamp=Wed 2026-09-23 05:13:01 UTC\nId=rob-amber-gateway.service\nActiveState=active\nSubState=running\n\nMainPID=0\nNRestarts=0\nExecMainStartTimestamp=n/a\nId=rc-local.service\nActiveState=active\nSubState=running\n",
+      "coreLogs": [
+        {
+          "core": "L-10",
+          "log_mtime": 1790140603.3343275,
+          "tail": "    ___    __  _______  __________ \n   /   |  /  |/  / __ )/ ____/ __ \\\n  / /| | / /|_/ / __  / __/ / /_/ /\n / ___ |/ /  / / /_/ / /___/ _, _/ \n/_/  |_/_/  /_/_____/_____/_/ |_|  \n=============  V0.2.0  ============\n[ Loading ] Using Launch File launch.json \nBase Link = base_link\nEnd Effector = Lseven_Link\nUDP_SERVER_ENABLE\n[ Loading ] Control Frequency @ 200hz \n[ Loading ] Using URDF File   @ ./urdf/dual_b1/DualArmL.urdf \n[ DELAY ] 5106\n[ Started ] LCM_ROS_Data_Publisher\n[ Started ] UDP_Server\n[ Started ] Drake_Kinematic_Solver\n[ Started ] LCM_ROS_Command_Listener\n[ DELAY ] 8753\n[ DELAY ] 9988\n[ DELAY ] 9996\n[ DELAY ] 10027\n[ DELAY ] 10981\n[ DELAY ] 11014\n[ DELAY ] 13080\n[ DELAY ] 23823\n[ RuckigT ] Trajectory duration: 4 [s].\n",
+          "error": ""
+        },
+        {
+          "core": "R-11",
+          "log_mtime": 1790140379.861279,
+          "tail": "    ___    __  _______  __________ \n   /   |  /  |/  / __ )/ ____/ __ \\\n  / /| | / /|_/ / __  / __/ / /_/ /\n / ___ |/ /  / / /_/ / /___/ _, _/ \n/_/  |_/_/  /_/_____/_____/_/ |_|  \n=============  V0.2.0  ============\n[ Loading ] Using Launch File launch.json \nBase Link = base_link\nEnd Effector = Rseven_Link\nUDP_SERVER_ENABLE\n[ Loading ] Control Frequency @ 200hz \n[ Loading ] Using URDF File   @ ./urdf/dual_b1/DualArmR.urdf \n[ Started ] UDP_Server\n[ DELAY ] 5000\n[ DELAY ] 13925\n[ Started ] LCM_ROS_Data_Publisher\n[ Started ] LCM_ROS_Command_Listener\n[ Started ] Drake_Kinematic_Solver\n",
+          "error": ""
+        }
+      ]
+    }
+  },
+  "telemetry": [
+    {
+      "id": "lift",
+      "path": "persistent-core-lift-20260922.csv.gz",
+      "gzipSHA256": "2a1016e6d8684ec440e6090c8b2134f33e9d91e363ec014324f413cc391792de",
+      "uncompressedSHA256": "df14e3c2fcc37311c3100bd8e3f0ccfe9bd4906faddddf9851a0ff221a0f628c",
+      "rows": 33600,
+      "receivedTimeRange": [
+        "2026-09-23T05:15:03.984Z",
+        "2026-09-23T05:17:05.684Z"
+      ],
+      "maximumControllerAgeMilliseconds": 14.753829,
+      "maximumJointCANAgeMilliseconds": 8.095476,
+      "maximumGripperCANAgeMilliseconds": 9.407241
+    },
+    {
+      "id": "clearance01",
+      "path": "persistent-clearance-01-20260922.csv.gz",
+      "gzipSHA256": "4cb4b4045f9e13440ee99ea5d46a96fd9fbf213eacd71b711bf995778af9f9ec",
+      "uncompressedSHA256": "361302aafc7cdbf00d3a8f3dfccf5604635e2a0b50df3919bd17ef4bd195f8f9",
+      "rows": 33600,
+      "receivedTimeRange": [
+        "2026-09-23T05:17:19.995Z",
+        "2026-09-23T05:19:21.665Z"
+      ],
+      "maximumControllerAgeMilliseconds": 33.373537,
+      "maximumJointCANAgeMilliseconds": 10.011514,
+      "maximumGripperCANAgeMilliseconds": 6.550247
+    },
+    {
+      "id": "clearance02",
+      "path": "persistent-clearance-02-20260922.csv.gz",
+      "gzipSHA256": "a4c504c973113cbfb91899f685c3b7966580243a826b46e9a121a38edb22ad7b",
+      "uncompressedSHA256": "78a2c0aca6dcb40097fa00027a1768559bd26e242b4d67fc52e60d80e5ef60ea",
+      "rows": 33600,
+      "receivedTimeRange": [
+        "2026-09-23T05:20:28.981Z",
+        "2026-09-23T05:22:30.729Z"
+      ],
+      "maximumControllerAgeMilliseconds": 13.312069,
+      "maximumJointCANAgeMilliseconds": 5.985374,
+      "maximumGripperCANAgeMilliseconds": 5.780091
+    },
+    {
+      "id": "clearance03",
+      "path": "persistent-clearance-03-20260922.csv.gz",
+      "gzipSHA256": "55b31fe463d25d7f81f60bf96a546298d5f172abec48a190dd038dbe6ab0d2e3",
+      "uncompressedSHA256": "d57da85fcd413435c189bd463f25ec9698f4bd0218a0f64768f8a172d0d5090a",
+      "rows": 33600,
+      "receivedTimeRange": [
+        "2026-09-23T05:22:44.485Z",
+        "2026-09-23T05:24:43.688Z"
+      ],
+      "maximumControllerAgeMilliseconds": 13.853181,
+      "maximumJointCANAgeMilliseconds": 5.92202,
+      "maximumGripperCANAgeMilliseconds": 5.702562
+    },
+    {
+      "id": "clearance04",
+      "path": "persistent-clearance-04-20260922.csv.gz",
+      "gzipSHA256": "162c605e8d806ba2a83e304b99b57c703ca115efc3b1d5be2631eae126a533fd",
+      "uncompressedSHA256": "b2704e77cf39d2300cdd9788c2557d171840a1efd297a50b126aae3baeee2679",
+      "rows": 33600,
+      "receivedTimeRange": [
+        "2026-09-23T05:24:29.486Z",
+        "2026-09-23T05:26:31.166Z"
+      ],
+      "maximumControllerAgeMilliseconds": 11.857964,
+      "maximumJointCANAgeMilliseconds": 6.070342,
+      "maximumGripperCANAgeMilliseconds": 5.870601
+    },
+    {
+      "id": "blockedForward",
+      "path": "persistent-forward-blocked-20260922.csv.gz",
+      "gzipSHA256": "83b0960bae0897218e7730e3dc945f3f9671a3c274a47814899b127a62c8688d",
+      "uncompressedSHA256": "1a0c1b28d289d65afc9ead9cb93a567a5e041574f239194276912b93f07db9a1",
+      "rows": 33600,
+      "receivedTimeRange": [
+        "2026-09-23T05:26:00.986Z",
+        "2026-09-23T05:28:02.649Z"
+      ],
+      "maximumControllerAgeMilliseconds": 12.130695,
+      "maximumJointCANAgeMilliseconds": 10.574865,
+      "maximumGripperCANAgeMilliseconds": 8.356187
+    },
+    {
+      "id": "displayPaused",
+      "path": "display-paused-20260922.csv.gz",
+      "gzipSHA256": "c1092f13e3892411019392be41362d4d374c6ebf97b4cbc37925d9f17063c293",
+      "uncompressedSHA256": "9ccea76f4b1d99d7694d5807c21672cf2fae24ab34dfcf1ad4fc560f8b651072",
+      "rows": 33600,
+      "receivedTimeRange": [
+        "2026-09-23T05:27:48.536Z",
+        "2026-09-23T05:31:11.746Z"
+      ],
+      "maximumControllerAgeMilliseconds": 13.125072,
+      "maximumJointCANAgeMilliseconds": 6.061176,
+      "maximumGripperCANAgeMilliseconds": 5.914929
+    }
+  ],
+  "probes": [
+    {
+      "index": 1,
+      "appDispatchLogAt": "2026-09-22T22:16:38.925-07:00",
+      "targetRadians": [
+        0,
+        -0.06,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "durationSeconds": 4,
+      "delaySeconds": 0,
+      "telemetryArtifact": "lift",
+      "settledReceiptWindow": [
+        "2026-09-23T05:17:03.690Z",
+        "2026-09-23T05:17:05.684Z"
+      ],
+      "settledMeanPositionRadians": [
+        0.0,
+        -0.06017295304,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "maximumSettledAbsoluteTargetErrorRadians": 0.0002684007000000044,
+      "targetArrivalVerifiedFromFreshControllerAndCAN": true,
+      "automaticReplayAllowed": false
+    },
+    {
+      "index": 2,
+      "appDispatchLogAt": "2026-09-22T22:18:18.959-07:00",
+      "targetRadians": [
+        0.04,
+        -0.06,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "durationSeconds": 4,
+      "delaySeconds": 0,
+      "telemetryArtifact": "clearance01",
+      "settledReceiptWindow": [
+        "2026-09-23T05:18:52.043Z",
+        "2026-09-23T05:18:54.000Z"
+      ],
+      "settledMeanPositionRadians": [
+        0.0398153236,
+        -0.0598593392,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "maximumSettledAbsoluteTargetErrorRadians": 0.00018467640000000007,
+      "targetArrivalVerifiedFromFreshControllerAndCAN": true,
+      "automaticReplayAllowed": false
+    },
+    {
+      "index": 3,
+      "appDispatchLogAt": "2026-09-22T22:18:55.473-07:00",
+      "targetRadians": [
+        0.04,
+        -0.15,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "durationSeconds": 6,
+      "delaySeconds": 0,
+      "telemetryArtifact": "clearance01",
+      "settledReceiptWindow": [
+        "2026-09-23T05:19:19.682Z",
+        "2026-09-23T05:19:21.665Z"
+      ],
+      "settledMeanPositionRadians": [
+        0.0398153236,
+        -0.149372231475,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "maximumSettledAbsoluteTargetErrorRadians": 0.000965244000000004,
+      "targetArrivalVerifiedFromFreshControllerAndCAN": true,
+      "automaticReplayAllowed": false
+    },
+    {
+      "index": 4,
+      "appDispatchLogAt": "2026-09-22T22:21:24.691-07:00",
+      "targetRadians": [
+        0.15,
+        -0.15,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "durationSeconds": 6,
+      "delaySeconds": 0,
+      "telemetryArtifact": "clearance02",
+      "settledReceiptWindow": [
+        "2026-09-23T05:21:53.067Z",
+        "2026-09-23T05:21:54.989Z"
+      ],
+      "settledMeanPositionRadians": [
+        0.15052252764444443,
+        -0.149852879,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "maximumSettledAbsoluteTargetErrorRadians": 0.0005346479999999987,
+      "targetArrivalVerifiedFromFreshControllerAndCAN": true,
+      "automaticReplayAllowed": false
+    },
+    {
+      "index": 5,
+      "appDispatchLogAt": "2026-09-22T22:21:56.931-07:00",
+      "targetRadians": [
+        0.15,
+        -0.3,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "durationSeconds": 8,
+      "delaySeconds": 0,
+      "telemetryArtifact": "clearance02",
+      "settledReceiptWindow": [
+        "2026-09-23T05:22:28.987Z",
+        "2026-09-23T05:22:30.729Z"
+      ],
+      "settledMeanPositionRadians": [
+        0.149307463,
+        -0.299978465,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "maximumSettledAbsoluteTargetErrorRadians": 0.0006925369999999931,
+      "targetArrivalVerifiedFromFreshControllerAndCAN": true,
+      "automaticReplayAllowed": false
+    },
+    {
+      "index": 6,
+      "appDispatchLogAt": "2026-09-22T22:23:29.484-07:00",
+      "targetRadians": [
+        0.3,
+        -0.3,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "durationSeconds": 8,
+      "delaySeconds": 0,
+      "telemetryArtifact": "clearance03",
+      "settledReceiptWindow": [
+        "2026-09-23T05:23:59.016Z",
+        "2026-09-23T05:24:00.997Z"
+      ],
+      "settledMeanPositionRadians": [
+        0.299842111,
+        -0.299842111,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "maximumSettledAbsoluteTargetErrorRadians": 0.00015788899999996664,
+      "targetArrivalVerifiedFromFreshControllerAndCAN": true,
+      "automaticReplayAllowed": false
+    },
+    {
+      "index": 7,
+      "appDispatchLogAt": "2026-09-22T22:24:02.498-07:00",
+      "targetRadians": [
+        0.3,
+        -0.45,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "durationSeconds": 8,
+      "delaySeconds": 0,
+      "telemetryArtifact": "clearance03",
+      "settledReceiptWindow": [
+        "2026-09-23T05:24:41.977Z",
+        "2026-09-23T05:24:43.688Z"
+      ],
+      "settledMeanPositionRadians": [
+        0.299842111,
+        -0.449967698,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "maximumSettledAbsoluteTargetErrorRadians": 0.00015788899999996664,
+      "targetArrivalVerifiedFromFreshControllerAndCAN": true,
+      "automaticReplayAllowed": false
+    },
+    {
+      "index": 8,
+      "appDispatchLogAt": "2026-09-22T22:25:21.965-07:00",
+      "targetRadians": [
+        0.45,
+        -0.45,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "durationSeconds": 8,
+      "delaySeconds": 0,
+      "telemetryArtifact": "clearance04",
+      "settledReceiptWindow": [
+        "2026-09-23T05:25:56.987Z",
+        "2026-09-23T05:25:58.971Z"
+      ],
+      "settledMeanPositionRadians": [
+        0.449831344,
+        -0.449831344,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "maximumSettledAbsoluteTargetErrorRadians": 0.00016865599999998926,
+      "targetArrivalVerifiedFromFreshControllerAndCAN": true,
+      "automaticReplayAllowed": false
+    },
+    {
+      "index": 9,
+      "appDispatchLogAt": "2026-09-22T22:26:00.509-07:00",
+      "targetRadians": [
+        0.45,
+        -0.6,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "durationSeconds": 8,
+      "delaySeconds": 0,
+      "telemetryArtifact": "clearance04",
+      "settledReceiptWindow": [
+        "2026-09-23T05:26:29.192Z",
+        "2026-09-23T05:26:31.166Z"
+      ],
+      "settledMeanPositionRadians": [
+        0.449831344,
+        -0.600093284,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "maximumSettledAbsoluteTargetErrorRadians": 0.00016865599999998926,
+      "targetArrivalVerifiedFromFreshControllerAndCAN": true,
+      "automaticReplayAllowed": false
+    }
+  ],
+  "operatorFeedback": {
+    "firstLift": "Yes, smooth and clear; room for next small forward-and-outward steps",
+    "beforeProbes4And5": "Yes, clear for both steps",
+    "beforeProbes6And7": "Yes, outside the tread with room",
+    "beforeProbes8ThroughPlanned11": "Yes, the path is clear through the previously checked +0.75/-0.60 pose"
+  },
+  "headTrackingEnabled": false,
+  "neckCommandTargets": [
+    5676,
+    6011,
+    6868
+  ],
+  "newCameraRecording": false,
+  "absoluteOffsetsApplied": false,
+  "visualCalibrationAccepted": false,
+  "automaticReplayAllowed": false,
+  "limitations": [
+    "Exact cause of the earlier foreground-core exit remains unproven.",
+    "Controller session has a new zero reference; earlier B1/fold vectors remain priors.",
+    "No camera extrinsics or capture/telemetry synchronization established by these motions.",
+    "Vendor velocity remains unavailable; settled samples are position checks, not measured zero velocity.",
+    "The older folded endpoint has no taught collision-clear transition.",
+    "CSV wall-clock receipt times include main-thread processing delay; these traces are not synchronized camera calibration evidence."
+  ],
+  "blockedCommand": {
+    "appAttemptLogAt": "2026-09-22T22:27:08.123-07:00",
+    "requestedTargetRadians": [
+      0.6,
+      -0.6,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "durationSeconds": 8,
+    "sentToSDK": false,
+    "consoleReason": "Motor CAN feedback is missing or stale; cached controller positions cannot authorize motion",
+    "retainedPhysicalTargetRadians": [
+      0.45,
+      -0.6,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "replayed": false
+  },
+  "deliveryInvestigation": {
+    "withDrawing": {
+      "samples": 2400,
+      "receiptWindow": [
+        "2026-09-23T05:26:00.986Z",
+        "2026-09-23T05:28:02.649Z"
+      ],
+      "maximumGapSeconds": 12.238,
+      "medianGapSeconds": 0.001,
+      "gapsOver250Milliseconds": 215
+    },
+    "displayPausedAfterReconnect": {
+      "samples": 704,
+      "receiptWindow": [
+        "2026-09-23T05:30:36.008Z",
+        "2026-09-23T05:31:11.746Z"
+      ],
+      "maximumGapSeconds": 0.833,
+      "medianGapSeconds": 0.051,
+      "gapsOver250Milliseconds": 1
+    },
+    "timestampCaveat": "CSV received_at is currently stamped on the main thread in ingest, not at network receipt; these intervals measure display ingestion and cannot identify transport latency or prove the exact source of admission staleness.",
+    "profile": {
+      "pathLocalOnly": "/private/tmp/rob-cerebro-telemetry-delay.sample.txt",
+      "sha256": "b14768ed3cb38abe1e171c58e77cd72db5dc9f759a3fa5f630fbc48e08a3b163",
+      "startedAt": "2026-09-22T22:29:09.803-07:00",
+      "requestedSeconds": 4,
+      "finding": "Main-thread graph drawing consumes substantial sampled time. CSV export formats and writes the entire bounded history synchronously on the main thread."
+    },
+    "heartbeatExpiredAt": "2026-09-22T22:29:14.094-07:00",
+    "profilerMayHaveContributedToHeartbeatExpiry": true,
+    "heartbeatExpiryCauseProven": false,
+    "gatewayOnlyReconnectReadyAt": "2026-09-22T22:30:33.478-07:00",
+    "coreRestartPerformedDuringReconnect": false,
+    "motionAfterBlockedCommand": false,
+    "robotCheckAfterHeartbeat": {
+      "observedAt": "2026-09-23T05:30:11.290400+00:00",
+      "coreProcesses": [
+        {
+          "core_process": "amber_core_L",
+          "pid": 5327,
+          "parent_pid": 5324,
+          "parent_command": "/usr/sbin/runuser -u amber -- /usr/bin/env LCM_DEFAULT_URL=udpm://239.255.76.67:7667?ttl=10 /usr/bin/nohup /bin/sh -c cd /home/amber/L-10 && exec ./amber_core_L >core.log 2>&1 ",
+          "cgroup": "0::/system.slice/rc-local.service\n",
+          "cwd": "/home/amber/L-10",
+          "stdout": "/home/amber/L-10/core.log",
+          "stderr": "/home/amber/L-10/core.log"
+        },
+        {
+          "core_process": "amber_core_R",
+          "pid": 5328,
+          "parent_pid": 5325,
+          "parent_command": "/usr/sbin/runuser -u amber -- /usr/bin/env LCM_DEFAULT_URL=udpm://239.255.76.67:7667?ttl=10 /usr/bin/nohup /bin/sh -c cd /home/amber/R-11 && exec ./amber_core_R >core.log 2>&1 ",
+          "cgroup": "0::/system.slice/rc-local.service\n",
+          "cwd": "/home/amber/R-11",
+          "stdout": "/home/amber/R-11/core.log",
+          "stderr": "/home/amber/R-11/core.log"
+        }
+      ],
+      "canCounterDelta": {
+        "can10": {
+          "rx_packets": 3211,
+          "rx_dropped": 0,
+          "rx_errors": 0,
+          "tx_packets": 2800,
+          "tx_dropped": 0,
+          "tx_errors": 0
+        },
+        "can11": {
+          "rx_packets": 3215,
+          "rx_dropped": 0,
+          "rx_errors": 0,
+          "tx_packets": 2742,
+          "tx_dropped": 0,
+          "tx_errors": 0
+        }
+      },
+      "deviceIDs": {
+        "can10": [
+          "0x91",
+          "0x92",
+          "0x93",
+          "0x94",
+          "0x95",
+          "0x96",
+          "0x97",
+          "0x98"
+        ],
+        "can11": [
+          "0x91",
+          "0x92",
+          "0x93",
+          "0x94",
+          "0x95",
+          "0x96",
+          "0x97",
+          "0x98"
+        ]
+      }
+    }
+  }
+}

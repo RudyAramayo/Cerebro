@@ -119,9 +119,43 @@ The right core's SSH session closed at the same time. The operator reported
 touching nothing. No kernel crash/OOM entry or core dump was found; the exact
 exit cause is unproven. The legacy Torso starter runs a core in the foreground
 of SSH, while the installed guarded stack recovery uses the persistent
-`rc.local` startup with redirected logs. That existing recovery was prepared
-in the UI pending both-arms support, because right motors had been activated
-since the earlier power-off. This trial is not accepted calibration evidence.
+`rc.local` startup with redirected logs. After the operator confirmed both
+arms supported and reported restarting the core, the UI showed successful
+guarded recovery at 22:13:03. No additional restart was issued. This failed
+lift is not accepted calibration evidence.
+
+## Persistent recovery and resumed clearance steps
+
+The [persistent recovery record](evidence/2026-09-22-right-arm/persistent-core-recovery.json)
+contains seven compressed telemetry exports and the subsequent read-only
+checks. Both cores remained in `rc-local.service`, with stdout/stderr going
+to their respective `core.log` files. All eight devices on each CAN bus
+replied during passive captures, with no error/drop counter increase. The
+right arm reported position mode and a new zero reference; the left remained
+inactive. The operator confirmed hanging/clear before further movement.
+
+Nine separate slow shoulder steps reached `[+0.45, −0.60, 0, 0, 0, 0, 0]`.
+The operator checked clearance at the intermediate poses. Settled controller
+readbacks differed from their targets by less than 0.001 rad across the
+recorded two-second endpoint windows, with current individual CAN feedback.
+This is an encoder target-arrival check, not an absolute visual calibration.
+
+At 22:27:08 the attempted J1 +0.60 step was blocked before SDK dispatch by
+the 250 ms freshness check. The arm stayed at the previous target. Both cores
+and the CAN devices remained alive. The display ingested telemetry in bursts;
+pausing the diagnostic drawings reduced the median interval to 51 ms, with
+one gap over 250 ms in approximately 35 seconds. The comparison with drawings
+running had 215 such gaps over approximately 122 seconds, including CSV export.
+CSV receipt times are currently assigned on the main thread, so these figures
+measure display ingestion delay, not proven network transit delay.
+
+A short Mac process profile showed substantial main-thread graph drawing;
+source inspection also confirmed synchronous CSV formatting/writing. A
+heartbeat expiry at 22:29:14 coincided with that profile, which may have
+contributed. Reconnecting only the gateway session restored connectivity at
+22:30:33 without restarting either core or sending a motor command. Movement
+remained suspended for the display/receipt-time investigation. The rejected
+target was not replayed, and this route is not a taught folding animation.
 
 ## Camera references
 

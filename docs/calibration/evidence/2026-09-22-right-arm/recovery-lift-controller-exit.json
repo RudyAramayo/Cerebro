@@ -143,7 +143,11 @@
     "rootCauseProven": false,
     "assessment": "Right core exited contemporaneously with its SSH session closing. The legacy Torso core launcher executes the core in the foreground of SSH; this is a lifecycle risk, not proof of the exact exit cause. Both CAN buses still had device replies."
   },
-  "recoveryPrepared": "Existing guarded Restart CAN/Core Stack dialog; waiting for a new both-arms-supported confirmation because right motors were activated after the earlier power-off",
   "automaticReplayAllowed": false,
-  "calibrationApplied": false
+  "calibrationApplied": false,
+  "recoveryResult": {
+    "status": "succeeded",
+    "record": "persistent-core-recovery.json",
+    "uiSucceededAt": "2026-09-22T22:13:03.410-07:00"
+  }
 }
