@@ -30,6 +30,38 @@ calibration/control acceptance is reported as unverified mechanical completion.
 
 ## Transport and failure behavior
 
+Cerebro automatically opens its Amber SSH tunnel and authenticates the gateway
+on launch and after system wake when the gateway token and SSH password are
+already saved in Keychain. This prepares telemetry without activating either
+arm. No Diagnostics window or terminal login is needed. The current connection
+uses `sshpass` with the saved password on an anonymous pipe; an authorized SSH
+key is not required. The SSH attempt and initial gateway retries are bounded;
+failure remains visible in Amber Diagnostics and an approved operation can make
+a fresh attempt. There is no indefinite reconnect loop or motion replay.
+
+Before sleep, Cerebro cancels pending arm approval/routines, requests hold and
+closes the tunnel. Wake starts a new gateway session, and the startup calibration
+preference still requires a new controller approval. A hold request is not proof
+of physical stopping; the gateway's motion lease/watchdog remains authoritative.
+
+The iPhone controller now calls attention to pending approvals with a persistent
+orange banner, countdown, two-note sound and warning haptic, plus one reminder
+after ten seconds. Tapping the banner opens the existing review controls; it
+does not approve. The controller must be active with Action Approvals enabled.
+
+Startup/notice update verified on 2026-09-23: tunnel lifecycle fixtures passed,
+including missing credentials and repeated startup/wake calls; the approval
+broker passed 39 checks. Signed macOS and iOS builds passed. Cerebro was installed
+and relaunched, and Diagnostics showed an authenticated gateway without pressing
+Connect Tunnel. Startup calibration remained off and no arm operation was run.
+Both arm controller streams arrived at about 19.7 Hz, but motor CAN feedback was
+stale after relaunch, so motor readiness was not established by this check.
+Installed Cerebro debug-library SHA-256:
+`59be42a0a97e1b1e5337f5dbdc42f01fd4d1eb4daadb6df0dbabd951bf8a871c`.
+ROBController was installed and launched on Onix16. Onix11 refused installation
+because it was locked. Alert lifecycle and wire-protocol fixtures passed; actual
+phone sound/vibration still needs operator observation using the Settings test.
+
 The existing `com.orbitusrobotics.robot-action` v1 envelope now supports
 `arm_operation` with exactly `operation`, physical `arm`, and `summary` fields.
 This is a Cerebro-created request; it is excluded from model-proposable actions.

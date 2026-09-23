@@ -254,6 +254,18 @@ extension Notification.Name {
     private var activeHost: String?
     private var connectionTimer: Timer?
 
+    /// Transport only: prepare telemetry before the operator reviews startup
+    /// motion. Unconfigured installations stay idle without a desktop prompt.
+    public func connectIfConfigured() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.connectIfConfigured() }
+            return
+        }
+        let configuration = ROBAmberGatewayConfiguration.shared
+        guard configuration.hasGatewayToken, configuration.hasSSHPassword else { return }
+        connect()
+    }
+
     public func connect(host requestedHost: String? = nil) {
         guard Thread.isMainThread else {
             DispatchQueue.main.async { [weak self] in self?.connect(host: requestedHost) }

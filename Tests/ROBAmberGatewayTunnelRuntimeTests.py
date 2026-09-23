@@ -23,6 +23,8 @@ final class ROBAmberGatewayConfiguration {
     static let shared = ROBAmberGatewayConfiguration()
     var sshHost = "configured-robot.invalid"
     var password: String? = "fixture password"
+    var hasGatewayToken = true
+    var hasSSHPassword: Bool { password != nil }
     func gatewayToken() -> String? { String(repeating: "t", count: 64) }
     func sshPassword() -> String? { password }
 }
@@ -143,6 +145,30 @@ TESTS = r'''
         wait({ tunnel.failureDetail?.contains("timed out") == true }, seconds: 12)
         precondition(stalled.terminated && !tunnel.isRunning)
         print("Tunnel: unresponsive gateway is terminated within the connection deadline passed")
+
+        let startupLaunches = FixtureProcess.launched.count
+        config.password = nil
+        tunnel.connectIfConfigured()
+        precondition(FixtureProcess.launched.count == startupLaunches)
+        config.password = "fixture password"
+        config.hasGatewayToken = false
+        tunnel.connectIfConfigured()
+        precondition(FixtureProcess.launched.count == startupLaunches)
+        config.hasGatewayToken = true
+        tunnel.connectIfConfigured()
+        tunnel.connectIfConfigured()
+        precondition(FixtureProcess.launched.count == startupLaunches + 1)
+        let startupConnects = gateway.connects
+        wait({ gateway.connects > startupConnects })
+        gateway.state = .ready
+        wait({ tunnel.detail.contains("gateway authenticated") })
+        tunnel.connectIfConfigured()
+        precondition(FixtureProcess.launched.count == startupLaunches + 1)
+        tunnel.disconnect() // sleep closes the old session before wake
+        tunnel.connectIfConfigured()
+        precondition(FixtureProcess.launched.count == startupLaunches + 2)
+        tunnel.disconnect()
+        print("Tunnel: configured startup/wake, missing credentials and duplicate launch passed")
     }
 }
 '''

@@ -44,6 +44,7 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
 @property (readwrite, retain) NSMenuItem *amberDiagnosticsMenuItem;
 @property (readwrite, retain) NSMenuItem *wakeUpCalibrationMenuItem;
 - (void)workspaceDidWake:(NSNotification *)notification;
+- (void)workspaceWillSleep:(NSNotification *)notification;
 - (ROBMainViewController *)mainViewControllerInViewController:(NSViewController *)viewController;
 
 @end
@@ -74,6 +75,11 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
            selector:@selector(workspaceDidWake:)
                name:NSWorkspaceDidWakeNotification
              object:nil];
+    [[[NSWorkspace sharedWorkspace] notificationCenter]
+        addObserver:self
+           selector:@selector(workspaceWillSleep:)
+               name:NSWorkspaceWillSleepNotification
+             object:nil];
     self.utcWebCamIsOnline = NO;
     self.utcWebCamOutput = [NSMutableString string];
     self.utcWebCamOutputQueue = dispatch_queue_create("com.orbitusrobotics.Cerebro.UTCWebCamOutput", DISPATCH_QUEUE_SERIAL);
@@ -92,6 +98,7 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     } else {
         NSLog(@"Cerebro system dependency needs attention: choose Homebrew or MacPorts in Settings to install sshpass");
     }
+    [[ROBAmberGatewayTunnel shared] connectIfConfigured];
     [self utcWebCamCheck];
     [[ROBInsta360CameraService shared] start];
     [[ROBMLXRuntime shared] prepareVisionModel];
@@ -331,12 +338,26 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     [self stopUTCWebCamTask];
 }
 
+- (void)workspaceWillSleep:(NSNotification *)notification
+{
+    // Invalidate pending grants and request hold before closing the transport.
+    // Wake establishes a new session; it cannot resume an old approved motion.
+    [[ROBArmRoutineCoordinator shared] cancelWithReason:@"Cerebro is going to sleep"];
+    [[ROBShowMotionCoordinator shared] stop];
+    (void)[[ROBAmberGestureExecutor shared] cancelCurrentGestureWithReason:@"Cerebro is going to sleep"];
+    (void)[[ROBAmberGestureExecutor shared] requestPriorityHold];
+    [[ROBAmberDebugAuthority shared] revoke];
+    [[ROBAmberGatewayTunnel shared] disconnect];
+}
+
 - (void)workspaceDidWake:(NSNotification *)notification
 {
     NSLog(@"Cerebro is recovering hardware and service health after system wake");
 
     ROBSystemDependencyManager *dependencyManager = [ROBSystemDependencyManager sharedManager];
     [dependencyManager refreshSSHpassAvailability];
+
+    [[ROBAmberGatewayTunnel shared] connectIfConfigured];
 
     [self.rplidarCheckTimer invalidate];
     self.rplidarCheckTimer = nil;
