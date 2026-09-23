@@ -14,6 +14,9 @@ import Security
     public let arm: String
     public let sequence: UInt64
     public let sampleAgeMilliseconds: Double
+    public let controllerSampleAgeMilliseconds: Double
+    public let jointFeedbackAgeMilliseconds: [NSNumber]
+    public let gripperFeedbackAgeMilliseconds: Double
     public let receivedAtUptime: TimeInterval
     public let positionsRadians: [NSNumber]
     public let velocitiesRadiansPerSecond: [NSNumber]
@@ -25,6 +28,11 @@ import Security
         arm = message.arm ?? ""
         sequence = message.sequence ?? 0
         sampleAgeMilliseconds = message.sampleAgeMilliseconds ?? .infinity
+        controllerSampleAgeMilliseconds = message.controllerSampleAgeMilliseconds
+            ?? message.sampleAgeMilliseconds ?? .infinity
+        jointFeedbackAgeMilliseconds = (message.jointFeedbackAgeMilliseconds ?? [])
+            .map { NSNumber(value: $0 ?? .infinity) }
+        gripperFeedbackAgeMilliseconds = message.gripperFeedbackAgeMilliseconds ?? .infinity
         receivedAtUptime = ProcessInfo.processInfo.systemUptime
         positionsRadians = (message.positionsRadians ?? []).map(NSNumber.init(value:))
         velocitiesAvailable = message.velocitiesAvailable != false
@@ -40,12 +48,25 @@ import Security
     /// fresh when telemetry delivery stops.
     public var effectiveSampleAgeMilliseconds: Double {
         guard sampleAgeMilliseconds.isFinite,
-              sampleAgeMilliseconds >= 0 else { return .infinity }
+              sampleAgeMilliseconds >= 0,
+              controllerSampleAgeMilliseconds.isFinite,
+              controllerSampleAgeMilliseconds >= 0,
+              jointFeedbackAgeMilliseconds.count == 7,
+              jointFeedbackAgeMilliseconds.allSatisfy({ $0.doubleValue.isFinite && $0.doubleValue >= 0 })
+              else { return .infinity }
         let elapsed = max(
             0,
             ProcessInfo.processInfo.systemUptime - receivedAtUptime
         ) * 1_000
-        return sampleAgeMilliseconds + elapsed
+        return max(max(sampleAgeMilliseconds, controllerSampleAgeMilliseconds),
+                   jointFeedbackAgeMilliseconds.map(\.doubleValue).max() ?? .infinity) + elapsed
+    }
+
+    public var effectiveGripperFeedbackAgeMilliseconds: Double {
+        guard gripperFeedbackAgeMilliseconds.isFinite, gripperFeedbackAgeMilliseconds >= 0
+            else { return .infinity }
+        return gripperFeedbackAgeMilliseconds
+            + max(0, ProcessInfo.processInfo.systemUptime - receivedAtUptime) * 1_000
     }
 }
 
@@ -314,6 +335,9 @@ private struct ROBAmberGatewayMessage: Codable {
     var leaseMilliseconds: UInt32? = nil
     var sequence: UInt64? = nil
     var sampleAgeMilliseconds: Double? = nil
+    var controllerSampleAgeMilliseconds: Double? = nil
+    var jointFeedbackAgeMilliseconds: [Double?]? = nil
+    var gripperFeedbackAgeMilliseconds: Double? = nil
     var velocitiesRadiansPerSecond: [Double]? = nil
     var velocitiesAvailable: Bool? = nil
     var currents: [Double]? = nil
@@ -354,6 +378,9 @@ private struct ROBAmberGatewayMessage: Codable {
         case durationSeconds = "duration_s"
         case leaseMilliseconds = "lease_ms"
         case sampleAgeMilliseconds = "sample_age_ms"
+        case controllerSampleAgeMilliseconds = "controller_sample_age_ms"
+        case jointFeedbackAgeMilliseconds = "joint_feedback_age_ms"
+        case gripperFeedbackAgeMilliseconds = "gripper_feedback_age_ms"
         case velocitiesRadiansPerSecond = "velocities_rad_s"
         case velocitiesAvailable = "velocities_available"
         case activeModes = "active_modes"
@@ -717,6 +744,37 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                 "exclusiveControllerSession": NSNumber(value: exclusiveControllerSession),
                 "sessionGeneration": NSNumber(value: authenticatedSessionGeneration),
             ]
+        }
+    }
+
+    /// Admission for the explicit Torso SDK controls. A running vendor core
+    /// can repeat cached positions/modes indefinitely after a cable loss.
+    /// Require independent CAN replies and bind delayed requests to this
+    /// authenticated session; never replay them after reconnect.
+    @objc(manualArmControlReadinessForUDPPort:expectedSessionGeneration:)
+    public func manualArmControlReadiness(forUDPPort port: Int,
+                                          expectedSessionGeneration: UInt64) -> NSDictionary {
+        queue.sync {
+            let arm = port == 26001 ? "left" : port == 26002 ? "right" : ""
+            let telemetry = arm == "left" ? leftTelemetry : arm == "right" ? rightTelemetry : nil
+            let reason: String?
+            if arm.isEmpty {
+                reason = "Unknown Amber arm port"
+            } else if state != .ready || !exclusiveControllerSession || authenticatedSessionGeneration == 0 {
+                reason = "Connect Amber Diagnostics before sending manual arm commands"
+            } else if expectedSessionGeneration != 0 && expectedSessionGeneration != authenticatedSessionGeneration {
+                reason = "Gateway session changed; the delayed manual command was discarded"
+            } else if telemetry?.jointFeedbackAgeMilliseconds.count != 7 {
+                reason = "Per-motor CAN feedback is unavailable; update the Amber gateway"
+            } else if telemetry!.effectiveSampleAgeMilliseconds > 250 {
+                reason = "Motor CAN feedback is missing or stale; cached controller positions cannot authorize motion"
+            } else if telemetry!.effectiveGripperFeedbackAgeMilliseconds > 250 {
+                reason = "Gripper CAN feedback is missing or stale; check the arm connection"
+            } else {
+                reason = nil
+            }
+            return ["allowed": reason == nil, "reason": reason ?? "",
+                    "sessionGeneration": NSNumber(value: authenticatedSessionGeneration)] as NSDictionary
         }
     }
 
@@ -1095,8 +1153,12 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                     && message.velocitiesRadiansPerSecond?.allSatisfy(\.isFinite) == true)
             guard ["left", "right"].contains(message.arm ?? ""),
                   let sequence = message.sequence, sequence > 0,
-                  let sampleAge = message.sampleAgeMilliseconds,
-                  sampleAge.isFinite, sampleAge >= 0,
+                  message.sampleAgeMilliseconds.map({ $0.isFinite && $0 >= 0 }) ?? true,
+                  message.controllerSampleAgeMilliseconds.map({ $0.isFinite && $0 >= 0 }) ?? true,
+                  message.jointFeedbackAgeMilliseconds.map({ ages in
+                      ages.count == 7 && ages.allSatisfy { $0.map { $0.isFinite && $0 >= 0 } ?? true }
+                  }) ?? true,
+                  message.gripperFeedbackAgeMilliseconds.map({ $0.isFinite && $0 >= 0 }) ?? true,
                   let positions = message.positionsRadians,
                   positions.count == 7, positions.allSatisfy(\.isFinite),
                   velocityIsValid,

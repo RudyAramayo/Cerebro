@@ -20,6 +20,13 @@ This replaces a blanket requirement to manually re-measure B1 zero after every
 power cycle. Saved calibration and camera evidence remain useful across boots;
 the current encoder offset is established from the new observed response.
 
+The [September 22 supervised inspection record](right-arm-supervised-probes-2026-09-22.md)
+documents the actual right-arm steps to a visible wrist/gripper pose,
+controller readbacks, local RGB-D recordings, and the main camera held at its
+saved chess pose. It also records the interrupted wrist probe, cached-feedback
+defect and camera-registration, coverage and timing limits; it is not an
+accepted offset fit or an automatic replay route.
+
 ## Tread clearance and folding animation
 
 Rob clarified that moving the extremities too early or too quickly can catch

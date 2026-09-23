@@ -1,0 +1,281 @@
+{
+  "schemaVersion": 1,
+  "physicalRightBinding": {
+    "core": "L10",
+    "interface": "can10",
+    "udpPort": 26001,
+    "gatewayArm": "left"
+  },
+  "captures": [
+    {
+      "localPath": "/private/tmp/rob-amber-j6-readonly-20260922.jsonl",
+      "sha256": "52f6174e4b03decda776af88f533864793310d1192684a597ddee84054751f1a",
+      "observedAt": "2026-09-23T04:34:54.019556+00:00",
+      "interfaces": [
+        {
+          "interface": "can10",
+          "sample_seconds": 2,
+          "received_ids": {
+            "0x91": 401
+          },
+          "local_tx_ids": {
+            "0x11": 385,
+            "0x12": 384,
+            "0x13": 384,
+            "0x14": 384,
+            "0x15": 384,
+            "0x16": 384,
+            "0x17": 384
+          },
+          "last_received_payload": {
+            "0x91": "ff26ab0000ff0602"
+          },
+          "sent_frames": 0
+        },
+        {
+          "interface": "can11",
+          "sample_seconds": 2,
+          "received_ids": {
+            "0x91": 400,
+            "0x94": 401,
+            "0x93": 401,
+            "0x92": 401,
+            "0x95": 400,
+            "0x98": 400,
+            "0x96": 400,
+            "0x97": 400
+          },
+          "local_tx_ids": {
+            "0x11": 395,
+            "0x12": 395,
+            "0x13": 395,
+            "0x14": 395,
+            "0x15": 395,
+            "0x16": 395,
+            "0x17": 395
+          },
+          "last_received_payload": {
+            "0x91": "ff00000000000000",
+            "0x94": "ff00000000000000",
+            "0x93": "ff00000000000000",
+            "0x92": "ff00000000000000",
+            "0x95": "ff00000000000000",
+            "0x98": "ff00000000000000",
+            "0x96": "ff00000000000000",
+            "0x97": "ff00000000000000"
+          },
+          "sent_frames": 0
+        }
+      ],
+      "counterDelta": {
+        "can10": {
+          "rx_packets": 402,
+          "rx_dropped": 0,
+          "rx_errors": 0,
+          "tx_packets": 2695,
+          "tx_dropped": 0,
+          "tx_errors": 0
+        },
+        "can11": {
+          "rx_packets": 3217,
+          "rx_dropped": 0,
+          "rx_errors": 0,
+          "tx_packets": 2772,
+          "tx_dropped": 0,
+          "tx_errors": 0
+        }
+      },
+      "diagnosticCommandsSent": 0,
+      "gatewayService": "MainPID=2760\nNRestarts=0\nExecMainStartTimestamp=Wed 2026-09-23 02:35:44 UTC\nId=rob-amber-gateway.service\nActiveState=active\nSubState=running\n\nMainPID=0\nNRestarts=0\nExecMainStartTimestamp=n/a\nId=rc-local.service\nActiveState=active\nSubState=running\n",
+      "coreProcesses": "2705 ./amber_core_R\n2706 ./amber_core_L\n"
+    },
+    {
+      "localPath": "/private/tmp/rob-amber-j6-readonly-repeat-20260922.jsonl",
+      "sha256": "4715cb71bd159fc0a93ea9e7b1b64d5df6d2dfcace4ad8ff0b8531271be8b7b1",
+      "observedAt": "2026-09-23T04:37:19.789140+00:00",
+      "interfaces": [
+        {
+          "interface": "can10",
+          "sample_seconds": 2,
+          "received_ids": {
+            "0x91": 401
+          },
+          "local_tx_ids": {
+            "0x11": 391,
+            "0x12": 391,
+            "0x13": 391,
+            "0x14": 391,
+            "0x15": 391,
+            "0x16": 391,
+            "0x17": 391
+          },
+          "last_received_payload": {
+            "0x91": "ff26ac0000ff1402"
+          },
+          "sent_frames": 0
+        },
+        {
+          "interface": "can11",
+          "sample_seconds": 2,
+          "received_ids": {
+            "0x94": 401,
+            "0x93": 402,
+            "0x98": 400,
+            "0x97": 400,
+            "0x96": 401,
+            "0x92": 401,
+            "0x91": 400,
+            "0x95": 400
+          },
+          "local_tx_ids": {
+            "0x11": 363,
+            "0x12": 363,
+            "0x13": 363,
+            "0x14": 363,
+            "0x15": 363,
+            "0x16": 363,
+            "0x17": 363
+          },
+          "last_received_payload": {
+            "0x94": "ff00000000000000",
+            "0x93": "ff00000000000000",
+            "0x98": "ff00000000000000",
+            "0x97": "ff00000000000000",
+            "0x96": "ff00000000000000",
+            "0x92": "ff00000000000000",
+            "0x91": "ff00000000000000",
+            "0x95": "ff00000000000000"
+          },
+          "sent_frames": 0
+        }
+      ],
+      "counterDelta": {
+        "can10": {
+          "rx_packets": 403,
+          "rx_dropped": 0,
+          "rx_errors": 0,
+          "tx_packets": 2751,
+          "tx_dropped": 0,
+          "tx_errors": 0
+        },
+        "can11": {
+          "rx_packets": 3218,
+          "rx_dropped": 0,
+          "rx_errors": 0,
+          "tx_packets": 2548,
+          "tx_dropped": 0,
+          "tx_errors": 0
+        }
+      },
+      "diagnosticCommandsSent": 0,
+      "gatewayService": "MainPID=2760\nNRestarts=0\nExecMainStartTimestamp=Wed 2026-09-23 02:35:44 UTC\nId=rob-amber-gateway.service\nActiveState=active\nSubState=running\n\nMainPID=0\nNRestarts=0\nExecMainStartTimestamp=n/a\nId=rc-local.service\nActiveState=active\nSubState=running\n",
+      "coreProcesses": "2705 ./amber_core_R\n2706 ./amber_core_L\n"
+    },
+    {
+      "localPath": "/private/tmp/rob-amber-supported-off-post-reboot-20260922.jsonl",
+      "sha256": "43f72da12aa6c922b30f9db075221474abaad6a679a992f48d4f2040cccfd0ff",
+      "observedAt": "2026-09-23T04:44:57.683278+00:00",
+      "interfaces": [
+        {
+          "interface": "can10",
+          "sample_seconds": 2,
+          "received_ids": {
+            "0x96": 401,
+            "0x91": 401,
+            "0x98": 400,
+            "0x97": 400,
+            "0x94": 401,
+            "0x93": 400,
+            "0x95": 401,
+            "0x92": 401
+          },
+          "local_tx_ids": {
+            "0x11": 348,
+            "0x12": 348,
+            "0x13": 348,
+            "0x14": 348,
+            "0x15": 348,
+            "0x16": 348,
+            "0x17": 348
+          },
+          "last_received_payload": {
+            "0x96": "ff00000000000000",
+            "0x91": "ff00000000000000",
+            "0x98": "ff00000000000000",
+            "0x97": "ff00000000000000",
+            "0x94": "ff00000000000000",
+            "0x93": "ff00000000000000",
+            "0x95": "ff00000000000000",
+            "0x92": "ff00000000000000"
+          },
+          "sent_frames": 0
+        },
+        {
+          "interface": "can11",
+          "sample_seconds": 2,
+          "received_ids": {
+            "0x95": 401,
+            "0x97": 400,
+            "0x92": 401,
+            "0x94": 400,
+            "0x98": 400,
+            "0x91": 400,
+            "0x93": 402,
+            "0x96": 400
+          },
+          "local_tx_ids": {
+            "0x11": 373,
+            "0x12": 373,
+            "0x13": 373,
+            "0x14": 373,
+            "0x15": 373,
+            "0x16": 373,
+            "0x17": 373
+          },
+          "last_received_payload": {
+            "0x95": "ff00000000000000",
+            "0x97": "ff00000000000000",
+            "0x92": "ff00000000000000",
+            "0x94": "ff00000000000000",
+            "0x98": "ff00000000000000",
+            "0x91": "ff00000000000000",
+            "0x93": "ff00000000000000",
+            "0x96": "ff00000000000000"
+          },
+          "sent_frames": 0
+        }
+      ],
+      "counterDelta": {
+        "can10": {
+          "rx_packets": 3210,
+          "rx_dropped": 0,
+          "rx_errors": 0,
+          "tx_packets": 2445,
+          "tx_dropped": 0,
+          "tx_errors": 0
+        },
+        "can11": {
+          "rx_packets": 3214,
+          "rx_dropped": 0,
+          "rx_errors": 0,
+          "tx_packets": 2618,
+          "tx_dropped": 0,
+          "tx_errors": 0
+        }
+      },
+      "diagnosticCommandsSent": 0,
+      "gatewayService": "MainPID=2760\nNRestarts=0\nExecMainStartTimestamp=Wed 2026-09-23 02:35:44 UTC\nId=rob-amber-gateway.service\nActiveState=active\nSubState=running\n\nMainPID=0\nNRestarts=0\nExecMainStartTimestamp=n/a\nId=rc-local.service\nActiveState=active\nSubState=running\n",
+      "coreProcesses": "2705 ./amber_core_R\n4331 ./amber_core_L\n"
+    }
+  ],
+  "finding": "Both pre-recovery captures had only right J1 reply 0x91 while the core continued seven-joint setpoints and cached LCM publication. Left had all eight replies. Interface error/drop counters did not increase.",
+  "operatorRecovery": [
+    "Right arm supported and powered off",
+    "Operator reported rebooting Draco"
+  ],
+  "verifiedRecovery": "After that report, right core PID changed from 2706 to 4331; left core 2705 and gateway 2760 did not restart. Both buses replied on 0x91\u20130x98 with inactive payload ff00000000000000.",
+  "retainedTargetClearedVerified": false,
+  "physicalFaultCauseConfirmed": false,
+  "motionAfterLossSentByAssistant": false,
+  "calibrationResumed": false
+}

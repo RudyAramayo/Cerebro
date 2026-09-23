@@ -20,8 +20,26 @@ private extension ROBArmSide {
 
 private struct ROBAmberDiagnosticsSample {
     let receivedAt: Date
+    let receivedAtUptime: TimeInterval
     let sequence: UInt64
     let sampleAgeMilliseconds: Double
+    let controllerSampleAgeMilliseconds: Double
+    let jointFeedbackAgeMilliseconds: [Double]
+    let gripperFeedbackAgeMilliseconds: Double
+
+    var localAgeMilliseconds: Double {
+        max(0, ProcessInfo.processInfo.systemUptime - receivedAtUptime) * 1_000
+    }
+
+    func jointFeedbackIsFresh(_ joint: Int) -> Bool {
+        (jointFeedbackAgeMilliseconds[safe: joint] ?? .infinity) + localAgeMilliseconds <= 250
+            && controllerSampleAgeMilliseconds + localAgeMilliseconds <= 250
+    }
+
+    var armFeedbackIsFresh: Bool {
+        sampleAgeMilliseconds + localAgeMilliseconds <= 250
+            && (0..<7).allSatisfy { jointFeedbackIsFresh($0) }
+    }
     let positionsRadians: [Double]
     let velocitiesRadiansPerSecond: [Double]
     let currents: [Double]
@@ -448,7 +466,7 @@ private final class ROBAmberArmSchematicView: NSView {
         if let targetPoints {
             drawChain(targetPoints.map(mapped), color: NSColor.systemOrange.withAlphaComponent(0.58), dashed: true)
         }
-        let stale = Date().timeIntervalSince(sample.receivedAt) > 0.5
+        let stale = !sample.armFeedbackIsFresh
         let outsideJointLimits = Swift.zip(sample.positionsRadians, ROBAmberB1Kinematics.joints)
             .contains { angle, joint in !(joint.lowerLimit ... joint.upperLimit).contains(angle) }
         drawChain(
@@ -1003,7 +1021,7 @@ private final class ROBAmberArmSchematicView: NSView {
 
     private func makeArmTablePanel(_ arm: ROBAmberDiagnosticsArm, table: NSTableView,
                                    summary: NSTextField) -> NSView {
-        let heading = NSTextField(labelWithString: "\(arm.amberRoutingDescription) — measured state")
+        let heading = NSTextField(labelWithString: "\(arm.amberRoutingDescription) — controller telemetry")
         heading.font = .systemFont(ofSize: 12, weight: .semibold)
         summary.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
         summary.textColor = .secondaryLabelColor
@@ -1387,8 +1405,6 @@ private final class ROBAmberArmSchematicView: NSView {
 
     private func ingest(_ telemetry: ROBAmberGatewayTelemetry) {
         guard let arm = ROBAmberDiagnosticsArm(amberGatewayArm: telemetry.arm),
-              telemetry.sampleAgeMilliseconds.isFinite,
-              telemetry.sampleAgeMilliseconds >= 0,
               telemetry.positionsRadians.count == 7,
               (telemetry.velocitiesRadiansPerSecond.count == 7
                 || (!telemetry.velocitiesAvailable && telemetry.velocitiesRadiansPerSecond.isEmpty)),
@@ -1405,8 +1421,12 @@ private final class ROBAmberArmSchematicView: NSView {
               statuses.allSatisfy(\.isFinite) else { return }
         let sample = ROBAmberDiagnosticsSample(
             receivedAt: Date(),
+            receivedAtUptime: telemetry.receivedAtUptime,
             sequence: telemetry.sequence,
             sampleAgeMilliseconds: telemetry.sampleAgeMilliseconds,
+            controllerSampleAgeMilliseconds: telemetry.controllerSampleAgeMilliseconds,
+            jointFeedbackAgeMilliseconds: telemetry.jointFeedbackAgeMilliseconds.map(\.doubleValue),
+            gripperFeedbackAgeMilliseconds: telemetry.gripperFeedbackAgeMilliseconds,
             positionsRadians: positions,
             velocitiesRadiansPerSecond: velocities,
             currents: currents,
@@ -1650,13 +1670,28 @@ private final class ROBAmberArmSchematicView: NSView {
             label.textColor = .secondaryLabelColor
             return
         }
-        let localAge = Date().timeIntervalSince(sample.receivedAt)
-        label.stringValue = String(format: "seq %llu • %.1f Hz • %.2f ms • received %.2f s ago",
-                                   sample.sequence, history.updateRate(), sample.sampleAgeMilliseconds, localAge)
+        let localAge = sample.localAgeMilliseconds / 1_000
+        let staleJoints = (0..<7).filter {
+            (sample.jointFeedbackAgeMilliseconds[safe: $0] ?? .infinity)
+                + max(0, localAge) * 1_000 > 250
+        }
+        label.stringValue = String(format: "controller seq %llu • %.1f Hz • controller age %.2f ms • received %.2f s ago",
+                                   sample.sequence, history.updateRate(), sample.controllerSampleAgeMilliseconds, localAge)
+        if sample.jointFeedbackAgeMilliseconds.count != 7 {
+            label.stringValue += " • per-motor CAN feedback unavailable; gateway update required"
+        } else if !staleJoints.isEmpty {
+            label.stringValue += " • CAN feedback missing/stale: " + staleJoints.map { "J\($0 + 1)" }.joined(separator: ", ")
+        } else {
+            label.stringValue += " • all joint CAN replies current"
+        }
+        if sample.gripperFeedbackAgeMilliseconds + sample.localAgeMilliseconds > 250 {
+            label.stringValue += " • gripper CAN feedback missing/stale"
+        }
         if sample.velocitiesRadiansPerSecond.isEmpty {
             label.stringValue += " • velocity unavailable"
         }
-        label.textColor = localAge > 0.5 || sample.sampleAgeMilliseconds > 250
+        label.textColor = !sample.armFeedbackIsFresh
+            || sample.gripperFeedbackAgeMilliseconds + sample.localAgeMilliseconds > 250
             ? .systemRed : .secondaryLabelColor
     }
 
@@ -1731,6 +1766,7 @@ private final class ROBAmberArmSchematicView: NSView {
         }
         let position = sample?.positionsRadians[safe: row]
         let targetValue = target?[safe: row]
+        let feedbackFresh = sample?.jointFeedbackIsFresh(row) ?? false
         switch identifier.rawValue {
         case "joint": label.stringValue = "J\(row + 1)"
         case "positionRad": label.stringValue = format(position, digits: 5)
@@ -1740,11 +1776,11 @@ private final class ROBAmberArmSchematicView: NSView {
             label.stringValue = format(zip(position, targetValue).map { ($1 - $0) * 180 / .pi }, digits: 2)
         case "velocity": label.stringValue = format(sample?.velocitiesRadiansPerSecond[safe: row], digits: 4)
         case "current": label.stringValue = format(sample?.currents[safe: row], digits: 4)
-        case "mode": label.stringValue = formatMode(modeSnapshots[arm]?[safe: row])
+        case "mode": label.stringValue = feedbackFresh ? formatMode(modeSnapshots[arm]?[safe: row]) : "stale"
         case "status": label.stringValue = formatStatus(sample?.statuses[safe: row])
         default: label.stringValue = "—"
         }
-        if let sample, Date().timeIntervalSince(sample.receivedAt) > 0.5 {
+        if !feedbackFresh {
             label.textColor = .systemRed
         } else if identifier.rawValue == "errorDeg", let position, let targetValue,
                   abs(targetValue - position) > 0.0873 {
@@ -1752,7 +1788,8 @@ private final class ROBAmberArmSchematicView: NSView {
         } else {
             label.textColor = .labelColor
         }
-        label.toolTip = label.stringValue
+        label.toolTip = feedbackFresh ? label.stringValue
+            : "Motor CAN feedback is missing or stale. Displayed values are cached controller data, not a current measured pose."
         return cell
     }
 
@@ -2566,7 +2603,7 @@ private final class ROBAmberArmSchematicView: NSView {
     }
 
     private func csvData() -> Data {
-        var lines = ["arm,received_at,sequence,sample_age_ms,joint,position_rad,target_rad,error_rad,velocity_rad_s,current,status,robot_arm,core,udp_port"]
+        var lines = ["arm,received_at,sequence,sample_age_ms,joint,position_rad,target_rad,error_rad,velocity_rad_s,current,status,robot_arm,core,udp_port,controller_sample_age_ms,joint_feedback_age_ms,gripper_feedback_age_ms"]
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         for arm in ROBAmberDiagnosticsArm.allCases {
@@ -2589,6 +2626,9 @@ private final class ROBAmberArmSchematicView: NSView {
                         arm.rawValue,
                         arm.amberCoreName,
                         String(arm.amberUDPPort),
+                        csvNumber(sample.controllerSampleAgeMilliseconds),
+                        csvNumber(sample.jointFeedbackAgeMilliseconds[safe: joint]),
+                        csvNumber(sample.gripperFeedbackAgeMilliseconds),
                     ]
                     lines.append(fields.joined(separator: ","))
                 }

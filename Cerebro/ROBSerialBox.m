@@ -5306,6 +5306,55 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
 
 - (void)runPythonArguments:(NSArray<NSString *> *)arguments operation:(NSString *)operation
 {
+    NSUInteger portIndex = [arguments indexOfObject:@"--port"];
+    NSInteger port = portIndex != NSNotFound && portIndex + 1 < arguments.count
+        ? [arguments[portIndex + 1] integerValue] : 0;
+    NSSet<NSString *> *guardedOperations = [NSSet setWithArray:@[
+        @"cmd_activate_mode_v2", @"zero_position_mode_v2", @"cmd_position_mode_v2",
+        @"cmd_current_mode_v2", @"cmd_position_input", @"cmd_cartesian_input"
+    ]];
+    if ([guardedOperations containsObject:operation]) {
+        ROBAmberGatewayClient *gateway = [ROBAmberGatewayClient shared];
+        NSDictionary *admission = [gateway manualArmControlReadinessForUDPPort:port expectedSessionGeneration:0];
+        unsigned long long generation = [admission[@"sessionGeneration"] unsignedLongLongValue];
+        // Sleep before the final feedback check, never inside the SDK after
+        // admission. A reconnect during this delay must cancel the request.
+        NSUInteger sleepIndex = [arguments indexOfObject:@"--cmd_sleep"];
+        if ([admission[@"allowed"] boolValue] && sleepIndex != NSNotFound && sleepIndex + 1 < arguments.count) {
+            double delay = [arguments[sleepIndex + 1] doubleValue];
+            if (isfinite(delay) && delay > 0 && delay <= 60) {
+                NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + delay;
+                while (NSProcessInfo.processInfo.systemUptime < deadline) {
+                    NSTimeInterval remaining = deadline - NSProcessInfo.processInfo.systemUptime;
+                    if (remaining <= 0) { break; }
+                    [NSThread sleepForTimeInterval:MIN(0.05, remaining)];
+                    admission = [gateway manualArmControlReadinessForUDPPort:port expectedSessionGeneration:generation];
+                    if (![admission[@"allowed"] boolValue]) { break; }
+                }
+                NSMutableArray *immediate = [arguments mutableCopy];
+                immediate[sleepIndex + 1] = @"0";
+                arguments = immediate;
+            } else if (!isfinite(delay) || delay < 0 || delay > 60) {
+                admission = @{@"allowed": @NO, @"reason": @"Manual command delay must be between 0 and 60 seconds"};
+            }
+        }
+        if ([admission[@"allowed"] boolValue]) {
+            admission = [gateway manualArmControlReadinessForUDPPort:port expectedSessionGeneration:generation];
+        }
+        if (![admission[@"allowed"] boolValue]) {
+            NSString *message = [NSString stringWithFormat:@"\n%@: blocked — %@\n", operation, admission[@"reason"]];
+            NSLog(@"%@", message);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                NSTextView *console = port == 26001 ? self.amberMasterCoreOutput_L10
+                    : (port == 26002 ? self.amberMasterCoreOutput_R11 : nil);
+                if (console != nil) {
+                    console.string = [console.string stringByAppendingString:message];
+                    [console scrollRangeToVisible:NSMakeRange(console.string.length, 0)];
+                }
+            });
+            return;
+        }
+    }
     NSError *error = nil;
     NSString *output = [[ROBPythonRuntime sharedRuntime] runPythonWithArguments:arguments error:&error];
     if (error != nil) {

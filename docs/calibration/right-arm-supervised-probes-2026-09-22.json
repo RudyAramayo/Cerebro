@@ -1,0 +1,1451 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Supervised commissioning observations; not an executable trajectory or fitted calibration",
+  "physicalArm": "right",
+  "core": "L10",
+  "canInterface": "can10",
+  "udpPort": 26001,
+  "gatewayArm": "left",
+  "appCommit": "8eff7b835a15ec3675d90f6b6eac44f95f166cd4",
+  "operatorInitialState": "Right arm hanging and clear; belly camera cannot see it yet",
+  "positionMode": {
+    "requestedAt": "2026-09-22T20:47:23.382-07:00",
+    "acknowledgedAt": "2026-09-22T20:47:23.859-07:00",
+    "allSevenModes": 2,
+    "capturedHoldTargetRadians": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "probes": [
+    {
+      "requestedAt": "2026-09-22T20:48:04.377-07:00",
+      "transport": "Cerebro Torso manual Amber V2 API, UDP 26001",
+      "targetRadians": [
+        0,
+        -0.02,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "requestedDurationSeconds": 4,
+      "commandDelaySeconds": 0,
+      "operatorObservation": "Too small to judge",
+      "cameraObserved": false,
+      "postCommandWindowSeconds": [
+        10,
+        14
+      ],
+      "telemetry": {
+        "path": "evidence/2026-09-22-right-arm/rob-right-j2-probe-20260922.csv.gz",
+        "gzipSHA256": "30c1584ad35900530982e36ebadda737a54935b056da496755ef45df49d34d7c",
+        "uncompressedSHA256": "2c3f22dc74b1abd7897ef34e74927910878cb2a1ccc1afc9ccaca935990b5a79",
+        "rows": 33600
+      },
+      "controllerReadbackStatistics": [
+        {
+          "joint": 1,
+          "samples": 79,
+          "meanRadians": 0.000136353848,
+          "minRadians": 0.000136353848,
+          "maxRadians": 0.000136353848
+        },
+        {
+          "joint": 2,
+          "samples": 79,
+          "meanRadians": -0.019317370425316456,
+          "minRadians": -0.0194986002,
+          "maxRadians": -0.0192258925
+        },
+        {
+          "joint": 3,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 4,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 5,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 6,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 7,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        }
+      ]
+    },
+    {
+      "requestedAt": "2026-09-22T20:50:14.876-07:00",
+      "transport": "Cerebro Torso manual Amber V2 API, UDP 26001",
+      "targetRadians": [
+        0,
+        -0.06,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "requestedDurationSeconds": 4,
+      "commandDelaySeconds": 0,
+      "operatorObservation": "Outward from its side",
+      "cameraObserved": false,
+      "postCommandWindowSeconds": [
+        10,
+        14
+      ],
+      "telemetry": {
+        "path": "evidence/2026-09-22-right-arm/rob-right-j2-probe2-20260922.csv.gz",
+        "gzipSHA256": "428dd637873c8f7d6f67356986aa1deff440945ecd36dd2f266c67acc380cac7",
+        "uncompressedSHA256": "4f3c1381df1f0dce77099a8d4864aac31a8ad246c916a47b51e443e665dd0b1f",
+        "rows": 33600
+      },
+      "controllerReadbackStatistics": [
+        {
+          "joint": 1,
+          "samples": 75,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 2,
+          "samples": 75,
+          "meanRadians": -0.0604047546,
+          "minRadians": -0.0604047546,
+          "maxRadians": -0.0604047546
+        },
+        {
+          "joint": 3,
+          "samples": 75,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 4,
+          "samples": 75,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 5,
+          "samples": 75,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 6,
+          "samples": 75,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 7,
+          "samples": 75,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        }
+      ]
+    },
+    {
+      "targetRadians": [
+        0.04,
+        -0.06,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "requestedDurationSeconds": 4,
+      "commandDelaySeconds": 0,
+      "operatorObservation": "Toward the front",
+      "cameraObserved": false,
+      "telemetry": {
+        "path": "evidence/2026-09-22-right-arm/rob-right-j1-probe-20260922.csv.gz",
+        "gzipSHA256": "813878d1313e331ffcb595beab16a9175f3a874182f939eabee1b8aab0704226",
+        "uncompressedSHA256": "54355fec862e77a3305d3668cbf5a72a38578d0ef714ffec4d1376b2a48260e0",
+        "rows": 33600
+      },
+      "requestedAt": "2026-09-22T20:52:52.400-07:00",
+      "transport": "Cerebro Torso manual Amber V2 API, UDP 26001",
+      "postCommandWindowSeconds": [
+        10,
+        14
+      ],
+      "controllerReadbackStatistics": [
+        {
+          "joint": 1,
+          "samples": 79,
+          "meanRadians": 0.0398153236,
+          "minRadians": 0.0398153236,
+          "maxRadians": 0.0398153236
+        },
+        {
+          "joint": 2,
+          "samples": 79,
+          "meanRadians": -0.0598593392,
+          "minRadians": -0.0598593392,
+          "maxRadians": -0.0598593392
+        },
+        {
+          "joint": 3,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 4,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 5,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 6,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 7,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        }
+      ]
+    },
+    {
+      "requestedAt": "2026-09-22T20:54:23.886-07:00",
+      "transport": "Cerebro Torso manual Amber V2 API, UDP 26001",
+      "targetRadians": [
+        0.04,
+        -0.15,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "requestedDurationSeconds": 6,
+      "commandDelaySeconds": 0,
+      "operatorObservation": "Yes, smooth and clear",
+      "cameraObserved": false,
+      "postCommandWindowSeconds": [
+        12,
+        16
+      ],
+      "telemetry": {
+        "path": "evidence/2026-09-22-right-arm/rob-right-clearance1-20260922.csv.gz",
+        "gzipSHA256": "5a7b190502c52e7a6c53ee5b81217770fe68d50d304ddac62fc5be38c9dcb8d6",
+        "uncompressedSHA256": "df300acbbe678ec617de96abd8428a211a80b19748b510869c7d661353b0c480",
+        "rows": 33600
+      },
+      "controllerReadbackStatistics": [
+        {
+          "joint": 1,
+          "samples": 80,
+          "meanRadians": 0.0398153236,
+          "minRadians": 0.0398153236,
+          "maxRadians": 0.0398153236
+        },
+        {
+          "joint": 2,
+          "samples": 80,
+          "meanRadians": -0.15120959949999999,
+          "minRadians": -0.152170894,
+          "maxRadians": -0.150398294
+        },
+        {
+          "joint": 3,
+          "samples": 80,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 4,
+          "samples": 80,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 5,
+          "samples": 80,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 6,
+          "samples": 80,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 7,
+          "samples": 80,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        }
+      ]
+    },
+    {
+      "requestedAt": "2026-09-22T20:56:18.504-07:00",
+      "transport": "Cerebro Torso manual Amber V2 API, UDP 26001",
+      "targetRadians": [
+        0.15,
+        -0.15,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "requestedDurationSeconds": 6,
+      "commandDelaySeconds": 0,
+      "operatorObservation": "Yes, smooth and clear",
+      "cameraObserved": false,
+      "postCommandWindowSeconds": [
+        12,
+        16
+      ],
+      "telemetry": {
+        "path": "evidence/2026-09-22-right-arm/rob-right-forward1-20260922.csv.gz",
+        "gzipSHA256": "ee688670d4ce07a9a9b065fc0dd3e33d47588d4f8838efff14274984a136c168",
+        "uncompressedSHA256": "5222e6e51c3d7284118ae4a863c43e97eaef629781978eed2161e38cd1b496b8",
+        "rows": 33600
+      },
+      "controllerReadbackStatistics": [
+        {
+          "joint": 1,
+          "samples": 79,
+          "meanRadians": 0.15026194,
+          "minRadians": 0.15026194,
+          "maxRadians": 0.15026194
+        },
+        {
+          "joint": 2,
+          "samples": 79,
+          "meanRadians": -0.149852879,
+          "minRadians": -0.149852879,
+          "maxRadians": -0.149852879
+        },
+        {
+          "joint": 3,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 4,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 5,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 6,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 7,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        }
+      ]
+    },
+    {
+      "requestedAt": "2026-09-22T20:58:43.598-07:00",
+      "transport": "Cerebro Torso manual Amber V2 API, UDP 26001",
+      "targetRadians": [
+        0.15,
+        -0.3,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "requestedDurationSeconds": 8,
+      "commandDelaySeconds": 0,
+      "operatorObservation": "Yes, clearly outside with room",
+      "cameraObserved": false,
+      "postCommandWindowSeconds": [
+        14,
+        18
+      ],
+      "telemetry": {
+        "path": "evidence/2026-09-22-right-arm/rob-right-clearance2-20260922.csv.gz",
+        "gzipSHA256": "e87e749ff649153b366cb4dbc85cb95e763ce0e01a72fb9b87aed652e2796b7e",
+        "uncompressedSHA256": "21f8b1e35e14f0302b3d60fff5ed2a067faa5446179f4ebb9b0a5d8402617c68",
+        "rows": 33600
+      },
+      "controllerReadbackStatistics": [
+        {
+          "joint": 1,
+          "samples": 79,
+          "meanRadians": 0.149852879,
+          "minRadians": 0.149852879,
+          "maxRadians": 0.149852879
+        },
+        {
+          "joint": 2,
+          "samples": 79,
+          "meanRadians": -0.300932942,
+          "minRadians": -0.300932942,
+          "maxRadians": -0.300932942
+        },
+        {
+          "joint": 3,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 4,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 5,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 6,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 7,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        }
+      ]
+    },
+    {
+      "requestedAt": "2026-09-22T21:01:14.385-07:00",
+      "transport": "Cerebro Torso manual Amber V2 API, UDP 26001",
+      "targetRadians": [
+        0.3,
+        -0.3,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "requestedDurationSeconds": 8,
+      "commandDelaySeconds": 0,
+      "operatorObservation": "Yes, smooth and clear (both steps)",
+      "cameraObserved": false,
+      "postCommandWindowSeconds": [
+        14,
+        18
+      ],
+      "telemetry": {
+        "path": "evidence/2026-09-22-right-arm/rob-right-forward2-clearance3-20260922.csv.gz",
+        "gzipSHA256": "caf28fd2b65ea5c54014b3298cc2e420fe05dd1fe614ed722b3588eaa69447c4",
+        "uncompressedSHA256": "6b7f8dd909bc70bf14335096b3f48f31f8a639e9fb7e42ab0b6f2256afbe0667",
+        "rows": 33600
+      },
+      "controllerReadbackStatistics": [
+        {
+          "joint": 1,
+          "samples": 79,
+          "meanRadians": 0.3009968040506329,
+          "minRadians": 0.299705757,
+          "maxRadians": 0.301614711
+        },
+        {
+          "joint": 2,
+          "samples": 79,
+          "meanRadians": -0.299842111,
+          "minRadians": -0.299842111,
+          "maxRadians": -0.299842111
+        },
+        {
+          "joint": 3,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 4,
+          "samples": 79,
+          "meanRadians": 0.00019676378065822784,
+          "minRadians": 0.000136353848,
+          "maxRadians": 0.000272707696
+        },
+        {
+          "joint": 5,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 6,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 7,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        }
+      ]
+    },
+    {
+      "requestedAt": "2026-09-22T21:02:19.864-07:00",
+      "transport": "Cerebro Torso manual Amber V2 API, UDP 26001",
+      "targetRadians": [
+        0.3,
+        -0.45,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "requestedDurationSeconds": 8,
+      "commandDelaySeconds": 0,
+      "operatorObservation": "Yes, smooth and clear (both steps)",
+      "cameraObserved": false,
+      "postCommandWindowSeconds": [
+        14,
+        18
+      ],
+      "telemetry": {
+        "path": "evidence/2026-09-22-right-arm/rob-right-forward2-clearance3-20260922.csv.gz",
+        "gzipSHA256": "caf28fd2b65ea5c54014b3298cc2e420fe05dd1fe614ed722b3588eaa69447c4",
+        "uncompressedSHA256": "6b7f8dd909bc70bf14335096b3f48f31f8a639e9fb7e42ab0b6f2256afbe0667",
+        "rows": 33600
+      },
+      "controllerReadbackStatistics": [
+        {
+          "joint": 1,
+          "samples": 79,
+          "meanRadians": 0.2987685408734177,
+          "minRadians": 0.298751281,
+          "maxRadians": 0.298887634
+        },
+        {
+          "joint": 2,
+          "samples": 79,
+          "meanRadians": -0.450104052,
+          "minRadians": -0.450104052,
+          "maxRadians": -0.450104052
+        },
+        {
+          "joint": 3,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 4,
+          "samples": 79,
+          "meanRadians": -5.177994227848102e-06,
+          "minRadians": -0.000136353848,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 5,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 6,
+          "samples": 79,
+          "meanRadians": 0.000272707696,
+          "minRadians": 0.000272707696,
+          "maxRadians": 0.000272707696
+        },
+        {
+          "joint": 7,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        }
+      ]
+    },
+    {
+      "requestedAt": "2026-09-22T21:04:14.426-07:00",
+      "transport": "Cerebro Torso manual Amber V2 API, UDP 26001",
+      "targetRadians": [
+        0.45,
+        -0.45,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "requestedDurationSeconds": 8,
+      "commandDelaySeconds": 0,
+      "operatorObservation": "Yes, smooth and clear; operator then changed lighting and robot location",
+      "cameraObserved": false,
+      "postCommandWindowSeconds": [
+        26,
+        30
+      ],
+      "transitionIncludedInExport": false,
+      "telemetry": {
+        "path": "evidence/2026-09-22-right-arm/rob-right-forward3-20260922.csv.gz",
+        "gzipSHA256": "f1c9a7c533a0f5defb71bf28cdf22ce88b59a5f26eb45f43670e315ee05f4e0d",
+        "uncompressedSHA256": "047d7ad8d81be13e010a8463a185b67edee00d702cfec412ee6133f45b3f27a6",
+        "rows": 33600
+      },
+      "controllerReadbackStatistics": [
+        {
+          "joint": 1,
+          "samples": 79,
+          "meanRadians": 0.449831344,
+          "minRadians": 0.449831344,
+          "maxRadians": 0.449831344
+        },
+        {
+          "joint": 2,
+          "samples": 79,
+          "meanRadians": -0.449831344,
+          "minRadians": -0.449831344,
+          "maxRadians": -0.449831344
+        },
+        {
+          "joint": 3,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 4,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 5,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 6,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 7,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        }
+      ]
+    },
+    {
+      "requestedAt": "2026-09-22T21:07:14.899-07:00",
+      "transport": "Cerebro Torso manual Amber V2 API, UDP 26001",
+      "targetRadians": [
+        0.45,
+        -0.6,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "requestedDurationSeconds": 8,
+      "commandDelaySeconds": 0,
+      "operatorObservation": "Yes, clear with room (both steps)",
+      "cameraObserved": false,
+      "postCommandWindowSeconds": [
+        14,
+        18
+      ],
+      "transitionIncludedInExport": true,
+      "telemetry": {
+        "path": "evidence/2026-09-22-right-arm/rob-right-clearance4-forward4-20260922.csv.gz",
+        "gzipSHA256": "46f74c64ae62bcff9bc5b9b9029899204163ea06a29b8c9f05916ef556c8df2a",
+        "uncompressedSHA256": "1efff0c98c8233be619482e94ae3d0a6bd44e6dec9e3801dc29951edb13b641c",
+        "rows": 33600
+      },
+      "controllerReadbackStatistics": [
+        {
+          "joint": 1,
+          "samples": 78,
+          "meanRadians": 0.449831344,
+          "minRadians": 0.449831344,
+          "maxRadians": 0.449831344
+        },
+        {
+          "joint": 2,
+          "samples": 78,
+          "meanRadians": -0.5998188288717949,
+          "minRadians": -0.599820577,
+          "maxRadians": -0.599684223
+        },
+        {
+          "joint": 3,
+          "samples": 78,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 4,
+          "samples": 78,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 5,
+          "samples": 78,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 6,
+          "samples": 78,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 7,
+          "samples": 78,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        }
+      ]
+    },
+    {
+      "requestedAt": "2026-09-22T21:08:01.614-07:00",
+      "transport": "Cerebro Torso manual Amber V2 API, UDP 26001",
+      "targetRadians": [
+        0.6,
+        -0.6,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "requestedDurationSeconds": 8,
+      "commandDelaySeconds": 0,
+      "operatorObservation": "Yes, clear with room (both steps)",
+      "cameraObserved": false,
+      "postCommandWindowSeconds": [
+        14,
+        18
+      ],
+      "transitionIncludedInExport": true,
+      "telemetry": {
+        "path": "evidence/2026-09-22-right-arm/rob-right-clearance4-forward4-20260922.csv.gz",
+        "gzipSHA256": "46f74c64ae62bcff9bc5b9b9029899204163ea06a29b8c9f05916ef556c8df2a",
+        "uncompressedSHA256": "1efff0c98c8233be619482e94ae3d0a6bd44e6dec9e3801dc29951edb13b641c",
+        "rows": 33600
+      },
+      "controllerReadbackStatistics": [
+        {
+          "joint": 1,
+          "samples": 79,
+          "meanRadians": 0.600438484,
+          "minRadians": 0.600365992,
+          "maxRadians": 0.600502346
+        },
+        {
+          "joint": 2,
+          "samples": 79,
+          "meanRadians": -0.599820577,
+          "minRadians": -0.599820577,
+          "maxRadians": -0.599820577
+        },
+        {
+          "joint": 3,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 4,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 5,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 6,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 7,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        }
+      ]
+    },
+    {
+      "transport": "Cerebro Torso manual Amber V2 API, UDP 26001",
+      "commandDelaySeconds": 0,
+      "requestedAt": "2026-09-22T21:09:48.942-07:00",
+      "targetRadians": [
+        0.75,
+        -0.6,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "requestedDurationSeconds": 8,
+      "operatorObservation": "Yes, space is clear; arm about 45 degrees from the side",
+      "cameraObserved": false,
+      "transitionIncludedInExport": false,
+      "telemetry": null,
+      "observedUIReadbackRadians": [
+        0.74995,
+        -0.59982,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "evidenceNote": "Readback was observed in the live Diagnostics UI. This pose aged out of the bounded CSV history before export; there is no archived endpoint sample window."
+    },
+    {
+      "transport": "Cerebro Torso manual Amber V2 API, UDP 26001",
+      "commandDelaySeconds": 0,
+      "requestedAt": "2026-09-22T21:11:48.590-07:00",
+      "targetRadians": [
+        1.05,
+        -0.6,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "requestedDurationSeconds": 16,
+      "operatorObservation": "The arm is now visible; remaining forward swing is clear of the operator and chair",
+      "cameraObserved": true,
+      "cameraObservation": "Gripper entered the right image edge; most forearm remained cropped. Qualitative UI image only; no synchronized frame saved at this midpoint.",
+      "postCommandWindowSeconds": [
+        124,
+        128
+      ],
+      "transitionIncludedInExport": false,
+      "telemetry": {
+        "path": "evidence/2026-09-22-right-arm/rob-right-visible-midpoint-20260922.csv.gz",
+        "gzipSHA256": "162aae656aa760c8bf968399e9baf604aba4c4991fd9ae00f06b82c325e2bab6",
+        "uncompressedSHA256": "75e1152ba012498979737beaf618072f0dd66bb0489060c69c44825cf5c197c5",
+        "rows": 33600
+      },
+      "evidenceNote": "Only later held-pose samples were retained in this export; the transition aged out.",
+      "controllerReadbackStatistics": [
+        {
+          "joint": 1,
+          "samples": 79,
+          "meanRadians": 1.049826243670886,
+          "minRadians": 1.04978827,
+          "maxRadians": 1.04992463
+        },
+        {
+          "joint": 2,
+          "samples": 79,
+          "meanRadians": -0.599820577,
+          "minRadians": -0.599820577,
+          "maxRadians": -0.599820577
+        },
+        {
+          "joint": 3,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 4,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 5,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 6,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 7,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        }
+      ]
+    },
+    {
+      "transport": "Cerebro Torso manual Amber V2 API, UDP 26001",
+      "commandDelaySeconds": 0,
+      "requestedAt": "2026-09-22T21:19:24.086-07:00",
+      "targetRadians": [
+        1.35,
+        -0.6,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "requestedDurationSeconds": 16,
+      "operatorClearanceBeforeCommand": "Yes, the remaining swing is clear",
+      "operatorObservationAfterCommand": null,
+      "cameraObserved": true,
+      "cameraObservation": "Wrist and gripper visible in upper-right image; upper arm and most forearm remain cropped. Camera overlap with nearby objects is not metric swept-clearance evidence.",
+      "postCommandWindowSeconds": [
+        22,
+        26
+      ],
+      "transitionIncludedInExport": true,
+      "telemetry": {
+        "path": "evidence/2026-09-22-right-arm/rob-right-visible-forward-20260922.csv.gz",
+        "gzipSHA256": "5d24c200134e5dd58122fce4366da58eb261a364a247fc017e03f79fe099c488",
+        "uncompressedSHA256": "12af15fdc39010dd176ade73e0433adc8ad0a22033b9b2a285d8738c4c2d8a5d",
+        "rows": 33600
+      },
+      "controllerReadbackStatistics": [
+        {
+          "joint": 1,
+          "samples": 79,
+          "meanRadians": 1.3504882051898734,
+          "minRadians": 1.34990309,
+          "maxRadians": 1.35126663
+        },
+        {
+          "joint": 2,
+          "samples": 79,
+          "meanRadians": -0.599820577,
+          "minRadians": -0.599820577,
+          "maxRadians": -0.599820577
+        },
+        {
+          "joint": 3,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 4,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 5,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 6,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 7,
+          "samples": 79,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        }
+      ]
+    },
+    {
+      "requestedAt": "2026-09-22T21:32:11.336-07:00",
+      "transport": "Cerebro Torso manual Amber V2 API, UDP 26001",
+      "targetRadians": [
+        1.35,
+        -0.6,
+        0,
+        0,
+        0,
+        0.04,
+        0
+      ],
+      "requestedDurationSeconds": 4,
+      "commandDelaySeconds": 0,
+      "outcome": "No verified J6 response; partial CAN loss discovered; further commands stopped",
+      "cameraMotionVerified": false,
+      "returnCommandSent": false,
+      "controllerReadbackStatistics": [
+        {
+          "joint": 1,
+          "samples": 2400,
+          "meanRadians": 1.3498733770625,
+          "minRadians": 1.34976674,
+          "maxRadians": 1.34990309
+        },
+        {
+          "joint": 2,
+          "samples": 2400,
+          "meanRadians": -0.599820577,
+          "minRadians": -0.599820577,
+          "maxRadians": -0.599820577
+        },
+        {
+          "joint": 3,
+          "samples": 2400,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 4,
+          "samples": 2400,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 5,
+          "samples": 2400,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 6,
+          "samples": 2400,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 7,
+          "samples": 2400,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        }
+      ],
+      "telemetry": {
+        "path": "evidence/2026-09-22-right-arm/rob-right-j6-probe-20260922.csv.gz",
+        "gzipSHA256": "ad596f4f31ff5f4000cec868ef1ed4304bc6e5d47d1a920c834436a026b94ad4",
+        "uncompressedSHA256": "9fe838aa1248c8b2d02bdc9154dfa8e449e00024366bb7f542444e97e7c009be",
+        "rows": 33600
+      },
+      "telemetryReceiptInterval": [
+        "2026-09-23T04:32:08.491Z",
+        "2026-09-23T04:34:10.060Z"
+      ],
+      "feedbackCaveat": "Only J1 replied in subsequent passive CAN captures. J2\u2013J7 values and modes are cached, not current physical pose evidence. Exact dropout onset is unknown."
+    }
+  ],
+  "evidenceLimits": [
+    "CSV target_rad/error_rad retain the earlier gateway hold target; Torso manual commands use a separate SDK path. Use each probe targetRadians above for its requested target.",
+    "Timestamps are Mac receipt/log times, not synchronized camera/encoder acquisition times.",
+    "Velocity is unavailable; no validated peak speed or acceleration is claimed.",
+    "Operator confirmed outward movement for negative right J2 and forward movement for positive right J1; no seven-joint URDF sign or offset fit is established.",
+    "Wrist/gripper-visible endpoints are recorded, but full-arm observability, quantitative camera calibration, automatic inspection replay, and a folding route remain unvalidated.",
+    "The recorded RGB-D metadata retains hardware timestamps and Mac receipt times but does not store capture epoch time or the camera stream-generation ID required by the startup trial fitter. Receipt pairing is approximate and does not establish the acquisition skew."
+  ],
+  "fittedCalibration": null,
+  "automaticReplayAllowed": false,
+  "environmentChange": {
+    "afterProbeNumber": 9,
+    "operatorReport": "Changed the lighting and position of the droid",
+    "cameraReview": "Brighter belly-camera view shows floor, stool, and operator; robot hand not yet visible at the reviewed poses."
+  },
+  "cameraBaseline": {
+    "targetRadians": [
+      1.35,
+      -0.6,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "recordingSession": "20260923T042114Z_8517d521",
+    "localRecordingDirectory": "/Users/rob/Library/Application Support/Cerebro/Recordings/Training/20260923T042114Z_8517d521",
+    "rawCameraArtifactsCommitted": false,
+    "startedAt": "2026-09-23T04:21:14.379Z",
+    "endedAt": "2026-09-23T04:22:01.860Z",
+    "recordingState": "complete",
+    "frames": 73,
+    "rgbDimensions": [
+      640,
+      400
+    ],
+    "depthEncoding": "uint16-little-endian-millimeters-zero-invalid",
+    "cameraToRobotExtrinsicsStored": false,
+    "artifactInventoryLocalPath": "/Users/rob/Library/Application Support/Cerebro/Recordings/Training/20260923T042114Z_8517d521-calibration-artifacts.json",
+    "artifactInventorySHA256": "34920f35e1f823dac649e9e052baeb0e43963d226f31377bd1aa24e5a67a1fcb",
+    "manifestSHA256": "5f416826b516e2ec77fd7831c4963249f65363f71937d12de2557f046ce52e27",
+    "framesJSONLSHA256": "4f02cbee5a49e6d318df71effcebf99e74ff0dd9dd2d06eb5c769de8eb5aa842",
+    "telemetry": {
+      "path": "evidence/2026-09-22-right-arm/rob-right-camera-baseline-20260922.csv.gz",
+      "gzipSHA256": "a46c7dd8fbba114a12614a3b2e2b929c38b04c47a98202e371e8ec1f2759d2da",
+      "uncompressedSHA256": "3f99e89a5c0790ce184747ae3336728f94186eab997cf5ae9a9eed2b76361a74",
+      "rows": 33600
+    },
+    "overlap": {
+      "basis": "Mac receipt wall-clock times only, not acquisition-time synchronization",
+      "framesInsideTelemetryReceiptInterval": 31,
+      "maximumNearestTelemetryReceiptSkewMilliseconds": 161.00001335144043,
+      "receivedAtInterval": [
+        "2026-09-22T21:21:14.613000-07:00",
+        "2026-09-22T21:21:35.038000-07:00"
+      ],
+      "controllerReadbackStatistics": [
+        {
+          "joint": 1,
+          "samples": 404,
+          "meanRadians": 1.349814665,
+          "minRadians": 1.34976674,
+          "maxRadians": 1.34990309
+        },
+        {
+          "joint": 2,
+          "samples": 404,
+          "meanRadians": -0.599820577,
+          "minRadians": -0.599820577,
+          "maxRadians": -0.599820577
+        },
+        {
+          "joint": 3,
+          "samples": 404,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 4,
+          "samples": 404,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 5,
+          "samples": 404,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 6,
+          "samples": 404,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        },
+        {
+          "joint": 7,
+          "samples": 404,
+          "meanRadians": 0.0,
+          "minRadians": 0.0,
+          "maxRadians": 0.0
+        }
+      ]
+    },
+    "registrationCheck": {
+      "path": "evidence/2026-09-22-right-arm/camera-registration-check.json",
+      "sha256": "1d0dda81074fb0f098383bd22771e530d4ebef44b6dcd311c4fe167c11c83fcd",
+      "sampledFrames": 3,
+      "result": "All unavailable: no projected base/torso registration surfaces in this camera view"
+    },
+    "assessment": "First visible held-pose reference only. Not a startup offset fit, synchronized calibration trial, full-arm observation, or validated automatic inspection route."
+  },
+  "twoCameraBaseline": {
+    "recordingSession": "20260923T042728Z_76e1127c",
+    "localRecordingDirectory": "/Users/rob/Library/Application Support/Cerebro/Recordings/Training/20260923T042728Z_76e1127c",
+    "startedAt": "2026-09-23T04:27:28.532Z",
+    "endedAt": "2026-09-23T04:27:56.787Z",
+    "recordingState": "complete",
+    "rawCameraArtifactsCommitted": false,
+    "armTargetRadians": [
+      1.35,
+      -0.6,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "neck": {
+      "savedPosition": "chess_board",
+      "commandedPanTarget": 5799,
+      "commandedLowerTarget": 7014,
+      "commandedUpperTarget": 6815,
+      "headTrackingEnabled": false,
+      "keepUprightEnabled": false,
+      "source": "Saved operator camera position through ROBServoControlRuntime; exact commanded tuple verified in UI after staging",
+      "measuredShaftFeedback": false,
+      "pulseToAngleCalibrationVerified": false
+    },
+    "roles": {
+      "face": {
+        "frames": 46,
+        "framesJSONLSHA256": "2a14c012df285a37370fc23eb0d541796b637551ef16c0b59afe099e43c0f731",
+        "firstReceivedAt": "2026-09-23T04:27:28.706Z",
+        "lastReceivedAt": "2026-09-23T04:27:56.382Z",
+        "rgbDimensions": [
+          640,
+          400
+        ],
+        "intrinsics": {
+          "cx": 319.5987243652344,
+          "cy": 205.55215454101562,
+          "fx": 573.69189453125,
+          "fy": 573.69189453125
+        },
+        "storedCameraToRobotExtrinsics": null,
+        "framesInsideTelemetryReceiptInterval": 46,
+        "maximumNearestTelemetryReceiptSkewMilliseconds": 127.00009346008301
+      },
+      "belly": {
+        "frames": 46,
+        "framesJSONLSHA256": "45cf348debf3596db4944eef5ec2f97939672b03549b49ae0e62947828a355fb",
+        "firstReceivedAt": "2026-09-23T04:27:28.800Z",
+        "lastReceivedAt": "2026-09-23T04:27:56.446Z",
+        "rgbDimensions": [
+          640,
+          400
+        ],
+        "intrinsics": {
+          "cx": 331.8689880371094,
+          "cy": 197.572509765625,
+          "fx": 425.3040771484375,
+          "fy": 425.3040771484375
+        },
+        "storedCameraToRobotExtrinsics": null,
+        "framesInsideTelemetryReceiptInterval": 46,
+        "maximumNearestTelemetryReceiptSkewMilliseconds": 107.00011253356934
+      }
+    },
+    "observedCoverage": "Main camera gives an additional downward view of the wrist/gripper and distal arm; shoulder and upper arm remain outside the reviewed image. Belly view remains wrist/gripper only. Neither view establishes full seven-joint observability.",
+    "telemetry": {
+      "path": "evidence/2026-09-22-right-arm/rob-right-two-camera-baseline-20260922.csv.gz",
+      "gzipSHA256": "05f418d93d7004309f5bb074ff5b9efb22c6e03d077df9ab4b22875ee987a289",
+      "uncompressedSHA256": "286af31e4bfad651c1f8cb511d6a4d56bed68d82d075859d6901be1616a6f2d0",
+      "rows": 33600
+    },
+    "pairingLimit": "Receipt-time overlap only. Recording metadata lacks camera capture epoch time and stream-generation ID; no acquisition-time synchronization or offset-fit eligibility is claimed.",
+    "artifactInventoryLocalPath": "/Users/rob/Library/Application Support/Cerebro/Recordings/Training/20260923T042728Z_76e1127c-calibration-artifacts.json",
+    "artifactInventorySHA256": "0b586e79d17086f7b2286f20b6255b6d48ca8c5a60dd591490e7d9b53c7883d8",
+    "manifestSHA256": "b5776f7588c87eece15be4198a3dbe96a7b89634804691df365883d6a5a68d53",
+    "calibrationApplied": false,
+    "controllerReadbackStatistics": [
+      {
+        "joint": 1,
+        "samples": 553,
+        "meanRadians": 1.3498688175768534,
+        "minRadians": 1.34976674,
+        "maxRadians": 1.34990309
+      },
+      {
+        "joint": 2,
+        "samples": 553,
+        "meanRadians": -0.599820577,
+        "minRadians": -0.599820577,
+        "maxRadians": -0.599820577
+      },
+      {
+        "joint": 3,
+        "samples": 553,
+        "meanRadians": 0.0,
+        "minRadians": 0.0,
+        "maxRadians": 0.0
+      },
+      {
+        "joint": 4,
+        "samples": 553,
+        "meanRadians": 0.0,
+        "minRadians": 0.0,
+        "maxRadians": 0.0
+      },
+      {
+        "joint": 5,
+        "samples": 553,
+        "meanRadians": 0.0,
+        "minRadians": 0.0,
+        "maxRadians": 0.0
+      },
+      {
+        "joint": 6,
+        "samples": 553,
+        "meanRadians": 0.0,
+        "minRadians": 0.0,
+        "maxRadians": 0.0
+      },
+      {
+        "joint": 7,
+        "samples": 553,
+        "meanRadians": 0.0,
+        "minRadians": 0.0,
+        "maxRadians": 0.0
+      }
+    ]
+  },
+  "feedbackValidity": {
+    "priorReadbacks": "LCM/core readbacks without concurrent per-joint CAN liveness; not independently verified seven-joint measurements.",
+    "operatorEvidence": "The operator observed supervised J1/J2 movement and clearance. This does not verify the unchanged downstream joints.",
+    "lastAllDevicesObservedBeforeLift": "2026-09-22 around 20:47 PDT",
+    "dropoutOnsetKnown": false,
+    "automaticReplayAllowed": false,
+    "cameraOffsetFitAccepted": false
+  },
+  "canLoss": {
+    "path": "evidence/2026-09-22-right-arm/can-loss-and-recovery.json",
+    "sha256": "4a77dc83aec45e03bc5d195c4c45d8b89f581e913faac4e1315249ae840742a6",
+    "rootCause": "Partial CAN device loss; cable/power cause not independently established",
+    "softwareDefect": "Cached LCM joint vector was incorrectly presented as fresh per-motor feedback",
+    "lastCommandMayHaveBeenRetained": true,
+    "operatorReportedSupportedOffAndRebooted": true,
+    "automaticReplayAllowed": false
+  },
+  "failedWristProbeRecording": {
+    "recordingSession": "20260923T043151Z_1c1c557e",
+    "localRecordingDirectory": "/Users/rob/Library/Application Support/Cerebro/Recordings/Training/20260923T043151Z_1c1c557e",
+    "startedAt": "2026-09-23T04:31:51.797Z",
+    "endedAt": "2026-09-23T04:33:19.059Z",
+    "recordingState": "complete",
+    "roles": {
+      "face": {
+        "frames": 140,
+        "framesJSONLSHA256": "59d334601b12d9af35e4d29477ecc36e8e9a159d5506638807c89187a5125491",
+        "firstReceivedAt": "2026-09-23T04:31:51.842Z",
+        "lastReceivedAt": "2026-09-23T04:33:18.971Z"
+      },
+      "belly": {
+        "frames": 139,
+        "framesJSONLSHA256": "168053edea1ca97ec1fac71271e994cac693186f42581c668bc6a3d9b6480aaa",
+        "firstReceivedAt": "2026-09-23T04:31:51.833Z",
+        "lastReceivedAt": "2026-09-23T04:33:18.830Z"
+      }
+    },
+    "rawCameraArtifactsCommitted": false,
+    "manifestSHA256": "07a7dbf8bff362a3af0ef1403e21de476b7e4964f976cf7bb3cd6fefc5cd8237",
+    "artifactInventoryLocalPath": "/Users/rob/Library/Application Support/Cerebro/Recordings/Training/20260923T043151Z_1c1c557e-calibration-artifacts.json",
+    "artifactInventorySHA256": "9a5a32193b895ed3311d975f775d3a247ab6ec37c9f2d1fb0232ae427a9475fe",
+    "calibrationApplied": false,
+    "acceptedAsCalibrationTrial": false,
+    "reason": "J6 response unverified; missing downstream CAN feedback. Receipt-time camera pairing alone cannot repair invalid encoder evidence."
+  }
+}

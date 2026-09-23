@@ -81,6 +81,54 @@ struct GatewayCompatibilityFixtures {
         expect(limited?.velocitiesAvailable == false, "Unverified velocity was advertised")
         expect(limited?.velocitiesRadiansPerSecond.isEmpty == true,
                "Unavailable velocity became zero-speed evidence for reference/settling gates")
+        expect(limited?.effectiveSampleAgeMilliseconds.isInfinite == true,
+               "Legacy core packets became verified individual motor feedback")
+        expect(client.manualArmControlReadiness(forUDPPort: 26002, expectedSessionGeneration: 0)["allowed"] as? Bool == false,
+               "Manual SDK command bypassed missing per-motor feedback")
+
+        var motorSample: [String: Any] = [
+            "type": "telemetry", "arm": "left", "sequence": 3,
+            "sample_age_ms": 1.0, "controller_sample_age_ms": 1.0,
+            "joint_feedback_age_ms": [Double](repeating: 1.0, count: 7),
+            "gripper_feedback_age_ms": 1.0,
+            "positions_rad": [Double](repeating: 0.0, count: 7),
+            "velocities_rad_s": NSNull(), "velocities_available": false,
+            "currents": [Double](repeating: 0.0, count: 7),
+            "statuses": [Double](repeating: 2.0, count: 7),
+        ]
+        try client.fixtureReceive(motorSample)
+        let admitted = client.manualArmControlReadiness(forUDPPort: 26001, expectedSessionGeneration: 0)
+        expect(admitted["allowed"] as? Bool == true, "Fresh physical-right feedback was not admitted on L10")
+        let admittedGeneration = (admitted["sessionGeneration"] as! NSNumber).uint64Value
+        expect(client.manualArmControlReadiness(forUDPPort: 26002, expectedSessionGeneration: 0)["allowed"] as? Bool == false,
+               "Physical-left command borrowed physical-right feedback")
+        motorSample["sequence"] = 4
+        motorSample["sample_age_ms"] = NSNull()
+        motorSample["joint_feedback_age_ms"] = [1.0, NSNull(), NSNull(), NSNull(), NSNull(), NSNull(), NSNull()] as [Any]
+        try client.fixtureReceive(motorSample)
+        expect(client.telemetry(forArm: "left")?.sequence == 4, "Missing CAN replies discarded useful stale diagnostics")
+        expect(client.telemetry(forArm: "left")?.effectiveSampleAgeMilliseconds.isInfinite == true,
+               "Advancing controller messages freshened silent motors")
+        expect(client.manualArmControlReadiness(forUDPPort: 26001, expectedSessionGeneration: 0)["allowed"] as? Bool == false,
+               "Manual position request admitted cached joints")
+        motorSample["sequence"] = 5
+        motorSample["sample_age_ms"] = 1.0
+        motorSample["joint_feedback_age_ms"] = [Double](repeating: 1.0, count: 7)
+        motorSample["gripper_feedback_age_ms"] = NSNull()
+        try client.fixtureReceive(motorSample)
+        expect(client.manualArmControlReadiness(forUDPPort: 26001, expectedSessionGeneration: 0)["allowed"] as? Bool == false,
+               "Missing gripper feedback was accepted by manual arm controls")
+        motorSample["gripper_feedback_age_ms"] = 1.0
+        motorSample["controller_sample_age_ms"] = 500.0
+        try client.fixtureReceive(motorSample)
+        expect(client.manualArmControlReadiness(forUDPPort: 26001, expectedSessionGeneration: 0)["allowed"] as? Bool == false,
+               "Live CAN replies freshened a stale LCM sample")
+        client.fixtureDisconnect()
+        try client.fixtureReceive(legacyReady)
+        motorSample["controller_sample_age_ms"] = 1.0
+        try client.fixtureReceive(motorSample)
+        expect(client.manualArmControlReadiness(forUDPPort: 26001, expectedSessionGeneration: admittedGeneration)["allowed"] as? Bool == false,
+               "Delayed manual command replayed into a different gateway session")
 
         // All three operations must be advertised before admitting gripper work.
         client.fixtureDisconnect()

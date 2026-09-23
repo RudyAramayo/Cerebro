@@ -90,6 +90,37 @@ Deactivation and read-only mode queries remain available. Software packet
 freshness does not prove each servo is communicating; September 22's motor
 response problem recovered after the operator readjusted the cable.
 
+## Partial CAN loss and cached telemetry
+
+The later right-wrist probe lost replies from J2–J7 and the gripper while J1
+and the core's LCM publisher continued. The updated gateway independently
+listens for each device's kernel-timestamped CAN replies. Telemetry includes
+`controller_sample_age_ms`, seven nullable `joint_feedback_age_ms` entries,
+and `gripper_feedback_age_ms`. `sample_age_ms` now covers both the LCM sample
+and the oldest of the seven joint replies; missing evidence is null.
+
+Cerebro retains missing/stale data for inspection, marks affected rows and the
+schematic red, and labels cached modes stale. CSV exports include the separate
+controller, joint and gripper ages. Consumers use local monotonic elapsed time
+as well, so stopped delivery cannot keep a sample fresh. Legacy telemetry
+without individual CAN evidence remains displayable but fails freshness gates.
+
+Torso manual SDK activation, mode and position commands require an authenticated
+gateway session and all eight live device replies. Delays are checked in the
+app before launching the SDK: a feedback loss or session replacement discards
+the pending request. Read-only polling and deactivation remain available.
+Gateway arm commands and measured-pose holds independently require all seven
+joint replies and LCM to be at most 250 ms old; gripper commands require the
+eighth reply too. This does not stop an already dispatched vendor trajectory
+or clear retained controller/motor targets. Feedback returning never causes
+the listener to replay a command.
+
+Deploy both app and gateway together. This changes neither vendor core nor CAN
+configuration. The monitor defaults follow legacy identities (`left`→can10,
+`right`→can11), requires Linux kernel receive timestamps, and sends no frames.
+The [commissioning record](calibration/right-arm-supervised-probes-2026-09-22.md)
+distinguishes operator observations, cached readbacks and passive CAN evidence.
+
 ## Files to transfer
 
 Copy the complete directory from the development Mac:
@@ -194,8 +225,9 @@ and telemetry for `left` and `right`. Verify that:
 
 - `sequence` increases;
 - `sample_age_ms` normally remains below 250 ms;
-- each position, velocity, current, and status array has seven values;
-- stationary joint velocities are near zero;
+- position, current and status arrays have seven values;
+- each of the seven joint CAN ages and the gripper CAN age are below 250 ms;
+- unverified velocity remains null with `velocities_available:false`;
 - no arm moves during this test.
 
 Stop the foreground gateway with Control-C.

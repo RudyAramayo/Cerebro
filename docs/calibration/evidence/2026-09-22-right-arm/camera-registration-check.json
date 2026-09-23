@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Offline visibility/registration check of recorded held-pose depth; not a live observation or fitted arm calibration",
+  "modelID": "c4a5c1bee9a9a0a6cca6ecdba9433f98ab647eea3084fb462ff592a0a0ea1e03",
+  "recordingSession": "20260923T042114Z_8517d521",
+  "hardwareOutputEnabled": false,
+  "method": "Same 3-pixel depth sampling and edge/0.15\u20133m filter as the markerless camera path; register_camera called directly on stored pixels without freshness or live-controller claims. No joint target enters the camera registration.",
+  "cameraToRobotExtrinsicsStored": false,
+  "frames": [
+    {
+      "keyframeID": "belly-000000066774",
+      "sourceSequence": 66774,
+      "receivedAt": "2026-09-23T04:21:14.613Z",
+      "depthSHA256": "27d6e4d104dc4672d27e58053a6ee364468e095e749c70464b41e57e370e5c51",
+      "usableDepthPoints": 17310,
+      "projectedBodyPoints": 0,
+      "projectedBodyPointsByLink": {
+        "base_link": 0,
+        "left_track_link": 0,
+        "right_track_link": 0,
+        "torso_link": 0,
+        "lean_link": 0,
+        "rplidar_link": 0
+      },
+      "status": "unavailable",
+      "detail": "Camera cannot see enough of ROB's base and torso to register the scan"
+    },
+    {
+      "keyframeID": "belly-000000067511",
+      "sourceSequence": 67511,
+      "receivedAt": "2026-09-23T04:21:38.731Z",
+      "depthSHA256": "31e0e6bde525c58f7bf0823eb29d7586ea6cadb5a668f237b327ecac7e3c6153",
+      "usableDepthPoints": 17658,
+      "projectedBodyPoints": 0,
+      "projectedBodyPointsByLink": {
+        "base_link": 0,
+        "left_track_link": 0,
+        "right_track_link": 0,
+        "torso_link": 0,
+        "lean_link": 0,
+        "rplidar_link": 0
+      },
+      "status": "unavailable",
+      "detail": "Camera cannot see enough of ROB's base and torso to register the scan"
+    },
+    {
+      "keyframeID": "belly-000000068216",
+      "sourceSequence": 68216,
+      "receivedAt": "2026-09-23T04:22:01.044Z",
+      "depthSHA256": "07398d7bc1f813bbcbd8b152698a32ce29d7eac7dc6bbd3c809d2f77ceba3071",
+      "usableDepthPoints": 14090,
+      "projectedBodyPoints": 0,
+      "projectedBodyPointsByLink": {
+        "base_link": 0,
+        "left_track_link": 0,
+        "right_track_link": 0,
+        "torso_link": 0,
+        "lean_link": 0,
+        "rplidar_link": 0
+      },
+      "status": "unavailable",
+      "detail": "Camera cannot see enough of ROB's base and torso to register the scan"
+    }
+  ]
+}
