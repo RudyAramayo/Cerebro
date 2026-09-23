@@ -249,11 +249,18 @@ class MarkerlessEstimator:
         result = dict(schemaVersion=1, modelID=self.p.reference["modelID"], referenceID=self.p.reference["referenceID"],
                       source="markerless_rgbd", capturedAtMilliseconds=frame.get("capturedAtMilliseconds", 0),
                       camera=frame.get("camera", "unknown"), sequence=frame.get("sequence", 0),
+                      streamID=frame.get("streamID", ""),
+                      timestampNanoseconds=frame.get("timestampNanoseconds", 0),
                       frame="base_link", arms={}, status="unavailable", detail="No usable depth")
         try:
             cloud, depth, intrinsics = self.cloud(frame)
             camera, registration_error = self.register_camera(frame["camera"], cloud, depth, intrinsics)
             result.update(cameraRegistrationRMS=registration_error, status="partial", detail="Visible surfaces fitted to the approved scan")
+            # Preserve the actual camera registration with each observation.
+            # Calibration replay must distinguish head/camera motion from an
+            # arm's encoder offset, and frame sequence alone resets on reconnect.
+            result.update(cameraToRobot=camera.tolist(), cameraIntrinsics=intrinsics.tolist(),
+                          depthImageSize=[int(depth.shape[1]), int(depth.shape[0])])
             for side in ("left", "right"):
                 arm = self.fit_arm(side, cloud, depth, intrinsics, camera, registration_error)
                 result["arms"][side] = arm

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "recordedDate": "2026-09-22",
+  "units": "vendor_radians",
+  "jointOrder": [1, 2, 3, 4, 5, 6, 7],
+  "pose": "folded",
+  "hardwareOutputEnabled": false,
+  "right": {
+    "core": "L-10",
+    "gatewayArm": "left",
+    "udpPort": 26001,
+    "positions": [0.0, -0.207477, 0.922961, -0.816727, 0.976605, 1.644858, -0.284677],
+    "provenance": "Operator reported this as the safe folded endpoint; no synchronized camera record captured"
+  },
+  "left": {
+    "core": "R-11",
+    "gatewayArm": "right",
+    "udpPort": 26002,
+    "positions": [0.0, 0.207477, -0.922961, 0.816727, -0.976605, -1.644858, 0.284677],
+    "provenance": "Mirrored from the right endpoint as directed and confirmed by the operator; separate physical validation not recorded"
+  },
+  "transition": {
+    "status": "intermediate_waypoints_required",
+    "foldWaypoints": [],
+    "unfoldWaypoints": [],
+    "constraint": "Animate through validated clearance poses with controlled joint speeds and smooth transitions; extremities can catch the treads",
+    "directEndpointReplayAllowed": false
+  }
+}

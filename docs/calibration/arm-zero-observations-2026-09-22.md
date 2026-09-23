@@ -65,10 +65,14 @@ q_vendor = q_vendor_at_verified_B1_zero + direction * q_model
 
 `direction` is established separately for each joint; mirrored target vectors
 alone do not establish it. This assumes B1 zero has been verified against the
-specific joint frames in the loaded URDF. References are invalid after a reboot,
-actuator power cycle, or loss of the validated session. Fixed mount geometry
-remains separate. The arms were power-cycled later in this troubleshooting
-session, so these saved vectors require renewed verification before reuse.
+specific joint frames in the loaded URDF. Preserve these operator-verified
+vectors as durable calibration priors across power cycles. Rob clarified that
+startup should expect hanging arms, then use a camera-visible extension and
+small independent servo movements to estimate any session offset changes.
+A manual return to B1 zero is not required at each boot. The active encoder
+mapping must come from current observations rather than blindly copying an
+old session offset. Fixed mount geometry remains separate. See the
+[camera-guided startup workflow](camera-guided-arm-startup.md).
 
 Keep physical side identity explicit when integrating these vectors. The
 geometry handoff identifies ROB-right as L-10 and ROB-left as R-11. The gateway's

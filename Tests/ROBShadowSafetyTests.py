@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 import uuid
 
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -66,6 +67,26 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(result["observedFrames"], [])
         self.assertEqual(result["visionStatus"], "unavailable")
         np.testing.assert_array_equal(self.p.q, self.p.q0)
+
+    def test_observation_retains_camera_identity_and_registration_for_replay(self):
+        estimator = MarkerlessEstimator(self.p)
+        frame = dict(camera="belly", sequence=12, streamID="camera-after-reconnect",
+                     timestampNanoseconds=123456789, capturedAtMilliseconds=time.time()*1000)
+        camera = np.eye(4); camera[0, 3] = .2
+        intrinsics = np.array([[30.,0,16.],[0,30.,12.],[0,0,1.]])
+        depth = np.ones((24,32))
+        fitted = dict(status="confirmed", detail="fixture observation", positions=[0.]*7,
+                      standardDeviationRadians=[.001]*7, residualMeters=.003)
+        with patch.object(estimator,"cloud",return_value=(np.zeros((10,3)),depth,intrinsics)), \
+                patch.object(estimator,"register_camera",return_value=(camera,.004)), \
+                patch.object(estimator,"fit_arm",return_value=fitted):
+            result = estimator.process(frame)
+        self.assertEqual(result["status"],"confirmed")
+        self.assertEqual(result["streamID"],frame["streamID"])
+        self.assertEqual(result["timestampNanoseconds"],frame["timestampNanoseconds"])
+        np.testing.assert_array_equal(result["cameraToRobot"],camera)
+        np.testing.assert_array_equal(result["cameraIntrinsics"],intrinsics)
+        self.assertEqual(result["depthImageSize"],[32,24])
 
     def test_reference_scan_overlap_blocks_and_reports_links(self):
         start = self.send("start", visionRequired=False)
