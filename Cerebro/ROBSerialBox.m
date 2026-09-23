@@ -5310,6 +5310,20 @@ static NSArray<NSString *> *ROBTicSerialNumbersFromListOutput(NSString *output)
     NSString *output = [[ROBPythonRuntime sharedRuntime] runPythonWithArguments:arguments error:&error];
     if (error != nil) {
         NSLog(@"%@: %@", operation, error.localizedDescription);
+        // Keep manual arm failures visible in the corresponding arm console,
+        // including SDK errors and partial-mode rejections.
+        NSUInteger portIndex = [arguments indexOfObject:@"--port"];
+        if (portIndex != NSNotFound && portIndex + 1 < arguments.count) {
+            NSInteger port = arguments[portIndex + 1].integerValue;
+            NSString *message = [NSString stringWithFormat:@"\n%@: %@\n", operation, error.localizedDescription];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                NSTextView *console = port == 26001 ? self.amberMasterCoreOutput_L10
+                    : (port == 26002 ? self.amberMasterCoreOutput_R11 : nil);
+                if (console == nil) { return; }
+                console.string = [console.string stringByAppendingString:message];
+                [console scrollRangeToVisible:NSMakeRange(console.string.length, 0)];
+            });
+        }
         return;
     }
     NSLog(@"%@: %@", operation, output ?: @"");

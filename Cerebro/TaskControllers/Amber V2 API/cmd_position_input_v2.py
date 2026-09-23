@@ -1,5 +1,7 @@
 from amber_api.amber_robot import Amber_Robot
+from amber_mode_guard import require_position_mode
 import argparse
+import math
 import time
 
 parser = argparse.ArgumentParser(description="Example of argparse with default values.")
@@ -51,22 +53,36 @@ PORT = args.port
 # Set joint count
 joint_count = 7
 
+if not all(math.isfinite(value) for value in (
+    cmd_time, cmd_sleep, servo1, servo2, servo3, servo4, servo5, servo6, servo7
+)) or cmd_time <= 0 or cmd_sleep < 0:
+    raise SystemExit("Position command blocked: joint targets and times must be finite, duration positive, and sleep nonnegative")
+
 time.sleep(cmd_sleep)
 
 arm = Amber_Robot(IP_ADDR, PORT, joint_count=joint_count)
-print(f"The robotic arm is now in mode{arm.get_mode()} ")
+try:
+    modes = require_position_mode(arm)
+except RuntimeError as error:
+    raise SystemExit(str(error)) from error
+print(f"Controller reports joint modes {modes}")
 
 # Get status from robot
 j_pos, c_pos = arm.get_status()
 
 print(f"Joint Position [1,2,3,4,5,6,7] = {j_pos})")
 print(f"Cartesian Position [X,Y,Z,Roll,Pitch,Yaw] = {c_pos}")
-print(f"The robotic arm is now in mode{arm.get_mode()} ")
+try:
+    require_position_mode(arm)
+except RuntimeError as error:
+    raise SystemExit(str(error)) from error
 
 #print("Move Joint to [1,1,1,1,1,1,1]")
 # Move Joint
 j_target = [servo1, servo2, servo3, servo4, servo5, servo6, servo7]  # Joint Position [1,2,3,4,5,6,7]
-arm.move_j(j_target, duration=cmd_time)
+if not arm.move_j(j_target, duration=cmd_time):
+    raise SystemExit("Position command rejected or not acknowledged; check the target limits and controller connection")
+print("Position command acknowledged by controller; this does not verify physical motion")
 # Wait until finish
 #print("Success?")
 #print(arm.wait_for_joint(j_target))  # True = pass, False = timeout

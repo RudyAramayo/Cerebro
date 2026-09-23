@@ -90,6 +90,7 @@
 		D4ADDC012E78A51E00631737 /* HumanBodySkeletonRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4ADDC002E78A51E00631737 /* HumanBodySkeletonRenderer.swift */; };
 		D4ADDC072E78A64500631737 /* HumanBodyPose3DDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4ADDC062E78A64500631737 /* HumanBodyPose3DDetector.swift */; };
 		D4B3620A2E72A1F2004E0BD0 /* cmd_activate_mode_v2.py in Resources */ = {isa = PBXBuildFile; fileRef = D4B362092E72A1E9004E0BD0 /* cmd_activate_mode_v2.py */; };
+		BC4142DB75F346C69386AD02 /* amber_mode_guard.py in Resources */ = {isa = PBXBuildFile; fileRef = BC4142DB75F346C69386AD01 /* amber_mode_guard.py */; };
 		D4B83AD72E754ACA006B2863 /* lcm.py in Resources */ = {isa = PBXBuildFile; fileRef = D4B83AD62E754AC1006B2863 /* lcm.py */; };
 		D4BDA6732E6E725D0088A5B4 /* cmd_cartesian_input.py in Resources */ = {isa = PBXBuildFile; fileRef = D4BDA6722E6E725D0088A5B4 /* cmd_cartesian_input.py */; };
 		D4C282032E70D5F5009CCABC /* watch_position_out.py in Resources */ = {isa = PBXBuildFile; fileRef = D4C282022E70D5F5009CCABC /* watch_position_out.py */; };
@@ -326,6 +327,7 @@
 		D4ADDC002E78A51E00631737 /* HumanBodySkeletonRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HumanBodySkeletonRenderer.swift; sourceTree = "<group>"; };
 		D4ADDC062E78A64500631737 /* HumanBodyPose3DDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HumanBodyPose3DDetector.swift; sourceTree = "<group>"; };
 		D4B362092E72A1E9004E0BD0 /* cmd_activate_mode_v2.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = cmd_activate_mode_v2.py; sourceTree = "<group>"; };
+		BC4142DB75F346C69386AD01 /* amber_mode_guard.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = amber_mode_guard.py; sourceTree = "<group>"; };
 		D4B83AD62E754AC1006B2863 /* lcm.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = lcm.py; sourceTree = "<group>"; };
 		D4BDA6722E6E725D0088A5B4 /* cmd_cartesian_input.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = cmd_cartesian_input.py; sourceTree = "<group>"; };
 		D4C282022E70D5F5009CCABC /* watch_position_out.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = watch_position_out.py; sourceTree = "<group>"; };
@@ -746,6 +748,7 @@
 				D4C2824B2E711D66009CCABC /* cmd_deactivate_mode_v2.py */,
 				D4B83AD62E754AC1006B2863 /* lcm.py */,
 				D4B362092E72A1E9004E0BD0 /* cmd_activate_mode_v2.py */,
+				BC4142DB75F346C69386AD01 /* amber_mode_guard.py */,
 				D4C282432E70F27C009CCABC /* cmd_position_mode_v2.py */,
 				D4A8DAE22E722D1E000485DF /* cmd_speed_mode_v2.py */,
 				D4A8DAD42E71EF90000485DF /* cmd_current_mode_v2.py */,
@@ -931,6 +934,7 @@
 				D4A8DAD52E71EF90000485DF /* cmd_current_mode_v2.py in Resources */,
 				D4C2824C2E711D6C009CCABC /* cmd_deactivate_mode_v2.py in Resources */,
 				D4B3620A2E72A1F2004E0BD0 /* cmd_activate_mode_v2.py in Resources */,
+				BC4142DB75F346C69386AD02 /* amber_mode_guard.py in Resources */,
 				D4C282362E70F132009CCABC /* LICENSE in Resources */,
 				D4C282382E70F132009CCABC /* README.md in Resources */,
 				D4F4802E22F2903E006ADB7A /* RealSenseTaskController.command in Resources */,
