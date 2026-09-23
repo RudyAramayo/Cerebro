@@ -41,6 +41,7 @@ private struct ROBAmberDiagnosticsConnectionSnapshot {
 /// report jaw position, force, or completion. In particular, an accepted
 /// calibration is not presented as physically verified/ready.
 private struct ROBAmberDiagnosticsGripperSnapshot {
+    var commandsAvailable = false
     var calibrationState = "unknown"
     var calibrationVerified = false
     var feedbackAvailable = false
@@ -1330,6 +1331,9 @@ private final class ROBAmberArmSchematicView: NSView {
         guard let arm = stringValue(in: dictionary, keys: ["arm"])
             .flatMap({ ROBAmberDiagnosticsArm(rawValue: $0.lowercased()) }) ?? fallbackArm else { return }
         var snapshot = gripperSnapshots[arm] ?? ROBAmberDiagnosticsGripperSnapshot()
+        if let value = boolValue(in: dictionary, keys: ["commandsAvailable"]) {
+            snapshot.commandsAvailable = value
+        }
         if let value = stringValue(in: dictionary, keys: ["calibrationState"]) {
             snapshot.calibrationState = value
         }
@@ -1385,7 +1389,8 @@ private final class ROBAmberArmSchematicView: NSView {
               telemetry.sampleAgeMilliseconds.isFinite,
               telemetry.sampleAgeMilliseconds >= 0,
               telemetry.positionsRadians.count == 7,
-              telemetry.velocitiesRadiansPerSecond.count == 7,
+              (telemetry.velocitiesRadiansPerSecond.count == 7
+                || (!telemetry.velocitiesAvailable && telemetry.velocitiesRadiansPerSecond.isEmpty)),
               telemetry.currents.count == 7,
               telemetry.statuses.count == 7,
               let history = histories[arm] else { return }
@@ -1553,7 +1558,10 @@ private final class ROBAmberArmSchematicView: NSView {
             let pending = pendingGripperCommands.values.first { $0.arm == arm }
             let stateText: String
             let stateColor: NSColor
-            if pending?.operation == "gripper_calibrate" {
+            if connection.state == .ready && !snapshot.commandsAvailable {
+                stateText = "Gripper unavailable — gateway update required"
+                stateColor = .systemOrange
+            } else if pending?.operation == "gripper_calibrate" {
                 stateText = "Calibration request pending — awaiting dispatch acknowledgement"
                 stateColor = .systemOrange
             } else if let operation = pending?.operation {
@@ -1616,13 +1624,14 @@ private final class ROBAmberArmSchematicView: NSView {
 
             let calibrationAccepted = snapshot.calibrationVerified
                 || snapshot.calibrationState == "command_accepted_unverified"
-            controls.queryButton.isEnabled = sharedInterlocksPass
-            controls.calibrateButton.isEnabled = sharedInterlocksPass
+            let gripperInterlocksPass = sharedInterlocksPass && snapshot.commandsAvailable
+            controls.queryButton.isEnabled = gripperInterlocksPass
+            controls.calibrateButton.isEnabled = gripperInterlocksPass
                 && !snapshot.commandInFlight
-            controls.releaseButton.isEnabled = sharedInterlocksPass
+            controls.releaseButton.isEnabled = gripperInterlocksPass
                 && !snapshot.commandInFlight
                 && calibrationAccepted
-            controls.holdButton.isEnabled = sharedInterlocksPass
+            controls.holdButton.isEnabled = gripperInterlocksPass
                 && !snapshot.commandInFlight
                 && calibrationAccepted
             controls.forceSlider.isEnabled = controls.holdButton.isEnabled
@@ -1639,6 +1648,9 @@ private final class ROBAmberArmSchematicView: NSView {
         let localAge = Date().timeIntervalSince(sample.receivedAt)
         label.stringValue = String(format: "seq %llu • %.1f Hz • %.2f ms • received %.2f s ago",
                                    sample.sequence, history.updateRate(), sample.sampleAgeMilliseconds, localAge)
+        if sample.velocitiesRadiansPerSecond.isEmpty {
+            label.stringValue += " • velocity unavailable"
+        }
         label.textColor = localAge > 0.5 || sample.sampleAgeMilliseconds > 250
             ? .systemRed : .secondaryLabelColor
     }
@@ -2080,6 +2092,8 @@ private final class ROBAmberArmSchematicView: NSView {
         let reason: String?
         if connection.state != .ready || !connection.exclusiveControllerSession {
             reason = "the authenticated exclusive Amber gateway is not ready"
+        } else if !snapshot.commandsAvailable {
+            reason = "gripper control requires a gateway update"
         } else if ROBAmberGestureExecutor.shared.isExecuting {
             reason = "an approved arm gesture is executing"
         } else if !pendingManualCommandIDs.isEmpty {
@@ -2564,7 +2578,7 @@ private final class ROBAmberArmSchematicView: NSView {
                         csvNumber(sample.positionsRadians[joint]),
                         csvNumber(target),
                         csvNumber(error),
-                        csvNumber(sample.velocitiesRadiansPerSecond[joint]),
+                        csvNumber(sample.velocitiesRadiansPerSecond[safe: joint]),
                         csvNumber(sample.currents[joint]),
                         csvNumber(sample.statuses[joint]),
                     ]

@@ -772,6 +772,13 @@ private final class ROBWakeUpFlippedDocumentView: NSView {
         let velocities = telemetry.velocitiesRadiansPerSecond.map(\.doubleValue)
         let currents = telemetry.currents.map(\.doubleValue)
         let statuses = telemetry.statuses.map(\.doubleValue)
+        guard telemetry.velocitiesAvailable else {
+            return .init(
+                level: .attention,
+                summary: "Velocity feedback unavailable",
+                detail: "Position diagnostics remain available; reference readiness needs verified joint velocities."
+            )
+        }
         guard telemetry.sequence > 0,
               positions.count == 7, velocities.count == 7,
               currents.count == 7, statuses.count == 7,

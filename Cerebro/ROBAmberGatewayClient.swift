@@ -17,6 +17,7 @@ import Security
     public let receivedAtUptime: TimeInterval
     public let positionsRadians: [NSNumber]
     public let velocitiesRadiansPerSecond: [NSNumber]
+    public let velocitiesAvailable: Bool
     public let currents: [NSNumber]
     public let statuses: [NSNumber]
 
@@ -26,7 +27,9 @@ import Security
         sampleAgeMilliseconds = message.sampleAgeMilliseconds ?? .infinity
         receivedAtUptime = ProcessInfo.processInfo.systemUptime
         positionsRadians = (message.positionsRadians ?? []).map(NSNumber.init(value:))
-        velocitiesRadiansPerSecond = (message.velocitiesRadiansPerSecond ?? []).map(NSNumber.init(value:))
+        velocitiesAvailable = message.velocitiesAvailable != false
+        velocitiesRadiansPerSecond = velocitiesAvailable
+            ? (message.velocitiesRadiansPerSecond ?? []).map(NSNumber.init(value:)) : []
         currents = (message.currents ?? []).map(NSNumber.init(value:))
         statuses = (message.statuses ?? []).map(NSNumber.init(value:))
         super.init()
@@ -312,6 +315,7 @@ private struct ROBAmberGatewayMessage: Codable {
     var sequence: UInt64? = nil
     var sampleAgeMilliseconds: Double? = nil
     var velocitiesRadiansPerSecond: [Double]? = nil
+    var velocitiesAvailable: Bool? = nil
     var currents: [Double]? = nil
     var statuses: [Double]? = nil
     var modes: [Int]? = nil
@@ -322,6 +326,8 @@ private struct ROBAmberGatewayMessage: Codable {
     var activeAmberResponse: Int? = nil
     var holdAmberResponse: Int? = nil
     var exclusiveControllerSession: Bool? = nil
+    var supportedCommands: [String]? = nil
+    var commandType: String? = nil
     var action: String? = nil
     var force: Int? = nil
     var calibrationState: String? = nil
@@ -349,6 +355,7 @@ private struct ROBAmberGatewayMessage: Codable {
         case leaseMilliseconds = "lease_ms"
         case sampleAgeMilliseconds = "sample_age_ms"
         case velocitiesRadiansPerSecond = "velocities_rad_s"
+        case velocitiesAvailable = "velocities_available"
         case activeModes = "active_modes"
         case capturedPositionsRadians = "captured_positions_rad"
         case holdDurationSeconds = "hold_duration_s"
@@ -357,6 +364,8 @@ private struct ROBAmberGatewayMessage: Codable {
         case activeAmberResponse = "active_amber_response"
         case holdAmberResponse = "hold_amber_response"
         case exclusiveControllerSession = "exclusive_controller_session"
+        case supportedCommands = "supported_commands"
+        case commandType = "command_type"
         case calibrationState = "calibration_state"
         case calibrationVerified = "calibration_verified"
         case feedbackAvailable = "feedback_available"
@@ -423,6 +432,10 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
     private static let gripperForceRange = 1 ... 300
     private static let gripperForceUnit = "vendor_intensity"
     private static let gripperActions = ["release", "hold"]
+    private static let requiredGripperCommands: Set<String> = [
+        "gripper_state", "gripper_calibrate", "gripper_control",
+    ]
+    private var gripperCommandsAvailable = false
     private static let jointBoundsRadians: [ClosedRange<Double>] = [
         -2.4435 ... 2.4435,
         -2.3213 ... 2.3213,
@@ -842,6 +855,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
     ) -> UInt64 {
         queue.sync {
             guard state == .ready,
+                  gripperCommandsAvailable,
                   ["left", "right"].contains(arm),
                   let current = gripperStates[arm],
                   !current.commandInFlight,
@@ -918,6 +932,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         guard let snapshot = gripperStates[arm] else { return [:] }
         var dictionary: [String: Any] = [
             "arm": arm,
+            "commandsAvailable": gripperCommandsAvailable,
             "calibrationState": snapshot.calibrationState,
             "calibrationVerified": snapshot.calibrationVerified,
             "feedbackAvailable": snapshot.feedbackAvailable,
@@ -926,7 +941,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
             "forceMin": Self.gripperForceRange.lowerBound,
             "forceMax": Self.gripperForceRange.upperBound,
             "forceUnit": Self.gripperForceUnit,
-            "supportedActions": Self.gripperActions,
+            "supportedActions": gripperCommandsAvailable ? Self.gripperActions : [],
         ]
         dictionary["lastAction"] = snapshot.lastAction.map { $0 as Any } ?? NSNull()
         dictionary["lastForce"] = snapshot.lastForce.map { NSNumber(value: $0) } ?? NSNull()
@@ -1006,24 +1021,40 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                 return
             }
             exclusiveControllerSession = true
+            // Legacy gateways reject optional gripper queries with an
+            // uncorrelated command_error. Never probe them automatically:
+            // keep arm diagnostics available and require advertised support
+            // before admitting any gripper request, including calibration.
+            gripperCommandsAvailable = Self.requiredGripperCommands.isSubset(
+                of: Set(message.supportedCommands ?? [])
+            )
             authenticatedSessionGeneration &+= 1
             if authenticatedSessionGeneration == 0 {
                 authenticatedSessionGeneration = 1
             }
             resetGripperStates(
-                detail: "Gateway ready; calibration is required for this session"
+                detail: gripperCommandsAvailable
+                    ? "Gateway ready; calibration is required for this session"
+                    : "Gripper control requires a gateway update; arm telemetry remains available"
             )
-            transition(.ready, detail: "Amber gateway ready")
+            transition(.ready, detail: gripperCommandsAvailable
+                ? "Amber gateway ready"
+                : "Amber gateway ready — gripper commands unavailable; gateway update required")
             startHeartbeat()
         case "telemetry":
+            // Missing/unverified velocity must not become a zero-speed claim.
+            // Keep positions available for diagnostics; the empty velocity
+            // vector closes the existing seven-joint reference/settling gates.
+            let velocityIsValid = message.velocitiesAvailable == false
+                || (message.velocitiesRadiansPerSecond?.count == 7
+                    && message.velocitiesRadiansPerSecond?.allSatisfy(\.isFinite) == true)
             guard ["left", "right"].contains(message.arm ?? ""),
                   let sequence = message.sequence, sequence > 0,
                   let sampleAge = message.sampleAgeMilliseconds,
                   sampleAge.isFinite, sampleAge >= 0,
                   let positions = message.positionsRadians,
                   positions.count == 7, positions.allSatisfy(\.isFinite),
-                  let velocities = message.velocitiesRadiansPerSecond,
-                  velocities.count == 7, velocities.allSatisfy(\.isFinite),
+                  velocityIsValid,
                   let currents = message.currents,
                   currents.count == 7, currents.allSatisfy(\.isFinite),
                   let statuses = message.statuses,
@@ -1128,8 +1159,19 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
             }
         case "heartbeat_expired", "error":
             disconnectOnQueue(detail: message.error ?? message.type, failed: true)
+        case "command_error":
+            // A generic rejection cannot safely acknowledge or retry an
+            // outstanding command. Retain the reason and invalidate the session.
+            let operation = String((message.commandType ?? "command").prefix(80))
+            disconnectOnQueue(
+                detail: "Gateway rejected \(operation): \(message.error ?? "unspecified error")",
+                failed: true
+            )
         default:
-            disconnectOnQueue(detail: "Unknown gateway message type", failed: true)
+            disconnectOnQueue(
+                detail: "Unknown gateway message type: \(String(message.type.prefix(80)))",
+                failed: true
+            )
         }
     }
 
@@ -1183,6 +1225,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         rightModes = []
         leftTargetPositionsRadians = []
         rightTargetPositionsRadians = []
+        gripperCommandsAvailable = false
         resetGripperStates(
             detail: "Gateway session unavailable; calibration acceptance reset (\(detail))"
         )

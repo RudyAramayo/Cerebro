@@ -19,6 +19,39 @@ gateway now owns verified inactive, active, and position-mode transitions, but
 does not write `launch.json`, publish raw `PosCmd`, or alter
 velocity/acceleration/jerk limits.
 
+## Compatibility with older gateways
+
+Cerebro requires the gateway's `ready.supported_commands` advertisement before
+sending gripper queries or commands. A gateway without that advertisement can
+still provide arm telemetry and the original manual mode commands; Diagnostics
+shows **Gripper unavailable — gateway update required** and disables gripper
+controls. This prevents automatic gripper-state refresh from disconnecting a
+working legacy gateway with **Unknown gateway message type**. Explicit generic
+command rejections still end the session and display the rejected command and
+reason. Unknown message types remain fatal and their names are now displayed.
+
+Update the gateway sources and restart the gateway under the existing physical
+safety procedure to enable the advertised gripper operations. Restarting a
+gateway is separate from restarting CAN or the vendor arm cores.
+
+## Position units and unavailable velocity
+
+The installed vendor core's LCM position array is in degrees. The gateway now
+normalizes that array to radians before displaying it or using it for a hold,
+and rejects out-of-range measured positions before entering position mode or
+issuing any measured-pose hold. Every outgoing UDP position vector is bounded
+as well. No arm reference, mounting angle, or side mapping is changed by this
+conversion.
+
+The raw velocity field has unverified units/validity. The gateway reports it as
+unavailable (`velocities_available:false`, `velocities_rad_s:null`). Updated
+Cerebro displays the remaining telemetry with empty velocity cells; the
+existing seven-velocity reference and completion gates stay closed. Rebuild
+Cerebro together with this gateway update: older clients discard such samples.
+Deactivation and read-only mode queries remain available. Software packet
+freshness does not prove each servo is communicating; September 22's motor
+response problem recovered after the operator readjusted the cable.
+
 ## Files to transfer
 
 Copy the complete directory from the development Mac:

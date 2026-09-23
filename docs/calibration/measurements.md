@@ -70,6 +70,10 @@ do not call it a joint center unless the offset to the actual axis is known.
 
 ## Stationary startup observations
 
+See the [September 22 operator-reported B1-zero vectors](arm-zero-observations-2026-09-22.md)
+for the supplied upright reference coordinates and their verification status.
+They are retained separately from this measured-feedback table.
+
 For an existing stationary scan, record its current readings without moving or
 re-homing to fill this sheet. If using the separately planned zero-to-hanging
 capture, fill two copies of the table: one at the physically verified URDF-zero
