@@ -2817,7 +2817,7 @@ private actor GeminiRoboticsLiveSession: ROBRealtimeSession {
             if activeToolCallID == callID {
                 switch toolCallLedger[callID] {
                 case .pending(let name):
-                    if name == "robot_action" || name == "loiter_control" {
+                    if name == "robot_action" || name == "loiter_control" || name == "arm_control" {
                         // Physical cancellation is not complete until the
                         // local action coordinator confirms a safe stop.
                         toolCallLedger[callID] = .cancelling(name: name)

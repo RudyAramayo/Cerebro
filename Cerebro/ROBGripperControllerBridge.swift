@@ -253,7 +253,8 @@ final class ROBGripperControllerBridge {
             )
             return
         }
-        guard pendingArm[intent.arm] == nil, !snapshot.commandInFlight else {
+        guard pendingArm[intent.arm] == nil, !snapshot.commandInFlight,
+              !ROBArmRoutineCoordinator.shared.isRunning else {
             sendDisposition(
                 for: intent,
                 recipientID: authenticatedControllerID,

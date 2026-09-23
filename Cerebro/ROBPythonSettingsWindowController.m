@@ -367,6 +367,11 @@ static NSNotificationName const ROBControlPairedDevicesDidChangeNotification =
     self.insta360SettingsTab.label = @"Perception";
     [tabView addTabViewItem:self.insta360SettingsTab];
 
+    NSTabViewItem *armsTab = [NSTabViewItem tabViewItemWithViewController:
+        [[ROBArmRoutineSettingsViewController alloc] init]];
+    armsTab.label = @"Arms";
+    [tabView addTabViewItem:armsTab];
+
     NSTextField *speechHeading = [self labelWithString:@"ROB Voice Preferences"
                                                   frame:NSMakeRect(24, 530, 632, 28)];
     speechHeading.font = [NSFont boldSystemFontOfSize:20.0];

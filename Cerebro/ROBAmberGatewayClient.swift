@@ -637,6 +637,24 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         }
     }
 
+    /// Fixed, taught hanging/front corridor only. No caller-supplied raw joint
+    /// vectors, no model-reference promotion, and no replay across reconnects.
+    /// The coordinator owns camera clearance and the physical hanging datum.
+    @nonobjc func sendRoutineWaypoint(arm: String, index: Int, expectedSessionGeneration: UInt64) -> UInt64 {
+        guard Thread.isMainThread, ROBArmRoutineCoordinator.shared.isRunning,
+              ["left", "right"].contains(arm),
+              let target = ROBArmRoutinePlan.target(index: index, physicalLeft: arm == "right"),
+              let sample = telemetry(forArm: arm), sample.effectiveSampleAgeMilliseconds <= 250,
+              sample.effectiveGripperFeedbackAgeMilliseconds <= 250,
+              let progress = ROBArmRoutinePlan.progress(sample.positionsRadians.map(\.doubleValue), physicalLeft: arm == "right"),
+              abs(progress - Double(index)) <= 1.05,
+              modes(forArm: arm).count == 7,
+              modes(forArm: arm).allSatisfy({ $0.intValue == 2 }) else { return 0 }
+        return sendVendorLeasedTrajectory(arm: arm, positionsRadians: target.map(NSNumber.init(value:)),
+            duration: ROBArmRoutinePlan.segmentSeconds, leaseMilliseconds: 1500,
+            expectedSessionGeneration: expectedSessionGeneration)
+    }
+
     @discardableResult public func queryMode(forArm arm: String) -> UInt64 {
         sendArmCommand(type: "mode_query", arm: arm)
     }
@@ -762,6 +780,8 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
             let reason: String?
             if arm.isEmpty {
                 reason = "Unknown Amber arm port"
+            } else if let side = ROBArmSide(amberGatewayArm: arm), ROBAmberArmMotionArbiter.shared.isReserved(side) {
+                reason = "A supervised arm routine owns this arm; use Stop + hold before manual motion"
             } else if state != .ready || !exclusiveControllerSession || authenticatedSessionGeneration == 0 {
                 reason = "Connect Amber Diagnostics before sending manual arm commands"
             } else if expectedSessionGeneration != 0 && expectedSessionGeneration != authenticatedSessionGeneration {

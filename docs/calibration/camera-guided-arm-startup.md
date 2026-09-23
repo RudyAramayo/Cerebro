@@ -97,6 +97,11 @@ binding; the gateway routing itself is unchanged.
 
 ## Current implementation boundary
 
+The [fixed startup/relax/front-grab routine](../arm-startup-and-grab.md) now
+implements the separately exercised hanging/front corridor and both grippers.
+It preserves this document's calibration priors and does not install a new
+seven-joint offset fit or enable the unvalidated folded route.
+
 The assessment and bounded sequence preview are **offline tools**. They do not
 send mode/position commands, install fitted offsets in the running app, or
 turn the existing preview model into an autonomous executor. The existing

@@ -798,6 +798,7 @@ final class CameraViewController: NSViewController {
         manager.delegate = self
         manager.recordingFrameHandler = { frameSet in
             ROBRecordingCoordinator.shared.offerCameraFrame(role: .face, frameSet: frameSet)
+            ROBArmRoutineVision.shared.offer(frameSet, role: .face)
         }
         cameraManager = manager
         
@@ -970,9 +971,18 @@ final class CameraViewController: NSViewController {
         try? cameraManager?.stopSession()
     }
 
+    private var armRoutineDemand = false
+
+    @objc func setArmRoutineDemandActive(_ active: Bool) {
+        armRoutineDemand = active
+        applyRecordingDemand()
+        reconcileCameraSession()
+    }
+
     private func reconcileCameraSession() {
         guard let cameraManager else { return }
         let shouldRun = cameraViewIsVisible
+            || armRoutineDemand
             || automaticProcessingNeedsFrames
             || followVideoIsActive
             || bubbleVideoIsActive
@@ -1073,7 +1083,10 @@ final class CameraViewController: NSViewController {
     private func applyRecordingDemand() {
         let demand = ROBRecordingCoordinator.shared.cameraCaptureDemand(for: .face)
         recordingDemandActive = demand.active
-        cameraManager?.setCaptureResolutionOverride(demand.resolutionOverride)
+        // Keep both RGB-D links responsive during arm motion. An explicit
+        // recording resolution retains priority, and ordinary capture resumes
+        // when the routine releases its demand.
+        cameraManager?.setCaptureResolutionOverride(demand.resolutionOverride ?? (armRoutineDemand ? "640x400" : nil))
     }
 
     private func applyProcessingSettings() {

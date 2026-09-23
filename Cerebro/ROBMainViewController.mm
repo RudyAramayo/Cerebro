@@ -426,6 +426,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 @property (readwrite, retain) NSTimer *robotActionBridgeTimer;
 @property (readwrite, retain) NSTimer *handWaveFocusTimer;
 @property (readwrite, copy) NSString *localAmberGestureCallID;
+@property (readwrite, copy) NSString *localArmRoutineCallID;
+@property (readwrite, copy) NSString *addressedArmCommand;
+@property (readwrite, retain) NSDate *addressedArmCommandAt;
 @property (readwrite, copy) NSString *controllerApprovedAmberGestureCallID;
 @property (readwrite, retain) ROBRobotActionMessage *controllerApprovedAmberGestureExecutingStatus;
 @property (readwrite, copy) NSString *controllerApprovedLiveStartupCallID;
@@ -1241,6 +1244,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         return;
     }
     NSLog(@"Gemini Robotics heard: %@", text);
+    // Only an addressed microphone transcript can authorize a model-originated
+    // routine. Camera pixels, model narration and stage text never mint this grant.
+    self.addressedArmCommand = [ROBArmRoutineCoordinator commandForText:text];
+    self.addressedArmCommandAt = self.addressedArmCommand ? [NSDate date] : nil;
     [self resetSpeechResponseAttentionTimer];
     [self appendConversationText:text fromUser:YES];
     if ([[ROBFaceRecognitionService shared] noteConversationTranscript:text]) {
@@ -1363,6 +1370,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         }
     }
     NSArray<NSString *> *callIDs = [geminiCallIDs copy];
+    if (self.localArmRoutineCallID != nil) {
+        [[ROBArmRoutineCoordinator shared] cancelWithReason:reason];
+    }
     BOOL hasLocalAmberGesture = self.localAmberGestureCallID.length > 0;
     if (callIDs.count == 0 && !hasLocalAmberGesture) {
         return;
@@ -1424,6 +1434,56 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void)robAI:(ROBAI *)robAI didReceiveToolCall:(ROBAIRobotToolCall *)call
 {
+    BOOL armTool = [call.name isEqualToString:@"arm_control"];
+    BOOL pickTool = [call.name isEqualToString:@"robot_action"] &&
+        [call.arguments[@"action"] isEqual:@"request_pick"];
+    if (armTool || pickTool) {
+        if (call.isStageOrigin || self.stageShowCoordinator.isRunning || self.pendingRobotActionRequests.count > 0) {
+            [robAI sendToolResponseWithCallID:call.callID name:call.name result:
+                @{@"status": @"rejected", @"detail": @"Another physical action or stage show owns the robot"}];
+            return;
+        }
+        NSString *command = pickTool ? @"grab" : call.arguments[@"command"];
+        NSString *target = call.arguments[@"object"] ?: call.arguments[@"target_id"] ?: @"";
+        NSSet *allowed = [NSSet setWithArray:armTool ? @[@"command", @"object"] : @[@"action", @"target_id"]];
+        if (![command isKindOfClass:NSString.class] || ![target isKindOfClass:NSString.class] ||
+            ![[NSSet setWithArray:call.arguments.allKeys] isSubsetOfSet:allowed] || target.length > 160 ||
+            ![@[@"prepare", @"grab", @"hold", @"relax", @"status"] containsObject:command]) {
+            [robAI sendToolResponseWithCallID:call.callID name:call.name result:
+                @{@"status": @"rejected", @"detail": @"Invalid arm command or object description"}];
+            return;
+        }
+        if ([command isEqualToString:@"status"]) {
+            [robAI sendToolResponseWithCallID:call.callID name:call.name result:
+                @{@"status": [ROBArmRoutineCoordinator shared].isRunning ? @"running" : @"idle",
+                  @"detail": [ROBArmRoutineCoordinator shared].status}];
+            return;
+        }
+        if ([self.localArmRoutineCallID isEqualToString:call.callID]) { return; }
+        BOOL matchingRequest = [self.addressedArmCommand isEqualToString:command] ||
+            ([@[@"grab", @"hold"] containsObject:command] &&
+             [@[@"grab", @"hold"] containsObject:self.addressedArmCommand ?: @""]);
+        if (!matchingRequest || self.addressedArmCommandAt == nil ||
+            -self.addressedArmCommandAt.timeIntervalSinceNow > 30) {
+            [robAI sendToolResponseWithCallID:call.callID name:call.name result:
+                @{@"status": @"rejected", @"detail": @"A fresh addressed grab, hold, prepare or relax request is required. Camera observations cannot authorize arm motion. Simple typed commands are handled directly by Cerebro."}];
+            return;
+        }
+        self.addressedArmCommand = nil;
+        self.addressedArmCommandAt = nil;
+        if (self.localArmRoutineCallID != nil && ![command isEqualToString:@"relax"]) {
+            [robAI sendToolResponseWithCallID:call.callID name:call.name result:
+                @{@"status": @"busy", @"detail": [ROBArmRoutineCoordinator shared].status}];
+            return;
+        }
+        self.localArmRoutineCallID = call.callID;
+        __weak ROBMainViewController *weakSelf = self;
+        [[ROBArmRoutineCoordinator shared] performCommand:command target:target completion:^(NSDictionary *result) {
+            if ([weakSelf.localArmRoutineCallID isEqualToString:call.callID]) { weakSelf.localArmRoutineCallID = nil; }
+            [robAI sendToolResponseWithCallID:call.callID name:call.name result:result];
+        }];
+        return;
+    }
     if ([call.name isEqualToString:@"loiter_control"]) {
         NSDictionary *result;
         if (call.isStageOrigin || self.stageShowCoordinator.isRunning) {
@@ -1676,6 +1736,12 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 {
     [self.autonomyCoordinator cancelLoiterControlCalls:callIDs];
     for (NSString *callID in callIDs) {
+        if ([self.localArmRoutineCallID isEqualToString:callID]) {
+            [[ROBArmRoutineCoordinator shared] cancelWithReason:@"The arm request was cancelled"];
+            self.localArmRoutineCallID = nil;
+            [robAI confirmToolCallCancellation:callID];
+            continue;
+        }
         if ([self.localAmberGestureCallID isEqualToString:callID]) {
             self.localAmberGestureCallID = nil;
             (void)[[ROBAmberGestureExecutor shared]
@@ -2715,6 +2781,14 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         [addressTokens containsObject:@"robot"];
     BOOL shouldAcknowledgeAcceptedTurn = NO;
 
+    if (!self.stageShowCoordinator.isRunning && (addressesROB || !self.ignoreText)) {
+        NSString *armCommand = [ROBArmRoutineCoordinator commandForText:textInput];
+        if (armCommand != nil && (!geminiMicrophoneAvailable || [armCommand isEqualToString:@"relax"])) {
+            [self performLocalArmText:textInput command:armCommand];
+            return;
+        }
+    }
+
     // Safety phrases stay local and effective even when Gemini is unavailable
     // or intentionally turned off.
     if ([textInput containsString:@"stop"] || [textInput containsString:@"wait"] || [textInput containsString:@"don't move"] || [textInput containsString:@"do not move"])
@@ -2963,6 +3037,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     [ROBBubbleRuntime shared].serialBox = self.serialBox;
     self.serialBox.delegate = self;
     [self.serialBox initialize_connection];
+    [self configureArmRoutines];
     
     //---------------------------------------------------------
     //Enable one of these to auto allow a controller to take over... otherwise a controller is required to intiate robot control!
@@ -3140,6 +3215,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         cancelCurrentGestureWithReason:@"Cerebro is shutting down"];
     (void)[[ROBAmberGestureExecutor shared] requestPriorityHold];
     [[ROBAmberDebugAuthority shared] revoke];
+    [[ROBArmRoutineCoordinator shared] cancelWithReason:@"Cerebro is shutting down"];
     [[ROBAmberGatewayTunnel shared] disconnect];
     [[ROBMessagesBridge shared] stop];
     [self.baseSerialConsoleWindowController close];
@@ -3160,6 +3236,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void)applyPrioritySoftwareStopWithReason:(NSString *)reason
 {
+    self.addressedArmCommand = nil;
+    self.addressedArmCommandAt = nil;
+    [[ROBArmRoutineCoordinator shared] cancelWithReason:reason];
     self.currentPersonTrackingID = -1;
     self.followingMode = false;
     [self.speechBox stopIt:nil];
@@ -4646,6 +4725,12 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         NSBeep();
         return;
     }
+    NSString *armCommand = [ROBArmRoutineCoordinator commandForText:text];
+    if (armCommand != nil && !self.stageShowCoordinator.isRunning) {
+        [self performLocalArmText:text command:armCommand];
+        self.speechTextView.string = @"";
+        return;
+    }
     if (!self.robAI.isGeminiConnectionEnabled) {
         [self.speechBox sayIt:@"Gemini is turned off. Use the Gemini controls to connect."];
         return;
@@ -5495,6 +5580,54 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     // Keep RGB-D perception alive without requiring a diagnostics window.
     [self ensureBellyCameraRuntime];
     [self.bellyCameraWindowController setNavigationDemandActive:YES];
+}
+
+- (void)configureArmRoutines
+{
+    __weak ROBMainViewController *weakSelf = self;
+    ROBArmRoutineCoordinator *routine = [ROBArmRoutineCoordinator shared];
+    __block BOOL armViewPreparationStarted = NO;
+    routine.cameraDemand = ^(BOOL active) {
+        ROBMainViewController *strongSelf = weakSelf;
+        if (active) { armViewPreparationStarted = NO; }
+        if (active) { [strongSelf ensureMainCameraRuntime]; [strongSelf ensureBellyCameraRuntime]; }
+        [strongSelf.cameraViewController setArmRoutineDemandActive:active];
+        [strongSelf.bellyCameraWindowController setArmRoutineDemandActive:active];
+    };
+    routine.prepareView = ^BOOL {
+        ROBMainViewController *strongSelf = weakSelf;
+        if (strongSelf == nil || strongSelf.stageShowCoordinator.isRunning ||
+            strongSelf.pendingRobotActionRequests.count > 0 ||
+            [ROBAmberStackMaintenanceController shared].isRunning) { return NO; }
+        if (!armViewPreparationStarted) {
+            armViewPreparationStarted = YES;
+            [strongSelf.serialBox stopBaseMotionAndDropHeartbeat];
+            if (strongSelf.autonomyCoordinator.active) { [strongSelf.autonomyCoordinator stopWithReason:@"Arm inspection"]; }
+            if (strongSelf.followPersonCoordinator.active) { [strongSelf.followPersonCoordinator stopWithReason:@"Arm inspection"]; }
+            strongSelf.torsoControlsViewController.headTracking_enabled.state = NSControlStateValueOff;
+        }
+        return [strongSelf.serialBox prepareNeckForArmInspection];
+    };
+    routine.viewIsStationary = ^BOOL {
+        ROBSerialBox *serial = weakSelf.serialBox;
+        return serial != nil && serial.neckCommandStateKnown &&
+            serial.commandedLowerNeckTiltTarget == 6011 && serial.commandedUpperNeckTiltTarget == 5650 &&
+            fabs(serial.commandedNeckPanDegrees) <= 5 &&
+            NSProcessInfo.processInfo.systemUptime >= serial.neckCommandReadyAtUptime;
+    };
+    [routine wakeIfEnabled];
+}
+
+- (void)performLocalArmText:(NSString *)text command:(NSString *)command
+{
+    [self appendConversationText:text fromUser:YES];
+    [self.speechBox sayIt:[command isEqualToString:@"relax"] ? @"Lowering my arms gently." : @"Checking the cameras and preparing my grippers."];
+    __weak ROBMainViewController *weakSelf = self;
+    [[ROBArmRoutineCoordinator shared] performCommand:command target:text completion:^(NSDictionary *result) {
+        NSString *detail = result[@"detail"] ?: @"The arm routine ended.";
+        [weakSelf appendConversationText:detail fromUser:NO];
+        [weakSelf.speechBox sayIt:detail];
+    }];
 }
 
 - (void)ensureMainCameraRuntime

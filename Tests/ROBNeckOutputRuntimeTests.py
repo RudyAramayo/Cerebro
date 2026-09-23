@@ -42,6 +42,7 @@ selectors = [
     "requestPersonTrackingPanTarget:", "requestOperatorNeckPosePanTarget:",
     "applySafeNeckPanTarget:", "startSafeNeckStartup",
     "advanceSafeNeckStartupForGeneration:", "cancelSafeNeckStartup",
+    "prepareNeckForPersonFollow", "prepareNeckForArmInspection",
     "torso_controllerPassthrough_head_pan:",
 ]
 methods = [method(selector) for selector in selectors]
@@ -175,6 +176,24 @@ static void render(NeckFixture *box, int pan, int lower, int upper, BOOL manual)
 }
 
 int main(void) { @autoreleasepool {
+    // Inspection survives the stale torso slider renderer throughout both
+    // camera ramps; explicit manual intervention retains its normal priority.
+    NeckFixture *inspection = activeNeck();
+    assert(![inspection prepareNeckForArmInspection]);
+    assert(inspection.commandedUpperNeckTiltTarget == 7375);
+    render(inspection, 6000, 6011, 6807, NO);
+    assert(inspection.commandedUpperNeckTiltTarget == 7375);
+    settle(inspection);
+    assert(![inspection prepareNeckForArmInspection]);
+    assert(inspection.commandedUpperNeckTiltTarget == 5650);
+    for (int tick = 0; tick < 100; tick++) render(inspection, 6000, 6011, 6807, NO);
+    assert(inspection.commandedUpperNeckTiltTarget == 5650);
+    settle(inspection);
+    assert([inspection prepareNeckForArmInspection]);
+    render(inspection, 6000, 6011, 6807, YES);
+    assert(inspection.commandedUpperNeckTiltTarget == 6807);
+    assert(![inspection prepareNeckForArmInspection]);
+
     // Each startup phase reaches the wire once despite passive renders and
     // face detections throughout the staged movement.
     NeckFixture *box = unknownNeck();

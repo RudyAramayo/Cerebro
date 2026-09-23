@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AC2309260000000000000008 /* ROBArmRoutineSettingsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2309260000000000000007 /* ROBArmRoutineSettingsViewController.swift */; };
+		AC2309260000000000000006 /* ROBArmRoutineCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2309260000000000000005 /* ROBArmRoutineCoordinator.swift */; };
+		AC2309260000000000000004 /* ROBArmRoutineVision.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2309260000000000000003 /* ROBArmRoutineVision.swift */; };
+		AC2309260000000000000002 /* ROBArmRoutinePlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2309260000000000000001 /* ROBArmRoutinePlan.swift */; };
 		4CD13F5582E197979947B506 /* ROBTorsoControlWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E892F0BA1E3D33BF7797B0 /* ROBTorsoControlWindowController.swift */; };
 		503F2719D45BA7356756FD2F /* ROBTorsoControlCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D237612E5D39BF4229766EF0 /* ROBTorsoControlCenter.swift */; };
 		8845317BA38558B2D3876B8C /* ROBTicVelocityTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 296CEFD9716806B67EE286A2 /* ROBTicVelocityTransport.swift */; };
@@ -230,6 +234,10 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		AC2309260000000000000007 /* ROBArmRoutineSettingsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBArmRoutineSettingsViewController.swift; sourceTree = "<group>"; };
+		AC2309260000000000000005 /* ROBArmRoutineCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBArmRoutineCoordinator.swift; sourceTree = "<group>"; };
+		AC2309260000000000000003 /* ROBArmRoutineVision.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBArmRoutineVision.swift; sourceTree = "<group>"; };
+		AC2309260000000000000001 /* ROBArmRoutinePlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBArmRoutinePlan.swift; sourceTree = "<group>"; };
 		B7E892F0BA1E3D33BF7797B0 /* ROBTorsoControlWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBTorsoControlWindowController.swift; sourceTree = "<group>"; };
 		D237612E5D39BF4229766EF0 /* ROBTorsoControlCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBTorsoControlCenter.swift; sourceTree = "<group>"; };
 		296CEFD9716806B67EE286A2 /* ROBTicVelocityTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBTicVelocityTransport.swift; sourceTree = "<group>"; };
@@ -649,6 +657,10 @@
 				D4EB00012F00000100000001 /* ROBSaberChoreography.swift */,
 				D4EC00012F00000100000001 /* ROBAmberGatewayClient.swift */,
 				C0AD01012F49000100000001 /* ROBAmberDiagnosticsWindowController.swift */,
+				AC2309260000000000000001 /* ROBArmRoutinePlan.swift */,
+				AC2309260000000000000003 /* ROBArmRoutineVision.swift */,
+				AC2309260000000000000005 /* ROBArmRoutineCoordinator.swift */,
+				AC2309260000000000000007 /* ROBArmRoutineSettingsViewController.swift */,
 				ABC9036F889D40C79B5BC101 /* ROBAmberArmBinding.swift */,
 				C0B001012F4C000100000001 /* ROBWakeUpCalibrationWindowController.swift */,
 				C0B002012F4C000200000001 /* ROBSceneProducerFreshness.swift */,
@@ -1052,6 +1064,10 @@
 				D4EB00022F00000100000001 /* ROBSaberChoreography.swift in Sources */,
 				D4EC00022F00000100000001 /* ROBAmberGatewayClient.swift in Sources */,
 				C0AD01022F49000100000001 /* ROBAmberDiagnosticsWindowController.swift in Sources */,
+				AC2309260000000000000002 /* ROBArmRoutinePlan.swift in Sources */,
+				AC2309260000000000000004 /* ROBArmRoutineVision.swift in Sources */,
+				AC2309260000000000000006 /* ROBArmRoutineCoordinator.swift in Sources */,
+				AC2309260000000000000008 /* ROBArmRoutineSettingsViewController.swift in Sources */,
 				ABC9036F889D40C79B5BC102 /* ROBAmberArmBinding.swift in Sources */,
 				C0B001022F4C000100000001 /* ROBWakeUpCalibrationWindowController.swift in Sources */,
 				C0B002022F4C000200000001 /* ROBSceneProducerFreshness.swift in Sources */,

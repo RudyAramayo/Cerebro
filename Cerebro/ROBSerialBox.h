@@ -282,6 +282,10 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 /// retry or wait for an operator to recover an unknown/off neck state. Once
 /// upright is settled, active pan motion does not restart this preparation.
 - (BOOL)prepareNeckForPersonFollow;
+/// Stages the existing reviewed upright neck clearance, then looks down at
+/// the arm workspace using camera tilt only. Repeated calls advance settling;
+/// unknown/OFF state and competing leases remain blocked.
+- (BOOL)prepareNeckForArmInspection;
 /// Typed ingress for autonomous neck gestures. Pan is calibrated degrees;
 /// lower/upper are Maestro command targets because those axes do not yet have
 /// verified degree calibration. Acceptance reports a commanded (unverified)

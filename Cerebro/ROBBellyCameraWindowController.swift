@@ -74,6 +74,7 @@ import AVFoundation
         manager.delegate = self
         manager.recordingFrameHandler = { frameSet in
             ROBRecordingCoordinator.shared.offerCameraFrame(role: .belly, frameSet: frameSet)
+            ROBArmRoutineVision.shared.offer(frameSet, role: .belly)
         }
         manager.videoSampleHandler = { sampleBuffer in
             if #available(macOS 12.0, *) {
@@ -240,12 +241,21 @@ import AVFoundation
     private func applyRecordingDemand() {
         let demand = ROBRecordingCoordinator.shared.cameraCaptureDemand(for: .belly)
         recordingDemandActive = demand.active
-        bellyCameraManager?.setCaptureResolutionOverride(demand.resolutionOverride)
+        bellyCameraManager?.setCaptureResolutionOverride(demand.resolutionOverride ?? (armRoutineDemand ? "640x400" : nil))
     }
     
+    private var armRoutineDemand = false
+
+    func setArmRoutineDemandActive(_ active: Bool) {
+        armRoutineDemand = active
+        applyRecordingDemand()
+        reconcileCameraSession()
+    }
+
     private func reconcileCameraSession() {
         guard let bellyCameraManager else { return }
         let shouldRun = cameraViewIsVisible
+            || armRoutineDemand
             || navigationDemandActive
             || recordingDemandActive
             || ROBTorsoControlCenter.shared.cameraDemandActive

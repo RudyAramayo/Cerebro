@@ -217,7 +217,9 @@ def main():
         source = Path(folder) / "GatewayFixtures.swift"
         binary = Path(folder) / "gateway-fixtures"
         source.write_text(
-            (ROOT / "Cerebro/ROBAmberGatewayClient.swift").read_text() + FIXTURES
+            (ROOT / "Cerebro/ROBAmberGatewayClient.swift").read_text()
+            + (ROOT / "Cerebro/ROBArmRoutinePlan.swift").read_text()
+            + (ROOT / "Tests/ROBArmRoutineGatewayFixtureSupport.swift").read_text() + FIXTURES
         )
         subprocess.run([
             "xcrun", "swiftc", "-swift-version", "5", "-parse-as-library",

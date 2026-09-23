@@ -1587,10 +1587,12 @@ private final class ROBAmberArmSchematicView: NSView {
                 && pendingManualCommandIDs.isEmpty
                 && !gripperCommandIsActive
                 && !gestureIsExecuting
+                && !ROBArmRoutineCoordinator.shared.isRunning
                 && !stackMaintenance.isRunning
                 && !stackRecoveryInProgress
         }
         restartStackButton.isEnabled = !stackMaintenance.isRunning
+            && !ROBArmRoutineCoordinator.shared.isRunning
             && !stackRecoveryInProgress
             && pendingManualCommandIDs.isEmpty
             && !gripperCommandIsActive
@@ -2072,6 +2074,7 @@ private final class ROBAmberArmSchematicView: NSView {
         // interlock after it closes so a command that began while the operator
         // was reading the warning cannot be interrupted by maintenance.
         guard !gestureExecutor.isExecuting,
+              !ROBArmRoutineCoordinator.shared.isRunning,
               pendingManualCommandIDs.isEmpty,
               !hasActiveGripperCommand(refreshFromGateway: true),
               !stackMaintenance.isRunning,
@@ -2258,6 +2261,8 @@ private final class ROBAmberArmSchematicView: NSView {
             reason = "the authenticated exclusive Amber gateway is not ready"
         } else if !snapshot.commandsAvailable {
             reason = "gripper control requires a gateway update"
+        } else if ROBArmRoutineCoordinator.shared.isRunning {
+            reason = "the startup/grab/relax routine owns both grippers"
         } else if ROBAmberGestureExecutor.shared.isExecuting {
             reason = "an approved arm gesture is executing"
         } else if !pendingManualCommandIDs.isEmpty {
@@ -2391,7 +2396,12 @@ private final class ROBAmberArmSchematicView: NSView {
         alert.alertStyle = .critical
         alert.addButton(withTitle: confirmation)
         alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn
+        let confirmed = alert.runModal() == .alertFirstButtonReturn
+        guard !ROBArmRoutineCoordinator.shared.isRunning else {
+            appendEvent("Manual mode change blocked: startup/grab/relax owns the arms")
+            return false
+        }
+        return confirmed
     }
 
     private func recordSubmittedCommand(

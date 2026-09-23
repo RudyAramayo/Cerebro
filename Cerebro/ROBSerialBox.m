@@ -4429,6 +4429,37 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     return fullPanEnvelopeIsSettled;
 }
 
+- (BOOL)prepareNeckForArmInspection
+{
+    if (!NSThread.isMainThread || !self.maestroConnectionValid || !self.neckCommandStateKnown ||
+        self.commandedNeckPanTarget == ROBNeckSafetyTargetOff ||
+        self.commandedLowerNeckTiltTarget == ROBNeckSafetyTargetOff ||
+        self.commandedUpperNeckTiltTarget == ROBNeckSafetyTargetOff) { return NO; }
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (self.commandedLowerNeckTiltTarget == 6011 && self.commandedUpperNeckTiltTarget == 5650 &&
+        fabs(self.commandedNeckPanDegrees) <= 5) {
+        return now >= self.neckCommandReadyAtUptime;
+    }
+    if (now < self.manualNeckOverrideUntil || now < self.gestureNeckAuthorityUntil ||
+        now < self.visionNeckAuthorityUntil) { return NO; }
+    // Keep passive torso renders from restoring their old camera slider value
+    // between staging and inspection. An explicit manual action still wins.
+    self.torsoNeckAuthorityRequiresOperatorAction = YES;
+    // Reuse the existing exact upright/full-clearance staging, with its
+    // center-first, lower-dependent envelope and command-space settle checks.
+    // No new lower-neck recovery exception is added for arm startup.
+    if (![self prepareNeckForPersonFollow]) { return NO; }
+    ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
+    (void)[self applySafeNeckPanTarget:configuration.panCenterTarget
+                     lowerTiltTarget:(int)self.commandedLowerNeckTiltTarget
+                   desiredUpperTarget:5650
+                         includeLower:NO
+        allowSupervisedLowerRecovery:NO
+                              source:@"Arm inspection camera"];
+    return self.commandedLowerNeckTiltTarget == 6011 && self.commandedUpperNeckTiltTarget == 5650 &&
+        fabs(self.commandedNeckPanDegrees) <= 5 && now >= self.neckCommandReadyAtUptime;
+}
+
 - (ROBNeckCommandDisposition)requestNeckGesturePanDegrees:(double)panDegrees
                                       lowerTiltRawTarget:(NSInteger)lowerTiltRawTarget
                                      cameraTiltRawTarget:(NSInteger)cameraTiltRawTarget

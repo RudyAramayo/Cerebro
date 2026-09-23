@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -139,7 +140,15 @@ def main():
         folder = Path(directory)
         source = folder / "ConnectionFixture.swift"
         binary = folder / "connection-fixture"
-        source.write_text((ROOT / "Cerebro/ROBAmberGatewayClient.swift").read_text() + FIXTURE)
+        client_source = (ROOT / "Cerebro/ROBAmberGatewayClient.swift").read_text()
+        if "--baseline" in sys.argv:
+            # Compare an environment-dependent Network.framework failure with
+            # the committed client without editing or checking out user files.
+            client_source = subprocess.check_output(
+                ["git", "show", "HEAD:Cerebro/ROBAmberGatewayClient.swift"], cwd=ROOT, text=True)
+        source.write_text(client_source
+            + (ROOT / "Cerebro/ROBArmRoutinePlan.swift").read_text()
+            + (ROOT / "Tests/ROBArmRoutineGatewayFixtureSupport.swift").read_text() + FIXTURE)
         subprocess.run([
             "xcrun", "swiftc", "-swift-version", "5", "-parse-as-library",
             "-module-cache-path", str(folder / "module-cache"), str(source), "-o", str(binary),

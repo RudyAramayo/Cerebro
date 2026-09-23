@@ -349,6 +349,7 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     }
     [self utcWebCamCheck];
     [[ROBInsta360CameraService shared] recoverAfterWake];
+    [[ROBArmRoutineCoordinator shared] wakeIfEnabled];
 }
 
 - (IBAction)showPythonSettings:(id)sender

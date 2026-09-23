@@ -60,6 +60,10 @@ struct GeminiRoboticsProtocolFixtureTests {
         let resume = GeminiRoboticsToolCall(id: "loiter-resume", name: "loiter_control", arguments: ["command": "resume"])
         try expect(GeminiRoboticsToolPolicy.requiresPriorityDispatch(pause), "Loiter pause waited behind ordinary queued work")
         try expect(!GeminiRoboticsToolPolicy.requiresPriorityDispatch(resume), "Loiter resume bypassed ordinary queued work")
+        let relax = GeminiRoboticsToolCall(id: "relax-arms", name: "arm_control", arguments: ["command": "relax"])
+        let grab = GeminiRoboticsToolCall(id: "grab-object", name: "arm_control", arguments: ["command": "grab", "object": "cup"])
+        try expect(GeminiRoboticsToolPolicy.requiresPriorityDispatch(relax), "Relax waited behind a running grab")
+        try expect(!GeminiRoboticsToolPolicy.requiresPriorityDispatch(grab), "Grab bypassed ordinary tool work")
         try expect(GeminiRoboticsToolPolicy.dispatchRoute(for: pause) == .delegate, "Loiter skipped the local authority gate")
         let news = GeminiRoboticsToolCall(
             id: "news-1",
@@ -205,6 +209,7 @@ struct GeminiRoboticsProtocolFixtureTests {
             defaultFunctionNames.contains("robot_action"),
             "Default setup did not declare robot_action"
         )
+        try expect(defaultFunctionNames.contains("arm_control"), "Default setup did not declare the local arm routine")
         try expect(
             defaultFunctionNames.contains(ROBNewsSearchService.toolName),
             "Default setup did not declare search_news"

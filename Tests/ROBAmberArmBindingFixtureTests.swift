@@ -163,3 +163,8 @@ struct ROBAmberArmBindingFixtureTests {
         print("Amber physical-side routing fixtures passed; no hardware APIs linked")
     }
 }
+
+final class ROBArmRoutineCoordinator {
+    static let shared = ROBArmRoutineCoordinator()
+    let isRunning = false
+}
