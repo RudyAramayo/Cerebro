@@ -31,8 +31,12 @@ see [shadow IK](vision-pro-shadow-ik.md).
 
 ## Arm vocabulary
 
-- `prepare`: move both arms in front, calibrate both empty grippers if needed in
-  this gateway session, then observe open jaws.
+- `prepare`: move both arms in front, reuse current gateway calibration (including
+  manual diagnostics), calibrate empty grippers only when required, and request
+  both jaws open on every preparation. Opening is automatic, with no separate
+  release command. The controller summary covers supporting any held object.
+  The result distinguishes accepted release commands from measured jaw opening;
+  calibration and closing retain their stationary camera assessments.
 - `grab` / `hold`, with `object`: prepare and attempt a low-intensity close only
   when the requested object is already between exactly one open gripper's jaws.
   No arbitrary reaching or secure-force grasp claim.

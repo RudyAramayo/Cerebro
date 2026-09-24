@@ -55,6 +55,40 @@ off-route wrist/elbow or new session away from hanging blocks motion.
 Interrupted positions on the taught segments can return along that
 same corridor within the verified session.
 
+Cerebro Speech announces sustained arm-feedback loss locally, even during
+manual SDK commands or when Gemini, diagnostics and the controller are not
+open. Spoken names use the robot's physical side: Amber gateway `left` / L10
+is the **right arm**. Warnings identify missing joints/gripper or a missing
+controller stream. One second of continuous loss triggers one announcement;
+one second of healthy samples permits a recovery announcement and a later new
+fault. The initial connection has a three-second sample grace period. These
+speech delays do not change the existing 250 ms motion-admission limit.
+A lost gateway receives one shared connection warning rather than falsely
+assigning a broken motor; deliberate disconnect and shutdown are silent.
+Warnings interrupt queued speech and are retained in the Main AI transcript.
+They do not restart, zero, activate or move hardware. Settings → Arms → **Test
+spoken arm warning** exercises the local voice with an explicitly labeled test.
+`bash Scripts/test-arm-feedback-alerts.sh` validates side mapping, partial bus
+loss, stale/frozen telemetry, debounce, recovery and reconnect behavior without
+hardware.
+
+Every `prepare`, `startup`, `grab` and `hold` requests **both grippers open**
+once the arms are measured in front, whether or not calibration was needed.
+Preparation queries the gateway's current session state, including calibration
+accepted through manual diagnostics. It no longer uses a separate private
+calibration flag or confines Release to the first calibration attempt. Missing
+or revoked calibration still requires the existing empty-jaw camera assessment.
+Only grippers whose acceptance is missing are calibrated.
+
+The single controller summary explicitly includes opening both jaws and asks
+the operator to support any held object and clear the jaws. Already calibrated
+opening uses the live RGB-D/hand detector and measured front/mode checks without
+waiting for MLX to label the jaws. Prepare/startup returns
+`gripper_release: accepted_unverified` and `jaw_opening_verified: false` after
+both acknowledgements. It does not claim measured opening. Grab/hold still
+requires the stationary visual object/jaw assessment before closing. Greetings
+and replay leave the jaws unchanged under their supervised route approval.
+
 The main face RGB-D camera owns arm inspection and runs independently of preview
 visibility and optional detector settings. The belly stream is not required or
 included in an arm observation. The current RGB-D stream and independent
@@ -345,6 +379,58 @@ deactivates both arms and verifies all fourteen modes inactive. A failed return
 requests a measured hold; it never drops torque early or opens a held object.
 An already inactive pair at zero remains inactive. Stop cancels pending startup
 and active work and requests a hold; it does not initiate a relax movement.
+
+## Automatic opening correction and interrupted wrist teaching — September 23
+
+Prepare previously dispatched Release only inside the first-calibration branch.
+The routine also tracked calibration separately from diagnostics. This allowed
+subsequent preparation to omit opening, or repeat the empty-jaw inspection even
+after both manual calibration commands had been accepted. Preparation now queries
+the authoritative gateway state and dispatches both Release commands every time.
+Gemini/OpenAI instructions and Settings describe opening as automatic preparation,
+with command acceptance distinguished from measured jaw completion.
+
+`Scripts/test-arm-routines.sh` exercises repeated opening after manual calibration,
+partial calibration reuse, rejected opening, stale feedback, a hand arriving after
+preflight, revoked calibration and refusing a close when jaw inspection fails.
+Protocol fixtures passed. The signed Debug build was installed automatically at
+`/Applications/Cerebro.app`; the installed `Cerebro.debug.dylib` SHA-256 is
+`0332003284426f7e2c703c4002c1e9585c13fb3a60010fb6dd4ae607eb711f60`
+(includes the spoken-feedback alerts).
+The running process was initially kept in place while the arms were forward
+and right-wrist feedback was unavailable. After the operator rebooted the right
+arm, all sixteen device replies returned and all fourteen joints reported
+inactive at zero; Cerebro was then restarted to load the opening correction.
+The final signed build with spoken-feedback alerts was also loaded while both
+arms remained inactive at zero. The Settings voice-test button dispatched its
+explicitly labeled test through Cerebro Speech; the operator confirmed it was
+clearly audible. Automatic opening on the new
+binary has not yet been verified on hardware.
+
+In the same session the operator requested palms upward. Three right-wrist
+requests went through real phone approval with J1/J2 held at +1.05/−0.60:
+
+| Request | J5 target | J6 target | Requested seconds | Observation |
+| --- | ---: | ---: | ---: | --- |
+| Initial direction trial | +0.25 | −0.15 | 4 | Operator requested the opposite J5 direction |
+| Direction correction | −0.25 | −0.15 | 8 | Fresh feedback reached the corrected endpoint |
+| Continue palm-up | −0.55 | −0.30 | 4 | Wrist feedback was lost; arrival unverified |
+
+The operator specified negative J5 and clockwise/negative J6 for this physical
+right arm, then reported that the wrist LEDs remained lit. Receive-only CAN
+inspection confirmed replies from right J1–J4 but none from J5–J7 or the gripper;
+the left bus still replied from all eight devices. The last cached J5/J6 values
+were approximately −0.547/−0.238 rad. They are not a verified final pose. Stop +
+hold was requested; a right-arm hold cannot be claimed without current feedback.
+Later telemetry changed to zero coordinates with mixed cached right modes and
+left inactive; no new physical hanging datum was accepted.
+
+[The commissioning record and passive traces](calibration/evidence/2026-09-23-palms-up/trial.json)
+retain targets, user observations, raw sample times and hashes. No left-wrist
+trial, new startup waypoint, secure grasp, connector fault diagnosis or completed
+palm-up rendition is claimed. The data loss must be resolved and current physical
+pose re-established before continuing; no reset or additional wrist target was
+sent by Codex after the loss.
 
 ## Physical observation on 2026-09-23
 

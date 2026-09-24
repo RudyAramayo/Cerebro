@@ -22,6 +22,7 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
+		AC2609230000000000000002 /* ROBArmFeedbackAlerts.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2609230000000000000001 /* ROBArmFeedbackAlerts.swift */; };
 		AC2509230000000000000002 /* ROBShowMotionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2509230000000000000001 /* ROBShowMotionCoordinator.swift */; };
 		AC2409230000000000000002 /* ROBArmImitationPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2409230000000000000001 /* ROBArmImitationPlan.swift */; };
 		AC2309230000000000000012 /* ROBControllerArmApproval.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2309230000000000000011 /* ROBControllerArmApproval.swift */; };
@@ -262,6 +263,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		AC2609230000000000000001 /* ROBArmFeedbackAlerts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBArmFeedbackAlerts.swift; sourceTree = "<group>"; };
 		AC2509230000000000000001 /* ROBShowMotionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBShowMotionCoordinator.swift; sourceTree = "<group>"; };
 		AC2409230000000000000001 /* ROBArmImitationPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBArmImitationPlan.swift; sourceTree = "<group>"; };
 		AC2309230000000000000011 /* ROBControllerArmApproval.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBControllerArmApproval.swift; sourceTree = "<group>"; };
@@ -690,6 +692,7 @@
 				C0AD01012F49000100000001 /* ROBAmberDiagnosticsWindowController.swift */,
 				AC2309230000000000000011 /* ROBControllerArmApproval.swift */,
 				AC2409230000000000000001 /* ROBArmImitationPlan.swift */,
+				AC2609230000000000000001 /* ROBArmFeedbackAlerts.swift */,
 				AC2309260000000000000001 /* ROBArmRoutinePlan.swift */,
 				AC2309260000000000000003 /* ROBArmRoutineVision.swift */,
 				AC2309260000000000000005 /* ROBArmRoutineCoordinator.swift */,
@@ -1116,6 +1119,7 @@
 				C0AD01022F49000100000001 /* ROBAmberDiagnosticsWindowController.swift in Sources */,
 				AC2309230000000000000012 /* ROBControllerArmApproval.swift in Sources */,
 				AC2409230000000000000002 /* ROBArmImitationPlan.swift in Sources */,
+				AC2609230000000000000002 /* ROBArmFeedbackAlerts.swift in Sources */,
 				AC2309260000000000000002 /* ROBArmRoutinePlan.swift in Sources */,
 				AC2309260000000000000004 /* ROBArmRoutineVision.swift in Sources */,
 				AC2309260000000000000006 /* ROBArmRoutineCoordinator.swift in Sources */,

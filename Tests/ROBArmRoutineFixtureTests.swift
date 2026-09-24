@@ -52,6 +52,10 @@ final class ROBAmberGatewayClient: NSObject {
     var q = ["left": Array(repeating: 0.0, count: 7), "right": Array(repeating: 0.0, count: 7)]
     var mode = ["left": 0, "right": 0]
     var commands: [String] = []
+    var calibrated: Set<String> = []
+    var rejectRelease = false
+    var afterRelease: (() -> Void)?
+    var afterStateQuery: (() -> Void)?
     var sequence: UInt64 = 1, nextID: UInt64 = 1
     var feedbackReadyAt = 0.0
     var modeFeedbackDelay = 0.0
@@ -96,24 +100,36 @@ final class ROBAmberGatewayClient: NSObject {
         precondition(ROBArmRoutinePlan.near(q[arm]!, Array(repeating: 0, count: 7)), "Torque removed away from hanging")
         mode[arm] = 0; return ack("deactivate", arm)
     }
+    func queryGripperState(forArm arm: String) -> UInt64 {
+        let id = ack("gripper_state", arm); afterStateQuery?(); return id
+    }
+    func gripperSnapshot(forArm arm: String) -> NSDictionary {
+        ["calibrationState": calibrated.contains(arm) ? "command_accepted_unverified" : "required"]
+    }
     func calibrateGripper(forArm arm: String) -> UInt64 {
         precondition(q.allSatisfy { ROBArmRoutinePlan.near($0.value, ROBArmRoutinePlan.target(index: 6, physicalLeft: $0.key == "right")!) }, "Calibration before BOTH arms reached front")
+        calibrated.insert(arm)
         return ack("calibrate", arm)
     }
     func controlGripper(forArm arm: String, action: String, force: Int) -> UInt64 {
         precondition(force == 10)
-        return ack("gripper_\(action)", arm)
+        precondition(calibrated.contains(arm), "Uncalibrated jaw command")
+        let id = ack("gripper_\(action)", arm, accepted: action != "release" || !rejectRelease)
+        if action == "release" { afterRelease?() }
+        return id
     }
 }
 final class ROBArmRoutineVision {
     static let shared = ROBArmRoutineVision()
     var fresh = true, handsClear = true, blocked = false, objectInRight = false
+    var observationCount = 0
     var readinessDescription: String { "Simulated camera unavailable" }
     func healthSnapshot() -> NSDictionary { ["fixture": true] }
     var demonstrationSample: ROBArmDemonstrationSample?
     func setActive(_ active: Bool, teaching: Bool = false) {}
     func observe(target: String, grippers: Bool = true, progress: (@MainActor (String) -> Void)? = nil) async throws -> ROBArmRoutineObservation {
-        ROBArmRoutineObservation(pathVisible: !blocked, pathClear: !blocked, hanging: true, armsInFront: !blocked,
+        observationCount += 1
+        return ROBArmRoutineObservation(pathVisible: !blocked, pathClear: !blocked, hanging: true, armsInFront: !blocked,
             leftJawEmpty: !objectInRight, rightJawEmpty: !objectInRight,
             leftObjectBetweenJaws: false, rightObjectBetweenJaws: objectInRight,
             leftJawOpen: true, rightJawOpen: true, leftJawClosedOnObject: false, rightJawClosedOnObject: objectInRight,
@@ -264,9 +280,54 @@ final class ROBArmRoutineVision {
         precondition(occluded["status"] as? String == "blocked")
         precondition(g.commands.filter { $0.hasPrefix("waypoint") }.count == 12,
                      "Explicit controller supervision did not allow the taught route in poor visibility")
-        precondition(!g.commands.contains { $0.hasPrefix("calibrate") || $0.hasPrefix("gripper_") },
+        precondition(!g.commands.contains { $0.hasPrefix("calibrate") || $0.hasPrefix("gripper_release") || $0.hasPrefix("gripper_hold") },
                      "Poor jaw visibility allowed a gripper operation")
         precondition(!ROBControllerArmApproval.shared.authorizesSupervisedArmRoute(), "Supervision survived completion")
+        // Simulate both manual diagnostic calibrations accepted in this same
+        // gateway session. Cropped MLX jaw labels must not block supervised
+        // opening, and preparation must not recalibrate around a presented item.
+        g.calibrated = ["left", "right"]; g.commands = []
+        let inspectionsBefore = v.observationCount
+        let manuallyCalibrated = await run("prepare")
+        precondition(manuallyCalibrated["status"] as? String == "completed", manuallyCalibrated.description)
+        precondition(manuallyCalibrated["jaw_opening_verified"] as? Bool == false)
+        precondition(manuallyCalibrated["gripper_release"] as? String == "accepted_unverified")
+        precondition(g.commands.filter { $0.hasPrefix("gripper_release:") } == ["gripper_release:left", "gripper_release:right"])
+        precondition(!g.commands.contains { $0.hasPrefix("calibrate") || $0.hasPrefix("waypoint") || $0.hasPrefix("position_mode") || $0.hasPrefix("gripper_hold") })
+        precondition(v.observationCount == inspectionsBefore, "Already calibrated preparation waited for semantic jaw recognition")
+        for _ in 0..<2 {
+            g.commands = []
+            let again = await run("prepare")
+            precondition(again["status"] as? String == "completed")
+            precondition(g.commands.filter { $0.hasPrefix("gripper_release:") }.count == 2, "Repeated prepare failed to reopen both grippers")
+            precondition(!g.commands.contains { $0.hasPrefix("calibrate") })
+        }
+        g.commands = []; v.handsClear = false
+        let hands = await run("prepare")
+        precondition(hands["status"] as? String == "blocked")
+        precondition(!g.commands.contains { $0.hasPrefix("gripper_release") }, "Hand detector was bypassed")
+        v.handsClear = true; g.commands = []
+        g.afterStateQuery = { v.handsClear = false }
+        let lateHand = await run("prepare")
+        precondition(lateHand["status"] as? String == "blocked")
+        precondition(!g.commands.contains { $0.hasPrefix("gripper_release") }, "Hand arrival after preflight allowed jaw dispatch")
+        g.afterStateQuery = nil
+        v.handsClear = true; g.commands = []; g.rejectRelease = true
+        let rejectedOpening = await run("prepare")
+        precondition(rejectedOpening["status"] as? String == "blocked")
+        precondition(g.commands.filter { $0.hasPrefix("gripper_release:") }.count == 1, "A rejected opening was retried or followed by the second jaw")
+        g.rejectRelease = false; g.commands = []
+        g.afterRelease = { g.stale = true }
+        let staleOpening = await run("prepare")
+        precondition(staleOpening["status"] as? String == "blocked")
+        precondition(g.commands.filter { $0.hasPrefix("gripper_release:") }.count == 1)
+        g.afterRelease = nil; g.stale = false
+        // Gateway revocation is authoritative even after successful preparation.
+        g.calibrated = []; g.commands = []
+        let revoked = await run("prepare")
+        precondition(revoked["status"] as? String == "blocked")
+        precondition(!g.commands.contains { $0.hasPrefix("calibrate") || $0.hasPrefix("gripper_release") })
+        print("Preparation: manual calibration reused, both jaws reopened on every request, hand/freshness/rejection/revoked-calibration checks preserved")
         // A core may have entered active mode before a prior acknowledgement
         // failed. A whole active arm must still verify position mode to move.
         v.blocked = false; g.q = ["left": zero, "right": zero]; g.mode = ["left": 1, "right": 0]; g.commands = []
@@ -280,7 +341,17 @@ final class ROBArmRoutineVision {
         precondition(g.mode.values.allSatisfy { $0 == 2 })
         print("Startup: both arms reached front before either gripper calibration")
 
+        g.commands = []; g.calibrated = ["left"]
+        let partialCalibration = await run("prepare")
+        precondition(partialCalibration["status"] as? String == "completed")
+        precondition(g.commands.filter { $0.hasPrefix("calibrate:") } == ["calibrate:right"], "Already accepted jaw recalibrated")
+        precondition(g.commands.filter { $0.hasPrefix("gripper_release:") }.count == 2)
         g.commands = []; v.blocked = true
+        let unobservedGrab = await run("grab")
+        precondition(unobservedGrab["status"] as? String == "blocked")
+        precondition(g.commands.filter { $0.hasPrefix("gripper_release:") }.count == 2)
+        precondition(!g.commands.contains { $0.hasPrefix("gripper_hold") }, "Opening acceptance was used as authorization to close")
+        g.commands = []
         let wave = await run("wave")
         precondition(wave["status"] as? String == "completed" && wave["measured"] as? Bool == true)
         precondition(g.commands.filter { $0.hasPrefix("waypoint") }.count == 8)
@@ -320,6 +391,8 @@ final class ROBArmRoutineVision {
         let grip = await run("grab")
         precondition(grip["status"] as? String == "grip_attempted", grip.description)
         precondition(g.commands.contains("gripper_hold:left"), "Physical right routed to wrong Amber core")
+        precondition(g.commands.filter { $0.hasPrefix("gripper_release:") }.count == 2)
+        precondition(g.commands.lastIndex(of: "gripper_release:right")! < g.commands.firstIndex(of: "gripper_hold:left")!, "Grab closed before automatically opening both jaws")
         precondition(!g.commands.contains { $0.hasPrefix("calibrate") }, "Recalibrated around a presented object")
         v.objectInRight = false; g.commands = []
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { v.fresh = false }

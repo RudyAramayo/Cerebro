@@ -1,0 +1,288 @@
+{
+  "schema_version": 1,
+  "physical_right": {
+    "gateway_arm": "left",
+    "core": "L10",
+    "interface": "can10",
+    "udp_port": 26001
+  },
+  "authorization": "Each physical wrist target was sent from Cerebro Torso controls for real ROBController approval. No approvals were synthesized.",
+  "operator_observations": [
+    "Palms facing upward to receive the object.",
+    "Positive J5 was the wrong direction; move J5 negative.",
+    "J6 clockwise uses negative numbers.",
+    "After missing replies, wrist LEDs were still lit."
+  ],
+  "requested_targets": [
+    {
+      "q": [
+        1.05,
+        -0.6,
+        0,
+        0,
+        0.25,
+        -0.15,
+        0
+      ],
+      "duration_seconds": 4,
+      "result": "Measured trial; operator rejected J5 direction."
+    },
+    {
+      "q": [
+        1.05,
+        -0.6,
+        0,
+        0,
+        -0.25,
+        -0.15,
+        0
+      ],
+      "duration_seconds": 8,
+      "result": "Measured endpoint with fresh feedback."
+    },
+    {
+      "q": [
+        1.05,
+        -0.6,
+        0,
+        0,
+        -0.55,
+        -0.3,
+        0
+      ],
+      "duration_seconds": 4,
+      "result": "Interrupted feedback; target arrival unverified."
+    }
+  ],
+  "last_cached_wrist_before_reset": {
+    "joint5_rad": -0.5471879912697847,
+    "joint6_rad": -0.23834652597547562,
+    "measured_final_pose": false
+  },
+  "passive_can_capture": {
+    "duration_seconds": 2,
+    "transmitted_frames": 0,
+    "can10_replies": {
+      "0x91": 302,
+      "0x92": 284,
+      "0x93": 284,
+      "0x94": 259
+    },
+    "can11_replies": {
+      "0x91": 174,
+      "0x92": 195,
+      "0x93": 189,
+      "0x94": 87,
+      "0x95": 216,
+      "0x96": 160,
+      "0x97": 173,
+      "0x98": 144
+    },
+    "right_missing": [
+      "J5",
+      "J6",
+      "J7",
+      "gripper"
+    ],
+    "interface_rx_errors": 0,
+    "interface_tx_errors": 0
+  },
+  "safety_response": "Stop + hold requested through Arms settings; right physical hold not verified because wrist feedback was unavailable. No new wrist target or reset command was sent by Codex afterward.",
+  "validation": "No left wrist probe or palms-up startup path validated. No updated wrist waypoints installed.",
+  "captures": [
+    {
+      "file": "rob-palms-up-right-trial.jsonl.gz",
+      "sha256": "c6aed35991e306c92d6386884da5c50310fcf90c81e28df846d534f60958abf6",
+      "sample_count": 350,
+      "first_at_utc": "2026-09-24T00:15:48.902770+00:00",
+      "last_at_utc": "2026-09-24T00:16:58.864636+00:00",
+      "first_stale_after_fresh_at_utc": null,
+      "last_sample": {
+        "time": 1790209018.8646364,
+        "arms": {
+          "left": {
+            "q": [
+              1.0497882743050269,
+              -0.5998205765252387,
+              0.0,
+              0.0,
+              -0.25075472612637284,
+              -0.14944381720201447,
+              0.0
+            ],
+            "status": [
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0
+            ],
+            "fresh": true
+          },
+          "right": {
+            "q": [
+              -1.050333689696275,
+              0.5992751611339905,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "status": [
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0
+            ],
+            "fresh": true
+          }
+        }
+      }
+    },
+    {
+      "file": "rob-palms-up-right-corrected.jsonl.gz",
+      "sha256": "c3b549010d4c91df8f172e884a4973b4a0dd8d2e06abd68643fe9cb4285f1cae",
+      "sample_count": 350,
+      "first_at_utc": "2026-09-24T00:16:42.278678+00:00",
+      "last_at_utc": "2026-09-24T00:17:52.240110+00:00",
+      "first_stale_after_fresh_at_utc": "2026-09-24T00:17:37.606742+00:00",
+      "last_sample": {
+        "time": 1790209072.2401102,
+        "arms": {
+          "left": {
+            "q": [
+              1.0497882743050269,
+              -0.5998205765252387,
+              0.0,
+              0.0,
+              -0.5471879912697847,
+              -0.23834652597547562,
+              0.0
+            ],
+            "status": [
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0
+            ],
+            "fresh": false
+          },
+          "right": {
+            "q": [
+              -1.050333689696275,
+              0.5992751611339905,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "status": [
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0
+            ],
+            "fresh": true
+          }
+        }
+      }
+    },
+    {
+      "file": "rob-palms-up-continue.jsonl.gz",
+      "sha256": "f77f8d0938542d1a98bb1c0c97b6a161d32ac7dce1141a22353440e0c1d838d6",
+      "sample_count": 1000,
+      "first_at_utc": "2026-09-24T00:17:37.501753+00:00",
+      "last_at_utc": "2026-09-24T00:20:57.839367+00:00",
+      "first_stale_after_fresh_at_utc": null,
+      "last_sample": {
+        "time": 1790209257.8393672,
+        "arms": {
+          "left": {
+            "q": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "status": [
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "fresh": false
+          },
+          "right": {
+            "q": [
+              0.0,
+              0.0,
+              0.0,
+              0.000136353847812057,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "status": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "fresh": true
+          }
+        }
+      },
+      "started_without_fresh_right_feedback": true
+    }
+  ],
+  "recovery": {
+    "operator_report": "Rebooted the right arm because it was not responsive.",
+    "fresh_can_feedback_both_arms": true,
+    "joint_statuses_after_reboot": {
+      "gateway_left_physical_right": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "gateway_right_physical_left": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    "coordinates": "Both report encoder zero (left J4 approximately 0.0001 rad). This is not an independent physical hanging check.",
+    "right_core_pid": 9693,
+    "left_core_pid": 985,
+    "motion_resumed_automatically": false
+  }
+}

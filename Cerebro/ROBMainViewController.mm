@@ -3040,6 +3040,18 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     self.speechBox = [ROBSpeechBox new];
     self.speechBox.delegate = self;
 
+    // Hardware health announcements stay local and work without a Live model
+    // or a diagnostics window. Use physical arm names, never Amber's swapped keys.
+    __weak ROBMainViewController *weakArmSpeechOwner = self;
+    [ROBArmFeedbackAlerts shared].announce = ^(NSString *text, BOOL isFault) {
+        ROBMainViewController *owner = weakArmSpeechOwner;
+        if (owner == nil || owner.runtimeIsShuttingDown) { return; }
+        if (isFault) { [owner.speechBox stopIt:nil]; }
+        [owner appendConversationText:text fromUser:NO];
+        [owner.speechBox sayIt:text];
+    };
+    [[ROBArmFeedbackAlerts shared] start];
+
     // Start capture in wake-word mode. A recognized ROB/Robbie/Robot address
     // opens the bounded continuation window; unrelated room speech at launch
     // must not be treated as a failed Gemini turn.
@@ -3189,6 +3201,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         return;
     }
     self.runtimeIsShuttingDown = YES;
+    [[ROBArmFeedbackAlerts shared] stop];
     [self.robotActionBridgeTimer invalidate];
     self.robotActionBridgeTimer = nil;
     [self stopHandWaveFocus];

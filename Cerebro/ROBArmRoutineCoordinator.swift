@@ -27,7 +27,6 @@ enum ROBArmRoutineError: LocalizedError {
     private var owner: UUID?
     private var generation: UInt64 = 0
     private var referencedGeneration: UInt64 = 0
-    private var calibratedGeneration: UInt64 = 0
     private var acknowledgements: [UInt64: Bool] = [:]
     private var expected: Set<UInt64> = []
     private var renewalIDs: Set<UInt64> = []
@@ -52,8 +51,9 @@ enum ROBArmRoutineError: LocalizedError {
          "camera_ready": vision.fresh, "camera_detail": vision.readinessDescription,
          "motion_owner": "local coordinator; paired arms and bounded segments",
          "corridor_revision": ROBArmRendition.revision,
-         "route_supervision": "One explicit controller approval covers the taught route despite incomplete camera visibility. Operator watches clearance; live camera, hand/person veto, motor feedback and Stop remain active. Grippers require a stationary camera assessment.",
+         "route_supervision": "One explicit controller approval covers the taught route despite incomplete camera visibility. Operator watches clearance; live camera, hand/person veto, motor feedback and Stop remain active. Calibration and closing require a stationary camera assessment; every preparation automatically requests both calibrated jaws open under live camera and operator supervision.",
          "limits": "Fixed hanging/front corridor only. Teach/replay maps symmetric relative lift order; no general human joint copying, arbitrary reach or full-environment collision guarantee. Empty jaws required for greetings/replay.",
+         "preparation": "Every prepare/startup/grab/hold opens both calibrated grippers at the stationary front pose. Current gateway calibration acceptance is reused, including manual diagnostics calibration. Opening is not measured jaw feedback.",
          "gripper_completion": "command acceptance and visual observations; force and secure grasp unverified"]
     }
 
@@ -131,7 +131,7 @@ enum ROBArmRoutineError: LocalizedError {
         if let rendition {
             summary = "\(rendition.name): move both arms along the taught route, then replay \(rendition.waypoints.count) bounded front-corridor steps. Grippers stay unchanged; confirm they are empty. Both arms end in front."
         } else if command == "relax" { summary = "Return both arms gently to hanging, then deactivate position mode." }
-        else { summary = "\(command.capitalized): bring both arms forward, calibrate both empty grippers if needed, and \(command == "grab" || command == "hold" ? "attempt a camera-checked grip of \(String(target.prefix(160)))" : "leave both grippers open")." }
+        else { summary = "\(command.capitalized): bring both arms forward, calibrate both empty grippers if needed, and \(command == "grab" || command == "hold" ? "attempt a camera-checked grip of \(String(target.prefix(160)))" : "request both grippers open"). Both grippers open during preparation, including after an earlier grip; support any held object and clear the jaws." }
         if inspectionPan != 0 {
             summary += " Inspection camera pans 10° \(inspectionPan < 0 ? "right" : "left")."
         }
@@ -429,7 +429,7 @@ enum ROBArmRoutineError: LocalizedError {
             setStatus("Inspecting the complete arm path in the main camera")
             let observation = try await inspect(target: target, grippers: false)
             guard !atHanging || observation.hanging else {
-                referencedGeneration = 0; calibratedGeneration = 0
+                referencedGeneration = 0
                 throw ROBArmRoutineError.blocked("Encoder zero does not match visually hanging arms; the session datum is invalid.")
             }
             if referencedGeneration != generation {
@@ -481,30 +481,47 @@ enum ROBArmRoutineError: LocalizedError {
             return ["status": "completed", "measured": true, "clip_id": rendition.id,
                 "detail": "Both arms completed the taught gesture and reached the front pose under controller supervision. Grippers were unchanged; camera clearance was not certified."]
         }
-        setStatus("Checking both grippers in front")
-        let inFront = try await inspect(target: target, calibration: calibratedGeneration != generation)
-        guard inFront.armsInFront else { throw ROBArmRoutineError.blocked("The cameras could not confirm both arms in front.") }
-        if calibratedGeneration != generation {
+        // The gateway owns calibration acceptance for this authenticated session.
+        // Diagnostics may already have calibrated the jaws; a private routine
+        // cache must not cause another full-travel calibration around an object.
+        try verifyFrontBeforeGripperMotion()
+        setStatus("Checking current gripper calibration")
+        for arm in arms {
+            try await accepted([try send(gateway.queryGripperState(forArm: arm))])
+        }
+        let uncalibrated = arms.filter {
+            gateway.gripperSnapshot(forArm: $0)["calibrationState"] as? String != "command_accepted_unverified"
+        }
+        if !uncalibrated.isEmpty {
+            _ = try await inspect(target: target, calibration: true)
             // Serial acknowledgements: the vendor globally serializes gripper commands.
-            for arm in arms {
-                try verifyFrontBeforeGripperMotion()
+            for arm in uncalibrated {
                 moving = true
+                try verifyFrontBeforeGripperMotion()
                 setStatus("Calibrating \(arm == "left" ? "right" : "left") gripper in front")
                 try await accepted([try send(gateway.calibrateGripper(forArm: arm))])
                 let settledAt = ProcessInfo.processInfo.systemUptime + 2
                 try await wait(seconds: 3) { ProcessInfo.processInfo.systemUptime >= settledAt }
                 moving = false
             }
-            // Acceptance is deliberately never labeled measured calibration.
-            calibratedGeneration = generation
-            for arm in arms {
-                try verifyFrontBeforeGripperMotion()
-                moving = true
-                try await accepted([try send(gateway.controlGripper(forArm: arm, action: "release", force: 10))])
-            }
-            let openedAt = ProcessInfo.processInfo.systemUptime + 1.5
-            try await wait(seconds: 3) { ProcessInfo.processInfo.systemUptime >= openedAt }
-            moving = false
+        }
+        // Opening is preparation, not a side effect of first-time calibration.
+        // The complete controller approval covers release of both jaws, including
+        // support of any held object. Live camera/hand and motor checks stay on;
+        // an MLX jaw label is not required to dispatch this supervised opening.
+        for arm in arms {
+            moving = true
+            try verifyFrontBeforeGripperMotion()
+            setStatus("Opening \(arm == "left" ? "right" : "left") gripper for the object")
+            try await accepted([try send(gateway.controlGripper(forArm: arm, action: "release", force: 10))])
+        }
+        let openedAt = ProcessInfo.processInfo.systemUptime + 1.5
+        try await wait(seconds: 3) { ProcessInfo.processInfo.systemUptime >= openedAt }
+        moving = false
+        if command == "prepare" || command == "startup" {
+            return ["status": "completed", "gripper_calibration": "accepted_unverified",
+                    "gripper_release": "accepted_unverified", "jaw_opening_verified": false,
+                    "detail": "Both arms are measured in front and both gripper release commands were accepted. The jaws were commanded open for the object; jaw opening and force are not measured."]
         }
         let ready = try await inspect(target: target)
         guard ready.armsInFront, ready.leftJawOpen, ready.rightJawOpen else {
@@ -523,8 +540,8 @@ enum ROBArmRoutineError: LocalizedError {
             guard let arm = ready.graspArm else {
                 return ["status": "ready_for_object", "detail": "Arms are in front and both grippers are open. The requested object is not clearly between one gripper's jaws. Reaching outside this pose needs camera-to-arm calibration.", "gripper_calibration": "accepted_unverified"]
             }
-            try verifyFrontBeforeGripperMotion()
             moving = true
+            try verifyFrontBeforeGripperMotion()
             try await accepted([try send(gateway.controlGripper(forArm: arm, action: "hold", force: 10))])
             let closedAt = ProcessInfo.processInfo.systemUptime + 1.5
             try await wait(seconds: 3) { ProcessInfo.processInfo.systemUptime >= closedAt }
@@ -609,12 +626,12 @@ enum ROBArmRoutineError: LocalizedError {
         if now > deadline { abort("Arm routine exceeded its 90-second deadline."); return }
         if generation > 0 {
             guard gateway.isReady(), (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == generation else {
-                referencedGeneration = 0; calibratedGeneration = 0
+                referencedGeneration = 0
                 abort("The gateway session changed; the arm routine was stopped."); return
             }
             for arm in arms {
                 if (try? measured(arm)) == nil {
-                    referencedGeneration = 0; calibratedGeneration = 0
+                    referencedGeneration = 0
                     abort("Motor feedback went stale; an arm hold was requested."); return
                 }
                 if moving {
@@ -622,7 +639,7 @@ enum ROBArmRoutineError: LocalizedError {
                     let statuses = gateway.telemetry(forArm: arm)?.statuses.map(\.intValue) ?? []
                     guard modes.count == 7, modes.allSatisfy({ $0 == 2 }),
                           statuses.count == 7, statuses.allSatisfy({ $0 == 2 }) else {
-                        referencedGeneration = 0; calibratedGeneration = 0
+                        referencedGeneration = 0
                         abort("An arm left position mode or reported a motor fault."); return
                     }
                 }

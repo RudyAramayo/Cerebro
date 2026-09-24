@@ -21,7 +21,7 @@ import AppKit
         let inspectionRow = NSStackView(views: [NSTextField(labelWithString: "Arm inspection camera pan:"), inspectionPan])
         inspectionRow.spacing = 10
         let explanation = NSTextField(wrappingLabelWithString:
-            "One Vision Pro or iPhone approval covers the complete taught arm route under your supervision, including an incomplete camera view. Watch the arms and keep Stop + hold ready. Startup brings hanging arms forward, then checks, calibrates and opens both empty grippers. Paired forward travel took about 22 seconds in one supervised trial; camera checks and gripper work take additional time.")
+            "One Vision Pro or iPhone approval covers the complete taught arm route under your supervision, including an incomplete camera view. Watch the arms and keep Stop + hold ready. Startup brings hanging arms forward, checks calibration and requests both grippers open. Every Prepare opens both jaws automatically, reusing current calibration; empty-jaw calibration runs only when needed. Support any held object before approving preparation. Paired forward travel took about 22 seconds in one supervised trial; camera checks and gripper work take additional time.")
         let commands = NSTextField(wrappingLabelWithString:
             "Say or type ‘relax’ to lower the arms gently and turn off holding torque. ‘Grab this’ or ‘hold this’ brings the arms forward and attempts a gentle close when the camera sees the object between a gripper’s jaws. These commands are available without enabling startup calibration. Each complete operation needs one controller approval. Stop + hold is immediate.")
         let limitation = NSTextField(wrappingLabelWithString:
@@ -33,8 +33,9 @@ import AppKit
         buttons.spacing = 10
         let teaching = NSStackView(views: [button("Motion rehearsal…", #selector(rehearsal)), button("Record body demonstration", #selector(teach)),
             button("Replay last", #selector(replay)), button("Front-arm greeting", #selector(wave))])
+        let speechTest = button("Test spoken arm warning", #selector(testArmSpeech))
         teaching.spacing = 10
-        let stack = NSStackView(views: [title, startup, inspectionRow, explanation, commands, buttons, teaching, state, limitation])
+        let stack = NSStackView(views: [title, startup, inspectionRow, explanation, commands, buttons, teaching, speechTest, state, limitation])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 20
         stack.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(stack)
         NSLayoutConstraint.activate([
@@ -66,6 +67,7 @@ import AppKit
     @objc private func teach() { run("teach") }
     @objc private func replay() { run("replay") }
     @objc private func wave() { run("wave") }
+    @objc private func testArmSpeech() { ROBArmFeedbackAlerts.shared.testSpeech() }
     @objc private func rehearsal() { ROBShowMotionCoordinator.shared.showControls(self) }
     @objc private func stop() {
         ROBArmRoutineCoordinator.shared.cancel(reason: "Stop requested in Arms settings")
