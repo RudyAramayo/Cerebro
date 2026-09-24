@@ -276,6 +276,31 @@ a jaw-assessment failure to the hanging route. Negative assessments still do
 not trigger retries to obtain a favourable answer. This prompt correction
 requires a new live trial; fixtures do not establish recognition accuracy.
 
+The signed jaw-scope build passed the inspection and complete arm-routine
+fixtures, was installed by the build phase, and passed strict signature
+verification. Debug-library SHA-256:
+`549c04057ca028afaa9138218d9d7f2b753ef1efc347b3ce73c4cc683fb68c03`.
+It was loaded after another approved Relax returned both arms to measured
+hanging zero and deactivated all fourteen motors. A new Prepare reached front,
+then stopped after two changed-scene assessments. A stationary retry returned
+0% confidence with gripper visibility and hand clearance both false. Neither
+automatic attempt sent calibration commands. The prompt correction therefore
+has not established dependable automatic gripper recognition.
+
+At the operator's explicit request to calibrate without waiting for image
+recognition, calibration then used the existing manual Amber diagnostics path.
+The operator confirmed the ball removed, both jaws empty and hands clear; the
+arms remained at the measured front pose. Each existing manual control sent its
+own authenticated phone request, with the full-travel/empty-jaw warning and
+live gateway/session/feedback/ownership interlocks. This is supervised manual
+calibration, not a successful automatic camera assessment or a general vision
+override. Physical right/L10 command 193 was submitted at 17:01:09.011 PDT and
+accepted with vendor response 1; physical left/R11 command 194 was submitted at
+17:01:37.814 and accepted with vendor response 1. Both per-session diagnostics
+now show calibration accepted. Jaw position, force and mechanical completion
+remain unreported by Amber. No ball close/grasp was commanded. Manual
+calibration does not establish completion of the automatic prepare/grab flow.
+
 A separate Vision hand detector, current depth coverage, stationary
 neck view, current per-motor CAN replies and a 1.5-second gateway lease supervise
 motion. These checks are conservative observations, **not a certified geometric
