@@ -14,7 +14,7 @@ until the current test and controller workflow are finished.
    freezes the ×4 preview on execution, updates only changed mesh transforms,
    and caps display work. At Rob's request the timing is now 4× the old low
    approach pace and 6× the old front pace. Collinear increments are joined;
-   every path corner/reversal is retained. A full ghost wave schedules 14.6 s.
+   every path corner/reversal is retained. A full ghost wave schedules 14.7 s.
    New angles and pace still require a completed supervised trial.
    Confirm physical clearance before calling the added angles taught. See [arm trials](arm-startup-and-grab.md).
 2. **Implemented, live verification in progress — ghost motion editor.** Reuse the

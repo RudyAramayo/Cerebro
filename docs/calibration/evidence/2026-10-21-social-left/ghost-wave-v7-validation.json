@@ -22,7 +22,7 @@
   },
   "timing": "14.6 s scheduled from hanging with 15 segments; exactly collinear increments joined, corners/reversals retained; 4x old approach / 6x old front timing, 0.5 s minimum; measured settling additional",
   "display": "Only changed mesh transforms; preview freezes on request; 30 scene FPS; 8 cloud submissions/s/camera",
-  "liveTrial": "v7 loaded after Rob physically confirmed hanging; 15-segment preview verified. Request ended: Connect Vision Pro or iPhone and enable Action Approvals. No arm operation was started. Waiting for controller connection before resending.",
+  "liveTrial": "After Action Approvals reconnected, left_ghost-41B9CA12-F60B-43D6-90FC-94E902173A64 reached raised J2/J4 but refused J5 before dispatch due to planner/transport minimum-duration mismatch. See trial-ghost-wave-v7-transport-stop.json; corrected in v8.",
   "currentJumpLimitRaw": 0,
   "scope": "Supervised empty physical left only; jaws unchanged; model and neck mapping remain priors; camera/URDF calibration deferred",
   "nativeUIResponse": "Scene controls read/preview actions completed in 0.05\u20130.44 s with the updated model and live clouds; no live-movement performance conclusion yet."

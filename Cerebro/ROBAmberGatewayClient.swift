@@ -729,7 +729,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                       value.doubleValue.isFinite && bounds.contains(value.doubleValue)
                   }),
                   nextCommandID <= UInt64(UInt32.max),
-                  duration.isFinite, (0.65 ... 10).contains(duration),
+                  duration.isFinite, (ROBArmRoutinePlan.minimumLeasedTrajectorySeconds ... 10).contains(duration),
                   (700 ... 1_500).contains(leaseMilliseconds) else { return 0 }
             let commandID = nextCommandID
             nextCommandID &+= 1

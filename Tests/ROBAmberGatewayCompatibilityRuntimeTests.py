@@ -250,6 +250,13 @@ struct GatewayCompatibilityFixtures {
         try motorFeedback(positions: ROBLeftArmInteractionPlan.target(index: 6)!)
         expect(waypoint("right", 7) > 0, "Approved front-only J3 step refused")
         expect(waypoint("right", 8) == 0, "Front extension skipped a J3 step")
+        // The planner's shortest segment must survive the real transport's
+        // duration floor, including a small raised J5 step.
+        let j5From = ROBLeftArmInteractionPlan.target(index: 34)!
+        let j5To = ROBLeftArmInteractionPlan.target(index: 35)!
+        try motorFeedback(positions: j5From)
+        let shortSegment = ROBLeftArmInteractionPlan.duration(from: j5From, to: j5To)!
+        expect(waypoint("right", 35, shortSegment) > 0, "Planner generated a duration refused by its transport")
         try motorFeedback(positions: ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.waveRestIndex)!)
         expect(waypoint("right", ROBLeftArmInteractionPlan.waveIndex) > 0, "Approved wave refused at new front pose")
         expect(waypoint("right", ROBLeftArmInteractionPlan.waveIndex, 0.7) > 0, "Approved front wave refused its reviewed faster timing")

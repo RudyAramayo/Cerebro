@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-21T23:20:18.138445+00:00",
+  "sourceSHA256": {
+    "Cerebro/ROBArmRoutinePlan.swift": "650a3f301365042275f45d62b7e02fb56e7507e868c22f110808875a6217f5fd",
+    "Cerebro/ROBAmberGatewayClient.swift": "3a784b91897b8acec6d8cdf68bd95a608e30344cac389d5f9892e957647f53f6",
+    "Cerebro/ROBGhostMotionPlan.swift": "b8067ac8f071fe4ab762286be6fa5577a4e235e7a87c32ce884667f316d4d718",
+    "Cerebro/ROBGhostGestureEditor.swift": "7289fe60692b9bb28fec19b4eb3755098b1d4d03ea400c3b774a5573d2d2e6cc",
+    "Cerebro/ROBLeftArmTrial.swift": "5fb6bb3a76d11d4a70730cad36999deaaa5cf480df74013fdf895bd2af269cc4",
+    "Cerebro/ROBSCNViewController.m": "a8c781ac5e2f565d18c5df9a54dbef542b8f64b9b307457e88a8d13a212fa424",
+    "Cerebro/ROBDepthCloudProjection.h": "8156ce960d1f3ddf9dfaa1f434f4786d123ac4a6970537117adf818987e2a449"
+  },
+  "installedDebugLibrarySHA256": "1604602f9b87dffe2d7f54b396879c7cced676a19306d9426507627eb57fd507",
+  "checks": {
+    "ghostModelAndRouteTiming": "passed",
+    "productionGatewayShortestPlannerSegment": "passed",
+    "leftExecutorFaultCutoffRecoveryAndReturn": "passed",
+    "ghostEditorRenderAndSharedCameraOrigin": "passed",
+    "signedMacOSDebugBuild": "passed",
+    "geometry": "Unchanged joint route and hulls from model-preview-v7.json; only minimum duration corrected"
+  },
+  "timing": "0.7 s floor, shared 0.65 s transport contract; 15 compacted segments from hanging, 14.7 s scheduled plus preparation/settling",
+  "preload": "Operator manually returned left to zero without touching treads; subsequent real-controller-approved left_relax-06557669-7CAA-4ADA-9958-7BA5F1DF8041.csv verified hanging/inactive before relaunch",
+  "liveTrial": "New faster-wave controller request being prepared",
+  "currentJumpLimitRaw": 0
+}

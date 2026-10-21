@@ -13,6 +13,7 @@ enum ROBArmRoutinePlan {
     static let tolerance = 0.025
     static let segmentSeconds = 4.0 // nominal longest taught segment
     static let maximumAverageSpeed = 0.075
+    static let minimumLeasedTrajectorySeconds = 0.65
     /// Short segments retain the old longest-segment timing scale. The cubic
     /// bound is conservative command timing, not measured acceleration or jerk.
     static func duration(from: [Double], to: [Double]) -> Double? {
@@ -133,7 +134,7 @@ enum ROBLeftArmInteractionPlan {
         let padded = max(original, delta / ROBArmRoutinePlan.maximumAverageSpeed, 4 * pow(delta / 0.3, 1.0 / 3.0))
         let approach = ROBArmRoutinePlan.progress(from, physicalLeft: true) != nil &&
             ROBArmRoutinePlan.progress(to, physicalLeft: true) != nil
-        return max(0.5, padded / (approach ? 4 : 6))
+        return max(ROBArmRoutinePlan.minimumLeasedTrajectorySeconds + 0.05, padded / (approach ? 4 : 6))
     }
 
     static func progress(_ positions: [Double]) -> Double? {

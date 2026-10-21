@@ -34,7 +34,7 @@ These trials use direct operator supervision instead of semantic camera collisio
 or jaw estimates. Live camera freshness, stationary body/neck, per-device motor
 feedback, verified modes, existing route/timing bounds and motion leases remain
 required. At Rob's request, the empty-left trial uses 4× the original low approach pace
-and 6× the original front pace, with a 0.5-second segment minimum. Ghost paths
+and 6× the original front pace, with a 0.7-second segment minimum. Ghost paths
 join exactly collinear increments and retain all corners and reversals, without
 changing the geometric corridor. Measured settling, freshness and the 1500 ms
 watchdog remain in place. Exact durations are frozen in the ghost review.
@@ -91,7 +91,7 @@ lease/freshness faults; a main-thread SceneKit transaction stall was observed.
 V7 freezes ×4 preview on execution, avoids unchanged mesh transforms, caps the
 scene at 30 FPS and clouds at eight updates/second per camera. It also joins
 collinear increments while retaining every corner/reversal, and uses 4× low
-approach / 6× front timing (0.5 s minimum), scheduling 14.6 seconds from hanging
+approach / 6× front timing (0.7 s minimum), scheduling 14.7 seconds from hanging
 plus preparation and measured settling. Model tread sweeps pass the 25 mm
 margin; provisional full-model warnings remain in [the preview](calibration/evidence/2026-10-21-social-left/model-preview-v6.json),
 including reference housing overlaps. They are not physical clearance proof.
@@ -108,7 +108,13 @@ and is being positioned manually through the existing safe neck controls.
 The first v7 request ended with “Connect Vision Pro or iPhone and enable Action
 Approvals. No arm operation was started.” The physical arm remains inactive;
 a new authenticated controller connection and approval are needed for the
-14.6-second wave. Live completion and operator gesture acceptance remain pending.
+14.7-second wave. The next real approval reached the raised J2/J4 pose in 25.45 seconds including
+preparation and measured settling, then refused the 0.606-second J5 segment
+before submission because transport requires at least 0.65 seconds. The renderer
+remained responsive; max recorded feedback age was 78.3 ms. V8 shares the
+transport floor with the planner and uses a 0.7-second minimum, with a production
+gateway regression for the shortest raised J5 segment. Live completion and
+operator gesture acceptance remain pending.
 
 ### 2026-10-21 installation and trial request
 

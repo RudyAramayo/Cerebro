@@ -1,0 +1,29 @@
+{
+  "recording": "left_ghost-41B9CA12-F60B-43D6-90FC-94E902173A64.csv",
+  "sha256": "f38054fc5da6204129b431fbe0cb577989674ef2cc3f885b75da2bf83d89a6e5",
+  "archivedRecording": "ghost-wave-v7-transport-stop.csv.gz",
+  "archiveSHA256": "93a0534cb3a143ffc81d15c9a7e6c8416ff83ac26003689141b7746c3aa97920",
+  "proposalSHA256": "b9ca9b41d63f210ad82e96e2edaed202128ae146423b574d7c21b66e75308af5",
+  "outcome": "Gateway refused left-arm command during gesture step 10, before submission; held at raised J2/J4 pose before J5 extension",
+  "cause": "Planner allowed 0.5 s minimum, but generic leased transport required >=0.65 s; rejected planned J5 segment was 0.6057068643 s",
+  "correction": "Shared transport minimum and 0.7 s interaction floor, with production gateway regression exercising shortest raised J5 step",
+  "elapsedSeconds": 25.448289916668728,
+  "lastPhase": "gesture step 9",
+  "samples": 497,
+  "finalPositionsRadians": [
+    -1.050197335848463,
+    1.294952492671105,
+    -0.605138376589909,
+    -0.5953208995474408,
+    -0.5965480841777494,
+    -0.6078654535461501,
+    0.0
+  ],
+  "peakCurrentJumpRaw": 2.02734375,
+  "maximumFeedbackAgeMilliseconds": 78.20213466948958,
+  "maximumSampleGapSeconds": 0.21087654166694847,
+  "currentJumpLimitRaw": 0,
+  "displayPerformance": "No rendering-related freshness or lease failure during this attempt; native scene remained responsive",
+  "fullWaveCompleted": false,
+  "manualReturnObservation": "Rob used the physical-left zero-position button and confirmed it returned without touching the treads. This is an operator-controlled direct return, not proof of the compiled reverse-route executor."
+}

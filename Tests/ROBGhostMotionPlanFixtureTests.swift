@@ -46,14 +46,13 @@ import simd
             baseline: Array(repeating: 0, count: 7), generation: 42)
         try ROBLeftGestureCompiler.validate(proposal, model: model)
         precondition(proposal.steps.last!.positions == wave)
-        precondition(proposal.steps.allSatisfy { (0.5...5).contains($0.seconds) })
+        precondition(proposal.steps.allSatisfy { (0.7...5).contains($0.seconds) })
         precondition(proposal.seconds < 20 && proposal.steps.count == 15)
         let approachFrom = ROBLeftArmInteractionPlan.target(index: 5)!, approachTo = ROBLeftArmInteractionPlan.target(index: 6)!
         precondition(abs(ROBLeftArmInteractionPlan.duration(from: approachFrom, to: approachTo)! * 4 -
             ROBArmRoutinePlan.duration(from: approachFrom, to: approachTo)!) < 1e-8)
         let crest = ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.waveIndex)!
-        precondition(abs(ROBLeftArmInteractionPlan.duration(from: wave, to: crest)! * 6 -
-            ROBArmRoutinePlan.duration(from: wave, to: crest)!) < 1e-8)
+        precondition((0.7...0.75).contains(ROBLeftArmInteractionPlan.duration(from: wave, to: crest)!))
         let route = Array(ROBLeftArmInteractionPlan.waypoints[1...ROBLeftArmInteractionPlan.waveRestIndex])
         let compact = ROBLeftGestureCompiler.compactRoute(baseline: Array(repeating: 0, count: 7), targets: route)
         precondition(compact == [1,4,6,9,12,15,18,24,28,34,36].map { ROBLeftArmInteractionPlan.waypoints[$0] })
