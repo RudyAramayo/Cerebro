@@ -124,17 +124,13 @@ final class ROBGhostRobotModel {
         for index in 0..<7 { result["left_joint\(index + 1)"] = vendorLeft[index] - Self.uprightPrior[index] }
         return result
     }
-    /// Display-only Maestro-to-URDF prior. The accepted level command is the
-    /// optical horizon, rather than the captured scan's tilted head pose.
+    /// Display-only Maestro-to-URDF prior. Upright/level accepted commands
+    /// map to zero neck angles, not the lean-back scan's captured joint pose.
     /// All three joints feed the same FK used for the mesh and depth camera.
     func headPositions(pan: Double, lowerPitch: Double, upperPitch: Double) -> [String: Double]? {
-        guard [pan, lowerPitch, upperPitch].allSatisfy(\.isFinite),
-              let camera = frames(reference)["oak_optical_frame"],
-              let lower = reference["lower_neck"], let upper = reference["upper_neck"] else { return nil }
-        let forward = camera.columns.2
-        let referencePitch = atan2(forward.z, hypot(forward.x, forward.y))
-        let values = ["lower_neck": lower - lowerPitch, "neck_pan": pan,
-                      "upper_neck": upper + referencePitch - upperPitch]
+        guard [pan, lowerPitch, upperPitch].allSatisfy(\.isFinite) else { return nil }
+        let values = ["lower_neck": -lowerPitch, "neck_pan": pan,
+                      "upper_neck": -upperPitch]
         guard values.allSatisfy({ name, value in
             joints.contains { $0.name == name && ($0.lower...$0.upper).contains(value) }
         }) else { return nil }
@@ -236,6 +232,16 @@ struct ROBLeftGestureProposal: Codable, Equatable {
     var seconds: Double { steps.reduce(0) { $0 + $1.seconds } }
     func encoded() throws -> Data { let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]; return try encoder.encode(self) }
     var fingerprint: String { (try? encoded()).map(ROBGhostRobotModel.hash) ?? "invalid" }
+    /// Historical recordings need identity/shape checks, not recompilation
+    /// against today's gesture angles. This never authorizes execution.
+    func validForReplay(model: ROBGhostRobotModel) -> Bool {
+        modelID == model.modelID && referenceID == model.referenceID && geometryID == model.geometryID &&
+            mappingID == ROBGhostRobotModel.mappingID && baseline.count == 7 && baseline.allSatisfy(\.isFinite) &&
+            !steps.isEmpty && steps.count <= 80 && steps.allSatisfy {
+                $0.positions.count == 7 && $0.positions.allSatisfy { $0.isFinite && abs($0) <= 3.1 } &&
+                $0.seconds.isFinite && (ROBArmRoutinePlan.minimumLeasedTrajectorySeconds...5).contains($0.seconds)
+            }
+    }
 }
 
 enum ROBLeftGestureCompiler {

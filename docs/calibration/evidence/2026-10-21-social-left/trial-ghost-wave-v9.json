@@ -1,0 +1,25 @@
+{
+  "recording": "left_ghost-B5E4F6A2-CCD2-4F04-87F9-BE21F3404208.csv",
+  "sha256": "645e4809c9842780a01410e4979f6635815dcbf26b530338f8490c586a54740c",
+  "archivedRecording": "ghost-wave-v9.csv.gz",
+  "archiveSHA256": "0581bd8d3ed19149bd95577777cfadc8badb257c3f1c4539705660b464e326fc",
+  "outcome": "Completed full wave with controller window open and embedded preview frozen; actual application reported completed and holding final pose.",
+  "lastPhase": "gesture step 14",
+  "elapsedSeconds": 33.11109195833342,
+  "samples": 651,
+  "finalPositionsRadians": [
+    -1.045697658870665,
+    1.299588523496715,
+    -0.6036384842639764,
+    -0.5985933918949302,
+    -0.9993373506145657,
+    -0.6110015920458274,
+    0.0
+  ],
+  "peakCurrentJumpRaw": 1.8671875,
+  "maximumFeedbackAgeMilliseconds": 43.59862566714987,
+  "currentJumpLimitRaw": 0,
+  "operatorFeedback": "J5 needs more rotation. Lower neck appears unresponsive in model and head angle appears high versus physical slight downward view.",
+  "proposalSHA256": "ef795bbc79da05538ec6417514fc5c526bab03cd5e70f597dfaf18b68074136c",
+  "steps": 15
+}

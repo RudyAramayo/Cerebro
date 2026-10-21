@@ -10,7 +10,7 @@ whole operation; no per-waypoint or extra spoken confirmation is needed.
 - **Wave left** uses the existing hanging/front route through waypoint 6, then
   stages J3/J5 through −0.30 to −0.60 rad, one joint at a time in 0.10-rad steps.
   J6 stages inward to −0.60; the accepted handoff raises J2 to +1.00.
-  The wave raises J2 to +1.30 with J4 −0.60, stages J5 to −1.00,
+  The wave raises J2 to +1.30 with J4 −0.60, stages J5 to −1.40,
   then waves J1 −0.90/−1.05 with J6 −0.90/−0.60 twice.
   It leaves the empty arm raised without changing the jaws. These added
   angles require supervised commissioning; they are not a certified route.
@@ -887,3 +887,36 @@ pixels or waive full-path visibility. See [camera measurements](depth-camera.md#
 This revision was validated with simulated arm hardware and real camera-only
 capture. No automatic arm trajectory, new grip or human demonstration replay was
 performed on the robot during this update. Startup preference remains off.
+
+
+### Further J5 rotation and upright neck reference
+
+V9 completed the full wave with the controller window open and embedded preview
+frozen: 33.11 seconds, 651 complete seven-joint samples, maximum feedback age
+43.6 ms. [Its recording and proposal](calibration/evidence/2026-10-21-social-left/trial-ghost-wave-v9.json)
+retain the actual successful path. Rob requested more J5 rotation again. V10
+extends raised J5 to −1.40, about 23° beyond v9, leaving the accepted handoff and
+J6 swing unchanged. The 15-segment ghost path schedules 15.8 seconds plus
+preparation and measured settling. [Model tread sweeps](calibration/evidence/2026-10-21-social-left/model-preview-v10.json)
+pass the 25 mm margin; provisional full-model warnings remain recorded.
+
+The first v9 return lost all left-joint/gripper CAN feedback near waypoint 8.
+The gateway stayed connected and reported its priority hold unconfirmed;
+[this interrupted return](calibration/evidence/2026-10-21-social-left/trial-v9-return-can-feedback-stop.json)
+is distinct from the successful wave. Rob then confirmed the arm hanging and
+inactive. Fresh readings returned at zero before v10 was loaded; no controller
+stack restart was issued.
+
+The neck display previously retained the lean-back scan's lower-neck rotation
+at the hardware's upright setting. Upright now maps to zero neck angles, with
+independent accepted lower/upper targets and one shared model/cloud transform.
+This changes display mapping, not physical limits, URDF geometry or calibration.
+
+The live editor replayed v9's matching CSV/manifest and displayed all seven raw
+currents while scrubbing. Replay now accepts the faster valid recorded segments.
+The live XYZ editor also solved a +2 cm ghost nudge, added it as a pose and saved
+**Centered hello +2cm**, which reviewed as an 11-step path. This saved gesture
+has not been executed on hardware. The authenticated v10 wave began but stopped during approach at step 6, before
+reaching raised J5, after 17.76 seconds and 349 samples. [Its interruption record](calibration/evidence/2026-10-21-social-left/trial-ghost-wave-v10-can-feedback-stop.json)
+includes the missing CAN feedback and unconfirmed gateway hold. Raised angle
+acceptance remains pending; no automatic retry or controller reset was issued.

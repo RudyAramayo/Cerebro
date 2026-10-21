@@ -1,0 +1,23 @@
+{
+  "recording": "left_relax-93963792-DF99-4565-886E-BB4A74866C0C.csv",
+  "sha256": "d5924aeab8c433a6c6517b7fb96a0d62fe6561378110a6364819d93b69321c02",
+  "archivedRecording": "v9-return-can-feedback-stop.csv.gz",
+  "archiveSHA256": "757eb99ab46e01d8e280bea29a409357a86be067436b05377e5c21af3098a7f2",
+  "outcome": "Return interrupted near waypoint 8; all seven left arm joints and gripper subsequently marked CAN feedback missing/stale in diagnostics. Gateway remained authenticated. Priority hold was unconfirmed due missing fresh telemetry. No restart or further motion performed.",
+  "lastPhase": "waypoint 8",
+  "elapsedSeconds": 39.604767708333384,
+  "samples": 778,
+  "finalPositionsRadians": [
+    -1.049924628152839,
+    0.6014568226989834,
+    -0.2988876344040289,
+    0.000272707695624114,
+    -0.001499892325932627,
+    -0.002181661564992912,
+    0.0
+  ],
+  "peakCurrentJumpRaw": 1.81640625,
+  "maximumFeedbackAgeMilliseconds": 226.6947703309889,
+  "currentJumpLimitRaw": 0,
+  "operatorFeedback": "Rob confirmed already hanging and inactive. Fresh all-zero left joint readings returned before loading v10. No controller stack restart issued."
+}

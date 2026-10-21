@@ -1,0 +1,26 @@
+{
+  "recording": "left_ghost-5B609185-F58A-440A-958E-CA39B5BB3D2E.csv",
+  "sha256": "01ccbbf6a8c8784a028b80da8e66b1682d89315903bafa1b71013229e6117247",
+  "archivedRecording": "ghost-wave-v10-can-feedback-stop.csv.gz",
+  "archiveSHA256": "38c126d6e389ffedcc3778fae414c7a12b7fe94d2fc4dc7920bc12b9f34b538d",
+  "proposalSHA256": "8d9c732f8aabc6920b7d7f1c6dc66a1c982c8ac0a30945cef5ab618d4867dd25",
+  "outcome": "Authenticated approved wave interrupted during approach at step 6; raised J5 -1.40 was not reached. Gateway priority hold unconfirmed due missing fresh telemetry. No repeat motion or stack reset performed.",
+  "steps": 15,
+  "lastPhase": "gesture step 6",
+  "elapsedSeconds": 17.76281154166645,
+  "samples": 349,
+  "finalPositionsRadians": [
+    -1.049788274305027,
+    0.6013204688511713,
+    -0.5976389149602458,
+    0.0,
+    -0.5315072987713981,
+    0.005317800064670222,
+    0.0
+  ],
+  "peakCurrentJumpRaw": 1.76953125,
+  "maximumFeedbackAgeMilliseconds": 207.34080066913288,
+  "currentJumpLimitRaw": 0,
+  "diagnostics": "Fresh gateway/controller publications continued; joint CAN feedback initially missing, later J6/J7/gripper stale. Gateway log 23:47:16.690 priority_hold unconfirmed: new, fresh telemetry unavailable. A later passive three-second can11 capture contained only IDs 011..017 (569/570 frames each), no additional IDs. Root cause unconfirmed.",
+  "operatorFeedback": "Requested physical support/hanging confirmation before controller-approved stack recovery; pending."
+}

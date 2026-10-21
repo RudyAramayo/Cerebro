@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-21T23:47:34.241450+00:00",
+  "sourceSHA256": {
+    "Cerebro/ROBArmRoutinePlan.swift": "e4120eecaceec67d8db0adfd6be6b828cca605301ded9c10da426f0d527e5122",
+    "Cerebro/ROBGhostMotionPlan.swift": "491f2f5d7d36417e34cb6a85c347a10b1652f49f9cd1ae8f8a1d1a25036d40cc",
+    "Cerebro/ROBGhostGestureEditor.swift": "96645f9569d28bd8c8b88624aeabeda4ca02ebc463cee9364d819a6677bc6aba",
+    "Cerebro/ROBSCNViewController.m": "f8aab4253010c59797d99358f61dc510bc0c11e89fb750cd86232db685d79440",
+    "Cerebro/ROBLeftArmTrial.swift": "3780860708afb5ad8f16e8a703b355777c5ace4a8a5b343a0f59a469aa9f3a29"
+  },
+  "installedDebugLibrarySHA256": "c3234e6c20d9eaa67db36b27c54960ba4ad23af8a5a29283f87c8a07580c9bed",
+  "checks": {
+    "ghostModelAndFrozenRouteTiming": "passed",
+    "uprightNeckZeroAndIndependentLowerFK": "passed",
+    "modelTreadSweeps": "passed (25 mm margin; provisional full-model warnings retained)",
+    "renderSnapshotFreezeThawAndSharedHeadCameraOrigin": "passed",
+    "leftExecutorCurrentFaultStopRecovery": "passed",
+    "productionGatewayShortestSegmentFloor": "passed",
+    "depthAffineProjection": "passed",
+    "signedMacOSDebugBuild": "passed",
+    "liveCurrentReplay": "passed with v9 CSV and matching manifest; raw seven-joint currents displayed",
+    "liveXYZAuthoringSaveReview": "passed: Centered hello +2cm; 11 steps; no physical execution"
+  },
+  "wave": "J5 -1.40; J2 +1.30, J4 -0.60, J6 -0.90/-0.60 unchanged; handoff unchanged; 15 compacted segments, 15.8 s scheduled",
+  "preload": "Rob confirmed physically hanging/inactive after interrupted return; fresh zero left readings matched before relaunch; no stack recovery issued",
+  "liveTrial": "Interrupted before raised J5 during approach at step 6 after 17.76 s / 349 samples: invalid or stale current feedback. Gateway hold unconfirmed, CAN feedback missing. Live angle acceptance pending recovery; no automatic restart.",
+  "currentJumpLimitRaw": 0
+}

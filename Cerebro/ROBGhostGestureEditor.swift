@@ -515,11 +515,7 @@ import simd
             let manifestData = try? Data(contentsOf: manifest)
             let frozen = manifestData.flatMap { $0.count <= 2_000_000 ? try? JSONDecoder().decode(ROBLeftGestureProposal.self, from: $0) : nil }
             if let frozen {
-                guard frozen.modelID == model.modelID, frozen.referenceID == model.referenceID,
-                      frozen.geometryID == model.geometryID, frozen.mappingID == ROBGhostRobotModel.mappingID, frozen.baseline.count == 7,
-                      frozen.baseline.allSatisfy(\.isFinite), frozen.steps.count <= 80,
-                      frozen.steps.allSatisfy({ $0.positions.count == 7 && $0.positions.allSatisfy { $0.isFinite && abs($0) <= 3.1 }
-                          && $0.seconds.isFinite && (0.8...5).contains($0.seconds) }) else {
+                guard frozen.validForReplay(model: model) else {
                     throw ROBGhostMotionError.blocked("Recording manifest is invalid or uses a different model/mapping.")
                 }
             }

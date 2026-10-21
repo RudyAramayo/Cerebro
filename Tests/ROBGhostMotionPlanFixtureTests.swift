@@ -16,6 +16,13 @@ import simd
             positions.merge(model.headPositions(pan: pan, lowerPitch: lower, upperPitch: upper)!) { _, command in command }
             return model.frames(positions)
         }
+        let upright = model.headPositions(pan: 0, lowerPitch: 0, upperPitch: 0)!
+        precondition(upright["lower_neck"] == 0 && upright["upper_neck"] == 0 && upright["neck_pan"] == 0)
+        // A captured lean-back pose must not survive an upright command.
+        var zeroNeck = model.reference
+        zeroNeck.merge(upright) { _, command in command }
+        let lowerOnly = model.headPositions(pan: 0, lowerPitch: 0.1, upperPitch: 0)!
+        precondition(lowerOnly["lower_neck"] == -0.1 && lowerOnly["upper_neck"] == 0)
         let level = head(0, 0, 0), down = head(0, 0, -.pi / 10), turned = head(.pi / 6, 0, -.pi / 10)
         let forward = level["oak_optical_frame"]!.columns.2
         let downForward = down["oak_optical_frame"]!.columns.2
@@ -24,6 +31,11 @@ import simd
         precondition(turned["oak_optical_frame"]!.columns.2.y > 0.4)
         precondition(simd_distance(level["oak_optical_frame"]!.columns.3, down["oak_optical_frame"]!.columns.3) > 0.02)
         precondition(level["belly_oak_optical_frame"]! == turned["belly_oak_optical_frame"]!)
+        precondition(level["lower_neck_link"]! == model.frames(zeroNeck)["lower_neck_link"]!)
+        let lowerBent = head(0, 0.1, 0)
+        let lowerAxis = lowerBent["lower_neck_link"]!.columns.2
+        precondition(lowerAxis.x < -0.09 && lowerAxis.z > 0.99)
+        precondition(simd_distance(lowerBent["neck_pan_link"]!.columns.3, level["neck_pan_link"]!.columns.3) > 0.01)
         precondition(head(0, -0.1, 0.1)["lower_neck_link"]! != level["lower_neck_link"]!)
         precondition(model.headPositions(pan: .nan, lowerPitch: 0, upperPitch: 0) == nil)
         print("Head FK: level/down/pan command priors articulate the camera and neck together; belly remains fixed")
@@ -39,7 +51,7 @@ import simd
         precondition(abs(j6CenterXYZ.y) < 0.05 && j6CenterXYZ.y < oldXYZ.y - 0.1)
         precondition(centerXYZ.z > j6CenterXYZ.z + 0.18)
         precondition(waveXYZ.z > shoulderZ + 0.15)
-        precondition(wave[4] == -1.0 && ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.waveIndex)![5] == -0.9)
+        precondition(wave[4] == -1.4 && ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.waveIndex)![5] == -0.9)
         print("URDF: negative J6 centers the hand; larger J2 and negative J4 put the wave above shoulder height")
 
         let proposal = try ROBLeftGestureCompiler.compile(kind: "wave", name: "High wave", model: model,
@@ -55,7 +67,7 @@ import simd
         precondition((0.7...0.75).contains(ROBLeftArmInteractionPlan.duration(from: wave, to: crest)!))
         let route = Array(ROBLeftArmInteractionPlan.waypoints[1...ROBLeftArmInteractionPlan.waveRestIndex])
         let compact = ROBLeftGestureCompiler.compactRoute(baseline: Array(repeating: 0, count: 7), targets: route)
-        precondition(compact == [1,4,6,9,12,15,18,24,28,34,38].map { ROBLeftArmInteractionPlan.waypoints[$0] })
+        precondition(compact == [1,4,6,9,12,15,18,24,28,34,42].map { ROBLeftArmInteractionPlan.waypoints[$0] })
         // Changing a joint at a corner must not turn into a diagonal shortcut.
         let corner = [[0.1,0,0,0,0,0,0],[0.1,0.1,0,0,0,0,0],[0.2,0.1,0,0,0,0,0]]
         precondition(ROBLeftGestureCompiler.compactRoute(baseline: Array(repeating: 0, count: 7), targets: corner) == corner)
@@ -63,6 +75,14 @@ import simd
         print(String(format: "Reviewed pace: collinear increments joined with corners/reversals intact; full wave %.1f seconds scheduled", proposal.seconds))
         let encoded = try proposal.encoded()
         precondition(proposal.fingerprint == ROBGhostRobotModel.hash(encoded))
+        let historical = try JSONDecoder().decode(ROBLeftGestureProposal.self, from: encoded)
+        precondition(historical.steps.contains { $0.seconds >= 0.7 && $0.seconds < 0.8 })
+        precondition(historical.validForReplay(model: model), "Fast recorded steps must replay without reauthorizing execution")
+        let invalidReplay = ROBLeftGestureProposal(id: proposal.id, name: proposal.name, kind: proposal.kind, modelID: proposal.modelID,
+            referenceID: proposal.referenceID, geometryID: proposal.geometryID, mappingID: proposal.mappingID,
+            sessionGeneration: proposal.sessionGeneration, baseline: proposal.baseline, poses: proposal.poses,
+            steps: [.init(positions: wave, seconds: 0.3)])
+        precondition(!invalidReplay.validForReplay(model: model))
         let changed = ROBLeftGestureProposal(id: proposal.id, name: proposal.name, kind: proposal.kind, modelID: proposal.modelID,
             referenceID: proposal.referenceID, geometryID: proposal.geometryID, mappingID: proposal.mappingID,
             sessionGeneration: proposal.sessionGeneration, baseline: proposal.baseline,

@@ -19,7 +19,11 @@ until the current test and controller workflow are finished.
    including preparation/settling (max feedback age 36.2 ms). Rob requested
    further J5 rotation; v9 stages it to −1.00 and automatically holds an embedded
    preview snapshot during motion so the controller window can stay open.
-   The revised J5 angle still requires a supervised trial.
+   V9 completed with that window open in 33.11 seconds (651 seven-joint samples,
+   maximum feedback age 43.6 ms). Rob requested more J5; v10 proposes −1.40,
+   retaining handoff and J6. Its model tread sweeps pass. The authenticated live attempt lost CAN feedback
+   during approach before reaching raised J5; hold was unconfirmed. Recovery and
+   live acceptance remain pending. Do not weaken freshness checks to proceed.
    Confirm physical clearance before calling the added angles taught. See [arm trials](arm-startup-and-grab.md).
 2. **Implemented, live verification in progress — ghost motion editor.** Reuse the
    existing robot model and URDF joint names. Show the original robot with a
@@ -32,7 +36,11 @@ until the current test and controller workflow are finished.
    other named axes remain preview/save-only until their mappings are commissioned.
    The [head-angle cloud correction](controller-depth-cloud.md) improved live
    alignment. Rob identified the frozen model neck; v6 now articulates model and
-   camera through shared URDF FK. Check the integrated display after loading.
+   camera through shared URDF FK. V10 removes scan neck offsets at upright and
+   makes lower display rotation independent of the optional leveling gain.
+   The live current replay was verified, and a +2 cm XYZ ghost pose was saved as
+   **Centered hello +2cm** and reviewed; it has not been physically executed.
+   Check neck orientation against the physical robot after loading.
    A supervised hanging-arm camera view was established at pan +30° / lower
    6011 / upper 5650: Rob confirmed the hanging arm is visible at J2, with distal
    joints still cropped. A small lower-neck refinement to 6200 was applied. This is

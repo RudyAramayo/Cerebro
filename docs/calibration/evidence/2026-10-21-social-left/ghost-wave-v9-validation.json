@@ -19,6 +19,6 @@
   "wave": "Raised J5 -1.00, J2 +1.30, J4 -0.60, J6 -0.90/-0.60; handoff unchanged; 15 compacted segments, 14.95 s scheduled plus measured settling/preparation",
   "preload": "Old build completed controlled reverse route in 50.44 s and verified hanging/inactive; recording left_relax-A5647E0D-C45B-4A95-9FAD-FA312DB155B6.csv",
   "display": "Embedded static snapshot during approval/execution; live 3D hidden and cloud/mesh updates suspended during physical motion; callback restores live scene",
-  "liveTrial": "Loaded; reviewed wave request being prepared",
+  "liveTrial": "Completed: 33.11 s, 651 seven-joint samples, max feedback age 43.6 ms, embedded snapshot and controller window open. Operator requested more J5 rotation.",
   "currentJumpLimitRaw": 0
 }

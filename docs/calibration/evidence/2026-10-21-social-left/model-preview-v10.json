@@ -1,0 +1,2187 @@
+{
+  "schemaVersion": 1,
+  "simulationOnly": true,
+  "hardwareOutputEnabled": false,
+  "modelID": "c4a5c1bee9a9a0a6cca6ecdba9433f98ab647eea3084fb462ff592a0a0ea1e03",
+  "referenceID": "ba63a659f10085da3fa7f7c5002f17b4af27596408bc447e0ac64cdb4198c2d7",
+  "planSourceSHA256": "e4120eecaceec67d8db0adfd6be6b828cca605301ded9c10da426f0d527e5122",
+  "vendorAtModelZeroPrior": [
+    0.0,
+    2.080432,
+    0.0,
+    -0.687254,
+    0.0,
+    0.027043,
+    0.0
+  ],
+  "driverDirectionAssumption": [
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+  ],
+  "assumptions": [
+    "Positive driver directions are not a measured calibration.",
+    "September 22 upright coordinates are a prior, not a session-bound measurement.",
+    "Other joints use the scan estimate, not live robot positions.",
+    "Tool offset and hulls are provisional; cables, payloads and surroundings are unverified."
+  ],
+  "waypoints": [
+    {
+      "waypoint": 6,
+      "vendorRadians": [
+        -1.05,
+        0.6,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.480432,
+        0.0,
+        0.687254,
+        0.0,
+        -0.027043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.4955024007574213,
+        0.3092471809795393,
+        0.6014647682546804
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": null,
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.17612847404056936,
+        "pair": [
+          "left_tool",
+          "left_track_link"
+        ]
+      },
+      "treadSweepFromPrevious": null
+    },
+    {
+      "waypoint": 7,
+      "vendorRadians": [
+        -1.05,
+        0.6,
+        -0.1,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.480432,
+        -0.1,
+        0.687254,
+        0.0,
+        -0.027043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.5108875060658371,
+        0.28430926694844605,
+        0.6121943930202975
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": false,
+        "distance": 0.00029113769465986025,
+        "pair": [
+          "left_two_Link",
+          "left_four_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.18950956369728889,
+        "pair": [
+          "left_tool",
+          "left_track_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 8,
+      "vendorRadians": [
+        -1.05,
+        0.6,
+        -0.2,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.480432,
+        -0.2,
+        0.687254,
+        0.0,
+        -0.027043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.5258747259409445,
+        0.26055138239389214,
+        0.6257838018040477
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": false,
+        "distance": -0.001864854707322244,
+        "pair": [
+          "left_two_Link",
+          "left_four_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.2068713451922487,
+        "pair": [
+          "left_tool",
+          "left_track_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 9,
+      "vendorRadians": [
+        -1.05,
+        0.6,
+        -0.3,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.480432,
+        -0.3,
+        0.687254,
+        0.0,
+        -0.027043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.5403143130358675,
+        0.23821090824503424,
+        0.6420972137254252
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": false,
+        "distance": 0.0009524882051763543,
+        "pair": [
+          "left_two_Link",
+          "left_four_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.2277362964925207,
+        "pair": [
+          "left_tool",
+          "left_track_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 10,
+      "vendorRadians": [
+        -1.05,
+        0.6,
+        -0.3,
+        0.0,
+        -0.1,
+        0.0,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.480432,
+        -0.3,
+        0.687254,
+        -0.1,
+        -0.027043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.5406565267721659,
+        0.23773557871018722,
+        0.6425284540484631
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": true,
+        "distance": 0.04194185554624954,
+        "pair": [
+          "left_four_Link",
+          "left_six_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.2278269526654496,
+        "pair": [
+          "left_tool",
+          "left_track_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 11,
+      "vendorRadians": [
+        -1.05,
+        0.6,
+        -0.3,
+        0.0,
+        -0.2,
+        0.0,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.480432,
+        -0.3,
+        0.687254,
+        -0.2,
+        -0.027043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.5410226980418987,
+        0.23731746409648483,
+        0.642997618620073
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": true,
+        "distance": 0.041511799653012146,
+        "pair": [
+          "left_four_Link",
+          "left_six_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.2289251366997725,
+        "pair": [
+          "left_tool",
+          "left_track_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 12,
+      "vendorRadians": [
+        -1.05,
+        0.6,
+        -0.3,
+        0.0,
+        -0.3,
+        0.0,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.480432,
+        -0.3,
+        0.687254,
+        -0.3,
+        -0.027043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.5414091681827791,
+        0.23696074206693685,
+        0.6435000197029401
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": true,
+        "distance": 0.04111749356755615,
+        "pair": [
+          "left_four_Link",
+          "left_six_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.2310200490878378,
+        "pair": [
+          "left_tool",
+          "left_track_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 13,
+      "vendorRadians": [
+        -1.05,
+        0.6,
+        -0.4,
+        0.0,
+        -0.3,
+        0.0,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.480432,
+        -0.4,
+        0.687254,
+        -0.3,
+        -0.027043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.5550933005554691,
+        0.2163978948765101,
+        0.6625294323793489
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": false,
+        "distance": 0.0033986812296398668,
+        "pair": [
+          "left_two_Link",
+          "left_four_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.25740548122025164,
+        "pair": [
+          "left_tool",
+          "left_track_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 14,
+      "vendorRadians": [
+        -1.05,
+        0.6,
+        -0.5,
+        0.0,
+        -0.3,
+        0.0,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.480432,
+        -0.5,
+        0.687254,
+        -0.3,
+        -0.027043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.567939638424626,
+        0.19769464856762445,
+        0.6839155234443335
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": false,
+        "distance": 0.005742600587362714,
+        "pair": [
+          "left_two_Link",
+          "left_four_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.2865022472524888,
+        "pair": [
+          "left_tool",
+          "left_track_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 15,
+      "vendorRadians": [
+        -1.05,
+        0.6,
+        -0.6,
+        0.0,
+        -0.3,
+        0.0,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.480432,
+        -0.6,
+        0.687254,
+        -0.3,
+        -0.027043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.5798198254286963,
+        0.18103787979492705,
+        0.707444610145275
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": false,
+        "distance": 0.00776494801764926,
+        "pair": [
+          "left_two_Link",
+          "left_four_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.3180622875679121,
+        "pair": [
+          "left_tool",
+          "left_track_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 16,
+      "vendorRadians": [
+        -1.05,
+        0.6,
+        -0.6,
+        0.0,
+        -0.4,
+        0.0,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.480432,
+        -0.6,
+        0.687254,
+        -0.4,
+        -0.027043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.580140286922402,
+        0.18090820283001924,
+        0.7080845358753775
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": true,
+        "distance": 0.04080766589277811,
+        "pair": [
+          "left_four_Link",
+          "left_six_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.32329256303577747,
+        "pair": [
+          "left_tool",
+          "left_track_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 17,
+      "vendorRadians": [
+        -1.05,
+        0.6,
+        -0.6,
+        0.0,
+        -0.5,
+        0.0,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.480432,
+        -0.6,
+        0.687254,
+        -0.5,
+        -0.027043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.580469183869418,
+        0.18085046929154602,
+        0.7087306862146965
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": true,
+        "distance": 0.040642417662938746,
+        "pair": [
+          "left_four_Link",
+          "left_six_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.32834408614386484,
+        "pair": [
+          "left_tool",
+          "left_track_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 18,
+      "vendorRadians": [
+        -1.05,
+        0.6,
+        -0.6,
+        0.0,
+        -0.6,
+        0.0,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.480432,
+        -0.6,
+        0.687254,
+        -0.6,
+        -0.027043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.5808032300401682,
+        0.18086525603393963,
+        0.7093766050426303
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": true,
+        "distance": 0.04060620889000259,
+        "pair": [
+          "left_four_Link",
+          "left_six_Link"
+        ],
+        "required": 0.02852381280516498
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.3293636498190119,
+        "pair": [
+          "left_tool",
+          "left_track_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 19,
+      "vendorRadians": [
+        -1.05,
+        0.6,
+        -0.6,
+        0.0,
+        -0.6,
+        -0.1,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.480432,
+        -0.6,
+        0.687254,
+        -0.6,
+        -0.12704300000000002,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.5782976159291507,
+        0.15430150436524684,
+        0.7127874465184298
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": true,
+        "distance": 0.040609387316392166,
+        "pair": [
+          "left_four_Link",
+          "left_six_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.3290392980982639,
+        "pair": [
+          "left_tool",
+          "left_track_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 20,
+      "vendorRadians": [
+        -1.05,
+        0.6,
+        -0.6,
+        0.0,
+        -0.6,
+        -0.2,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.480432,
+        -0.6,
+        0.687254,
+        -0.6,
+        -0.22704300000000002,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.5734347886636719,
+        0.1282487420021019,
+        0.7173865038781458
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": true,
+        "distance": 0.042137862781722844,
+        "pair": [
+          "left_four_Link",
+          "left_six_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.32962676537031155,
+        "pair": [
+          "left_tool",
+          "left_track_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 21,
+      "vendorRadians": [
+        -1.05,
+        0.6,
+        -0.6,
+        0.0,
+        -0.6,
+        -0.3,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.480432,
+        -0.6,
+        0.687254,
+        -0.6,
+        -0.327043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.5662633360063312,
+        0.10296727953413916,
+        0.7231278248608861
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": true,
+        "distance": 0.04388632775643054,
+        "pair": [
+          "left_four_Link",
+          "left_six_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.33129078058091566,
+        "pair": [
+          "left_tool",
+          "left_track_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 22,
+      "vendorRadians": [
+        -1.05,
+        0.6,
+        -0.6,
+        0.0,
+        -0.6,
+        -0.4,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.480432,
+        -0.6,
+        0.687254,
+        -0.6,
+        -0.427043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.5568549127415139,
+        0.07870972097739799,
+        0.7299540440852197
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": true,
+        "distance": 0.04534070111115931,
+        "pair": [
+          "left_four_Link",
+          "left_six_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.33144103484528853,
+        "pair": [
+          "left_four_Link",
+          "left_flipper_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 23,
+      "vendorRadians": [
+        -1.05,
+        0.6,
+        -0.6,
+        0.0,
+        -0.6,
+        -0.5,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.480432,
+        -0.6,
+        0.687254,
+        -0.6,
+        -0.527043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.5453035247244706,
+        0.05571843983849462,
+        0.737796956225105
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": true,
+        "distance": 0.04665273808639683,
+        "pair": [
+          "left_four_Link",
+          "left_six_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.33144103484528853,
+        "pair": [
+          "left_four_Link",
+          "left_flipper_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 24,
+      "vendorRadians": [
+        -1.05,
+        0.6,
+        -0.6,
+        0.0,
+        -0.6,
+        -0.6,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.480432,
+        -0.6,
+        0.687254,
+        -0.6,
+        -0.627043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.5317245896058865,
+        0.0342231573986619,
+        0.7465781974949625
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": true,
+        "distance": 0.04812849240912375,
+        "pair": [
+          "left_four_Link",
+          "left_six_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.33144103484528853,
+        "pair": [
+          "left_four_Link",
+          "left_flipper_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 25,
+      "vendorRadians": [
+        -1.05,
+        0.7,
+        -0.6,
+        0.0,
+        -0.6,
+        -0.6,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.380432,
+        -0.6,
+        0.687254,
+        -0.6,
+        -0.627043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.5483178899423371,
+        0.060165736988883306,
+        0.7900253656877638
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": false,
+        "distance": 0.009445516893475378,
+        "pair": [
+          "left_two_Link",
+          "left_four_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.35481395318705256,
+        "pair": [
+          "left_one_Link",
+          "left_flipper_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 26,
+      "vendorRadians": [
+        -1.05,
+        0.8,
+        -0.6,
+        0.0,
+        -0.6,
+        -0.6,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.280432,
+        -0.6,
+        0.687254,
+        -0.6,
+        -0.627043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.5605243924448807,
+        0.08431197133898856,
+        0.8358944417542093
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": false,
+        "distance": 0.009445516893475362,
+        "pair": [
+          "left_two_Link",
+          "left_four_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.35481395318705256,
+        "pair": [
+          "left_one_Link",
+          "left_flipper_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 27,
+      "vendorRadians": [
+        -1.05,
+        0.9,
+        -0.6,
+        0.0,
+        -0.6,
+        -0.6,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.1804320000000001,
+        -0.6,
+        0.687254,
+        -0.6,
+        -0.627043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.5682221337754454,
+        0.10642059925703493,
+        0.8837271170485446
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": false,
+        "distance": 0.009445516893475425,
+        "pair": [
+          "left_two_Link",
+          "left_four_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.35481395318705256,
+        "pair": [
+          "left_one_Link",
+          "left_flipper_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 28,
+      "vendorRadians": [
+        -1.05,
+        1.0,
+        -0.6,
+        0.0,
+        -0.6,
+        -0.6,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.080432,
+        -0.6,
+        0.687254,
+        -0.6,
+        -0.627043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.571334200647191,
+        0.12627071864100625,
+        0.9330454632906082
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": false,
+        "distance": 0.00944551689347542,
+        "pair": [
+          "left_two_Link",
+          "left_four_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.35481395318705256,
+        "pair": [
+          "left_one_Link",
+          "left_flipper_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 29,
+      "vendorRadians": [
+        -1.05,
+        1.05,
+        -0.6,
+        -0.1,
+        -0.6,
+        -0.6,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -1.030432,
+        -0.6,
+        0.587254,
+        -0.6,
+        -0.627043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.580555554219809,
+        0.1697363594729081,
+        0.9856794155924601
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": false,
+        "distance": 0.009445516893475352,
+        "pair": [
+          "left_two_Link",
+          "left_four_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.35481395318705256,
+        "pair": [
+          "left_one_Link",
+          "left_flipper_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 30,
+      "vendorRadians": [
+        -1.05,
+        1.1,
+        -0.6,
+        -0.2,
+        -0.6,
+        -0.6,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -0.980432,
+        -0.6,
+        0.487254,
+        -0.6,
+        -0.627043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.5808799274861829,
+        0.2114226918008124,
+        1.0417305034730675
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": false,
+        "distance": 0.015350565992401827,
+        "pair": [
+          "left_two_Link",
+          "left_four_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.35481395318705256,
+        "pair": [
+          "left_one_Link",
+          "left_flipper_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 31,
+      "vendorRadians": [
+        -1.05,
+        1.15,
+        -0.6,
+        -0.3,
+        -0.6,
+        -0.6,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -0.9304320000000001,
+        -0.6,
+        0.38725400000000004,
+        -0.6,
+        -0.627043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.5720908980278262,
+        0.25056310409585575,
+        1.1000343411230962
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": false,
+        "distance": 0.021489290729522544,
+        "pair": [
+          "left_two_Link",
+          "left_four_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.35481395318705256,
+        "pair": [
+          "left_one_Link",
+          "left_flipper_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 32,
+      "vendorRadians": [
+        -1.05,
+        1.2,
+        -0.6,
+        -0.4,
+        -0.6,
+        -0.6,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -0.8804320000000001,
+        -0.6,
+        0.287254,
+        -0.6,
+        -0.627043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.5541587747314198,
+        0.28645927304192054,
+        1.159361305542669
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": false,
+        "distance": 0.024400601511760156,
+        "pair": [
+          "upper_neck_link",
+          "left_two_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.35481395318705256,
+        "pair": [
+          "left_one_Link",
+          "left_flipper_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 33,
+      "vendorRadians": [
+        -1.05,
+        1.25,
+        -0.6,
+        -0.5,
+        -0.6,
+        -0.6,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -0.8304320000000001,
+        -0.6,
+        0.18725400000000003,
+        -0.6,
+        -0.627043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.5272427141846879,
+        0.31849494982447324,
+        1.2184444777860743
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": false,
+        "distance": 0.024400601511760156,
+        "pair": [
+          "upper_neck_link",
+          "left_two_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.35481395318705256,
+        "pair": [
+          "left_one_Link",
+          "left_flipper_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 34,
+      "vendorRadians": [
+        -1.05,
+        1.3,
+        -0.6,
+        -0.6,
+        -0.6,
+        -0.6,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -0.780432,
+        -0.6,
+        0.08725400000000005,
+        -0.6,
+        -0.627043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.4916887115880665,
+        0.346147758254275,
+        1.2760085019554677
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": false,
+        "distance": 0.023724190061715923,
+        "pair": [
+          "upper_neck_link",
+          "left_two_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.35481395318705256,
+        "pair": [
+          "left_one_Link",
+          "left_flipper_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 35,
+      "vendorRadians": [
+        -1.05,
+        1.3,
+        -0.6,
+        -0.6,
+        -0.7,
+        -0.6,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -0.780432,
+        -0.6,
+        0.08725400000000005,
+        -0.7,
+        -0.627043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.48546936588490003,
+        0.34118119355415766,
+        1.289637669241364
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": true,
+        "distance": 0.04973923184027695,
+        "pair": [
+          "left_four_Link",
+          "left_six_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.35481395318705256,
+        "pair": [
+          "left_one_Link",
+          "left_flipper_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 36,
+      "vendorRadians": [
+        -1.05,
+        1.3,
+        -0.6,
+        -0.6,
+        -0.8,
+        -0.6,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -0.780432,
+        -0.6,
+        0.08725400000000005,
+        -0.8,
+        -0.627043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.47830130747541594,
+        0.3374734335200376,
+        1.3032013221774472
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": true,
+        "distance": 0.04988017001836552,
+        "pair": [
+          "left_four_Link",
+          "left_six_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.35481395318705256,
+        "pair": [
+          "left_one_Link",
+          "left_flipper_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 37,
+      "vendorRadians": [
+        -1.05,
+        1.3,
+        -0.6,
+        -0.6,
+        -0.9,
+        -0.6,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -0.780432,
+        -0.6,
+        0.08725400000000005,
+        -0.9,
+        -0.627043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.47025615722979686,
+        0.3350615248645535,
+        1.3165639372271263
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": true,
+        "distance": 0.05002256902967041,
+        "pair": [
+          "left_four_Link",
+          "left_six_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.35481395318705256,
+        "pair": [
+          "left_one_Link",
+          "left_flipper_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 38,
+      "vendorRadians": [
+        -1.05,
+        1.3,
+        -0.6,
+        -0.6,
+        -1.0,
+        -0.6,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -0.780432,
+        -0.6,
+        0.08725400000000005,
+        -1.0,
+        -0.627043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.46141429962992375,
+        0.33396956658171967,
+        1.329591999557919
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": true,
+        "distance": 0.05018976452207354,
+        "pair": [
+          "left_four_Link",
+          "left_six_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.35481395318705256,
+        "pair": [
+          "left_one_Link",
+          "left_flipper_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 39,
+      "vendorRadians": [
+        -1.05,
+        1.3,
+        -0.6,
+        -0.6,
+        -1.1,
+        -0.6,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -0.780432,
+        -0.6,
+        0.08725400000000005,
+        -1.1,
+        -0.627043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.4518640795942052,
+        0.3342084691577449,
+        1.3421553370775208
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": true,
+        "distance": 0.050379126943257975,
+        "pair": [
+          "left_four_Link",
+          "left_six_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.35481395318705256,
+        "pair": [
+          "left_one_Link",
+          "left_flipper_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 40,
+      "vendorRadians": [
+        -1.05,
+        1.3,
+        -0.6,
+        -0.6,
+        -1.2,
+        -0.6,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -0.780432,
+        -0.6,
+        0.08725400000000005,
+        -1.2,
+        -0.627043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.441700919764355,
+        0.3357758455570602,
+        1.354128421070323
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": true,
+        "distance": 0.05051475198135947,
+        "pair": [
+          "left_four_Link",
+          "left_six_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.35481395318705256,
+        "pair": [
+          "left_one_Link",
+          "left_flipper_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 41,
+      "vendorRadians": [
+        -1.05,
+        1.3,
+        -0.6,
+        -0.6,
+        -1.3,
+        -0.6,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -0.780432,
+        -0.6,
+        0.08725400000000005,
+        -1.3,
+        -0.627043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.4310263670738989,
+        0.3386560350727894,
+        1.3653916204388443
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": true,
+        "distance": 0.05051690269505602,
+        "pair": [
+          "left_four_Link",
+          "left_six_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.35481395318705256,
+        "pair": [
+          "left_one_Link",
+          "left_flipper_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 42,
+      "vendorRadians": [
+        -1.05,
+        1.3,
+        -0.6,
+        -0.6,
+        -1.4,
+        -0.6,
+        0.0
+      ],
+      "modelRadians": [
+        -1.05,
+        -0.780432,
+        -0.6,
+        0.08725400000000005,
+        -1.4,
+        -0.627043,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.41994707812478216,
+        0.3428202598033554,
+        1.3758323970181139
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": true,
+        "distance": 0.050390864247729594,
+        "pair": [
+          "left_four_Link",
+          "left_six_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.35481395318705256,
+        "pair": [
+          "left_one_Link",
+          "left_flipper_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    },
+    {
+      "waypoint": 43,
+      "vendorRadians": [
+        -0.9,
+        1.3,
+        -0.6,
+        -0.6,
+        -1.4,
+        -0.9,
+        0.0
+      ],
+      "modelRadians": [
+        -0.9,
+        -0.780432,
+        -0.6,
+        0.08725400000000005,
+        -1.4,
+        -0.9270430000000001,
+        0.0
+      ],
+      "toolXYZMeters": [
+        0.38814049653781363,
+        0.32714536068852,
+        1.3593391417279024
+      ],
+      "fullModelClearance": {
+        "clear": false,
+        "distance": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "required": 0.025
+      },
+      "sweepFromPrevious": {
+        "clear": false,
+        "distance": 0.01837414938835273,
+        "pair": [
+          "lower_neck_link",
+          "left_one_Link"
+        ],
+        "required": 0.025
+      },
+      "treadSeparationLowerBound": {
+        "distanceMeters": 0.3547673052438266,
+        "pair": [
+          "left_one_Link",
+          "left_flipper_link"
+        ]
+      },
+      "treadSweepFromPrevious": {
+        "clear": true,
+        "distance": null,
+        "pair": null,
+        "required": 0.025
+      }
+    }
+  ]
+}

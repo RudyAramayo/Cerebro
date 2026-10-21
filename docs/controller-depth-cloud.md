@@ -8,11 +8,14 @@ accepted neck command estimates. It does not assume that the head is level.
   same pose; explicitly edited ghost neck angles remain preview-only overrides.
 - The optical transform comes directly from that articulated URDF camera frame.
   The cloud uses the mesh's exact FK, optical mount, basis and presentation scale,
-  without a separate pivot rotation. The accepted level command is aligned to
-  the optical horizon rather than the scan's captured head tilt. Existing neck
-  coupling converts lower motion to pitch; at lower 6011 / upper 6306 / centered
-  pan the camera points approximately 18° down. These are display mapping priors,
-  not newly measured camera calibration.
+  without a separate pivot rotation. Accepted upright lower 6011 and level upper
+  6906 map to zero URDF neck angles. The captured lean-back scan's lower/upper
+  reference rotations are no longer retained at upright. Each accepted joint
+  target moves its own model joint; optional camera-leveling compensation does
+  not set the display mapping or suppress lower-neck movement. The existing
+  mounting-direction and 33.333-targets/degree priors are retained. At lower
+  6011 / upper 6306 / centered pan the optical axis points approximately 18°
+  down. These are display mapping priors, not newly measured camera calibration.
 - Points, original robot and blue ghost share the AppKit robot's presentation
   scale and base transform. The belly camera stays attached to its body mount
   and is independent of head movement.
@@ -41,7 +44,8 @@ Camera extrinsics, mounting/zero errors, timing uncertainty and held-out pose
 validation remain in the [deferred calibration task](arm-motion-work-queue.md).
 
 `bash Scripts/test-ghost-motion.sh` checks articulated level/down/pan directions,
-neck movement, fixed belly geometry and invalid commands.
+upright joint zeros, independent lower-neck rotation/pivot displacement, fixed
+belly geometry and invalid commands.
 `bash Scripts/test-depth-cloud-projection.sh` checks optical axes, scale,
 stationary surface round trips and invalid affine transforms. The render fixture
 also verifies that the cloud origin equals the rendered head's optical mount

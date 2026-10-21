@@ -615,8 +615,9 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     BOOL known = serial.isNeckCommandStateKnown &&
         ROBNeckSafetyPanTargetToDegrees(&config, (int32_t)serial.commandedNeckPanTarget, &pan);
     const double radiansPerTarget = M_PI / (180.0 * 33.3333333333);
-    double lower = -config.upperCounterRotationGain *
-        (serial.commandedLowerNeckTiltTarget - ROBNeckSafetyUprightLowerTarget) * radiansPerTarget;
+    // Joint display mapping is independent of the optional camera-leveling
+    // compensation gain. Keep the existing mounting-direction prior.
+    double lower = (serial.commandedLowerNeckTiltTarget - ROBNeckSafetyUprightLowerTarget) * radiansPerTarget;
     double upper = (serial.commandedUpperNeckTiltTarget - ROBNeckSafetyUprightUpperTarget) * radiansPerTarget;
     [self.ghostGestureEditor setHeadCommandPan:pan * M_PI / 180.0 lowerPitch:lower upperPitch:upper known:known];
 }
@@ -652,10 +653,9 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     double pan = 0;
     if (!belly && !ROBNeckSafetyPanTargetToDegrees(&config, (int32_t)serial.commandedNeckPanTarget, &pan)) return;
     // Accepted Maestro targets are command estimates, not shaft feedback. The
-    // existing calibrated leveling gain converts lower motion to pitch units.
+    // display direction prior is independent of optional leveling compensation.
     const double radiansPerTarget = M_PI / (180.0 * 33.3333333333);
-    double lower = belly ? 0 : -config.upperCounterRotationGain *
-        (serial.commandedLowerNeckTiltTarget - ROBNeckSafetyUprightLowerTarget) * radiansPerTarget;
+    double lower = belly ? 0 : (serial.commandedLowerNeckTiltTarget - ROBNeckSafetyUprightLowerTarget) * radiansPerTarget;
     double upper = belly ? 0 : (serial.commandedUpperNeckTiltTarget - ROBNeckSafetyUprightUpperTarget) * radiansPerTarget;
     ROBDepthCloudTransform camera = ROBDepthCloudMakeTransform(rows);
     if (!camera.valid) return;
