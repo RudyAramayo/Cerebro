@@ -208,6 +208,17 @@ No new movement was dispatched automatically: a new controller-approved return
 was requested from the measured point on the route. App replacement waits for
 measured hanging and inactive status.
 
+That approved retry reached measured hanging and inactive. After relaunch, the
+larger controller-approved wave completed in 75.211 s with 1,476 distinct
+position/current samples. Final J3/J5 were −0.599957/−0.607047 rad, inside the
+target tolerance; maximum recorded feedback age was 48.366 ms. The camera used
+centered pan, lower 6011 and upper 6606. No jaw command was part of the wave.
+[Second-trial metadata and current archive](calibration/evidence/2026-10-21-social-left/trial-v2.json)
+retain the full phase sequence, hashes and installed signed-library identity.
+Current cutoff remains 0 (record only). The runtime reports the wave complete
+and holding in front; operator assessment of the new hand height, head-camera
+visibility and physical clearance is pending.
+
 ## Existing paired operations
 
 Settings → Arms contains **Calibrate arms on startup** (off until selected),
