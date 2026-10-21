@@ -1,0 +1,24 @@
+{
+  "recording": "left_ghost-4C2AE041-D55A-41DD-AEA3-F8484412116B.csv",
+  "sha256": "8386b5f857f670d1d97d579f5dc57e521ae26b3d28c6e8eb75e8bca7f28de7e4",
+  "archivedRecording": "ghost-wave-v8-open-scene-stop.csv.gz",
+  "archiveSHA256": "d391a8a83fce19e2d71a320f235951558793ef61a600a46b5a4fb43664d6ad92",
+  "proposalSHA256": "ef100fb553ccdcf93ade5feac8d960f05486dec6dae892563317f34e07d3935a",
+  "outcome": "Held on stale/invalid current recording while 3D scene was open",
+  "steps": 15,
+  "lastPhase": "gesture step 11",
+  "elapsedSeconds": 26.68954816666519,
+  "samples": 526,
+  "finalPositionsRadians": [
+    -0.9932014274630232,
+    1.297134154236098,
+    -0.6005023457642991,
+    -0.6015931765467954,
+    -0.7997153174177143,
+    -0.6314546692176359,
+    0.0
+  ],
+  "peakCurrentJumpRaw": 2.1953125,
+  "maximumFeedbackAgeMilliseconds": 201.09959700046474,
+  "currentJumpLimitRaw": 0
+}

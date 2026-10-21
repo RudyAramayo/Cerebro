@@ -85,8 +85,8 @@ enum ROBLeftArmInteractionPlan {
     static let approachIndex = 6
     static let previousFrontIndex = 24
     static let frontIndex = 28
-    static let waveRestIndex = 36
-    static let waveIndex = 37
+    static let waveRestIndex = 38
+    static let waveIndex = 39
     static let waypoints: [[Double]] = ROBArmRoutinePlan.rightWaypoints.map { $0.map { -$0 } } + [
         [-1.05, 0.60, -0.10, 0, 0, 0, 0],
         [-1.05, 0.60, -0.20, 0, 0, 0, 0],
@@ -118,7 +118,9 @@ enum ROBLeftArmInteractionPlan {
         [-1.05, 1.30, -0.60, -0.60, -0.60, -0.60, 0],
         [-1.05, 1.30, -0.60, -0.60, -0.70, -0.60, 0],
         [-1.05, 1.30, -0.60, -0.60, -0.80, -0.60, 0],
-        [-0.90, 1.30, -0.60, -0.60, -0.80, -0.90, 0],
+        [-1.05, 1.30, -0.60, -0.60, -0.90, -0.60, 0],
+        [-1.05, 1.30, -0.60, -0.60, -1.00, -0.60, 0],
+        [-0.90, 1.30, -0.60, -0.60, -1.00, -0.90, 0],
     ]
 
     static func target(index: Int) -> [Double]? {

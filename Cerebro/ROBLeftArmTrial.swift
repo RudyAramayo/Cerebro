@@ -158,7 +158,7 @@ import AppKit
         }
         let action: String
         switch command {
-        case "left_wave": action = "Bring the empty LEFT arm to front; stage J3/J5 to -0.60 rad, then J6 to -0.60 rad to center the hand. Raise the handoff with J2 to +1.00, then continue to +1.30 with J4 to -0.60 in small coordinated steps. At raised height, stage J5 to -0.80 in two steps. Wave J1 -0.90/-1.05 twice above the shoulder, bending J6 -0.90/-0.60 with each wave, and leave raised. Jaws unchanged."
+        case "left_wave": action = "Bring the empty LEFT arm to front; stage J3/J5 to -0.60 rad, then J6 to -0.60 rad to center the hand. Raise the handoff with J2 to +1.00, then continue to +1.30 with J4 to -0.60 in small coordinated steps. At raised height, stage J5 to -1.00 in four steps. Wave J1 -0.90/-1.05 twice above the shoulder, bending J6 -0.90/-0.60 with each wave, and leave raised. Jaws unchanged."
         case "left_prepare": action = "Bring the empty LEFT arm to front; stage J3/J5 to -0.60 rad, then J6 to -0.60 rad to center the hand, then J2 to +1.00 to raise it. Reverse any raised wave section before reaching this handoff pose. Calibrate its EMPTY gripper only if needed, then open it. Keep fingers clear during calibration."
         case "left_grip": action = "Keep the LEFT arm stationary in front and close its already-calibrated gripper at intensity 10 around the presented OBJECT. Confirm the object is between the open jaws and all fingers are clear. Never grip a person's hand. No reopening, calibration or arm travel."
         case "left_release": action = "Keep the LEFT arm stationary in front and open its already-calibrated gripper to return the object. Confirm the receiver supports the object before approving. No calibration or arm travel."

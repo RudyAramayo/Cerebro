@@ -10,7 +10,7 @@ whole operation; no per-waypoint or extra spoken confirmation is needed.
 - **Wave left** uses the existing hanging/front route through waypoint 6, then
   stages J3/J5 through −0.30 to −0.60 rad, one joint at a time in 0.10-rad steps.
   J6 stages inward to −0.60; the accepted handoff raises J2 to +1.00.
-  The wave raises J2 to +1.30 with J4 −0.60, stages J5 to −0.80,
+  The wave raises J2 to +1.30 with J4 −0.60, stages J5 to −1.00,
   then waves J1 −0.90/−1.05 with J6 −0.90/−0.60 twice.
   It leaves the empty arm raised without changing the jaws. These added
   angles require supervised commissioning; they are not a certified route.
@@ -115,6 +115,29 @@ remained responsive; max recorded feedback age was 78.3 ms. V8 shares the
 transport floor with the planner and uses a 0.7-second minimum, with a production
 gateway regression for the shortest raised J5 segment. Live completion and
 operator gesture acceptance remain pending.
+
+### Embedded preview during execution and more upright J5
+
+With the v8 3D scene open, the first attempt held on stale current feedback
+before completing the wave. After Rob confirmed hanging again, a newly approved
+full path with the 3D window closed reached both wave positions and ended at
+raised rest in 31.43 seconds, including preparation and settling. It recorded
+618 complete seven-joint samples with maximum feedback age 36.2 ms; the raw
+current jump peak was 2.153 with cutoff still zero. [The trace and manifest](calibration/evidence/2026-10-21-social-left/trial-ghost-wave-v8-closed-scene.json)
+preserve this distinction from the [open-scene interruption](calibration/evidence/2026-10-21-social-left/trial-ghost-wave-v8-open-scene-stop.json).
+
+Rob requested more J5 rotation. V9 adds raised J5 −0.90 and −1.00, keeping the
+accepted handoff and J6 −0.90/−0.60 wave. [Model tread sweeps](calibration/evidence/2026-10-21-social-left/model-preview-v9.json)
+pass, with provisional full-model warnings retained. The prior build returned
+through its full reverse route and verified hanging/inactive before reload.
+
+The editor now keeps an embedded snapshot of the reviewed scene during controller
+approval and execution. The live SceneKit view, mesh updates and depth-cloud
+rendering pause during physical motion, leaving camera capture and the existing
+feedback/recording/watchdog limits intact. Completion, refusal or interruption
+restores the live scene; editing a pending proposal still cancels it. The isolated
+render fixture exercises freeze/thaw and shared head/camera alignment without
+any actuator transport. V9 live validation is pending.
 
 ### 2026-10-21 installation and trial request
 

@@ -9,6 +9,9 @@ import simd
     let panelView = NSView()
     @nonobjc private let scene: SCNScene
     @nonobjc private let capturedRobot: SCNNode
+    @nonobjc private weak var sceneView: SCNView?
+    private var frozenPreview: NSImageView?
+    private var previewFrozen = false
     @nonobjc private var model: ROBGhostRobotModel?
     @nonobjc private var originalNodes: [String: SCNNode] = [:]
     @nonobjc private var ghostNodes: [String: SCNNode] = [:]
@@ -45,7 +48,7 @@ import simd
     @nonobjc private var record: [ROBGhostRecordingSample] = []
 
     init(sceneView: SCNView, originalRobot: SCNNode) {
-        scene = sceneView.scene!; capturedRobot = originalRobot
+        scene = sceneView.scene!; capturedRobot = originalRobot; self.sceneView = sceneView
         super.init()
         buildPanel()
         do {
@@ -91,13 +94,39 @@ import simd
         timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.tick() }
     }
 
-    func invalidate() { timer?.invalidate(); timer = nil; renderRoot.removeFromParentNode(); capturedRobot.isHidden = false }
+    func invalidate() { timer?.invalidate(); timer = nil; setPreviewFrozen(false); renderRoot.removeFromParentNode(); capturedRobot.isHidden = false }
+
+    /// Keep the reviewed picture embedded while physical execution records its
+    /// own telemetry. SceneKit must not compete with the motion watchdog.
+    func setPreviewFrozen(_ frozen: Bool) {
+        guard frozen != previewFrozen, let view = sceneView else { return }
+        previewFrozen = frozen
+        if frozen {
+            if let host = view.superview {
+                let picture = NSImageView(); picture.image = view.snapshot()
+                picture.imageScaling = .scaleProportionallyUpOrDown
+                picture.translatesAutoresizingMaskIntoConstraints = false
+                host.addSubview(picture, positioned: .above, relativeTo: view)
+                NSLayoutConstraint.activate([picture.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                    picture.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                    picture.topAnchor.constraint(equalTo: view.topAnchor), picture.bottomAnchor.constraint(equalTo: view.bottomAnchor)])
+                frozenPreview = picture
+            }
+            view.isHidden = true
+        } else {
+            frozenPreview?.removeFromSuperview(); frozenPreview = nil; view.isHidden = false
+            if !ROBLeftArmTrial.shared.isRunning && !ROBArmRoutineCoordinator.shared.isRunning {
+                updateOriginal(originalPositions); updateGhost(ghostDisplayPositions, updateFields: false)
+            }
+        }
+    }
 
     @objc(setHeadCommandPan:lowerPitch:upperPitch:known:)
     func setHeadCommand(pan: Double, lowerPitch: Double, upperPitch: Double, known: Bool) {
         let value = known ? model?.headPositions(pan: pan, lowerPitch: lowerPitch, upperPitch: upperPitch) : nil
         guard value != headEstimate else { return }
         headEstimate = value
+        guard !previewFrozen, !ROBLeftArmTrial.shared.isRunning, !ROBArmRoutineCoordinator.shared.isRunning else { return }
         updateOriginal(originalPositions)
         updateGhost(ghostDisplayPositions, updateFields: false)
     }
@@ -242,6 +271,7 @@ import simd
             ROBControllerArmApproval.shared.cancel(reason: "Ghost was edited; review and approve a new path.")
         }
         ownsPendingRequest = false
+        setPreviewFrozen(false)
         proposal = nil; playing = false; replayingRecording = false; record = []; currentPlot.values = []
         for node in ghostNodes.values { node.isHidden = false }
         executeButton.isEnabled = false; identity.stringValue = "Unreviewed edits · no hardware output"
@@ -355,8 +385,10 @@ import simd
         playing = false
         executeButton.isEnabled = false
         ownsPendingRequest = true
+        setPreviewFrozen(true)
         ROBLeftArmTrial.shared.perform(proposal: proposal, model: model) { [weak self] result in
             self?.ownsPendingRequest = false
+            self?.setPreviewFrozen(false)
             self?.status.stringValue = result["detail"] as? String ?? "Gesture ended"
         }
         status.stringValue = "Review request sent to the authenticated controller. This exact path and hash are frozen; editing cancels a pending request."
@@ -432,7 +464,24 @@ import simd
     }
     private func tick() {
         guard let model else { return }
-        renderRoot.simdTransform = capturedRobot.presentation.simdWorldTransform * modelBasis
+        let busy = ROBLeftArmTrial.shared.isRunning || ROBArmRoutineCoordinator.shared.isRunning
+        for view in [presets, joints, angle, name] as [NSControl] { view.isEnabled = !busy }
+        if busy || (ownsPendingRequest && ROBControllerArmApproval.shared.isPending) {
+            // For operations launched elsewhere, hide without taking a costly
+            // snapshot after motion has already started.
+            sceneView?.isHidden = true; playing = false; executeButton.isEnabled = false
+            referenceInfo.stringValue = busy ? "Preview frozen · measured motion and currents are being recorded."
+                : "Preview frozen · waiting for controller approval."
+            if busy { status.stringValue = ROBLeftArmTrial.shared.status }
+            return
+        }
+        if previewFrozen { setPreviewFrozen(false) }
+        else if sceneView?.isHidden == true {
+            sceneView?.isHidden = false
+            updateGhost(ghostDisplayPositions, updateFields: false)
+        }
+        let base = capturedRobot.presentation.simdWorldTransform * modelBasis
+        if renderRoot.simdTransform != base { renderRoot.simdTransform = base }
         let now = ProcessInfo.processInfo.systemUptime
         if !replayingRecording, now - lastOriginalUpdate > 0.2 {
             lastOriginalUpdate = now
@@ -443,8 +492,6 @@ import simd
                 (headEstimate == nil ? " Head: reference; command estimate unavailable." : " Head: accepted neck command estimate.") +
                 " Other joints: scan reference."
         }
-        let busy = ROBLeftArmTrial.shared.isRunning || ROBArmRoutineCoordinator.shared.isRunning
-        for view in [presets, joints, angle, name] as [NSControl] { view.isEnabled = !busy }
         if let proposal, let fresh = freshBaseline(), !busy, !ROBControllerArmApproval.shared.isPending, !replayingRecording {
             executeButton.isEnabled = liveBaseline && fresh.generation == proposal.sessionGeneration
                 && ROBArmRoutinePlan.near(fresh.q, proposal.baseline, tolerance: 0.015)

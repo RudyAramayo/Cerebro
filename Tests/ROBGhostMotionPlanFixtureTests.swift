@@ -39,7 +39,7 @@ import simd
         precondition(abs(j6CenterXYZ.y) < 0.05 && j6CenterXYZ.y < oldXYZ.y - 0.1)
         precondition(centerXYZ.z > j6CenterXYZ.z + 0.18)
         precondition(waveXYZ.z > shoulderZ + 0.15)
-        precondition(wave[4] == -0.8 && ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.waveIndex)![5] == -0.9)
+        precondition(wave[4] == -1.0 && ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.waveIndex)![5] == -0.9)
         print("URDF: negative J6 centers the hand; larger J2 and negative J4 put the wave above shoulder height")
 
         let proposal = try ROBLeftGestureCompiler.compile(kind: "wave", name: "High wave", model: model,
@@ -55,7 +55,7 @@ import simd
         precondition((0.7...0.75).contains(ROBLeftArmInteractionPlan.duration(from: wave, to: crest)!))
         let route = Array(ROBLeftArmInteractionPlan.waypoints[1...ROBLeftArmInteractionPlan.waveRestIndex])
         let compact = ROBLeftGestureCompiler.compactRoute(baseline: Array(repeating: 0, count: 7), targets: route)
-        precondition(compact == [1,4,6,9,12,15,18,24,28,34,36].map { ROBLeftArmInteractionPlan.waypoints[$0] })
+        precondition(compact == [1,4,6,9,12,15,18,24,28,34,38].map { ROBLeftArmInteractionPlan.waypoints[$0] })
         // Changing a joint at a corner must not turn into a diagonal shortcut.
         let corner = [[0.1,0,0,0,0,0,0],[0.1,0.1,0,0,0,0,0],[0.2,0.1,0,0,0,0,0]]
         precondition(ROBLeftGestureCompiler.compactRoute(baseline: Array(repeating: 0, count: 7), targets: corner) == corner)

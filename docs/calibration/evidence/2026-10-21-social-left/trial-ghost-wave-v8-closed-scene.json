@@ -1,0 +1,25 @@
+{
+  "recording": "left_ghost-2F2F9739-92F5-45DA-84B6-0F876D05B03A.csv",
+  "sha256": "107b8bb686b1c2e6867823369d085ad630c6afffa922bb70dc5115b5f2a02a4f",
+  "archivedRecording": "ghost-wave-v8-closed-scene.csv.gz",
+  "archiveSHA256": "d1ee0371fe4e7d4c112f9130656cd76ac57219da31162a0127e686a1bfb68e98",
+  "proposalSHA256": "c3395d83429eeb84d012bbfe7496053598c5dc15ec3963e8a519731bd2cdd7f8",
+  "outcome": "Full wave path reached both wave positions and ended at raised rest; 3D window closed before execution",
+  "steps": 15,
+  "lastPhase": "gesture step 14",
+  "elapsedSeconds": 31.42557454166672,
+  "samples": 618,
+  "finalPositionsRadians": [
+    -1.047879320435658,
+    1.300406646583588,
+    -0.6013204688511713,
+    -0.6011841150033593,
+    -0.8039422866998881,
+    -0.607729099698338,
+    0.0
+  ],
+  "peakCurrentJumpRaw": 2.15234375,
+  "maximumFeedbackAgeMilliseconds": 36.12406300305311,
+  "currentJumpLimitRaw": 0,
+  "operatorFeedback": "Increase J5 further so hand is more upright; candidate next J5 -1.00, leaving handoff unchanged."
+}

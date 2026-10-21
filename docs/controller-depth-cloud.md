@@ -21,8 +21,11 @@ accepted neck command estimates. It does not assume that the head is level.
   **estimated intrinsics** in the scene HUD.
 - Display work is capped at 30 scene frames/second and eight cloud submissions
   per second per camera. Unchanged mesh transforms do not start transactions;
-  the ×4 preview freezes when real execution is requested. Camera capture,
-  encoder monitoring and the motion watchdog retain their own timing.
+  requesting execution captures an embedded snapshot and hides the live 3D view
+  until the operation ends. Physical motion also suspends cloud submissions and
+  mesh updates. The same window remains open; live 3D resumes after completion,
+  refusal or interruption. Camera capture, encoder monitoring and the motion
+  watchdog retain their own timing.
 - A frame must follow the neck's conservative command settling time. Frame
   capture timestamps are mapped to the host monotonic clock; absent or unusable
   timestamps get a conservative 400 ms allowance. Old frames do not become

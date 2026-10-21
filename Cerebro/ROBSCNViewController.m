@@ -629,6 +629,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     }
     ROBDepthCloudFrame *frame = [notification.object isKindOfClass:ROBDepthCloudFrame.class] ? notification.object : nil;
     if (frame == nil || self.robo_scnView.scene == nil) return;
+    if (ROBLeftArmTrial.shared.isRunning || ROBArmRoutineCoordinator.shared.isRunning) return;
     BOOL belly = frame.isBelly;
     if (belly ? self.bellyCloudUpdatePending : self.cloudUpdatePending) return;
     double now = NSProcessInfo.processInfo.systemUptime;
@@ -783,6 +784,10 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     if (rgb != NULL) CVPixelBufferUnlockBaseAddress(rgb, kCVPixelBufferLock_ReadOnly);
     SCNGeometry *geometry = [self pointGeometry:points colors:colors pointSize:2];
     dispatch_async(dispatch_get_main_queue(), ^{
+        if (ROBLeftArmTrial.shared.isRunning || ROBArmRoutineCoordinator.shared.isRunning) {
+            if (isBelly) self.bellyCloudUpdatePending = NO; else self.cloudUpdatePending = NO;
+            return;
+        }
         if (isBelly) {
             self.liveBellyRGBCloudNode.geometry = geometry;
             self.lastBellyCloudUptime = frame.capturedUptime;

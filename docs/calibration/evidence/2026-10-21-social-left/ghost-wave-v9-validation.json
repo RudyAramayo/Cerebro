@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-21T23:30:50.440911+00:00",
+  "sourceSHA256": {
+    "Cerebro/ROBArmRoutinePlan.swift": "c6ba617920d16375700244c02a95f8e073a8e62575e1d067f8577b15d37b157b",
+    "Cerebro/ROBGhostGestureEditor.swift": "b67aec35015702ba899860f1ab7e764c4437d956a9a61f65472171f25cd9df11",
+    "Cerebro/ROBSCNViewController.m": "d3f6b02bc2d398a9a19e90138faada10c1c34f5c5651fe9d463834f4b0023223",
+    "Cerebro/ROBLeftArmTrial.swift": "f53504e6d2c643f6f22d156d4c420f69e132c8fe978b75fcdfef1258fd9060eb"
+  },
+  "installedDebugLibrarySHA256": "da4a85be877bad80161ecd94cd16cf7f57d9937893718b6024fe27fea89ee4d4",
+  "checks": {
+    "ghostModelAndFrozenRouteTiming": "passed",
+    "modelTreadSweeps": "passed (provisional full-model warnings retained)",
+    "renderSnapshotFreezeThawAndHeadCameraOrigin": "passed",
+    "leftExecutorAndCurrentFaultStopRecovery": "passed",
+    "productionGatewayIncludingShortestSegmentFloor": "passed",
+    "signedMacOSDebugBuild": "passed"
+  },
+  "wave": "Raised J5 -1.00, J2 +1.30, J4 -0.60, J6 -0.90/-0.60; handoff unchanged; 15 compacted segments, 14.95 s scheduled plus measured settling/preparation",
+  "preload": "Old build completed controlled reverse route in 50.44 s and verified hanging/inactive; recording left_relax-A5647E0D-C45B-4A95-9FAD-FA312DB155B6.csv",
+  "display": "Embedded static snapshot during approval/execution; live 3D hidden and cloud/mesh updates suspended during physical motion; callback restores live scene",
+  "liveTrial": "Loaded; reviewed wave request being prepared",
+  "currentJumpLimitRaw": 0
+}

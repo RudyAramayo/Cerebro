@@ -93,6 +93,14 @@ final class GhostFixtureSnapshotView: NSView {
         timeline.doubleValue = timeline.maxValue; NSApp.sendAction(timeline.action!, to: timeline.target, from: timeline)
         let execute = controls.first { $0.identifier?.rawValue == "ghost-execute" } as! NSButton
         precondition(!execute.isEnabled, "Offline preview offered hardware execution")
+        let pauseHost = NSView(frame: view.frame); pauseHost.addSubview(view)
+        editor.setPreviewFrozen(true)
+        precondition(view.isHidden && pauseHost.subviews.count == 2)
+        let frozenHead = originalHead.simdTransform
+        editor.setHeadCommand(pan: 0, lowerPitch: 0, upperPitch: -.pi / 10, known: true)
+        precondition(originalHead.simdTransform == frozenHead, "Paused preview still changed its model")
+        editor.setPreviewFrozen(false)
+        precondition(!view.isHidden && pauseHost.subviews.count == 1 && originalHead.simdTransform != frozenHead)
         let blue = scene.rootNode.childNodes.flatMap(\.childNodes).filter { $0.name?.hasPrefix("Blue ghost ") == true }
         precondition(blue.count >= 40)
         let renderer = SCNRenderer(device: nil, options: nil); renderer.scene = scene; renderer.pointOfView = camera
