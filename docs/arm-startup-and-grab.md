@@ -108,6 +108,44 @@ The local recording is `LeftArmTrials/left_wave-DAD663C6-3B55-47B1-9BC7-90D7696A
 under Cerebro's Application Support directory. Its SHA-256 is
 `976b8ac4770e8ef1411691120b8d29aaff03d9e0a7ce3a8cf47d56f54a422818`.
 
+### 2026-10-21 green Grinch doll handoff
+
+The initial Present / open run attempted calibration and opening, but Rob
+reported that the jaws remained closed. A standalone physical-left calibration
+was then accepted as command 110 at 13:41:48.670 local time, vendor response 1;
+Rob reported no visible motion. A separate Open/Release command 111 was accepted
+at 13:42:49.502, response 1, and Rob confirmed that the jaw opened. These results
+do not establish mechanical calibration completion or a reliable delay between
+calibration and opening. Do not treat either acknowledgement as observed opening.
+
+An early Grip request was approved before an object was placed, producing an
+empty close (command 114). The test was stopped and the empty jaw reopened
+(command 116). For assisted tests, wait for the operator's explicit report that
+the object is positioned before even requesting Grip; controller approval
+remains the separate, mandatory runtime authorization. Likewise, confirm that
+the receiver supports the object before requesting Release. Never infer either
+physical condition from an acknowledgement or from a generic request to test.
+
+After Rob explicitly reported the object in place, the stationary left-grip
+operation accepted command 119 at 13:45:08.748, response 1. Rob confirmed that
+the left gripper held a green Grinch doll. After Rob confirmed a hand supporting
+the doll, stationary Release accepted command 122 at 13:46:57.683, response 1.
+Rob then confirmed that the doll was back in hand and clear of the jaws. This
+establishes an operator-observed grasp, hold and return with the arm in front;
+it does not establish measured grip force or autonomous object placement.
+
+The arm remained near J1 −1.046379, J2 +0.600093 radians. The jaw was left open
+and no lower-arm command was sent. Automatic current cutoff remained 0 (record
+only). The recordings contain the seven **arm-joint** currents, not measured
+gripper current, jaw opening or grip force:
+
+- `LeftArmTrials/left_grip-8E5F54AD-D769-4621-9730-FC93A22C612F.csv`:
+  133 samples over 6.834 s; SHA-256
+  `33471fad008d849038d97cd7e2f1f3fb31306d5655cd1a3f574a3c25ea113b6c`.
+- `LeftArmTrials/left_release-D0408A99-05EA-452A-B674-C83F9D4B7825.csv`:
+  125 samples over 6.581 s; SHA-256
+  `b6d48b22eb6e25ec0f63f553f5eb47f68650cb471534840891fb775aff975541`.
+
 ## Existing paired operations
 
 Settings → Arms contains **Calibrate arms on startup** (off until selected),
