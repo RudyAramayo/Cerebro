@@ -53,6 +53,7 @@ final class ROBAmberGatewayClient: NSObject {
     var generation: UInt64 = 1
     var ready = true, stale = false, rejectRenewal = false
     var current = 0.2
+    var assertStationaryGripperApproval = false
     var onWaypoint: (() -> Void)?
     var q = ["left": Array(repeating: 0.0, count: 7), "right": Array(repeating: 0.0, count: 7)]
     var mode = ["left": 0, "right": 0]
@@ -95,6 +96,8 @@ final class ROBAmberGatewayClient: NSObject {
         return ack("position_mode", arm)
     }
     func sendRoutineWaypoint(arm: String, index: Int, duration: Double, expectedSessionGeneration: UInt64) -> UInt64 {
+        precondition(ROBLeftArmTrial.shared.authorizesTaughtWaypoint(arm: arm,
+            expectedSessionGeneration: expectedSessionGeneration), "Gateway admission did not recognize the approved left trial")
         precondition(expectedSessionGeneration == generation && mode[arm] == 2)
         precondition(arm == "right", "Trial dispatched to physical right arm")
         precondition(telemetry(forArm: arm)!.statuses.allSatisfy { $0.intValue == 2 })
@@ -121,6 +124,10 @@ final class ROBAmberGatewayClient: NSObject {
         return ack("calibrate", arm)
     }
     func controlGripper(forArm arm: String, action: String, force: Int) -> UInt64 {
+        if assertStationaryGripperApproval {
+            precondition(!ROBLeftArmTrial.shared.authorizesTaughtWaypoint(arm: arm,
+                expectedSessionGeneration: generation), "Stationary gripper approval authorized arm travel")
+        }
         precondition(force == 10)
         precondition(calibrated.contains(arm), "Uncalibrated jaw command")
         let id = ack("gripper_\(action)", arm, accepted: action != "release" || !rejectRelease)
@@ -166,6 +173,7 @@ final class ROBArmRoutineCoordinator {
     }
     @MainActor static func tests() async throws {
         let trial = ROBLeftArmTrial.shared, g = ROBAmberGatewayClient.shared
+        precondition(!trial.authorizesTaughtWaypoint(arm: "right", expectedSessionGeneration: g.generation))
         let broker = ROBControllerArmApproval.shared
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("left-arm-fixture-" + UUID().uuidString)
         trial.recordingDirectory = folder
@@ -227,6 +235,7 @@ final class ROBArmRoutineCoordinator {
         precondition(g.commands.filter { $0.hasPrefix("calibrate") } == ["calibrate:right"])
         precondition(g.commands.contains("gripper_release:right"))
         g.commands = []
+        g.assertStationaryGripperApproval = true
         let grip = await run("left_grip")
         precondition(grip["status"] as? String == "accepted_unverified", grip.description)
         precondition(g.commands.contains("gripper_hold:right"))

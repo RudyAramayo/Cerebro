@@ -749,7 +749,9 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
     /// vectors, no model-reference promotion, and no replay across reconnects.
     /// The coordinator owns camera clearance and the physical hanging datum.
     @nonobjc func sendRoutineWaypoint(arm: String, index: Int, duration: Double, expectedSessionGeneration: UInt64) -> UInt64 {
-        guard Thread.isMainThread, ROBArmRoutineCoordinator.shared.isRunning,
+        guard Thread.isMainThread,
+              ROBArmRoutineCoordinator.shared.isRunning || ROBLeftArmTrial.shared.authorizesTaughtWaypoint(
+                arm: arm, expectedSessionGeneration: expectedSessionGeneration),
               ["left", "right"].contains(arm),
               let target = ROBArmRoutinePlan.target(index: index, physicalLeft: arm == "right"),
               let sample = telemetry(forArm: arm), sample.effectiveSampleAgeMilliseconds <= 250,

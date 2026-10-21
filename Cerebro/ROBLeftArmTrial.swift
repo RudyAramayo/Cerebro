@@ -30,6 +30,7 @@ import AppKit
     private var failure: String?
     private var cameraReady = false
     private var positionReady = false
+    private var allowsArmTravel = false
     private var leased = false
     private var lastRenewal = 0.0
     private var log: FileHandle?
@@ -99,6 +100,15 @@ import AppKit
 
     func cancel(reason: String) { abort(reason) }
 
+    /// Gateway admission is scoped to this accepted operation, physical side
+    /// and session. Stationary grip/release approvals never permit arm travel.
+    @nonobjc func authorizesTaughtWaypoint(arm: String, expectedSessionGeneration: UInt64) -> Bool {
+        guard Thread.isMainThread, isRunning, owner != nil, allowsArmTravel,
+              cameraReady, positionReady, arm == self.arm, generation > 0,
+              generation == expectedSessionGeneration else { return false }
+        do { try check(); return true } catch { return false }
+    }
+
     private func update(_ message: String) {
         status = message; statusChanged?(message)
         NotificationCenter.default.post(name: Notification.Name("ROBArmRoutineDidChange"), object: self)
@@ -119,6 +129,7 @@ import AppKit
         owner = id; isRunning = true; self.summary = summary; currentLimit = limit
         lastRecordingPath = ""; sampleCount = 0; peakJump = 0
         failure = nil; generation = 0; cameraReady = false; positionReady = false; leased = false
+        allowsArmTravel = ["left_wave", "left_prepare", "left_relax"].contains(command)
         waiting = []; acks = [:]; leaseRenewals = [:]; phase = "preflight"
         deadline = ProcessInfo.processInfo.systemUptime + 90
         vision.setActive(true); ROBArmRoutineCoordinator.shared.cameraDemand?(true)
@@ -187,7 +198,7 @@ import AppKit
     @MainActor private func accepted(_ dispatch: () -> UInt64) async throws {
         try check()
         let id = dispatch()
-        guard id != 0 else { throw ROBArmRoutineError.blocked("Gateway refused the left-arm command.") }
+        guard id != 0 else { throw ROBArmRoutineError.blocked("Gateway refused left-arm command during \(phase), before submission.") }
         waiting.insert(id)
         try await wait(3) { self.acks[id] == true }
         waiting.remove(id); acks.removeValue(forKey: id)

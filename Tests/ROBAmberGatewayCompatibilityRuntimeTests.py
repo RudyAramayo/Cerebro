@@ -206,6 +206,52 @@ struct GatewayCompatibilityFixtures {
         try client.fixtureReceive(["type": "future_event"])
         expect(client.state == .failed, "Unknown message was silently ignored")
         expect(client.stateDetail.contains("future_event"), "Unknown type was hidden")
+        // Exercise the real taught-waypoint admission method. The older
+        // coordinator is idle: an approved left-only executor must still reach
+        // the gateway, without lending authority to the physical right arm.
+        let taught = ROBAmberGatewayClient()
+        defer { taught.fixtureDisconnect() }
+        try taught.fixtureReceive(modernReady)
+        let generation = (taught.connectionSnapshot()["sessionGeneration"] as! NSNumber).uint64Value
+        func motorFeedback(age: Double = 1) throws {
+            for arm in ["left", "right"] {
+                try taught.fixtureReceive([
+                    "type": "telemetry", "arm": arm, "sequence": 100,
+                    "sample_age_ms": age, "controller_sample_age_ms": age,
+                    "joint_feedback_age_ms": [Double](repeating: age, count: 7),
+                    "gripper_feedback_age_ms": age,
+                    "positions_rad": [Double](repeating: 0, count: 7),
+                    "velocities_rad_s": NSNull(), "velocities_available": false,
+                    "currents": [Double](repeating: 0.2, count: 7),
+                    "statuses": [Double](repeating: 2, count: 7),
+                ])
+                try taught.fixtureReceive([
+                    "type": "mode_query_ack", "arm": arm, "command_id": 500,
+                    "accepted": true, "modes": [Int](repeating: 2, count: 7),
+                ])
+            }
+        }
+        func waypoint(_ arm: String = "right", _ index: Int = 1, _ duration: Double = 4,
+                      _ expectedGeneration: UInt64? = nil) -> UInt64 {
+            taught.sendRoutineWaypoint(arm: arm, index: index, duration: duration,
+                expectedSessionGeneration: expectedGeneration ?? generation)
+        }
+        try motorFeedback()
+        let trial = ROBLeftArmTrial.shared
+        trial.generation = generation
+        expect(waypoint() == 0, "Idle or unapproved left trial admitted a waypoint")
+        trial.approved = true
+        expect(waypoint() > 0, "Approved left trial was rejected because the paired coordinator is idle")
+        expect(waypoint("left") == 0, "Left-only approval authorized the physical right arm")
+        expect(waypoint("right", 2) == 0, "Left trial bypassed adjacent-waypoint bounds")
+        expect(waypoint("right", 1, 0.8) == 0, "Left trial bypassed existing segment timing")
+        expect(waypoint("right", 1, 4, generation + 1) == 0, "Left trial replayed across sessions")
+        try motorFeedback(age: 500)
+        expect(waypoint() == 0, "Left trial bypassed fresh motor feedback")
+        try motorFeedback()
+        trial.approved = false
+        expect(waypoint() == 0, "Revoked trial could still dispatch")
+        print("Taught-waypoint admission: real gateway recognizes only the approved left trial and retains route, timing, session and freshness bounds")
         print("Amber gateway compatibility fixtures passed")
     }
 }

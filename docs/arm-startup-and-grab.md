@@ -78,6 +78,36 @@ It ended with **“Connect Vision Pro or iPhone and enable Action Approvals. No 
 operation was started.”** No motor trial or live current recording occurred;
 actual waving, object retention and handoff remain unverified on hardware.
 
+The next controller-approved wave reached position-mode preparation and recorded
+101 fresh telemetry samples over 5.09 seconds, with all measured joint positions
+remaining zero. It then ended with **“Gateway refused the left-arm command.”**
+The first taught waypoint was rejected locally because the gateway admitted
+only the older paired coordinator's running state. The gateway now also admits
+an active, specifically approved physical-left trial, bound to its side, session,
+camera/mode checks and an operation that permits arm travel. Stationary grip and
+release approvals cannot authorize waypoints. Existing adjacency, timing,
+feedback and joint bounds are retained.
+
+Regression coverage now exercises the real gateway admission method with the
+paired coordinator idle, including wrong-side, stale-session, skipped-waypoint,
+short-duration, stale-feedback and revoked-approval rejections. The left-arm
+executor fixtures also exercise the real trial authorization check at dispatch.
+Both fixture suites and the signed build passed. The installed debug-library
+SHA-256 for this correction is
+`73391a5387b8963ccda239a2488ce8961b059e29410cedfb669c4d5d0515a0bd`.
+
+After loading that correction, a fresh controller-approved wave completed with
+**“Left arm waved twice and is holding in front. Gripper unchanged.”** The live
+recording contains the six forward waypoints followed by 5 → 6 → 5 → 6, with
+896 distinct telemetry samples over 45.776 seconds including preparation.
+Final measured physical-left J1/J2 were −1.045152 and +0.600639 radians, within
+the existing front-pose tolerance. The maximum recorded feedback age was
+42.657 ms. Current units remain raw and the cutoff was 0 (record only); this
+trial establishes measured movement and recording, not collision-force limits.
+The local recording is `LeftArmTrials/left_wave-DAD663C6-3B55-47B1-9BC7-90D7696AA8FC.csv`
+under Cerebro's Application Support directory. Its SHA-256 is
+`976b8ac4770e8ef1411691120b8d29aaff03d9e0a7ce3a8cf47d56f54a422818`.
+
 ## Existing paired operations
 
 Settings → Arms contains **Calibrate arms on startup** (off until selected),
