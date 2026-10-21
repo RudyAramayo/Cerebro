@@ -176,7 +176,7 @@ final class ROBArmRoutineCoordinator {
         for index in 0...6 {
             precondition(plan.target(index: index)! == ROBArmRoutinePlan.target(index: index, physicalLeft: true)!)
         }
-        for index in 7...12 {
+        for index in 7...plan.frontIndex {
             let a = plan.target(index: index - 1)!, b = plan.target(index: index)!
             precondition(a[0] == -1.05 && b[0] == -1.05 && a[1] == 0.6 && b[1] == 0.6)
             precondition(zip(a, b).filter { abs($0 - $1) > 0.001 }.count == 1)
@@ -186,10 +186,10 @@ final class ROBArmRoutineCoordinator {
             precondition(lowering.first == index - 1 && lowering.last == 0)
             precondition(lowering.contains(6), "Extension did not unwind before descending")
         }
-        precondition(plan.route(from: plan.target(index: 13)!, hanging: false) == [12])
+        precondition(plan.route(from: plan.target(index: plan.waveIndex)!, hanging: false) == [plan.frontIndex])
         var offRoute = plan.target(index: 4)!; offRoute[2] = -0.1
         precondition(plan.route(from: offRoute, hanging: true) == nil, "J3 rotation near the treads was admitted")
-        precondition(plan.stationaryFrontTarget(plan.target(index: 13)!) == nil)
+        precondition(plan.stationaryFrontTarget(plan.target(index: plan.waveIndex)!) == nil)
         print("Interaction plan: tested approach unchanged, one joint at a time at front, reverse unwinds before descent, off-route poses rejected")
         let trial = ROBLeftArmTrial.shared, g = ROBAmberGatewayClient.shared
         precondition(!trial.authorizesTaughtWaypoint(arm: "right", expectedSessionGeneration: g.generation))
@@ -238,9 +238,9 @@ final class ROBArmRoutineCoordinator {
         precondition(wave["status"] as? String == "completed", wave.description)
         precondition(wave["measured"] as? Bool == true)
         precondition(g.commands.allSatisfy { $0.hasSuffix(":right") })
-        precondition(g.commands.filter { $0.hasPrefix("waypoint_") }.count == 16)
-        precondition(g.commands.filter { $0.hasPrefix("waypoint_") }.suffix(4) == ["waypoint_13:right", "waypoint_12:right", "waypoint_13:right", "waypoint_12:right"])
-        precondition(g.q["right"]! == plan.target(index: 12)!)
+        precondition(g.commands.filter { $0.hasPrefix("waypoint_") }.count == 22)
+        precondition(g.commands.filter { $0.hasPrefix("waypoint_") }.suffix(4) == ["waypoint_19:right", "waypoint_18:right", "waypoint_19:right", "waypoint_18:right"])
+        precondition(g.q["right"]! == plan.target(index: plan.frontIndex)!)
         precondition(!g.commands.contains { $0.hasPrefix("gripper_hold") || $0.hasPrefix("gripper_release") || $0.hasPrefix("calibrate") })
         precondition(g.q["left"]! == rightBefore)
         precondition(ROBArmRoutineVision.shared.observationCount == 0)
@@ -249,7 +249,7 @@ final class ROBArmRoutineCoordinator {
         precondition(csv.contains("current_raw,current_delta_raw") && csv.contains(",left,right,"))
         precondition(csv.contains("waypoint 6"))
         precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty)
-        print("Left wave: one approval, 16 bounded waypoints, physical-left mapping, no right-arm or jaw commands, current CSV saved")
+        print("Left wave: one approval, 22 bounded waypoints, physical-left mapping, no right-arm or jaw commands, current CSV saved")
         g.commands = []
         let prepare = await run("left_prepare")
         precondition(prepare["status"] as? String == "accepted_unverified", prepare.description)

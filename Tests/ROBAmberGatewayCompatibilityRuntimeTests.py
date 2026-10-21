@@ -250,14 +250,14 @@ struct GatewayCompatibilityFixtures {
         try motorFeedback(positions: ROBLeftArmInteractionPlan.target(index: 6)!)
         expect(waypoint("right", 7) > 0, "Approved front-only J3 step refused")
         expect(waypoint("right", 8) == 0, "Front extension skipped a J3 step")
-        try motorFeedback(positions: ROBLeftArmInteractionPlan.target(index: 12)!)
-        expect(waypoint("right", 13) > 0, "Approved wave refused at new front pose")
+        try motorFeedback(positions: ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.frontIndex)!)
+        expect(waypoint("right", ROBLeftArmInteractionPlan.waveIndex) > 0, "Approved wave refused at new front pose")
         expect(waypoint("right", 5) == 0, "Lowering admitted before J3/J5 unwind")
-        expect(waypoint("left", 13) == 0, "New front pose sent to physical right arm")
+        expect(waypoint("left", ROBLeftArmInteractionPlan.waveIndex) == 0, "New front pose sent to physical right arm")
         trial.approved = false
-        expect(waypoint("right", 13) == 0, "Revoked approval retained new-pose authority")
+        expect(waypoint("right", ROBLeftArmInteractionPlan.waveIndex) == 0, "Revoked approval retained new-pose authority")
         ROBArmRoutineCoordinator.shared.isRunning = true
-        expect(waypoint("right", 13) == 0, "Paired legacy routine acquired new extension angles")
+        expect(waypoint("right", ROBLeftArmInteractionPlan.waveIndex) == 0, "Paired legacy routine acquired new extension angles")
         ROBArmRoutineCoordinator.shared.isRunning = false
         trial.approved = true
         try motorFeedback(age: 500)

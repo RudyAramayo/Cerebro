@@ -82,8 +82,9 @@ enum ROBArmRoutinePlan {
 /// it is not a measured collision envelope or a verified driver calibration.
 enum ROBLeftArmInteractionPlan {
     static let approachIndex = 6
-    static let frontIndex = 12
-    static let waveIndex = 13
+    static let previousFrontIndex = 12
+    static let frontIndex = 18
+    static let waveIndex = 19
     static let waypoints: [[Double]] = ROBArmRoutinePlan.rightWaypoints.map { $0.map { -$0 } } + [
         [-1.05, 0.60, -0.10, 0, 0, 0, 0],
         [-1.05, 0.60, -0.20, 0, 0, 0, 0],
@@ -91,7 +92,13 @@ enum ROBLeftArmInteractionPlan {
         [-1.05, 0.60, -0.30, 0, -0.10, 0, 0],
         [-1.05, 0.60, -0.30, 0, -0.20, 0, 0],
         [-1.05, 0.60, -0.30, 0, -0.30, 0, 0],
-        [-0.90, 0.60, -0.30, 0, -0.30, 0, 0],
+        [-1.05, 0.60, -0.40, 0, -0.30, 0, 0],
+        [-1.05, 0.60, -0.50, 0, -0.30, 0, 0],
+        [-1.05, 0.60, -0.60, 0, -0.30, 0, 0],
+        [-1.05, 0.60, -0.60, 0, -0.40, 0, 0],
+        [-1.05, 0.60, -0.60, 0, -0.50, 0, 0],
+        [-1.05, 0.60, -0.60, 0, -0.60, 0, 0],
+        [-0.90, 0.60, -0.60, 0, -0.60, 0, 0],
     ]
 
     static func target(index: Int) -> [Double]? {
@@ -116,7 +123,7 @@ enum ROBLeftArmInteractionPlan {
     /// Jaw-only actions may also finish the existing low-front handoff. They
     /// never reposition a held object to the new pose.
     static func stationaryFrontTarget(_ positions: [Double]) -> [Double]? {
-        for index in [frontIndex, approachIndex] {
+        for index in [frontIndex, previousFrontIndex, approachIndex] {
             if ROBArmRoutinePlan.near(positions, waypoints[index]) { return waypoints[index] }
         }
         return nil

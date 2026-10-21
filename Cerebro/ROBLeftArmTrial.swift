@@ -79,13 +79,13 @@ import AppKit
         }
         let action: String
         switch command {
-        case "left_wave": action = "Move the empty LEFT arm along the tested route to front, then try the new front pose: J3 to -0.30 rad, followed by J5 to -0.30 rad, each in 0.10-rad steps. Wave twice with J1 between -0.90 and -1.05 rad; leave it at the new front pose. Jaws unchanged."
-        case "left_prepare": action = "Bring the empty LEFT arm along the tested route to front, then try J3 -0.30 rad followed by J5 -0.30 rad in 0.10-rad steps. Calibrate its EMPTY gripper only if needed, then open it. Keep fingers clear during calibration."
+        case "left_wave": action = "Move the empty LEFT arm along the tested route to front, then try the new front pose: J3 and J5 first to -0.30 rad, then to -0.60 rad, one joint at a time in 0.10-rad steps. Wave twice with J1 between -0.90 and -1.05 rad; leave it at the new front pose. Jaws unchanged."
+        case "left_prepare": action = "Bring the empty LEFT arm along the tested route to front, then stage J3/J5 through -0.30 to -0.60 rad, one joint at a time in 0.10-rad steps. Calibrate its EMPTY gripper only if needed, then open it. Keep fingers clear during calibration."
         case "left_grip": action = "Keep the LEFT arm stationary in front and close its already-calibrated gripper at intensity 10 around the presented OBJECT. Confirm the object is between the open jaws and all fingers are clear. Never grip a person's hand. No reopening, calibration or arm travel."
         case "left_release": action = "Keep the LEFT arm stationary in front and open its already-calibrated gripper to return the object. Confirm the receiver supports the object before approving. No calibration or arm travel."
         default: action = "Return the empty LEFT arm: undo any new J5 and J3 rotations at the front pose FIRST, then reverse the tested route to hanging and deactivate it. Remove any object first."
         }
-        let notice = " Camera faces forward at the existing upright neck pose. New J3/J5 angles are a supervised trial, not a verified collision-free route; watch their direction and tread/cable clearance. Right arm receives no commands. Confirm LEFT arm physically hangs at encoder zero for the first movement of a new session. Watch the live camera and direct view; Stop + hold remains available. Camera object estimates do not veto this supervised trial."
+        let notice = " Camera centers at the upright neck pose and tilts about 9 degrees below level. New J3/J5 angles are a supervised trial, not a verified collision-free route; watch their direction and tread/cable clearance. Right arm receives no commands. Confirm LEFT arm physically hangs at encoder zero for the first movement of a new session. Watch the live camera and direct view; Stop + hold remains available. Camera object estimates do not veto this supervised trial."
         let current = limit == 0 ? " Current recording only; automatic current cutoff is not configured."
             : " Request hold if any joint's current changes by more than \(limit) raw units between samples; this is not a calibrated force limit."
         let approvedSummary = action + notice + current

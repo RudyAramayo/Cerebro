@@ -226,7 +226,7 @@ int main(void) { @autoreleasepool {
     }
     assert(neckPackets(inspection).count == trimPackets);
 
-    // Left-arm interactions use the existing compensated forward camera,
+    // Left-arm interactions use the slightly downward interaction camera,
     // retaining center-first staging, ramp settling and manual priority.
     inspection = activeNeck();
     inspection.commandedUpperNeckTiltTarget = 5650;
@@ -235,10 +235,10 @@ int main(void) { @autoreleasepool {
     settle(inspection);
     assert(![inspection prepareNeckForArmInteraction]);
     assert(inspection.commandedLowerNeckTiltTarget == ROBNeckSafetyUprightLowerTarget);
-    assert(inspection.commandedUpperNeckTiltTarget == ROBNeckSafetyUprightUpperTarget);
+    assert(inspection.commandedUpperNeckTiltTarget == ROBNeckSafetyArmInteractionUpperTarget);
     assert(![inspection isNeckReadyForArmInteraction]);
     render(inspection, 6000, 6011, 5650, NO);
-    assert(inspection.commandedUpperNeckTiltTarget == ROBNeckSafetyUprightUpperTarget);
+    assert(inspection.commandedUpperNeckTiltTarget == ROBNeckSafetyArmInteractionUpperTarget);
     settle(inspection);
     assert([inspection prepareNeckForArmInteraction]);
     assert([inspection isNeckReadyForArmInteraction]);

@@ -8,7 +8,7 @@ approval on the authenticated iPhone or Vision Pro. The summary describes the
 whole operation; no per-waypoint or extra spoken confirmation is needed.
 
 - **Wave left** uses the existing hanging/front route through waypoint 6, then
-  tries J3 −0.30 rad and J5 −0.30 rad, one joint at a time in 0.10-rad steps.
+  stages J3/J5 through −0.30 to −0.60 rad, one joint at a time in 0.10-rad steps.
   At the extended front pose it waves J1 between −0.90 and −1.05 rad twice.
   It leaves the empty arm in front without changing the jaws. These added
   angles require supervised commissioning; they are not a certified route.
@@ -36,7 +36,8 @@ speed. Grip/open acknowledgements are **accepted_unverified**, never measured
 force, measured jaw completion, or proof of object retention.
 
 The left controls now center the camera and use the existing upright lower-neck
-target 6011 and compensated forward-camera target 6906. The legacy paired
+target 6011 and upper-camera target 6606, about 9° below compensated level.
+The legacy paired
 inspection retains its downward target 5650. Both go through the existing
 center-first clearance policy, command ramp settling, manual priority and
 unknown/OFF-state checks. Neck arrival is command-space, not encoder feedback.
@@ -188,6 +189,24 @@ Reproduce a model-only preview with the existing ShadowPlanner venv Python:
 The script compiles the production waypoint table rather than maintaining
 another copy of the targets. See the [ordered work queue](arm-motion-work-queue.md)
 for ghost-motion review/approval and deferred camera-to-URDF calibration.
+
+Following Rob's observation, the next candidate preserves all approach and
+initial extension points, then adds another 0.30 rad on J3 and J5, one at a
+time in 0.10-rad steps. It holds J1/J2 at −1.05/+0.60 until the new wave at
+J3/J5 −0.60/−0.60. Reverse travel unwinds the complete extension before lowering.
+The camera tilts down 300 Maestro target units from level to 6606, retaining
+lower 6011 and all existing clearance/stationary checks. Stationary jaw actions
+also accept either earlier tested front pose without moving a held object.
+[The second model preview](calibration/evidence/2026-10-21-social-left/model-preview-v2.json)
+retains the same explicit calibration assumptions and full-model warnings.
+
+The initial return request was cancelled when Rob switched controller apps.
+After the first new pose trial, a return stopped at the front during J5 unwind
+because the camera/stationary-view interlock was lost. It requested hold at
+approximately `[−1.049652, +0.599821, −0.299569, 0, −0.113446, 0, 0]` rad.
+No new movement was dispatched automatically: a new controller-approved return
+was requested from the measured point on the route. App replacement waits for
+measured hanging and inactive status.
 
 ## Existing paired operations
 

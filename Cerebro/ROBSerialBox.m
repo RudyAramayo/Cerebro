@@ -4457,12 +4457,12 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
 
 - (BOOL)prepareNeckForArmInteraction
 {
-    return [self stageNeckForArmViewWithPanDegrees:0 upperTarget:ROBNeckSafetyUprightUpperTarget];
+    return [self stageNeckForArmViewWithPanDegrees:0 upperTarget:ROBNeckSafetyArmInteractionUpperTarget];
 }
 
 - (BOOL)isNeckReadyForArmInteraction
 {
-    return [self isNeckReadyForArmViewWithPanDegrees:0 upperTarget:ROBNeckSafetyUprightUpperTarget];
+    return [self isNeckReadyForArmViewWithPanDegrees:0 upperTarget:ROBNeckSafetyArmInteractionUpperTarget];
 }
 
 - (BOOL)isNeckReadyForArmViewWithPanDegrees:(double)panDegrees upperTarget:(int32_t)upperTarget
@@ -4470,7 +4470,7 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
     int32_t target = ROBNeckSafetyTargetOff;
     return NSThread.isMainThread && self.maestroConnectionValid && self.neckCommandStateKnown &&
-        (upperTarget == 5650 || upperTarget == ROBNeckSafetyUprightUpperTarget) &&
+        (upperTarget == 5650 || upperTarget == ROBNeckSafetyArmInteractionUpperTarget) &&
         isfinite(panDegrees) && fabs(panDegrees) <= 10 &&
         ROBNeckSafetyPanDegreesToTarget(&configuration, panDegrees, &target) &&
         self.commandedNeckPanTarget == target && self.commandedLowerNeckTiltTarget == 6011 &&
@@ -4483,7 +4483,7 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
     int32_t panTarget = ROBNeckSafetyTargetOff;
     if (!NSThread.isMainThread || !self.maestroConnectionValid || !self.neckCommandStateKnown ||
-        (upperTarget != 5650 && upperTarget != ROBNeckSafetyUprightUpperTarget) ||
+        (upperTarget != 5650 && upperTarget != ROBNeckSafetyArmInteractionUpperTarget) ||
         !isfinite(panDegrees) || fabs(panDegrees) > 10 ||
         !ROBNeckSafetyPanDegreesToTarget(&configuration, panDegrees, &panTarget) ||
         self.commandedNeckPanTarget == ROBNeckSafetyTargetOff ||
@@ -4508,7 +4508,7 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
                    desiredUpperTarget:upperTarget
                          includeLower:NO
         allowSupervisedLowerRecovery:NO
-                              source:upperTarget == ROBNeckSafetyUprightUpperTarget ? @"Arm interaction camera" : @"Arm inspection camera"];
+                              source:upperTarget == ROBNeckSafetyArmInteractionUpperTarget ? @"Arm interaction camera" : @"Arm inspection camera"];
     return [self isNeckReadyForArmViewWithPanDegrees:panDegrees upperTarget:upperTarget];
 }
 

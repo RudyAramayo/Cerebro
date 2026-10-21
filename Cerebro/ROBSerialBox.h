@@ -290,7 +290,7 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 - (BOOL)prepareNeckForArmInspectionWithPanDegrees:(double)panDegrees;
 - (BOOL)isNeckReadyForArmInspectionWithPanDegrees:(double)panDegrees;
 /// Forward-facing, centered camera for supervised left-arm social gestures.
-/// Uses the existing upright clearance and compensated camera-level target.
+/// Uses upright clearance and camera tilt about 9 degrees below level.
 - (BOOL)prepareNeckForArmInteraction;
 - (BOOL)isNeckReadyForArmInteraction;
 /// Typed ingress for autonomous neck gestures. Pan is calibrated degrees;
