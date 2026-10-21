@@ -250,7 +250,7 @@ struct GatewayCompatibilityFixtures {
         try motorFeedback(positions: ROBLeftArmInteractionPlan.target(index: 6)!)
         expect(waypoint("right", 7) > 0, "Approved front-only J3 step refused")
         expect(waypoint("right", 8) == 0, "Front extension skipped a J3 step")
-        try motorFeedback(positions: ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.frontIndex)!)
+        try motorFeedback(positions: ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.waveRestIndex)!)
         expect(waypoint("right", ROBLeftArmInteractionPlan.waveIndex) > 0, "Approved wave refused at new front pose")
         expect(waypoint("right", 5) == 0, "Lowering admitted before J3/J5 unwind")
         expect(waypoint("left", ROBLeftArmInteractionPlan.waveIndex) == 0, "New front pose sent to physical right arm")
@@ -260,7 +260,23 @@ struct GatewayCompatibilityFixtures {
         expect(waypoint("right", ROBLeftArmInteractionPlan.waveIndex) == 0, "Paired legacy routine acquired new extension angles")
         ROBArmRoutineCoordinator.shared.isRunning = false
         trial.approved = true
+        try motorFeedback()
+        let ghostID = UUID()
+        trial.ghostID = ghostID; trial.ghostTarget = [0, 0.10, 0, 0, 0, 0, 0]
+        func ghost(_ id: UUID? = nil, _ index: Int = 0, _ seconds: Double = 3.2, _ session: UInt64? = nil) -> UInt64 {
+            taught.sendApprovedLeftGestureStep(proposalID: id ?? ghostID, index: index, duration: seconds,
+                expectedSessionGeneration: session ?? generation)
+        }
+        expect(ghost() > 0, "Frozen left gesture step was refused")
+        expect(ghost(UUID()) == 0, "Wrong proposal ID admitted a ghost step")
+        expect(ghost(ghostID, 1) == 0, "A future ghost step was admitted")
+        expect(ghost(ghostID, 0, 3.3) == 0, "Changed ghost timing was admitted")
+        expect(ghost(ghostID, 0, 3.2, generation + 1) == 0, "Ghost replayed across gateway sessions")
+        trial.approved = false
+        expect(ghost() == 0, "Unapproved ghost path retained authority")
+        trial.approved = true
         try motorFeedback(age: 500)
+        expect(ghost() == 0, "Ghost step bypassed stale feedback")
         expect(waypoint() == 0, "Left trial bypassed fresh motor feedback")
         try motorFeedback()
         trial.approved = false

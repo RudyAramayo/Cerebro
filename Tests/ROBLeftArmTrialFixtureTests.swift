@@ -106,6 +106,17 @@ final class ROBAmberGatewayClient: NSObject {
         onWaypoint?()
         return id
     }
+    var onGhostStep: (() -> Void)?
+    func sendApprovedLeftGestureStep(proposalID: UUID, index: Int, duration: Double, expectedSessionGeneration: UInt64) -> UInt64 {
+        guard let target = ROBLeftArmTrial.shared.approvedGestureTarget(id: proposalID, index: index,
+            seconds: duration, generation: expectedSessionGeneration) else { return 0 }
+        precondition(ROBLeftArmTrial.shared.approvedGestureTarget(id: UUID(), index: index, seconds: duration,
+            generation: expectedSessionGeneration) == nil)
+        precondition(ROBLeftArmTrial.shared.approvedGestureTarget(id: proposalID, index: index + 1, seconds: duration,
+            generation: expectedSessionGeneration) == nil)
+        q["right"] = target
+        let id = ack("ghost_step_\(index)", "right"); onGhostStep?(); return id
+    }
     func priorityHold(forArm arm: String) -> UInt64 { ack("priority_hold", arm) }
     func renewLease(forArm arm: String, leaseMilliseconds: UInt32) -> UInt64 { ack("renew_lease", arm, accepted: !rejectRenewal) }
     func deactivateArm(_ arm: String) -> UInt64 {
@@ -166,6 +177,11 @@ final class ROBArmRoutineCoordinator {
 }
 
 @main struct LeftArmTrialFixtures {
+    @MainActor static func run(_ proposal: ROBLeftGestureProposal, model: ROBGhostRobotModel) async -> NSDictionary {
+        await withCheckedContinuation { continuation in
+            ROBLeftArmTrial.shared.perform(proposal: proposal, model: model) { continuation.resume(returning: $0) }
+        }
+    }
     @MainActor static func run(_ command: String) async -> NSDictionary {
         await withCheckedContinuation { continuation in
             ROBLeftArmTrial.shared.perform(command) { continuation.resume(returning: $0) }
@@ -178,7 +194,9 @@ final class ROBArmRoutineCoordinator {
         }
         for index in 7...plan.frontIndex {
             let a = plan.target(index: index - 1)!, b = plan.target(index: index)!
-            precondition(a[0] == -1.05 && b[0] == -1.05 && a[1] == 0.6 && b[1] == 0.6)
+            precondition(a[0] == -1.05 && b[0] == -1.05)
+            if index <= 24 { precondition(a[1] == 0.6 && b[1] == 0.6) }
+            else { precondition(a[1] >= 0.6 && b[1] <= 1.0) }
             precondition(zip(a, b).filter { abs($0 - $1) > 0.001 }.count == 1)
             precondition(zip(a, b).allSatisfy { abs($0 - $1) <= 0.100001 })
             let middle = zip(a, b).map { ($0 + $1) / 2 }
@@ -186,7 +204,7 @@ final class ROBArmRoutineCoordinator {
             precondition(lowering.first == index - 1 && lowering.last == 0)
             precondition(lowering.contains(6), "Extension did not unwind before descending")
         }
-        precondition(plan.route(from: plan.target(index: plan.waveIndex)!, hanging: false) == [plan.frontIndex])
+        precondition(plan.route(from: plan.target(index: plan.waveIndex)!, hanging: false) == Array(stride(from: plan.waveRestIndex, through: plan.frontIndex, by: -1)))
         var offRoute = plan.target(index: 4)!; offRoute[2] = -0.1
         precondition(plan.route(from: offRoute, hanging: true) == nil, "J3 rotation near the treads was admitted")
         precondition(plan.stationaryFrontTarget(plan.target(index: plan.waveIndex)!) == nil)
@@ -238,9 +256,9 @@ final class ROBArmRoutineCoordinator {
         precondition(wave["status"] as? String == "completed", wave.description)
         precondition(wave["measured"] as? Bool == true)
         precondition(g.commands.allSatisfy { $0.hasSuffix(":right") })
-        precondition(g.commands.filter { $0.hasPrefix("waypoint_") }.count == 22)
-        precondition(g.commands.filter { $0.hasPrefix("waypoint_") }.suffix(4) == ["waypoint_19:right", "waypoint_18:right", "waypoint_19:right", "waypoint_18:right"])
-        precondition(g.q["right"]! == plan.target(index: plan.frontIndex)!)
+        precondition(g.commands.filter { $0.hasPrefix("waypoint_") }.count == 38)
+        precondition(g.commands.filter { $0.hasPrefix("waypoint_") }.suffix(4) == ["waypoint_35:right", "waypoint_34:right", "waypoint_35:right", "waypoint_34:right"])
+        precondition(g.q["right"]! == plan.target(index: plan.waveRestIndex)!)
         precondition(!g.commands.contains { $0.hasPrefix("gripper_hold") || $0.hasPrefix("gripper_release") || $0.hasPrefix("calibrate") })
         precondition(g.q["left"]! == rightBefore)
         precondition(ROBArmRoutineVision.shared.observationCount == 0)
@@ -249,7 +267,7 @@ final class ROBArmRoutineCoordinator {
         precondition(csv.contains("current_raw,current_delta_raw") && csv.contains(",left,right,"))
         precondition(csv.contains("waypoint 6"))
         precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty)
-        print("Left wave: one approval, 22 bounded waypoints, physical-left mapping, no right-arm or jaw commands, current CSV saved")
+        print("Left wave: one approval, 38 bounded waypoints, above-shoulder endpoint, no right-arm or jaw commands, current CSV saved")
         g.commands = []
         let prepare = await run("left_prepare")
         precondition(prepare["status"] as? String == "accepted_unverified", prepare.description)
@@ -266,6 +284,37 @@ final class ROBArmRoutineCoordinator {
         precondition(release["status"] as? String == "accepted_unverified", release.description)
         precondition(g.commands.contains("gripper_release:right"))
         precondition(!g.commands.contains { $0.hasPrefix("waypoint") || $0.hasPrefix("calibrate") || $0.hasPrefix("gripper_hold") })
+        // Review and execute a custom gesture through the actual frozen-step
+        // admission. Its successful ending returns to the known center pose.
+        let root = URL(fileURLWithPath: CommandLine.arguments[1])
+        let model = try ROBGhostRobotModel(directory: root.appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
+        var pose = model.positions(vendorLeft: g.q["right"]!); pose["left_joint1"] = -0.95
+        let frozen = try ROBLeftGestureCompiler.compile(kind: "custom", name: "Fixture ghost", poses: [pose], model: model,
+            baseline: g.q["right"]!, generation: g.generation)
+        g.commands = []
+        let ghost = await run(frozen, model: model)
+        precondition(ghost["status"] as? String == "completed", ghost.description)
+        precondition(ghost["motion_proposal_sha256"] as? String == frozen.fingerprint)
+        precondition(g.q["right"]! == ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.frontIndex)!)
+        precondition(g.commands.contains { $0.hasPrefix("ghost_step_") })
+        precondition(!g.commands.contains { $0.hasPrefix("gripper_") || $0.hasPrefix("calibrate") || $0.hasSuffix(":left") })
+        let manifest = URL(fileURLWithPath: ghost["current_recording"] as! String).deletingPathExtension().appendingPathExtension("proposal.json")
+        let recordedProposal = try JSONDecoder().decode(ROBLeftGestureProposal.self, from: Data(contentsOf: manifest))
+        precondition(recordedProposal == frozen)
+        print("Ghost execution: exact approved ID/index/duration, physical-left only, unchanged jaws, measured return and matching recording manifest")
+        g.commands = []
+        let interrupted = try ROBLeftGestureCompiler.compile(kind: "custom", name: "Interrupted ghost", poses: [pose], model: model,
+            baseline: g.q["right"]!, generation: g.generation)
+        g.onGhostStep = { trial.cancel(reason: "Fixture ghost stop") }
+        let stopped = await run(interrupted, model: model)
+        precondition(stopped["status"] as? String == "blocked")
+        precondition(g.commands.filter { $0.hasPrefix("ghost_step_") }.count == 1)
+        g.onGhostStep = nil; g.commands = []
+        let recovery = try trial.recoveryProposal(model: model)
+        let recovered = await run(recovery, model: model)
+        precondition(recovered["status"] as? String == "completed", recovered.description)
+        precondition(g.q["right"]! == ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.frontIndex)!)
+        print("Ghost interruption: stop holds, later targets cancelled, new controller approval reverses only the remembered path")
         g.commands = []; g.calibrated = []
         let uncalibrated = await run("left_grip")
         precondition(uncalibrated["status"] as? String == "blocked")
@@ -316,7 +365,7 @@ final class ROBArmRoutineCoordinator {
             precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty)
         }
         print("Stop/faults: stale feedback, replaced session, camera loss and operator cancellation prevent any subsequent waypoint and retain torque")
-        precondition(approvals == 13)
+        precondition(approvals == 16)
     }
     static func main() async throws { setbuf(stdout, nil); try await tests(); print("Left-arm trial fixtures passed; no hardware transport exists in this executable") }
 }

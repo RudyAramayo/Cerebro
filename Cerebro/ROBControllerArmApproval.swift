@@ -33,6 +33,7 @@ import Foundation
         var peer: Peer?
         var request: ROBRobotActionMessage?
         var started: Date?
+        let executionLimit: TimeInterval
     }
     private var peers: [UUID: Peer] = [:]
     private var pending: Pending?
@@ -48,6 +49,15 @@ import Foundation
                  completion: @escaping (NSDictionary) -> Void) {
         request(action: "arm_operation", arguments: ["operation": operation, "arm": arm, "summary": summary],
                 summary: summary, execute: execute, cancel: cancel, completion: completion)
+    }
+
+    /// A reviewed immutable ghost rendition remains bounded to three minutes.
+    /// This does not change other arm or gripper approval deadlines.
+    @nonobjc func requestLeftGesture(summary: String,
+        execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
+        cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
+        request(action: "arm_operation", arguments: ["operation": "manual", "arm": "left", "summary": summary],
+            summary: summary, executionLimit: 180, execute: execute, cancel: cancel, completion: completion)
     }
 
     /// Existing controllers already review named play_gesture requests and
@@ -70,7 +80,7 @@ import Foundation
         guard let p = pending, let started = p.started, let peer = p.peer,
               p.action == "arm_operation", p.arguments["operation"] as? String == "manual",
               p.arguments["arm"] as? String == "left", p.summary == summary,
-              peerIsFresh(peer), (0..<120).contains(now().timeIntervalSince(started)) else { return false }
+              peerIsFresh(peer), (0..<p.executionLimit).contains(now().timeIntervalSince(started)) else { return false }
         return true
     }
 
@@ -84,7 +94,7 @@ import Foundation
             || (p.action == "play_gesture" && p.summary == Self.supervisedGreetingName)
     }
 
-    private func request(action: String, arguments: NSDictionary, summary: String,
+    private func request(action: String, arguments: NSDictionary, summary: String, executionLimit: TimeInterval = 120,
                          execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
                          cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
         precondition(Thread.isMainThread)
@@ -98,7 +108,7 @@ import Foundation
             completion(["status": "rejected", "detail": "Invalid controller motion approval request."]); return
         }
         pending = Pending(id: probe.callID!, action: action, arguments: arguments.copy() as! NSDictionary, summary: summary,
-            created: now(), execute: execute, cancel: cancel, completion: completion)
+            created: now(), execute: execute, cancel: cancel, completion: completion, executionLimit: executionLimit)
         update("Waiting for Vision Pro or iPhone to approve: \(summary)")
         let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in self?.tick() }
         self.timer = timer
@@ -189,7 +199,7 @@ import Foundation
                 cancel(reason: "The approving controller disconnected; arm hold requested."); return
             }
             if let started = p.started {
-                if now().timeIntervalSince(started) > 120 {
+                if now().timeIntervalSince(started) > p.executionLimit {
                     cancel(reason: "The approved arm operation timed out; hold requested.")
                 }
             } else if p.request.map(isExpired) == true {

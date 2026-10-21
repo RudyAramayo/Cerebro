@@ -30,9 +30,9 @@ enum {
     // The front camera is mounted about 25 degrees nose-down. At the
     // calibrated 33.333 targets/degree, 6073 + 833 aims it level.
     ROBNeckSafetyUprightUpperTarget = 6906,
-    // Social arm workspace: about 9 degrees below compensated level, leaving
+    // Social arm workspace: about 18 degrees below compensated level, leaving
     // the upright lower-neck/pan clearance posture unchanged.
-    ROBNeckSafetyArmInteractionUpperTarget = 6606,
+    ROBNeckSafetyArmInteractionUpperTarget = 6306,
     // Safe torso-control defaults: forward pan and the original resting neck
     // pose. This upper value is intentionally independent of the compensated
     // camera-upright target above.

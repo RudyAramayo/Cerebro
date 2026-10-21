@@ -150,6 +150,24 @@ final class ROBAmberGatewayClient: NSObject {
             done?(["status": "completed"])
         }
 
+        // A frozen ghost rendition has its own bounded three-minute execution
+        // lease. The review window and all ordinary requests remain unchanged.
+        do {
+            let b = broker()
+            var time = Date(), request: ROBRobotActionMessage?, held = 0
+            b.now = { time }
+            b.send = { message, _, _ in if message.kind == .actionRequest { request = message }; return true }
+            _ = b.receive(hello, device: device, session: session)
+            b.requestLeftGesture(summary: "Reviewed immutable ghost", execute: { _ in }, cancel: { held += 1 }, completion: { _ in })
+            _ = b.receive(reply(request!), device: device, session: session)
+            time.addTimeInterval(125)
+            _ = b.receive(hello, device: device, session: session)
+            check(b.authorizesLeftArmTrial("Reviewed immutable ghost"), "Ghost authorization ended before its bounded rendition window")
+            time.addTimeInterval(56)
+            _ = b.receive(hello, device: device, session: session)
+            check(!b.isPending && held == 1, "Ghost execution exceeded three minutes without cancellation/hold")
+        }
+
         // Rejection, expiry, decline, send failure, disconnect and lost opt-in.
         for scenario in ["reject", "expired", "claimed_complete", "disconnect_pending", "disconnect_running", "disabled", "cancel", "send_failed"] {
             let b = broker()

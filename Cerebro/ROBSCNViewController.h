@@ -14,11 +14,13 @@
 @interface ROBSCNViewController : NSObject
 
 @property (readwrite, retain) SCNView *robo_scnView;
+@property (readonly, strong) NSView *ghostGesturePanel;
 
 - (instancetype)initWithRobo_scnView:(SCNView *)scnView;
 - (void)updateWithControllerModel:(ROBBaseControllerModel *)model sender:(NSString *)sender;
 - (void)updateWithIRDistances:(NSArray<NSNumber *> *)distances receivedAtUptime:(NSTimeInterval)uptime;
 - (void)updateWithLegacyIRWarningFront:(BOOL)front back:(BOOL)back receivedAtUptime:(NSTimeInterval)uptime;
 - (void)invalidate;
+- (void)reviewGhostPreset:(NSString *)name;
 
 @end

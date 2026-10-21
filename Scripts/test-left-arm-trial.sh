@@ -6,9 +6,10 @@ trap 'rm -rf "$fixture_dir"' EXIT
 xcrun swiftc -swift-version 5 -parse-as-library \
   -module-cache-path /private/tmp/cerebro-swift-module-cache \
   "$repo_dir/Cerebro/ROBArmRoutinePlan.swift" \
+  "$repo_dir/Cerebro/ROBGhostMotionPlan.swift" \
   "$repo_dir/Cerebro/ROBRobotActionProtocol.swift" \
   "$repo_dir/Cerebro/ROBControllerArmApproval.swift" \
   "$repo_dir/Cerebro/ROBLeftArmTrial.swift" \
   "$repo_dir/Tests/ROBLeftArmTrialFixtureTests.swift" \
   -o "$fixture_dir/left-arm"
-"$fixture_dir/left-arm"
+"$fixture_dir/left-arm" "$repo_dir"

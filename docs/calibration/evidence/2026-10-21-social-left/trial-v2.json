@@ -43,7 +43,7 @@
   "maximumFeedbackAgeMs": 48.36598000074331,
   "peakCurrentJumpRaw": 1.46484375,
   "currentCutoff": 0,
-  "operatorObservation": "pending",
+  "operatorObservation": "Rob reported the test was running really well, then requested inward J6 centering and a higher human greeting using stronger J2 with the opposite J4 bend.",
   "runtimeOutcome": "Left arm waved twice and is holding in front. Gripper unchanged.",
   "commandedCameraTargets": {
     "lower": 6011,

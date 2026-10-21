@@ -1,0 +1,32 @@
+{
+  "recording": "left_ghost-7C1C9600-F2B2-44B2-9625-938A9F18C35E.csv",
+  "sha256": "e7a5070494c66a6164a04a37e669d39bbc2794c826a147865402f5e78022c2aa",
+  "archivedRecording": "ghost-center-higher.csv.gz",
+  "archiveSHA256": "93d876fdb962fcff3f509c7f461efab97f722c142bcca3176a07fef6240666e9",
+  "proposalFile": "ghost-center-higher.proposal.json",
+  "proposalSHA256": "d7d2784c801c7f02a6466db51921a8c813d8045baf7c044647645b7650998fa7",
+  "steps": 28,
+  "scheduledSeconds": 87.73824669578316,
+  "samples": 1882,
+  "elapsedSeconds": 100.26396462499906,
+  "finalPositionsRadians": [
+    -1.049788274305027,
+    0.9867927966158565,
+    -0.5998205765252387,
+    0.000545415391248228,
+    -0.5964117303299373,
+    -0.5994115149818026,
+    0.0
+  ],
+  "maximumFeedbackAgeMs": 145.36502466424855,
+  "peakCurrentJumpRaw": 1.53125,
+  "currentCutoff": 0,
+  "commandedCameraTargets": {
+    "lower": 6011,
+    "upper": 6306,
+    "panDegrees": 0
+  },
+  "runtimeOutcome": "Completed; left arm held at final higher handoff pose; jaws unchanged",
+  "operatorObservation": "pending",
+  "installedDebugLibrarySHA256": "73da81cf1cb214c34ef287a0714cff1d30ad72bdb99c3f56cc9f2371b2872d14"
+}

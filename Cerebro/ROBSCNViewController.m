@@ -30,6 +30,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 @property (readwrite, retain) SCNNode *leftControllerNode;
 @property (readwrite, retain) SCNNode *rightControllerNode;
 @property (readwrite, retain) SCNNode *robotNode;
+@property (readwrite, strong) ROBGhostGestureEditor *ghostGestureEditor;
 @property (readwrite, retain) SCNNode *leftTreadNode;
 @property (readwrite, retain) SCNNode *rightTreadNode;
 @property (readwrite, retain) SCNNode *neckPanNode;
@@ -77,6 +78,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
         self.robo_scnView = scnView;
         self.lastSender = @"No controller";
         [self loadScene];
+        self.ghostGestureEditor = [[ROBGhostGestureEditor alloc] initWithSceneView:scnView originalRobot:self.robotNode];
         self.cloudQueue = dispatch_queue_create("com.orbitusrobotics.Cerebro.live-rgb-cloud", DISPATCH_QUEUE_SERIAL);
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(receivedDepthCloudFrame:)
                                                      name:@"ROBDepthCloudFrame" object:nil];
@@ -96,11 +98,22 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 
 - (void)invalidate
 {
+    [self.ghostGestureEditor invalidate];
     [[NSNotificationCenter defaultCenter] removeObserver:self name:@"ROBDepthCloudFrame" object:nil];
     [self.freshnessTimer invalidate];
     self.freshnessTimer = nil;
     self.robo_scnView.playing = NO;
     self.robo_scnView.scene = nil;
+}
+
+- (NSView *)ghostGesturePanel
+{
+    return self.ghostGestureEditor.panelView;
+}
+
+- (void)reviewGhostPreset:(NSString *)name
+{
+    [self.ghostGestureEditor reviewPresetNamed:name];
 }
 
 - (SCNMaterial *)materialWithColor:(NSColor *)color emission:(CGFloat)emission
@@ -187,8 +200,8 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     cameraNode.camera.fieldOfView = 52;
     cameraNode.camera.wantsHDR = YES;
     cameraNode.camera.exposureOffset = -1;
-    cameraNode.position = SCNVector3Make(1.35, 1.25, -2.5);
-    [cameraNode lookAt:SCNVector3Make(0, 0.78, 0)];
+    cameraNode.position = SCNVector3Make(1.6, 1.45, -3.1);
+    [cameraNode lookAt:SCNVector3Make(0, 0.85, 0)];
     [scene.rootNode addChildNode:cameraNode];
 
     SCNNode *lightNode = [SCNNode node];
@@ -287,6 +300,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     [scene.rootNode addChildNode:self.rightControllerNode];
 
     self.robo_scnView.scene = scene;
+    self.robo_scnView.pointOfView = cameraNode;
     self.robo_scnView.allowsCameraControl = YES;
     self.robo_scnView.defaultCameraController.target = SCNVector3Make(0, 0.78, 0);
     self.robo_scnView.showsStatistics = YES;

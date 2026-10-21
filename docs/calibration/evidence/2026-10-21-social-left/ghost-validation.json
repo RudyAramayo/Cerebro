@@ -1,0 +1,18 @@
+{
+  "build": "signed macOS Debug",
+  "installedDebugLibrarySHA256": "73da81cf1cb214c34ef287a0714cff1d30ad72bdb99c3f56cc9f2371b2872d14",
+  "ghostEditorRender": "passed; captured scan with original and translucent blue URDF segments, offline execution disabled; embedded pane layout checked at 1100x700 and 1330x820",
+  "liveResizeObservation": "Rob confirmed it stays embedded and stable",
+  "modelPreview": "model-preview-v4.json",
+  "treadSweeps": "all added segments pass the model-only tread sweep; full-model warnings retained",
+  "currentUnits": "raw arm-joint readings; not calibrated grip force; cutoff remains zero/record-only",
+  "calibration": "camera-to-URDF work remains deferred in arm-motion-work-queue.md",
+  "checks": {
+    "ghostPlanCompilerIKCurrentParser": "passed",
+    "controllerApproval": "62 checks passed",
+    "gatewayAdmission": "passed",
+    "neckOutput": "passed",
+    "pairedArmRoutines": "passed on staged source, preserving unrelated working-tree edits",
+    "leftArmTrial": "passed latest 38-waypoint plan, exact ghost execution and recovery, grip/release, measured return, current cutoff and stale/session/camera/operator stops"
+  }
+}

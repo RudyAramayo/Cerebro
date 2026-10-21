@@ -3079,28 +3079,53 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
 - (void)showControllerInputDiagnostics:(NSNotification *)notification
 {
-    if (![[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey]) {
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:ROBDevelopmentModeDefaultsKey] &&
+        notification.userInfo[@"ghostPreset"] == nil) {
         return;
     }
     if (self.controllerDiagnosticsWindowController == nil) {
         SCNView *view = [[SCNView alloc] initWithFrame:NSMakeRect(0, 0, 960, 620)];
         NSWindow *window = [[NSWindow alloc]
-            initWithContentRect:NSMakeRect(0, 0, 960, 620)
+            initWithContentRect:NSMakeRect(0, 0, 1330, 820)
                       styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                                  NSWindowStyleMaskResizable | NSWindowStyleMaskMiniaturizable)
                         backing:NSBackingStoreBuffered
                           defer:NO];
         window.title = @"ROB Received VR Controller Diagnostics";
-        window.contentView = view;
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(controllerDiagnosticsWindowWillClose:)
                                                      name:NSWindowWillCloseNotification
                                                    object:window];
         self.controllerDiagnosticsWindowController = [[NSWindowController alloc] initWithWindow:window];
         self.scnViewController = [[ROBSCNViewController alloc] initWithRobo_scnView:view];
+        // Anchor both panes to the window. A root stack's fitting size can
+        // change with live HUD/status text and repeatedly resize the SCNView.
+        NSView *content = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 1330, 820)];
+        content.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+        NSView *panel = self.scnViewController.ghostGesturePanel;
+        view.translatesAutoresizingMaskIntoConstraints = NO;
+        panel.translatesAutoresizingMaskIntoConstraints = NO;
+        [content addSubview:view];
+        [content addSubview:panel];
+        [NSLayoutConstraint activateConstraints:@[
+            [view.leadingAnchor constraintEqualToAnchor:content.leadingAnchor],
+            [view.topAnchor constraintEqualToAnchor:content.topAnchor],
+            [view.bottomAnchor constraintEqualToAnchor:content.bottomAnchor],
+            [view.widthAnchor constraintGreaterThanOrEqualToConstant:650],
+            [view.trailingAnchor constraintEqualToAnchor:panel.leadingAnchor],
+            [panel.trailingAnchor constraintEqualToAnchor:content.trailingAnchor],
+            [panel.topAnchor constraintEqualToAnchor:content.topAnchor],
+            [panel.bottomAnchor constraintEqualToAnchor:content.bottomAnchor]
+        ]];
+        window.minSize = NSMakeSize(1020, 650);
+        window.contentView = content;
     }
     [NSApp activateIgnoringOtherApps:YES];
     [self.controllerDiagnosticsWindowController showWindow:self];
+    NSString *ghostPreset = notification.userInfo[@"ghostPreset"];
+    if ([ghostPreset isKindOfClass:NSString.class]) {
+        [self.scnViewController reviewGhostPreset:ghostPreset];
+    }
 }
 
 - (void)updateBaseIRFrontLeft:(NSInteger)frontLeft

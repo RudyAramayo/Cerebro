@@ -216,8 +216,81 @@ centered pan, lower 6011 and upper 6606. No jaw command was part of the wave.
 [Second-trial metadata and current archive](calibration/evidence/2026-10-21-social-left/trial-v2.json)
 retain the full phase sequence, hashes and installed signed-library identity.
 Current cutoff remains 0 (record only). The runtime reports the wave complete
-and holding in front; operator assessment of the new hand height, head-camera
-visibility and physical clearance is pending.
+and holding in front. Rob reported the test was running really well, then
+requested inward J6 centering and an above-shoulder wave using J2/J4.
+
+### Controller-input ghost gesture editor
+
+Open **Settings → Arms → Ghost gestures…**, or **Development → Open Controller
+Input Scene…**. The existing controller-input scene shows the captured robot
+with fresh left encoder estimates and a translucent blue proposed robot. The
+same segmented scan used to generate the pinned URDF collision surfaces is
+bundled as `ShadowPlanner/robot-visual-rig.json`; its SHA-256 must equal the
+surfaces' source hash before rendering. Other joints use the scan reference.
+The upright encoder mapping is an explicit prior, not a measured calibration.
+
+- **Center hand** adds J6 −0.10…−0.60 rad at the previously tested front pose.
+  The first completed trial placed the modeled hand near the torso centerline
+  (Y ≈ +0.034 m). Following operator feedback, the next candidate raises J2
+  through +0.70…+1.00 rad, predicting another 0.186 m of height to Z ≈ 0.933 m.
+- **Wave above shoulder** continues J2 to +1.20 and J4 −0.10…−0.60,
+  then waves J1 twice. The model predicts Z ≈ 1.220 m versus shoulder ≈ 0.947 m.
+  Centering/lowering reverses every raised waypoint before unwinding J6/J5/J3.
+- Select any named movable URDF joint for preview, or move the left-hand XYZ
+  target with fields/2 cm nudges. **Add pose**, **Save gesture**, **Review path**,
+  then play at ×4 or scrub the complete proposed route.
+- Physical custom execution currently supports only the left arm inside the
+  supervised front workspace. Other servos can be previewed/saved; execution
+  rejects unmapped axes. Custom paths return through their approved points to
+  center. Do not use these empty-arm gestures to carry a held object.
+- **Request execution of reviewed path** asks the authenticated iPhone/Vision
+  controller to approve the exact proposal hash. Keep that controller open.
+  Editing cancels this editor's pending request; changed feedback/session/model
+  requires review again. Requests bind URDF, scan geometry, mapping, initial
+  measured angles, all targets and durations. The gateway admits only the
+  currently authorized proposal ID and step; neither UI nor gateway callers
+  can replace its targets. Playback changes no actuator state.
+- **Stop + hold** cancels further targets immediately. **Review stopped return**
+  offers a newly approved reverse of the remembered path in the same session;
+  it never automatically resumes or invents a path after relaunch.
+- Each execution records seven measured arm currents/positions to CSV and the
+  exact proposal to a matching `.proposal.json`. **Replay current recording…**
+  animates measured positions, approved targets and the largest per-sample
+  current change, with all seven current values at the cursor. Incomplete or
+  non-finite data is rejected. Missing manifests hide the approved ghost.
+
+The total scheduled path is capped at 135 seconds, with a 170-second executor
+and 180-second controller execution limit for ghost operations and supervised
+left-arm travel. The longer handoff/wave route needs this allowance for camera
+preparation and settling. Jaw-only, other manual operation and approval-review
+deadlines are unchanged. Fresh camera,
+feedback/modes, ownership, session binding, leased motion and holds remain.
+Current cutoff **0 remains record-only**, not collision/force protection.
+
+[The new model-only sweep](calibration/evidence/2026-10-21-social-left/model-preview-v4.json)
+retains full-model warnings, including provisional neck/arm margins at the
+raised pose; tread-only sweeps pass 25 mm. The images and model do not certify
+physical clearance. Test J6 centering first, then the raised wave with direct
+supervision. Camera-to-URDF calibration remains queued after this workflow.
+
+The first controller-approved ghost **Centered handoff** completed 24 steps in
+89.098 s (75.715 s scheduled), recording 1,640 distinct seven-joint samples.
+Final J6 was −0.5870 rad within tolerance of −0.60; maximum feedback age was
+172.330 ms and peak current change 1.6171875 raw units. Jaws stayed unchanged.
+Rob reported that it looked great, requested more J2 height and a lower face
+camera, and confirmed the embedded controller window stayed stable while
+resizing. [The exact proposal and current archive](calibration/evidence/2026-10-21-social-left/trial-ghost-center.json)
+retain the hashes and signed-build identity. The next candidate adds the J2
+handoff lift and changes the interaction camera from upper 6606 to 6306
+(about 18° below compensated level), preserving lower 6011 and centered pan.
+The separate controller-approved higher handoff then completed all 28 steps in
+100.264 s (87.738 s scheduled), with 1,882 distinct current/position samples.
+Final J2/J6 were +0.986793/−0.599412 rad; maximum feedback age was 145.365 ms
+and peak raw current change 1.53125. The jaws stayed unchanged.
+[Its exact proposal and CSV archive](calibration/evidence/2026-10-21-social-left/trial-ghost-center-higher.json)
+retain the signed-build identity and hashes. Operator assessment of this higher
+pose/camera pairing is pending.
+
 
 ## Existing paired operations
 

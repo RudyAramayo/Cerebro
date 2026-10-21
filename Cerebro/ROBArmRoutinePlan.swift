@@ -82,9 +82,10 @@ enum ROBArmRoutinePlan {
 /// it is not a measured collision envelope or a verified driver calibration.
 enum ROBLeftArmInteractionPlan {
     static let approachIndex = 6
-    static let previousFrontIndex = 12
-    static let frontIndex = 18
-    static let waveIndex = 19
+    static let previousFrontIndex = 24
+    static let frontIndex = 28
+    static let waveRestIndex = 34
+    static let waveIndex = 35
     static let waypoints: [[Double]] = ROBArmRoutinePlan.rightWaypoints.map { $0.map { -$0 } } + [
         [-1.05, 0.60, -0.10, 0, 0, 0, 0],
         [-1.05, 0.60, -0.20, 0, 0, 0, 0],
@@ -98,7 +99,23 @@ enum ROBLeftArmInteractionPlan {
         [-1.05, 0.60, -0.60, 0, -0.40, 0, 0],
         [-1.05, 0.60, -0.60, 0, -0.50, 0, 0],
         [-1.05, 0.60, -0.60, 0, -0.60, 0, 0],
-        [-0.90, 0.60, -0.60, 0, -0.60, 0, 0],
+        [-1.05, 0.60, -0.60, 0, -0.60, -0.10, 0],
+        [-1.05, 0.60, -0.60, 0, -0.60, -0.20, 0],
+        [-1.05, 0.60, -0.60, 0, -0.60, -0.30, 0],
+        [-1.05, 0.60, -0.60, 0, -0.60, -0.40, 0],
+        [-1.05, 0.60, -0.60, 0, -0.60, -0.50, 0],
+        [-1.05, 0.60, -0.60, 0, -0.60, -0.60, 0],
+        [-1.05, 0.70, -0.60, 0, -0.60, -0.60, 0],
+        [-1.05, 0.80, -0.60, 0, -0.60, -0.60, 0],
+        [-1.05, 0.90, -0.60, 0, -0.60, -0.60, 0],
+        [-1.05, 1.00, -0.60, 0, -0.60, -0.60, 0],
+        [-1.05, 1.00, -0.60, -0.10, -0.60, -0.60, 0],
+        [-1.05, 1.00, -0.60, -0.20, -0.60, -0.60, 0],
+        [-1.05, 1.05, -0.60, -0.30, -0.60, -0.60, 0],
+        [-1.05, 1.10, -0.60, -0.40, -0.60, -0.60, 0],
+        [-1.05, 1.15, -0.60, -0.50, -0.60, -0.60, 0],
+        [-1.05, 1.20, -0.60, -0.60, -0.60, -0.60, 0],
+        [-0.90, 1.20, -0.60, -0.60, -0.60, -0.60, 0],
     ]
 
     static func target(index: Int) -> [Double]? {
@@ -109,21 +126,24 @@ enum ROBLeftArmInteractionPlan {
         ROBArmRoutinePlan.progress(positions, waypoints: waypoints)
     }
 
-    static func route(from positions: [Double], hanging: Bool) -> [Int]? {
+    static func route(from positions: [Double], hanging: Bool, waving: Bool = false) -> [Int]? {
         guard let p = progress(positions) else { return nil }
         if hanging {
             let next = Int(ceil(p)) - 1
             return next < 0 ? [] : Array(stride(from: next, through: 0, by: -1))
         }
-        if p > Double(frontIndex) { return [frontIndex] }
+        let destination = waving ? waveRestIndex : frontIndex
+        if p > Double(destination) {
+            return Array(stride(from: Int(ceil(p)) - 1, through: destination, by: -1))
+        }
         let next = Int(floor(p)) + 1
-        return next > frontIndex ? [] : Array(next ... frontIndex)
+        return next > destination ? [] : Array(next ... destination)
     }
 
     /// Jaw-only actions may also finish the existing low-front handoff. They
     /// never reposition a held object to the new pose.
     static func stationaryFrontTarget(_ positions: [Double]) -> [Double]? {
-        for index in [frontIndex, previousFrontIndex, approachIndex] {
+        for index in [frontIndex, previousFrontIndex, 18, 12, approachIndex] {
             if ROBArmRoutinePlan.near(positions, waypoints[index]) { return waypoints[index] }
         }
         return nil

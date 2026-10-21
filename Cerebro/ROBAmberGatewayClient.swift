@@ -775,6 +775,23 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         sendArmCommand(type: "mode_query", arm: arm)
     }
 
+    /// Targets come only from the single current step of an accepted immutable
+    /// ghost proposal. Neither the UI nor the caller supplies a raw vector.
+    @nonobjc func sendApprovedLeftGestureStep(proposalID: UUID, index: Int, duration: Double,
+                                             expectedSessionGeneration: UInt64) -> UInt64 {
+        guard Thread.isMainThread,
+              let target = ROBLeftArmTrial.shared.approvedGestureTarget(id: proposalID, index: index,
+                seconds: duration, generation: expectedSessionGeneration),
+              let sample = telemetry(forArm: "right"), sample.effectiveSampleAgeMilliseconds <= 250,
+              sample.effectiveGripperFeedbackAgeMilliseconds <= 250,
+              sample.statuses.count == 7, sample.statuses.allSatisfy({ $0.intValue == 2 }),
+              modes(forArm: "right").count == 7, modes(forArm: "right").allSatisfy({ $0.intValue == 2 }),
+              let minimum = ROBArmRoutinePlan.duration(from: sample.positionsRadians.map(\.doubleValue), to: target),
+              duration.isFinite, duration >= minimum - 0.05, duration <= 5 else { return 0 }
+        return sendVendorLeasedTrajectory(arm: "right", positionsRadians: target.map(NSNumber.init(value:)),
+            duration: duration, leaseMilliseconds: 1500, expectedSessionGeneration: expectedSessionGeneration)
+    }
+
     @discardableResult public func activateArm(_ arm: String) -> UInt64 {
         sendArmCommand(type: "activate", arm: arm)
     }

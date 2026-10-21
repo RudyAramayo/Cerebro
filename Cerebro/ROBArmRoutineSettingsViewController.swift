@@ -38,8 +38,8 @@ import AppKit
         teaching.spacing = 10
         let leftTitle = NSTextField(labelWithString: "Left arm — supervised trial")
         leftTitle.font = .boldSystemFont(ofSize: 15)
-        let leftHelp = NSTextField(wrappingLabelWithString: "Camera tilts slightly down from level. Wave and Present stage J3/J5 through 17° to 34° of rotation, only after reaching the tested front pose. Watch clearance; these new angles need a supervised trial. Lower undoes those rotations before descending. For an object: Present / open → place object → Grip object → support it → Release to hand → Lower arm. Each button sends one controller approval. Grip/release keep the arm stationary. Never close on a person's hand.")
-        let leftButtons = NSStackView(views: [button("Wave left", #selector(leftWave)),
+        let leftHelp = NSTextField(wrappingLabelWithString: "Wave left opens the blue-ghost review in the controller input scene. The handoff pose bends J6 inward; the wave adds J2 lift and the opposite J4 bend above the shoulder. New angles need a supervised trial. Request execution of a reviewed path, then approve on the phone/controller. For objects: Present / open → place object → Grip → support it → Release → Lower. Grip/release stay stationary; never close on a person's hand.")
+        let leftButtons = NSStackView(views: [button("Wave left", #selector(leftWave)), button("Ghost gestures…", #selector(openGhost)),
             button("Present / open", #selector(leftPrepare)), button("Grip object", #selector(leftGrip)),
             button("Release to hand", #selector(leftRelease)), button("Lower arm", #selector(leftRelax))])
         leftButtons.spacing = 8
@@ -99,7 +99,12 @@ import AppKit
         }
         UserDefaults.standard.set(value, forKey: ROBLeftArmTrial.currentLimitKey)
     }
-    @objc private func leftWave() { run("left_wave") }
+    @objc private func leftWave() { showGhost("wave") }
+    @objc private func openGhost() { showGhost("center") }
+    private func showGhost(_ preset: String) {
+        NotificationCenter.default.post(name: Notification.Name("ROBShowControllerInputDiagnostics"), object: self,
+            userInfo: ["ghostPreset": preset])
+    }
     @objc private func leftPrepare() { run("left_prepare") }
     @objc private func leftGrip() { run("left_grip") }
     @objc private func leftRelease() { run("left_release") }

@@ -85,6 +85,7 @@ final class ROBAmberGatewayClient: NSObject {
         return id
     }
     func queryMode(forArm arm: String) -> UInt64 { ack("mode_query", arm) }
+    func sendApprovedLeftGestureStep(proposalID: UUID, index: Int, duration: Double, expectedSessionGeneration: UInt64) -> UInt64 { 0 }
     func enterPositionMode(forArm arm: String) -> UInt64 {
         mode[arm] = 2
         modeFeedbackReadyAt[arm] = ProcessInfo.processInfo.systemUptime + modeFeedbackDelay
