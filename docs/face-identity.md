@@ -14,7 +14,9 @@ head positions. Enrollment completes after 24 accepted samples. Cancelling an
 incomplete enrollment deletes its partial profile and samples.
 
 The People window shows accepted and remaining photo counts, live guidance, and
-the enrolled lighting range. Visual and throttled spoken prompts distinguish no
+the enrolled lighting range. Visual guidance updates continuously; each spoken
+correction is given at most once per requested session and corrections are
+spaced at least 30 seconds apart. Prompts distinguish no
 face, more than one face, too far away (**stand closer**), too dark,
 overexposed, blurred or obstructed, misaligned, and repeated-pose conditions.
 Select any completed profile and choose **Refine Selected Identity** to add eight
@@ -59,70 +61,76 @@ with separate enrollment and validation footage from ROB's actual camera before
 recognition is treated as reliable. Names enter scene context for only 15
 seconds and camera-derived identity remains untrusted sensor data.
 
-Lighting adaptation has separate conservative developer controls:
-`ROBFaceIdentity.maximumAdaptiveCosineDistance` (0.46),
-`ROBFaceIdentity.maximumPossibleMatchDistance` (0.52),
-and `ROBFaceIdentity.maximumRefinementConsentDistance` (0.52). Possible-match guidance
-never publishes an identity, and none of these thresholds grants authority.
+`ROBFaceIdentity.maximumPossibleMatchDistance` (0.52) allows only a spatially
+continuous, already confirmed track to bridge a temporary weak match.
+`ROBFaceIdentity.maximumRefinementConsentDistance` (0.52) controls ambiguous
+matches during a requested enrollment. Neither threshold establishes a new
+identity or grants authority.
 
 The gallery records its backend identifier and stores normalized 512-dimensional
-embeddings alongside retained, consented crops.
+embeddings alongside retained, consented crops. Ordinary recognition is
+read-only with respect to face samples: it never appends images or embeddings,
+including background lighting or pose adaptation. New face samples are stored
+only during an explicitly requested enrollment or refinement session. Existing
+profiles, names, roles, controller bindings, and samples remain intact.
 
-After a confident recognition, Cerebro can add at most one high-quality, diverse
-lighting or pose sample per minute under the person's original consent. A
-short-lived, recently confirmed identity may also bridge a gradual lighting
-change after three consistent frames. This does not make a weak match count as
-recognized. The original 24 enrollment samples are retained and later adaptive
-samples use a bounded rolling gallery, so refinement can continue over time
-without unbounded storage growth.
+Recognition accepts quality-gated faces at least 60 pixels wide and high, with
+an encodable crop of at least 80 pixels. This replaces a fixed fraction-of-frame
+area cutoff that discarded usable faces farther from high-resolution cameras.
+Three strong, spatially consistent matches establish identity. Brief unusable
+frames do not erase this evidence, but a gap of more than two seconds, a
+different identity, or a disjoint face starts confirmation again.
 
 Three strong AdaFace matches also seed a Vision pixel tracker on that face.
 While the tracker remains fresh and above 0.42 confidence, its 10 Hz bounding
 box keeps ROB's opt-in head tracking centered on the same recognized person and
 keeps the name in short-lived scene context between the slower embedding
-checks. Face detections are spatially associated with the tracked box so a
-small or briefly soft face does not immediately erase identity. A clear
+checks. Face detections are spatially associated with the tracked box, with bounded
+position and size changes and rejection of ambiguous crossing faces, so a
+small or briefly soft face does not immediately erase identity. The last
+strongly confirmed embedding provides an additional in-memory appearance
+reference during lighting changes; it is never written as a new face sample. A clear
 conflicting embedding, prolonged spatial ambiguity, tracker loss, model or
 enrollment changes, or 120 seconds without strong biometric revalidation drops
 the identity latch. This continuity is still untrusted personalization data
 and never authorizes motion or any other privileged action.
 
-If a face is close to a known profile but not yet confident, ROB asks the person
-to stand closer, face an even light, hold still, and look toward the camera
-instead of immediately treating them as new. A truly unfamiliar stable face
-still enters the consent-first friend flow.
+Ordinary recognition stays quiet when a face is unknown, small, blurred, or
+uncertain. It does not ask anyone to hold still, face the camera, identify
+themselves, or enroll. Camera-position and pose guidance is reserved for an
+explicitly requested enrollment or refinement.
 
 ## Conversation and hands-free friend enrollment
 
-Recognition now publishes an always-on conversation cue, independent of an
-authorized autonomy session. ROB greets a newly recalled person by name once,
-then observes a five-minute per-person greeting cooldown. The same short-lived
-recognized names are included in cloud and local conversation context as
-untrusted personalization data; they never grant administrator or robot-control
-authority.
+Recognition publishes a conversation cue independent of an authorized autonomy
+session. ROB greets a newly recalled person by name once, then observes a
+five-minute per-person greeting cooldown. Recognized names enter cloud and local
+conversation context as untrusted personalization data, never as authority.
 
-When recognition is enabled and an unfamiliar face remains stable for several
-quality-gated frames, ROB offers hands-free friend enrollment. No image is
-persisted before consent. ROB asks whether it may remember the visitor's face
-locally and what name to use, and reminds children to get a grown-up's permission.
-Replies such as **“Yes, my name is Rudy”**, **“Sure, I'm Rudy”**, and **“Go ahead,
-call me Rudy”** express the intent without a required wake word or exact command.
-Consent and names can arrive in either order, in separate replies, or across
-word-by-word fragments. After ROB asks for a name, **“Rudy”** is enough. Repeated
-or overlapping introduction fragments do not become part of the stored label.
-A name without an affirmative answer triggers a separate confirmation question. A
-decline stores nothing. After consent, ROB creates only a `knownPerson` profile,
-binds capture to the face that gave permission, collects the same 24 varied
-samples, gives spoken pose prompts, and announces completion. A different
-person stepping into the camera is rejected rather than enrolled.
-**“ROB, cancel enrollment”** stops the capture and deletes its
-partial profile and samples. Unknown-person invitations have a five-minute
-cooldown so ROB does not repeatedly ask the same nearby audience.
+Start hands-free enrollment with **“ROB, remember this person”** or
+**“ROB, remember me”**. Ordinary introductions such as **“I'm Rudy”**, agreement
+such as **“yes”**, and merely seeing an unfamiliar face never start this flow.
+Negated, quoted, or hypothetical remember phrases do not start enrollment.
+A fresh, single, quality-gated face must be visible when the command arrives;
+otherwise ROB asks the requester to bring one person into view and repeat the
+command. Only an in-memory embedding is held before the requested capture.
+
+**“Remember this person”** asks for that person's consent and name, including a
+reminder about a grown-up's permission for children. **“Remember me”** expresses
+self-consent and asks for a name if missing; **“Remember me, my name is Rudy”**
+provides both. Once the request is active, consent and names may arrive in
+either order, as natural replies or word-by-word fragments. A name alone does
+not provide consent for an operator's request to remember someone else.
+Repeated transcripts do not repeat the same pending question. A decline saves
+nothing. After consent, ROB creates only a `knownPerson` profile and binds
+capture to the face present at the request. A different person stepping into
+view is rejected. **“ROB, cancel enrollment”** stops capture and deletes its
+partial profile and samples.
 
 Each relevant reply refreshes a two-minute idle timeout, with a ten-minute
 maximum for one invitation. Follow-up questions wait for two seconds without a
 new fragment and are not repeated for duplicate transcripts. Declines,
-uncertainty, expiration, and a new invitation cannot reuse earlier agreement;
+uncertainty, expiration, and a new command cannot reuse earlier agreement;
 unrelated requests end the exchange. Uncertain or hypothetical statements prompt
 clarification instead of enrollment. **“Stop enrollment”**, **“Don't remember
 me”**, and **“I've changed my mind”** also cancel hands-free capture.
@@ -184,8 +192,17 @@ swiftc Cerebro/ROBFaceIdentityGallery.swift Tests/ROBFaceIdentityGalleryFixtureT
 /tmp/rob-face-gallery-tests
 swiftc Cerebro/ROBFaceConversationPolicy.swift Tests/ROBFaceConversationPolicyFixtureTests.swift -o /tmp/rob-face-conversation-tests
 /tmp/rob-face-conversation-tests
+swiftc Cerebro/ROBFaceTrackingPolicy.swift Tests/ROBFaceTrackingPolicyFixtureTests.swift -o /tmp/rob-face-tracking-tests
+/tmp/rob-face-tracking-tests
 python3 Tests/ROBFaceIdentityStaticTests.py
+python3 Tests/ROBFaceRecognitionServiceRuntimeTests.py
 ```
+
+The runtime fixtures use synthetic Vision observations, a fake encoder, and an
+isolated encrypted gallery. They check quiet recognition, distant faces, identity
+continuity and conflicts, command/consent gating, requested capture and
+cancellation, existing-profile refinement, and correction prompt suppression.
+They never open a camera or connect to robot hardware.
 
 Production calibration should measure false accepts and false rejects using
 unknown visitors, look-alikes, different lighting, glasses, masks, printed

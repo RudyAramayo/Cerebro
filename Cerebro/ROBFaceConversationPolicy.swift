@@ -2,7 +2,7 @@
 //  ROBFaceConversationPolicy.swift
 //  Cerebro
 //
-//  Invitation-scoped intent and speech-fragment memory for friend enrollment.
+//  Command-initiated intent and speech-fragment memory for friend enrollment.
 //
 
 import Foundation
@@ -31,6 +31,10 @@ struct ROBFaceConversationPolicy {
     private var pendingName: String?
     private var lastPrompt: ROBFaceFriendConversationAction?
 
+    static func isRememberCommand(_ transcript: String) -> Bool {
+        rememberCommand(in: words(in: transcript)) != nil
+    }
+
     mutating func beginInvitation(at now: TimeInterval) {
         reset()
         invitationExpiresAtUptime = now + Self.invitationIdleLifetime
@@ -51,13 +55,27 @@ struct ROBFaceConversationPolicy {
         at now: TimeInterval
     ) -> ROBFaceFriendConversationAction {
         expireInvitationIfNeeded(at: now)
-        let words = Self.words(in: transcript)
+        var words = Self.words(in: transcript)
         guard !words.isEmpty else { return .none }
 
         if enrollmentActive {
             return Self.declines(words) ? .cancelEnrollment : .none
         }
-        guard invitationExpiresAtUptime != nil else { return .none }
+        let command = Self.rememberCommand(in: words)
+        if invitationExpiresAtUptime == nil {
+            guard let command else { return .none }
+            beginInvitation(at: now)
+            // An operator asking to remember someone else is not that
+            // person's consent. A self-directed request is explicit consent.
+            consentConfirmed = command.isSelfRequest
+        }
+        if let command {
+            words = command.remainder
+            if words.isEmpty {
+                refreshDeadline(at: now)
+                return promptOnce(consentConfirmed ? .askForName : .clarifyConsent)
+            }
+        }
 
         let combined = Self.merging(fragments, with: words)
         // A current refusal overrides remembered agreement. Negated or
@@ -149,6 +167,25 @@ struct ROBFaceConversationPolicy {
 
     private static func withoutAddress(_ words: [String]) -> [String] {
         Array(words.drop(while: { ["rob", "robbie", "robot", "hey", "hello", "hi", "well"].contains($0) }))
+    }
+
+    private static func rememberCommand(in words: [String]) -> (isSelfRequest: Bool, remainder: [String])? {
+        var reply = withoutAddress(words)
+        if reply.first == "please" { reply.removeFirst() }
+        for prefix in [["can", "you"], ["could", "you"], ["would", "you"]] {
+            if reply.starts(with: prefix) { reply.removeFirst(prefix.count); break }
+        }
+        if reply.first == "please" { reply.removeFirst() }
+        guard !declines(reply), !isUncertain(reply) else { return nil }
+        for phrase in ["remember this person", "remember me", "remember my face", "save my face", "store my face", "enroll me"] {
+            let prefix = phrase.components(separatedBy: " ")
+            if reply.starts(with: prefix) {
+                var remainder = Array(reply.dropFirst(prefix.count))
+                if remainder.first == "as" { remainder = ["call", "me"] + remainder.dropFirst() }
+                return (phrase != "remember this person", remainder)
+            }
+        }
+        return nil
     }
 
     private static func declines(_ words: [String]) -> Bool {

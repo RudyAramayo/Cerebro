@@ -25,6 +25,7 @@ tracking_policy_header = text("ROBPersonTrackingPolicy.h")
 tracking_policy_source = text("ROBPersonTrackingPolicy.c")
 tracking_preferences = text("ROBPersonTrackingPreferences.h")
 gemini = text("GeminiRoboticsProtocol.swift")
+ai = text("ROBAI.swift")
 project = (ROOT / "Cerebro.xcodeproj" / "project.pbxproj").read_text(encoding="utf-8")
 
 assert "AES.GCM.seal" in gallery and "AES.GCM.open" in gallery
@@ -43,17 +44,23 @@ assert "ROBFaceIdentity.embeddingModel" in service
 assert "AdaFace-R18-WebFace4M.mlmodelc" in encoder
 assert "AdaFace-R18-VGGFace2.mlmodelc" in encoder
 assert "MLModel(contentsOf:" in encoder
-assert "pendingCandidateFrames >= 3" in service
-assert "pendingAdaptiveCandidateFrames >= 3" in service
+assert "recognitionConfirmation.observe" in service
 assert "VNTrackObjectRequest" in service and "VNSequenceRequestHandler" in service
 assert "trackingFrameInterval: TimeInterval = 0.1" in service
 assert "minimumTrackingConfidence: Float = 0.42" in service
 assert "spatiallyAssociatedFace" in service
 assert "robFaceIdentityTrackingDidUpdate" in service
 assert "best.second - best.distance >= margin" in service
-assert "maximumAdaptiveCosineDistance" in service
-assert "adaptiveContinuityLifetime" in service
-assert "maybeAppendAdaptiveSample" in service
+assert "identityContinuityLifetime" in service
+assert "referenceEmbedding" in service
+assert "maybeAppendAdaptiveSample" not in service
+recognition = service.split("private func processRecognitionFaces(", 1)[1].split(
+    "private func startEnrollmentUnlocked(", 1
+)[0]
+assert "gallery.append" not in recognition and "jpegData" not in recognition
+assert "postConversationCue" not in recognition
+assert "clearFriendInvitation()" not in recognition
+assert "face.boundingBox.width * source.extent.width >= 60" in recognition
 assert "existingCompletedProfile(matching: consentingFace)" in service
 assert "ROBFaceEnrollmentMatchPolicy.match" in service
 assert "namedProfiles" not in service
@@ -62,15 +69,16 @@ assert "Refine Selected Identity" in service
 assert 'key: "move-closer"' in service and 'key: "too-dark"' in service
 assert "averageLuminance(of:" in service
 assert "robFaceIdentityConversationCue" in service
-assert "noteUnknownFace" in service and "pendingUnknownFrames >= 5" in service
+assert "noteUnknownFace" not in service
 assert "spoken-consent-maker-faire" in service and "role: .knownPerson" in service
 assert "handsFreeEnrollmentReferenceEmbeddings" in service
 assert "I can only enroll the person who gave permission" in service
 assert "noteConversationTranscript" in service
-assert "adult, or your grown-up says it's okay" in service
+assert "grown-up's permission" in service
 assert "cancelled enrollment and deleted those face samples" in service
 assert "friendConversation.action" in service
-assert "friendConversation.beginInvitation(at: now)" in service
+assert "ROBFaceConversationPolicy.isRememberCommand(transcript)" in service
+assert "now - candidate.observedAtUptime" in service
 assert "friendConversation.expireInvitationIfNeeded(at: now)" in service
 assert "scheduleFriendPromptIfNeeded" in service
 assert "Please say, ROB" not in service
@@ -192,6 +200,9 @@ assert "noteConversationTranscript:text" in main
 assert "noteConversationTranscript:textInput" in main
 assert "faceIdentityConversationContract" in gemini
 assert "naturally acknowledge or greet that person by name once" in gemini
+assert "Never offer enrollment or ask anyone to hold still" in gemini
+for marker in ("private static func generateWithAppleFoundationModels(", "private static func mlxPrompt("):
+    assert "GeminiRoboticsConfiguration.faceIdentityConversationContract" in ai.rsplit(marker, 1)[1].split("private static func", 1)[0]
 
 for source in (
     "ROBFaceIdentityGallery.swift",
@@ -199,6 +210,7 @@ for source in (
     "ROBFaceIdentityWindowController.swift",
     "ROBFaceEmbeddingModel.swift",
     "ROBFaceConversationPolicy.swift",
+    "ROBFaceTrackingPolicy.swift",
     "ROBPersonTrackingPolicy.c",
 ):
     assert f"{source} in Sources" in project

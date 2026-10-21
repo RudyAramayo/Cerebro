@@ -161,6 +161,7 @@
 		C0A132022F4C013200000001 /* ROBFaceIdentityWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A132012F4C013200000001 /* ROBFaceIdentityWindowController.swift */; };
 		C0A133022F4C013300000001 /* ROBFaceEmbeddingModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A133012F4C013300000001 /* ROBFaceEmbeddingModel.swift */; };
 		C0A134022F4C013400000001 /* ROBFaceConversationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A134012F4C013400000001 /* ROBFaceConversationPolicy.swift */; };
+		C0A135022F4C013500000001 /* ROBFaceTrackingPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A135012F4C013500000001 /* ROBFaceTrackingPolicy.swift */; };
 		D4E3000E2F00000100000001 /* CameraOverlayManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E3000D2F00000100000001 /* CameraOverlayManager.swift */; };
 		C03600022F36000100000001 /* ROBInsta360DiagnosticsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03600012F36000100000001 /* ROBInsta360DiagnosticsWindowController.swift */; };
 		C03600122F36000100000001 /* ROBInsta360CameraService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03600112F36000100000001 /* ROBInsta360CameraService.swift */; };
@@ -419,6 +420,7 @@
 		C0A132012F4C013200000001 /* ROBFaceIdentityWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBFaceIdentityWindowController.swift; sourceTree = "<group>"; };
 		C0A133012F4C013300000001 /* ROBFaceEmbeddingModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBFaceEmbeddingModel.swift; sourceTree = "<group>"; };
 		C0A134012F4C013400000001 /* ROBFaceConversationPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBFaceConversationPolicy.swift; sourceTree = "<group>"; };
+		C0A135012F4C013500000001 /* ROBFaceTrackingPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBFaceTrackingPolicy.swift; sourceTree = "<group>"; };
 		D4E3000D2F00000100000001 /* CameraOverlayManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraOverlayManager.swift; sourceTree = "<group>"; };
 		C03600012F36000100000001 /* ROBInsta360DiagnosticsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBInsta360DiagnosticsWindowController.swift; sourceTree = "<group>"; };
 		C03600112F36000100000001 /* ROBInsta360CameraService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBInsta360CameraService.swift; sourceTree = "<group>"; };
@@ -667,6 +669,7 @@
 				C0A132012F4C013200000001 /* ROBFaceIdentityWindowController.swift */,
 				C0A133012F4C013300000001 /* ROBFaceEmbeddingModel.swift */,
 				C0A134012F4C013400000001 /* ROBFaceConversationPolicy.swift */,
+				C0A135012F4C013500000001 /* ROBFaceTrackingPolicy.swift */,
 				D4E3000D2F00000100000001 /* CameraOverlayManager.swift */,
 				C03600012F36000100000001 /* ROBInsta360DiagnosticsWindowController.swift */,
 				C03600112F36000100000001 /* ROBInsta360CameraService.swift */,
@@ -1088,6 +1091,7 @@
 				C0A132022F4C013200000001 /* ROBFaceIdentityWindowController.swift in Sources */,
 				C0A133022F4C013300000001 /* ROBFaceEmbeddingModel.swift in Sources */,
 				C0A134022F4C013400000001 /* ROBFaceConversationPolicy.swift in Sources */,
+				C0A135022F4C013500000001 /* ROBFaceTrackingPolicy.swift in Sources */,
 				D4E3000E2F00000100000001 /* CameraOverlayManager.swift in Sources */,
 				C03600022F36000100000001 /* ROBInsta360DiagnosticsWindowController.swift in Sources */,
 				C03600122F36000100000001 /* ROBInsta360CameraService.swift in Sources */,

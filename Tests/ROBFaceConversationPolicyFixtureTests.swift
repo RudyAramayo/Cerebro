@@ -3,6 +3,34 @@ import Foundation
 @main
 enum ROBFaceConversationPolicyFixtureTests {
     static func main() {
+        for transcript in [
+            "My name is Rudy", "Yes, I'm Rudy", "Rudy", "I agree", "hello",
+            "Don't remember this person", "Never remember me", "Maybe remember me",
+            "If I say remember this person", "He said remember me", "What does remember me mean?",
+            "Remember me if I say yes", "I used to say remember me"
+        ] {
+            var idle = ROBFaceConversationPolicy()
+            expect(!ROBFaceConversationPolicy.isRememberCommand(transcript), "Not a command: \(transcript)")
+            expect(idle.action(for: transcript, at: 0) == .none, "No unsolicited enrollment: \(transcript)")
+            expect(idle.invitationExpiresAtUptime == nil, "No pending invitation: \(transcript)")
+        }
+        for command in ["Remember this person", "ROB, please remember this person", "Could you remember this person?"] {
+            var requested = ROBFaceConversationPolicy()
+            expect(requested.action(for: command, at: 0) == .clarifyConsent, "Operator request needs visitor consent")
+            expect(requested.action(for: "my name is Rudy", at: 1) == .proposeName("Rudy"), "Name alone is not visitor consent")
+            expect(requested.action(for: "yes", at: 2) == .enroll("Rudy"), "Requested enrollment follows explicit consent")
+        }
+        var requested = ROBFaceConversationPolicy()
+        expect(requested.action(for: "ROB, remember me, my name is Rudy", at: 0) == .enroll("Rudy"), "Self request includes consent")
+        requested.reset()
+        expect(requested.action(for: "Remember me", at: 1) == .askForName, "Self request asks for missing name")
+        expect(requested.action(for: "Remember me", at: 2) == .continueListening, "Duplicate command does not repeat the prompt")
+        expect(requested.action(for: "Rudy", at: 3) == .enroll("Rudy"), "Command name may arrive later")
+        requested.reset()
+        expect(requested.action(for: "Remember me as Rudy", at: 4) == .enroll("Rudy"), "As introduces a name, not part of the label")
+        requested.reset()
+        expect(requested.action(for: "Remember this person as Rudy", at: 5) == .proposeName("Rudy"), "Operator's label still requires visitor consent")
+
         for reply in [
             "ROB, yes, remember me. My name is Rudy.",
             "Yes, My name is Rudy",
