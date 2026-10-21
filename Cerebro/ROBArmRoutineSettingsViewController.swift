@@ -4,6 +4,7 @@ import AppKit
     private let startup = NSButton(checkboxWithTitle: "Calibrate arms on startup", target: nil, action: nil)
     private let state = NSTextField(wrappingLabelWithString: "")
     private let inspectionPan = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let currentLimit = NSTextField(string: "0")
 
     override func loadView() {
         view = NSView(frame: NSRect(x: 0, y: 0, width: 680, height: 580))
@@ -35,15 +36,45 @@ import AppKit
             button("Replay last", #selector(replay)), button("Front-arm greeting", #selector(wave))])
         let speechTest = button("Test spoken arm warning", #selector(testArmSpeech))
         teaching.spacing = 10
-        let stack = NSStackView(views: [title, startup, inspectionRow, explanation, commands, buttons, teaching, speechTest, state, limitation])
-        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 20
-        stack.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(stack)
+        let leftTitle = NSTextField(labelWithString: "Left arm — supervised trial")
+        leftTitle.font = .boldSystemFont(ofSize: 15)
+        let leftHelp = NSTextField(wrappingLabelWithString: "Wave leaves the empty left arm in front. For an object: Present / open → put the object between the jaws → Grip object → support it in your hand → Release to hand → Lower arm. Each button sends one controller approval. Grip and release keep the arm stationary. Never close on a person's hand.")
+        let leftButtons = NSStackView(views: [button("Wave left", #selector(leftWave)),
+            button("Present / open", #selector(leftPrepare)), button("Grip object", #selector(leftGrip)),
+            button("Release to hand", #selector(leftRelease)), button("Lower arm", #selector(leftRelax))])
+        leftButtons.spacing = 8
+        currentLimit.stringValue = String(UserDefaults.standard.double(forKey: ROBLeftArmTrial.currentLimitKey))
+        currentLimit.widthAnchor.constraint(equalToConstant: 75).isActive = true
+        currentLimit.target = self; currentLimit.action = #selector(changeCurrentLimit)
+        currentLimit.setAccessibilityLabel("Left-arm current jump stop threshold in raw units")
+        let currentRow = NSStackView(views: [NSTextField(labelWithString: "Current jump stop:"), currentLimit,
+            NSTextField(labelWithString: "raw units; 0 = record only"), button("Show recording", #selector(showLeftRecording)),
+            button("Stop + hold", #selector(stop))])
+        currentRow.spacing = 8
+        let recordingHelp = NSTextField(wrappingLabelWithString: "Current and position are recorded automatically. Set a current jump threshold after reviewing the raw values; it requests Stop + hold on a sample-to-sample jump. This is not a calibrated force limit.")
+        recordingHelp.textColor = .secondaryLabelColor
+        let stack = NSStackView(views: [title, leftTitle, leftHelp, leftButtons, currentRow, recordingHelp, state,
+            startup, inspectionRow, explanation, commands, buttons, teaching, speechTest, limitation])
+        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 14
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        let document = ROBArmSettingsDocumentView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = document; view.addSubview(scroll)
+        stack.translatesAutoresizingMaskIntoConstraints = false; document.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
-            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
+            scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: view.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 24),
+            stack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -24),
+            stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 28),
+            stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -24),
         ])
-        for label in [explanation, commands, state, limitation] { label.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        for label in [explanation, commands, state, limitation, leftHelp, recordingHelp] { label.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: Notification.Name("ROBArmRoutineDidChange"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: Notification.Name("ROBControllerArmApprovalDidChange"), object: nil)
         refresh()
@@ -52,14 +83,30 @@ import AppKit
     private func button(_ title: String, _ action: Selector) -> NSButton { NSButton(title: title, target: self, action: action) }
     @objc private func changeStartup() { UserDefaults.standard.set(startup.state == .on, forKey: ROBArmRoutinePlan.startupDefaultsKey) }
     @objc private func changeInspectionPan() {
-        guard !ROBArmRoutineCoordinator.shared.isRunning, !ROBControllerArmApproval.shared.isPending else { refresh(); return }
+        guard !ROBArmRoutineCoordinator.shared.ownsPhysicalMotion, !ROBControllerArmApproval.shared.isPending else { refresh(); return }
         UserDefaults.standard.set(inspectionPan.selectedItem?.representedObject as? NSNumber ?? 0,
                                   forKey: ROBArmRoutinePlan.inspectionPanDefaultsKey)
     }
     @objc private func refresh() {
         state.stringValue = ROBArmRoutineCoordinator.shared.status
         inspectionPan.selectItem(at: [0.0, -10, 10].firstIndex(of: ROBArmRoutinePlan.inspectionPanDegrees()) ?? 0)
-        inspectionPan.isEnabled = !ROBArmRoutineCoordinator.shared.isRunning && !ROBControllerArmApproval.shared.isPending
+        inspectionPan.isEnabled = !ROBArmRoutineCoordinator.shared.ownsPhysicalMotion && !ROBControllerArmApproval.shared.isPending
+        currentLimit.isEnabled = inspectionPan.isEnabled
+    }
+    @objc private func changeCurrentLimit() {
+        guard currentLimit.isEnabled, let value = Double(currentLimit.stringValue), value.isFinite, value >= 0 else {
+            currentLimit.stringValue = String(UserDefaults.standard.double(forKey: ROBLeftArmTrial.currentLimitKey)); return
+        }
+        UserDefaults.standard.set(value, forKey: ROBLeftArmTrial.currentLimitKey)
+    }
+    @objc private func leftWave() { run("left_wave") }
+    @objc private func leftPrepare() { run("left_prepare") }
+    @objc private func leftGrip() { run("left_grip") }
+    @objc private func leftRelease() { run("left_release") }
+    @objc private func leftRelax() { run("left_relax") }
+    @objc private func showLeftRecording() {
+        let path = ROBLeftArmTrial.shared.lastRecordingPath
+        if !path.isEmpty { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
     }
     @objc private func runStartup() { run("startup") }
     @objc private func prepareArms() { run("prepare") }
@@ -75,8 +122,14 @@ import AppKit
         _ = ROBAmberGestureExecutor.shared.requestPriorityHold()
     }
     private func run(_ command: String) {
+        view.window?.makeFirstResponder(nil)
+        changeCurrentLimit()
         ROBArmRoutineCoordinator.shared.performCommand(command, target: "") { [weak self] result in
             self?.state.stringValue = result["detail"] as? String ?? "Arm routine ended"
         }
     }
+}
+
+private final class ROBArmSettingsDocumentView: NSView {
+    override var isFlipped: Bool { true }
 }

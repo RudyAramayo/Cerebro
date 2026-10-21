@@ -65,6 +65,15 @@ import Foundation
         return peerIsFresh(peer) && now().timeIntervalSince(p.started!) < 120
     }
 
+    /// Exact one-shot scope for the operator-supervised physical-left trial.
+    func authorizesLeftArmTrial(_ summary: String) -> Bool {
+        guard let p = pending, let started = p.started, let peer = p.peer,
+              p.action == "arm_operation", p.arguments["operation"] as? String == "manual",
+              p.arguments["arm"] as? String == "left", p.summary == summary,
+              peerIsFresh(peer), (0..<120).contains(now().timeIntervalSince(started)) else { return false }
+        return true
+    }
+
     /// Only an active approval whose on-controller wording explicitly covers
     /// operator-supervised travel may replace the semantic route inspection.
     /// Never persist or infer this scope from a model's request or a preference.

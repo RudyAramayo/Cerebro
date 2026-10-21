@@ -143,7 +143,7 @@ private final class SessionPool: @unchecked Sendable {
         let arm = tools.first { $0["name"] as? String == "arm_control" }!
         let properties = (arm["parameters"] as! [String: Any])["properties"] as! [String: Any]
         let commands = (properties["command"] as! [String: Any])["enum"] as! [String]
-        try expect(Set(commands) == ["status", "prepare", "grab", "hold", "relax", "wave", "teach", "replay", "stop"], "OpenAI arm commands diverged from Gemini")
+        try expect(Set(commands) == ["status", "prepare", "grab", "hold", "relax", "wave", "teach", "replay", "stop", "left_wave", "left_prepare", "left_grip", "left_release", "left_relax"], "OpenAI arm commands diverged from Gemini")
         try expect((session["instructions"] as? String)?.contains(GeminiRoboticsConfiguration.embodiedMotionContract) == true, "OpenAI missed shared motion constraints")
         let loiter = tools.first { $0["name"] as? String == "loiter_control" }!
         try expect((loiter["parameters"] as! [String: Any])["type"] as? String == "object", "Google schema was not converted")

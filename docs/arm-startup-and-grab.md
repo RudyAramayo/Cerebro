@@ -1,5 +1,85 @@
 # Arm startup, relax and front-pose grasp attempts
 
+## Simple physical-left trials
+
+Settings → Arms now starts with **Wave left**, **Present / open**, **Grip object**,
+**Release to hand**, **Lower arm**, and **Stop + hold**. Each operation needs one
+approval on the authenticated iPhone or Vision Pro. The summary describes the
+whole operation; no per-waypoint or extra spoken confirmation is needed.
+
+- **Wave left** uses the existing hanging/front route, then goes 6 → 5 → 6 → 5 → 6.
+  It leaves the empty arm in front without changing the jaws.
+- **Present / open** brings the left arm forward, calibrates only its empty jaw
+  if needed, then requests opening. Support any held object before using it.
+- Put an object between the jaws, clear your fingers, and approve **Grip object**.
+  It closes at the existing intensity 10, with no arm travel, reopening or
+  recalibration. The arm stays in front while you check retention.
+- Support the object in the receiver's hand and approve **Release to hand**.
+  It opens the calibrated jaw in place. Release is never timed automatically.
+- After removing the object, **Lower arm** follows the reverse taught route and
+  verifies hanging before deactivation. These controls do not grip human hands.
+
+Physical left routes exclusively to R11 / gateway `right` / UDP 26002. Both arms
+are reserved during a trial to prevent competing motion; the physical right arm
+receives no commands. First arm travel in a new gateway session requires left
+hanging at encoder zero, with the operator confirming the physical pose.
+
+These trials use direct operator supervision instead of semantic camera collision
+or jaw estimates. Live camera freshness, stationary body/neck, per-device motor
+feedback, verified modes, existing route/timing bounds and motion leases remain
+required. They retain the existing segment speed, not a newly validated faster
+speed. Grip/open acknowledgements are **accepted_unverified**, never measured
+force, measured jaw completion, or proof of object retention.
+
+Every operation records distinct fresh position/current samples to
+`~/Library/Application Support/Cerebro/LeftArmTrials/*.csv`. **Show recording**
+reveals the latest file. CSV contains elapsed time, source sequence, physical
+and gateway sides, joint number, position, raw current, signed current change,
+feedback age and operation phase. The tool result includes the file, sample
+count, peak absolute current change and configured cutoff.
+
+**Current jump stop** defaults to 0 (record only). After reviewing real raw
+values, the operator may set a positive threshold. The exact threshold is frozen
+into the controller approval. A larger absolute sample-to-sample change on any
+joint cancels the remaining steps and requests a left-arm hold, retaining the
+recording. This app-side monitor uses the available telemetry; it is not a
+calibrated collision detector or force limit and cannot prevent initial impact.
+The existing hold acknowledgement does not verify physical stopping.
+
+Voice/tool equivalents are `left_wave`, `left_prepare`, `left_grip`,
+`left_release` and `left_relax` through `arm_control`. Direct commands include
+“wave your left arm”, “open your left gripper”, “hold this with your left hand”,
+“return the object” and “lower your left arm”.
+
+Validation: `bash Scripts/test-left-arm-trial.sh` runs the production executor
+and real approval broker with isolated fake motors/camera/controller. It covers
+approval rejection, correct side, wave/return, calibration reuse, stationary
+grip/release, current recording/cutoff, stale feedback, session replacement,
+camera loss and Stop. Fixtures and a successful build do not establish a live
+robot trial; use the real controller approval and report its actual outcome.
+
+### 2026-10-21 installation and trial request
+
+The signed macOS Debug build passed, was installed at `/Applications/Cerebro.app`,
+and passed `codesign --verify --deep --strict`. The installed build was launched
+and the Arms controls were checked visually. Installed debug-library SHA-256:
+`72f64b68406de81a4cb5fc0b6f7ab218405caccecf15248430446ddb6074325f`.
+
+The left-arm executor fixtures, 60 controller-approval checks, Gemini protocol,
+both realtime-provider adapter fixtures and show-rehearsal fixtures passed.
+The paired-arm suite passed against the staged sources. The original working
+tree's paired-arm suite still fails its occluded-jaw assertion because of the
+operator's pre-existing disabled camera checks; the same failure was reproduced
+on the task's starting sources. Those local edits were preserved outside this
+change's commit.
+
+Pressing **Wave left** in the installed app requested real controller approval.
+It ended with **“Connect Vision Pro or iPhone and enable Action Approvals. No arm
+operation was started.”** No motor trial or live current recording occurred;
+actual waving, object retention and handoff remain unverified on hardware.
+
+## Existing paired operations
+
 Settings → Arms contains **Calibrate arms on startup** (off until selected),
 Run startup now, Prepare to grab, Relax arms and Stop + hold. Enabling startup
 requests one controller-approved attempt after launch or system wake. Failure ends that attempt;

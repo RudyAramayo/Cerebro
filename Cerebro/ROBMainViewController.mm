@@ -1493,7 +1493,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         if (![command isKindOfClass:NSString.class] || ![object isKindOfClass:NSString.class] ||
             ![clip isKindOfClass:NSString.class] || clip.length > 36 ||
             ![[NSSet setWithArray:call.arguments.allKeys] isSubsetOfSet:allowed] || object.length > 160 ||
-            ![@[@"prepare", @"grab", @"hold", @"relax", @"status", @"wave", @"teach", @"replay"] containsObject:command] ||
+            ![@[@"prepare", @"grab", @"hold", @"relax", @"status", @"wave", @"teach", @"replay", @"left_wave", @"left_prepare", @"left_grip", @"left_release", @"left_relax"] containsObject:command] ||
             (call.arguments[@"clip_id"] && ![command isEqual:@"replay"]) ||
             (call.arguments[@"object"] && ![@[@"grab", @"hold", @"teach"] containsObject:command])) {
             [robAI sendToolResponseWithCallID:call.callID name:call.name result:

@@ -548,7 +548,7 @@ struct GeminiRoboticsProtocolFixtureTests {
         let armProperties = (arm["parameters"] as! [String: Any])["properties"] as! [String: Any]
         try expect(Set(armProperties.keys) == ["command", "object", "clip_id"], "Raw motor parameters escaped the executor")
         let commands = (armProperties["command"] as! [String: Any])["enum"] as! [String]
-        try expect(Set(commands) == ["status", "prepare", "grab", "hold", "relax", "wave", "teach", "replay", "stop"], "Arm vocabulary drifted")
+        try expect(Set(commands) == ["status", "prepare", "grab", "hold", "relax", "wave", "teach", "replay", "stop", "left_wave", "left_prepare", "left_grip", "left_release", "left_relax"], "Arm vocabulary drifted")
         let loiter = try require(declarations.first { $0["name"] as? String == "loiter_control" }, "Missing loiter declaration")
         try expect(loiter["behavior"] as? String == "BLOCKING", "Loiter decisions must wait for local validation")
         let loiterParameters = try require(loiter["parameters"] as? [String: Any], "Missing loiter schema")

@@ -93,6 +93,23 @@ final class ROBAmberGatewayClient: NSObject {
             check(executed == 1, "Acceptance replay after completion must not restart")
         }
 
+        // Physical-left trials require the exact accepted manual operation,
+        // side and summary. They do not inherit another arm's approval.
+        for arm in ["left", "right", "both"] {
+            let b = broker()
+            var request: ROBRobotActionMessage?, done: ((NSDictionary) -> Void)?
+            b.send = { message, _, _ in if message.kind == .actionRequest { request = message }; return true }
+            _ = b.receive(hello, device: device, session: session)
+            b.request(operation: "manual", arm: arm, summary: "Exact left trial",
+                execute: { done = $0 }, cancel: {}, completion: { _ in })
+            check(!b.authorizesLeftArmTrial("Exact left trial"), "Pending trial cannot move")
+            _ = b.receive(reply(request!), device: device, session: session)
+            check(b.authorizesLeftArmTrial("Exact left trial") == (arm == "left"), "Trial scope must bind physical side")
+            check(!b.authorizesLeftArmTrial("Different trial"), "Trial scope must bind complete summary")
+            done?(["status": "completed"])
+            check(!b.authorizesLeftArmTrial("Exact left trial"), "Completed trial cannot authorize another movement")
+        }
+
         // Poor-view travel is covered only by the wording the operator actually
         // approved, never by a pending, old, ordinary or expired approval.
         for supervised in [false, true] {

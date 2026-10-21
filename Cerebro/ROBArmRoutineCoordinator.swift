@@ -13,7 +13,7 @@ enum ROBArmRoutineError: LocalizedError {
     private(set) var isRunning = false
     private(set) var status = "Arms idle"
     private(set) var inspectionPanDegrees = 0.0
-    var ownsPhysicalMotion: Bool { (isRunning && activeCommand != "teach") || ROBShowMotionCoordinator.shared.isRunning }
+    var ownsPhysicalMotion: Bool { (isRunning && activeCommand != "teach") || ROBShowMotionCoordinator.shared.isRunning || ROBLeftArmTrial.shared.isRunning }
     var cameraDemand: ((Bool) -> Void)?
     var prepareView: (() -> Bool)?
     var viewIsStationary: (() -> Bool)?
@@ -45,8 +45,11 @@ enum ROBArmRoutineError: LocalizedError {
     private let arms = ["left", "right"] // gateway keys; physical sides convert at the boundary
 
     func capabilitySnapshot() -> NSDictionary {
-        ["status": isRunning ? "running" : "idle", "detail": status,
-         "commands": ["status", "prepare", "grab", "hold", "relax", "wave", "teach", "replay", "stop"],
+        ["status": isRunning || ROBLeftArmTrial.shared.isRunning ? "running" : "idle", "detail": status,
+         "commands": ["status", "prepare", "grab", "hold", "relax", "wave", "teach", "replay", "stop"] + ROBLeftArmTrial.commands,
+         "left_arm_trial": ["status": ROBLeftArmTrial.shared.status, "running": ROBLeftArmTrial.shared.isRunning,
+             "current_recording": ROBLeftArmTrial.shared.lastRecordingPath,
+             "instructions": "left_wave moves only the physical left arm. left_prepare presents and opens empty jaws. left_grip closes on an operator-positioned object without arm travel. left_release opens after the receiver supports it. left_relax lowers the empty arm. Each needs one controller approval. Never grip a human hand."],
          "gateway_ready": gateway.isReady(), "camera": "main face RGB-D",
          "camera_ready": vision.fresh, "camera_detail": vision.readinessDescription,
          "motion_owner": "local coordinator; paired arms and bounded segments",
@@ -80,6 +83,15 @@ enum ROBArmRoutineError: LocalizedError {
         guard value.range(of: "\\b(?:not|don't|don’t|stop|wait|never|unless|until|if|explain|quote|say)\\b", options: .regularExpression) == nil,
               !value.contains("\""), !value.contains("‘"), !value.contains("'") else { return nil }
         let prefix = "^(?:(?:rob|robbie|robot)[, ]+)?(?:(?:please|can you|could you|would you|i want you to) )?(?:please )?"
+        for (pattern, command) in [
+            ("wave (?:with )?(?:your |the )?left arm", "left_wave"),
+            ("(?:present|prepare|open) (?:your |the )?left (?:arm|gripper)", "left_prepare"),
+            ("(?:grip|grab|hold) (?:this|the object) (?:with|in) (?:your |the )?left (?:arm|gripper|hand)", "left_grip"),
+            ("(?:release|return) (?:the object|this|it)(?: from (?:your |the )?left (?:gripper|hand))?", "left_release"),
+            ("(?:lower|relax) (?:your |the )?left arm", "left_relax")
+        ] {
+            if value.range(of: prefix + pattern + "[.!?]*$", options: .regularExpression) != nil { return command }
+        }
         if value.range(of: prefix + "wave(?: (?:at|to) .+)?[.!?]*$", options: .regularExpression) != nil { return "wave" }
         if value.range(of: prefix + "(?:copy (?:me|my (?:pose|movement))|learn (?:this|my) (?:pose|movement)|record (?:this|my) (?:pose|movement))[.!?]*$", options: .regularExpression) != nil { return "teach" }
         if value.range(of: prefix + "(?:replay|repeat|imitate) (?:that|the|my|last|this) (?:pose|movement)[.!?]*$", options: .regularExpression) != nil { return "replay" }
@@ -110,6 +122,14 @@ enum ROBArmRoutineError: LocalizedError {
 
     func performCommand(_ command: String, target: String, completion: @escaping (NSDictionary) -> Void) {
         precondition(Thread.isMainThread)
+        if ROBLeftArmTrial.commands.contains(command) {
+            ROBLeftArmTrial.shared.statusChanged = { [weak self] in self?.setStatus($0) }
+            ROBLeftArmTrial.shared.perform(command, completion: completion)
+            return
+        }
+        guard !ROBLeftArmTrial.shared.isRunning else {
+            completion(["status": "busy", "detail": "Left-arm trial is running; use Stop + hold first."]); return
+        }
         guard !ROBShowMotionCoordinator.shared.isRunning else {
             completion(["status": "busy", "detail": "The show rehearsal owns motion. Use Stop + hold first."]); return
         }
@@ -265,6 +285,7 @@ enum ROBArmRoutineError: LocalizedError {
 
     func cancel(reason: String) {
         ROBControllerArmApproval.shared.cancel(reason: reason)
+        ROBLeftArmTrial.shared.cancel(reason: reason)
         cancelAuthorized(reason: reason)
     }
 

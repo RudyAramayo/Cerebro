@@ -11,6 +11,7 @@ final class ROBShowMotionCoordinator {
 // between dispatch, cancellation, telemetry and leases remain exercised.
 extension Notification.Name {
     static let ROBAmberGatewayCommandDidComplete = Notification.Name("FixtureAck")
+    static let ROBAmberGatewayTelemetryDidUpdate = Notification.Name("FixtureTelemetry")
 }
 enum ROBControlLiveSessionRegistry {
     static func isActiveOperator(controllerID: UUID, sessionID: UUID) -> Bool { true }
@@ -34,6 +35,8 @@ final class ROBAmberGatewayTunnel {
     func connect(host: String? = nil) {}
 }
 final class ROBAmberGatewayTelemetry {
+    let arm = "right"
+    var currents = Array(repeating: NSNumber(value: 0.2), count: 7)
     let sequence: UInt64
     let positionsRadians: [NSNumber]
     let statuses: [NSNumber]
@@ -228,6 +231,11 @@ final class ROBArmRoutineVision {
             precondition(ROBArmRoutineCoordinator.commandForText(text) == nil, text)
         }
         precondition(ROBArmRoutineCoordinator.commandForText("Rob, wave at Sam") == "wave")
+        precondition(ROBArmRoutineCoordinator.commandForText("wave your left arm") == "left_wave")
+        precondition(ROBArmRoutineCoordinator.commandForText("open your left gripper") == "left_prepare")
+        precondition(ROBArmRoutineCoordinator.commandForText("hold this with your left hand") == "left_grip")
+        precondition(ROBArmRoutineCoordinator.commandForText("return the object") == "left_release")
+        precondition(ROBArmRoutineCoordinator.commandForText("lower your left arm") == "left_relax")
         precondition(ROBArmRoutineCoordinator.commandForText("copy my pose") == "teach")
         precondition(ROBArmRoutineCoordinator.commandForText("replay that movement") == "replay")
         precondition(ROBArmRoutineCoordinator.commandForText("hold this") == "hold")
