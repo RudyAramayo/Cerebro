@@ -46,9 +46,14 @@ enum ROBArmRoutinePlan {
     static func progress(_ positions: [Double], physicalLeft: Bool) -> Double? {
         guard positions.count == 7, positions.allSatisfy(\.isFinite) else { return nil }
         let q = positions.map { physicalLeft ? -$0 : $0 }
-        for index in rightWaypoints.indices where near(q, rightWaypoints[index]) { return Double(index) }
-        for index in 0 ..< rightWaypoints.count - 1 {
-            let a = rightWaypoints[index], b = rightWaypoints[index + 1]
+        return progress(q, waypoints: rightWaypoints)
+    }
+
+    fileprivate static func progress(_ q: [Double], waypoints: [[Double]]) -> Double? {
+        guard q.count == 7, q.allSatisfy(\.isFinite) else { return nil }
+        for index in waypoints.indices where near(q, waypoints[index]) { return Double(index) }
+        for index in 0 ..< waypoints.count - 1 {
+            let a = waypoints[index], b = waypoints[index + 1]
             let delta = zip(a, b).map { $1 - $0 }
             let square = delta.reduce(0) { $0 + $1 * $1 }
             let dot = zip(zip(q, a), delta).reduce(0.0) { $0 + ($1.0.0 - $1.0.1) * $1.1 }
@@ -67,6 +72,54 @@ enum ROBArmRoutinePlan {
         }
         let next = Int(floor(p)) + 1
         return next >= rightWaypoints.count ? [] : Array(next ..< rightWaypoints.count)
+    }
+}
+
+/// Candidate extension for supervised physical-LEFT interaction trials only.
+/// Keep the exercised approach intact. Rotate J3, then J5, in 0.1-rad steps
+/// only after reaching its front endpoint. Always unwind before descending.
+/// URDF preview uses the recorded upright offset and positive driver signs;
+/// it is not a measured collision envelope or a verified driver calibration.
+enum ROBLeftArmInteractionPlan {
+    static let approachIndex = 6
+    static let frontIndex = 12
+    static let waveIndex = 13
+    static let waypoints: [[Double]] = ROBArmRoutinePlan.rightWaypoints.map { $0.map { -$0 } } + [
+        [-1.05, 0.60, -0.10, 0, 0, 0, 0],
+        [-1.05, 0.60, -0.20, 0, 0, 0, 0],
+        [-1.05, 0.60, -0.30, 0, 0, 0, 0],
+        [-1.05, 0.60, -0.30, 0, -0.10, 0, 0],
+        [-1.05, 0.60, -0.30, 0, -0.20, 0, 0],
+        [-1.05, 0.60, -0.30, 0, -0.30, 0, 0],
+        [-0.90, 0.60, -0.30, 0, -0.30, 0, 0],
+    ]
+
+    static func target(index: Int) -> [Double]? {
+        waypoints.indices.contains(index) ? waypoints[index] : nil
+    }
+
+    static func progress(_ positions: [Double]) -> Double? {
+        ROBArmRoutinePlan.progress(positions, waypoints: waypoints)
+    }
+
+    static func route(from positions: [Double], hanging: Bool) -> [Int]? {
+        guard let p = progress(positions) else { return nil }
+        if hanging {
+            let next = Int(ceil(p)) - 1
+            return next < 0 ? [] : Array(stride(from: next, through: 0, by: -1))
+        }
+        if p > Double(frontIndex) { return [frontIndex] }
+        let next = Int(floor(p)) + 1
+        return next > frontIndex ? [] : Array(next ... frontIndex)
+    }
+
+    /// Jaw-only actions may also finish the existing low-front handoff. They
+    /// never reposition a held object to the new pose.
+    static func stationaryFrontTarget(_ positions: [Double]) -> [Double]? {
+        for index in [frontIndex, approachIndex] {
+            if ROBArmRoutinePlan.near(positions, waypoints[index]) { return waypoints[index] }
+        }
+        return nil
     }
 }
 

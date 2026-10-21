@@ -1,0 +1,42 @@
+{
+  "recording": "/Users/rob/Library/Application Support/Cerebro/LeftArmTrials/left_wave-78C6EA83-354F-4D18-A0BA-9A03E88EFFF7.csv",
+  "sha256": "519652af989e1ff5de83e5d6f08a8acdb06a7f34721839a01ec60b3c2ce2eaf8",
+  "samples": 1152,
+  "elapsedSeconds": 59.413037291666114,
+  "phases": [
+    "preflight",
+    "camera preparation",
+    "waypoint 1",
+    "waypoint 2",
+    "waypoint 3",
+    "waypoint 4",
+    "waypoint 5",
+    "waypoint 6",
+    "waypoint 7",
+    "waypoint 8",
+    "waypoint 9",
+    "waypoint 10",
+    "waypoint 11",
+    "waypoint 12",
+    "waypoint 13",
+    "waypoint 12",
+    "waypoint 13",
+    "waypoint 12"
+  ],
+  "finalPositionsRadians": [
+    -1.03342581256758,
+    0.5999569303730508,
+    -0.2995694036430892,
+    0.0,
+    -0.2999784651865254,
+    0.000272707695624114,
+    0.0
+  ],
+  "maximumFeedbackAgeMs": 35.86827133290089,
+  "peakCurrentJumpRaw": 1.5859375,
+  "currentCutoff": 0,
+  "operatorObservation": "Rob confirmed better position and clear of the treads; requested more J3/J5 rotation and a slightly downward head camera because the gripper was centered in the belly camera but absent from the head camera.",
+  "runtimeOutcome": "Left arm waved twice and is holding in front. Gripper unchanged.",
+  "archivedRecording": "left-wave.csv.gz",
+  "archiveSHA256": "1059b2617061381edecaa9503bdbe0ef0a61f50b4de97d637dbb495ec0b16fc4"
+}

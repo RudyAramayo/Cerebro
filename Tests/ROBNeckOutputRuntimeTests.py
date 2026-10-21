@@ -44,6 +44,8 @@ selectors = [
     "advanceSafeNeckStartupForGeneration:", "cancelSafeNeckStartup",
     "prepareNeckForPersonFollow", "prepareNeckForArmInspection",
     "prepareNeckForArmInspectionWithPanDegrees:", "isNeckReadyForArmInspectionWithPanDegrees:",
+    "prepareNeckForArmInteraction", "isNeckReadyForArmInteraction",
+    "stageNeckForArmViewWithPanDegrees:", "isNeckReadyForArmViewWithPanDegrees:",
     "torso_controllerPassthrough_head_pan:",
 ]
 methods = [method(selector) for selector in selectors]
@@ -223,6 +225,30 @@ int main(void) { @autoreleasepool {
         assert(![inspection isNeckReadyForArmInspectionWithPanDegrees:invalid.doubleValue]);
     }
     assert(neckPackets(inspection).count == trimPackets);
+
+    // Left-arm interactions use the existing compensated forward camera,
+    // retaining center-first staging, ramp settling and manual priority.
+    inspection = activeNeck();
+    inspection.commandedUpperNeckTiltTarget = 5650;
+    assert(![inspection prepareNeckForArmInteraction]);
+    assert(![inspection isNeckReadyForArmInteraction]);
+    settle(inspection);
+    assert(![inspection prepareNeckForArmInteraction]);
+    assert(inspection.commandedLowerNeckTiltTarget == ROBNeckSafetyUprightLowerTarget);
+    assert(inspection.commandedUpperNeckTiltTarget == ROBNeckSafetyUprightUpperTarget);
+    assert(![inspection isNeckReadyForArmInteraction]);
+    render(inspection, 6000, 6011, 5650, NO);
+    assert(inspection.commandedUpperNeckTiltTarget == ROBNeckSafetyUprightUpperTarget);
+    settle(inspection);
+    assert([inspection prepareNeckForArmInteraction]);
+    assert([inspection isNeckReadyForArmInteraction]);
+    assert(![inspection isNeckReadyForArmInspectionWithPanDegrees:0]);
+    NSUInteger interactionPackets = neckPackets(inspection).count;
+    assert(![inspection stageNeckForArmViewWithPanDegrees:0 upperTarget:9000]);
+    assert(![inspection isNeckReadyForArmViewWithPanDegrees:0 upperTarget:9000]);
+    assert(neckPackets(inspection).count == interactionPackets);
+    render(inspection, 6000, 6011, 6807, YES);
+    assert(![inspection prepareNeckForArmInteraction]);
 
     // Each startup phase reaches the wire once despite passive renders and
     // face detections throughout the staged movement.

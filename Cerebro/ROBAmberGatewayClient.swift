@@ -745,18 +745,22 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         }
     }
 
-    /// Fixed, taught hanging/front corridor only. No caller-supplied raw joint
+    /// Fixed hanging/front corridors only. The left trial alone may use its
+    /// supervised front-only J3/J5 extension. No caller-supplied raw joint
     /// vectors, no model-reference promotion, and no replay across reconnects.
     /// The coordinator owns camera clearance and the physical hanging datum.
     @nonobjc func sendRoutineWaypoint(arm: String, index: Int, duration: Double, expectedSessionGeneration: UInt64) -> UInt64 {
+        let leftTrial = ROBLeftArmTrial.shared.authorizesTaughtWaypoint(
+            arm: arm, expectedSessionGeneration: expectedSessionGeneration)
         guard Thread.isMainThread,
-              ROBArmRoutineCoordinator.shared.isRunning || ROBLeftArmTrial.shared.authorizesTaughtWaypoint(
-                arm: arm, expectedSessionGeneration: expectedSessionGeneration),
+              ROBArmRoutineCoordinator.shared.isRunning || leftTrial,
               ["left", "right"].contains(arm),
-              let target = ROBArmRoutinePlan.target(index: index, physicalLeft: arm == "right"),
+              let target = leftTrial ? ROBLeftArmInteractionPlan.target(index: index)
+                : ROBArmRoutinePlan.target(index: index, physicalLeft: arm == "right"),
               let sample = telemetry(forArm: arm), sample.effectiveSampleAgeMilliseconds <= 250,
               sample.effectiveGripperFeedbackAgeMilliseconds <= 250,
-              let progress = ROBArmRoutinePlan.progress(sample.positionsRadians.map(\.doubleValue), physicalLeft: arm == "right"),
+              let progress = leftTrial ? ROBLeftArmInteractionPlan.progress(sample.positionsRadians.map(\.doubleValue))
+                : ROBArmRoutinePlan.progress(sample.positionsRadians.map(\.doubleValue), physicalLeft: arm == "right"),
               abs(progress - Double(index)) <= 1.05,
               let minimumDuration = ROBArmRoutinePlan.duration(from: sample.positionsRadians.map(\.doubleValue), to: target),
               duration.isFinite, duration >= minimumDuration - 0.05, duration <= 5,

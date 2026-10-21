@@ -289,6 +289,10 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 /// Camera framing trim only, bounded to +/-10 calibrated pan degrees.
 - (BOOL)prepareNeckForArmInspectionWithPanDegrees:(double)panDegrees;
 - (BOOL)isNeckReadyForArmInspectionWithPanDegrees:(double)panDegrees;
+/// Forward-facing, centered camera for supervised left-arm social gestures.
+/// Uses the existing upright clearance and compensated camera-level target.
+- (BOOL)prepareNeckForArmInteraction;
+- (BOOL)isNeckReadyForArmInteraction;
 /// Typed ingress for autonomous neck gestures. Pan is calibrated degrees;
 /// lower/upper are Maestro command targets because those axes do not yet have
 /// verified degree calibration. Acceptance reports a commanded (unverified)

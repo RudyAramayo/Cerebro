@@ -1,6 +1,7 @@
 import AppKit
 
-/// Small operator-supervised trials on the existing hanging/front corridor.
+/// Operator-supervised trials using the taught approach and a small front-only
+/// J3/J5 extension. New extension angles still require physical commissioning.
 /// Physical left is Amber R11, gateway `right`; never dispatch to L10 here.
 @objcMembers final class ROBLeftArmTrial: NSObject {
     static let shared = ROBLeftArmTrial()
@@ -78,13 +79,13 @@ import AppKit
         }
         let action: String
         switch command {
-        case "left_wave": action = "Move the empty LEFT arm along the taught route to front, then wave twice between waypoints 5 and 6; leave it in front. Jaws unchanged."
-        case "left_prepare": action = "Bring the LEFT arm to front; calibrate its EMPTY gripper only if needed, then open it. Support any object first and keep fingers clear during calibration."
+        case "left_wave": action = "Move the empty LEFT arm along the tested route to front, then try the new front pose: J3 to -0.30 rad, followed by J5 to -0.30 rad, each in 0.10-rad steps. Wave twice with J1 between -0.90 and -1.05 rad; leave it at the new front pose. Jaws unchanged."
+        case "left_prepare": action = "Bring the empty LEFT arm along the tested route to front, then try J3 -0.30 rad followed by J5 -0.30 rad in 0.10-rad steps. Calibrate its EMPTY gripper only if needed, then open it. Keep fingers clear during calibration."
         case "left_grip": action = "Keep the LEFT arm stationary in front and close its already-calibrated gripper at intensity 10 around the presented OBJECT. Confirm the object is between the open jaws and all fingers are clear. Never grip a person's hand. No reopening, calibration or arm travel."
         case "left_release": action = "Keep the LEFT arm stationary in front and open its already-calibrated gripper to return the object. Confirm the receiver supports the object before approving. No calibration or arm travel."
-        default: action = "Return the empty LEFT arm along the taught route to hanging, then deactivate it. Remove any object first."
+        default: action = "Return the empty LEFT arm: undo any new J5 and J3 rotations at the front pose FIRST, then reverse the tested route to hanging and deactivate it. Remove any object first."
         }
-        let notice = " Right arm receives no commands. Confirm LEFT arm physically hangs at encoder zero for the first movement of a new session. Watch clearance using the live camera and direct view; Stop + hold remains available. Camera object estimates do not veto this supervised trial."
+        let notice = " Camera faces forward at the existing upright neck pose. New J3/J5 angles are a supervised trial, not a verified collision-free route; watch their direction and tread/cable clearance. Right arm receives no commands. Confirm LEFT arm physically hangs at encoder zero for the first movement of a new session. Watch the live camera and direct view; Stop + hold remains available. Camera object estimates do not veto this supervised trial."
         let current = limit == 0 ? " Current recording only; automatic current cutoff is not configured."
             : " Request hold if any joint's current changes by more than \(limit) raw units between samples; this is not a calibrated force limit."
         let approvedSummary = action + notice + current
@@ -216,7 +217,7 @@ import AppKit
         generation = connectedGeneration
         let q = try measured().positionsRadians.map(\.doubleValue)
         let stationaryJaw = command == "left_grip" || command == "left_release"
-        guard let route = ROBArmRoutinePlan.route(from: q, physicalLeft: true, hanging: command == "left_relax") else {
+        guard let route = ROBLeftArmInteractionPlan.route(from: q, hanging: command == "left_relax") else {
             throw ROBArmRoutineError.blocked("Left arm is outside the taught route; no movement sent.")
         }
         if stationaryJaw {
@@ -249,7 +250,9 @@ import AppKit
             // Position mode and one matching encoder read do not prove that
             // an earlier trajectory has settled. Require distinct stable reads.
             var settler = ROBArmRoutineSettler()
-            let front = ROBArmRoutinePlan.target(index: 6, physicalLeft: true)!
+            guard let front = ROBLeftArmInteractionPlan.stationaryFrontTarget(try measured().positionsRadians.map(\.doubleValue)) else {
+                throw ROBArmRoutineError.blocked("Left arm drifted from the front pose; no jaw command sent.")
+            }
             try await wait(2) {
                 guard let sample = try? self.measured() else { return false }
                 return settler.observe(sequence: sample.sequence, positions: sample.positionsRadians.map(\.doubleValue),
@@ -267,7 +270,8 @@ import AppKit
             try await wait(2) { let modes = self.gateway.modes(forArm: self.arm); return modes.count == 7 && modes.allSatisfy({ $0.intValue == 0 }) }
             return ["status": "completed", "measured": true, "detail": "Left arm reached hanging and is inactive."]
         case "left_wave":
-            try await move([5, 6, 5, 6])
+            try await move([ROBLeftArmInteractionPlan.waveIndex, ROBLeftArmInteractionPlan.frontIndex,
+                ROBLeftArmInteractionPlan.waveIndex, ROBLeftArmInteractionPlan.frontIndex])
             return ["status": "completed", "measured": true, "detail": "Left arm waved twice and is holding in front. Gripper unchanged."]
         default:
             try verifyFront()
@@ -298,7 +302,7 @@ import AppKit
         let sample = try measured()
         guard modes.count == 7, modes.allSatisfy({ $0.intValue == 2 }), sample.statuses.count == 7,
               sample.statuses.allSatisfy({ $0.intValue == 2 }),
-              ROBArmRoutinePlan.near(sample.positionsRadians.map(\.doubleValue), ROBArmRoutinePlan.target(index: 6, physicalLeft: true)!) else {
+              ROBLeftArmInteractionPlan.stationaryFrontTarget(sample.positionsRadians.map(\.doubleValue)) != nil else {
             throw ROBArmRoutineError.blocked("Gripper action requires the left arm stationary at the taught front pose in position mode.")
         }
     }
@@ -306,7 +310,7 @@ import AppKit
     @MainActor private func move(_ route: [Int]) async throws {
         for index in route {
             try check()
-            let target = ROBArmRoutinePlan.target(index: index, physicalLeft: true)!
+            let target = ROBLeftArmInteractionPlan.target(index: index)!
             let duration = ROBArmRoutinePlan.duration(from: try measured().positionsRadians.map(\.doubleValue), to: target)!
             phase = "waypoint \(index)"; update("Left arm: \(phase)")
             let started = ProcessInfo.processInfo.systemUptime

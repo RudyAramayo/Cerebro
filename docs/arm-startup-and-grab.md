@@ -7,8 +7,11 @@ Settings → Arms now starts with **Wave left**, **Present / open**, **Grip obje
 approval on the authenticated iPhone or Vision Pro. The summary describes the
 whole operation; no per-waypoint or extra spoken confirmation is needed.
 
-- **Wave left** uses the existing hanging/front route, then goes 6 → 5 → 6 → 5 → 6.
-  It leaves the empty arm in front without changing the jaws.
+- **Wave left** uses the existing hanging/front route through waypoint 6, then
+  tries J3 −0.30 rad and J5 −0.30 rad, one joint at a time in 0.10-rad steps.
+  At the extended front pose it waves J1 between −0.90 and −1.05 rad twice.
+  It leaves the empty arm in front without changing the jaws. These added
+  angles require supervised commissioning; they are not a certified route.
 - **Present / open** brings the left arm forward, calibrates only its empty jaw
   if needed, then requests opening. Support any held object before using it.
 - Put an object between the jaws, clear your fingers, and approve **Grip object**.
@@ -16,8 +19,9 @@ whole operation; no per-waypoint or extra spoken confirmation is needed.
   recalibration. The arm stays in front while you check retention.
 - Support the object in the receiver's hand and approve **Release to hand**.
   It opens the calibrated jaw in place. Release is never timed automatically.
-- After removing the object, **Lower arm** follows the reverse taught route and
-  verifies hanging before deactivation. These controls do not grip human hands.
+- After removing the object, **Lower arm** unwinds J5 and J3 at the front pose
+  before reversing the tested approach, then verifies hanging before
+  deactivation. These controls do not grip human hands.
 
 Physical left routes exclusively to R11 / gateway `right` / UDP 26002. Both arms
 are reserved during a trial to prevent competing motion; the physical right arm
@@ -30,6 +34,12 @@ feedback, verified modes, existing route/timing bounds and motion leases remain
 required. They retain the existing segment speed, not a newly validated faster
 speed. Grip/open acknowledgements are **accepted_unverified**, never measured
 force, measured jaw completion, or proof of object retention.
+
+The left controls now center the camera and use the existing upright lower-neck
+target 6011 and compensated forward-camera target 6906. The legacy paired
+inspection retains its downward target 5650. Both go through the existing
+center-first clearance policy, command ramp settling, manual priority and
+unknown/OFF-state checks. Neck arrival is command-space, not encoder feedback.
 
 Every operation records distinct fresh position/current samples to
 `~/Library/Application Support/Cerebro/LeftArmTrials/*.csv`. **Show recording**
@@ -145,6 +155,39 @@ gripper current, jaw opening or grip force:
 - `LeftArmTrials/left_release-D0408A99-05EA-452A-B674-C83F9D4B7825.csv`:
   125 samples over 6.581 s; SHA-256
   `b6d48b22eb6e25ec0f63f553f5eb47f68650cb471534840891fb775aff975541`.
+
+### 2026-10-21 front-only J3/J5 trial
+
+The empty left arm returned to measured hanging and inactive before relaunch.
+The next real controller-approved wave used the tested approach, stepped J3 then
+J5 to −0.30 rad, waved J1 between −0.90 and −1.05 rad twice, and held in front.
+The camera used centered pan, lower 6011 and forward upper 6906. Rob confirmed
+the position was better and clear of the treads, then requested further rotation
+and a slightly downward camera because the gripper was visible at belly-camera
+height but outside the head-camera image.
+
+The recording contains 1,152 distinct samples over 59.413 s. Final J3/J5 were
+−0.299569/−0.299978 rad; maximum feedback age was 35.868 ms. The current cutoff
+remained 0 (record only). [Trial metadata](calibration/evidence/2026-10-21-social-left/trial.json)
+includes the original CSV hash and compressed archive. The installed signed
+debug library SHA-256 was
+`5e8d36cb760c25808ada063493b496491248c8a6d4d1e61ad9dc268ad82f0ccc`.
+
+The [model preview](calibration/evidence/2026-10-21-social-left/model-preview.json)
+uses the bundled scan URDF/hulls and the recorded upright-coordinate prior,
+with explicit positive driver-sign assumptions. It predicts approximately
+42 mm additional hand height and 46 mm forward reach. The added segments pass
+the model's tread-only swept check at 25 mm margin. Full-model checks flag
+housing overlaps, including an unchanged right-arm/torso overlap and a
+left-arm housing warning already present at the previously tested front pose.
+These warnings remain in the record. No physical collision certificate,
+calibrated force limit, or measured camera/model agreement is claimed.
+
+Reproduce a model-only preview with the existing ShadowPlanner venv Python:
+`Scripts/preview-left-interaction.py --output /private/tmp/left-interaction-preview.json`.
+The script compiles the production waypoint table rather than maintaining
+another copy of the targets. See the [ordered work queue](arm-motion-work-queue.md)
+for ghost-motion review/approval and deferred camera-to-URDF calibration.
 
 ## Existing paired operations
 

@@ -38,7 +38,7 @@ import AppKit
         teaching.spacing = 10
         let leftTitle = NSTextField(labelWithString: "Left arm — supervised trial")
         leftTitle.font = .boldSystemFont(ofSize: 15)
-        let leftHelp = NSTextField(wrappingLabelWithString: "Wave leaves the empty left arm in front. For an object: Present / open → put the object between the jaws → Grip object → support it in your hand → Release to hand → Lower arm. Each button sends one controller approval. Grip and release keep the arm stationary. Never close on a person's hand.")
+        let leftHelp = NSTextField(wrappingLabelWithString: "Camera faces forward. Wave and Present try an extra 17° on J3, then J5, only after reaching the tested front pose. Watch clearance; these new angles need a supervised trial. Lower undoes those rotations before descending. For an object: Present / open → place object → Grip object → support it → Release to hand → Lower arm. Each button sends one controller approval. Grip/release keep the arm stationary. Never close on a person's hand.")
         let leftButtons = NSStackView(views: [button("Wave left", #selector(leftWave)),
             button("Present / open", #selector(leftPrepare)), button("Grip object", #selector(leftGrip)),
             button("Release to hand", #selector(leftRelease)), button("Lower arm", #selector(leftRelax))])

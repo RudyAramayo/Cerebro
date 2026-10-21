@@ -10,7 +10,7 @@ final class ROBLeftArmTrial {
 
 final class ROBArmRoutineCoordinator {
     static let shared = ROBArmRoutineCoordinator()
-    let isRunning = false
+    var isRunning = false
 }
 enum ROBArmSide {
     case left, right

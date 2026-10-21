@@ -213,14 +213,14 @@ struct GatewayCompatibilityFixtures {
         defer { taught.fixtureDisconnect() }
         try taught.fixtureReceive(modernReady)
         let generation = (taught.connectionSnapshot()["sessionGeneration"] as! NSNumber).uint64Value
-        func motorFeedback(age: Double = 1) throws {
+        func motorFeedback(age: Double = 1, positions: [Double] = [Double](repeating: 0, count: 7)) throws {
             for arm in ["left", "right"] {
                 try taught.fixtureReceive([
                     "type": "telemetry", "arm": arm, "sequence": 100,
                     "sample_age_ms": age, "controller_sample_age_ms": age,
                     "joint_feedback_age_ms": [Double](repeating: age, count: 7),
                     "gripper_feedback_age_ms": age,
-                    "positions_rad": [Double](repeating: 0, count: 7),
+                    "positions_rad": positions,
                     "velocities_rad_s": NSNull(), "velocities_available": false,
                     "currents": [Double](repeating: 0.2, count: 7),
                     "statuses": [Double](repeating: 2, count: 7),
@@ -246,6 +246,20 @@ struct GatewayCompatibilityFixtures {
         expect(waypoint("right", 2) == 0, "Left trial bypassed adjacent-waypoint bounds")
         expect(waypoint("right", 1, 0.8) == 0, "Left trial bypassed existing segment timing")
         expect(waypoint("right", 1, 4, generation + 1) == 0, "Left trial replayed across sessions")
+        expect(waypoint("right", 7) == 0, "Front extension admitted directly from hanging")
+        try motorFeedback(positions: ROBLeftArmInteractionPlan.target(index: 6)!)
+        expect(waypoint("right", 7) > 0, "Approved front-only J3 step refused")
+        expect(waypoint("right", 8) == 0, "Front extension skipped a J3 step")
+        try motorFeedback(positions: ROBLeftArmInteractionPlan.target(index: 12)!)
+        expect(waypoint("right", 13) > 0, "Approved wave refused at new front pose")
+        expect(waypoint("right", 5) == 0, "Lowering admitted before J3/J5 unwind")
+        expect(waypoint("left", 13) == 0, "New front pose sent to physical right arm")
+        trial.approved = false
+        expect(waypoint("right", 13) == 0, "Revoked approval retained new-pose authority")
+        ROBArmRoutineCoordinator.shared.isRunning = true
+        expect(waypoint("right", 13) == 0, "Paired legacy routine acquired new extension angles")
+        ROBArmRoutineCoordinator.shared.isRunning = false
+        trial.approved = true
         try motorFeedback(age: 500)
         expect(waypoint() == 0, "Left trial bypassed fresh motor feedback")
         try motorFeedback()
