@@ -1,0 +1,23 @@
+{
+  "requestedBy": "Rob",
+  "purpose": "Supplementary visual confirmation of hanging left arm",
+  "acceptedPartialView": {
+    "panDegrees": 30,
+    "panTarget": 7000,
+    "lowerTarget": 6011,
+    "upperTarget": 5650,
+    "operatorFeedback": "Possible to see the arm hanging down, even if only J2 is visible"
+  },
+  "refinement": {
+    "panDegrees": 30,
+    "panTarget": 7000,
+    "lowerTarget": 6200,
+    "upperTarget": 5650,
+    "operatorInstruction": "Tilt lower neck down a bit to see more",
+    "status": "commanded through safe neck UI; distal joints still partially occluded"
+  },
+  "headTrackingWasEnabled": true,
+  "headTrackingDuringManualInspection": false,
+  "fullIndependentPoseVerification": false,
+  "privacy": "Live room screenshots inspected locally, excluded from repository"
+}

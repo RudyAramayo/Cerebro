@@ -108,9 +108,8 @@ import AppKit
         guard let segment else { throw ROBGhostMotionError.blocked("Measured arm is outside the interrupted path; no recovery motion proposed.") }
         var previous = q; var steps: [ROBLeftGestureProposal.Step] = []
         for target in recoveryPath.prefix(segment).reversed() {
-            let delta = zip(previous, target).map { abs($0 - $1) }.max() ?? 0
-            let padded = delta + ROBArmRoutinePlan.tolerance
-            let seconds = max(0.8, padded / ROBArmRoutinePlan.maximumAverageSpeed, 4 * pow(padded / 0.3, 1.0 / 3.0))
+            let seconds = ROBLeftArmInteractionPlan.duration(from: previous, to: target,
+                padding: ROBArmRoutinePlan.tolerance)!
             guard seconds <= 5 else { throw ROBGhostMotionError.blocked("Recovery segment exceeds the motion bound.") }
             steps.append(.init(positions: target, seconds: seconds)); previous = target
         }
@@ -159,7 +158,7 @@ import AppKit
         }
         let action: String
         switch command {
-        case "left_wave": action = "Bring the empty LEFT arm to front; stage J3/J5 to -0.60 rad, then J6 to -0.60 rad to center the hand. Raise the handoff with J2 to +1.00, then continue to +1.30 with J4 to -0.60 in small coordinated steps. Wave J1 -0.90/-1.05 twice above the shoulder, bending J6 -0.70/-0.60 with each wave, and leave raised. Jaws unchanged."
+        case "left_wave": action = "Bring the empty LEFT arm to front; stage J3/J5 to -0.60 rad, then J6 to -0.60 rad to center the hand. Raise the handoff with J2 to +1.00, then continue to +1.30 with J4 to -0.60 in small coordinated steps. At raised height, stage J5 to -0.80 in two steps. Wave J1 -0.90/-1.05 twice above the shoulder, bending J6 -0.90/-0.60 with each wave, and leave raised. Jaws unchanged."
         case "left_prepare": action = "Bring the empty LEFT arm to front; stage J3/J5 to -0.60 rad, then J6 to -0.60 rad to center the hand, then J2 to +1.00 to raise it. Reverse any raised wave section before reaching this handoff pose. Calibrate its EMPTY gripper only if needed, then open it. Keep fingers clear during calibration."
         case "left_grip": action = "Keep the LEFT arm stationary in front and close its already-calibrated gripper at intensity 10 around the presented OBJECT. Confirm the object is between the open jaws and all fingers are clear. Never grip a person's hand. No reopening, calibration or arm travel."
         case "left_release": action = "Keep the LEFT arm stationary in front and open its already-calibrated gripper to return the object. Confirm the receiver supports the object before approving. No calibration or arm travel."
@@ -412,7 +411,7 @@ import AppKit
         for index in route {
             try check()
             let target = ROBLeftArmInteractionPlan.target(index: index)!
-            let duration = ROBArmRoutinePlan.duration(from: try measured().positionsRadians.map(\.doubleValue), to: target)!
+            let duration = ROBLeftArmInteractionPlan.duration(from: try measured().positionsRadians.map(\.doubleValue), to: target)!
             phase = "waypoint \(index)"; update("Left arm: \(phase)")
             let started = ProcessInfo.processInfo.systemUptime
             try await accepted { gateway.sendRoutineWaypoint(arm: arm, index: index, duration: duration, expectedSessionGeneration: generation) }
@@ -430,7 +429,7 @@ import AppKit
         for (index, step) in proposal.steps.enumerated() {
             try check()
             let q = try measured().positionsRadians.map(\.doubleValue)
-            guard let minimum = ROBArmRoutinePlan.duration(from: q, to: step.positions), step.seconds >= minimum - 0.05 else {
+            guard let minimum = ROBLeftArmInteractionPlan.duration(from: q, to: step.positions), step.seconds >= minimum - 0.05 else {
                 throw ROBArmRoutineError.blocked("Measured start drift exceeds the reviewed timing; hold requested.")
             }
             proposalStep = index; phase = "gesture step \(index)"; update("\(proposal.name): step \(index + 1)/\(proposal.steps.count)")

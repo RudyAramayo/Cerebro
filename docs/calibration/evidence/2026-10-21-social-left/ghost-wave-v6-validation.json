@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-21T22:52:14.015804+00:00",
+  "sourceSHA256": {
+    "Cerebro/ROBArmRoutinePlan.swift": "fab86367aee4c6bc83ed31b4eb62bcf0daaf9c0b46a854b7b997d5435c9595a2",
+    "Cerebro/ROBGhostMotionPlan.swift": "a79d00a02486cda2634a2758919cde73501870c3e071137132b43b0b7052bfb7",
+    "Cerebro/ROBGhostGestureEditor.swift": "d1978c920724e6f71b75f6a3920fe425ffae13a2caaa9d0981b7048158a6aa8b",
+    "Cerebro/ROBLeftArmTrial.swift": "5fb6bb3a76d11d4a70730cad36999deaaa5cf480df74013fdf895bd2af269cc4",
+    "Cerebro/ROBAmberGatewayClient.swift": "69ab2cd12f3ff8eaeb7abbedf6b70c159b9a9a90b4b07c56bcc088be60963856",
+    "Cerebro/ROBSCNViewController.m": "bd6fe9d131e2ed947fb0f9d35949ba656ddb041619438c2fd32446f161427676",
+    "Cerebro/ROBDepthCloudProjection.h": "8156ce960d1f3ddf9dfaa1f434f4786d123ac4a6970537117adf818987e2a449"
+  },
+  "installedDebugLibrarySHA256": "1afae9a05e2059291c31463603e4ab78f435cd2abfae29533efbb1203100a9e2",
+  "checks": {
+    "pureModel": "passed",
+    "renderedHeadCameraOriginAndBlueOverlay": "passed",
+    "affineProjection": "passed",
+    "leftExecutorIncludingCurrentCutoffStopRecovery": "passed",
+    "productionGatewayIncludingFasterTimingBounds": "passed",
+    "signedMacOSDebugBuild": "passed",
+    "pairedCoordinatorFromTaskSnapshotExcludingPreexistingUserEdits": "passed"
+  },
+  "timing": "Existing lower hanging approach; front profile twice the prior pace with measured settling",
+  "liveTrial": "First real approval stopped during approach on expired watchdog lease; retained evidence and requested a fresh measured-start review.",
+  "headModel": "Shared articulated URDF camera frame; display command estimate, calibration deferred",
+  "unrelatedWorkingTreeChanges": "Eight pre-existing files preserved and excluded from this task commit"
+}

@@ -9,8 +9,10 @@ whole operation; no per-waypoint or extra spoken confirmation is needed.
 
 - **Wave left** uses the existing hanging/front route through waypoint 6, then
   stages J3/J5 through −0.30 to −0.60 rad, one joint at a time in 0.10-rad steps.
-  At the extended front pose it waves J1 between −0.90 and −1.05 rad twice.
-  It leaves the empty arm in front without changing the jaws. These added
+  J6 stages inward to −0.60; the accepted handoff raises J2 to +1.00.
+  The wave raises J2 to +1.30 with J4 −0.60, stages J5 to −0.80,
+  then waves J1 −0.90/−1.05 with J6 −0.90/−0.60 twice.
+  It leaves the empty arm raised without changing the jaws. These added
   angles require supervised commissioning; they are not a certified route.
 - **Present / open** brings the left arm forward, calibrates only its empty jaw
   if needed, then requests opening. Support any held object before using it.
@@ -31,12 +33,16 @@ hanging at encoder zero, with the operator confirming the physical pose.
 These trials use direct operator supervision instead of semantic camera collision
 or jaw estimates. Live camera freshness, stationary body/neck, per-device motor
 feedback, verified modes, existing route/timing bounds and motion leases remain
-required. They retain the existing segment speed, not a newly validated faster
-speed. Grip/open acknowledgements are **accepted_unverified**, never measured
+required. At Rob's request, the empty-left trial uses 4× the original low approach pace
+and 6× the original front pace, with a 0.5-second segment minimum. Ghost paths
+join exactly collinear increments and retain all corners and reversals, without
+changing the geometric corridor. Measured settling, freshness and the 1500 ms
+watchdog remain in place. Exact durations are frozen in the ghost review.
+Grip/open acknowledgements are **accepted_unverified**, never measured
 force, measured jaw completion, or proof of object retention.
 
 The left controls now center the camera and use the existing upright lower-neck
-target 6011 and upper-camera target 6606, about 9° below compensated level.
+target 6011 and upper-camera target 6306, about 18° below compensated level.
 The legacy paired
 inspection retains its downward target 5650. Both go through the existing
 center-first clearance policy, command ramp settling, manual priority and
@@ -68,6 +74,41 @@ approval rejection, correct side, wave/return, calibration reuse, stationary
 grip/release, current recording/cutoff, stale feedback, session replacement,
 camera loss and Stop. Fixtures and a successful build do not establish a live
 robot trial; use the real controller approval and report its actual outcome.
+
+### Revised wave, speed and shared neck model
+
+The J2 +1.30 / J6 −0.70…−0.60 wave completed after an accidental spoken Stop
+and a newly reviewed, separately approved continuation. Rob requested more J5
+rotation to make the arm vertical and a larger J6 wave. The [v5 evidence](calibration/evidence/2026-10-21-social-left/trial-ghost-wave-v5.json)
+retains the measured positions/current trace; the [interrupted trace](calibration/evidence/2026-10-21-social-left/trial-ghost-wave-v5-interrupted.json)
+records why motion stopped. Spoken Stop remains active.
+
+Candidate v6 retains the accepted J2 +1.00 handoff, stages raised J5 through
+−0.70 to −0.80, and swings J6 between −0.60 and −0.90 with J1 twice. Rob also
+requested faster motion. The first 2× front profile still scheduled 75.5 seconds
+from hanging, and Rob reported it was extremely slow. Two attempts held on
+lease/freshness faults; a main-thread SceneKit transaction stall was observed.
+V7 freezes ×4 preview on execution, avoids unchanged mesh transforms, caps the
+scene at 30 FPS and clouds at eight updates/second per camera. It also joins
+collinear increments while retaining every corner/reversal, and uses 4× low
+approach / 6× front timing (0.5 s minimum), scheduling 14.6 seconds from hanging
+plus preparation and measured settling. Model tread sweeps pass the 25 mm
+margin; provisional full-model warnings remain in [the preview](calibration/evidence/2026-10-21-social-left/model-preview-v6.json),
+including reference housing overlaps. They are not physical clearance proof.
+
+The [head/cloud update](controller-depth-cloud.md) now uses one articulated URDF
+camera frame for both the model neck/head and depth projection. The untouched
+blue head follows accepted commands, with explicit ghost edits retained.
+The signed build and isolated model, render, projection, executor and gateway
+checks passed; [validation identities](calibration/evidence/2026-10-21-social-left/ghost-wave-v7-validation.json)
+record the exact source/build hashes. The previous build returned the physical
+left arm to zero and inactive before relaunch. Rob independently confirmed the
+physical arm hanging before v7 was loaded. Head-camera inspection was requested
+and is being positioned manually through the existing safe neck controls.
+The first v7 request ended with “Connect Vision Pro or iPhone and enable Action
+Approvals. No arm operation was started.” The physical arm remains inactive;
+a new authenticated controller connection and approval are needed for the
+14.6-second wave. Live completion and operator gesture acceptance remain pending.
 
 ### 2026-10-21 installation and trial request
 

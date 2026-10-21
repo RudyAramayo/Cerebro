@@ -124,6 +124,22 @@ final class ROBGhostRobotModel {
         for index in 0..<7 { result["left_joint\(index + 1)"] = vendorLeft[index] - Self.uprightPrior[index] }
         return result
     }
+    /// Display-only Maestro-to-URDF prior. The accepted level command is the
+    /// optical horizon, rather than the captured scan's tilted head pose.
+    /// All three joints feed the same FK used for the mesh and depth camera.
+    func headPositions(pan: Double, lowerPitch: Double, upperPitch: Double) -> [String: Double]? {
+        guard [pan, lowerPitch, upperPitch].allSatisfy(\.isFinite),
+              let camera = frames(reference)["oak_optical_frame"],
+              let lower = reference["lower_neck"], let upper = reference["upper_neck"] else { return nil }
+        let forward = camera.columns.2
+        let referencePitch = atan2(forward.z, hypot(forward.x, forward.y))
+        let values = ["lower_neck": lower - lowerPitch, "neck_pan": pan,
+                      "upper_neck": upper + referencePitch - upperPitch]
+        guard values.allSatisfy({ name, value in
+            joints.contains { $0.name == name && ($0.lower...$0.upper).contains(value) }
+        }) else { return nil }
+        return values
+    }
     func vendorLeft(_ positions: [String: Double]) -> [Double] {
         (0..<7).map { (positions["left_joint\($0 + 1)"] ?? reference["left_joint\($0 + 1)"] ?? 0) + Self.uprightPrior[$0] }
     }
@@ -290,12 +306,9 @@ enum ROBLeftGestureCompiler {
         }
         var previous = baseline
         var steps: [ROBLeftGestureProposal.Step] = []
-        for target in targets {
-            // Preserve the existing speed/jerk timing with extra allowance
-            // for the measured endpoint tolerance. No speed increase here.
-            let delta = zip(previous, target).map { abs($0 - $1) }.max() ?? 0
-            let padded = delta + ROBArmRoutinePlan.tolerance
-            let seconds = max(0.8, padded / ROBArmRoutinePlan.maximumAverageSpeed, 4 * pow(padded / 0.3, 1.0 / 3.0))
+        for target in compactRoute(baseline: baseline, targets: targets) {
+            let seconds = ROBLeftArmInteractionPlan.duration(from: previous, to: target,
+                padding: ROBArmRoutinePlan.tolerance)!
             guard seconds <= 5 else { throw ROBGhostMotionError.blocked("A gesture segment exceeds the bounded timing window.") }
             steps.append(.init(positions: target, seconds: seconds)); previous = target
         }
@@ -315,6 +328,28 @@ enum ROBLeftGestureCompiler {
         let expected = try compile(kind: proposal.kind, name: proposal.name, poses: proposal.poses, model: model,
             baseline: proposal.baseline, generation: proposal.sessionGeneration, id: proposal.id)
         guard proposal == expected else { throw ROBGhostMotionError.blocked("The reviewed path or timing changed; review a new proposal.") }
+    }
+
+    /// Remove artificial stops only where the joint-space route is exactly a
+    /// straight line in the same direction. Retain every corner and reversal;
+    /// a longer segment traverses the same modeled/swept positions.
+    static func compactRoute(baseline: [Double], targets: [[Double]]) -> [[Double]] {
+        var result = [baseline]
+        for target in targets {
+            if result.last == target { continue }
+            while result.count >= 2 {
+                let a = result[result.count - 2], b = result[result.count - 1]
+                let delta = zip(a, target).map { $1 - $0 }
+                let square = delta.reduce(0) { $0 + $1 * $1 }
+                guard square > 1e-12 else { break }
+                let fraction = zip(zip(b, a), delta).reduce(0.0) { $0 + ($1.0.0 - $1.0.1) * $1.1 } / square
+                guard fraction > 0, fraction < 1,
+                      zip(zip(a, delta), b).allSatisfy({ abs($0.0.0 + fraction * $0.0.1 - $0.1) < 1e-9 }) else { break }
+                result.removeLast()
+            }
+            result.append(target)
+        }
+        return Array(result.dropFirst())
     }
 }
 

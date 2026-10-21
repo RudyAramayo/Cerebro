@@ -68,6 +68,22 @@ final class GhostFixtureSnapshotView: NSView {
         let editor = ROBGhostGestureEditor(sceneView: view, originalRobot: original)
         defer { editor.invalidate(); UserDefaults.standard.removeObject(forKey: "ROBGhostSavedGestures.v1") }
         precondition(original.isHidden, "Canonical URDF model did not load")
+        precondition(editor.depthCloudCameraTransform(false).isEmpty)
+        editor.setHeadCommand(pan: 0, lowerPitch: 0, upperPitch: 0, known: true)
+        let levelCamera = editor.depthCloudCameraTransform(false)
+        let originalHead = scene.rootNode.childNodes.flatMap(\.childNodes).first { $0.name == "Original URDF oak_link" }!
+        let levelHead = originalHead.simdTransform
+        editor.setHeadCommand(pan: .pi / 12, lowerPitch: 0, upperPitch: -.pi / 10, known: true)
+        let downCamera = editor.depthCloudCameraTransform(false)
+        precondition(levelCamera.count == 12 && downCamera != levelCamera && originalHead.simdTransform != levelHead)
+        let headGhost = scene.rootNode.childNodes.flatMap(\.childNodes).first { $0.name == "Blue ghost oak_link" }!
+        precondition(headGhost.simdTransform == originalHead.simdTransform, "Untouched ghost neck differs from live model")
+        let model = try ROBGhostRobotModel(directory: Bundle.main.url(forResource: "ShadowPlanner", withExtension: nil)!)
+        let opticalInHead = simd_inverse(model.frames(model.reference)["oak_link"]!) * model.frames(model.reference)["oak_optical_frame"]!
+        let origin = originalHead.simdWorldTransform * SIMD4<Float>(opticalInHead.columns.3)
+        precondition(abs(origin.x - downCamera[3].floatValue) < 1e-6 &&
+            abs(origin.y - downCamera[7].floatValue) < 1e-6 && abs(origin.z - downCamera[11].floatValue) < 1e-6,
+            "Depth projection origin differs from the rendered head's optical mount")
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
         let controls = descendants(editor.panelView)
         let presets = controls.first { $0.identifier?.rawValue == "ghost-preset" } as! NSPopUpButton

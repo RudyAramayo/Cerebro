@@ -1,0 +1,22 @@
+{
+  "recording": "left_ghost-278E37DC-6CEF-4578-9E11-9A3C080133F0.csv",
+  "sha256": "d8eccc40860ab8ba9b079659a7cb3bda8d60a24b75a2e0873fd04de608072caf",
+  "archivedRecording": "ghost-wave-v5-interrupted.csv.gz",
+  "archiveSHA256": "67557fcdd976f7cbf8713749e7c43534d8f260d6d9972ef5f945e7a6c4fc9d6a",
+  "proposalSHA256": "fd433c7d06ad301e2d36944099d711ed56bd533c1fab3bc646871c1e97e1e4c6",
+  "outcome": "Interrupted during approach; priority hold, no later targets sent under this approval",
+  "reportedReason": "Show rehearsal stopped by operator",
+  "operatorExplanation": "Rob confirmed an accidental spoken stop in a different conversation",
+  "lastPhase": "gesture step 7",
+  "elapsedSeconds": 35.8481274166661,
+  "finalPositionsRadians": [
+    -1.049651920457215,
+    0.6005023457642991,
+    -0.1079922474671491,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "continuation": "Fresh measured-start proposal and separate real controller approval requested; spoken stop remains enabled"
+}

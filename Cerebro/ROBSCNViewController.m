@@ -43,6 +43,8 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 @property (readwrite, retain) NSTextField *cloudStatusLabel;
 @property NSTimeInterval lastHeadCloudUptime;
 @property NSTimeInterval lastBellyCloudUptime;
+@property NSTimeInterval lastHeadCloudSubmission;
+@property NSTimeInterval lastBellyCloudSubmission;
 @property (readwrite, retain) NSArray<SCNNode *> *irBeamNodes;
 @property (readwrite, retain) NSArray<NSValue *> *irBeamOrigins;
 @property (readwrite, retain) NSArray<NSValue *> *irBeamDirections;
@@ -309,6 +311,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     self.robo_scnView.scene = scene;
     self.robo_scnView.pointOfView = cameraNode;
     self.robo_scnView.allowsCameraControl = YES;
+    self.robo_scnView.preferredFramesPerSecond = 30;
     self.robo_scnView.defaultCameraController.target = SCNVector3Make(0, 0.78, 0);
     self.robo_scnView.showsStatistics = YES;
     self.robo_scnView.backgroundColor = NSColor.blackColor;
@@ -475,6 +478,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 - (void)refreshFreshness:(NSTimer *)timer
 {
     [self refreshIRState];
+    [self refreshHeadModelEstimate];
     NSTimeInterval cloudNow = NSProcessInfo.processInfo.systemUptime;
     if (cloudNow - self.lastHeadCloudUptime > 0.7 || !self.serialBox.isNeckCommandStateKnown ||
         self.serialBox.neckCommandReadyAtUptime > cloudNow) {
@@ -603,6 +607,20 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     [self updateTreadNode:self.rightTreadNode demand:0 color:NSColor.systemGreenColor];
 }
 
+- (void)refreshHeadModelEstimate
+{
+    ROBSerialBox *serial = self.serialBox;
+    ROBNeckSafetyConfig config = serial ? [serial neckSafetyConfiguration] : ROBNeckSafetyDefaultConfig();
+    double pan = 0;
+    BOOL known = serial.isNeckCommandStateKnown &&
+        ROBNeckSafetyPanTargetToDegrees(&config, (int32_t)serial.commandedNeckPanTarget, &pan);
+    const double radiansPerTarget = M_PI / (180.0 * 33.3333333333);
+    double lower = -config.upperCounterRotationGain *
+        (serial.commandedLowerNeckTiltTarget - ROBNeckSafetyUprightLowerTarget) * radiansPerTarget;
+    double upper = (serial.commandedUpperNeckTiltTarget - ROBNeckSafetyUprightUpperTarget) * radiansPerTarget;
+    [self.ghostGestureEditor setHeadCommandPan:pan * M_PI / 180.0 lowerPitch:lower upperPitch:upper known:known];
+}
+
 - (void)receivedDepthCloudFrame:(NSNotification *)notification
 {
     if (![NSThread isMainThread]) {
@@ -613,17 +631,22 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     if (frame == nil || self.robo_scnView.scene == nil) return;
     BOOL belly = frame.isBelly;
     if (belly ? self.bellyCloudUpdatePending : self.cloudUpdatePending) return;
-    NSArray<NSValue *> *points = [self.ghostGestureEditor depthCloudMountPoints:belly];
-    ROBSerialBox *serial = self.serialBox;
     double now = NSProcessInfo.processInfo.systemUptime;
+    // Display at most eight clouds/second per camera. Camera capture and arm
+    // monitoring keep their own cadence; rendering must not flood the UI loop.
+    if (now - (belly ? self.lastBellyCloudSubmission : self.lastHeadCloudSubmission) < 0.125) return;
+    if (belly) self.lastBellyCloudSubmission = now; else self.lastHeadCloudSubmission = now;
+    [self refreshHeadModelEstimate];
+    NSArray<NSNumber *> *affine = [self.ghostGestureEditor depthCloudCameraTransform:belly];
+    ROBSerialBox *serial = self.serialBox;
     BOOL settled = serial.isNeckCommandStateKnown && frame.capturedUptime >= serial.neckCommandReadyAtUptime;
-    if (points.count != 4 || now - frame.capturedUptime > 0.7 || (!belly && !settled)) {
+    if (affine.count != 12 || now - frame.capturedUptime > 0.7 || (!belly && !settled)) {
         if (belly) self.liveBellyRGBCloudNode.hidden = YES;
         else { self.liveRGBCloudNode.hidden = YES; self.cloudStatusLabel.stringValue = @"HEAD DEPTH HIDDEN: waiting for fresh frame and settled neck"; }
         return;
     }
-    ROBDepthPoint mounts[4];
-    for (int i=0;i<4;i++) { SCNVector3 p = points[i].SCNVector3Value; mounts[i] = (ROBDepthPoint){p.x,p.y,p.z}; }
+    double rows[12];
+    for (int i=0;i<12;i++) rows[i] = affine[i].doubleValue;
     ROBNeckSafetyConfig config = serial ? [serial neckSafetyConfiguration] : ROBNeckSafetyDefaultConfig();
     double pan = 0;
     if (!belly && !ROBNeckSafetyPanTargetToDegrees(&config, (int32_t)serial.commandedNeckPanTarget, &pan)) return;
@@ -633,8 +656,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     double lower = belly ? 0 : -config.upperCounterRotationGain *
         (serial.commandedLowerNeckTiltTarget - ROBNeckSafetyUprightLowerTarget) * radiansPerTarget;
     double upper = belly ? 0 : (serial.commandedUpperNeckTiltTarget - ROBNeckSafetyUprightUpperTarget) * radiansPerTarget;
-    ROBDepthCloudTransform camera = ROBDepthCloudMakeTransform(mounts, lower, pan * M_PI / 180.0,
-        upper, ROBScanVisualModel.presentationScale, belly);
+    ROBDepthCloudTransform camera = ROBDepthCloudMakeTransform(rows);
     if (!camera.valid) return;
     NSArray<NSNumber *> *targets = @[@(serial.commandedLowerNeckTiltTarget), @(serial.commandedNeckPanTarget), @(serial.commandedUpperNeckTiltTarget)];
     if (belly) self.bellyCloudUpdatePending = YES; else self.cloudUpdatePending = YES;

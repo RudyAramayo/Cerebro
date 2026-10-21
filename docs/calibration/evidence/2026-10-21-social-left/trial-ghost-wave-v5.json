@@ -1,0 +1,27 @@
+{
+  "recording": "left_ghost-AE73DC77-2F36-43E7-B443-ABCB05AD411E.csv",
+  "sha256": "5afece428e2caa9fc4f08131cb1504481ed27f6e8b49c7ba7afeeb25fab3591b",
+  "archivedRecording": "ghost-wave-v5.csv.gz",
+  "archiveSHA256": "9d910140ba487827c264d53824960565555f7e1dc8aa2e73a3f12e782cf6e6ab",
+  "proposalSHA256": "f7b9077ea2b8e6af1dd68099f196b2a960598d6e10ac8dd19c8fdc4025b0aebf",
+  "outcome": "Completed after a fresh measured-start proposal and separate controller approval following accidental spoken stop",
+  "operatorFeedback": "Needs more J5 rotation for a more vertical arm and a larger J6 excursion between wave positions",
+  "steps": 31,
+  "scheduledSeconds": 93.90161277146775,
+  "samples": 1787,
+  "elapsedSeconds": 109.13918962499883,
+  "finalPositionsRadians": [
+    -1.04733390504441,
+    1.299997585040152,
+    -0.5999569303730508,
+    -0.5994115149818026,
+    -0.5991388072861784,
+    -0.6015931765467954,
+    0.0
+  ],
+  "peakCurrentJumpRaw": 1.83203125,
+  "maximumFeedbackAgeMilliseconds": 206.26572233307016,
+  "currentJumpLimitRaw": 0,
+  "currentProtection": "Record-only; seven arm currents, not gripper force",
+  "headCloudFeedback": "Alignment improved; rendered neck did not yet follow camera angle. Shared head-model FK fix queued in v6."
+}

@@ -1,0 +1,23 @@
+{
+  "recording": "left_ghost-83B48304-C66B-45E8-837F-0316121A6705.csv",
+  "sha256": "a00ffa12bb031c2a8ff74926c75be5c84d76c07358633f8c22dc70dbc8b254e4",
+  "archivedRecording": "ghost-wave-v6-stale-stop.csv.gz",
+  "archiveSHA256": "d66b23e29700f2a01e9811257f7c836e38fa12678597e2cc1dd836ff5feee471",
+  "proposalSHA256": "8b1ffea09fb59fc4cd32044ff21ad15d43856e7fbe96c060532b28a272752cbc",
+  "outcome": "Held before raised J5 staging completed: Fresh left-arm motor and gripper feedback is required",
+  "elapsedSeconds": 78.38774137499786,
+  "lastPhase": "gesture step 31",
+  "finalPositionsRadians": [
+    -1.049379212761591,
+    1.298634046562031,
+    -0.5995478688296146,
+    -0.5990024534383663,
+    -0.7144941625351786,
+    -0.6005023457642991,
+    0.0
+  ],
+  "samples": 1304,
+  "peakCurrentJumpRaw": 1.71484375,
+  "operatorFeedback": "Motions still extremely slow. Later confirmed physical left arm hanging down.",
+  "disposition": "3D renderer implicated by main-thread transaction sample and immediate UI responsiveness after closing controller scene; v7 avoids unchanged-node transactions, freezes preview on request, caps scene and cloud rendering. Freshness/lease bounds retained. Joined collinear route segments and revised timing require a new proposal/approval."
+}

@@ -1,0 +1,22 @@
+{
+  "recording": "left_ghost-32003EC3-4329-478C-9F90-6F51CA95A23A.csv",
+  "sha256": "ccd20d3df1bdb7462d6da1ed4abac478edc932d07bc6f8a8f1dcb11bd5571ccc",
+  "archivedRecording": "ghost-wave-v6-lease-stop.csv.gz",
+  "archiveSHA256": "c53ae1147cab60936b736c010fdb0f79fd977856d7a68585c8402ea715088a84",
+  "proposalSHA256": "c6fad2d4c78d006561d3076aea9049e65341a0447dd69bae9ac9f8f3b4888992",
+  "outcome": "Stopped in low approach; gateway no active lease for right arm (physical left)",
+  "elapsedSeconds": 21.006390041664417,
+  "lastPhase": "gesture step 3",
+  "finalPositionsRadians": [
+    -0.4374231437810788,
+    0.5871396686787175,
+    0.0,
+    0.0,
+    0.0,
+    -0.000681769239060285,
+    0.0
+  ],
+  "maximumSampleGapSeconds": 2.019229166664445,
+  "observation": "A 2.019 s main-loop sample gap coincided with opening Settings via native UI during motion; 1500 ms watchdog expired. UI-block attribution is inferred from timing. No speed change had yet occurred in the low approach.",
+  "disposition": "Watchdog retained; no blind resume. New measured-start review and real controller approval required; no UI manipulation during movement."
+}

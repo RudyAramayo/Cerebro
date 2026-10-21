@@ -762,7 +762,8 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
               let progress = leftTrial ? ROBLeftArmInteractionPlan.progress(sample.positionsRadians.map(\.doubleValue))
                 : ROBArmRoutinePlan.progress(sample.positionsRadians.map(\.doubleValue), physicalLeft: arm == "right"),
               abs(progress - Double(index)) <= 1.05,
-              let minimumDuration = ROBArmRoutinePlan.duration(from: sample.positionsRadians.map(\.doubleValue), to: target),
+              let minimumDuration = leftTrial ? ROBLeftArmInteractionPlan.duration(from: sample.positionsRadians.map(\.doubleValue), to: target)
+                : ROBArmRoutinePlan.duration(from: sample.positionsRadians.map(\.doubleValue), to: target),
               duration.isFinite, duration >= minimumDuration - 0.05, duration <= 5,
               modes(forArm: arm).count == 7,
               modes(forArm: arm).allSatisfy({ $0.intValue == 2 }) else { return 0 }
@@ -786,7 +787,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
               sample.effectiveGripperFeedbackAgeMilliseconds <= 250,
               sample.statuses.count == 7, sample.statuses.allSatisfy({ $0.intValue == 2 }),
               modes(forArm: "right").count == 7, modes(forArm: "right").allSatisfy({ $0.intValue == 2 }),
-              let minimum = ROBArmRoutinePlan.duration(from: sample.positionsRadians.map(\.doubleValue), to: target),
+              let minimum = ROBLeftArmInteractionPlan.duration(from: sample.positionsRadians.map(\.doubleValue), to: target),
               duration.isFinite, duration >= minimum - 0.05, duration <= 5 else { return 0 }
         return sendVendorLeasedTrajectory(arm: "right", positionsRadians: target.map(NSNumber.init(value:)),
             duration: duration, leaseMilliseconds: 1500, expectedSessionGeneration: expectedSessionGeneration)

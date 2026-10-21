@@ -84,8 +84,8 @@ enum ROBLeftArmInteractionPlan {
     static let approachIndex = 6
     static let previousFrontIndex = 24
     static let frontIndex = 28
-    static let waveRestIndex = 34
-    static let waveIndex = 35
+    static let waveRestIndex = 36
+    static let waveIndex = 37
     static let waypoints: [[Double]] = ROBArmRoutinePlan.rightWaypoints.map { $0.map { -$0 } } + [
         [-1.05, 0.60, -0.10, 0, 0, 0, 0],
         [-1.05, 0.60, -0.20, 0, 0, 0, 0],
@@ -115,11 +115,25 @@ enum ROBLeftArmInteractionPlan {
         [-1.05, 1.20, -0.60, -0.40, -0.60, -0.60, 0],
         [-1.05, 1.25, -0.60, -0.50, -0.60, -0.60, 0],
         [-1.05, 1.30, -0.60, -0.60, -0.60, -0.60, 0],
-        [-0.90, 1.30, -0.60, -0.60, -0.60, -0.70, 0],
+        [-1.05, 1.30, -0.60, -0.60, -0.70, -0.60, 0],
+        [-1.05, 1.30, -0.60, -0.60, -0.80, -0.60, 0],
+        [-0.90, 1.30, -0.60, -0.60, -0.80, -0.90, 0],
     ]
 
     static func target(index: Int) -> [Double]? {
         waypoints.indices.contains(index) ? waypoints[index] : nil
+    }
+
+    /// Empty-left trial timing. Keep the lower approach slower than the front
+    /// gesture, with measured settling and the existing watchdog retained.
+    static func duration(from: [Double], to: [Double], padding: Double = 0) -> Double? {
+        guard let original = ROBArmRoutinePlan.duration(from: from, to: to),
+              padding.isFinite, padding >= 0 else { return nil }
+        let delta = (zip(from, to).map { abs($0 - $1) }.max() ?? 0) + padding
+        let padded = max(original, delta / ROBArmRoutinePlan.maximumAverageSpeed, 4 * pow(delta / 0.3, 1.0 / 3.0))
+        let approach = ROBArmRoutinePlan.progress(from, physicalLeft: true) != nil &&
+            ROBArmRoutinePlan.progress(to, physicalLeft: true) != nil
+        return max(0.5, padded / (approach ? 4 : 6))
     }
 
     static func progress(_ positions: [Double]) -> Double? {

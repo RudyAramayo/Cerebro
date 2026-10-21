@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-21T23:07:01.771924+00:00",
+  "sourceSHA256": {
+    "Cerebro/ROBArmRoutinePlan.swift": "1c7a8e2bcad00c195bb68c46cb13975ae3459389492763c288fb69d66a642d4b",
+    "Cerebro/ROBGhostMotionPlan.swift": "b8067ac8f071fe4ab762286be6fa5577a4e235e7a87c32ce884667f316d4d718",
+    "Cerebro/ROBGhostGestureEditor.swift": "7289fe60692b9bb28fec19b4eb3755098b1d4d03ea400c3b774a5573d2d2e6cc",
+    "Cerebro/ROBLeftArmTrial.swift": "5fb6bb3a76d11d4a70730cad36999deaaa5cf480df74013fdf895bd2af269cc4",
+    "Cerebro/ROBAmberGatewayClient.swift": "69ab2cd12f3ff8eaeb7abbedf6b70c159b9a9a90b4b07c56bcc088be60963856",
+    "Cerebro/ROBSCNViewController.m": "a8c781ac5e2f565d18c5df9a54dbef542b8f64b9b307457e88a8d13a212fa424",
+    "Cerebro/ROBDepthCloudProjection.h": "8156ce960d1f3ddf9dfaa1f434f4786d123ac4a6970537117adf818987e2a449"
+  },
+  "installedDebugLibrarySHA256": "2705982b2e0f311261d45502f36e3e357697f48fc805860cb2bfd335fd66c3a0",
+  "checks": {
+    "pureModelRouteCompactionTimingFrozenProposal": "passed",
+    "renderedHeadCameraOriginAndBlueOverlay": "passed",
+    "affineProjection": "passed (unchanged projection header/test from v6)",
+    "leftExecutorIncludingCutoffStopAndRecovery": "passed",
+    "productionGatewayIncludingFasterTimingBounds": "passed",
+    "signedMacOSDebugBuild": "passed",
+    "pairedCoordinatorExcludingPreexistingUserChanges": "passed"
+  },
+  "timing": "14.6 s scheduled from hanging with 15 segments; exactly collinear increments joined, corners/reversals retained; 4x old approach / 6x old front timing, 0.5 s minimum; measured settling additional",
+  "display": "Only changed mesh transforms; preview freezes on request; 30 scene FPS; 8 cloud submissions/s/camera",
+  "liveTrial": "v7 loaded after Rob physically confirmed hanging; 15-segment preview verified. Request ended: Connect Vision Pro or iPhone and enable Action Approvals. No arm operation was started. Waiting for controller connection before resending.",
+  "currentJumpLimitRaw": 0,
+  "scope": "Supervised empty physical left only; jaws unchanged; model and neck mapping remain priors; camera/URDF calibration deferred",
+  "nativeUIResponse": "Scene controls read/preview actions completed in 0.05\u20130.44 s with the updated model and live clouds; no live-movement performance conclusion yet."
+}

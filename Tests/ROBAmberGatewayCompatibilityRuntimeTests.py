@@ -244,7 +244,7 @@ struct GatewayCompatibilityFixtures {
         expect(waypoint() > 0, "Approved left trial was rejected because the paired coordinator is idle")
         expect(waypoint("left") == 0, "Left-only approval authorized the physical right arm")
         expect(waypoint("right", 2) == 0, "Left trial bypassed adjacent-waypoint bounds")
-        expect(waypoint("right", 1, 0.8) == 0, "Left trial bypassed existing segment timing")
+        expect(waypoint("right", 1, 0.5) == 0, "Left trial bypassed the approach timing bound")
         expect(waypoint("right", 1, 4, generation + 1) == 0, "Left trial replayed across sessions")
         expect(waypoint("right", 7) == 0, "Front extension admitted directly from hanging")
         try motorFeedback(positions: ROBLeftArmInteractionPlan.target(index: 6)!)
@@ -252,6 +252,8 @@ struct GatewayCompatibilityFixtures {
         expect(waypoint("right", 8) == 0, "Front extension skipped a J3 step")
         try motorFeedback(positions: ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.waveRestIndex)!)
         expect(waypoint("right", ROBLeftArmInteractionPlan.waveIndex) > 0, "Approved wave refused at new front pose")
+        expect(waypoint("right", ROBLeftArmInteractionPlan.waveIndex, 0.7) > 0, "Approved front wave refused its reviewed faster timing")
+        expect(waypoint("right", ROBLeftArmInteractionPlan.waveIndex, 0.3) == 0, "Faster wave bypassed its new timing bound")
         expect(waypoint("right", 5) == 0, "Lowering admitted before J3/J5 unwind")
         expect(waypoint("left", ROBLeftArmInteractionPlan.waveIndex) == 0, "New front pose sent to physical right arm")
         trial.approved = false

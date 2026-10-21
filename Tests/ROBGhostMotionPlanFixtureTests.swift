@@ -11,6 +11,22 @@ import simd
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
         let model = try ROBGhostRobotModel(directory: root.appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
         precondition(model.modelID.count == 64 && model.joints.count == 44 && model.hulls.count >= 40)
+        func head(_ pan: Double, _ lower: Double, _ upper: Double) -> [String: simd_double4x4] {
+            var positions = model.reference
+            positions.merge(model.headPositions(pan: pan, lowerPitch: lower, upperPitch: upper)!) { _, command in command }
+            return model.frames(positions)
+        }
+        let level = head(0, 0, 0), down = head(0, 0, -.pi / 10), turned = head(.pi / 6, 0, -.pi / 10)
+        let forward = level["oak_optical_frame"]!.columns.2
+        let downForward = down["oak_optical_frame"]!.columns.2
+        precondition(abs(forward.z) < 1e-8 && forward.x > 0.99)
+        precondition(abs(atan2(downForward.z, hypot(downForward.x, downForward.y)) + .pi / 10) < 1e-8)
+        precondition(turned["oak_optical_frame"]!.columns.2.y > 0.4)
+        precondition(simd_distance(level["oak_optical_frame"]!.columns.3, down["oak_optical_frame"]!.columns.3) > 0.02)
+        precondition(level["belly_oak_optical_frame"]! == turned["belly_oak_optical_frame"]!)
+        precondition(head(0, -0.1, 0.1)["lower_neck_link"]! != level["lower_neck_link"]!)
+        precondition(model.headPositions(pan: .nan, lowerPitch: 0, upperPitch: 0) == nil)
+        print("Head FK: level/down/pan command priors articulate the camera and neck together; belly remains fixed")
         let oldFront = ROBLeftArmInteractionPlan.target(index: 18)!
         let center = ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.frontIndex)!
         let wave = ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.waveRestIndex)!
@@ -23,14 +39,29 @@ import simd
         precondition(abs(j6CenterXYZ.y) < 0.05 && j6CenterXYZ.y < oldXYZ.y - 0.1)
         precondition(centerXYZ.z > j6CenterXYZ.z + 0.18)
         precondition(waveXYZ.z > shoulderZ + 0.15)
+        precondition(wave[4] == -0.8 && ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.waveIndex)![5] == -0.9)
         print("URDF: negative J6 centers the hand; larger J2 and negative J4 put the wave above shoulder height")
 
         let proposal = try ROBLeftGestureCompiler.compile(kind: "wave", name: "High wave", model: model,
             baseline: Array(repeating: 0, count: 7), generation: 42)
         try ROBLeftGestureCompiler.validate(proposal, model: model)
         precondition(proposal.steps.last!.positions == wave)
-        precondition(proposal.steps.allSatisfy { (0.8...5).contains($0.seconds) })
-        precondition(proposal.seconds <= 135 && proposal.steps.count == 38)
+        precondition(proposal.steps.allSatisfy { (0.5...5).contains($0.seconds) })
+        precondition(proposal.seconds < 20 && proposal.steps.count == 15)
+        let approachFrom = ROBLeftArmInteractionPlan.target(index: 5)!, approachTo = ROBLeftArmInteractionPlan.target(index: 6)!
+        precondition(abs(ROBLeftArmInteractionPlan.duration(from: approachFrom, to: approachTo)! * 4 -
+            ROBArmRoutinePlan.duration(from: approachFrom, to: approachTo)!) < 1e-8)
+        let crest = ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.waveIndex)!
+        precondition(abs(ROBLeftArmInteractionPlan.duration(from: wave, to: crest)! * 6 -
+            ROBArmRoutinePlan.duration(from: wave, to: crest)!) < 1e-8)
+        let route = Array(ROBLeftArmInteractionPlan.waypoints[1...ROBLeftArmInteractionPlan.waveRestIndex])
+        let compact = ROBLeftGestureCompiler.compactRoute(baseline: Array(repeating: 0, count: 7), targets: route)
+        precondition(compact == [1,4,6,9,12,15,18,24,28,34,36].map { ROBLeftArmInteractionPlan.waypoints[$0] })
+        // Changing a joint at a corner must not turn into a diagonal shortcut.
+        let corner = [[0.1,0,0,0,0,0,0],[0.1,0.1,0,0,0,0,0],[0.2,0.1,0,0,0,0,0]]
+        precondition(ROBLeftGestureCompiler.compactRoute(baseline: Array(repeating: 0, count: 7), targets: corner) == corner)
+        precondition(proposal.steps.suffix(4).map(\.positions) == [crest,wave,crest,wave])
+        print(String(format: "Reviewed pace: collinear increments joined with corners/reversals intact; full wave %.1f seconds scheduled", proposal.seconds))
         let encoded = try proposal.encoded()
         precondition(proposal.fingerprint == ROBGhostRobotModel.hash(encoded))
         let changed = ROBLeftGestureProposal(id: proposal.id, name: proposal.name, kind: proposal.kind, modelID: proposal.modelID,

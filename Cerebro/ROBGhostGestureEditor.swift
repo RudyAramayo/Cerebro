@@ -15,6 +15,9 @@ import simd
     @nonobjc private let renderRoot = SCNNode()
     @nonobjc private var modelBasis = matrix_identity_float4x4
     @nonobjc private var ghost: [String: Double] = [:]
+    @nonobjc private var headEstimate: [String: Double]?
+    @nonobjc private var originalPositions: [String: Double] = [:]
+    @nonobjc private var ghostDisplayPositions: [String: Double] = [:]
     @nonobjc private var poses: [[String: Double]] = []
     @nonobjc private var saved: [ROBGhostGesture] = []
     @nonobjc private var proposal: ROBLeftGestureProposal?
@@ -73,7 +76,7 @@ import simd
             }
             capturedRobot.isHidden = true
             let initial = freshBaseline()
-            updateNodes(originalNodes, positions: initial.map { model.positions(vendorLeft: $0.q) } ?? model.reference)
+            updateOriginal(initial.map { model.positions(vendorLeft: $0.q) } ?? model.reference)
             referenceInfo.stringValue = initial == nil ? "Original: scan reference; fresh left feedback unavailable."
                 : "Original left: fresh encoders with upright mapping prior. Other joints: scan reference."
             for joint in model.joints where joint.kind != "fixed" && joint.upper > joint.lower {
@@ -90,14 +93,40 @@ import simd
 
     func invalidate() { timer?.invalidate(); timer = nil; renderRoot.removeFromParentNode(); capturedRobot.isHidden = false }
 
-    func depthCloudMountPoints(_ belly: Bool) -> [NSValue] {
-        guard let model else { return [] }
-        let frames = model.frames(model.reference)
-        return ["lower_neck_link", "neck_pan_link", "upper_neck_link", belly ? "belly_oak_optical_frame" : "oak_optical_frame"].compactMap {
-            guard let frame = frames[$0] else { return nil }
-            let p = frame.columns.3
-            return NSValue(scnVector3: SCNVector3(-p.y, p.z, -p.x))
+    @objc(setHeadCommandPan:lowerPitch:upperPitch:known:)
+    func setHeadCommand(pan: Double, lowerPitch: Double, upperPitch: Double, known: Bool) {
+        let value = known ? model?.headPositions(pan: pan, lowerPitch: lowerPitch, upperPitch: upperPitch) : nil
+        guard value != headEstimate else { return }
+        headEstimate = value
+        updateOriginal(originalPositions)
+        updateGhost(ghostDisplayPositions, updateFields: false)
+    }
+
+    /// Row-major optical-to-scene affine transform, including the shared mesh
+    /// scale. There is no second neck rotation or optical-axis approximation.
+    func depthCloudCameraTransform(_ belly: Bool) -> [NSNumber] {
+        guard let model, belly || headEstimate != nil,
+              let frame = model.frames(renderPositions(model.reference, preview: false))[
+                belly ? "belly_oak_optical_frame" : "oak_optical_frame"] else { return [] }
+        let basis = simd_double4x4(columns: (SIMD4<Double>(modelBasis.columns.0), SIMD4<Double>(modelBasis.columns.1),
+            SIMD4<Double>(modelBasis.columns.2), SIMD4<Double>(modelBasis.columns.3)))
+        let transform = basis * frame
+        return (0..<3).flatMap { row in (0..<4).map { NSNumber(value: transform[$0][row]) } }
+    }
+
+    @nonobjc private func renderPositions(_ positions: [String: Double], preview: Bool) -> [String: Double] {
+        var result = positions
+        for (joint, value) in headEstimate ?? [:] {
+            // Live estimates are render-only: saved poses and execution hashes
+            // keep their original values; an explicit ghost neck edit wins.
+            if !preview || positions[joint] == model?.reference[joint] { result[joint] = value }
         }
+        return result
+    }
+
+    @nonobjc private func updateOriginal(_ positions: [String: Double]) {
+        originalPositions = positions
+        updateNodes(originalNodes, positions: renderPositions(positions, preview: false))
     }
 
     func reviewPresetNamed(_ name: String) {
@@ -110,7 +139,7 @@ import simd
     private func row(_ views: [NSView]) -> NSStackView { let value = NSStackView(views: views); value.spacing = 7; return value }
     private func buildPanel() {
         let title = NSTextField(labelWithString: "Ghost gestures"); title.font = .boldSystemFont(ofSize: 19)
-        let help = NSTextField(wrappingLabelWithString: "Original: captured robot with left encoder estimate. Blue: proposed motion. Preview and save every named joint; execution currently supports supervised left-arm gestures. Other joints remain reference estimates.")
+        let help = NSTextField(wrappingLabelWithString: "Original: captured robot with left encoders and accepted neck command estimates. Blue: proposed motion. Preview and save every named joint; execution currently supports supervised left-arm gestures. Other joints remain reference estimates.")
         help.textColor = .secondaryLabelColor
         presets.target = self; presets.action = #selector(selectPreset)
         presets.identifier = NSUserInterfaceItemIdentifier("ghost-preset")
@@ -238,7 +267,7 @@ import simd
         guard let model, let title = joints.titleOfSelectedItem,
               let joint = model.joints.first(where: { $0.name == title }) else { return }
         angle.minValue = joint.lower * 180 / .pi; angle.maxValue = joint.upper * 180 / .pi
-        angle.doubleValue = (ghost[title] ?? 0) * 180 / .pi
+        angle.doubleValue = (renderPositions(ghost, preview: true)[title] ?? 0) * 180 / .pi
         angleText.stringValue = String(format: "%.1f° · %@", angle.doubleValue, title)
     }
     @objc private func changeAngle() {
@@ -321,6 +350,9 @@ import simd
     }
     @objc private func executeReviewed() {
         guard let proposal, let model, liveBaseline, !replayingRecording else { return }
+        // Freeze the preview while awaiting/executing the real operation.
+        // A concurrent ×4 animation needlessly contends with live feedback.
+        playing = false
         executeButton.isEnabled = false
         ownsPendingRequest = true
         ROBLeftArmTrial.shared.perform(proposal: proposal, model: model) { [weak self] result in
@@ -350,7 +382,7 @@ import simd
         clock.stringValue = String(format: "%.1f s", time)
         if replayingRecording, !record.isEmpty {
             let sample = record.last(where: { $0.time <= time }) ?? record[0]
-            updateNodes(originalNodes, positions: model.positions(vendorLeft: sample.positions))
+            updateOriginal(model.positions(vendorLeft: sample.positions))
             currentPlot.cursor = time; currentPlot.needsDisplay = true
             status.stringValue = "Recording replay · \(String(format: "%.2f", sample.time)) s\n" +
                 sample.currents.enumerated().map { String(format: "J%d %.3f", $0.offset + 1, $0.element) }.joined(separator: " · ") +
@@ -378,17 +410,22 @@ import simd
     private func updateNodes(_ nodes: [String: SCNNode], positions: [String: Double]) {
         guard let model else { return }
         let frames = model.frames(positions)
-        SCNTransaction.begin(); SCNTransaction.disableActions = true
+        var changes: [(SCNNode, simd_float4x4)] = []
         for (link, node) in nodes {
             if let transform = frames[link] {
-                node.simdTransform = simd_float4x4(columns: (SIMD4<Float>(transform.columns.0), SIMD4<Float>(transform.columns.1),
+                let value = simd_float4x4(columns: (SIMD4<Float>(transform.columns.0), SIMD4<Float>(transform.columns.1),
                     SIMD4<Float>(transform.columns.2), SIMD4<Float>(transform.columns.3)))
+                if node.simdTransform != value { changes.append((node, value)) }
             }
         }
+        guard !changes.isEmpty else { return }
+        SCNTransaction.begin(); SCNTransaction.disableActions = true
+        for (node, transform) in changes { node.simdTransform = transform }
         SCNTransaction.commit()
     }
     private func updateGhost(_ positions: [String: Double], updateFields: Bool = true) {
-        updateNodes(ghostNodes, positions: positions)
+        ghostDisplayPositions = positions
+        updateNodes(ghostNodes, positions: renderPositions(positions, preview: true))
         if updateFields, let tip = model?.toolPosition(positions) {
             for i in 0..<3 { xyz[i].stringValue = String(format: "%.3f", tip[i]) }
         }
@@ -400,9 +437,11 @@ import simd
         if !replayingRecording, now - lastOriginalUpdate > 0.2 {
             lastOriginalUpdate = now
             let baseline = freshBaseline()
-            updateNodes(originalNodes, positions: baseline.map { model.positions(vendorLeft: $0.q) } ?? model.reference)
-            referenceInfo.stringValue = baseline == nil ? "Original: scan reference; fresh left feedback unavailable."
-                : "Original left: fresh encoders with upright mapping prior. Other joints: scan reference."
+            updateOriginal(baseline.map { model.positions(vendorLeft: $0.q) } ?? model.reference)
+            referenceInfo.stringValue = (baseline == nil ? "Left: scan reference; fresh encoders unavailable."
+                : "Left: fresh encoders with upright mapping prior.") +
+                (headEstimate == nil ? " Head: reference; command estimate unavailable." : " Head: accepted neck command estimate.") +
+                " Other joints: scan reference."
         }
         let busy = ROBLeftArmTrial.shared.isRunning || ROBArmRoutineCoordinator.shared.isRunning
         for view in [presets, joints, angle, name] as [NSControl] { view.isEnabled = !busy }
