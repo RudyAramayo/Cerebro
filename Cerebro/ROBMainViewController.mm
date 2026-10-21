@@ -3098,6 +3098,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                                                    object:window];
         self.controllerDiagnosticsWindowController = [[NSWindowController alloc] initWithWindow:window];
         self.scnViewController = [[ROBSCNViewController alloc] initWithRobo_scnView:view];
+        self.scnViewController.serialBox = self.serialBox;
         // Anchor both panes to the window. A root stack's fitting size can
         // change with live HUD/status text and repeatedly resize the SCNView.
         NSView *content = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 1330, 820)];

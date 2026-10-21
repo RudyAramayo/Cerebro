@@ -185,8 +185,15 @@ enum ROBSwordTrackerColor: String, CaseIterable {
     public let isBelly: Bool
     @nonobjc let calibratedIntrinsics: CameraIntrinsics?
     let receivedUptime: TimeInterval
+    let capturedUptime: TimeInterval
+    public var hasCalibratedIntrinsics: Bool { calibratedIntrinsics?.isValid(forWidth: width, height: height) == true }
+    public var cameraFX: Double { hasCalibratedIntrinsics ? calibratedIntrinsics!.fx : .nan }
+    public var cameraFY: Double { hasCalibratedIntrinsics ? calibratedIntrinsics!.fy : .nan }
+    public var cameraCX: Double { hasCalibratedIntrinsics ? calibratedIntrinsics!.cx : .nan }
+    public var cameraCY: Double { hasCalibratedIntrinsics ? calibratedIntrinsics!.cy : .nan }
 
-    init(depth: CameraDepthFrame, rgbSampleBuffer: CMSampleBuffer, isBelly: Bool = false, intrinsics: CameraIntrinsics? = nil) {
+    init(depth: CameraDepthFrame, rgbSampleBuffer: CMSampleBuffer, isBelly: Bool = false,
+         intrinsics: CameraIntrinsics? = nil, capturedAtMilliseconds: Double? = nil) {
         millimetersLittleEndian = depth.millimetersLittleEndian as NSData
         width = depth.width
         height = depth.height
@@ -194,6 +201,10 @@ enum ROBSwordTrackerColor: String, CaseIterable {
         self.isBelly = isBelly
         calibratedIntrinsics = intrinsics
         receivedUptime = ProcessInfo.processInfo.systemUptime
+        let age = capturedAtMilliseconds.map { Date().timeIntervalSince1970 - $0 / 1000 }
+        // A missing/unusable clock gets a conservative transport allowance;
+        // it cannot make a frame qualify earlier during a neck transition.
+        capturedUptime = receivedUptime - (age.flatMap { $0.isFinite && $0 >= -0.05 ? max(0, $0) : nil } ?? 0.4)
     }
 }
 
@@ -1706,7 +1717,8 @@ extension CameraViewController: CameraManagerDelegate {
         )
         
         if let depth = frameSet.alignedDepth {
-            let hologramFrame = ROBDepthCloudFrame(depth: depth, rgbSampleBuffer: sampleBuffer, isBelly: false, intrinsics: frameSet.intrinsics)
+            let hologramFrame = ROBDepthCloudFrame(depth: depth, rgbSampleBuffer: sampleBuffer, isBelly: false,
+                intrinsics: frameSet.intrinsics, capturedAtMilliseconds: frameSet.capturedAtMilliseconds)
             ROBHologramExporter.shared.capture(hologramFrame)
             if cameraViewIsVisible {
                 faceDepthPointCloudRenderer.offer(depth: depth, rgbSampleBuffer: sampleBuffer, in: skeletonView)

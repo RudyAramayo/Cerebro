@@ -1,0 +1,24 @@
+{
+  "recording": "left_ghost-BA85AEB4-4007-4A47-BCAF-053715B6FEDC.csv",
+  "sha256": "6598e87635e99f7c187d16b95d323305e8e66f4b8f0c22f5ddb224f16394e100",
+  "archivedRecording": "ghost-wave.csv.gz",
+  "archiveSHA256": "add010a1e11f4d044439f4bfc78652d102bf34478558c5a59675151af9a61339",
+  "proposalSHA256": "5adb69628c1c9ce408c13605dd4d9444ac640300202bfac63561f0da1fbab063",
+  "steps": 10,
+  "samples": 725,
+  "elapsedSeconds": 38.8180140000004,
+  "finalPositionsRadians": [
+    -1.036971012610693,
+    1.200050214593914,
+    -0.5996842226774267,
+    -0.5999569303730508,
+    -0.5996842226774267,
+    -0.5995478688296146,
+    0.0
+  ],
+  "maximumFeedbackAgeMs": 113.86381000048452,
+  "peakCurrentJumpRaw": 1.5234375,
+  "currentCutoff": 0,
+  "runtimeOutcome": "Above-shoulder wave completed, left arm held raised, jaws unchanged",
+  "operatorObservation": "Requested an angle adjustment: stronger J2 to raise the wave and stronger J6 bend between waves. This candidate is not promoted as the final taught wave."
+}

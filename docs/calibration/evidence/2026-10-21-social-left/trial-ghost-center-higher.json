@@ -27,6 +27,6 @@
     "panDegrees": 0
   },
   "runtimeOutcome": "Completed; left arm held at final higher handoff pose; jaws unchanged",
-  "operatorObservation": "pending",
+  "operatorObservation": "Rob confirmed height and camera view look good, and reported extremely accurate ghost values/model position for the servos tested.",
   "installedDebugLibrarySHA256": "73da81cf1cb214c34ef287a0714cff1d30ad72bdb99c3f56cc9f2371b2872d14"
 }

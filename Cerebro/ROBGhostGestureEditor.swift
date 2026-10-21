@@ -13,6 +13,7 @@ import simd
     @nonobjc private var originalNodes: [String: SCNNode] = [:]
     @nonobjc private var ghostNodes: [String: SCNNode] = [:]
     @nonobjc private let renderRoot = SCNNode()
+    @nonobjc private var modelBasis = matrix_identity_float4x4
     @nonobjc private var ghost: [String: Double] = [:]
     @nonobjc private var poses: [[String: Double]] = []
     @nonobjc private var saved: [ROBGhostGesture] = []
@@ -51,8 +52,10 @@ import simd
             let model = try ROBGhostRobotModel(directory: directory)
             self.model = model; ghost = model.reference
             // ROB X-forward/Y-left/Z-up -> the existing scene's Y-up/-Z-forward.
-            renderRoot.simdTransform = simd_float4x4(columns: (SIMD4(0, 0, -1.2, 0),
-                SIMD4(-1.2, 0, 0, 0), SIMD4(0, 1.2, 0, 0), SIMD4(0, 0, 0, 1)))
+            let scale = ROBScanVisualModel.presentationScale
+            modelBasis = simd_float4x4(columns: (SIMD4(0, 0, -scale, 0),
+                SIMD4(-scale, 0, 0, 0), SIMD4(0, scale, 0, 0), SIMD4(0, 0, 0, 1)))
+            renderRoot.simdTransform = capturedRobot.presentation.simdWorldTransform * modelBasis
             scene.rootNode.addChildNode(renderRoot)
             for (link, geometry, ghostGeometry) in try capturedGeometry(model) {
                 let original = SCNNode(geometry: geometry)
@@ -86,6 +89,16 @@ import simd
     }
 
     func invalidate() { timer?.invalidate(); timer = nil; renderRoot.removeFromParentNode(); capturedRobot.isHidden = false }
+
+    func depthCloudMountPoints(_ belly: Bool) -> [NSValue] {
+        guard let model else { return [] }
+        let frames = model.frames(model.reference)
+        return ["lower_neck_link", "neck_pan_link", "upper_neck_link", belly ? "belly_oak_optical_frame" : "oak_optical_frame"].compactMap {
+            guard let frame = frames[$0] else { return nil }
+            let p = frame.columns.3
+            return NSValue(scnVector3: SCNVector3(-p.y, p.z, -p.x))
+        }
+    }
 
     func reviewPresetNamed(_ name: String) {
         presets.selectItem(at: name == "wave" ? 1 : 0)
@@ -382,6 +395,7 @@ import simd
     }
     private func tick() {
         guard let model else { return }
+        renderRoot.simdTransform = capturedRobot.presentation.simdWorldTransform * modelBasis
         let now = ProcessInfo.processInfo.systemUptime
         if !replayingRecording, now - lastOriginalUpdate > 0.2 {
             lastOriginalUpdate = now

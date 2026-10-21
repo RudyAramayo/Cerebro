@@ -233,8 +233,9 @@ The upright encoder mapping is an explicit prior, not a measured calibration.
   The first completed trial placed the modeled hand near the torso centerline
   (Y ≈ +0.034 m). Following operator feedback, the next candidate raises J2
   through +0.70…+1.00 rad, predicting another 0.186 m of height to Z ≈ 0.933 m.
-- **Wave above shoulder** continues J2 to +1.20 and J4 −0.10…−0.60,
-  then waves J1 twice. The model predicts Z ≈ 1.220 m versus shoulder ≈ 0.947 m.
+- **Wave above shoulder** continues J2 to +1.30 and J4 −0.10…−0.60,
+  then waves J1 twice with a J6 −0.70/−0.60 bend. The model predicts
+  Z ≈ 1.276 m versus shoulder ≈ 0.947 m.
   Centering/lowering reverses every raised waypoint before unwinding J6/J5/J3.
 - Select any named movable URDF joint for preview, or move the left-hand XYZ
   target with fields/2 cm nudges. **Add pose**, **Save gesture**, **Review path**,
@@ -267,7 +268,7 @@ deadlines are unchanged. Fresh camera,
 feedback/modes, ownership, session binding, leased motion and holds remain.
 Current cutoff **0 remains record-only**, not collision/force protection.
 
-[The new model-only sweep](calibration/evidence/2026-10-21-social-left/model-preview-v4.json)
+[The new model-only sweep](calibration/evidence/2026-10-21-social-left/model-preview-v5.json)
 retains full-model warnings, including provisional neck/arm margins at the
 raised pose; tread-only sweeps pass 25 mm. The images and model do not certify
 physical clearance. Test J6 centering first, then the raised wave with direct
@@ -289,7 +290,23 @@ Final J2/J6 were +0.986793/−0.599412 rad; maximum feedback age was 145.365 ms
 and peak raw current change 1.53125. The jaws stayed unchanged.
 [Its exact proposal and CSV archive](calibration/evidence/2026-10-21-social-left/trial-ghost-center-higher.json)
 retain the signed-build identity and hashes. Operator assessment of this higher
-pose/camera pairing is pending.
+pose/camera pairing was positive: Rob confirmed both height and camera view
+look good and described the tested ghost/servo alignment as extremely accurate.
+
+The first raised ghost wave subsequently completed its 10-step path from the
+higher handoff in 38.818 s, recording 725 distinct samples with maximum age
+113.864 ms. Rob requested a higher J2 and a stronger J6 bend between waves;
+this candidate is not the final taught wave. [Its proposal and currents](calibration/evidence/2026-10-21-social-left/trial-ghost-wave.json)
+are archived. The next preview increases raised J2 from +1.20 to +1.30 and
+adds J6 −0.70 at the outward wave, returning to −0.60 between waves. All
+handoff/approach points remain unchanged. The existing 25 mm model-only tread
+sweeps pass; provisional full-model neck/arm warnings remain visible.
+
+See [head-angle depth projection](controller-depth-cloud.md) for the correction
+requested after the accurate handoff test: the controller cloud now uses the
+URDF camera mount, accepted head angle estimates, frame intrinsics and matching
+model scale. No URDF calibration or automatic force threshold was inferred from
+the operator's positive visual observation.
 
 
 ## Existing paired operations

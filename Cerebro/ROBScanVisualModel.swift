@@ -116,7 +116,8 @@ import SceneKit
 @objc(ROBScanVisualModel) @objcMembers final class ROBScanVisualModel: NSObject {
     private static let document = ROBVisualDocument.load()
     private static let buffer = document.loadBuffer()
-    private static let scale: Float = 1.2
+    static let presentationScale: Float = 1.2
+    private static let scale = presentationScale
     private static let surfaces = document.materials.mapValues { surface in
             let material = SCNMaterial()
             material.lightingModel = .physicallyBased

@@ -365,7 +365,8 @@ import AVFoundation
         )
         
         guard let depth = frameSet.alignedDepth else { return }
-        let hologramFrame = ROBDepthCloudFrame(depth: depth, rgbSampleBuffer: frameSet.rgbSampleBuffer, isBelly: true, intrinsics: frameSet.intrinsics)
+        let hologramFrame = ROBDepthCloudFrame(depth: depth, rgbSampleBuffer: frameSet.rgbSampleBuffer, isBelly: true,
+            intrinsics: frameSet.intrinsics, capturedAtMilliseconds: frameSet.capturedAtMilliseconds)
         NotificationCenter.default.post(
             name: .ROBDepthCloudFrame,
             object: hologramFrame

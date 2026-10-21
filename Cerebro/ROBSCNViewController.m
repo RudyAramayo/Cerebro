@@ -1,5 +1,7 @@
 #import "ROBSCNViewController.h"
 #import "ROBBaseControllerModel.h"
+#import "ROBSerialBox.h"
+#import "ROBDepthCloudProjection.h"
 #import <QuartzCore/QuartzCore.h>
 #import <simd/quaternion.h>
 #import "Cerebro-Swift.h"
@@ -38,6 +40,9 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 @property (readwrite, retain) NSTextField *statusLabel;
 @property (readwrite, retain) NSTextField *detailLabel;
 @property (readwrite, retain) NSTextField *irStatusLabel;
+@property (readwrite, retain) NSTextField *cloudStatusLabel;
+@property NSTimeInterval lastHeadCloudUptime;
+@property NSTimeInterval lastBellyCloudUptime;
 @property (readwrite, retain) NSArray<SCNNode *> *irBeamNodes;
 @property (readwrite, retain) NSArray<NSValue *> *irBeamOrigins;
 @property (readwrite, retain) NSArray<NSValue *> *irBeamDirections;
@@ -162,7 +167,9 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     self.statusLabel = [self hudLabelWithSize:15 weight:NSFontWeightBold];
     self.detailLabel = [self hudLabelWithSize:11 weight:NSFontWeightMedium];
     self.irStatusLabel = [self hudLabelWithSize:11 weight:NSFontWeightMedium];
-    NSStackView *stack = [NSStackView stackViewWithViews:@[self.statusLabel, self.detailLabel, self.irStatusLabel]];
+    self.cloudStatusLabel = [self hudLabelWithSize:10 weight:NSFontWeightRegular];
+    self.cloudStatusLabel.stringValue = @"HEAD DEPTH: waiting for a settled neck command";
+    NSStackView *stack = [NSStackView stackViewWithViews:@[self.statusLabel, self.detailLabel, self.irStatusLabel, self.cloudStatusLabel]];
     stack.orientation = NSUserInterfaceLayoutOrientationVertical;
     stack.alignment = NSLayoutAttributeLeading;
     stack.spacing = 3;
@@ -468,6 +475,13 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 - (void)refreshFreshness:(NSTimer *)timer
 {
     [self refreshIRState];
+    NSTimeInterval cloudNow = NSProcessInfo.processInfo.systemUptime;
+    if (cloudNow - self.lastHeadCloudUptime > 0.7 || !self.serialBox.isNeckCommandStateKnown ||
+        self.serialBox.neckCommandReadyAtUptime > cloudNow) {
+        self.liveRGBCloudNode.hidden = YES;
+        self.cloudStatusLabel.stringValue = @"HEAD DEPTH HIDDEN: stale frame or unknown/moving neck";
+    }
+    if (cloudNow - self.lastBellyCloudUptime > 0.7) self.liveBellyRGBCloudNode.hidden = YES;
     NSTimeInterval age = self.lastReceivedUptime > 0
         ? NSProcessInfo.processInfo.systemUptime - self.lastReceivedUptime
         : DBL_MAX;
@@ -591,29 +605,44 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 
 - (void)receivedDepthCloudFrame:(NSNotification *)notification
 {
-    ROBDepthCloudFrame *frame = [notification.object isKindOfClass:ROBDepthCloudFrame.class]
-        ? notification.object : nil;
-    if (frame == nil) return;
-    
-    BOOL isBelly = NO;
-    if ([frame respondsToSelector:@selector(isBelly)]) {
-        isBelly = frame.isBelly;
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{ [self receivedDepthCloudFrame:notification]; });
+        return;
     }
-    
-    if (isBelly) {
-        if (self.bellyCloudUpdatePending) return;
-        self.bellyCloudUpdatePending = YES;
-    } else {
-        if (self.cloudUpdatePending) return;
-        self.cloudUpdatePending = YES;
+    ROBDepthCloudFrame *frame = [notification.object isKindOfClass:ROBDepthCloudFrame.class] ? notification.object : nil;
+    if (frame == nil || self.robo_scnView.scene == nil) return;
+    BOOL belly = frame.isBelly;
+    if (belly ? self.bellyCloudUpdatePending : self.cloudUpdatePending) return;
+    NSArray<NSValue *> *points = [self.ghostGestureEditor depthCloudMountPoints:belly];
+    ROBSerialBox *serial = self.serialBox;
+    double now = NSProcessInfo.processInfo.systemUptime;
+    BOOL settled = serial.isNeckCommandStateKnown && frame.capturedUptime >= serial.neckCommandReadyAtUptime;
+    if (points.count != 4 || now - frame.capturedUptime > 0.7 || (!belly && !settled)) {
+        if (belly) self.liveBellyRGBCloudNode.hidden = YES;
+        else { self.liveRGBCloudNode.hidden = YES; self.cloudStatusLabel.stringValue = @"HEAD DEPTH HIDDEN: waiting for fresh frame and settled neck"; }
+        return;
     }
-    
-    dispatch_async(dispatch_get_main_queue(), ^{
-        SCNMatrix4 robotTransform = self.robotNode.presentationNode.worldTransform;
-        dispatch_async(self.cloudQueue, ^{
-            [self processDepthFrame:frame robotTransform:robotTransform];
-        });
-    });
+    ROBDepthPoint mounts[4];
+    for (int i=0;i<4;i++) { SCNVector3 p = points[i].SCNVector3Value; mounts[i] = (ROBDepthPoint){p.x,p.y,p.z}; }
+    ROBNeckSafetyConfig config = serial ? [serial neckSafetyConfiguration] : ROBNeckSafetyDefaultConfig();
+    double pan = 0;
+    if (!belly && !ROBNeckSafetyPanTargetToDegrees(&config, (int32_t)serial.commandedNeckPanTarget, &pan)) return;
+    // Accepted Maestro targets are command estimates, not shaft feedback. The
+    // existing calibrated leveling gain converts lower motion to pitch units.
+    const double radiansPerTarget = M_PI / (180.0 * 33.3333333333);
+    double lower = belly ? 0 : -config.upperCounterRotationGain *
+        (serial.commandedLowerNeckTiltTarget - ROBNeckSafetyUprightLowerTarget) * radiansPerTarget;
+    double upper = belly ? 0 : (serial.commandedUpperNeckTiltTarget - ROBNeckSafetyUprightUpperTarget) * radiansPerTarget;
+    ROBDepthCloudTransform camera = ROBDepthCloudMakeTransform(mounts, lower, pan * M_PI / 180.0,
+        upper, ROBScanVisualModel.presentationScale, belly);
+    if (!camera.valid) return;
+    NSArray<NSNumber *> *targets = @[@(serial.commandedLowerNeckTiltTarget), @(serial.commandedNeckPanTarget), @(serial.commandedUpperNeckTiltTarget)];
+    if (belly) self.bellyCloudUpdatePending = YES; else self.cloudUpdatePending = YES;
+    if (!belly) self.cloudStatusLabel.stringValue = [NSString stringWithFormat:
+        @"HEAD DEPTH: neck command estimate · pan %+.1f° / tilt %+.1f° · %@ intrinsics · URDF mount prior",
+        pan, (lower + upper) * 180 / M_PI, frame.hasCalibratedIntrinsics ? @"calibrated" : @"estimated"];
+    SCNMatrix4 robot = self.robotNode.presentationNode.worldTransform;
+    dispatch_async(self.cloudQueue, ^{ [self processDepthFrame:frame robotTransform:robot cameraTransform:camera neckTargets:targets]; });
 }
 
 - (SCNGeometry *)pointGeometry:(NSArray<NSValue *> *)points colors:(NSArray<NSNumber *> *)colors pointSize:(CGFloat)size
@@ -675,19 +704,28 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 }
 
 - (void)processDepthFrame:(ROBDepthCloudFrame *)frame robotTransform:(SCNMatrix4)robotTransform
+          cameraTransform:(ROBDepthCloudTransform)camera neckTargets:(NSArray<NSNumber *> *)targets
 {
+    if (frame.width <= 0 || frame.height <= 0 || frame.width > 8192 || frame.height > 8192 ||
+        frame.millimetersLittleEndian.length < (NSUInteger)frame.width * (NSUInteger)frame.height * 2) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (frame.isBelly) { self.bellyCloudUpdatePending = NO; self.liveBellyRGBCloudNode.hidden = YES; }
+            else { self.cloudUpdatePending = NO; self.liveRGBCloudNode.hidden = YES; }
+        });
+        return;
+    }
     BOOL isBelly = NO;
     if ([frame respondsToSelector:@selector(isBelly)]) {
         isBelly = frame.isBelly;
     }
     
-    float heightOffset = isBelly ? 0.62f : 1.05f;
-    float depthOffset = isBelly ? -0.29f : 0.0f;
-
     const uint8_t *bytes = frame.millimetersLittleEndian.bytes;
     NSInteger width = frame.width, height = frame.height;
     float focal = (float)width / (2.0f * tanf(69.0f * (float)M_PI / 360.0f));
-    float cx = (float)(width - 1) / 2.0f, cy = (float)(height - 1) / 2.0f;
+    double fx = frame.hasCalibratedIntrinsics ? frame.cameraFX : focal;
+    double fy = frame.hasCalibratedIntrinsics ? frame.cameraFY : focal;
+    double cx = frame.hasCalibratedIntrinsics ? frame.cameraCX : (double)(width - 1) / 2;
+    double cy = frame.hasCalibratedIntrinsics ? frame.cameraCY : (double)(height - 1) / 2;
     NSMutableArray<NSValue *> *points = [NSMutableArray arrayWithCapacity:(width / 4) * (height / 4)];
     NSMutableArray<NSNumber *> *colors = [NSMutableArray arrayWithCapacity:(width / 4) * (height / 4)];
     CVPixelBufferRef rgb = frame.rgbPixelBuffer;
@@ -703,9 +741,8 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
             uint16_t mm = bytes[offset] | ((uint16_t)bytes[offset + 1] << 8);
             if (mm < 150 || mm > 10000) continue;
             float z = (float)mm / 1000.0f;
-            SCNVector3 local = SCNVector3Make(((float)x - cx) * z / focal,
-                                              heightOffset - ((float)y - cy) * z / focal,
-                                              depthOffset - z);
+            ROBDepthPoint projected = ROBDepthCloudProject(camera, (x - cx) * z / fx, (y - cy) * z / fy, z);
+            SCNVector3 local = SCNVector3Make(projected.x, projected.y, projected.z);
             SCNVector3 world = SCNVector3Make(
                 robotTransform.m11 * local.x + robotTransform.m21 * local.y + robotTransform.m31 * local.z + robotTransform.m41,
                 robotTransform.m12 * local.x + robotTransform.m22 * local.y + robotTransform.m32 * local.z + robotTransform.m42,
@@ -726,9 +763,17 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     dispatch_async(dispatch_get_main_queue(), ^{
         if (isBelly) {
             self.liveBellyRGBCloudNode.geometry = geometry;
+            self.lastBellyCloudUptime = frame.capturedUptime;
+            self.liveBellyRGBCloudNode.hidden = NSProcessInfo.processInfo.systemUptime - frame.capturedUptime > 0.7;
             self.bellyCloudUpdatePending = NO;
         } else {
-            self.liveRGBCloudNode.geometry = geometry;
+            ROBSerialBox *serial = self.serialBox;
+            BOOL samePose = serial.isNeckCommandStateKnown && serial.commandedLowerNeckTiltTarget == targets[0].integerValue &&
+                serial.commandedNeckPanTarget == targets[1].integerValue && serial.commandedUpperNeckTiltTarget == targets[2].integerValue &&
+                frame.capturedUptime >= serial.neckCommandReadyAtUptime;
+            self.liveRGBCloudNode.geometry = samePose ? geometry : nil;
+            self.lastHeadCloudUptime = frame.capturedUptime;
+            self.liveRGBCloudNode.hidden = !samePose || NSProcessInfo.processInfo.systemUptime - frame.capturedUptime > 0.7;
             self.cloudUpdatePending = NO;
         }
     });
