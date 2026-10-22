@@ -24,6 +24,12 @@ until the current test and controller workflow are finished.
    retaining handoff and J6. Its model tread sweeps pass. The authenticated live attempt lost CAN feedback
    during approach before reaching raised J5; hold was unconfirmed. Recovery and
    live acceptance remain pending. Do not weaken freshness checks to proceed.
+   Rob recovered the arms and completed a Coke-can grip: intensity10 held but
+   slightly deformed it; intensity2 held securely with no additional deformation.
+   The can was returned and confirmed clear. This does not commission raised
+   J5 −1.40 or establish calibrated grip force. The lease-to-gripper transition
+   now requires a confirmed hold before calibration; real jaw opening still
+   requires observation. See [can evidence](calibration/evidence/2026-10-21-coke-can/can-grip-trial.json).
    Confirm physical clearance before calling the added angles taught. See [arm trials](arm-startup-and-grab.md).
 2. **Implemented, live verification in progress — ghost motion editor.** Reuse the
    existing robot model and URDF joint names. Show the original robot with a

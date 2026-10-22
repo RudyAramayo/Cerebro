@@ -59,6 +59,9 @@ final class ROBAmberGatewayClient: NSObject {
     var mode = ["left": 0, "right": 0]
     var commands: [String] = []
     var calibrated: Set<String> = []
+    var activeLeases: Set<String> = []
+    var rejectHold = false
+    var confirmHold = true
     var rejectRelease = false
     var afterRelease: (() -> Void)?
     var afterStateQuery: (() -> Void)?
@@ -80,12 +83,14 @@ final class ROBAmberGatewayClient: NSObject {
         return sample
     }
     func modes(forArm arm: String) -> [NSNumber] { Array(repeating: NSNumber(value: mode[arm]!), count: 7) }
-    func ack(_ operation: String, _ arm: String, accepted: Bool = true) -> UInt64 {
+    func ack(_ operation: String, _ arm: String, accepted: Bool = true, holdConfirmed: Bool? = nil) -> UInt64 {
         let id = nextID; nextID += 1
         commands.append("\(operation):\(arm)")
         DispatchQueue.main.async {
+            var info: [String: Any] = ["commandID": NSNumber(value: id), "accepted": accepted, "operation": operation]
+            if let holdConfirmed { info["holdConfirmed"] = holdConfirmed }
             NotificationCenter.default.post(name: .ROBAmberGatewayCommandDidComplete, object: self,
-                userInfo: ["commandID": NSNumber(value: id), "accepted": accepted, "operation": operation])
+                userInfo: info)
         }
         return id
     }
@@ -102,6 +107,7 @@ final class ROBAmberGatewayClient: NSObject {
         precondition(arm == "right", "Trial dispatched to physical right arm")
         precondition(telemetry(forArm: arm)!.statuses.allSatisfy { $0.intValue == 2 })
         q[arm] = ROBLeftArmInteractionPlan.target(index: index)!
+        activeLeases.insert(arm)
         let id = ack("waypoint_\(index)", arm)
         onWaypoint?()
         return id
@@ -115,12 +121,17 @@ final class ROBAmberGatewayClient: NSObject {
         precondition(ROBLeftArmTrial.shared.approvedGestureTarget(id: proposalID, index: index + 1, seconds: duration,
             generation: expectedSessionGeneration) == nil)
         q["right"] = target
+        activeLeases.insert("right")
         let id = ack("ghost_step_\(index)", "right"); onGhostStep?(); return id
     }
-    func priorityHold(forArm arm: String) -> UInt64 { ack("priority_hold", arm) }
+    func priorityHold(forArm arm: String) -> UInt64 {
+        if !rejectHold { activeLeases.remove(arm) }
+        return ack("priority_hold", arm, accepted: !rejectHold, holdConfirmed: confirmHold)
+    }
     func renewLease(forArm arm: String, leaseMilliseconds: UInt32) -> UInt64 { ack("renew_lease", arm, accepted: !rejectRenewal) }
     func deactivateArm(_ arm: String) -> UInt64 {
         precondition(ROBArmRoutinePlan.near(q[arm]!, Array(repeating: 0, count: 7)), "Torque removed away from hanging")
+        activeLeases.remove(arm)
         mode[arm] = 0; return ack("deactivate", arm)
     }
     func queryGripperState(forArm arm: String) -> UInt64 {
@@ -131,6 +142,10 @@ final class ROBAmberGatewayClient: NSObject {
     }
     func calibrateGripper(forArm arm: String) -> UInt64 {
         precondition(arm == "right" && ROBLeftArmInteractionPlan.stationaryFrontTarget(q[arm]!) != nil)
+        // Match the production gateway: settling does not release a lease,
+        // and an attempted calibration invalidates earlier acceptance first.
+        calibrated.remove(arm)
+        guard !activeLeases.contains(arm) else { return ack("calibrate", arm, accepted: false) }
         calibrated.insert(arm)
         return ack("calibrate", arm)
     }
@@ -273,6 +288,25 @@ final class ROBArmRoutineCoordinator {
         precondition(prepare["status"] as? String == "accepted_unverified", prepare.description)
         precondition(g.commands.filter { $0.hasPrefix("calibrate") } == ["calibrate:right"])
         precondition(g.commands.contains("gripper_release:right"))
+        let heldForPrepare = g.commands.firstIndex(of: "priority_hold:right")!
+        precondition(heldForPrepare > g.commands.lastIndex(of: "waypoint_\(plan.frontIndex):right")!)
+        precondition(heldForPrepare < g.commands.firstIndex(of: "calibrate:right")!)
+        precondition(!g.activeLeases.contains("right"))
+        // A reply may acknowledge the hold request without confirming a
+        // measured-pose hold. Neither that nor a refused hold permits jaws.
+        for refused in [false, true] {
+            g.commands = []; g.calibrated = []
+            g.q["right"] = plan.target(index: plan.frontIndex - 1)!
+            g.rejectHold = refused; g.confirmHold = false
+            let failedHold = await run("left_prepare")
+            precondition(failedHold["status"] as? String == "blocked", failedHold.description)
+            precondition(g.commands.contains("priority_hold:right"))
+            precondition(!g.commands.contains { $0.hasPrefix("gripper_") || $0.hasPrefix("calibrate") })
+            precondition(g.mode["right"] == 2, "Failed gripper setup removed torque")
+        }
+        g.rejectHold = false; g.confirmHold = true
+        g.activeLeases = []; g.calibrated = ["right"]
+        print("Lease-to-gripper handoff: prepare cancels its settled trajectory lease with a confirmed hold; refused or unconfirmed holds block all jaw commands")
         g.commands = []
         g.assertStationaryGripperApproval = true
         let grip = await run("left_grip")
@@ -365,7 +399,7 @@ final class ROBArmRoutineCoordinator {
             precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty)
         }
         print("Stop/faults: stale feedback, replaced session, camera loss and operator cancellation prevent any subsequent waypoint and retain torque")
-        precondition(approvals == 16)
+        precondition(approvals == 18)
     }
     static func main() async throws { setbuf(stdout, nil); try await tests(); print("Left-arm trial fixtures passed; no hardware transport exists in this executable") }
 }

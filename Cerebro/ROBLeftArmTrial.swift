@@ -21,6 +21,7 @@ import AppKit
     private var ackObserver: NSObjectProtocol?
     private var sampleObserver: NSObjectProtocol?
     private var acks: [UInt64: Bool] = [:]
+    private var holdConfirmations: [UInt64: Bool] = [:]
     private var waiting: Set<UInt64> = []
     private var leaseRenewals: [UInt64: Double] = [:]
     private var owner: UUID?
@@ -128,7 +129,12 @@ import AppKit
                       let id = (note.userInfo?["commandID"] as? NSNumber)?.uint64Value else { return }
                 let accepted = note.userInfo?["accepted"] as? Bool == true
                 let renewal = self.leaseRenewals.removeValue(forKey: id) != nil
-                if self.waiting.contains(id) { self.acks[id] = accepted }
+                if self.waiting.contains(id) {
+                    self.acks[id] = accepted
+                    if note.userInfo?["operation"] as? String == "priority_hold" {
+                        self.holdConfirmations[id] = note.userInfo?["holdConfirmed"] as? Bool == true
+                    }
+                }
                 if (renewal || self.waiting.contains(id)) && !accepted {
                     self.abort(note.userInfo?["error"] as? String ?? "Left-arm command rejected; hold requested.")
                 }
@@ -219,7 +225,7 @@ import AppKit
         failure = nil; generation = 0; cameraReady = false; positionReady = false; leased = false
         allowsArmTravel = ["left_wave", "left_prepare", "left_relax", "left_ghost"].contains(command)
         proposalStep = -1; sentPath = []
-        waiting = []; acks = [:]; leaseRenewals = [:]; phase = "preflight"
+        waiting = []; acks = [:]; holdConfirmations = [:]; leaseRenewals = [:]; phase = "preflight"
         deadline = ProcessInfo.processInfo.systemUptime + (allowsArmTravel ? 170 : 115)
         vision.setActive(true); ROBArmRoutineCoordinator.shared.cameraDemand?(true)
         if !gateway.isReady() { ROBAmberGatewayTunnel.shared.connect() }
@@ -284,13 +290,16 @@ import AppKit
         try check()
     }
 
-    @MainActor private func accepted(_ dispatch: () -> UInt64) async throws {
+    @MainActor private func accepted(requiresConfirmedHold: Bool = false, _ dispatch: () -> UInt64) async throws {
         try check()
         let id = dispatch()
         guard id != 0 else { throw ROBArmRoutineError.blocked("Gateway refused left-arm command during \(phase), before submission.") }
         waiting.insert(id)
+        defer { waiting.remove(id); acks.removeValue(forKey: id); holdConfirmations.removeValue(forKey: id) }
         try await wait(3) { self.acks[id] == true }
-        waiting.remove(id); acks.removeValue(forKey: id)
+        if requiresConfirmedHold, holdConfirmations[id] != true {
+            throw ROBArmRoutineError.blocked("Left-arm position hold was not confirmed; no gripper command sent.")
+        }
     }
 
     @MainActor private func execute(_ command: String) async throws -> NSDictionary {
@@ -342,17 +351,7 @@ import AppKit
         }
         positionReady = true
         if stationaryJaw {
-            // Position mode and one matching encoder read do not prove that
-            // an earlier trajectory has settled. Require distinct stable reads.
-            var settler = ROBArmRoutineSettler()
-            guard let front = ROBLeftArmInteractionPlan.stationaryFrontTarget(try measured().positionsRadians.map(\.doubleValue)) else {
-                throw ROBArmRoutineError.blocked("Left arm drifted from the front pose; no jaw command sent.")
-            }
-            try await wait(2) {
-                guard let sample = try? self.measured() else { return false }
-                return settler.observe(sequence: sample.sequence, positions: sample.positionsRadians.map(\.doubleValue),
-                    target: front, now: ProcessInfo.processInfo.systemUptime)
-            }
+            try await settleFront()
         } else if let proposal {
             try await move(proposal)
             return ["status": "completed", "measured": true, "motion_proposal_id": proposal.id.uuidString,
@@ -374,7 +373,17 @@ import AppKit
                 ROBLeftArmInteractionPlan.waveIndex, ROBLeftArmInteractionPlan.waveRestIndex])
             return ["status": "completed", "measured": true, "detail": "Left arm waved twice above the shoulder and is holding raised. Gripper unchanged."]
         default:
+            // A settled leased trajectory still owns a gateway motion lease.
+            // Calibration deliberately refuses that lease. Stop renewals and
+            // drain their replies before the priority hold, which cancels the
+            // lease without removing torque. An accepted but unconfirmed hold
+            // is insufficient authority for a subsequent jaw command.
             try verifyFront()
+            phase = "holding front for gripper"; update("Holding left arm before gripper setup")
+            leased = false
+            try await wait(1) { self.leaseRenewals.isEmpty }
+            try await accepted(requiresConfirmedHold: true) { gateway.priorityHold(forArm: arm) }
+            try await settleFront()
             try await accepted { gateway.queryGripperState(forArm: arm) }
             let calibrated = gateway.gripperSnapshot(forArm: arm)["calibrationState"] as? String == "command_accepted_unverified"
             if !calibrated {
@@ -404,6 +413,21 @@ import AppKit
               sample.statuses.allSatisfy({ $0.intValue == 2 }),
               ROBLeftArmInteractionPlan.stationaryFrontTarget(sample.positionsRadians.map(\.doubleValue)) != nil else {
             throw ROBArmRoutineError.blocked("Gripper action requires the left arm stationary at the taught front pose in position mode.")
+        }
+    }
+
+    @MainActor private func settleFront() async throws {
+        // Position mode and a single matching read do not prove settling.
+        // Recheck distinct fresh samples after changing the arm to a hold.
+        try verifyFront()
+        var settler = ROBArmRoutineSettler()
+        guard let front = ROBLeftArmInteractionPlan.stationaryFrontTarget(try measured().positionsRadians.map(\.doubleValue)) else {
+            throw ROBArmRoutineError.blocked("Left arm drifted from the front pose; no jaw command sent.")
+        }
+        try await wait(2) {
+            guard let sample = try? self.measured() else { return false }
+            return settler.observe(sequence: sample.sequence, positions: sample.positionsRadians.map(\.doubleValue),
+                target: front, now: ProcessInfo.processInfo.systemUptime)
         }
     }
 

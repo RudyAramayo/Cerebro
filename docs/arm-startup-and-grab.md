@@ -139,6 +139,45 @@ restores the live scene; editing a pending proposal still cancels it. The isolat
 render fixture exercises freeze/thaw and shared head/camera alignment without
 any actuator transport. V9 live validation is pending.
 
+### 2026-10-21 Coke-can grip test
+
+After Rob recovered the arms, both sides reported fresh CAN feedback and the
+left arm reported zero/inactive. Each operation below used a fresh authenticated
+controller approval. Only physical left (R11 / gateway `right`) received test
+commands.
+
+The approach reached the accepted handoff but calibration was refused because
+its settled trajectory still owned a renewed motion lease. A separate stationary
+**Present / open** accepted calibration/opening; Rob observed the jaw still
+closed. A separately approved release then visibly opened it. Rob placed the can,
+supported it underneath and cleared his fingers before closing.
+
+Intensity **10** retained the can but slightly deformed it. After a supported
+release and confirmed repositioning, diagnostics **Hold** at intensity **2**
+retained the same can with **no additional deformation**, as reported by Rob.
+The arm stayed at the handoff pose. The lower setting is an observation for this
+can, not a calibrated force or a guarantee for other objects. Diagnostics provides
+an adjustable 2–20 setting; the simple **Grip object** action still uses intensity
+10, so use the diagnostics setting for this can. Do not silently increase it.
+A final release at intensity2 was accepted; Rob confirmed the can returned and
+completely clear of the jaws before the empty arm's return was requested.
+[Trial records and telemetry](calibration/evidence/2026-10-21-coke-can/can-grip-trial.json)
+retain the failed preparation, successful opening, both intensities and physical
+observations. The raw readings cover arm joints, not measured gripper force.
+
+The executor fix ends the approach lease with a confirmed measured-position
+hold before gripper setup, drains pending renewals and verifies distinct fresh,
+stable front samples. It retains position torque, camera/session/current/mode
+checks and unverified jaw acknowledgements. Regression fixtures model the real
+active-lease calibration refusal and block every jaw command after a refused or
+unconfirmed hold. No gateway policy or calibration delay was relaxed. The new source passed the
+executor regressions and production gateway compatibility tests, and the signed
+Debug build passed signature verification. The old app's empty-arm return
+completed in 47.15 seconds with fresh samples and verified hanging/inactive before
+the new build was loaded. The fix itself has not received a new physical
+preparation trial. Relaunch resets calibration acceptance and the diagnostics
+intensity field; explicitly reselect2 there for this can after empty-jaw setup.
+
 ### 2026-10-21 installation and trial request
 
 The signed macOS Debug build passed, was installed at `/Applications/Cerebro.app`,

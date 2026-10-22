@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-21T23:57:32.999712+00:00",
+  "installedDebugLibrarySHA256": "c3234e6c20d9eaa67db36b27c54960ba4ad23af8a5a29283f87c8a07580c9bed",
+  "physicalArm": "LEFT / R11 / gateway right / UDP26002",
+  "otherArmCommands": "None sent by this test",
+  "operatorRecovery": "User reported arms recovered; both sides subsequently reported fresh telemetry. Left zero/inactive before preparation. Previous recovery failure text remained historical in diagnostics; no further stack recovery issued by this test.",
+  "gripperIntensityVendorUnits": 10,
+  "currentJumpLimitRaw": 0,
+  "measurementScope": "Seven arm joint positions/raw currents; no gripper force, jaw position, or retention measurement. Physical jaw/opening/retention require operator observation.",
+  "trials": [
+    {
+      "recording": "left_prepare-CE43B28F-CA9B-4F88-8C19-B1C0E546551A.csv",
+      "archivedRecording": "prepare-lease-rejection.csv.gz",
+      "sha256": "c2b240f602db5c2ef9ff4142cdf5dbb19e10c13c5ad0893b3800fb28d0d68d8c",
+      "archiveSHA256": "a309c170dc7ad6fdb75742fc07669d72d045ff72239e7cd755badf60b6a89727",
+      "outcome": "Reached handoff; calibration blocked by active approach motion lease. No jaw calibration performed in this request.",
+      "elapsedSeconds": 44.684516416666156,
+      "samples": 782,
+      "lastPhase": "waypoint 28",
+      "finalPositionsRadians": [
+        -1.049651920457215,
+        0.9971556890495729,
+        -0.5995478688296146,
+        -0.001227184630308513,
+        -0.5988660995905544,
+        -0.6022749457858557,
+        0.0
+      ],
+      "maximumFeedbackAgeMilliseconds": 114.17219633209879,
+      "peakCurrentJumpRaw": 1.87109375
+    },
+    {
+      "recording": "left_prepare-1C2D63A5-A918-4666-A5E8-68132FF624A1.csv",
+      "archivedRecording": "stationary-prepare.csv.gz",
+      "sha256": "f9b9147954ea472ed14a5b971f38d6d7606a8e512a7e912a2499fb6aaee53dce",
+      "archiveSHA256": "4bf4261577b821fcba02a38fe30b500b1628fe7f07e4570e66af9b9c6fc96b64",
+      "outcome": "Separate controller-approved stationary preparation accepted calibration and release. Operator reported jaws still closed; no can placed yet.",
+      "elapsedSeconds": 9.001646000000619,
+      "samples": 169,
+      "lastPhase": "release object",
+      "finalPositionsRadians": [
+        -1.049515566609403,
+        0.9974283967451969,
+        -0.5994115149818026,
+        -0.000954476934684399,
+        -0.5988660995905544,
+        -0.6020022380902317,
+        0.0
+      ],
+      "maximumFeedbackAgeMilliseconds": 82.86905099847985,
+      "peakCurrentJumpRaw": 1.2734375
+    },
+    {
+      "recording": "left_release-936843DE-52A3-45F6-8CBA-99D735C8D219.csv",
+      "archivedRecording": "standalone-open.csv.gz",
+      "sha256": "bcf89010fc520d2b7c003bcfa43f9fc1f1c62287d65435ed0c2d5c22dd9da3bd",
+      "archiveSHA256": "c42b5921b53335b4575d901f4c00d38f4482554abc2d39be79fffbdc87092154",
+      "outcome": "Separate controller-approved release accepted. Operator confirmed jaw open and can in place, supported underneath, fingers clear.",
+      "elapsedSeconds": 6.3528485000024375,
+      "samples": 124,
+      "lastPhase": "release object",
+      "finalPositionsRadians": [
+        -1.049515566609403,
+        0.9974283967451969,
+        -0.5994115149818026,
+        -0.000954476934684399,
+        -0.5987297457427423,
+        -0.6020022380902317,
+        0.0
+      ],
+      "maximumFeedbackAgeMilliseconds": 132.18903933018726,
+      "peakCurrentJumpRaw": 0.80078125
+    },
+    {
+      "recording": "left_grip-8E4B085E-7939-47F6-A3B5-95B9BD11F18E.csv",
+      "archivedRecording": "can-grip.csv.gz",
+      "sha256": "513f8bfcfbaf150ff9b5440d0ad01fe689520c5b715de8489683befcefe95d9e",
+      "archiveSHA256": "5a986b425fda75929cfd5fb418359d49c5f840503668f81ca8df890c1c7dadc8",
+      "outcome": "Stationary grip at intensity10 accepted; operator confirmed can held but slightly deformed. This did not establish a non-damaging setting.",
+      "elapsedSeconds": 6.866888958335039,
+      "samples": 132,
+      "lastPhase": "grip object",
+      "finalPositionsRadians": [
+        -1.049515566609403,
+        0.9974283967451969,
+        -0.5994115149818026,
+        -0.000954476934684399,
+        -0.5985933918949302,
+        -0.6020022380902317,
+        0.0
+      ],
+      "maximumFeedbackAgeMilliseconds": 147.8346506693345,
+      "peakCurrentJumpRaw": 1.015625
+    },
+    {
+      "recording": "left_release-10302703-FF52-4660-A9A9-0693526A5240.csv",
+      "archivedRecording": "return-before-lower-intensity.csv.gz",
+      "sha256": "44f09afce79af5f1c798a824478fd40c9a047286b3f9a4e32fa217c248d9ab3b",
+      "archiveSHA256": "01383cd88c9a00fea1a76554ddfad746eba9421de4535c385818c62f9996d16b",
+      "outcome": "Open command accepted; operator confirmed released, then can repositioned/supported with fingers clear for intensity2.",
+      "elapsedSeconds": 6.531785750001291,
+      "samples": 128,
+      "maximumFeedbackAgeMilliseconds": 152.45667299934365
+    },
+    {
+      "recording": "left_relax-4D759BA7-CEEB-49B1-A2C9-11C3184746BB.csv",
+      "archivedRecording": "empty-arm-return.csv.gz",
+      "sha256": "d8a8981df75818e217cb707ff146a8636c4613bc5af57ab4e3e4f324a0255bba",
+      "archiveSHA256": "026f193d2724b0a88ce2be20f38b47de3e07d22fd61c375908526eef95e53950",
+      "outcome": "Application reported left arm reached hanging and inactive after fresh controller-approved empty reverse route.",
+      "elapsedSeconds": 47.15327262500068,
+      "samples": 791,
+      "lastPhase": "deactivating",
+      "finalPositionsRadians": [
+        0.0,
+        0.007635815477475192,
+        0.0,
+        -0.004226969282173767,
+        0.0,
+        0.003681553890925539,
+        0.0
+      ],
+      "maximumFeedbackAgeMilliseconds": 150.308714669528,
+      "peakCurrentJumpRaw": 1.82421875
+    }
+  ],
+  "physicalRetention": "Operator: intensity 10 held the can but slightly deformed it. After a confirmed release/reposition, intensity 2 held securely with no additional deformation.",
+  "return": "Final low-intensity release accepted; Rob confirmed can returned and clear. Empty arm completed controller-approved reverse route and verified hanging/inactive in 47.15 seconds, 791 complete joint samples, maximum feedback age150.4ms.",
+  "lowerIntensity": {
+    "intensityVendorUnits": 2,
+    "controllerApproval": "Fresh approval of physical left Hold at raw intensity2 through existing diagnostics UI; no new arm movement.",
+    "gatewayCommandID": 132,
+    "gatewayAck": "gripper_control accepted, vendor response1, 1.57ms, physical completion unverified",
+    "ackLocalTime": "2026-10-21 16:59:22.856 America/Los_Angeles",
+    "operatorObservation": "Held securely with no additional deformation",
+    "recordingScope": "Existing bounded diagnostics export includes both arms; this test commanded physical left gripper only.",
+    "archivedRecording": "lower-intensity-telemetry.csv.gz",
+    "sourceExportSHA256": "3fc7d9115d1e32f328b5fe51e6fdecdb364d6530e4f52ea5ad624b49d5eab2cc",
+    "archiveSHA256": "d147ce0fcf50524ca23d3206906c8fe89d86f5f4bc498c8808d894a022cd4317",
+    "firstReceivedAt": "2026-10-21T23:58:18.384Z",
+    "lastReceivedAt": "2026-10-22T00:00:20.350Z",
+    "rows": 33600,
+    "physicalLeftSamples": 2400,
+    "leftMaximumJointFeedbackAgeMs": 5.980831
+  },
+  "settingScope": "Intensity2 was selected in the diagnostics UI for the can test. Simple Grip object remains fixed at10, and diagnostics resets to10 on relaunch. After new-session empty-jaw calibration and observed opening, explicitly select2 in diagnostics for this can. No force setting was silently changed for all other objects.",
+  "leaseHandoffFix": {
+    "softwareChecks": "Isolated production executor suite passed, including real-policy active-lease calibration rejection model, confirmed-hold ordering, refused/unconfirmed hold jaw rejection, all existing fault/return/current/ghost cases. Production gateway compatibility suite passed.",
+    "hardwareScope": "Can trials used the prior installed build plus a separately approved stationary preparation workaround. The new lease handoff itself has not been commissioned on hardware.",
+    "build": "Signed macOS Debug build passed, codesign --verify --deep --strict passed, installed and relaunched only after empty arm verified hanging/inactive. New calibration acceptance is required after the new gateway session; no additional motor or gripper operation performed.",
+    "installedDebugLibrarySHA256": "2b1817221faa7b82960f71a0c447ac7459b99402010a332895e0790cb968004d",
+    "sourceSHA256": {
+      "Cerebro/ROBLeftArmTrial.swift": "4303f0c722da8d7dd372d082b1a1cc4d2135cdb82a277685ef5880438296b72e",
+      "Tests/ROBLeftArmTrialFixtureTests.swift": "6961d2279410dcb51175fe1e1dbc6589bbe1631d1db1435b745df877c2521a81"
+    },
+    "reloadedProcessID": 23469
+  }
+}
