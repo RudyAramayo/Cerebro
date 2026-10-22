@@ -249,7 +249,90 @@ struct GatewayCompatibilityFixtures {
         expect(waypoint("right", 7) == 0, "Front extension admitted directly from hanging")
         try motorFeedback(positions: ROBLeftArmInteractionPlan.target(index: 6)!)
         expect(waypoint("right", 7) > 0, "Approved front-only J3 step refused")
-        expect(waypoint("right", 8) == 0, "Front extension skipped a J3 step")
+        expect(waypoint("right", 9) > 0, "Straight J3 increments could not be joined")
+        let plan = ROBLeftArmInteractionPlan.self
+        let zero = [Double](repeating: 0, count: 7)
+        let smoothHandoff = plan.executionRoute(from: zero, hanging: false)!
+        expect(smoothHandoff == [1, 4, 6, 18, 28], "Coordinated handoff did not retain its five fixed legs")
+        expect(plan.compactRoute(from: zero, indices: smoothHandoff) == smoothHandoff,
+               "Coordinated handoff lost a registered corner")
+        let smoothWave = plan.executionRoute(from: zero, hanging: false, waving: true)! + [43, 42, 43, 42]
+        expect(smoothWave == [1, 4, 6, 18, 28, 34, 42, 43, 42, 43, 42],
+               "Coordinated wave did not retain all eleven legs and reversals")
+        expect(plan.compactRoute(from: zero, indices: smoothWave) == smoothWave,
+               "Coordinated wave compaction removed a corner or reversal")
+        expect(plan.executionRoute(from: plan.target(index: 28)!, hanging: true) == [18, 6, 4, 1, 0],
+               "Coordinated return did not reverse the same fixed corridor")
+        let handoff = Array(1 ... plan.frontIndex)
+        expect(plan.compactRoute(from: zero, indices: handoff) == [1, 4, 6, 9, 12, 15, 18, 24, 28],
+               "Handoff compaction removed a corner or retained artificial stops")
+        let fullWave = Array(1 ... plan.waveRestIndex) + [plan.waveIndex, plan.waveRestIndex, plan.waveIndex, plan.waveRestIndex]
+        expect(plan.compactRoute(from: zero, indices: fullWave) == [1, 4, 6, 9, 12, 15, 18, 24, 28, 34, 42, 43, 42, 43, 42],
+               "Wave compaction removed a corner or reversal")
+        let oldStart = plan.target(index: 9)!
+        expect(plan.executionRoute(from: oldStart, hanging: false) == plan.route(from: oldStart, hanging: false),
+               "A stopped legacy pose did not fall back to its original corridor")
+        expect(plan.compactRoute(from: oldStart, indices: plan.executionRoute(from: oldStart, hanging: false)!) == [12, 15, 18, 24, 28],
+               "Legacy fallback lost one of its original path corners")
+        expect(plan.compactRoute(from: plan.target(index: 6)!, indices: [12]) == nil,
+               "Compaction accepted a route that skipped a canonical corner")
+        var one = zero; one[0] = 1
+        var two = zero; two[0] = 2
+        expect(ROBArmRoutinePlan.compactTargetIndices(baseline: zero, targets: [zero, one, one, two, one, zero]) == [3, 5],
+               "Shared compaction mishandled duplicates or discarded a reversal")
+        // Long segments follow exactly the same forward or reverse canonical
+        // leg: approach, J3, J5, J6, J2 and the coordinated J2/J4 raise.
+        for (a, b) in [(1, 4), (4, 6), (6, 9), (9, 12), (12, 15), (15, 18), (18, 24), (24, 28), (28, 34), (34, 42), (6, 18), (18, 28)] {
+            for (start, end) in [(a, b), (b, a)] {
+                let q = plan.target(index: start)!
+                try motorFeedback(positions: q)
+                expect(waypoint("right", end) > 0, "Known straight leg \(start)->\(end) was refused")
+                expect(waypoint("left", end) == 0, "Joined leg borrowed authority for the physical right arm")
+                expect(waypoint("right", end, 4, generation + 1) == 0, "Joined leg replayed across gateway sessions")
+            }
+        }
+        var noisyStart = zip(plan.target(index: 7)!, plan.target(index: 8)!).map { ($0 + $1) / 2 }
+        noisyStart[6] = 0.005
+        try motorFeedback(positions: noisyStart)
+        expect(waypoint("right", 9) > 0, "Existing corridor tolerance no longer permits normal feedback noise")
+        expect(waypoint("right", 6) > 0, "Reverse straight leg from measured mid-segment was refused")
+        noisyStart[6] = ROBArmRoutinePlan.tolerance + 0.001
+        try motorFeedback(positions: noisyStart)
+        expect(waypoint("right", 9) == 0, "Joined leg widened the known corridor tolerance")
+        for (a, b, after, before) in [(6, 18, [18, 28], [6, 4, 1, 0]), (18, 28, [28], [18, 6, 4, 1, 0])] {
+            var middle = zip(plan.target(index: a)!, plan.target(index: b)!).map { $0 + 0.4 * ($1 - $0) }
+            middle[6] = 0.005
+            expect(plan.progress(middle) == nil, "Smooth midpoint unexpectedly changed legacy progress semantics")
+            expect(plan.executionRoute(from: middle, hanging: false) == after,
+                   "Measured smooth midpoint did not continue through its next registered corner")
+            expect(plan.executionRoute(from: middle, hanging: true) == before,
+                   "Measured smooth midpoint did not reverse through its previous registered corner")
+            expect(plan.compactRoute(from: middle, indices: after) == after,
+                   "Compaction rejected a measured smooth midpoint")
+            try motorFeedback(positions: middle)
+            expect(waypoint("right", a) > 0 && waypoint("right", b) > 0,
+                   "Same-leg forward/reverse move from a smooth midpoint was refused")
+            expect(waypoint("right", a == 6 ? 28 : 6) == 0,
+                   "Smooth midpoint skipped its adjacent registered corner")
+            middle[6] = ROBArmRoutinePlan.tolerance + 0.001
+            expect(plan.executionRoute(from: middle, hanging: false) == nil,
+                   "Smooth execution route widened its corridor tolerance")
+            try motorFeedback(positions: middle)
+            expect(waypoint("right", b) == 0, "Smooth midpoint bypassed the original corridor tolerance")
+        }
+        // A chord through a corner would alter the taught swept path, even
+        // when its endpoints are individually valid canonical waypoints.
+        for (start, end) in [(0, 6), (6, 12), (9, 15), (6, 28), (28, 6), (18, 34), (34, 18), (28, 42), (42, 28), (34, 43), (43, 34), (24, 5)] {
+            try motorFeedback(positions: plan.target(index: start)!)
+            expect(waypoint("right", end) == 0, "Joined leg crossed a corner or skipped unwind: \(start)->\(end)")
+        }
+        trial.approved = false
+        ROBArmRoutineCoordinator.shared.isRunning = true
+        try motorFeedback(positions: plan.target(index: 1)!)
+        expect(waypoint("right", 3) == 0, "Paired routine lost its original adjacent-waypoint bound")
+        ROBArmRoutineCoordinator.shared.isRunning = false
+        trial.approved = true
+        expect(waypoint("right", 3) > 0, "Left trial did not admit the same straight approach leg")
         // The planner's shortest segment must survive the real transport's
         // duration floor, including a small raised J5 step.
         let j5From = ROBLeftArmInteractionPlan.target(index: 34)!
@@ -287,10 +370,13 @@ struct GatewayCompatibilityFixtures {
         try motorFeedback(age: 500)
         expect(ghost() == 0, "Ghost step bypassed stale feedback")
         expect(waypoint() == 0, "Left trial bypassed fresh motor feedback")
+        try motorFeedback(age: 500, positions: plan.target(index: 18)!)
+        expect(waypoint("right", 24) == 0, "Joined leg bypassed fresh motor feedback")
+        expect(waypoint("right", 28) == 0, "Smooth leg bypassed fresh motor feedback")
         try motorFeedback()
         trial.approved = false
         expect(waypoint() == 0, "Revoked trial could still dispatch")
-        print("Taught-waypoint admission: real gateway recognizes only the approved left trial and retains route, timing, session and freshness bounds")
+        print("Taught-waypoint admission: fixed five-leg handoff/eleven-leg wave, smooth midpoint recovery and legacy fallback retain corners, reversals, tolerance, timing, side, session and freshness bounds; paired adjacency unchanged")
         print("Amber gateway compatibility fixtures passed")
     }
 }

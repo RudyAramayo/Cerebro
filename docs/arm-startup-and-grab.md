@@ -7,9 +7,9 @@ Settings → Arms now starts with **Wave left**, **Present / open**, **Grip obje
 approval on the authenticated iPhone or Vision Pro. The summary describes the
 whole operation; no per-waypoint or extra spoken confirmation is needed.
 
-- **Wave left** uses the existing hanging/front route through waypoint 6, then
-  stages J3/J5 through −0.30 to −0.60 rad, one joint at a time in 0.10-rad steps.
-  J6 stages inward to −0.60; the accepted handoff raises J2 to +1.00.
+- **Wave left** preserves the low hanging/front route through waypoint 6, then
+  moves J3/J5 together to −0.60 rad at waypoint 18. The next leg combines
+  J6 inward to −0.60 with J2 rising to the accepted +1.00 handoff at waypoint 28.
   The wave raises J2 to +1.30 with J4 −0.60, stages J5 to −1.40,
   then waves J1 −0.90/−1.05 with J6 −0.90/−0.60 twice.
   It leaves the empty arm raised without changing the jaws. These added
@@ -34,10 +34,13 @@ These trials use direct operator supervision instead of semantic camera collisio
 or jaw estimates. Live camera freshness, stationary body/neck, per-device motor
 feedback, verified modes, existing route/timing bounds and motion leases remain
 required. At Rob's request, the empty-left trial uses 4× the original low approach pace
-and 6× the original front pace, with a 0.7-second segment minimum. Ghost paths
-join exactly collinear increments and retain all corners and reversals, without
-changing the geometric corridor. Measured settling, freshness and the 1500 ms
-watchdog remain in place. Exact durations are frozen in the ghost review.
+and 6× the original front pace, with a 0.7-second segment minimum. The current
+candidate uses five hanging-to-handoff segments ending at `1,4,6,18,28`, and
+11 segments for the full raised wave. The low approach anchors and wave reversals
+remain; the two new front legs combine joint motions instead of stopping at the
+old one-joint corners. These legs have model checks but await a live trial.
+Measured settling, freshness and the 1500 ms watchdog remain in place. Exact
+durations are frozen in the ghost review.
 Grip/open acknowledgements are **accepted_unverified**, never measured
 force, measured jaw completion, or proof of object retention.
 
@@ -138,6 +141,80 @@ feedback/recording/watchdog limits intact. Completion, refusal or interruption
 restores the live scene; editing a pending proposal still cancels it. The isolated
 render fixture exercises freeze/thaw and shared head/camera alignment without
 any actuator transport. V9 live validation is pending.
+
+### Fewer stops in the normal left-arm controls
+
+The first revision addressed normal buttons sending all 28 hanging-to-handoff
+increments while ghost execution already joined straight portions. That revision
+shared the exact-collinearity compactor. Its handoff retained nine endpoints
+`1,4,6,9,12,15,18,24,28`; the reverse retained nine, and the full raised wave used
+15 segments instead of 46 stops. Canonical joint angles and path corners remained
+unchanged. No corner or reversal was blended away. Existing timing limits,
+endpoint settling, mode/session ownership, fresh motor/gripper feedback, camera,
+Stop and current monitoring remain in effect.
+
+That revision's gateway admitted a longer normal left-arm segment only if every
+intervening canonical knot lay on that same straight leg, in order, using the existing
+corridor tolerance. The paired coordinator still requires adjacent waypoints.
+Model and gateway fixtures check forward/reverse legs, mid-leg measurement noise,
+rejected corner shortcuts, unapproved/wrong-side/stale/session-invalid requests,
+and normal/ghost path agreement. The model's newly joined tread sweeps pass the 25 mm margin;
+its unchanged hanging↔first-waypoint tool/track overlap remains recorded for
+deferred calibration. This model prior does not certify physical clearance.
+
+The signed Debug build and executor, model, renderer and production gateway tests
+passed. A freshly approved normal preparation executed endpoints
+`1,4,6,9,12,15,18`, reaching the last at 18.17 seconds versus 31.16 seconds in the
+previous 28-stop approach. It lost CAN feedback as J6 segment24 began at 18.32 seconds;
+the oldest required feedback was already aging before that command, and the
+gateway could not confirm its hold. At that point the complete faster handoff
+was not yet physically verified. [Evidence and model checks](calibration/evidence/2026-10-21-smooth-left/validation.json)
+preserve the interruption separately from software validation. No automatic
+restart or weakening of feedback guards was performed.
+
+A separately approved controller recovery passed verification. After Rob confirmed
+physical left hanging and empty, a fresh preparation completed all nine segments,
+reaching handoff in **22.24 seconds versus 44.68 seconds** previously. The confirmed
+position-hold transition then allowed empty calibration/open to finish at 26.66
+seconds. It recorded 472 complete seven-joint samples with maximum feedback age
+99.2 ms. [The completed trace](calibration/evidence/2026-10-21-smooth-left/trial-completed.json)
+is separate from the interrupted attempt. Rob reported **“Clear, but still too
+choppy or slow.”** This confirms the observed clearance for that nine-segment
+trial, while rejecting its smoothness/speed as sufficient.
+
+The next candidate reduces hanging-to-handoff travel to **five segments**, ending
+at `1,4,6,18,28`, and the full raised wave to **11 segments**. Endpoints and final
+joint angles are unchanged. After the existing low approach to waypoint 6,
+J3/J5 move together on 6→18; J2/J6 move together on 18→28. This changes the two
+front path shapes, rather than only removing collinear stops. The explicit
+candidate legs require the same controller approval and existing feedback,
+session, lease, current and endpoint-settling checks.
+
+[The five-segment model review](calibration/evidence/2026-10-21-smooth-left/five-segment-model.json)
+checks every eligible rigid-hull pair against the original canonical subpaths.
+The new 6→18 and 18→28 sweeps pass both 25 mm and 30 mm tread margins, with
+conservative model lower bounds of 172.4 mm and 327.0 mm. No new arm/body/self
+warning pair appears at either margin. Existing model warnings, including the
+unchanged hanging→first-waypoint tool/tread overlap, remain. These scan and
+mapping priors do not certify physical clearance; camera/URDF calibration stays
+deferred until the motion and controller workflow is complete. **The five-segment
+candidate has not been physically tested.**
+
+After an app/Xcode session restart, the nine-segment trial's automatic **Lower arm**
+was blocked by the new-session hanging-reference requirement. Rob used the manual
+Zero control and confirmed physical hanging; telemetry showed zero joint positions
+in mode 2. Rob confirmed support, and a separately controller-approved physical-left
+**Deactivate** succeeded: all seven joints reported inactive with fresh feedback.
+Rob confirmed physical hanging and empty before loading the signed five-segment
+build. [The blocked-return record](calibration/evidence/2026-10-21-smooth-left/return-new-session-blocked.json)
+preserves this recovery separately from successful motion.
+
+The new controller preview displays five steps and 7.3 scheduled seconds. Its
+first execution request expired because no Action Approvals controller was
+connected; no motion started. Both arms subsequently reported stale CAN replies
+while inactive. Controller reconnection, authenticated recovery and the live
+five-segment trial remain pending. [Five-segment validation](calibration/evidence/2026-10-21-smooth-left/validation-five.json)
+distinguishes software/model checks from physical commissioning.
 
 ### 2026-10-21 Coke-can grip test
 

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-22T00:37:26.452430+00:00",
+  "sourceSHA256": {
+    "Cerebro/ROBArmRoutinePlan.swift": "472bdb49eb1901cd0f079588d744967ac8fdaae66ebcf4ddabc1a0080531ebf3",
+    "Cerebro/ROBGhostMotionPlan.swift": "917ccd0c1048d22663881b3a13dfccc4f8a8e6f29605a8fc1c14632b2d743e9f",
+    "Cerebro/ROBLeftArmTrial.swift": "9e9d84f6b29ecde857ba039785d33a40e8432128d300388c85a2ca295f3054c3"
+  },
+  "appExecutableSHA256": "d5b318f9ee0d11683108721eef2ea8eec1b5d9599b63989e8a9996b9da1966e0",
+  "build": "Isolated arm64 Debug Cerebro target; xcodebuild succeeded and codesign --verify --deep --strict passed. Local commissioning build, not a distribution release. Gateway source also has unrelated concurrent tunnel-recovery edits; only direct-move admission belongs to this task.",
+  "checks": {
+    "ghostMotionAndMidpointRecovery": "passed",
+    "normalExecutorAndStopCurrentLeaseCases": "passed",
+    "productionGatewayAdmissionAndPairedAdjacency": "passed",
+    "ghostEditorRenderResize": "passed",
+    "newCoordinatedTreadSweeps": "passed 25mm and 30mm model margins; known unchanged reference warnings retained"
+  },
+  "handoffEndpointIndices": [
+    1,
+    4,
+    6,
+    18,
+    28
+  ],
+  "waveEndpointIndices": [
+    1,
+    4,
+    6,
+    18,
+    28,
+    34,
+    42,
+    43,
+    42,
+    43,
+    42
+  ],
+  "ghostHandoffScheduledSeconds": 7.279994100271876,
+  "timing": "Per-leg speed profile, endpoint settling, telemetry, leases and Stop guards retained. Two front sweeps now coordinate J3/J5, then J2/J6. Scheduled duration excludes preparation and measured settling.",
+  "currentJumpLimitRaw": 0,
+  "liveTrial": "First five-step ghost request expired: no connected Action Approvals controller; no motion began and no trial CSV was created. Both arms later reported stale CAN while inactive. Controller reconnection and authenticated recovery pending. Operator had confirmed hanging/empty and authenticated left-only deactivation before loading the build.",
+  "intendedGatewayClientSHA256": "34ff5911598fb2c4d9e8c52ca7b896ba46bc5edc326f2505c627fb37249b865c"
+}

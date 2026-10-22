@@ -1,0 +1,665 @@
+{
+  "schemaVersion": 1,
+  "simulationOnly": true,
+  "hardwareOutputEnabled": false,
+  "modelID": "c4a5c1bee9a9a0a6cca6ecdba9433f98ab647eea3084fb462ff592a0a0ea1e03",
+  "referenceID": "ba63a659f10085da3fa7f7c5002f17b4af27596408bc447e0ac64cdb4198c2d7",
+  "planSourceSHA256": "fd2a04b2760ba66b03d99c2a3cf3a9bd2a87612a72b7c4db89da1db4493fa1ba",
+  "waypointsUnchangedFromV10": true,
+  "previousCanonicalEvidence": "../2026-10-21-social-left/model-preview-v10.json",
+  "modelingLimits": "Same fixed upright and driver-sign priors as prior social tests; rigid-model tread checks do not establish physical clearance.",
+  "routes": {
+    "handoff": [
+      {
+        "endpoint": 1,
+        "vendorRadians": [
+          0,
+          0.15,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "treadSweep": {
+          "clear": false,
+          "distance": -0.07079439955622631,
+          "pair": [
+            "left_tool",
+            "left_track_upper_idler_link"
+          ],
+          "required": 0.025
+        },
+        "joinsIntermediateStops": false
+      },
+      {
+        "endpoint": 4,
+        "vendorRadians": [
+          -0.45,
+          0.6,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": 0.03087433705910914,
+          "pair": [
+            "left_tool",
+            "left_track_upper_idler_link"
+          ],
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 6,
+        "vendorRadians": [
+          -1.05,
+          0.6,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 9,
+        "vendorRadians": [
+          -1.05,
+          0.6,
+          -0.3,
+          0,
+          0,
+          0,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 12,
+        "vendorRadians": [
+          -1.05,
+          0.6,
+          -0.3,
+          0,
+          -0.3,
+          0,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 15,
+        "vendorRadians": [
+          -1.05,
+          0.6,
+          -0.6,
+          0,
+          -0.3,
+          0,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 18,
+        "vendorRadians": [
+          -1.05,
+          0.6,
+          -0.6,
+          0,
+          -0.6,
+          0,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 24,
+        "vendorRadians": [
+          -1.05,
+          0.6,
+          -0.6,
+          0,
+          -0.6,
+          -0.6,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 28,
+        "vendorRadians": [
+          -1.05,
+          1,
+          -0.6,
+          0,
+          -0.6,
+          -0.6,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      }
+    ],
+    "lower": [
+      {
+        "endpoint": 24,
+        "vendorRadians": [
+          -1.05,
+          0.6,
+          -0.6,
+          0,
+          -0.6,
+          -0.6,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 18,
+        "vendorRadians": [
+          -1.05,
+          0.6,
+          -0.6,
+          0,
+          -0.6,
+          0,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 15,
+        "vendorRadians": [
+          -1.05,
+          0.6,
+          -0.6,
+          0,
+          -0.3,
+          0,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 12,
+        "vendorRadians": [
+          -1.05,
+          0.6,
+          -0.3,
+          0,
+          -0.3,
+          0,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 9,
+        "vendorRadians": [
+          -1.05,
+          0.6,
+          -0.3,
+          0,
+          0,
+          0,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 6,
+        "vendorRadians": [
+          -1.05,
+          0.6,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 4,
+        "vendorRadians": [
+          -0.45,
+          0.6,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 1,
+        "vendorRadians": [
+          0,
+          0.15,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": 0.03087433705910914,
+          "pair": [
+            "left_tool",
+            "left_track_upper_idler_link"
+          ],
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 0,
+        "vendorRadians": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "treadSweep": {
+          "clear": false,
+          "distance": -0.07079439955622631,
+          "pair": [
+            "left_tool",
+            "left_track_upper_idler_link"
+          ],
+          "required": 0.025
+        },
+        "joinsIntermediateStops": false
+      }
+    ],
+    "wave": [
+      {
+        "endpoint": 1,
+        "vendorRadians": [
+          0,
+          0.15,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "treadSweep": {
+          "clear": false,
+          "distance": -0.07079439955622631,
+          "pair": [
+            "left_tool",
+            "left_track_upper_idler_link"
+          ],
+          "required": 0.025
+        },
+        "joinsIntermediateStops": false
+      },
+      {
+        "endpoint": 4,
+        "vendorRadians": [
+          -0.45,
+          0.6,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": 0.03087433705910914,
+          "pair": [
+            "left_tool",
+            "left_track_upper_idler_link"
+          ],
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 6,
+        "vendorRadians": [
+          -1.05,
+          0.6,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 9,
+        "vendorRadians": [
+          -1.05,
+          0.6,
+          -0.3,
+          0,
+          0,
+          0,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 12,
+        "vendorRadians": [
+          -1.05,
+          0.6,
+          -0.3,
+          0,
+          -0.3,
+          0,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 15,
+        "vendorRadians": [
+          -1.05,
+          0.6,
+          -0.6,
+          0,
+          -0.3,
+          0,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 18,
+        "vendorRadians": [
+          -1.05,
+          0.6,
+          -0.6,
+          0,
+          -0.6,
+          0,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 24,
+        "vendorRadians": [
+          -1.05,
+          0.6,
+          -0.6,
+          0,
+          -0.6,
+          -0.6,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 28,
+        "vendorRadians": [
+          -1.05,
+          1,
+          -0.6,
+          0,
+          -0.6,
+          -0.6,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 34,
+        "vendorRadians": [
+          -1.05,
+          1.3,
+          -0.6,
+          -0.6,
+          -0.6,
+          -0.6,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 42,
+        "vendorRadians": [
+          -1.05,
+          1.3,
+          -0.6,
+          -0.6,
+          -1.4,
+          -0.6,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": true
+      },
+      {
+        "endpoint": 43,
+        "vendorRadians": [
+          -0.9,
+          1.3,
+          -0.6,
+          -0.6,
+          -1.4,
+          -0.9,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": false
+      },
+      {
+        "endpoint": 42,
+        "vendorRadians": [
+          -1.05,
+          1.3,
+          -0.6,
+          -0.6,
+          -1.4,
+          -0.6,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": false
+      },
+      {
+        "endpoint": 43,
+        "vendorRadians": [
+          -0.9,
+          1.3,
+          -0.6,
+          -0.6,
+          -1.4,
+          -0.9,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": false
+      },
+      {
+        "endpoint": 42,
+        "vendorRadians": [
+          -1.05,
+          1.3,
+          -0.6,
+          -0.6,
+          -1.4,
+          -0.6,
+          0
+        ],
+        "treadSweep": {
+          "clear": true,
+          "distance": null,
+          "pair": null,
+          "required": 0.025
+        },
+        "joinsIntermediateStops": false
+      }
+    ]
+  },
+  "scopeOfWarnings": "The unchanged hanging->waypoint1 segment (and its reverse) retains a rigid-model left_tool/track overlap of -70.8mm. Previously exercised physical hanging/first move are unchanged. Newly joined segments all pass the25mm tread margin; do not describe the whole model as collision-free. Record hanging tool/track reference mismatch for deferred calibration."
+}

@@ -30,6 +30,30 @@ until the current test and controller workflow are finished.
    J5 −1.40 or establish calibrated grip force. The lease-to-gripper transition
    now requires a confirmed hold before calibration; real jaw opening still
    requires observation. See [can evidence](calibration/evidence/2026-10-21-coke-can/can-grip-trial.json).
+   The first revision joined normal controls' straight increments as the ghost compiler does:
+   handoff 28→9 segments, full wave 46→15, corners/reversals preserved. A live
+   preparation reached endpoint 18 in 18.17 seconds (previous 31.16) but lost CAN
+   feedback entering J6; the complete faster handoff was then unverified. Physical
+   recovery then passed verification, and a fresh approved nine-segment trial
+   completed after Rob confirmed hanging: handoff 22.24 seconds vs 44.68 previously,
+   full preparation 26.66 seconds with fresh feedback. Rob reported **“Clear, but
+   still too choppy or slow.”** Preserve that nine-segment trial as historical
+   evidence. The next candidate uses five center endpoints `1,4,6,18,28` and
+   11 full-wave segments: J3/J5 move together on 6→18, then J2/J6 on 18→28.
+   The two new sweeps pass 25/30 mm model tread margins (172.4/327.0 mm
+   conservative lower bounds), with no new arm/body/self warning pairs versus
+   the canonical subpaths. Existing rigid-model overlaps remain; this is not
+   physical clearance certification. The five-segment live trial is pending.
+   After an app/Xcode session restart, Lower was blocked by the new-session
+   hanging reference. Rob manually used Zero and confirmed hanging; telemetry
+   showed zero in mode 2. Support was confirmed; controller-approved
+   physical-left Deactivate succeeded with all seven joints inactive. Rob then
+   confirmed hanging and empty before the new build was loaded. The first
+   five-step ghost request expired without a connected approval controller;
+   no movement started. Both arms later showed stale CAN replies while inactive,
+   so authenticated recovery and a fresh trial remain pending. See
+   [smooth-route checks](calibration/evidence/2026-10-21-smooth-left/validation.json)
+   and [five-segment model evidence](calibration/evidence/2026-10-21-smooth-left/five-segment-model.json).
    Confirm physical clearance before calling the added angles taught. See [arm trials](arm-startup-and-grab.md).
 2. **Implemented, live verification in progress — ghost motion editor.** Reuse the
    existing robot model and URDF joint names. Show the original robot with a
@@ -60,6 +84,8 @@ until the current test and controller workflow are finished.
    assets. Validate on held-out poses, report uncertainty and compare predicted
    versus measured hand displacement and tread clearance. Preserve previous
    calibration versions and evidence hashes. Do not change link lengths or
-   origins merely to obtain a desired reach height, and do not promote
+   origins merely to obtain a desired reach height. Check the existing hanging
+   left-tool/track overlap in the rigid model as well as the camera offsets.
+   Do not promote
    unobservable rotations to measured calibration. This is queued work, not
    an automatic future motor operation or a calendar schedule.

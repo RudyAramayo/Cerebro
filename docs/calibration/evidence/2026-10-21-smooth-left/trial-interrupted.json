@@ -1,0 +1,37 @@
+{
+  "recording": "left_prepare-3DEB0D96-68DA-41F4-B2C2-0280CEA74A4D.csv",
+  "archivedRecording": "prepare-can-feedback-stop.csv.gz",
+  "sha256": "73950c49c85dccbc587b6dc2169127ee80f82e7ca4640a6a5b953eb630a90582",
+  "archiveSHA256": "2e2ee31d09bd2fea29c16170b6c1cc3c9429d9cd26aa49d3713de03d301779cd",
+  "outcome": "Controller-approved normal preparation executed seven retained endpoints and stopped during segment24 after losing required CAN feedback. Gateway hold unconfirmed; empty calibration/open branch was not reached.",
+  "elapsedSeconds": 18.319048708333867,
+  "samples": 360,
+  "lastPhase": "waypoint 24",
+  "phaseLastRecordedTimes": {
+    "preflight": 0.040054583332675975,
+    "camera preparation": 5.324564166669006,
+    "waypoint 1": 7.259322208334197,
+    "waypoint 4": 9.653988958332775,
+    "waypoint 6": 12.406320875001256,
+    "waypoint 9": 13.985287583334866,
+    "waypoint 12": 15.360674583334912,
+    "waypoint 15": 16.739623666668194,
+    "waypoint 18": 18.16827691666913,
+    "waypoint 24": 18.319048708333867
+  },
+  "finalPositionsRadians": [
+    -1.050197335848463,
+    0.6017295303946075,
+    -0.6017295303946075,
+    -0.001227184630308513,
+    -0.5950481918518167,
+    0.004772384673421995,
+    0.0
+  ],
+  "peakCurrentJumpRaw": 1.8046875,
+  "maximumFeedbackAgeMilliseconds": 223.03174766885303,
+  "currentJumpLimitRaw": 0,
+  "feedbackChronology": "Oldest required feedback stopped refreshing near18.096s during waypoint18, before waypoint24 began. Missing-CAN onset cannot be attributed to J6 solely from last phase label. Maximum recording gap91.3ms; no multi-second main-loop stall observed.",
+  "comparison": "Waypoint18 reached by18.17s versus31.16s in prior normal28-stop approach, including each operation preparation. Complete faster handoff not verified.",
+  "recovery": "Fresh authenticated controller-approved recovery completed: CAN adapters, both Amber cores, UDP listeners and loopback-only gateway passed verification. Both arms reported fresh replies. Rob confirmed empty left arm physically hanging before a new nine-segment preparation request; operator could not judge interrupted smoothness."
+}

@@ -759,9 +759,9 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                 : ROBArmRoutinePlan.target(index: index, physicalLeft: arm == "right"),
               let sample = telemetry(forArm: arm), sample.effectiveSampleAgeMilliseconds <= 250,
               sample.effectiveGripperFeedbackAgeMilliseconds <= 250,
-              let progress = leftTrial ? ROBLeftArmInteractionPlan.progress(sample.positionsRadians.map(\.doubleValue))
-                : ROBArmRoutinePlan.progress(sample.positionsRadians.map(\.doubleValue), physicalLeft: arm == "right"),
-              abs(progress - Double(index)) <= 1.05,
+              leftTrial ? ROBLeftArmInteractionPlan.allowsDirectMove(from: sample.positionsRadians.map(\.doubleValue), to: index)
+                : ROBArmRoutinePlan.progress(sample.positionsRadians.map(\.doubleValue), physicalLeft: arm == "right")
+                    .map({ abs($0 - Double(index)) <= 1.05 }) == true,
               let minimumDuration = leftTrial ? ROBLeftArmInteractionPlan.duration(from: sample.positionsRadians.map(\.doubleValue), to: target)
                 : ROBArmRoutinePlan.duration(from: sample.positionsRadians.map(\.doubleValue), to: target),
               duration.isFinite, duration >= minimumDuration - 0.05, duration <= 5,

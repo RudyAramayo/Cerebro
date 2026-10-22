@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-22T00:11:36.575601+00:00",
+  "sourceSHA256": {
+    "Cerebro/ROBArmRoutinePlan.swift": "fd2a04b2760ba66b03d99c2a3cf3a9bd2a87612a72b7c4db89da1db4493fa1ba",
+    "Cerebro/ROBAmberGatewayClient.swift": "34ff5911598fb2c4d9e8c52ca7b896ba46bc5edc326f2505c627fb37249b865c",
+    "Cerebro/ROBGhostMotionPlan.swift": "6f6545c73de8e102c6b9f51dc5aa63e59f0f28680f41d67cbe885461477088b0",
+    "Cerebro/ROBLeftArmTrial.swift": "4eb94f8c26f997c4a1223dc016ddb9eceb83c181761eb77fc741cb3f44e4161d"
+  },
+  "installedDebugLibrarySHA256": "5e4fbe4012d27d1108d7eab6d491a6e0bb71bff8dd56552867fe9ec2ac1f5c8d",
+  "checks": {
+    "sharedCompactorAndForwardReverseCornerPreservation": "passed",
+    "normalExecutorAndStopCurrentRecoveryLeaseHandoff": "passed",
+    "productionGatewayDirectLegAdmissionAndPairedAdjacency": "passed",
+    "ghostPreviewRenderingResizeFreezeThaw": "passed",
+    "newlyJoinedTreadSweeps": "passed25mm; unchanged hanging reference warning retained",
+    "signedMacOSDebugBuild": "passed; signature verified"
+  },
+  "handoff": "28 intermediate stops reduced to9 leg endpoints",
+  "wave": "46 stops reduced to15 segments including wave reversals",
+  "timing": "Existing per-leg speed profile, 0.7s minimum, endpoint settling and fresh telemetry guards retained. Ghost handoff scheduled9.7s; actual runtime includes view/mode preparation, settling and jaw setup.",
+  "jaws": "Simple Present/open retains empty calibration/open; no object to be gripped in speed test.",
+  "liveTrial": "After successful controller-approved recovery and physical hanging confirmation, a new approved preparation completed all9segments: handoff22.24s vs44.68s previously; complete empty calibration/open26.66s;472samples,maxfeedbackage99.2ms. First interrupted trial preserved separately. Rob reported: Clear, but still too choppy or slow. Retain this as historical nine-segment evidence, not acceptance of the next candidate.",
+  "currentJumpLimitRaw": 0,
+  "softwareAudit": "Same targets/transport/leases/guards as successful v9 ghost through handoff. Normal durations omit .025rad ghost padding (~45-56ms shorter J6 segment). No concrete new software fault found; CAN-loss cause unproven and occurred before compaction as well.",
+  "leaseHandoffHardwareTest": "Confirmed position hold->calibration/open path completed on real empty left gripper; jaw mechanical completion remains unverified.",
+  "validationScope": "The existing source/build hashes and checks describe the nine-segment revision. The five-segment candidate below has model evidence; its live trial is pending.",
+  "nextCandidate": {
+    "handoffEndpointIndices": [
+      1,
+      4,
+      6,
+      18,
+      28
+    ],
+    "handoffSegmentCount": 5,
+    "fullWaveSegmentCount": 11,
+    "jointCoordinatesChanged": false,
+    "frontPathShapeChanged": true,
+    "combinedLegs": [
+      {
+        "from": 6,
+        "to": 18,
+        "joints": [
+          "J3",
+          "J5"
+        ]
+      },
+      {
+        "from": 18,
+        "to": 28,
+        "joints": [
+          "J2",
+          "J6"
+        ]
+      }
+    ],
+    "modelEvidence": "five-segment-model.json",
+    "newJoinedTreadSweeps": "Both6->18 and18->28 pass25mm and30mm margins; conservative minimum lower bounds172.4mm and327.0mm. No new arm/body/self warning pair versus canonical subpaths at either margin. Existing model warnings retained.",
+    "physicalClearanceCertified": false,
+    "liveTrial": "Pending; five-segment candidate has not been physically tested.",
+    "deferredCalibration": "Retained after motion and controller workflow; model reference/driver signs and hulls remain priors."
+  },
+  "currentReturnStatus": "After app/Xcode session restart, automatic Lower was blocked by new-session hanging reference. Rob used manual Zero and confirmed physically hanging; telemetry q0 in mode2. Physical support confirmed, controller-approved physical-left Deactivate requested; result pending."
+}

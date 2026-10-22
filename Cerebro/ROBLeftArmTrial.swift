@@ -164,11 +164,11 @@ import AppKit
         }
         let action: String
         switch command {
-        case "left_wave": action = "Bring the empty LEFT arm to front; stage J3/J5 to -0.60 rad, then J6 to -0.60 rad to center the hand. Raise the handoff with J2 to +1.00, then continue to +1.30 with J4 to -0.60 in small coordinated steps. At raised height, stage J5 to -1.40 in eight steps. Wave J1 -0.90/-1.05 twice above the shoulder, bending J6 -0.90/-0.60 with each wave, and leave raised. Jaws unchanged."
-        case "left_prepare": action = "Bring the empty LEFT arm to front; stage J3/J5 to -0.60 rad, then J6 to -0.60 rad to center the hand, then J2 to +1.00 to raise it. Reverse any raised wave section before reaching this handoff pose. Calibrate its EMPTY gripper only if needed, then open it. Keep fingers clear during calibration."
+        case "left_wave": action = "Raise the empty LEFT arm along the initial tread-clearance approach, then coordinate J3/J5 together to -0.60 and J2/J6 together to +1.00/-0.60. Continue to J2 +1.30/J4 -0.60 and raised J5 -1.40. Seven approach segments from hanging plus four wave strokes; watch the newly coordinated front sweeps. Wave J1 -0.90/-1.05 twice with J6 -0.90/-0.60, and leave raised. Jaws unchanged."
+        case "left_prepare": action = "Raise the empty LEFT arm in five segments from hanging: retain the initial three tread-clearance moves, then coordinate J3/J5 together to -0.60 and J2/J6 together to +1.00/-0.60. The endpoints are unchanged; the two front sweeps are newly coordinated, model-checked supervised candidates. Watch actual arm/body/tread/cable clearance. Reverse any raised wave section first. Calibrate its EMPTY gripper only if needed, then open it. Keep fingers clear during calibration."
         case "left_grip": action = "Keep the LEFT arm stationary in front and close its already-calibrated gripper at intensity 10 around the presented OBJECT. Confirm the object is between the open jaws and all fingers are clear. Never grip a person's hand. No reopening, calibration or arm travel."
         case "left_release": action = "Keep the LEFT arm stationary in front and open its already-calibrated gripper to return the object. Confirm the receiver supports the object before approving. No calibration or arm travel."
-        default: action = "Return the empty LEFT arm: reverse the raised J2/J4 section, unwind J6 then J5/J3 at front, then reverse the tested approach to hanging and deactivate it. Remove any object first."
+        default: action = "Return the empty LEFT arm along its registered corridor: reverse the raised section, coordinate the J2/J6 and J3/J5 front sweeps, then reverse the original tread-clearance approach to hanging and deactivate it. Earlier stopped poses use the older corridor when needed. Remove any object first. Watch actual clearance."
         }
         let notice = " Camera centers at the upright neck pose and tilts about 18 degrees below level. New J6/J2/J4 angles are a supervised trial, not a verified collision-free route; watch their direction and tread/cable clearance. Right arm receives no commands. Confirm LEFT arm physically hangs at encoder zero for the first movement of a new session. Watch the live camera and direct view; Stop + hold remains available. Camera object estimates do not veto this supervised trial."
         let current = limit == 0 ? " Current recording only; automatic current cutoff is not configured."
@@ -320,7 +320,7 @@ import AppKit
             sentPath = [q]
         }
         let stationaryJaw = command == "left_grip" || command == "left_release"
-        guard let route = ROBLeftArmInteractionPlan.route(from: q, hanging: command == "left_relax", waving: command == "left_wave")
+        guard let route = ROBLeftArmInteractionPlan.executionRoute(from: q, hanging: command == "left_relax", waving: command == "left_wave")
             ?? (proposal?.kind == "recover" && referencedGeneration == generation ? [] : nil) else {
             throw ROBArmRoutineError.blocked("Left arm is outside the taught route; no movement sent.")
         }
@@ -432,7 +432,11 @@ import AppKit
     }
 
     @MainActor private func move(_ route: [Int]) async throws {
-        for index in route {
+        guard let compacted = ROBLeftArmInteractionPlan.compactRoute(
+            from: try measured().positionsRadians.map(\.doubleValue), indices: route) else {
+            throw ROBArmRoutineError.blocked("Left-arm route changed or crosses a path corner; no movement sent.")
+        }
+        for index in compacted {
             try check()
             let target = ROBLeftArmInteractionPlan.target(index: index)!
             let duration = ROBLeftArmInteractionPlan.duration(from: try measured().positionsRadians.map(\.doubleValue), to: target)!

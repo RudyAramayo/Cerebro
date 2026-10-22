@@ -59,7 +59,7 @@ import simd
         try ROBLeftGestureCompiler.validate(proposal, model: model)
         precondition(proposal.steps.last!.positions == wave)
         precondition(proposal.steps.allSatisfy { (0.7...5).contains($0.seconds) })
-        precondition(proposal.seconds < 20 && proposal.steps.count == 15)
+        precondition(proposal.seconds < 20 && proposal.steps.count == 11)
         let approachFrom = ROBLeftArmInteractionPlan.target(index: 5)!, approachTo = ROBLeftArmInteractionPlan.target(index: 6)!
         precondition(abs(ROBLeftArmInteractionPlan.duration(from: approachFrom, to: approachTo)! * 4 -
             ROBArmRoutinePlan.duration(from: approachFrom, to: approachTo)!) < 1e-8)
@@ -68,6 +68,31 @@ import simd
         let route = Array(ROBLeftArmInteractionPlan.waypoints[1...ROBLeftArmInteractionPlan.waveRestIndex])
         let compact = ROBLeftGestureCompiler.compactRoute(baseline: Array(repeating: 0, count: 7), targets: route)
         precondition(compact == [1,4,6,9,12,15,18,24,28,34,42].map { ROBLeftArmInteractionPlan.waypoints[$0] })
+        let zero = Array(repeating: 0.0, count: 7)
+        let centerRoute = ROBLeftArmInteractionPlan.executionRoute(from: zero, hanging: false)!
+        let centerStops = ROBLeftArmInteractionPlan.compactRoute(from: zero, indices: centerRoute)!
+        precondition(ROBLeftArmInteractionPlan.route(from: zero, hanging: false)!.count == 28)
+        precondition(centerStops == [1,4,6,18,28])
+        let returnStops = ROBLeftArmInteractionPlan.compactRoute(from: center,
+            indices: ROBLeftArmInteractionPlan.executionRoute(from: center, hanging: true)!)!
+        precondition(returnStops == [18,6,4,1,0])
+        let centerProposal = try ROBLeftGestureCompiler.compile(kind: "center", name: "Smooth handoff", model: model,
+            baseline: zero, generation: 42)
+        precondition(centerProposal.steps.map(\.positions) == centerStops.map { ROBLeftArmInteractionPlan.waypoints[$0] },
+            "Normal controls and ghost preview must traverse the same retained corners")
+        for start in 0...ROBLeftArmInteractionPlan.waveRestIndex {
+            for hanging in [false, true] {
+                var previous = ROBLeftArmInteractionPlan.waypoints[start]
+                let original = ROBLeftArmInteractionPlan.executionRoute(from: previous, hanging: hanging)!
+                let reduced = ROBLeftArmInteractionPlan.compactRoute(from: previous, indices: original)!
+                for index in reduced {
+                    precondition(ROBLeftArmInteractionPlan.allowsDirectMove(from: previous, to: index))
+                    previous = ROBLeftArmInteractionPlan.waypoints[index]
+                }
+                precondition(original.last == reduced.last)
+            }
+        }
+        print(String(format: "Normal handoff: 28 stops reduced to 5, %.1f seconds scheduled; ghost path and reverse corners agree", centerProposal.seconds))
         // Changing a joint at a corner must not turn into a diagonal shortcut.
         let corner = [[0.1,0,0,0,0,0,0],[0.1,0.1,0,0,0,0,0],[0.2,0.1,0,0,0,0,0]]
         precondition(ROBLeftGestureCompiler.compactRoute(baseline: Array(repeating: 0, count: 7), targets: corner) == corner)

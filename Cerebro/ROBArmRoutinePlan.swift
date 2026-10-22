@@ -42,6 +42,30 @@ enum ROBArmRoutinePlan {
             && zip(measured, target).allSatisfy { $0.isFinite && $1.isFinite && abs($0 - $1) <= tolerance }
     }
 
+    /// Target offsets after removing only exactly collinear, same-direction
+    /// intermediate stops. Every corner and reversal remains in the route.
+    static func compactTargetIndices(baseline: [Double], targets: [[Double]]) -> [Int] {
+        guard baseline.count == 7, baseline.allSatisfy(\.isFinite),
+              targets.allSatisfy({ $0.count == 7 && $0.allSatisfy(\.isFinite) }) else { return [] }
+        var result: [Int] = []
+        for (index, target) in targets.enumerated() {
+            if (result.last.map { targets[$0] } ?? baseline) == target { continue }
+            while let last = result.last {
+                let a = result.count >= 2 ? targets[result[result.count - 2]] : baseline
+                let b = targets[last]
+                let delta = zip(a, target).map { $1 - $0 }
+                let square = delta.reduce(0) { $0 + $1 * $1 }
+                guard square > 1e-12 else { break }
+                let fraction = zip(zip(b, a), delta).reduce(0.0) { $0 + ($1.0.0 - $1.0.1) * $1.1 } / square
+                guard fraction > 0, fraction < 1,
+                      zip(zip(a, delta), b).allSatisfy({ abs($0.0.0 + fraction * $0.0.1 - $0.1) < 1e-9 }) else { break }
+                result.removeLast()
+            }
+            result.append(index)
+        }
+        return result
+    }
+
     /// Locate only the exercised polyline, including a stopped mid-segment
     /// position. An arbitrary folded pose must never be interpolated to zero.
     static func progress(_ positions: [Double], physicalLeft: Bool) -> Double? {
@@ -77,8 +101,9 @@ enum ROBArmRoutinePlan {
 }
 
 /// Candidate extension for supervised physical-LEFT interaction trials only.
-/// Keep the exercised approach intact. Rotate J3, then J5, in 0.1-rad steps
-/// only after reaching its front endpoint. Always unwind before descending.
+/// Keep the exercised tread-clearance approach intact. The fixed coordinated
+/// corridor joins J3/J5, then J2/J6, above that approach; retain the original
+/// staged corridor for old or interrupted poses. Unwind before descending.
 /// URDF preview uses the recorded upright offset and positive driver signs;
 /// it is not a measured collision envelope or a verified driver calibration.
 enum ROBLeftArmInteractionPlan {
@@ -87,6 +112,9 @@ enum ROBLeftArmInteractionPlan {
     static let frontIndex = 28
     static let waveRestIndex = 42
     static let waveIndex = 43
+    /// Fixed coordinated corridor for supervised empty-left trials. The
+    /// original three tread-clearance legs and all social-pose corners remain.
+    static let smoothCorridorIndices = [0, 1, 4, 6, 18, 28, 34, 42, 43]
     static let waypoints: [[Double]] = ROBArmRoutinePlan.rightWaypoints.map { $0.map { -$0 } } + [
         [-1.05, 0.60, -0.10, 0, 0, 0, 0],
         [-1.05, 0.60, -0.20, 0, 0, 0, 0],
@@ -159,6 +187,78 @@ enum ROBLeftArmInteractionPlan {
         }
         let next = Int(floor(p)) + 1
         return next > destination ? [] : Array(next ... destination)
+    }
+
+    /// Prefer the coordinated corridor, retaining the original corridor for
+    /// stopped or previously commissioned poses that are not on the new one.
+    static func executionRoute(from positions: [Double], hanging: Bool, waving: Bool = false) -> [Int]? {
+        let corridor = smoothCorridorIndices.map { waypoints[$0] }
+        guard let p = ROBArmRoutinePlan.progress(positions, waypoints: corridor) else {
+            return route(from: positions, hanging: hanging, waving: waving)
+        }
+        let destination = hanging ? 0 : smoothCorridorIndices.firstIndex(of: waving ? waveRestIndex : frontIndex)!
+        if p > Double(destination) {
+            return Array(stride(from: Int(ceil(p)) - 1, through: destination, by: -1)).map { smoothCorridorIndices[$0] }
+        }
+        let next = Int(floor(p)) + 1
+        return next > destination ? [] : Array(next ... destination).map { smoothCorridorIndices[$0] }
+    }
+
+    private static func projectedPosition(at progress: Double, waypoints: [[Double]]) -> [Double] {
+        let lower = Int(floor(progress)), upper = Int(ceil(progress))
+        let fraction = progress - Double(lower)
+        return zip(waypoints[lower], waypoints[upper]).map { $0 + fraction * ($1 - $0) }
+    }
+
+    /// Admit a straight leg of either fixed corridor. Each projection uses
+    /// the existing tolerance and every intervening corridor corner remains.
+    static func allowsDirectMove(from positions: [Double], to index: Int) -> Bool {
+        allowsDirectMove(from: positions, to: index, indices: smoothCorridorIndices)
+            || allowsDirectMove(from: positions, to: index, indices: Array(waypoints.indices))
+    }
+
+    private static func allowsDirectMove(from positions: [Double], to index: Int, indices: [Int]) -> Bool {
+        guard let destination = indices.firstIndex(of: index) else { return false }
+        let corridor = indices.map { waypoints[$0] }
+        guard let p = ROBArmRoutinePlan.progress(positions, waypoints: corridor) else { return false }
+        let start = projectedPosition(at: p, waypoints: corridor), target = waypoints[index]
+        let delta = zip(start, target).map { $1 - $0 }
+        let square = delta.reduce(0) { $0 + $1 * $1 }
+        guard square > 1e-12 else { return abs(p - Double(destination)) < 1e-9 }
+        let knots: [Int]
+        if Double(destination) > p {
+            knots = Array(Int(ceil(p)) ... destination)
+        } else {
+            knots = Array(stride(from: Int(floor(p)), through: destination, by: -1))
+        }
+        var previousFraction = 0.0
+        for knot in knots {
+            let point = corridor[knot]
+            let fraction = zip(zip(point, start), delta).reduce(0.0) { $0 + ($1.0.0 - $1.0.1) * $1.1 } / square
+            guard fraction >= previousFraction - 1e-9, fraction <= 1 + 1e-9,
+                  zip(zip(start, delta), point).allSatisfy({ abs($0.0.0 + fraction * $0.0.1 - $0.1) < 1e-9 }) else { return false }
+            previousFraction = fraction
+        }
+        return true
+    }
+
+    static func compactRoute(from positions: [Double], indices: [Int]) -> [Int]? {
+        guard indices.allSatisfy({ waypoints.indices.contains($0) }) else { return nil }
+        let targets = indices.map { waypoints[$0] }
+        for registered in [smoothCorridorIndices, Array(waypoints.indices)] {
+            let corridor = registered.map { waypoints[$0] }
+            guard let p = ROBArmRoutinePlan.progress(positions, waypoints: corridor) else { continue }
+            let projected = projectedPosition(at: p, waypoints: corridor)
+            let result = ROBArmRoutinePlan.compactTargetIndices(baseline: projected, targets: targets).map { indices[$0] }
+            var previous = positions
+            var valid = true
+            for index in result {
+                if !allowsDirectMove(from: previous, to: index) { valid = false; break }
+                previous = waypoints[index]
+            }
+            if valid { return result }
+        }
+        return nil
     }
 
     /// Jaw-only actions may also finish the existing low-front handoff. They

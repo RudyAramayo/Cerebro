@@ -1,0 +1,2323 @@
+{
+  "schemaVersion": 1,
+  "simulationOnly": true,
+  "hardwareOutputEnabled": false,
+  "modelID": "c4a5c1bee9a9a0a6cca6ecdba9433f98ab647eea3084fb462ff592a0a0ea1e03",
+  "referenceID": "ba63a659f10085da3fa7f7c5002f17b4af27596408bc447e0ac64cdb4198c2d7",
+  "planSourceSHA256": "9a4fc753fed49e7145f7e46f0660049f5d12249c9d049aabfcdf6d903b228ac0",
+  "canonicalWaypointsSHA256": "eab454e37a0e4b86f0bdf4d4d636379a34a9f1d879ce6c202ee28d22b6f114f5",
+  "vendorAtModelZeroPrior": [
+    0.0,
+    2.080432,
+    0.0,
+    -0.687254,
+    0.0,
+    0.027043,
+    0.0
+  ],
+  "driverDirectionAssumption": [
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+  ],
+  "normalRaiseEndpoints": [
+    0,
+    1,
+    4,
+    6,
+    18,
+    28
+  ],
+  "newlyJoinedSegments": [
+    {
+      "start": 6,
+      "end": 18,
+      "sampleCount": 92,
+      "maxUnsampledPointTravelMeters": 0.003990225284820648,
+      "maxPairRelativeTravelMeters": 0.7182405512677166,
+      "vendorStartRadians": [
+        -1.05,
+        0.6,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "vendorEndRadians": [
+        -1.05,
+        0.6,
+        -0.6,
+        0,
+        -0.6,
+        0,
+        0
+      ],
+      "treads": {
+        "conservativeMinimumMeters": 0.17241517607755424,
+        "pair": [
+          "left_track_link",
+          "left_tool"
+        ],
+        "passes25mm": true,
+        "passes30mm": true,
+        "warnings25mm": [],
+        "warnings30mm": []
+      },
+      "fullModel": {
+        "conservativeMinimumMeters": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "passes25mm": false,
+        "passes30mm": false,
+        "warnings25mm": [
+          {
+            "pair": [
+              "right_track_link",
+              "right_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.00671342917368185
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.028406732823146267
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.00124275998033725
+          },
+          {
+            "pair": [
+              "lower_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.01837414938835273
+          },
+          {
+            "pair": [
+              "left_two_Link",
+              "left_four_Link"
+            ],
+            "category": "same-arm self",
+            "coveredDistanceLowerBoundMeters": -0.0037575277114545455
+          },
+          {
+            "pair": [
+              "right_base_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.016319576790738734
+          },
+          {
+            "pair": [
+              "right_tool",
+              "right_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.014714339118161106
+          }
+        ],
+        "warnings30mm": [
+          {
+            "pair": [
+              "right_track_link",
+              "right_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.00671342917368185
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.028406732823146267
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.00124275998033725
+          },
+          {
+            "pair": [
+              "lower_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.01837414938835273
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.028492333393752626
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.029778231508639678
+          },
+          {
+            "pair": [
+              "left_two_Link",
+              "left_four_Link"
+            ],
+            "category": "same-arm self",
+            "coveredDistanceLowerBoundMeters": -0.0037575277114545455
+          },
+          {
+            "pair": [
+              "right_base_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.016319576790738734
+          },
+          {
+            "pair": [
+              "right_tool",
+              "right_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.014714339118161106
+          }
+        ]
+      },
+      "leftRelatedModel": {
+        "conservativeMinimumMeters": -0.0037575277114545455,
+        "pair": [
+          "left_two_Link",
+          "left_four_Link"
+        ],
+        "passes25mm": false,
+        "passes30mm": false,
+        "warnings25mm": [
+          {
+            "pair": [
+              "lower_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.01837414938835273
+          },
+          {
+            "pair": [
+              "left_two_Link",
+              "left_four_Link"
+            ],
+            "category": "same-arm self",
+            "coveredDistanceLowerBoundMeters": -0.0037575277114545455
+          }
+        ],
+        "warnings30mm": [
+          {
+            "pair": [
+              "lower_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.01837414938835273
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.028492333393752626
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.029778231508639678
+          },
+          {
+            "pair": [
+              "left_two_Link",
+              "left_four_Link"
+            ],
+            "category": "same-arm self",
+            "coveredDistanceLowerBoundMeters": -0.0037575277114545455
+          }
+        ]
+      },
+      "oldCanonicalSubpathFullModel": {
+        "conservativeMinimumMeters": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "passes25mm": false,
+        "passes30mm": false,
+        "warnings25mm": [
+          {
+            "pair": [
+              "right_track_link",
+              "right_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.00671342917368185
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.028406732823146267
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.00124275998033725
+          },
+          {
+            "pair": [
+              "lower_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.01837414938835273
+          },
+          {
+            "pair": [
+              "left_two_Link",
+              "left_four_Link"
+            ],
+            "category": "same-arm self",
+            "coveredDistanceLowerBoundMeters": -0.004254337902752374
+          },
+          {
+            "pair": [
+              "right_base_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.016319576790738734
+          },
+          {
+            "pair": [
+              "right_tool",
+              "right_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.014714339118161106
+          }
+        ],
+        "warnings30mm": [
+          {
+            "pair": [
+              "right_track_link",
+              "right_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.00671342917368185
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.028406732823146267
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.00124275998033725
+          },
+          {
+            "pair": [
+              "lower_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.01837414938835273
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.028492333393752626
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.029778231508639678
+          },
+          {
+            "pair": [
+              "left_two_Link",
+              "left_four_Link"
+            ],
+            "category": "same-arm self",
+            "coveredDistanceLowerBoundMeters": -0.004254337902752374
+          },
+          {
+            "pair": [
+              "right_base_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.016319576790738734
+          },
+          {
+            "pair": [
+              "right_tool",
+              "right_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.014714339118161106
+          }
+        ]
+      },
+      "oldCanonicalSubpathTreads": {
+        "conservativeMinimumMeters": 0.17284859792774515,
+        "pair": [
+          "left_track_link",
+          "left_tool"
+        ],
+        "passes25mm": true,
+        "passes30mm": true,
+        "warnings25mm": [],
+        "warnings30mm": []
+      },
+      "newWarningsComparedWithCanonicalSubpath25mm": [],
+      "newWarningsComparedWithCanonicalSubpath30mm": [],
+      "existingWarningDistanceChangesOver5mm": []
+    },
+    {
+      "start": 18,
+      "end": 28,
+      "sampleCount": 74,
+      "maxUnsampledPointTravelMeters": 0.003997179116132618,
+      "maxPairRelativeTravelMeters": 0.5755937927230971,
+      "vendorStartRadians": [
+        -1.05,
+        0.6,
+        -0.6,
+        0,
+        -0.6,
+        0,
+        0
+      ],
+      "vendorEndRadians": [
+        -1.05,
+        1,
+        -0.6,
+        0,
+        -0.6,
+        -0.6,
+        0
+      ],
+      "treads": {
+        "conservativeMinimumMeters": 0.3269830453992462,
+        "pair": [
+          "left_track_link",
+          "left_tool"
+        ],
+        "passes25mm": true,
+        "passes30mm": true,
+        "warnings25mm": [],
+        "warnings30mm": []
+      },
+      "fullModel": {
+        "conservativeMinimumMeters": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "passes25mm": false,
+        "passes30mm": false,
+        "warnings25mm": [
+          {
+            "pair": [
+              "right_track_link",
+              "right_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.00671342917368185
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.028406732823146267
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.00124275998033725
+          },
+          {
+            "pair": [
+              "lower_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.01837414938835273
+          },
+          {
+            "pair": [
+              "left_two_Link",
+              "left_four_Link"
+            ],
+            "category": "same-arm self",
+            "coveredDistanceLowerBoundMeters": 0.009445516893475319
+          },
+          {
+            "pair": [
+              "right_base_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.016319576790738734
+          },
+          {
+            "pair": [
+              "right_tool",
+              "right_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.014714339118161106
+          }
+        ],
+        "warnings30mm": [
+          {
+            "pair": [
+              "right_track_link",
+              "right_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.00671342917368185
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.028406732823146267
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.00124275998033725
+          },
+          {
+            "pair": [
+              "lower_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.01837414938835273
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.028492333393752626
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.025785188976310373
+          },
+          {
+            "pair": [
+              "left_two_Link",
+              "left_four_Link"
+            ],
+            "category": "same-arm self",
+            "coveredDistanceLowerBoundMeters": 0.009445516893475319
+          },
+          {
+            "pair": [
+              "right_base_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.016319576790738734
+          },
+          {
+            "pair": [
+              "right_tool",
+              "right_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.014714339118161106
+          }
+        ]
+      },
+      "leftRelatedModel": {
+        "conservativeMinimumMeters": 0.009445516893475319,
+        "pair": [
+          "left_two_Link",
+          "left_four_Link"
+        ],
+        "passes25mm": false,
+        "passes30mm": false,
+        "warnings25mm": [
+          {
+            "pair": [
+              "lower_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.01837414938835273
+          },
+          {
+            "pair": [
+              "left_two_Link",
+              "left_four_Link"
+            ],
+            "category": "same-arm self",
+            "coveredDistanceLowerBoundMeters": 0.009445516893475319
+          }
+        ],
+        "warnings30mm": [
+          {
+            "pair": [
+              "lower_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.01837414938835273
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.028492333393752626
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.025785188976310373
+          },
+          {
+            "pair": [
+              "left_two_Link",
+              "left_four_Link"
+            ],
+            "category": "same-arm self",
+            "coveredDistanceLowerBoundMeters": 0.009445516893475319
+          }
+        ]
+      },
+      "oldCanonicalSubpathFullModel": {
+        "conservativeMinimumMeters": -0.028406732823146267,
+        "pair": [
+          "torso_link",
+          "right_two_Link"
+        ],
+        "passes25mm": false,
+        "passes30mm": false,
+        "warnings25mm": [
+          {
+            "pair": [
+              "right_track_link",
+              "right_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.00671342917368185
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.028406732823146267
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.00124275998033725
+          },
+          {
+            "pair": [
+              "lower_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.01837414938835273
+          },
+          {
+            "pair": [
+              "left_two_Link",
+              "left_four_Link"
+            ],
+            "category": "same-arm self",
+            "coveredDistanceLowerBoundMeters": 0.009445516893475323
+          },
+          {
+            "pair": [
+              "right_base_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.016319576790738734
+          },
+          {
+            "pair": [
+              "right_tool",
+              "right_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.014714339118161106
+          }
+        ],
+        "warnings30mm": [
+          {
+            "pair": [
+              "right_track_link",
+              "right_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.00671342917368185
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.028406732823146267
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.00124275998033725
+          },
+          {
+            "pair": [
+              "lower_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.01837414938835273
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.028492333393752626
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.025487828226612514
+          },
+          {
+            "pair": [
+              "left_two_Link",
+              "left_four_Link"
+            ],
+            "category": "same-arm self",
+            "coveredDistanceLowerBoundMeters": 0.009445516893475323
+          },
+          {
+            "pair": [
+              "right_base_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.016319576790738734
+          },
+          {
+            "pair": [
+              "right_tool",
+              "right_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.014714339118161106
+          }
+        ]
+      },
+      "oldCanonicalSubpathTreads": {
+        "conservativeMinimumMeters": 0.325665071077832,
+        "pair": [
+          "left_track_link",
+          "left_tool"
+        ],
+        "passes25mm": true,
+        "passes30mm": true,
+        "warnings25mm": [],
+        "warnings30mm": []
+      },
+      "newWarningsComparedWithCanonicalSubpath25mm": [],
+      "newWarningsComparedWithCanonicalSubpath30mm": [],
+      "existingWarningDistanceChangesOver5mm": []
+    }
+  ],
+  "routeComparison": {
+    "canonical": {
+      "treads": {
+        "conservativeMinimumMeters": -0.07153739243361534,
+        "pair": [
+          "left_tool",
+          "left_track_upper_idler_link"
+        ],
+        "passes25mm": false,
+        "passes30mm": false,
+        "warnings25mm": [
+          {
+            "pair": [
+              "left_track_link",
+              "left_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.05012272342602148
+          },
+          {
+            "pair": [
+              "left_seven_Link",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.005479883359552762
+          },
+          {
+            "pair": [
+              "left_tool",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.07153739243361534
+          }
+        ],
+        "warnings30mm": [
+          {
+            "pair": [
+              "left_track_link",
+              "left_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.05012272342602148
+          },
+          {
+            "pair": [
+              "left_seven_Link",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.005479883359552762
+          },
+          {
+            "pair": [
+              "left_tool",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.07153739243361534
+          }
+        ]
+      },
+      "fullModel": {
+        "conservativeMinimumMeters": -0.07153739243361534,
+        "pair": [
+          "left_tool",
+          "left_track_upper_idler_link"
+        ],
+        "passes25mm": false,
+        "passes30mm": false,
+        "warnings25mm": [
+          {
+            "pair": [
+              "base_link",
+              "left_tool"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.009140450763616458
+          },
+          {
+            "pair": [
+              "left_track_link",
+              "left_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.05012272342602148
+          },
+          {
+            "pair": [
+              "right_track_link",
+              "right_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.00671342917368185
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.027283413620363565
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.0022452282142619165
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_four_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.008781285346249007
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.028406732823146267
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.00124275998033725
+          },
+          {
+            "pair": [
+              "lower_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.007253729975373669
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.003983528163992811
+          },
+          {
+            "pair": [
+              "left_base_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.005039702540812107
+          },
+          {
+            "pair": [
+              "left_two_Link",
+              "left_four_Link"
+            ],
+            "category": "same-arm self",
+            "coveredDistanceLowerBoundMeters": -0.004254337902752374
+          },
+          {
+            "pair": [
+              "left_seven_Link",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.005479883359552762
+          },
+          {
+            "pair": [
+              "left_tool",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.07153739243361534
+          },
+          {
+            "pair": [
+              "right_base_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.016319576790738734
+          },
+          {
+            "pair": [
+              "right_tool",
+              "right_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.014714339118161106
+          }
+        ],
+        "warnings30mm": [
+          {
+            "pair": [
+              "base_link",
+              "left_tool"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.009140450763616458
+          },
+          {
+            "pair": [
+              "left_track_link",
+              "left_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.05012272342602148
+          },
+          {
+            "pair": [
+              "right_track_link",
+              "right_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.00671342917368185
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.027283413620363565
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.0022452282142619165
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_four_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.008781285346249007
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.028406732823146267
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.00124275998033725
+          },
+          {
+            "pair": [
+              "lower_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.007253729975373669
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.003983528163992811
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.025487828226612514
+          },
+          {
+            "pair": [
+              "left_base_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.005039702540812107
+          },
+          {
+            "pair": [
+              "left_two_Link",
+              "left_four_Link"
+            ],
+            "category": "same-arm self",
+            "coveredDistanceLowerBoundMeters": -0.004254337902752374
+          },
+          {
+            "pair": [
+              "left_seven_Link",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.005479883359552762
+          },
+          {
+            "pair": [
+              "left_tool",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.07153739243361534
+          },
+          {
+            "pair": [
+              "right_base_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.016319576790738734
+          },
+          {
+            "pair": [
+              "right_tool",
+              "right_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.014714339118161106
+          }
+        ]
+      },
+      "leftRelatedModel": {
+        "conservativeMinimumMeters": -0.07153739243361534,
+        "pair": [
+          "left_tool",
+          "left_track_upper_idler_link"
+        ],
+        "passes25mm": false,
+        "passes30mm": false,
+        "warnings25mm": [
+          {
+            "pair": [
+              "base_link",
+              "left_tool"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.009140450763616458
+          },
+          {
+            "pair": [
+              "left_track_link",
+              "left_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.05012272342602148
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.027283413620363565
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.0022452282142619165
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_four_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.008781285346249007
+          },
+          {
+            "pair": [
+              "lower_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.007253729975373669
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.003983528163992811
+          },
+          {
+            "pair": [
+              "left_base_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.005039702540812107
+          },
+          {
+            "pair": [
+              "left_two_Link",
+              "left_four_Link"
+            ],
+            "category": "same-arm self",
+            "coveredDistanceLowerBoundMeters": -0.004254337902752374
+          },
+          {
+            "pair": [
+              "left_seven_Link",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.005479883359552762
+          },
+          {
+            "pair": [
+              "left_tool",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.07153739243361534
+          }
+        ],
+        "warnings30mm": [
+          {
+            "pair": [
+              "base_link",
+              "left_tool"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.009140450763616458
+          },
+          {
+            "pair": [
+              "left_track_link",
+              "left_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.05012272342602148
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.027283413620363565
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.0022452282142619165
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_four_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.008781285346249007
+          },
+          {
+            "pair": [
+              "lower_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.007253729975373669
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.003983528163992811
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.025487828226612514
+          },
+          {
+            "pair": [
+              "left_base_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.005039702540812107
+          },
+          {
+            "pair": [
+              "left_two_Link",
+              "left_four_Link"
+            ],
+            "category": "same-arm self",
+            "coveredDistanceLowerBoundMeters": -0.004254337902752374
+          },
+          {
+            "pair": [
+              "left_seven_Link",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.005479883359552762
+          },
+          {
+            "pair": [
+              "left_tool",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.07153739243361534
+          }
+        ]
+      }
+    },
+    "previousNineSegment": {
+      "treads": {
+        "conservativeMinimumMeters": -0.07153739243361534,
+        "pair": [
+          "left_tool",
+          "left_track_upper_idler_link"
+        ],
+        "passes25mm": false,
+        "passes30mm": false,
+        "warnings25mm": [
+          {
+            "pair": [
+              "left_track_link",
+              "left_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.05012272342602148
+          },
+          {
+            "pair": [
+              "left_seven_Link",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.005479883359552762
+          },
+          {
+            "pair": [
+              "left_tool",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.07153739243361534
+          }
+        ],
+        "warnings30mm": [
+          {
+            "pair": [
+              "left_track_link",
+              "left_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.05012272342602148
+          },
+          {
+            "pair": [
+              "left_seven_Link",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.005479883359552762
+          },
+          {
+            "pair": [
+              "left_tool",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.07153739243361534
+          }
+        ]
+      },
+      "fullModel": {
+        "conservativeMinimumMeters": -0.07153739243361534,
+        "pair": [
+          "left_tool",
+          "left_track_upper_idler_link"
+        ],
+        "passes25mm": false,
+        "passes30mm": false,
+        "warnings25mm": [
+          {
+            "pair": [
+              "base_link",
+              "left_tool"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.009140450763616458
+          },
+          {
+            "pair": [
+              "left_track_link",
+              "left_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.05012272342602148
+          },
+          {
+            "pair": [
+              "right_track_link",
+              "right_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.00671342917368185
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.027283413620363565
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.0022452282142619165
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_four_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.008781285346249007
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.028406732823146267
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.00124275998033725
+          },
+          {
+            "pair": [
+              "lower_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.007253729975373669
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.003983528163992811
+          },
+          {
+            "pair": [
+              "left_base_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.005039702540812107
+          },
+          {
+            "pair": [
+              "left_two_Link",
+              "left_four_Link"
+            ],
+            "category": "same-arm self",
+            "coveredDistanceLowerBoundMeters": -0.004254337902752305
+          },
+          {
+            "pair": [
+              "left_seven_Link",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.005479883359552762
+          },
+          {
+            "pair": [
+              "left_tool",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.07153739243361534
+          },
+          {
+            "pair": [
+              "right_base_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.016319576790738734
+          },
+          {
+            "pair": [
+              "right_tool",
+              "right_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.014714339118161106
+          }
+        ],
+        "warnings30mm": [
+          {
+            "pair": [
+              "base_link",
+              "left_tool"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.009140450763616458
+          },
+          {
+            "pair": [
+              "left_track_link",
+              "left_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.05012272342602148
+          },
+          {
+            "pair": [
+              "right_track_link",
+              "right_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.00671342917368185
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.027283413620363565
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.0022452282142619165
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_four_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.008781285346249007
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.028406732823146267
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.00124275998033725
+          },
+          {
+            "pair": [
+              "lower_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.007253729975373669
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.003983528163992811
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.025451419769977394
+          },
+          {
+            "pair": [
+              "left_base_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.005039702540812107
+          },
+          {
+            "pair": [
+              "left_two_Link",
+              "left_four_Link"
+            ],
+            "category": "same-arm self",
+            "coveredDistanceLowerBoundMeters": -0.004254337902752305
+          },
+          {
+            "pair": [
+              "left_seven_Link",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.005479883359552762
+          },
+          {
+            "pair": [
+              "left_tool",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.07153739243361534
+          },
+          {
+            "pair": [
+              "right_base_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.016319576790738734
+          },
+          {
+            "pair": [
+              "right_tool",
+              "right_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.014714339118161106
+          }
+        ]
+      }
+    },
+    "proposedFiveSegment": {
+      "treads": {
+        "conservativeMinimumMeters": -0.07153739243361534,
+        "pair": [
+          "left_tool",
+          "left_track_upper_idler_link"
+        ],
+        "passes25mm": false,
+        "passes30mm": false,
+        "warnings25mm": [
+          {
+            "pair": [
+              "left_track_link",
+              "left_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.05012272342602148
+          },
+          {
+            "pair": [
+              "left_seven_Link",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.005479883359552762
+          },
+          {
+            "pair": [
+              "left_tool",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.07153739243361534
+          }
+        ],
+        "warnings30mm": [
+          {
+            "pair": [
+              "left_track_link",
+              "left_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.05012272342602148
+          },
+          {
+            "pair": [
+              "left_seven_Link",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.005479883359552762
+          },
+          {
+            "pair": [
+              "left_tool",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.07153739243361534
+          }
+        ]
+      },
+      "fullModel": {
+        "conservativeMinimumMeters": -0.07153739243361534,
+        "pair": [
+          "left_tool",
+          "left_track_upper_idler_link"
+        ],
+        "passes25mm": false,
+        "passes30mm": false,
+        "warnings25mm": [
+          {
+            "pair": [
+              "base_link",
+              "left_tool"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.009140450763616458
+          },
+          {
+            "pair": [
+              "left_track_link",
+              "left_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.05012272342602148
+          },
+          {
+            "pair": [
+              "right_track_link",
+              "right_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.00671342917368185
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.027283413620363565
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.0022452282142619165
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_four_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.008781285346249007
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.028406732823146267
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.00124275998033725
+          },
+          {
+            "pair": [
+              "lower_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.007253729975373669
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.003983528163992811
+          },
+          {
+            "pair": [
+              "left_base_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.005039702540812107
+          },
+          {
+            "pair": [
+              "left_two_Link",
+              "left_four_Link"
+            ],
+            "category": "same-arm self",
+            "coveredDistanceLowerBoundMeters": -0.0037575277114545455
+          },
+          {
+            "pair": [
+              "left_seven_Link",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.005479883359552762
+          },
+          {
+            "pair": [
+              "left_tool",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.07153739243361534
+          },
+          {
+            "pair": [
+              "right_base_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.016319576790738734
+          },
+          {
+            "pair": [
+              "right_tool",
+              "right_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.014714339118161106
+          }
+        ],
+        "warnings30mm": [
+          {
+            "pair": [
+              "base_link",
+              "left_tool"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.009140450763616458
+          },
+          {
+            "pair": [
+              "left_track_link",
+              "left_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.05012272342602148
+          },
+          {
+            "pair": [
+              "right_track_link",
+              "right_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.00671342917368185
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.027283413620363565
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.0022452282142619165
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_four_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.008781285346249007
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.028406732823146267
+          },
+          {
+            "pair": [
+              "torso_link",
+              "right_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.00124275998033725
+          },
+          {
+            "pair": [
+              "lower_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.007253729975373669
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.003983528163992811
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.025785188976310373
+          },
+          {
+            "pair": [
+              "left_base_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.005039702540812107
+          },
+          {
+            "pair": [
+              "left_two_Link",
+              "left_four_Link"
+            ],
+            "category": "same-arm self",
+            "coveredDistanceLowerBoundMeters": -0.0037575277114545455
+          },
+          {
+            "pair": [
+              "left_seven_Link",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.005479883359552762
+          },
+          {
+            "pair": [
+              "left_tool",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.07153739243361534
+          },
+          {
+            "pair": [
+              "right_base_link",
+              "right_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.016319576790738734
+          },
+          {
+            "pair": [
+              "right_tool",
+              "right_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.014714339118161106
+          }
+        ]
+      },
+      "leftRelatedModel": {
+        "conservativeMinimumMeters": -0.07153739243361534,
+        "pair": [
+          "left_tool",
+          "left_track_upper_idler_link"
+        ],
+        "passes25mm": false,
+        "passes30mm": false,
+        "warnings25mm": [
+          {
+            "pair": [
+              "base_link",
+              "left_tool"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.009140450763616458
+          },
+          {
+            "pair": [
+              "left_track_link",
+              "left_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.05012272342602148
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.027283413620363565
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.0022452282142619165
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_four_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.008781285346249007
+          },
+          {
+            "pair": [
+              "lower_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.007253729975373669
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.003983528163992811
+          },
+          {
+            "pair": [
+              "left_base_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.005039702540812107
+          },
+          {
+            "pair": [
+              "left_two_Link",
+              "left_four_Link"
+            ],
+            "category": "same-arm self",
+            "coveredDistanceLowerBoundMeters": -0.0037575277114545455
+          },
+          {
+            "pair": [
+              "left_seven_Link",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.005479883359552762
+          },
+          {
+            "pair": [
+              "left_tool",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.07153739243361534
+          }
+        ],
+        "warnings30mm": [
+          {
+            "pair": [
+              "base_link",
+              "left_tool"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.009140450763616458
+          },
+          {
+            "pair": [
+              "left_track_link",
+              "left_tool"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.05012272342602148
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.027283413620363565
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_three_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.0022452282142619165
+          },
+          {
+            "pair": [
+              "torso_link",
+              "left_four_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.008781285346249007
+          },
+          {
+            "pair": [
+              "lower_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.007253729975373669
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_one_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.003983528163992811
+          },
+          {
+            "pair": [
+              "upper_neck_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": 0.025785188976310373
+          },
+          {
+            "pair": [
+              "left_base_link",
+              "left_two_Link"
+            ],
+            "category": "arm-body",
+            "coveredDistanceLowerBoundMeters": -0.005039702540812107
+          },
+          {
+            "pair": [
+              "left_two_Link",
+              "left_four_Link"
+            ],
+            "category": "same-arm self",
+            "coveredDistanceLowerBoundMeters": -0.0037575277114545455
+          },
+          {
+            "pair": [
+              "left_seven_Link",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.005479883359552762
+          },
+          {
+            "pair": [
+              "left_tool",
+              "left_track_upper_idler_link"
+            ],
+            "category": "tread",
+            "coveredDistanceLowerBoundMeters": -0.07153739243361534
+          }
+        ]
+      }
+    }
+  },
+  "newWarningPairsAcrossWholeRaise25mm": [],
+  "method": {
+    "pairCount": 526,
+    "leftRelatedPairCount": 295,
+    "treadPairCount": 96,
+    "geometry": "Drake convex rigid-scan signed hull distances; all production eligible pairs, including arm-body, self and opposite arm; adjacent rigid assemblies retain production exclusions",
+    "sweep": "Piecewise joint-linear paths. Endpoints plus midpoint samples; each pair uses production lever travel bound, with unsampled relative point travel subtracted. At most4mm cover per pair. Query AABB distances over80mm retained as conservative lower bounds rather than exact convex distances.",
+    "comparison": "Same scan reference, unchanged canonical coordinates, inactive joints held at reference; full warning sets retained rather than early return on first warning.",
+    "sampledStateCount": 800
+  },
+  "limitations": [
+    "Positive driver directions are assumptions, not measured calibration.",
+    "September22 arm upright offsets and all inactive joints remain scan priors, not measured current physical posture.",
+    "Convex hulls and tool offsets remain provisional; cables, payload, real joint tracking deviation, and environment are outside this test.",
+    "The unchanged hanging->waypoint1 overlap is retained in this evidence. Passing new joined segments is not whole-route collision clearance or physical certification."
+  ],
+  "unchangedInitialSegment": {
+    "start": 0,
+    "end": 1,
+    "sampleCount": 18,
+    "maxUnsampledPointTravelMeters": 0.003902970903389516,
+    "maxPairRelativeTravelMeters": 0.12489506890846451,
+    "treads": {
+      "conservativeMinimumMeters": -0.07153739243361534,
+      "pair": [
+        "left_tool",
+        "left_track_upper_idler_link"
+      ],
+      "passes25mm": false,
+      "passes30mm": false,
+      "warnings25mm": [
+        {
+          "pair": [
+            "left_track_link",
+            "left_tool"
+          ],
+          "category": "tread",
+          "coveredDistanceLowerBoundMeters": -0.05012272342602148
+        },
+        {
+          "pair": [
+            "left_seven_Link",
+            "left_track_upper_idler_link"
+          ],
+          "category": "tread",
+          "coveredDistanceLowerBoundMeters": -0.005479883359552762
+        },
+        {
+          "pair": [
+            "left_tool",
+            "left_track_upper_idler_link"
+          ],
+          "category": "tread",
+          "coveredDistanceLowerBoundMeters": -0.07153739243361534
+        }
+      ],
+      "warnings30mm": [
+        {
+          "pair": [
+            "left_track_link",
+            "left_tool"
+          ],
+          "category": "tread",
+          "coveredDistanceLowerBoundMeters": -0.05012272342602148
+        },
+        {
+          "pair": [
+            "left_seven_Link",
+            "left_track_upper_idler_link"
+          ],
+          "category": "tread",
+          "coveredDistanceLowerBoundMeters": -0.005479883359552762
+        },
+        {
+          "pair": [
+            "left_tool",
+            "left_track_upper_idler_link"
+          ],
+          "category": "tread",
+          "coveredDistanceLowerBoundMeters": -0.07153739243361534
+        }
+      ]
+    }
+  }
+}

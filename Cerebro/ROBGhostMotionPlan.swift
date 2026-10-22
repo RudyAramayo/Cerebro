@@ -256,7 +256,7 @@ enum ROBLeftGestureCompiler {
               ["center", "wave", "custom", "lower"].contains(kind), poses.count <= 12 else {
             throw ROBGhostMotionError.blocked("Invalid gesture or missing live gateway session.")
         }
-        guard let route = ROBLeftArmInteractionPlan.route(from: baseline, hanging: kind == "lower", waving: kind == "wave") else {
+        guard let route = ROBLeftArmInteractionPlan.executionRoute(from: baseline, hanging: kind == "lower", waving: kind == "wave") else {
             throw ROBGhostMotionError.blocked("Start from the known arm route. A stopped custom gesture must be recovered first.")
         }
         var targets = route.compactMap { ROBLeftArmInteractionPlan.target(index: $0) }
@@ -340,22 +340,7 @@ enum ROBLeftGestureCompiler {
     /// straight line in the same direction. Retain every corner and reversal;
     /// a longer segment traverses the same modeled/swept positions.
     static func compactRoute(baseline: [Double], targets: [[Double]]) -> [[Double]] {
-        var result = [baseline]
-        for target in targets {
-            if result.last == target { continue }
-            while result.count >= 2 {
-                let a = result[result.count - 2], b = result[result.count - 1]
-                let delta = zip(a, target).map { $1 - $0 }
-                let square = delta.reduce(0) { $0 + $1 * $1 }
-                guard square > 1e-12 else { break }
-                let fraction = zip(zip(b, a), delta).reduce(0.0) { $0 + ($1.0.0 - $1.0.1) * $1.1 } / square
-                guard fraction > 0, fraction < 1,
-                      zip(zip(a, delta), b).allSatisfy({ abs($0.0.0 + fraction * $0.0.1 - $0.1) < 1e-9 }) else { break }
-                result.removeLast()
-            }
-            result.append(target)
-        }
-        return Array(result.dropFirst())
+        ROBArmRoutinePlan.compactTargetIndices(baseline: baseline, targets: targets).map { targets[$0] }
     }
 }
 

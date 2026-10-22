@@ -105,6 +105,7 @@ final class ROBAmberGatewayClient: NSObject {
             expectedSessionGeneration: expectedSessionGeneration), "Gateway admission did not recognize the approved left trial")
         precondition(expectedSessionGeneration == generation && mode[arm] == 2)
         precondition(arm == "right", "Trial dispatched to physical right arm")
+        precondition(ROBLeftArmInteractionPlan.allowsDirectMove(from: q[arm]!, to: index), "Compacted trial cut a corridor corner")
         precondition(telemetry(forArm: arm)!.statuses.allSatisfy { $0.intValue == 2 })
         q[arm] = ROBLeftArmInteractionPlan.target(index: index)!
         activeLeases.insert(arm)
@@ -271,7 +272,9 @@ final class ROBArmRoutineCoordinator {
         precondition(wave["status"] as? String == "completed", wave.description)
         precondition(wave["measured"] as? Bool == true)
         precondition(g.commands.allSatisfy { $0.hasSuffix(":right") })
-        precondition(g.commands.filter { $0.hasPrefix("waypoint_") }.count == 46)
+        precondition(g.commands.filter { $0.hasPrefix("waypoint_") }.count == 11)
+        precondition(Array(g.commands.filter { $0.hasPrefix("waypoint_") }.prefix(7)) ==
+            [1,4,6,18,28,34,42].map { "waypoint_\($0):right" })
         precondition(g.commands.filter { $0.hasPrefix("waypoint_") }.suffix(4) == ["waypoint_43:right", "waypoint_42:right", "waypoint_43:right", "waypoint_42:right"])
         precondition(g.q["right"]! == plan.target(index: plan.waveRestIndex)!)
         precondition(!g.commands.contains { $0.hasPrefix("gripper_hold") || $0.hasPrefix("gripper_release") || $0.hasPrefix("calibrate") })
@@ -282,7 +285,7 @@ final class ROBArmRoutineCoordinator {
         precondition(csv.contains("current_raw,current_delta_raw") && csv.contains(",left,right,"))
         precondition(csv.contains("waypoint 6"))
         precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty)
-        print("Left wave: one approval, 46 bounded waypoints, above-shoulder endpoint, no right-arm or jaw commands, current CSV saved")
+        print("Left wave: one approval, 11 registered corridor segments instead of 46 stops, no right-arm or jaw commands, current CSV saved")
         g.commands = []
         let prepare = await run("left_prepare")
         precondition(prepare["status"] as? String == "accepted_unverified", prepare.description)

@@ -1,0 +1,10 @@
+{
+  "recording": "left_relax-E0CB1361-C7D2-4888-92FE-2E7703D82D2F.csv",
+  "archivedRecording": "return-new-session-blocked.csv.gz",
+  "sha256": "cd755b6a2e635df0ce79c9179db18b9c1aabb93c86446765e79563fc48b4f22a",
+  "archiveSHA256": "ea695d369a47d6f06b5686a2583d2036faf0015d35907bb0668f4dac120281c7",
+  "outcome": "Lower approved but blocked in preflight: First left-arm movement in a new session must start physically hanging at encoder zero. No trajectory sent. App/debugger restart had lost its in-memory reference.",
+  "operatorRecovery": "Operator used manual left Zero Position. Fresh encoder q approximately zero, still position mode2. Operator confirmed physically supporting empty left arm before authenticated left-only Deactivate request. Amber accepted command7 at17:34:45; fresh all-seven status0/inactive. Operator then confirmed physically hanging and empty.",
+  "guard": "New-session physical-hanging guard retained; no direct motor bypass used by agent.",
+  "reload": "Only after confirmed hanging/inactive, loaded isolated signed arm64 five-segment local Debug build. Old Xcode session was paused at MLX Metal ss_Dividefloat32 missing buffer assertion; ended through Xcode Stop. DepthAI also reported device crash at17:35:17. No arm operation active during reload."
+}
