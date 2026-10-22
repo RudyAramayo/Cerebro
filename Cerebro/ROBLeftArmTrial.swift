@@ -402,10 +402,31 @@ import AppKit
         if command == "left_recycle_can" {
             let model = try workspaceModel()
             let objects = try await ROBWorkspaceSearch.shared.run(targets: ROBWorkspaceTarget.allCases,
-                model: model, check: { try self.check() }, progress: { self.update($0) })
+                model: model, requireDepth: false, check: { try self.check() }, progress: { self.update($0) })
+            // Ask for a reachable can even when bucket release geometry is
+            // still unavailable. This is a model check, never a motion path.
+            if let can = objects[.can] {
+                let baseline = model.positions(vendorLeft: q)
+                let reach = try await Task.detached(priority: .userInitiated) {
+                    try ROBCanGrabPreview.make(can: can, model: model, baseline: baseline)
+                }.value
+                try check()
+                if let message = reach.helpRequest {
+                    ROBWorkspaceSearch.shared.announce?(message)
+                    return ["status": "needs_help", "arm_motion_sent": false, "measured": false,
+                        "detail": message + " I'll check its new position before reaching.",
+                        "workspace_search": ROBWorkspaceSearch.shared.lastReport]
+                }
+            }
             guard let can = objects[.can], let bucket = objects[.orangeBucket] else {
-                return ["status": ["depth_unconfirmed", "vision_unavailable"].contains(ROBWorkspaceSearch.shared.lastReport["status"] as? String ?? "") ? "not_localized" : "not_found", "measured": false, "arm_motion_sent": false,
-                    "detail": ROBWorkspaceSearch.shared.lastReport["detail"] ?? "Can or orange bucket was not confirmed.",
+                let report = ROBWorkspaceSearch.shared.lastReport
+                let visible = report["visually_confirmed"] as? [String] ?? []
+                let detail = objects[.orangeBucket] == nil && visible.contains("orangeBucket")
+                    ? "I see the bucket, but I can't measure its opening yet."
+                    : report["detail"] as? String ?? "Can or orange bucket was not confirmed."
+                if visible.contains("orangeBucket") { ROBWorkspaceSearch.shared.announce?(detail) }
+                return ["status": ["depth_unconfirmed", "vision_unavailable", "visually_found"].contains(report["status"] as? String ?? "") ? "not_localized" : "not_found", "measured": false, "arm_motion_sent": false,
+                    "detail": detail,
                     "workspace_search": ROBWorkspaceSearch.shared.lastReport]
             }
             guard [can, bucket].allSatisfy({ Date().timeIntervalSince1970 * 1000 - $0.capturedAt < 60_000 }) else {
@@ -419,6 +440,10 @@ import AppKit
                 proposal = try ROBLeftGestureCompiler.compile(kind: "tabletop", name: task.name, poses: task.poses,
                     model: model, baseline: q, generation: generation)
                 try ROBLeftGestureCompiler.validate(proposal!, model: model)
+            } catch let error as ROBWorkspaceReachError {
+                ROBWorkspaceSearch.shared.announce?(error.helpRequest)
+                return ["status": "needs_help", "arm_motion_sent": false, "measured": false,
+                    "detail": error.localizedDescription, "workspace_search": ROBWorkspaceSearch.shared.lastReport]
             } catch {
                 return ["status": "not_reachable", "arm_motion_sent": false, "measured": false,
                     "detail": error.localizedDescription, "workspace_search": ROBWorkspaceSearch.shared.lastReport]

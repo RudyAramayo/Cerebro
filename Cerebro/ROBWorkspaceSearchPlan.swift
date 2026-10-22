@@ -6,6 +6,35 @@ enum ROBWorkspaceTarget: String, Codable, CaseIterable {
     var spokenName: String { self == .can ? "Coke can" : "orange bucket" }
 }
 
+/// Announce confirmed discoveries once per search, including what remains.
+/// Visual confirmation is deliberately independent of grasp/drop geometry.
+struct ROBWorkspaceSearchSpeech {
+    private var announced = Set<ROBWorkspaceTarget>()
+    mutating func confirmed(_ visible: Set<ROBWorkspaceTarget>, targets: [ROBWorkspaceTarget]) -> String? {
+        let requested = Set(targets)
+        let seen = visible.intersection(requested)
+        let new = seen.subtracting(announced)
+        guard !new.isEmpty else { return nil }
+        announced.formUnion(new)
+        if new.count == 2 { return "I see the can and bucket." }
+        let name = new.contains(.can) ? "can" : "bucket"
+        let missing = requested.subtracting(seen)
+        guard !missing.isEmpty else { return "I see the \(name)." }
+        return "I see the \(name). I'm still looking for the \(missing.contains(.can) ? "can" : "bucket")."
+    }
+}
+
+enum ROBWorkspaceReachError: LocalizedError {
+    case outOfReach(ROBWorkspaceTarget)
+    var helpRequest: String {
+        switch self {
+        case .outOfReach(.can): return "Please bring the can closer."
+        case .outOfReach(.orangeBucket): return "Please bring the bucket closer."
+        }
+    }
+    var errorDescription: String? { helpRequest + " I'll need to check its new position before reaching." }
+}
+
 struct ROBWorkspaceView: Codable, Equatable {
     let panDegrees: Double
     let upperTarget: Int
@@ -151,6 +180,10 @@ struct ROBCanGrabPreview {
     let gripperTiltDegrees: Double
     let reachesCan: Bool
     var seconds: Double { steps.reduce(0) { $0 + $1.seconds } }
+    var helpRequest: String? {
+        // An orientation-only failure must not be described as too far away.
+        graspError > 0.012 ? ROBWorkspaceReachError.outOfReach(.can).helpRequest : nil
+    }
 
     static func make(can: ROBWorkspaceLocatedObject, model: ROBGhostRobotModel,
                      baseline: [String: Double], side: String = "left", now: Double = Date().timeIntervalSince1970 * 1000) throws -> Self {
@@ -346,10 +379,10 @@ enum ROBWorkspaceGrounding {
         let points = [can.point + SIMD3(0, 0, 0.08), can.point, can.point + SIMD3(0, 0, 0.06),
                       bucket.point + SIMD3(0, 0, 0.12), bucket.point + SIMD3(0, 0, 0.20)]
         var seed = center, poses: [[String: Double]] = []
-        for point in points {
+        for (index, point) in points.enumerated() {
             guard let pose = model.solveLeft(target: point, from: seed),
                   let tip = model.toolPosition(pose), simd_distance(tip, point) <= 0.012 else {
-                throw ROBGhostMotionError.blocked("Found the can/bucket, but the left arm cannot reach the observed positions with the current model. Reposition them closer; no blind reach was sent.")
+                throw ROBWorkspaceReachError.outOfReach(index < 3 ? .can : .orangeBucket)
             }
             poses.append(pose); seed = pose
         }

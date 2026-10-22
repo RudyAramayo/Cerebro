@@ -453,6 +453,8 @@ final class ROBArmRoutineVision {
         locatedObjects = [:]
         var found: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
         var visuallyFound = Set<ROBWorkspaceTarget>()
+        var speech = ROBWorkspaceSearchSpeech()
+        var announcements: [[String: Any]] = []
         var evidence: [[String: Any]] = []
         var leftHanging = false, rightHanging = false
         var validObservations = 0
@@ -472,6 +474,7 @@ final class ROBArmRoutineVision {
                 "camera_arm_mapping": "provisional URDF/neck command prior, not measured hand-eye calibration",
                 "left_hanging_observed": leftHanging, "right_hanging_observed": rightHanging,
                 "visually_confirmed": visuallyFound.map(\.rawValue).sorted(), "decoded_observations": validObservations,
+                "announcements": announcements,
                 "settle_seconds_per_view": 1.5,
                 "depth_required": requireDepth,
                 "views": evidence, "objects": found.reduce(into: [String: Any]()) {
@@ -567,6 +570,12 @@ final class ROBArmRoutineVision {
                     prior[target] = located
                 }
                 evidence.append(entry)
+            }
+            if let message = speech.confirmed(visuallyFound, targets: targets) {
+                announce?(message)
+                announcements.append(["message": message, "at": ISO8601DateFormatter().string(from: Date()),
+                    "visually_confirmed": visuallyFound.map(\.rawValue).sorted()])
+                progress(message)
             }
         }
         func inspectWithRetry(_ view: ROBWorkspaceView) async throws {

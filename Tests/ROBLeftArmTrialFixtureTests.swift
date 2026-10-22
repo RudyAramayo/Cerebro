@@ -171,15 +171,17 @@ final class ROBAmberGatewayClient: NSObject {
 
 final class ROBWorkspaceSearch {
     static let shared = ROBWorkspaceSearch()
+    var announce: ((String) -> Void)?
     var lastReport: NSDictionary = ["detail": "Fixture search only"]
     var fail = false
     var requiredDepth = true
+    var objects: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
     var onInspect: (() -> Void)?
     @MainActor func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true, check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
         requiredDepth = requireDepth
         onInspect?()
         if fail { throw ROBArmRoutineError.blocked("Fixture observation unavailable") }
-        try check(); return [:]
+        try check(); return objects
     }
 }
 
@@ -585,6 +587,32 @@ final class ROBArmRoutineCoordinator {
         g.expectedGripperIntensity = 10; g.stale = false
         precondition(approvals == beforeCycle + 7)
         print("Object-cycle waits: stale feedback, replaced session, expired approval and Stop prevent subsequent close/release/lower, retain torque and invalidate readiness")
+        // Help must precede all reaching/gripping, even if the bucket has
+        // visual identity only. It must not activate or move either arm.
+        g.q["right"] = Array(repeating: 0, count: 7); g.mode["right"] = 0
+        g.commands = []; g.activeLeases = []
+        let search = ROBWorkspaceSearch.shared
+        let now = Date().timeIntervalSince1970 * 1000
+        search.objects = [.can: .init(target: .can, position: [10,0,1], confidence: 0.9,
+            capturedAt: now, sequence: 111, view: view)]
+        search.lastReport = ["status": "visually_found", "visually_confirmed": ["can", "orangeBucket"]]
+        var requests: [String] = []
+        search.announce = { requests.append($0) }
+        let beforeHelp = approvals
+        let assistance = await run("left_recycle_can")
+        precondition(assistance["status"] as? String == "needs_help", assistance.description)
+        precondition(assistance["arm_motion_sent"] as? Bool == false && approvals == beforeHelp + 1)
+        precondition(requests == ["Please bring the can closer."] && !search.requiredDepth)
+        precondition(g.commands == ["mode_query:right"], "Help request issued arm/gripper commands")
+        g.commands = []; requests = []
+        search.objects = [.can: .init(target: .can, position: [hand.x,hand.y,hand.z], confidence: 0.9,
+            capturedAt: Date().timeIntervalSince1970 * 1000, sequence: 112, view: view)]
+        let missingRim = await run("left_recycle_can")
+        precondition(missingRim["status"] as? String == "not_localized", missingRim.description)
+        precondition(requests == ["I see the bucket, but I can't measure its opening yet."])
+        precondition(g.commands == ["mode_query:right"], "Visual bucket detection admitted reaching without release geometry")
+        search.objects = [:]; search.announce = nil
+        print("Recycling assistance: one short request before motion for a distant can, even without bucket depth; reachable can never substitutes for missing release geometry")
     }
     static func main() async throws { setbuf(stdout, nil); try await tests(); print("Left-arm trial fixtures passed; no hardware transport exists in this executable") }
 }

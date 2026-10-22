@@ -288,6 +288,7 @@ import simd
                     guard let self, !Task.isCancelled, self.canRequestID == request else { return }
                     self.showCanPreview(preview)
                     self.play()
+                    if let message = preview.helpRequest { ROBWorkspaceSearch.shared.announce?(message) }
                 } catch {
                     guard let self, self.canRequestID == request else { return }
                     self.status.stringValue = error.localizedDescription
@@ -380,6 +381,9 @@ import simd
         status.stringValue = "\(stage) · GHOST ONLY\n" + (preview.reachesCan
             ? String(format: "Grasp model error %.1f mm; gripper tilt %.1f° from horizontal. Jaw closure/retention simulated; tool mounting and table clearance unverified.", preview.graspError * 1000, preview.gripperTiltDegrees)
             : String(format: "Hand gap %.1f cm; gripper tilt %.1f° from horizontal. No grasp or lift is claimed.", preview.graspError * 100, preview.gripperTiltDegrees))
+        if let message = preview.helpRequest {
+            status.stringValue += "\n" + message + " Then use Find Coke can + ghost grab to check again."
+        }
     }
 
     private func refreshCanInfo() {

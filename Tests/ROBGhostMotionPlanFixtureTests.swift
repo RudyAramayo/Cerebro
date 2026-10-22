@@ -229,6 +229,22 @@ import simd
         let bucketBoxOnly = ROBWorkspaceDetection(visible: true, confidence: 0.6, box: [0.1,0.2,0.6,0.8],
             aim: [], depthPoint: [], confidenceThreshold: 0.35)
         precondition(bucketBoxOnly.visuallyUsable && !bucketBoxOnly.usable, "A bucket rectangle cannot invent a rim/release position")
+        var speech = ROBWorkspaceSearchSpeech()
+        precondition(speech.confirmed([], targets: ROBWorkspaceTarget.allCases) == nil)
+        precondition(speech.confirmed([.can], targets: ROBWorkspaceTarget.allCases) == "I see the can. I'm still looking for the bucket.")
+        precondition(speech.confirmed([.can], targets: ROBWorkspaceTarget.allCases) == nil,
+            "Repeated observations must not repeat a discovery announcement")
+        precondition(speech.confirmed([.can, .orangeBucket], targets: ROBWorkspaceTarget.allCases) == "I see the bucket.")
+        precondition(speech.confirmed([.orangeBucket], targets: ROBWorkspaceTarget.allCases) == nil)
+        precondition(speech.confirmed([.can, .orangeBucket], targets: ROBWorkspaceTarget.allCases) == nil,
+            "Refreshing an older target must not announce it again")
+        var bucketFirst = ROBWorkspaceSearchSpeech()
+        precondition(bucketFirst.confirmed([.orangeBucket], targets: ROBWorkspaceTarget.allCases) == "I see the bucket. I'm still looking for the can.")
+        var together = ROBWorkspaceSearchSpeech()
+        precondition(together.confirmed([.can, .orangeBucket], targets: ROBWorkspaceTarget.allCases) == "I see the can and bucket.")
+        var canOnly = ROBWorkspaceSearchSpeech()
+        precondition(canOnly.confirmed([.can, .orangeBucket], targets: [.can]) == "I see the can.")
+        print("Search speech: can-first/bucket-first/simultaneous discoveries, requested targets only, no repeated prompts on later observations")
         let wrappedObservation = try ROBWorkspaceObservation.decode("Here is the observation:\n```JSON\n" + observationJSON + "\n```")
         precondition(wrappedObservation.can.usable)
         let bareFence = try ROBWorkspaceObservation.decode("```\n" + observationJSON + "\n```")
@@ -272,6 +288,7 @@ import simd
         let grabPreview = try ROBCanGrabPreview.make(can: previewCan, model: model, baseline: model.reference, now: previewNow)
         precondition(grabPreview.side == "left" && grabPreview.reachesCan && grabPreview.graspError <= 0.012)
         precondition(grabPreview.gripperTiltDegrees <= 5, "A successful grasp requires horizontal approach and jaw axes")
+        precondition(grabPreview.helpRequest == nil, "A reachable can must not trigger a move-closer request")
         precondition(grabPreview.steps.contains { $0.stage == "Close jaws (simulation)" })
         precondition(grabPreview.steps.allSatisfy { step in
             model.joints.filter { !$0.name.hasPrefix("left_joint") }.allSatisfy { step.pose[$0.name] == model.reference[$0.name] }
@@ -285,6 +302,10 @@ import simd
         precondition(rightPreview.side == "right")
         precondition(rightPreview.reachesCan || !rightPreview.steps.contains { $0.stage.contains("simulation") }, "An unreachable can must not appear gripped or lifted")
         let crossBody = try ROBCanGrabPreview.make(can: rightCan, model: model, baseline: model.reference, now: previewNow)
+        precondition(crossBody.graspError > 0.012 && crossBody.helpRequest == "Please bring the can closer.")
+        let tiltOnly = ROBCanGrabPreview(can: previewCan, side: "left", baseline: model.reference,
+            steps: [], graspError: 0.001, gripperTiltDegrees: 15, reachesCan: false)
+        precondition(tiltOnly.helpRequest == nil, "A wrist orientation problem must not be described as a distant can")
         precondition(crossBody.side == "left" && crossBody.steps.allSatisfy { step in
             model.joints.filter { $0.name.hasPrefix("right_joint") }.allSatisfy { step.pose[$0.name] == model.reference[$0.name] }
         }, "A can on the right must still use the operator-selected left arm when the table blocks the right")
@@ -297,6 +318,23 @@ import simd
         let bucket = ROBWorkspaceLocatedObject(target: .orangeBucket, position: [hand.x,hand.y + 0.08,hand.z - 0.10],
             confidence: 0.9, capturedAt: 1500, sequence: 2, view: view)
         let task = try ROBWorkspaceGrounding.task(can: can, bucket: bucket, model: model)
+        let farCan = ROBWorkspaceLocatedObject(target: .can, position: [10,0,1], confidence: 0.9,
+            capturedAt: 1000, sequence: 1, view: view)
+        let farBucket = ROBWorkspaceLocatedObject(target: .orangeBucket, position: [10,0,1], confidence: 0.9,
+            capturedAt: 1500, sequence: 2, view: view)
+        do {
+            _ = try ROBWorkspaceGrounding.task(can: farCan, bucket: bucket, model: model)
+            preconditionFailure("Unreachable pickup was accepted")
+        } catch let error as ROBWorkspaceReachError {
+            precondition(error.helpRequest == "Please bring the can closer.")
+        }
+        do {
+            _ = try ROBWorkspaceGrounding.task(can: can, bucket: farBucket, model: model)
+            preconditionFailure("Unreachable bucket was accepted")
+        } catch let error as ROBWorkspaceReachError {
+            precondition(error.helpRequest == "Please bring the bucket closer.",
+                "An unreachable bucket must not ask the human to move the can")
+        }
         let tabletop = try ROBLeftGestureCompiler.compile(kind: "tabletop", name: task.name, poses: task.poses,
             model: model, baseline: zero, generation: 42)
         try ROBLeftGestureCompiler.validate(tabletop, model: model)

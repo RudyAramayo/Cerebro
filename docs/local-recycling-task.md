@@ -102,6 +102,13 @@ localization. A search-only operation ends when both objects are visually
 confirmed and reports `visually_found`, without claiming a bucket release
 position. ROB reports found/not found aloud.
 
+Confirmed discoveries also get brief spoken progress: “I see the can. I'm still
+looking for the bucket,” followed by “I see the bucket” when it is confirmed.
+Each object is announced only once per search, after the existing two-frame
+confirmation. Repeated observations and refreshes do not repeat the announcement.
+The report records these messages; seeing a bucket still does not establish its
+opening or a measured drop position.
+
 Each search saves observations, capture times, sequences, view targets, found
 positions and the actual outcome in Application Support/Cerebro/WorkspaceSearch.
 Progress is saved after each view, including interruptions; an interrupted
@@ -170,6 +177,21 @@ The target is never moved to make the simulation succeed. If the model cannot
 reach it, the displayed gap remains and no closing/lift is simulated. Otherwise
 the animation shows symbolic jaw closure and a 6 cm lift when that pose solves.
 The cyan path and labeled target can be scrubbed or replayed with **Play ×4**.
+
+An out-of-reach can prompts “Please bring the can closer.” The ghost panel keeps
+that request and the rescan instruction visible. After moving the can, **Find
+Coke can + ghost grab** acquires new RGB-D observations and recomputes the reach;
+the old target is never shifted or reused as the new position. An orientation-only
+failure does not ask for a closer can. Executable task planning similarly asks
+for the can or bucket whose position failed the reach check, before any reaching
+or gripping. This assistance does not drive the treads or create an arm grant.
+Automatic base approach is future work.
+
+The [assistance validation record](calibration/evidence/2026-10-22-recycling/can-assistance-validation.json)
+records the signed local build, passing fixtures and a native search that
+announced the can and bucket once each. After Rob moved the can closer, the
+native left ghost solved the grasp with 0.2 mm displayed error, horizontal jaws
+and a simulated 6 cm lift. No physical pickup or placement was run.
 
 This rehearsal uses a separate non-executable data type, leaves the other arm and
 original/measured robot unchanged, and never requests an arm grant or sends arm

@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-22T22:52:59.334296+00:00",
+  "baseCommit": "d9bb0b3f62c119a5ce6f0f13890b2feaa2abb625",
+  "sourceSHA256": {
+    "Cerebro/ROBWorkspaceSearchPlan.swift": "081d0ec6a4a309b5ba2f15388f28d2b2cceba389a27eb94f45ea1eb7caac2a72",
+    "Cerebro/ROBArmRoutineVision.swift": "c3e3ab36fef12d9f8e950e7698e907bae0cef251f4feb58f702335b5d3415da4",
+    "Cerebro/ROBGhostGestureEditor.swift": "473e15a75b9fa0ea1909d3bbba8341bf0e40b804f73a961617c770994a1dd264",
+    "Cerebro/ROBLeftArmTrial.swift": "7667e1de78d30902c6c4bd88f729a08aa6f3c1ac12021993f1d4b5e54757f27e"
+  },
+  "validation": [
+    {
+      "name": "ghost-motion",
+      "command": "bash Scripts/test-ghost-motion.sh",
+      "result": "passed",
+      "logSHA256": "ee80cceab7ac3792d9fcbdb1db1c3f6ed3271bc1152ff8658c5405486314c5bb"
+    },
+    {
+      "name": "ghost-render",
+      "command": "bash Scripts/test-ghost-editor-render.sh <output.png> can",
+      "result": "passed",
+      "logSHA256": "720762223a3fd3d8d8683256d545af79b669484105b93088e57bb1833ba4ed87"
+    },
+    {
+      "name": "left-arm-executor",
+      "command": "bash Scripts/test-left-arm-trial.sh",
+      "result": "passed",
+      "logSHA256": "3f3a0bc596a9f957f690121049c737eb9d28779b194cb8df0c5331043a0f3ec2"
+    }
+  ],
+  "build": {
+    "configuration": "Signed arm64 local Debug; isolated committed source plus intended changes; unrelated user edits excluded",
+    "result": "passed",
+    "codeSignatureVerification": "codesign --verify --deep --strict passed",
+    "logSHA256": "6d495035f6706de696c6177b3a8abb2e8d58d41f15751d712c2cdbf2fdb1e165",
+    "installedBinarySHA256": "a08e15cde5dfa75f1f03a14cf6f3d54764f5177538187ea35a41d1c1e19a2f4d",
+    "wakeSessionOfferRestored": true
+  },
+  "liveSearch": {
+    "report": "A0AD7D73-A217-4163-A024-BB9F56051E98.json",
+    "reportSHA256": "6ac027afa8daca131979f8c067a610aecb01aa55549281964d3dc5418745d349",
+    "status": "visually_found",
+    "decodedObservations": 18,
+    "announcements": [
+      {
+        "at": "2026-10-22T22:50:53Z",
+        "message": "I see the can. I'm still looking for the bucket.",
+        "visually_confirmed": [
+          "can"
+        ]
+      },
+      {
+        "at": "2026-10-22T22:51:46Z",
+        "message": "I see the bucket.",
+        "visually_confirmed": [
+          "can",
+          "orangeBucket"
+        ]
+      }
+    ],
+    "objects": {
+      "can": {
+        "captured_at_ms": 1792709512603.036,
+        "position": [
+          0.5466242614762347,
+          -0.0662521310393451,
+          0.8829912408868328
+        ]
+      }
+    },
+    "speechEvidence": "Native search dispatched these messages through the existing SpeechBox callback. This record does not independently verify speaker audibility."
+  },
+  "nativeGhost": {
+    "arm": "left",
+    "captureSequence": 2092,
+    "captureTimestampMS": 1792709512603.036,
+    "graspModelErrorMMDisplayed": 0.2,
+    "gripperTiltDegreesDisplayed": 0.0,
+    "wristJoint7Degrees": -55.86210257601883,
+    "stages": 10,
+    "simulatedLiftM": 0.06,
+    "executionButtonDisabled": true
+  },
+  "physicalScope": "Neck-only search and non-executable ghost; no arm, gripper or tread action requested. No pickup or placement is claimed.",
+  "remainingLimits": [
+    "Bucket opening/release depth remains unavailable.",
+    "The corrected horizontal ghost is not connected to hardware task execution.",
+    "Camera/tool mapping and table collision geometry remain provisional.",
+    "Automatic tread approach remains future work."
+  ]
+}

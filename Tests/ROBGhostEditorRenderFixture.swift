@@ -32,6 +32,7 @@ final class ROBArmRoutineCoordinator {
 }
 final class ROBWorkspaceSearch {
     static let shared = ROBWorkspaceSearch()
+    var announce: ((String) -> Void)?
     var locatedObjects: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
 }
 final class ROBAmberGestureExecutor {
@@ -354,6 +355,9 @@ final class GhostFixtureSnapshotView: NSView {
         precondition(headNode("Blue ghost", "left_two_Link").simdTransform != originalLeft)
         if !canPreview.reachesCan {
             precondition(scene.rootNode.childNode(withName: "Simulated held can", recursively: true)!.isHidden)
+            precondition(controls.compactMap { $0 as? NSTextField }.contains {
+                $0.stringValue.contains("Please bring the can closer.") && $0.stringValue.contains("check again")
+            }, "An unreachable preview must explain how to get a fresh reach check after moving the can")
         }
         let replay = controls.compactMap { $0 as? NSButton }.first { $0.title == "Play ×4" }!
         NSApp.sendAction(replay.action!, to: replay.target, from: replay)
