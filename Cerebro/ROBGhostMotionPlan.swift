@@ -280,6 +280,7 @@ struct ROBLeftGestureProposal: Codable, Equatable {
     let baseline: [Double]
     let poses: [[String: Double]]
     let steps: [Step]
+    var recyclingActions: [Int: JawAction]? = nil
     var seconds: Double { steps.reduce(0) { $0 + $1.seconds } }
     func encoded() throws -> Data { let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]; return try encoder.encode(self) }
     var fingerprint: String { (try? encoded()).map(ROBGhostRobotModel.hash) ?? "invalid" }
@@ -301,7 +302,12 @@ enum ROBLeftGestureCompiler {
         (-0.60)...0, (-0.65)...(-0.30), (-0.60)...0, (-0.001)...0.001]
 
     static func compile(kind: String, name: String, poses: [[String: Double]] = [], model: ROBGhostRobotModel,
-                        baseline: [Double], generation: UInt64, id: UUID = UUID()) throws -> ROBLeftGestureProposal {
+                        baseline: [Double], generation: UInt64, id: UUID = UUID(),
+                        recyclingActions: [Int: ROBLeftGestureProposal.JawAction]? = nil) throws -> ROBLeftGestureProposal {
+        if kind == "recycling" {
+            return try ROBHorizontalCanRecycle.compile(name: name, poses: poses, actions: recyclingActions ?? [:],
+                model: model, baseline: baseline, generation: generation, id: id)
+        }
         if kind == "tabletop" {
             return try ROBTabletopPickPlace.compile(name: name, poses: poses, model: model,
                 baseline: baseline, generation: generation, id: id)
@@ -387,7 +393,8 @@ enum ROBLeftGestureCompiler {
             throw ROBGhostMotionError.blocked("The robot model changed; rebuild and review this proposal.")
         }
         let expected = try compile(kind: proposal.kind, name: proposal.name, poses: proposal.poses, model: model,
-            baseline: proposal.baseline, generation: proposal.sessionGeneration, id: proposal.id)
+            baseline: proposal.baseline, generation: proposal.sessionGeneration, id: proposal.id,
+            recyclingActions: proposal.recyclingActions)
         guard proposal == expected else { throw ROBGhostMotionError.blocked("The reviewed path or timing changed; review a new proposal.") }
     }
 
@@ -396,6 +403,92 @@ enum ROBLeftGestureCompiler {
     /// a longer segment traverses the same modeled/swept positions.
     static func compactRoute(baseline: [Double], targets: [[Double]]) -> [[Double]] {
         ROBArmRoutinePlan.compactTargetIndices(baseline: baseline, targets: targets).map { targets[$0] }
+    }
+}
+
+/// Executes the same seven-joint, horizontal-jaw route used in the accepted
+/// can rehearsal. Unlike legacy taught tabletop poses this explicitly maps
+/// wrist roll and binds the two payload transitions into the frozen proposal.
+enum ROBHorizontalCanRecycle {
+    static func compile(name: String, poses: [[String: Double]], actions: [Int: ROBLeftGestureProposal.JawAction],
+                        model: ROBGhostRobotModel, baseline: [Double], generation: UInt64, id: UUID) throws -> ROBLeftGestureProposal {
+        guard (10...65).contains(poses.count), baseline.count == 7, baseline.allSatisfy(\.isFinite), generation > 0,
+              !name.isEmpty, name.count <= 100, actions.count == 2,
+              let grip = actions.first(where: { $0.value == .grip })?.key,
+              let release = actions.first(where: { $0.value == .release })?.key,
+              grip >= 7, release > grip + 1, release < poses.count - 1,
+              let route = ROBLeftArmInteractionPlan.executionRoute(from: baseline, hanging: false) else {
+            throw ROBGhostMotionError.blocked("The horizontal recycling route or its jaw boundaries are incomplete.")
+        }
+        let front = ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.frontIndex)!
+        let reference = model.positions(vendorLeft: front)
+        let targets = try poses.map { pose -> [Double] in
+            guard pose.allSatisfy({ key, value in value.isFinite && model.joints.contains { $0.name == key } }) else {
+                throw ROBGhostMotionError.blocked("Recycling pose contains an invalid joint.")
+            }
+            for joint in model.joints {
+                let value = pose[joint.name] ?? reference[joint.name] ?? 0
+                if joint.name.hasPrefix("left_joint"), !(joint.lower...joint.upper).contains(value) {
+                    throw ROBGhostMotionError.blocked("Recycling exceeds the model limit for \(joint.name).")
+                }
+                if !joint.name.hasPrefix("left_joint"), abs(value - (reference[joint.name] ?? 0)) > 0.000001 {
+                    throw ROBGhostMotionError.blocked("Recycling may move only the physical LEFT arm.")
+                }
+            }
+            let target = model.vendorLeft(pose)
+            guard target.allSatisfy({ $0.isFinite && abs($0) <= 3.1 }) else { throw ROBGhostMotionError.blocked("Recycling exceeds a transport joint limit.") }
+            return target
+        }
+        guard ROBArmRoutinePlan.near(targets[0], front, tolerance: 0.001),
+              ROBArmRoutinePlan.near(targets[grip], targets[grip-1], tolerance: 0.001),
+              ROBArmRoutinePlan.near(targets[release], targets[release-1], tolerance: 0.001),
+              let grasp = model.toolPosition(poses[grip]), let lift = model.toolPosition(poses[grip+1]),
+              let drop = model.toolPosition(poses[release]), let retreat = model.toolPosition(poses.last!),
+              (0.015...0.15).contains(lift.z-grasp.z), hypot(lift.x-grasp.x,lift.y-grasp.y) <= 0.10,
+              simd_distance(drop,grasp) >= 0.04, retreat.z - drop.z >= 0.04 else {
+            throw ROBGhostMotionError.blocked("Recycling needs a stationary grasp, small upward lift, separate release and upward retreat.")
+        }
+        var steps: [ROBLeftGestureProposal.Step] = [], previous = baseline
+        func append(_ target: [Double], stage: String, action: ROBLeftGestureProposal.JawAction? = nil) throws {
+            guard let duration = ROBLeftArmInteractionPlan.duration(from: previous, to: target, padding: ROBArmRoutinePlan.tolerance), duration <= 5 else {
+                throw ROBGhostMotionError.blocked("A recycling motion exceeds the bounded timing window.")
+            }
+            steps.append(.init(positions: target, seconds: duration, jawAction: action, stage: stage)); previous = target
+        }
+        guard let compact = ROBLeftArmInteractionPlan.compactRoute(from: baseline, indices: route) else {
+            throw ROBGhostMotionError.blocked("Start recycling from the registered empty-arm route.")
+        }
+        for index in compact { try append(ROBLeftArmInteractionPlan.target(index: index)!, stage: "Present empty left arm") }
+        if steps.last?.positions == front { steps[steps.count-1].jawAction = .prepare }
+        else { try append(front, stage: "Open empty gripper", action: .prepare) }
+        for (index, target) in targets.enumerated().dropFirst() {
+            let start = previous
+            let travel = 1.5 * zip(start,target).reduce(0.0) { $0 + abs($1.0-$1.1) }
+            let checks = max(1, Int(ceil(travel/0.01)))
+            for sample in 0...checks {
+                let t = Double(sample)/Double(checks), q = zip(start,target).map { $0 + ($1-$0)*t }
+                guard model.treadSeparation(vendorLeft: q) >= 0.030 else {
+                    throw ROBGhostMotionError.blocked("The horizontal recycling path enters the tread clearance margin.")
+                }
+                if index > 1, let frame = model.frames(model.positions(vendorLeft: q))["left_tool"] {
+                    guard max(abs(frame.columns.1.z),abs(frame.columns.2.z)) <= sin(8 * .pi / 180) else {
+                        throw ROBGhostMotionError.blocked("The recycling approach would turn the jaws vertically.")
+                    }
+                }
+            }
+            let count = max(1, Int(ceil((zip(start,target).map { abs($0-$1) }.max() ?? 0)/0.30)))
+            for part in 1...count {
+                let t = Double(part)/Double(count)
+                try append(zip(start,target).map { $0+($1-$0)*t }, stage: index < grip ? "Approach can with horizontal jaws" : index == grip ? "Grip can" : index < release ? "Lift and carry can" : index == release ? "Release above bucket" : "Retreat above bucket",
+                    action: part == count ? actions[index] : nil)
+            }
+        }
+        guard steps.count <= 80, steps.reduce(0, { $0+$1.seconds }) <= 135 else {
+            throw ROBGhostMotionError.blocked("The recycling path exceeds one bounded operation; bring the objects closer.")
+        }
+        return .init(id: id, name: name, kind: "recycling", modelID: model.modelID, referenceID: model.referenceID,
+            geometryID: model.geometryID, mappingID: ROBGhostRobotModel.mappingID, sessionGeneration: generation,
+            baseline: baseline, poses: poses, steps: steps, recyclingActions: actions)
     }
 }
 

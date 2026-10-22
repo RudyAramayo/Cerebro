@@ -84,7 +84,7 @@ import AppKit
             }.joined(separator: "; ")
             let current = limit == 0 ? "Record currents only; automatic cutoff is not configured."
                 : "Hold on a sample-to-sample current jump above \(limit) raw units; not a calibrated force limit."
-            let scope = proposal.kind == "tabletop"
+            let scope = ["tabletop", "recycling"].contains(proposal.kind)
                 ? "Complete a fixed-station can-to-bucket attempt: present EMPTY arm, calibrate empty jaws only if needed, open, approach, grip at intensity 2, small lift, carry to bucket release, open and retreat to the final held pose. No per-step Continue or approval. The empty can and bucket must match the taught positions. Jaw opening, retention and placement are unmeasured; supervise the whole attempt."
                 : "Move only the empty physical LEFT arm; jaws unchanged."
             let text = "Reviewed ghost gesture ‘\(proposal.name)’: \(proposal.steps.count) steps, \(Int(ceil(proposal.seconds))) seconds scheduled, maximum 180 seconds including settling. \(range). Proposal \(proposal.id.uuidString), SHA256 \(proposal.fingerprint). \(scope) Camera centers at upright lower 6011 / upper 6306. Confirm physically hanging at encoder zero for the first movement of this session. Model/encoder mapping uses the recorded upright prior; watch actual arm, tread and cable clearance. This is a supervised trial, not certified collision or force protection. Keep Stop + hold ready; keep the controller open when using controller approval. \(current)"
@@ -409,7 +409,7 @@ import AppKit
         if command == "left_recycle_can" {
             let model = try workspaceModel()
             let objects = try await ROBWorkspaceSearch.shared.run(targets: ROBWorkspaceTarget.allCases,
-                model: model, requireDepth: false, check: { try self.check() }, progress: { self.update($0) })
+                model: model, requireDepth: true, check: { try self.check() }, progress: { self.update($0) })
             // Ask for a reachable can even when bucket release geometry is
             // still unavailable. This is a model check, never a motion path.
             if let can = objects[.can] {
@@ -443,10 +443,19 @@ import AppKit
                 throw ROBGhostMotionError.blocked("Arm start position changed during the scan; no reach was sent.")
             }
             do {
-                let task = try ROBWorkspaceGrounding.task(can: can, bucket: bucket, model: model)
-                proposal = try ROBLeftGestureCompiler.compile(kind: "tabletop", name: task.name, poses: task.poses,
-                    model: model, baseline: q, generation: generation)
-                try ROBLeftGestureCompiler.validate(proposal!, model: model)
+                let baseline = model.positions(vendorLeft: q)
+                let compiled = try await Task.detached(priority: .userInitiated) { [generation] in
+                    let plan = try ROBCanGrabPreview.make(can: can, model: model, baseline: baseline, bucket: bucket)
+                    let actions = Dictionary(uniqueKeysWithValues: plan.steps.enumerated().compactMap { index, step in
+                        step.jawAction.map { (index, $0) }
+                    })
+                    let result = try ROBLeftGestureCompiler.compile(kind: "recycling", name: "Recycle can with horizontal jaws", poses: plan.steps.map(\.pose),
+                        model: model, baseline: q, generation: generation, recyclingActions: actions)
+                    try ROBLeftGestureCompiler.validate(result, model: model)
+                    return result
+                }.value
+                try check()
+                proposal = compiled
             } catch let error as ROBWorkspaceReachError {
                 ROBWorkspaceSearch.shared.announce?(error.helpRequest)
                 return ["status": "needs_help", "arm_motion_sent": false, "measured": false,
@@ -504,7 +513,7 @@ import AppKit
             try await settleFront()
         } else if let proposal {
             try await move(proposal)
-            if proposal.kind == "tabletop" {
+            if ["tabletop", "recycling"].contains(proposal.kind) {
                 try await holdTaskPosition(proposal.steps.last!.positions)
                 return ["status": "accepted_unverified", "measured": false, "motion_completed": true,
                     "gripper_measured": false, "placement_verified": false, "gripper_intensity": ROBTabletopPickPlace.intensity,
@@ -562,6 +571,7 @@ import AppKit
         try await requireGripperCalibration(allowEmptyCalibration: action == .prepare)
         phase = "tabletop \(action.rawValue)"
         update(action == .grip ? "Local task: gripping empty can at intensity 2" : "Local task: opening gripper at the planned position")
+        ROBWorkspaceSearch.shared.announce?(action == .prepare ? "Preparing my left hand." : action == .grip ? "Grabbing the can." : "Releasing over the bucket.")
         try await accepted { gateway.controlGripper(forArm: arm, action: action == .grip ? "hold" : "release",
             force: ROBTabletopPickPlace.intensity) }
         let end = ProcessInfo.processInfo.systemUptime + 1.5
@@ -793,7 +803,7 @@ import AppKit
         timer?.invalidate(); timer = nil
         if !Self.neckOnlyCommands.contains(activeCommand), leased || result["status"] as? String == "blocked" { _ = gateway.priorityHold(forArm: arm) }
         leased = false
-        if proposal?.kind == "tabletop" {
+        if ["tabletop", "recycling"].contains(proposal?.kind ?? "") {
             // A failed close/open may leave a payload. Never offer the old
             // empty-arm reverse/recovery automatically for a recycling task.
             recoveryPath = []; recoveryGeneration = 0; offeredRecovery = nil

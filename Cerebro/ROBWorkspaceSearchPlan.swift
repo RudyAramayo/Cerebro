@@ -56,6 +56,95 @@ struct ROBWorkspaceView: Codable, Equatable {
     }
 }
 
+/// Durable attention hints only. A remembered sighting never satisfies a live
+/// detection, depth measurement, or arm authorization, even after a restart.
+struct ROBWorkspaceRecall: Codable {
+    struct Sighting: Codable {
+        let target: ROBWorkspaceTarget
+        let view: ROBWorkspaceView
+        let box: [Double]
+        let confidence: Double
+        let capturedAt: Double
+        var valid: Bool {
+            box.count == 4 && box.allSatisfy { $0.isFinite && (0...1).contains($0) } &&
+                box[2] > box[0] && box[3] > box[1] && confidence.isFinite && (0.35...1).contains(confidence) &&
+                capturedAt.isFinite && view.panDegrees.isFinite && abs(view.panDegrees) <= 70 && (5300...7500).contains(view.upperTarget)
+        }
+        var centeredView: ROBWorkspaceView {
+            let x = (box[0] + box[2]) / 2, y = (box[1] + box[3]) / 2
+            return .init(panDegrees: max(-45, min(45, view.panDegrees - (x - 0.5) * 69)),
+                upperTarget: max(5300, min(7500, view.upperTarget - Int((y - 0.5) * 1500))))
+        }
+    }
+    let modelID: String
+    let geometryID: String
+    var sightings: [Sighting] = []
+    static var directory: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Cerebro/WorkspaceSearch") }
+    static var file: URL { directory.appendingPathComponent("recall-v1.json") }
+    static func load(model: ROBGhostRobotModel, directory: URL = directory, now: Double = Date().timeIntervalSince1970 * 1000) -> Self {
+        let file = directory.appendingPathComponent("recall-v1.json")
+        if let data = try? Data(contentsOf: file), data.count < 32_000,
+           let value = try? JSONDecoder().decode(Self.self, from: data), value.modelID == model.modelID,
+           value.geometryID == model.geometryID, value.sightings.count <= ROBWorkspaceTarget.allCases.count,
+           value.sightings.allSatisfy({ $0.valid }) { return value }
+        var result = Self(modelID: model.modelID, geometryID: model.geometryID)
+        // Migrate the previous session's on-disk observations. Require two
+        // agreeing camera frames; imported positions are deliberately ignored.
+        let files = ((try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
+            .filter { $0.pathExtension == "json" && $0.lastPathComponent != "recall-v1.json" }
+            .sorted { ((try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) >
+                ((try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) }
+        for url in files.prefix(16) {
+            guard let data = try? Data(contentsOf: url), data.count < 2_000_000,
+                  let report = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let views = report["views"] as? [[String: Any]] else { continue }
+            var candidates: [Sighting] = []
+            var previous: [ROBWorkspaceTarget: (Sighting, UInt64)] = [:]
+            for entry in views {
+                guard let pan = entry["pan"] as? Double, let upper = entry["upper"] as? Int,
+                      let sequence = (entry["sequence"] as? NSNumber)?.uint64Value,
+                      let capturedAt = entry["captured_at_ms"] as? Double, (0...86_400_000).contains(now - capturedAt),
+                      let inference = entry["local_inference"] as? [String: Any],
+                      let boxes = inference["candidates"] as? [[String: Any]] else { continue }
+                for target in ROBWorkspaceTarget.allCases {
+                    let matches = boxes.filter { $0["target"] as? String == target.rawValue && ($0["score"] as? Double ?? 0) >= 0.35 }
+                    guard let best = matches.max(by: { ($0["score"] as? Double ?? 0) < ($1["score"] as? Double ?? 0) }),
+                          let box = best["box"] as? [Double], let score = best["score"] as? Double else { previous.removeValue(forKey: target); continue }
+                    let sighting = Sighting(target: target, view: .init(panDegrees: pan, upperTarget: upper), box: box, confidence: score, capturedAt: capturedAt)
+                    guard sighting.valid else { continue }
+                    if let prior = previous[target], prior.1 != sequence, prior.0.view == sighting.view,
+                       zip(prior.0.box, box).allSatisfy({ abs($0 - $1) < 0.08 }) { candidates.append(sighting) }
+                    previous[target] = (sighting, sequence)
+                }
+            }
+            for target in ROBWorkspaceTarget.allCases where !result.sightings.contains(where: { $0.target == target }) {
+                // Prefer an unclipped, centered observation within the latest
+                // usable search over the last glimpse at the edge of a sweep.
+                if let best = candidates.filter({ $0.target == target }).min(by: {
+                    abs(($0.box[0] + $0.box[2])/2 - 0.5) < abs(($1.box[0] + $1.box[2])/2 - 0.5)
+                }) { result.sightings.append(best) }
+            }
+        }
+        return result
+    }
+    mutating func remember(target: ROBWorkspaceTarget, detection: ROBWorkspaceDetection, view: ROBWorkspaceView, capturedAt: Double) {
+        let value = Sighting(target: target, view: view, box: detection.box, confidence: detection.confidence, capturedAt: capturedAt)
+        guard detection.visuallyUsable, value.valid else { return }
+        sightings.removeAll { $0.target == target }; sightings.append(value)
+    }
+    func save(to file: URL = file) throws {
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(self).write(to: file, options: .atomic)
+    }
+    func views(targets: [ROBWorkspaceTarget], now: Double = Date().timeIntervalSince1970 * 1000) -> [ROBWorkspaceView] {
+        targets.compactMap { target in sightings.first { $0.target == target && $0.valid && (0...86_400_000).contains(now - $0.capturedAt) } }
+            .flatMap { [$0.centeredView, $0.view] }
+            .reduce(into: []) { result, view in
+                if !result.contains(where: { abs($0.panDegrees - view.panDegrees) < 3 && abs($0.upperTarget - view.upperTarget) < 100 }) { result.append(view) }
+            }
+    }
+}
+
 struct ROBWorkspaceDetection: Codable {
     let visible: Bool
     let confidence: Double
@@ -157,10 +246,79 @@ struct ROBWorkspaceLocatedObject: Codable {
     let capturedAt: Double
     let sequence: UInt64
     let view: ROBWorkspaceView
+    var openingRadius: Double? = nil
+    var floorCorrectionDegrees: Double? = nil
     var point: SIMD3<Double> { SIMD3(position[0], position[1], position[2]) }
     func agrees(with other: Self) -> Bool {
         target == other.target && sequence != other.sequence && other.capturedAt > capturedAt &&
             other.capturedAt - capturedAt < 30_000 && simd_distance(point, other.point) <= 0.05
+    }
+}
+
+/// Measure vertical from a dominant floor plane before interpreting a low
+/// bucket through the provisional neck-angle prior. This is a per-frame
+/// camera correction, not a replacement for arm calibration or a saved grant.
+enum ROBWorkspaceFloorAlignment {
+    struct Result {
+        let cameraFrame: simd_double4x4
+        let correctionDegrees: Double
+        let supportFraction: Double
+    }
+    static func fit(points: [SIMD3<Double>], cameraFrame: simd_double4x4) -> Result? {
+        guard (300...10_000).contains(points.count), points.allSatisfy({ $0.x.isFinite && $0.y.isFinite && $0.z.isFinite }) else { return nil }
+        let camera = SIMD3(cameraFrame.columns.3.x,cameraFrame.columns.3.y,cameraFrame.columns.3.z)
+        var best: (normal: SIMD3<Double>, height: Double, count: Int)?
+        for i in 0..<600 {
+            let a = points[(i*17)%points.count], b = points[(i*37+points.count/3)%points.count], c = points[(i*61+points.count*2/3)%points.count]
+            let cross = simd_cross(b-a,c-a), length = simd_length(cross)
+            guard length > 0.001 else { continue }
+            var normal = cross/length
+            if normal.z < 0 { normal = -normal }
+            let d = -simd_dot(normal,a), height = simd_dot(normal,camera)+d
+            guard normal.z >= cos(35 * .pi/180), (0.8...1.3).contains(height) else { continue }
+            let count = points.reduce(0) { $0 + (abs(simd_dot(normal,$1)+d) <= 0.015 ? 1 : 0) }
+            if count > (best?.count ?? 0) { best = (normal,height,count) }
+        }
+        guard let best, Double(best.count)/Double(points.count) >= 0.35 else { return nil }
+        let rotation = simd_double4x4(simd_quatd(from: best.normal,to: SIMD3<Double>(0,0,1)))
+        var corrected = rotation * cameraFrame
+        corrected.columns.3 = SIMD4(camera.x,camera.y,best.height,1)
+        return .init(cameraFrame: corrected, correctionDegrees: acos(min(1,best.normal.z))*180 / .pi,
+            supportFraction: Double(best.count)/Double(points.count))
+    }
+}
+
+/// A bucket release point comes from an observed horizontal circular rim and
+/// recessed interior, never the center of a detector rectangle.
+enum ROBWorkspaceBucketRim {
+    static func fit(orange: [SIMD3<Double>], scene: [SIMD3<Double>]) -> (center: SIMD3<Double>, radius: Double)? {
+        let points = orange.filter { $0.x.isFinite && $0.y.isFinite && $0.z.isFinite }
+        guard points.count >= 40 else { return nil }
+        let heights = points.map(\.z).sorted(), top = heights[heights.count * 98 / 100]
+        let rim = points.filter { abs($0.z - top) <= 0.018 }
+        guard rim.count >= 25 else { return nil }
+        var best: (SIMD2<Double>, Double, [SIMD3<Double>])?
+        for iteration in 0..<120 {
+            let a = rim[(iteration * 17) % rim.count], b = rim[(iteration * 37 + rim.count/3) % rim.count], c = rim[(iteration * 61 + rim.count*2/3) % rim.count]
+            let ab = SIMD2(b.x-a.x, b.y-a.y), ac = SIMD2(c.x-a.x, c.y-a.y)
+            let determinant = 2 * (ab.x*ac.y - ab.y*ac.x)
+            guard abs(determinant) > 0.0001 else { continue }
+            let d = SIMD2((simd_length_squared(ab)*ac.y - simd_length_squared(ac)*ab.y) / determinant,
+                (ab.x*simd_length_squared(ac) - ac.x*simd_length_squared(ab)) / determinant)
+            let center = SIMD2(a.x,a.y) + d, radius = simd_length(d)
+            guard (0.06...0.28).contains(radius) else { continue }
+            let inliers = rim.filter { abs(simd_distance(SIMD2($0.x,$0.y), center) - radius) <= 0.012 }
+            if inliers.count > (best?.2.count ?? 0) { best = (center, radius, inliers) }
+        }
+        guard let (center, radius, inliers) = best, inliers.count >= 25, Double(inliers.count)/Double(rim.count) >= 0.65 else { return nil }
+        let angles = inliers.map { atan2($0.y-center.y, $0.x-center.x) }.sorted()
+        let gaps = zip(angles, angles.dropFirst()).map { $1 - $0 } + [angles[0] + 2 * .pi - angles.last!]
+        guard 2 * Double.pi - gaps.max()! >= 160 * .pi / 180 else { return nil }
+        let rimZ = inliers.map(\.z).sorted()[inliers.count/2]
+        let interior = scene.filter { simd_distance(SIMD2($0.x,$0.y), center) < radius * 0.5 }
+        guard interior.count >= 12,
+              Double(interior.filter { $0.z < rimZ - 0.04 }.count) / Double(interior.count) >= 0.8 else { return nil }
+        return (SIMD3(center.x,center.y,rimZ), radius)
     }
 }
 
@@ -171,6 +329,7 @@ struct ROBCanGrabPreview {
         let pose: [String: Double]
         let seconds: Double
         let stage: String
+        var jawAction: ROBLeftGestureProposal.JawAction? = nil
     }
     let can: ROBWorkspaceLocatedObject
     let side: String
@@ -186,7 +345,8 @@ struct ROBCanGrabPreview {
     }
 
     static func make(can: ROBWorkspaceLocatedObject, model: ROBGhostRobotModel,
-                     baseline: [String: Double], side: String = "left", now: Double = Date().timeIntervalSince1970 * 1000) throws -> Self {
+                     baseline: [String: Double], side: String = "left", now: Double = Date().timeIntervalSince1970 * 1000,
+                     bucket: ROBWorkspaceLocatedObject? = nil) throws -> Self {
         guard can.target == .can, can.position.count == 3, can.position.allSatisfy(\.isFinite),
               ["left", "right"].contains(side),
               can.confidence.isFinite, (0.35...1).contains(can.confidence), can.sequence > 0,
@@ -270,9 +430,9 @@ struct ROBCanGrabPreview {
         let front = model.positions(vendorLeft: ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.frontIndex)!)
         for i in 1...6 { seed["\(side)_joint\(i)"] = (side == "left" ? 1 : -1) * front["left_joint\(i)"]! }
         var previous = baseline, steps: [Step] = []
-        func append(_ pose: [String: Double], _ stage: String, dwell: Double = 0) {
+        func append(_ pose: [String: Double], _ stage: String, dwell: Double = 0, action: ROBLeftGestureProposal.JawAction? = nil) {
             let angle = chain.map { abs(pose[$0.name, default: 0] - previous[$0.name, default: 0]) }.max() ?? 0
-            steps.append(.init(pose: pose, seconds: max(0.8, angle / 0.6) + dwell, stage: stage)); previous = pose
+            steps.append(.init(pose: pose, seconds: max(0.8, angle / 0.6) + dwell, stage: stage, jawAction: action)); previous = pose
         }
         append(seed, "Present ghost hand")
         let frontTip = tip(seed)
@@ -300,10 +460,48 @@ struct ROBCanGrabPreview {
         let ready = error <= 0.012 && tilt <= 5
         append(grasp, ready ? "Grasp pose" : "Closest horizontal reach — grasp unconfirmed")
         if ready {
-            append(grasp, "Close jaws (simulation)", dwell: 1)
+            append(grasp, "Close jaws (simulation)", dwell: 1, action: .grip)
             let liftTarget = can.point + SIMD3(0, 0, 0.06)
             let lift = closest(liftTarget, grasp)
             if simd_distance(tip(lift), liftTarget) <= 0.012 && tiltDegrees(lift) <= 5 { append(lift, "Lift 6 cm (simulation)", dwell: 1) }
+            else if bucket != nil { throw ROBWorkspaceReachError.outOfReach(.can) }
+        }
+        if let bucket {
+            guard side == "left", ready else { throw ROBWorkspaceReachError.outOfReach(.can) }
+            guard bucket.target == .orangeBucket, bucket.position.count == 3, bucket.position.allSatisfy(\.isFinite),
+                  (0...60_000).contains(now - bucket.capturedAt), bucket.confidence >= 0.35,
+                  let radius = bucket.openingRadius, (0.06...0.28).contains(radius) else {
+                throw ROBGhostMotionError.blocked("Measure the open bucket rim again before planning a release.")
+            }
+            func travel(_ target: SIMD3<Double>, stage: String) throws {
+                let origin = tip(previous), count = max(1, Int(ceil(simd_distance(origin, target)/0.03)))
+                for index in 1...count {
+                    let point = origin + (target-origin) * (Double(index)/Double(count))
+                    let pose = closest(point, previous)
+                    guard simd_distance(tip(pose), point) <= 0.012, tiltDegrees(pose) <= 5 else {
+                        throw ROBWorkspaceReachError.outOfReach(.orangeBucket)
+                    }
+                    append(pose, stage)
+                }
+            }
+            // Release from above and let gravity do the drop. The hand never
+            // has to descend to a floor-level bucket. An inward release point
+            // still leaves 5.5 cm of opening radius for the can and fit error.
+            let towardHand = SIMD2(can.point.x-bucket.point.x,can.point.y-bucket.point.y)
+            let offset = simd_length(towardHand) > 0.001 ? simd_normalize(towardHand) * min(0.04,max(0,radius-0.055)) : .zero
+            let dropXY = SIMD2(bucket.point.x,bucket.point.y) + offset
+            var releaseTarget: SIMD3<Double>?
+            for extra in [0.15,0.10,0.20,0.25] {
+                let point = SIMD3(dropXY.x,dropXY.y,max(can.point.z+extra,bucket.point.z+0.12))
+                let candidate = closest(point,previous)
+                if simd_distance(tip(candidate),point) <= 0.012 && tiltDegrees(candidate) <= 5 { releaseTarget = point; break }
+            }
+            guard let releaseTarget else { throw ROBWorkspaceReachError.outOfReach(.orangeBucket) }
+            let carryZ = releaseTarget.z
+            try travel(SIMD3(can.point.x, can.point.y, carryZ), stage: "Raise can for transfer")
+            try travel(releaseTarget, stage: "Carry above bucket for gravity drop")
+            append(previous, "Release above bucket", action: .release)
+            try travel(releaseTarget + SIMD3(0,0,0.08), stage: "Retreat above bucket")
         }
         return .init(can: can, side: side, baseline: baseline, steps: steps, graspError: error,
             gripperTiltDegrees: tilt, reachesCan: ready)

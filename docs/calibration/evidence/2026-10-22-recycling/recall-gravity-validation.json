@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-22T23:51:41.312266+00:00",
+  "baseCommit": "8e77afb8570105a048b2c34266f1c30f6a4f9598",
+  "sourceSHA256": {
+    "Cerebro/ROBWorkspaceSearchPlan.swift": "c192abca991d488207831b7ae6e575b5bd5700c8e404fd923b4a4ac593133de7",
+    "Cerebro/ROBArmRoutineVision.swift": "094d6dd7f88218f9b5d4fad20db3c19f77792d625dcb95843fb19ec81131d6db",
+    "Cerebro/ROBGhostMotionPlan.swift": "684c10f547cbc69e76bc71cbd8c521b498b7b6a090e8a5a1c55abc00c19a7c15",
+    "Cerebro/ROBLeftArmTrial.swift": "031af98a9e3417d9b6c2675b2f92be93bd3bf5fbab6f0be66f7397826056d58d"
+  },
+  "installedBinarySHA256": "3570ab83fd6495ed80d2b844796ca9edd902aa96468709400a99a775ada9973d",
+  "build": {
+    "result": "passed",
+    "configuration": "signed arm64 local Debug from isolated source excluding seven unrelated pre-existing edits",
+    "codeSignature": "codesign --verify --deep --strict passed",
+    "logSHA256": "13930a9bb3a6d255e00e40580231380b73573cb2aa0c66133e681642f572cbff"
+  },
+  "validation": [
+    {
+      "name": "ghost-and-gravity",
+      "command": "bash Scripts/test-ghost-motion.sh",
+      "result": "passed",
+      "logSHA256": "ae9f2115f8780b697bd9009463a9af8cc710d2ef6bec6c13ad1e97ccd880eaa8"
+    },
+    {
+      "name": "final-gravity-executor",
+      "command": "bash Scripts/test-left-arm-trial.sh recycling",
+      "result": "passed",
+      "logSHA256": "9c2c94a7dfe641a154207a6bd19c5f817b9f5d9eb858455f6b3e16ba2f5bb5ff"
+    },
+    {
+      "name": "full-executor-before-gravity-model-change",
+      "command": "bash Scripts/test-left-arm-trial.sh",
+      "result": "passed",
+      "logSHA256": "a3a22ce1e15c3978fdf50ba5406c2a7e04097a64abe971a9c7488916945fc78d"
+    },
+    {
+      "name": "telemetry",
+      "command": "bash Scripts/test-left-arm-trial.sh telemetry",
+      "result": "passed",
+      "logSHA256": "08ed13df09d3d6d5935e8f041d01db478c48d977ecf068412fb09cf1279f0ab7"
+    }
+  ],
+  "savedDepthReplay": {
+    "result": "passed",
+    "logSHA256": "c8843acc9b9b9178ab304b1132dae126266d095e2dc851242d26bffb5ca229cf",
+    "floorCorrectionDegrees": 25.605285176822168,
+    "floorSupportFraction": 0.4489105935386927,
+    "bucketPositionMeters": [
+      0.29531853388063994,
+      0.6157659750703083,
+      0.2371555782346963
+    ],
+    "openingRadiusMeters": 0.12883710101360157,
+    "steps": 48,
+    "scheduledSeconds": 37.38493148920923,
+    "dropPointMeters": [
+      0.3091370447221247,
+      0.5781797240394126,
+      1.0321892042520768
+    ],
+    "note": "Historical depth replay in an executable without robot transport; not a physical placement claim."
+  },
+  "nativeRecallSearches": [
+    {
+      "id": "067C5BC9-7CC4-45D0-A7F8-BAA7977DC39E",
+      "result": "visually_found",
+      "recalledViewsTriedFirst": true,
+      "armsActivated": false
+    },
+    {
+      "id": "1929BB23-F74A-4F4D-BF7A-2EC40022DD4D",
+      "result": "visually_found",
+      "recalledViewsTriedFirst": true,
+      "armsActivated": false
+    }
+  ],
+  "livePhysicalTask": {
+    "status": "queued_for_single_real_microphone_or_controller_authorization",
+    "canPickedUp": false,
+    "canPlacedInBucket": false
+  },
+  "cameraImagesIncluded": false,
+  "rawDepthIncluded": false,
+  "grantsPersisted": false
+}

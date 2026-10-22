@@ -351,6 +351,25 @@ final class ROBArmRoutineCoordinator {
         precondition(approvals == 0 && g.commands.isEmpty && ROBAmberGatewayTunnel.shared.connections == 0)
         ROBWorkspaceSearch.shared.fail = false; ROBWorkspaceSearch.shared.onInspect = nil; g.ready = true
         print("Neck-only search and hanging checks: no arm approval, gateway connection, motor or hold commands, including failure")
+        if CommandLine.arguments.last == "recycling" {
+            let model = try ROBGhostRobotModel(directory: URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
+            let front = model.toolPosition(model.positions(vendorLeft: plan.target(index: plan.frontIndex)!))!
+            let now = Date().timeIntervalSince1970 * 1000, view = ROBWorkspaceView(panDegrees: 0, upperTarget: 6306)
+            ROBWorkspaceSearch.shared.objects = [
+                .can: .init(target: .can, position: [front.x,front.y,front.z], confidence: 0.8, capturedAt: now, sequence: 10, view: view),
+                .orangeBucket: .init(target: .orangeBucket, position: [front.x,front.y+0.08,front.z-0.10], confidence: 0.8,
+                    capturedAt: now, sequence: 11, view: view, openingRadius: 0.14)]
+            g.expectedGripperIntensity = 2
+            let outcome = await run("left_recycle_can")
+            precondition(outcome["motion_completed"] as? Bool == true, outcome.description)
+            precondition(outcome["placement_verified"] as? Bool == false, "Command acknowledgements falsely verified placement")
+            precondition(approvals == 1 && ROBWorkspaceSearch.shared.requiredDepth)
+            precondition(g.commands.filter { $0 == "gripper_release:right" || $0 == "gripper_hold:right" } == ["gripper_release:right","gripper_hold:right","gripper_release:right"])
+            precondition(g.commands.allSatisfy { $0.hasSuffix(":right") } && !g.commands.contains("deactivate:right"))
+            precondition(g.activeLeases.isEmpty && ROBAmberArmMotionArbiter.shared.owners.isEmpty)
+            print("Horizontal recycling executor: one real-protocol fixture grant, fresh grounded targets, seven-joint frozen steps, prepare/grip/release at intensity 2, measured hold, no right-arm motion or automatic torque-off")
+            return
+        }
         if CommandLine.arguments.last == "telemetry" { try await delayedTelemetryTests(); return }
         let alreadyHanging = await run("left_relax")
         precondition(alreadyHanging["status"] as? String == "completed", alreadyHanging.description)
@@ -657,7 +676,7 @@ final class ROBArmRoutineCoordinator {
         let assistance = await run("left_recycle_can")
         precondition(assistance["status"] as? String == "needs_help", assistance.description)
         precondition(assistance["arm_motion_sent"] as? Bool == false && approvals == beforeHelp + 1)
-        precondition(requests == ["Please bring the can closer."] && !search.requiredDepth)
+        precondition(requests == ["Please bring the can closer."] && search.requiredDepth)
         precondition(g.commands == ["mode_query:right"], "Help request issued arm/gripper commands")
         g.commands = []; requests = []
         search.objects = [.can: .init(target: .can, position: [hand.x,hand.y,hand.z], confidence: 0.9,

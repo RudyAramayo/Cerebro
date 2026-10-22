@@ -365,6 +365,17 @@ final class ROBArmRoutineVision {
                 .appendingPathComponent("Library/Application Support/Cerebro/WorkspaceDetector/latest-input.jpg")
             try? jpeg.write(to: inputURL, options: .atomic)
             let result = try await ROBWorkspaceObjectDetector.shared.detect(jpeg: jpeg)
+            if result.candidates.contains(where: { $0.target == "orangeBucket" && $0.score >= 0.35 }) {
+                let directory = inputURL.deletingLastPathComponent()
+                try? jpeg.write(to: directory.appendingPathComponent("last-bucket-input.jpg"), options: .atomic)
+                if let depth = frame.depth, let k = frame.intrinsics {
+                    try? depth.millimetersLittleEndian.write(to: directory.appendingPathComponent("last-bucket-depth.u16"), options: .atomic)
+                    let metadata: [String: Any] = ["width": depth.width, "height": depth.height,
+                        "fx": k.fx, "fy": k.fy, "cx": k.cx, "cy": k.cy, "captured_at_ms": frame.capturedAt,
+                        "sequence": NSNumber(value: frame.sequence), "boxes": result.candidates.filter { $0.target == "orangeBucket" }.map(\.box)]
+                    try? JSONSerialization.data(withJSONObject: metadata).write(to: directory.appendingPathComponent("last-bucket-depth.json"), options: .atomic)
+                }
+            }
             try Task.checkCancellation()
             let liveDeadline = ProcessInfo.processInfo.systemUptime + 2
             var advancing = false
@@ -447,6 +458,38 @@ final class ROBArmRoutineVision {
     private(set) var lastReport: NSDictionary = [:]
     @nonobjc private(set) var locatedObjects: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
 
+    @nonobjc private func bucketLocation(_ detection: ROBWorkspaceDetection, frame: ROBArmRoutineVision.Frame,
+                                         view: ROBWorkspaceView, model: ROBGhostRobotModel) -> ROBWorkspaceLocatedObject? {
+        guard detection.visuallyUsable, detection.box[0] > 0.005, detection.box[2] < 0.995,
+              detection.box[1] > 0.015, detection.box[3] < 0.985,
+              let depth = frame.depth, let k = frame.intrinsics,
+              let transform = view.cameraFrame(model: model),
+              let cg = CIContext(options: [.useSoftwareRenderer: true]).createCGImage(frame.image, from: frame.image.extent) else { return nil }
+        let pixels = NSBitmapImageRep(cgImage: cg)
+        var floorPoints: [SIMD3<Double>] = []
+        for y in stride(from: 0, to: depth.height, by: 6) { for x in stride(from: 0, to: depth.width, by: 6) {
+            guard let mm = depth.distanceMillimeters(x: x,y: y), (200...3000).contains(mm) else { continue }
+            let z = Double(mm)/1000, p = transform * SIMD4((Double(x)-k.cx)*z/k.fx,(Double(y)-k.cy)*z/k.fy,z,1)
+            floorPoints.append(SIMD3(p.x,p.y,p.z))
+        } }
+        guard let floor = ROBWorkspaceFloorAlignment.fit(points: floorPoints,cameraFrame: transform) else { return nil }
+        var orange: [SIMD3<Double>] = [], scene: [SIMD3<Double>] = []
+        let left = Int(detection.box[0] * Double(cg.width-1)), right = Int(detection.box[2] * Double(cg.width-1))
+        let top = Int(detection.box[1] * Double(cg.height-1)), bottom = Int(detection.box[3] * Double(cg.height-1))
+        for y in stride(from: top, through: bottom, by: 2) { for x in stride(from: left, through: right, by: 2) {
+            let u = Double(x)/Double(cg.width-1) * Double(depth.width-1), v = Double(y)/Double(cg.height-1) * Double(depth.height-1)
+            guard let mm = depth.distanceMillimeters(x: Int(u), y: Int(v)), (150...3000).contains(mm) else { continue }
+            let z = Double(mm)/1000, p = floor.cameraFrame * SIMD4((u-k.cx)*z/k.fx, (v-k.cy)*z/k.fy, z, 1)
+            let point = SIMD3(p.x,p.y,p.z); scene.append(point)
+            if let color = pixels.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB), color.redComponent >= 0.20,
+               color.redComponent > color.greenComponent * 2, color.redComponent > color.blueComponent * 2 { orange.append(point) }
+        } }
+        guard let rim = ROBWorkspaceBucketRim.fit(orange: orange, scene: scene) else { return nil }
+        return .init(target: .orangeBucket, position: [rim.center.x,rim.center.y,rim.center.z], confidence: detection.confidence,
+            capturedAt: frame.capturedAt, sequence: frame.sequence, view: view, openingRadius: rim.radius,
+            floorCorrectionDegrees: floor.correctionDegrees)
+    }
+
     @MainActor @nonobjc func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true,
         check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
         let vision = ROBArmRoutineVision.shared
@@ -461,6 +504,10 @@ final class ROBArmRoutineVision {
         var nearest: (view: ROBWorkspaceView, distance: Double)?
         var livePointing: (hint: ROBWorkspacePointingHint, view: ROBWorkspaceView, capturedAt: Double)?
         var followedLivePointing = false
+        var recall = ROBWorkspaceRecall.load(model: model)
+        let recalledViews = recall.views(targets: targets)
+        var recenterViews: [ROBWorkspaceView] = []
+        var recenteredViews: [ROBWorkspaceView] = []
         let reportID = UUID().uuidString
         let startedAt = ISO8601DateFormatter().string(from: Date())
         var finished = false
@@ -477,6 +524,8 @@ final class ROBArmRoutineVision {
                 "announcements": announcements,
                 "settle_seconds_per_view": 1.5,
                 "depth_required": requireDepth,
+                "recall_views": recalledViews.map { ["pan": $0.panDegrees, "upper": $0.upperTarget] },
+                "historical_positions_used_for_motion": false,
                 "views": evidence, "objects": found.reduce(into: [String: Any]()) {
                     $0[$1.key.rawValue] = ["position": $1.value.position, "captured_at_ms": $1.value.capturedAt]
                 }]
@@ -555,17 +604,38 @@ final class ROBArmRoutineVision {
                     if detection.visuallyUsable, let previous = priorVisual[target], previous.sequence != frame.sequence,
                        hypot(detection.center[0] - previous.detection.center[0], detection.center[1] - previous.detection.center[1]) <= 0.08 {
                         visuallyFound.insert(target)
+                        recall.remember(target: target, detection: detection, view: view, capturedAt: frame.capturedAt)
+                        do { try recall.save() } catch { entry["recall_save_error"] = error.localizedDescription }
+                        if found[target] == nil {
+                            let centered = ROBWorkspaceRecall.Sighting(target: target, view: view, box: detection.box,
+                                confidence: detection.confidence, capturedAt: frame.capturedAt).centeredView
+                            if abs(centered.panDegrees - view.panDegrees) > 5 || abs(centered.upperTarget - view.upperTarget) > 180 {
+                                recenterViews.append(centered)
+                            }
+                        }
                     }
                     if detection.visuallyUsable { priorVisual[target] = (detection, frame.sequence) }
                     else { priorVisual.removeValue(forKey: target) }
-                    guard let depth = frame.depth, let k = frame.intrinsics,
-                          let located = ROBWorkspaceGrounding.locate(target: target, detection: detection,
+                    var measurement: ROBWorkspaceLocatedObject?
+                    if target == .orangeBucket {
+                        measurement = await Task.detached(priority: .userInitiated) {
+                            self.bucketLocation(detection, frame: frame, view: view, model: model)
+                        }.value
+                        try check()
+                    }
+                    else if let depth = frame.depth, let k = frame.intrinsics {
+                        measurement = ROBWorkspaceGrounding.locate(target: target, detection: detection,
                             width: depth.width, height: depth.height, fx: k.fx, fy: k.fy, cx: k.cx, cy: k.cy,
                             depth: { depth.distanceMillimeters(x: $0, y: $1) }, view: view, model: model,
-                            capturedAt: frame.capturedAt, sequence: frame.sequence) else {
+                            capturedAt: frame.capturedAt, sequence: frame.sequence)
+                    }
+                    guard let located = measurement else {
                         prior.removeValue(forKey: target); entry[target.rawValue] = "not_grounded"; continue
                     }
-                    entry[target.rawValue] = ["position": located.position, "confidence": located.confidence]
+                    var geometry: [String: Any] = ["position": located.position, "confidence": located.confidence]
+                    if let radius = located.openingRadius { geometry["opening_radius_m"] = radius }
+                    if let correction = located.floorCorrectionDegrees { geometry["floor_camera_correction_degrees"] = correction }
+                    entry[target.rawValue] = geometry
                     if let previous = prior[target], previous.agrees(with: located) { found[target] = located }
                     prior[target] = located
                 }
@@ -603,11 +673,21 @@ final class ROBArmRoutineVision {
                 if targetsConfirmed() { break }
             }
         }
+        if !recalledViews.isEmpty { announce?("Checking where I last saw them.") }
         let sweep = targets.isEmpty ? [ROBWorkspaceView(panDegrees: 0, upperTarget: 5300),
-            .init(panDegrees: -35, upperTarget: 5300), .init(panDegrees: 35, upperTarget: 5300)] : ROBWorkspaceView.sweep
+            .init(panDegrees: -35, upperTarget: 5300), .init(panDegrees: 35, upperTarget: 5300)] : recalledViews + ROBWorkspaceView.sweep
         for (index, view) in sweep.enumerated() {
             progress("Searching view \(index + 1) of \(sweep.count)")
             try await inspectWithRetry(view)
+            // A partial object at the image edge warrants looking directly
+            // at it before continuing the raster, especially a bucket rim.
+            while !targetsConfirmed(), !recenterViews.isEmpty, recenteredViews.count < 4 {
+                let centered = recenterViews.removeFirst()
+                guard !recenteredViews.contains(where: { abs($0.panDegrees - centered.panDegrees) < 5 && abs($0.upperTarget - centered.upperTarget) < 150 }) else { continue }
+                recenteredViews.append(centered)
+                try await inspectWithRetry(centered)
+                persist("searching", "Centered a remembered or partially visible object; taking new measurements")
+            }
             if !targets.isEmpty, !followedLivePointing, let pointing = livePointing,
                Date().timeIntervalSince1970 * 1000 - pointing.capturedAt < 15_000,
                targets.contains(where: { !visuallyFound.contains($0) }) {

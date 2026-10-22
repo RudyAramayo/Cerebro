@@ -81,6 +81,15 @@ Search does not require the entire scene to be motionless: the neck view and
 individual target confirmations govern it. Older discoveries are re-observed.
 Views outside the current calibrated neck envelope are skipped immediately.
 
+Search now starts with durable last-seen views for the requested objects. The
+per-model `WorkspaceSearch/recall-v1.json` records a twice-confirmed box, camera
+view, confidence and original capture time. Existing search reports seed the
+first recall file. Recalled views are centered before falling back to the raster;
+partially visible objects get up to four additional centered looks. Hints expire
+after 24 hours and a changed robot model invalidates them. No remembered position,
+old detection, saved permission or confidence value satisfies a live confirmation.
+ROB says “Checking where I last saw them” and still takes two new observations.
+
 The legacy hanging observation decoder accepts a single complete JSON object with optional
 Markdown wrapping or a short preamble. It rejects invalid coordinates, extra
 answers and trailing instructions. A format failure gets one fresh-image retry;
@@ -146,10 +155,18 @@ The [detector validation record](calibration/evidence/2026-10-22-recycling/objec
 links the live outcomes, replay checks and build/source hashes. Camera pixels
 remain local and are not included in these committed records.
 
-A can box currently supplies its side-wall center. A bucket box establishes
-visual identity only; it does not invent an opening/rim release point. Rim/depth
-localization remains required for automatic transfer; a taught five-anchor task
-can be used for a fixed station.
+A can box supplies its side-wall center. A bucket box first establishes visual
+identity. Opening localization additionally fits a measured floor plane, corrects
+the provisional neck-camera vertical for that frame, and fits the orange rim in
+aligned depth. Floor support must cover at least 35% of the sampled scene, stay
+within 35° of the prior and put camera height at 0.8–1.3 m. The rim requires at
+least 25 points, 65% inliers within 12 mm, at least 160° of observed circumference
+and a 6–28 cm radius. At least 80% of 12 or more interior samples must lie 4 cm
+below it. A lid, short arc, clipped box or inconsistent depth supplies no drop
+position. Two independent frames must still agree within 5 cm. This corrects a
+local camera prior; it does not commission the arm mapping or environment model.
+The last bucket RGB image, aligned depth and calibration are retained locally as
+`WorkspaceDetector/last-bucket-*` for diagnosis; they are not publication assets.
 
 ## Pick and place
 
@@ -215,12 +232,23 @@ the last pose. No camera images, grants or physical grip claims are included.
 `left_recycle_can` covers search, pointing assistance if needed, planning and
 execution under the original authorization, bounded to ten minutes to allow the
 deliberate search and settling intervals (the executor stops at 590 seconds).
-A local IK
-planner generates five anchors: pickup approach, grasp, 6 cm test lift, release
-12 cm above the observed bucket rim, and retreat. The proposal includes exact
+A local seven-joint IK planner now compiles the horizontal-jaw ghost approach
+into physical steps: registered empty-arm presentation, leveling, raised
+cross-body approach, grasp, 6 cm test lift, high carry, gravity release and upward
+retreat. Wrist roll follows the same nearest-branch solution as the preview.
+The hand releases at a reachable height above the opening; it does not descend
+to a floor bucket. The drop point may move up to 4 cm toward the hand within the
+observed opening while retaining 5.5 cm of rim clearance for the can and fit error.
+Release stays at least 12 cm above the rim. Grip and release are frozen into the
+`recycling` proposal, distinct from the legacy five-anchor taught `tabletop` task.
+The proposal includes exact
 targets, timing, model/mapping/session IDs and jaw-action boundaries. Only the
 single current step can reach the gateway. Taught approach travel uses the
 existing five segments. Arbitrary camera/model joint values are never admitted.
+All seven joints retain URDF/transport bounds; interpolated post-leveling poses
+retain horizontal jaw axes within 8°, sampled tread clearance remains 30 mm,
+and one proposal is limited to 80 steps / 135 scheduled seconds. Planning and
+depth fitting run off the main thread so they cannot block control monitoring.
 
 Before each jaw action the executor drains motion leases, requires a confirmed
 position hold and fresh settled joint feedback. Empty calibration occurs only at

@@ -254,6 +254,47 @@ import simd
         expectBlocked { _ = try ROBWorkspaceObservation.decode(String(observationJSON.dropLast())) }
         expectBlocked { _ = try ROBWorkspaceObservation.decode(observationJSON.replacingOccurrences(of: "0.85", with: "1.85")) }
         let view = ROBWorkspaceView(panDegrees: 0, upperTarget: 6906)
+        let recallDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("rob-recall-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: recallDirectory) }
+        var recall = ROBWorkspaceRecall(modelID: model.modelID, geometryID: model.geometryID)
+        let recallNow = Date().timeIntervalSince1970 * 1000
+        recall.remember(target: .orangeBucket, detection: .init(visible: true, confidence: 0.6,
+            box: [0.02,0.4,0.26,0.77], aim: [], depthPoint: [], confidenceThreshold: 0.35),
+            view: .init(panDegrees: 15, upperTarget: 5650), capturedAt: recallNow)
+        try recall.save(to: recallDirectory.appendingPathComponent("recall-v1.json"))
+        let restarted = ROBWorkspaceRecall.load(model: model, directory: recallDirectory, now: recallNow)
+        precondition(restarted.sightings.count == 1 && restarted.views(targets: [.orangeBucket], now: recallNow).first!.panDegrees > 35)
+        precondition(restarted.views(targets: [.can], now: recallNow).isEmpty)
+        precondition(restarted.views(targets: [.orangeBucket], now: recallNow + 86_400_001).isEmpty)
+        let mismatched = ROBWorkspaceRecall(modelID: "old-model", geometryID: model.geometryID, sightings: recall.sightings)
+        try mismatched.save(to: recallDirectory.appendingPathComponent("recall-v1.json"))
+        precondition(ROBWorkspaceRecall.load(model: model, directory: recallDirectory, now: recallNow).sightings.isEmpty)
+        let ring = (0..<180).map { i -> SIMD3<Double> in
+            let angle = Double(i)*2 * .pi/180
+            return SIMD3(0.45+0.14*cos(angle),0.2+0.14*sin(angle),0.55)
+        }
+        let interior = (0..<50).map { i -> SIMD3<Double> in
+            let angle = Double(i)*2 * .pi/50
+            return SIMD3(0.45+0.03*cos(angle),0.2+0.03*sin(angle),0.30)
+        }
+        let fitted = ROBWorkspaceBucketRim.fit(orange: ring, scene: ring+interior)
+        precondition(fitted != nil && simd_distance(fitted!.center, SIMD3(0.45,0.2,0.55)) < 0.005)
+        precondition(ROBWorkspaceBucketRim.fit(orange: ring, scene: ring+interior.map { SIMD3($0.x,$0.y,0.55) }) == nil,
+            "A solid orange lid was mistaken for an opening")
+        precondition(ROBWorkspaceBucketRim.fit(orange: Array(ring.prefix(70)), scene: interior) == nil,
+            "A partially observed rim was treated as a full release opening")
+        let floorNormal = simd_normalize(SIMD3<Double>(-0.42,-0.09,0.90))
+        let floorRotation = simd_quatd(from: SIMD3<Double>(0,0,1),to: floorNormal)
+        let floorPoints = (0..<30).flatMap { x in (0..<30).map { y in
+            floorRotation.act(SIMD3(Double(x)*0.03,Double(y)*0.03,-0.25))
+        } }
+        var camera = matrix_identity_double4x4; camera.columns.3 = SIMD4(0,0,1.07,1)
+        let floorAlignment = ROBWorkspaceFloorAlignment.fit(points: floorPoints,cameraFrame: camera)
+        precondition(floorAlignment != nil && (25...27).contains(floorAlignment!.correctionDegrees))
+        precondition(floorAlignment!.supportFraction > 0.99)
+        precondition(ROBWorkspaceFloorAlignment.fit(points: floorPoints.map { $0+SIMD3(0,0,0.8) },cameraFrame: camera) == nil,
+            "A tabletop was accepted as the floor")
+        print("Recall: durable per-model sighting hints, centered first look, expiry and no object-position reuse. Rim: measured circle plus recessed interior; lids and partial arcs rejected")
         precondition(ROBWorkspaceView.sweep.count == 32 && ROBWorkspaceView.sweep.contains { $0.upperTarget == 5300 })
         precondition(zip(ROBWorkspaceView.sweep, ROBWorkspaceView.sweep.dropFirst()).allSatisfy { abs($0.panDegrees - $1.panDegrees) <= 15 },
             "Search must inspect intermediate views rather than jumping between distant sides")
@@ -286,6 +327,26 @@ import simd
         let previewCan = ROBWorkspaceLocatedObject(target: .can, position: [previewHand.x, previewHand.y, previewHand.z], confidence: 0.8,
             capturedAt: previewNow, sequence: 71, view: view)
         let grabPreview = try ROBCanGrabPreview.make(can: previewCan, model: model, baseline: model.reference, now: previewNow)
+        let recycleBucket = ROBWorkspaceLocatedObject(target: .orangeBucket,
+            position: [previewHand.x,previewHand.y+0.08,previewHand.z-0.10], confidence: 0.8,
+            capturedAt: previewNow, sequence: 74, view: view, openingRadius: 0.14)
+        let recycling = try ROBCanGrabPreview.make(can: previewCan, model: model, baseline: model.positions(vendorLeft: zero),
+            now: previewNow, bucket: recycleBucket)
+        let recyclingActions = Dictionary(uniqueKeysWithValues: recycling.steps.enumerated().compactMap { index, step in step.jawAction.map { (index,$0) } })
+        let physicalRecycle = try ROBLeftGestureCompiler.compile(kind: "recycling", name: "Horizontal recycling", poses: recycling.steps.map(\.pose),
+            model: model, baseline: zero, generation: 42, recyclingActions: recyclingActions)
+        try ROBLeftGestureCompiler.validate(physicalRecycle, model: model)
+        precondition(physicalRecycle.steps.compactMap(\.jawAction) == [.prepare,.grip,.release])
+        precondition(physicalRecycle.steps.contains { abs($0.positions[6]) > 0.2 }, "Horizontal jaws require the reviewed wrist roll")
+        var altered = physicalRecycle; altered.recyclingActions = [:]
+        expectBlocked { try ROBLeftGestureCompiler.validate(altered, model: model) }
+        precondition(physicalRecycle.steps.count <= 80 && physicalRecycle.seconds <= 135)
+        let dropIndex = recycling.steps.firstIndex { $0.jawAction == .release }!
+        let dropPoint = model.toolPosition(recycling.steps[dropIndex].pose)!
+        precondition(dropPoint.z >= previewCan.point.z + 0.08 && dropPoint.z > recycleBucket.point.z + 0.12,
+            "A floor bucket must use a high gravity drop instead of requiring a low hand pose")
+        precondition(hypot(dropPoint.x-recycleBucket.point.x,dropPoint.y-recycleBucket.point.y) < recycleBucket.openingRadius!-0.05)
+        print("Physical horizontal recycling: same seven-joint ghost approach, grip/lift/carry/release/retreat, bounded wrist mapping and exact immutable jaw transitions")
         precondition(grabPreview.side == "left" && grabPreview.reachesCan && grabPreview.graspError <= 0.012)
         precondition(grabPreview.gripperTiltDegrees <= 5, "A successful grasp requires horizontal approach and jaw axes")
         precondition(grabPreview.helpRequest == nil, "A reachable can must not trigger a move-closer request")
