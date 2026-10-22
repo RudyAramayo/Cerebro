@@ -288,6 +288,17 @@ final class ROBAmberGatewayClient: NSObject {
             check(b.receiveSpokenAuthorization("no"), "Spoken rejection cancels a pending request")
             check(!b.isPending && !b.armSessionActive, "Rejected request leaves no grant")
         }
+        do {
+            let b = broker()
+            var clock = Date(), stopped = 0
+            b.now = { clock }
+            b.requestLeftWorkspaceTask(summary: "Deliberate camera search and transfer", execute: { _ in }, cancel: { stopped += 1 }, completion: { _ in })
+            check(b.receiveSpokenAuthorization("yes proceed"), "One voice approval covers the deliberate search task")
+            clock.addTimeInterval(599)
+            check(b.authorizesLeftArmTrial("Deliberate camera search and transfer"), "Camera settling must not exhaust the old short task window")
+            clock.addTimeInterval(2); b.tick()
+            check(stopped == 1 && !b.authorizesLeftArmTrial("Deliberate camera search and transfer"), "The complete search task remains bounded to ten minutes")
+        }
         print("Controller/spoken arm approval and session reuse: \(checks) checks passed; no hardware access")
     }
 }

@@ -352,8 +352,54 @@ final class ROBArmRoutineVision {
     /// Acquire the actual pixels after the local model/GPU is ready. The caller
     /// holds a specific settled neck view throughout both inference and depth
     /// projection; a current callback never refreshes the capture timestamp.
-    func observeWorkspace() async throws -> (ROBWorkspaceObservation, Frame) {
+    func observeWorkspace(objectDetection: Bool = true) async throws -> (ROBWorkspaceObservation, Frame) {
         let token = try inspectionEpoch()
+        if objectDetection {
+            try await ROBWorkspaceObjectDetector.shared.warmUp()
+            let frame = try await settledInspectionFrame(epoch: token, requireStaticScene: false)
+            guard let cg = context.createCGImage(frame.image, from: frame.image.extent),
+                  let jpeg = NSBitmapImageRep(cgImage: cg).representation(using: .jpeg, properties: [.compressionFactor: 0.9]) else {
+                throw ROBWorkspaceDetectorError.failure("Local detector could not read the camera image.")
+            }
+            let inputURL = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Application Support/Cerebro/WorkspaceDetector/latest-input.jpg")
+            try? jpeg.write(to: inputURL, options: .atomic)
+            let result = try await ROBWorkspaceObjectDetector.shared.detect(jpeg: jpeg)
+            try Task.checkCancellation()
+            let liveDeadline = ProcessInfo.processInfo.systemUptime + 2
+            var advancing = false
+            while ProcessInfo.processInfo.systemUptime < liveDeadline {
+                try Task.checkCancellation()
+                if let current = try inspectionFrame(epoch: token), isFresh(current), current.sequence > frame.sequence {
+                    advancing = true; break
+                }
+                try await Task.sleep(nanoseconds: 50_000_000)
+            }
+            guard advancing, Date().timeIntervalSince1970 * 1000 - frame.capturedAt < 30_000 else {
+                throw ROBWorkspaceDetectorError.failure("Local detector lost the advancing live camera.")
+            }
+            func detection(_ target: String) -> ROBWorkspaceDetection {
+                let candidates = result.candidates.filter { $0.target == target && $0.score >= 0.35 }
+                    .sorted { $0.score > $1.score }
+                guard let best = candidates.first else {
+                    return .init(visible: false, confidence: 0, box: [], aim: [], depthPoint: [])
+                }
+                let center = [(best.box[0] + best.box[2]) / 2, (best.box[1] + best.box[3]) / 2]
+                // An object box can locate an upright can wall. A bucket box
+                // alone does not establish its opening/rim, so do not invent
+                // a release point from the rectangle's center.
+                return .init(visible: true, confidence: best.score, box: best.box,
+                    aim: target == "can" ? center : [], depthPoint: target == "can" ? center : [], confidenceThreshold: 0.35)
+            }
+            recordInspection(["assessment": "workspace_object_detector", "provider": result.provider,
+                "model": result.model, "device": result.device, "inference_ms": result.inference_ms,
+                "input_sequence": NSNumber(value: frame.sequence), "input_captured_at_ms": frame.capturedAt,
+                "latest_input_file": inputURL.path, "candidates": result.candidates.map {
+                    ["target": $0.target, "query": $0.query, "score": $0.score, "box": $0.box] as [String: Any]
+                }])
+            return (.init(can: detection("can"), orangeBucket: detection("orangeBucket"),
+                leftArmHanging: false, rightArmHanging: false, hangingConfidence: 0), frame)
+        }
         var diagnostics: [[String: Any]] = []
         for attempt in 0...1 {
             let result = try await ROBMLXEngine.shared.observeWorkspaceSearch(formatRetry: attempt > 0) {
@@ -395,11 +441,12 @@ final class ROBArmRoutineVision {
     var prepareView: ((Double, Int) -> Bool)?
     var viewReady: ((Double, Int) -> Bool)?
     var canUseView: ((Double, Int) -> Bool)?
+    var boundedPan: ((Double) -> Double)?
     var finishView: (() -> Void)?
     var announce: ((String) -> Void)?
     private(set) var lastReport: NSDictionary = [:]
 
-    @MainActor @nonobjc func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel,
+    @MainActor @nonobjc func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true,
         check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
         let vision = ROBArmRoutineVision.shared
         var found: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
@@ -408,18 +455,55 @@ final class ROBArmRoutineVision {
         var leftHanging = false, rightHanging = false
         var validObservations = 0
         var nearest: (view: ROBWorkspaceView, distance: Double)?
-        defer { finishView?() }
+        var livePointing: (hint: ROBWorkspacePointingHint, view: ROBWorkspaceView, capturedAt: Double)?
+        var followedLivePointing = false
+        let reportID = UUID().uuidString
+        let startedAt = ISO8601DateFormatter().string(from: Date())
+        var finished = false
+        func targetsConfirmed() -> Bool {
+            targets.allSatisfy { requireDepth ? found[$0] != nil : visuallyFound.contains($0) }
+        }
+        func persist(_ status: String, _ detail: String) {
+            var report: [String: Any] = ["schema_version": 1, "status": status, "detail": detail,
+                "created_at": ISO8601DateFormatter().string(from: Date()), "search_started_at": startedAt,
+                "inference": targets.isEmpty ? "on-device MLX hanging inspection; no cloud session" : "offline OWLv2 object boxes; no cloud or generative detection",
+                "camera_arm_mapping": "provisional URDF/neck command prior, not measured hand-eye calibration",
+                "left_hanging_observed": leftHanging, "right_hanging_observed": rightHanging,
+                "visually_confirmed": visuallyFound.map(\.rawValue).sorted(), "decoded_observations": validObservations,
+                "settle_seconds_per_view": 1.5,
+                "depth_required": requireDepth,
+                "views": evidence, "objects": found.reduce(into: [String: Any]()) {
+                    $0[$1.key.rawValue] = ["position": $1.value.position, "captured_at_ms": $1.value.capturedAt]
+                }]
+            do {
+                let directory = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                    appropriateFor: nil, create: true).appendingPathComponent("Cerebro/WorkspaceSearch", isDirectory: true)
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                let file = directory.appendingPathComponent("\(reportID).json")
+                try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys, .prettyPrinted]).write(to: file, options: .atomic)
+                report["recording"] = file.path
+            } catch { report["recording_error"] = error.localizedDescription }
+            lastReport = report as NSDictionary
+        }
+        defer {
+            if !finished { persist("interrupted", "Search interrupted; completed observations are retained. Object absence is unconfirmed.") }
+            finishView?()
+        }
         func moveView(_ view: ROBWorkspaceView) async throws -> Bool {
             if canUseView?(view.panDegrees, view.upperTarget) == false {
                 evidence.append(["pan": view.panDegrees, "upper": view.upperTarget, "status": "outside_current_neck_envelope"])
                 return false
             }
             let deadline = ProcessInfo.processInfo.systemUptime + 12
+            var settledSince: TimeInterval?
             progress(String(format: "Local search: camera pan %+.0f°, tilt target %d", view.panDegrees, view.upperTarget))
             while ProcessInfo.processInfo.systemUptime < deadline {
                 try check()
                 if prepareView?(view.panDegrees, view.upperTarget) == true,
-                   viewReady?(view.panDegrees, view.upperTarget) == true { return true }
+                   viewReady?(view.panDegrees, view.upperTarget) == true {
+                    if settledSince == nil { settledSince = ProcessInfo.processInfo.systemUptime }
+                    if ProcessInfo.processInfo.systemUptime - settledSince! >= 1.5 { return true }
+                } else { settledSince = nil }
                 try await Task.sleep(nanoseconds: 100_000_000)
             }
             evidence.append(["pan": view.panDegrees, "upper": view.upperTarget, "status": "view_unavailable"])
@@ -430,12 +514,13 @@ final class ROBArmRoutineVision {
             var prior: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
             var priorVisual: [ROBWorkspaceTarget: (detection: ROBWorkspaceDetection, sequence: UInt64)] = [:]
             var priorHanging: ROBWorkspaceObservation?
+            var priorPointing: ROBWorkspacePointingHint?
             for _ in 0..<2 {
                 try check()
                 guard viewReady?(view.panDegrees, view.upperTarget) == true else {
                     throw ROBArmRoutineError.blocked("Search camera moved during inspection.")
                 }
-                let (observation, frame) = try await vision.observeWorkspace()
+                let (observation, frame) = try await vision.observeWorkspace(objectDetection: !targets.isEmpty)
                 validObservations += 1
                 try check()
                 guard viewReady?(view.panDegrees, view.upperTarget) == true else {
@@ -449,6 +534,12 @@ final class ROBArmRoutineVision {
                     rightHanging = rightHanging || (previous.rightArmHanging && observation.rightArmHanging)
                 }
                 priorHanging = observation
+                if let hint = frame.pointing {
+                    if let previous = priorPointing, previous.agrees(with: hint) {
+                        livePointing = (hint, view, frame.capturedAt)
+                    }
+                    priorPointing = hint
+                } else { priorPointing = nil }
                 var entry: [String: Any] = ["pan": view.panDegrees, "upper": view.upperTarget,
                     "sequence": NSNumber(value: frame.sequence), "captured_at_ms": frame.capturedAt,
                     "left_hanging": observation.leftArmHanging, "right_hanging": observation.rightArmHanging,
@@ -456,11 +547,11 @@ final class ROBArmRoutineVision {
                 entry["local_inference"] = vision.healthSnapshot()["inspection"]
                 for target in targets {
                     let detection = observation[target]
-                    if detection.usable, let previous = priorVisual[target], previous.sequence != frame.sequence,
-                       hypot(detection.aim[0] - previous.detection.aim[0], detection.aim[1] - previous.detection.aim[1]) <= 0.08 {
+                    if detection.visuallyUsable, let previous = priorVisual[target], previous.sequence != frame.sequence,
+                       hypot(detection.center[0] - previous.detection.center[0], detection.center[1] - previous.detection.center[1]) <= 0.08 {
                         visuallyFound.insert(target)
                     }
-                    if detection.usable { priorVisual[target] = (detection, frame.sequence) }
+                    if detection.visuallyUsable { priorVisual[target] = (detection, frame.sequence) }
                     else { priorVisual.removeValue(forKey: target) }
                     guard let depth = frame.depth, let k = frame.intrinsics,
                           let located = ROBWorkspaceGrounding.locate(target: target, detection: detection,
@@ -476,29 +567,55 @@ final class ROBArmRoutineVision {
                 evidence.append(entry)
             }
         }
+        func inspectWithRetry(_ view: ROBWorkspaceView) async throws {
+            for attempt in 0...1 {
+                do { try await inspect(view); return }
+                catch is CancellationError { throw CancellationError() }
+                catch {
+                    try check()
+                    evidence.append(["pan": view.panDegrees, "upper": view.upperTarget, "attempt": attempt + 1,
+                        "error": error.localizedDescription, "local_inference": vision.healthSnapshot()["inspection"] ?? [:]])
+                    let transientCamera = ["camera", "settle", "stream", "view"].contains { error.localizedDescription.lowercased().contains($0) }
+                    if !transientCamera || attempt == 1 { return }
+                    progress("Camera pause; settling and retrying this view")
+                }
+            }
+        }
+        func followPointing(_ hint: ROBWorkspacePointingHint, from humanView: ROBWorkspaceView) async throws {
+            let views = hint.searchViews(from: humanView, boundedPan: boundedPan ?? { max(-45, min(45, $0)) })
+            evidence.append(["pointing_hint": ["x": hint.x, "y": hint.y, "dx": hint.dx, "dy": hint.dy],
+                "guided_views": views.map { ["pan": $0.panDegrees, "upper": $0.upperTarget] }, "pointing_is_object_confirmation": false])
+            for (index, view) in views.enumerated() {
+                progress("Pointing search view \(index + 1) of \(views.count)")
+                try await inspectWithRetry(view)
+                persist("searching", "Completed pointing search view \(index + 1) of \(views.count)")
+                if targetsConfirmed() { break }
+            }
+        }
         let sweep = targets.isEmpty ? [ROBWorkspaceView(panDegrees: 0, upperTarget: 5300),
             .init(panDegrees: -35, upperTarget: 5300), .init(panDegrees: 35, upperTarget: 5300)] : ROBWorkspaceView.sweep
-        for view in sweep {
-            do { try await inspect(view) }
-            catch is CancellationError { throw CancellationError() }
-            catch {
-                try check()
-                // An absent object, invalid model answer or unusable depth is
-                // a failed view, not a request for another human permission.
-                evidence.append(["pan": view.panDegrees, "upper": view.upperTarget, "error": error.localizedDescription,
-                    "local_inference": vision.healthSnapshot()["inspection"] ?? [:]])
+        for (index, view) in sweep.enumerated() {
+            progress("Searching view \(index + 1) of \(sweep.count)")
+            try await inspectWithRetry(view)
+            if !targets.isEmpty, !followedLivePointing, let pointing = livePointing,
+               Date().timeIntervalSince1970 * 1000 - pointing.capturedAt < 15_000,
+               targets.contains(where: { !visuallyFound.contains($0) }) {
+                followedLivePointing = true
+                announce?("Following your pointing direction.")
+                try await followPointing(pointing.hint, from: pointing.view)
             }
-            if targets.isEmpty ? leftHanging && rightHanging : targets.allSatisfy({ found[$0] != nil }) { break }
+            persist("searching", "Completed search view \(index + 1) of \(sweep.count)")
+            if targets.isEmpty ? leftHanging && rightHanging : targetsConfirmed() { break }
         }
         if validObservations > 0, !targets.isEmpty, targets.contains(where: { !visuallyFound.contains($0) }) {
             let missing = targets.filter { !visuallyFound.contains($0) }.map(\.spokenName).joined(separator: " and ")
             let humanView = nearest?.view ?? ROBWorkspaceView(panDegrees: 0, upperTarget: 6906)
             if try await moveView(humanView) {
-                announce?("I couldn't find the \(missing). Could you point toward it and hold your pointing hand still for a moment?")
+                announce?("Point to the \(missing), please.")
                 progress("Waiting for a nearby person's pointing gesture")
                 let deadline = ProcessInfo.processInfo.systemUptime + 20
                 var prior: ROBWorkspacePointingHint?, priorSequence: UInt64 = 0
-                var guided: ROBWorkspaceView?
+                var pointingHint: ROBWorkspacePointingHint?
                 while ProcessInfo.processInfo.systemUptime < deadline {
                     try check()
                     guard viewReady?(humanView.panDegrees, humanView.upperTarget) == true else {
@@ -508,22 +625,15 @@ final class ROBArmRoutineVision {
                         priorSequence = frame.sequence
                         if let pointing = frame.pointing {
                             if let previous = prior, previous.agrees(with: pointing) {
-                                guided = pointing.guidedView(from: humanView); break
+                                pointingHint = pointing; break
                             }
                             prior = pointing
                         } else { prior = nil }
                     }
                     try await Task.sleep(nanoseconds: 100_000_000)
                 }
-                if let guided {
-                    evidence.append(["pointing_guided_pan": guided.panDegrees, "upper": guided.upperTarget,
-                        "pointing_is_object_confirmation": false])
-                    for offset in [0.0, -15, 15] {
-                        let view = ROBWorkspaceView(panDegrees: max(-70, min(70, guided.panDegrees + offset)), upperTarget: guided.upperTarget)
-                        do { try await inspect(view) } catch is CancellationError { throw CancellationError() }
-                        catch { try check(); evidence.append(["guided_error": error.localizedDescription]) }
-                        if targets.allSatisfy({ found[$0] != nil }) { break }
-                    }
+                if let pointingHint {
+                    try await followPointing(pointingHint, from: humanView)
                 }
             }
         }
@@ -539,30 +649,19 @@ final class ROBArmRoutineVision {
         }
         let missing = targets.filter { found[$0] == nil }.map(\.spokenName)
         let unseen = targets.filter { !visuallyFound.contains($0) }.map(\.spokenName)
+        let seen = targets.filter { visuallyFound.contains($0) }.map(\.spokenName)
         let status = targets.isEmpty ? (leftHanging && rightHanging ? "observed_hanging" : "hanging_unconfirmed")
-            : validObservations == 0 ? "vision_unavailable" : missing.isEmpty ? "found" : unseen.isEmpty ? "depth_unconfirmed" : "not_found"
+            : validObservations == 0 ? "vision_unavailable" : !requireDepth && unseen.isEmpty ? "visually_found"
+                : missing.isEmpty ? "found" : unseen.isEmpty ? "depth_unconfirmed" : "not_found"
         let message = targets.isEmpty ? (leftHanging && rightHanging ? "I can see both robot arms hanging." : "I couldn't confirm both arms hanging from these views.")
             : validObservations == 0 ? "My local search could not produce a usable camera observation. I cannot yet confirm the can or bucket. I haven't sent a reach."
-                : missing.isEmpty ? "I found the \(targets.map(\.spokenName).joined(separator: " and "))."
+                : missing.isEmpty || !requireDepth && unseen.isEmpty ? "I found the \(targets.map(\.spokenName).joined(separator: " and "))."
                 : unseen.isEmpty ? "I can see the can and orange bucket, but I couldn't confirm their depth positions. I haven't sent a reach."
-                    : "I still couldn't confirm the \(unseen.joined(separator: " and "))."
+                    : (seen.isEmpty ? "" : "I can see the \(seen.joined(separator: " and ")). ") +
+                        "I still couldn't confirm the \(unseen.joined(separator: " and "))."
         announce?(message); progress(message)
-        var report: [String: Any] = ["schema_version": 1, "status": status, "detail": message,
-            "created_at": ISO8601DateFormatter().string(from: Date()), "inference": "on-device MLX; no cloud session",
-            "camera_arm_mapping": "provisional URDF/neck command prior, not measured hand-eye calibration",
-            "left_hanging_observed": leftHanging, "right_hanging_observed": rightHanging,
-            "visually_confirmed": visuallyFound.map(\.rawValue).sorted(),
-            "decoded_observations": validObservations,
-            "views": evidence, "objects": found.mapValues { ["position": $0.position, "captured_at_ms": $0.capturedAt] } .reduce(into: [String: Any]()) { $0[$1.key.rawValue] = $1.value }]
-        do {
-            let directory = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
-                appropriateFor: nil, create: true).appendingPathComponent("Cerebro/WorkspaceSearch", isDirectory: true)
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let file = directory.appendingPathComponent("\(UUID().uuidString).json")
-            try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys, .prettyPrinted]).write(to: file, options: .atomic)
-            report["recording"] = file.path
-        } catch { report["recording_error"] = error.localizedDescription }
-        lastReport = report as NSDictionary
+        finished = true
+        persist(status, message)
         return found
     }
 }

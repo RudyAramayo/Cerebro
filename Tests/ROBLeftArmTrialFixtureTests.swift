@@ -173,8 +173,10 @@ final class ROBWorkspaceSearch {
     static let shared = ROBWorkspaceSearch()
     var lastReport: NSDictionary = ["detail": "Fixture search only"]
     var fail = false
+    var requiredDepth = true
     var onInspect: (() -> Void)?
-    @MainActor func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
+    @MainActor func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true, check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
+        requiredDepth = requireDepth
         onInspect?()
         if fail { throw ROBArmRoutineError.blocked("Fixture observation unavailable") }
         try check(); return [:]
@@ -289,6 +291,7 @@ final class ROBArmRoutineCoordinator {
             let searched = await run(command)
             precondition(searched["status"] as? String == "accepted_unverified", searched.description)
             precondition(approvals == 0 && g.commands.isEmpty)
+            precondition(!ROBWorkspaceSearch.shared.requiredDepth, "A visual search must not wait for bucket release geometry")
         }
         ROBWorkspaceSearch.shared.fail = true
         let failedSearch = await run("left_search_workspace")

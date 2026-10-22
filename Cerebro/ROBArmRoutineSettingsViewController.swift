@@ -44,7 +44,7 @@ import AppKit
         teaching.spacing = 10
         let leftTitle = NSTextField(labelWithString: "Left arm — supervised trial")
         leftTitle.font = .boldSystemFont(ofSize: 15)
-        let workspaceHelp = NSTextField(wrappingLabelWithString: "Recycle can scans for an empty Coke can and an open orange bucket with on-device MLX, asks a nearby person to point if needed, then attempts a locally planned pick-and-place under ONE spoken or controller authorization. Search only and Check hanging move only the neck camera and need no arm approval or gateway connection. No cloud conversation is required after the vision model is installed. Camera-to-arm geometry is provisional; supervise the attempt and keep Stop + hold ready.")
+        let workspaceHelp = NSTextField(wrappingLabelWithString: "Recycle can scans for an empty Coke can and an open orange bucket with an offline object detector, asks a nearby person to point if needed, then attempts a locally planned pick-and-place under ONE spoken or controller authorization. Search only and Check hanging move only the neck camera and need no arm approval or gateway connection. No cloud conversation is required after the vision model is installed. Camera-to-arm geometry is provisional; supervise the attempt and keep Stop + hold ready.")
         let workspaceButtons = NSStackView(views: [button("Start 15-minute left-arm session", #selector(startArmSession)),
             button("End arm session", #selector(endArmSession)), button("Recycle can → orange bucket", #selector(recycleCan)),
             button("Search only", #selector(searchWorkspace)), button("Check hanging", #selector(checkHanging))])

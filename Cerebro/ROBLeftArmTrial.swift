@@ -199,7 +199,7 @@ import AppKit
         let action: String
         let intensity = ROBControllerArmApproval.shared.armSessionActive ? 2 : 10
         switch command {
-        case "left_search_workspace": action = "Search locally for a Coke can and an orange bucket by panning/tilting the neck camera. Confirm detections in two fresh RGB-D observations using on-device MLX. If missing, ask the nearest visible person to point and search in the estimated pointing direction. Report found/not found. No arm activation, gripper commands or arm travel."
+        case "left_search_workspace": action = "Search locally for a Coke can and an orange bucket by panning/tilting the neck camera. Confirm detections in two fresh RGB-D observations using the offline object detector. If missing, ask the nearest visible person to point and search in the estimated pointing direction. Report found/not found. No arm activation, gripper commands or arm travel."
         case "left_check_hanging": action = "Inspect both robot arms by panning/tilting the neck camera using on-device MLX; report whether each is visibly hanging. This observation never resets encoders or activates/moves either arm."
         case "left_recycle_can": action = "One experimental recycling task: scan the neck camera locally for an EMPTY Coke can and open orange bucket, confirm each twice with aligned depth, and ask a nearby person to point if needed. Plan with the provisional articulated camera/arm model. If reachable, present the empty LEFT arm, calibrate empty jaws if needed, open, approach the can, close at intensity 2, lift, carry above the bucket rim, open and retreat to a held pose. No per-step permission or Continue. Only this bounded locally computed path may execute. Wrong geometry or a failed grip can cause a miss; supervise the complete attempt. No automatic force escalation, blind retries, driving or torque-off with an object. Retention and placement remain unmeasured."
         case "left_wave": action = "Raise the empty LEFT arm along the initial tread-clearance approach, then coordinate J3/J5 together to -0.60 and J2/J6 together to +1.00/-0.60. Continue to J2 +1.30/J4 -0.60 and raised J5 -1.40. Seven approach segments from hanging plus four wave strokes; watch the newly coordinated front sweeps. Wave J1 -0.90/-1.05 twice with J6 -0.90/-0.60, and leave raised. Jaws unchanged."
@@ -214,7 +214,7 @@ import AppKit
             : " Request hold if any joint's current changes by more than \(limit) raw units between samples; this is not a calibrated force limit."
         let travel = ["left_wave", "left_prepare", "left_relax", "left_object_cycle"].contains(command)
         let workspace = ["left_recycle_can", "left_search_workspace", "left_check_hanging"].contains(command)
-        let approvedSummary = action + notice + current + (workspace ? " Maximum 360 seconds including search, planning and movement." : travel ? " Maximum 180 seconds including preparation and settling." : "")
+        let approvedSummary = action + notice + current + (workspace ? " Maximum 600 seconds including search, planning and movement." : travel ? " Maximum 180 seconds including preparation and settling." : "")
         if Self.neckOnlyCommands.contains(command) || command == "left_relax" {
             update(command == "left_relax" ? "Returning the empty left arm to hanging" : "Starting local neck-camera inspection")
             start(command, summary: action, limit: limit, completion: completion)
@@ -290,7 +290,7 @@ import AppKit
         proposalStep = -1; sentPath = []
         waiting = []; acks = [:]; holdConfirmations = [:]; leaseRenewals = [:]; phase = "preflight"
         let workspace = ["left_recycle_can", "left_search_workspace", "left_check_hanging"].contains(command)
-        deadline = ProcessInfo.processInfo.systemUptime + (workspace ? 350 : allowsArmTravel ? 170 : 115)
+        deadline = ProcessInfo.processInfo.systemUptime + (workspace ? 590 : allowsArmTravel ? 170 : 115)
         vision.setActive(true); ROBArmRoutineCoordinator.shared.cameraDemand?(true)
         if !Self.neckOnlyCommands.contains(command), !gateway.isReady() { ROBAmberGatewayTunnel.shared.connect() }
         let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in self?.monitor() }
@@ -378,7 +378,7 @@ import AppKit
         if command == "left_search_workspace" || command == "left_check_hanging" {
             let model = try workspaceModel()
             _ = try await ROBWorkspaceSearch.shared.run(targets: command == "left_check_hanging" ? [] : ROBWorkspaceTarget.allCases,
-                model: model, check: { try self.check() }, progress: { self.update($0) })
+                model: model, requireDepth: false, check: { try self.check() }, progress: { self.update($0) })
             return ["status": "accepted_unverified", "measured": false, "arm_motion_sent": false,
                 "detail": ROBWorkspaceSearch.shared.lastReport["detail"] ?? "Local workspace search ended.",
                 "workspace_search": ROBWorkspaceSearch.shared.lastReport]

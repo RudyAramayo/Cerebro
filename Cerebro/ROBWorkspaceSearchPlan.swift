@@ -9,12 +9,16 @@ enum ROBWorkspaceTarget: String, Codable, CaseIterable {
 struct ROBWorkspaceView: Codable, Equatable {
     let panDegrees: Double
     let upperTarget: Int
-    static let sweep: [Self] = [
-        .init(panDegrees: 0, upperTarget: 6306), .init(panDegrees: -35, upperTarget: 5650),
-        .init(panDegrees: 35, upperTarget: 5650), .init(panDegrees: 0, upperTarget: 5650),
-        .init(panDegrees: -70, upperTarget: 6306), .init(panDegrees: 70, upperTarget: 6306),
-        .init(panDegrees: 0, upperTarget: 6906)
-    ]
+    static let sweep: [Self] = {
+        var views = [0.0, -15, -30, -45].map { Self(panDegrees: $0, upperTarget: 6306) }
+        // Continuous raster rather than alternating distant left/right jumps.
+        // The 5300 row includes the lower workspace/floor beside the table.
+        for (index, upper) in [5650, 5300, 6306, 6906].enumerated() {
+            let pans = index.isMultiple(of: 2) ? [-45.0,-30,-15,0,15,30,45] : [45.0,30,15,0,-15,-30,-45]
+            views += pans.map { Self(panDegrees: $0, upperTarget: upper) }
+        }
+        return views
+    }()
     func cameraFrame(model: ROBGhostRobotModel) -> simd_double4x4? {
         guard let pose = ROBHeadCameraPoseEstimator.estimateDisplay(panRadians: panDegrees * .pi / 180,
             lowerTarget: 6011, upperTarget: upperTarget, known: true),
@@ -31,8 +35,19 @@ struct ROBWorkspaceDetection: Codable {
     let box: [Double]
     let aim: [Double]
     let depthPoint: [Double]
+    // Detector-specific raw score threshold, supplied only by native code.
+    // VLM JSON cannot change it or promote its own confidence.
+    var confidenceThreshold = 0.6
+    private enum CodingKeys: String, CodingKey { case visible, confidence, box, aim, depthPoint }
+    var center: [Double] { box.count == 4 ? [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2] : [] }
+    var visuallyUsable: Bool {
+        visible && confidence.isFinite && confidenceThreshold.isFinite &&
+        (0...1).contains(confidenceThreshold) && (confidenceThreshold...1).contains(confidence) &&
+        box.count == 4 && box.allSatisfy({ $0.isFinite && (0...1).contains($0) }) &&
+        box[2] - box[0] >= 0.015 && box[3] - box[1] >= 0.015
+    }
     var usable: Bool {
-        visible && confidence.isFinite && (0.6...1).contains(confidence) && validShape
+        visuallyUsable && validShape
     }
     var validShape: Bool {
         box.count == 4 && aim.count == 2 && depthPoint.count == 2 &&
@@ -129,10 +144,28 @@ struct ROBWorkspacePointingHint: Equatable {
         return norm > 0.0001 && (dx * other.dx + dy * other.dy) / norm >= 0.90 &&
             hypot(x - other.x, y - other.y) < 0.15
     }
-    func guidedView(from view: ROBWorkspaceView, horizontalFOV: Double = 69) -> ROBWorkspaceView {
-        let aimX = max(0, min(1, x + dx * 3)), aimY = max(0, min(1, y + dy * 3))
+    func guidedView(from view: ROBWorkspaceView, horizontalFOV: Double = 69, extensionScale: Double = 3) -> ROBWorkspaceView {
+        let aimX = max(0, min(1, x + dx * extensionScale)), aimY = max(0, min(1, y + dy * extensionScale))
         return .init(panDegrees: max(-70, min(70, view.panDegrees - (aimX - 0.5) * horizontalFOV)),
             upperTarget: max(5300, min(7500, view.upperTarget - Int((aimY - 0.5) * 45 * 33.333333))))
+    }
+    func searchViews(from view: ROBWorkspaceView, boundedPan: (Double) -> Double) -> [ROBWorkspaceView] {
+        var views: [ROBWorkspaceView] = []
+        func append(_ value: ROBWorkspaceView) {
+            let value = ROBWorkspaceView(panDegrees: boundedPan(value.panDegrees), upperTarget: value.upperTarget)
+            if !views.contains(where: { abs($0.panDegrees - value.panDegrees) < 3 && abs($0.upperTarget - value.upperTarget) < 150 }) { views.append(value) }
+        }
+        for scale in [3.0, 1.5, 6] {
+            let center = guidedView(from: view, extensionScale: scale)
+            append(center)
+            for (row, tilt) in [-800, -400, 400].enumerated() {
+                let offsets = row.isMultiple(of: 2) ? [-12.0, 0, 12] : [12.0, 0, -12]
+                for offset in offsets {
+                    append(.init(panDegrees: center.panDegrees + offset, upperTarget: max(5300, min(7500, center.upperTarget + tilt))))
+                }
+            }
+        }
+        return views
     }
 }
 

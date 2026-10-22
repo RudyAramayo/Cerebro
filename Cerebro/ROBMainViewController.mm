@@ -5695,6 +5695,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         return serial != nil && serial.neckCommandStateKnown &&
             pan >= serial.currentNeckPanMinimumDegrees && pan <= serial.currentNeckPanMaximumDegrees;
     };
+    workspace.boundedPan = ^double(double pan) {
+        ROBSerialBox *serial = weakSelf.serialBox;
+        return serial == nil ? 0 : MAX(serial.currentNeckPanMinimumDegrees, MIN(serial.currentNeckPanMaximumDegrees, pan));
+    };
     workspace.announce = ^(NSString *text) { [weakSelf.speechBox sayIt:text]; };
     ROBShowMotionCoordinator *rehearsal = [ROBShowMotionCoordinator shared];
     rehearsal.cameraDemand = routine.cameraDemand;

@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-22T21:54:23.333855+00:00",
+  "baseCommit": "2fb6fb5adea5ec6a597fedec7472767ddb79ddd0",
+  "model": {
+    "provider": "offline OWLv2",
+    "repository": "google/owlv2-base-patch16-ensemble",
+    "revision": "cfd3195ba4ea9592eec887ded089f4c08eff231d",
+    "rawScoreThreshold": 0.35,
+    "bucketAppearance": "At least 18% R>=50, R>1.25G and R>1.5B inside candidate box.",
+    "runtimeNetwork": false,
+    "generativeDetections": false
+  },
+  "search": {
+    "rasterViews": 32,
+    "panIntervalDegrees": 15,
+    "settleSeconds": 1.5,
+    "focus": "Settling allowance; no measured autofocus guarantee.",
+    "transientCameraRetry": 1,
+    "pointing": "Stable 2D finger hint, multiple pan/tilt neighborhoods; not calibrated 3D."
+  },
+  "checks": {
+    "detectorTransport": {
+      "result": "passed",
+      "logSHA256": "31391dc53a14f4ec50af29b0ced9ff4c3bfdc4a0cd797b157fd8f5b1b52761ee",
+      "lastOutput": "Object detector transport: persistent worker, matching frame IDs, invalid boxes rejected, cancellation terminates inference, fresh request after failure. No robot transport linked."
+    },
+    "geometry": {
+      "result": "passed",
+      "logSHA256": "021edb871638cf5a1aeba1d2d3621860dc4deb6a67f19be09f6c29de405c59a5",
+      "lastOutput": "Ghost motion plan fixtures passed; model preview assumptions are not physical calibration"
+    },
+    "approval": {
+      "result": "passed",
+      "logSHA256": "afd17aa088712fcf4d384b7c3a1acd4cd9ab5ad390e4249dc62d48cb4a9c3c53",
+      "lastOutput": "Controller/spoken arm approval and session reuse: 88 checks passed; no hardware access"
+    },
+    "executor": {
+      "result": "passed",
+      "logSHA256": "d60d14ab356d698c1fe4e6bd1b0f036e580dd2a3f8321b56795aa0c4c7b733a5",
+      "lastOutput": "Left-arm trial fixtures passed; no hardware transport exists in this executable"
+    }
+  },
+  "build": {
+    "result": "passed",
+    "configuration": "Signed arm64 Debug; isolated app-only scheme, user bypass edits excluded.",
+    "logSHA256": "6d495035f6706de696c6177b3a8abb2e8d58d41f15751d712c2cdbf2fdb1e165",
+    "signatureVerification": "codesign --verify --deep --strict passed",
+    "executablesSHA256": {
+      "Cerebro": "a767cd2f31fa0d0377c1ad8d4afd5bf7ba839f3d34255e6df7452e4206994b30",
+      "Cerebro.debug.dylib": "fdc1469810fc5efe57301f40a07b14c7cf3ca3cbebb8f3cf62de6e64c921d008"
+    },
+    "changedBuildInputsMatchStagedIndex": true,
+    "changedBuildInputsSHA256": {
+      "Cerebro.xcodeproj/project.pbxproj": "17301dfec821800e3f391d9d030d8d96b9a80a93c42fadb3f75fde4240158a81",
+      "Cerebro/ROBArmRoutineCoordinator.swift": "7c6048a02f0917d8ee7b4bfa284db0ef0e8bca4316763a659cbc5df2782c98c2",
+      "Cerebro/ROBArmRoutineSettingsViewController.swift": "92f50759b2bae0d7a218c52648e63d9e5030dbf322bf785249c6364e2fdf9abe",
+      "Cerebro/ROBArmRoutineVision.swift": "097777fe598ede8a90ca480dae4dd89935d11794ce0479f3e3d1ff652631fb27",
+      "Cerebro/ROBControllerArmApproval.swift": "5a1d3816ffc0b5c01f5ef00e27e141fa165bafd56d40ff5d3a5f070dada4fcc3",
+      "Cerebro/ROBLeftArmTrial.swift": "2a803fa48729b4e04b01cd80005b88ac2947c12e427cc26f9926183141718095",
+      "Cerebro/ROBMainViewController.mm": "ace21fb68b3c1de3c69df5c05cb24af0f6cbece003dab3cea251e141fcec7d4b",
+      "Cerebro/ROBWorkspaceObjectDetector.swift": "48e80321e93a8d552b48645338f1aa7612c723a7fc0b9a8bae32c0c6149ea340",
+      "Cerebro/ROBWorkspaceSearchPlan.swift": "01363334ffc3ad156357d6a8c2025e410cf494e78ba510addafabf7bc2023b22",
+      "Cerebro/Resources/ShadowPlanner/workspace_detector.py": "a72ec148e3c4bcb6ae161ad05b37daab4966102c29d2c896622b6943f021c53a"
+    },
+    "installed": "/Applications/Cerebro.app",
+    "wakeSessionOfferRestored": true
+  },
+  "live": {
+    "status": "visually_found",
+    "detail": "I found the Coke can and orange bucket.",
+    "startedUTC": "2026-10-22T21:51:43Z",
+    "finishedUTC": "2026-10-22T21:52:56Z",
+    "decodedObservations": 18,
+    "rasterPositions": 8,
+    "refreshObservations": 2,
+    "visuallyConfirmed": [
+      "can",
+      "orangeBucket"
+    ],
+    "armMotionSent": false,
+    "approvalSynthesized": false,
+    "placementVerified": false,
+    "earlierDenseDiagnostic": "Completed 32-view raster; stable pointing confirmed bucket. Deliberately interrupted after both visual confirmations to load correction."
+  },
+  "limits": [
+    "Can pickup/carry/placement has not been demonstrated.",
+    "Bucket boxes establish visual identity only; opening/rim/depth localization is still required for automatic transfer.",
+    "Camera-to-arm mapping remains provisional.",
+    "Few local replay scenes/crops do not establish broad detector accuracy."
+  ],
+  "evidenceSHA256": {
+    "object-detector-camera-replay.json": "34d84dcb25488052ea9e5a3e4c599be2b4d3f35be6eb19ba6b561463f96e94e8",
+    "object-detector-bucket-replay.json": "d28966ca1ae257d4a6757b3fbf30e8cb7fc6a1d6f76e0e0aa500c0847901e5af",
+    "object-detector-first-native-search.json": "67d2009f6250dad7d639ba5b3e9dd4695a9e133f0e3c4804f76f35f32af5ea2b",
+    "object-detector-dense-pointing-search.json.gz": "41f3b88fb18645989393d579d99bf1d0cf1e4dec89ed301651b45199ea548880",
+    "object-detector-final-native-search.json": "dbb92e3e14e7be08f460014f631b7dfaa9d04b3791c3fc9b20f495d582c19377"
+  },
+  "privacy": "No camera images included. Only detector outputs, hashes and outcomes are committed."
+}

@@ -1,0 +1,2256 @@
+{
+  "camera_arm_mapping" : "provisional URDF\/neck command prior, not measured hand-eye calibration",
+  "created_at" : "2026-10-22T21:31:17Z",
+  "decoded_observations" : 12,
+  "detail" : "I can see the Coke can. I still couldn't confirm the orange bucket.",
+  "inference" : "offline OWLv2 object boxes; no cloud or generative detection",
+  "left_hanging_observed" : false,
+  "objects" : {
+    "can" : {
+      "captured_at_ms" : 1792704664491.1409,
+      "position" : [
+        0.57603413776235701,
+        -0.35510485913839068,
+        0.91867249204180301
+      ]
+    }
+  },
+  "right_hanging_observed" : false,
+  "schema_version" : 1,
+  "status" : "not_found",
+  "views" : [
+    {
+      "can" : "not_grounded",
+      "captured_at_ms" : 1792704620257.5129,
+      "hanging_confidence" : 0,
+      "left_hanging" : false,
+      "local_inference" : {
+        "assessment" : "workspace_object_detector",
+        "candidates" : [
+          {
+            "box" : [
+              0.50882506370544434,
+              0.62626235961914067,
+              0.99937248229980469,
+              1
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.76858294010162354,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.55292463302612305,
+              0.45014106750488281,
+              0.92580661773681638,
+              0.87454826354980464
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.16352786123752594,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.059885489940643313,
+              0.17777799606323241,
+              0.17644166946411133,
+              0.37502788543701171
+            ],
+            "query" : "a stapler",
+            "score" : 0.13238747417926788,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.5711572647094727,
+              0.63920703887939456,
+              0.98855333328247075,
+              0.99842300415039065
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.12260667979717255,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.50325031280517574,
+              0.28238851547241212,
+              0.5861711978912354,
+              0.3714247512817383
+            ],
+            "query" : "a stapler",
+            "score" : 0.11925599724054337,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.97972173690795894,
+              0.3858821105957031,
+              0.99897460937500004,
+              0.5097354125976562
+            ],
+            "query" : "a stapler",
+            "score" : 0.11414533108472824,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.00036988407373428345,
+              0.39606414794921874,
+              0.14344024658203125,
+              0.61567100524902341
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.10744506120681763,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.49758663177490237,
+              0.45786888122558594,
+              0.99859504699707036,
+              0.99809616088867192
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.082775063812732697,
+            "target" : "other"
+          }
+        ],
+        "device" : "mps",
+        "inference_ms" : 9323.3587920000009,
+        "input_captured_at_ms" : 1792704620257.5129,
+        "input_sequence" : 88,
+        "latest_input_file" : "\/Users\/rob\/Library\/Application Support\/Cerebro\/WorkspaceDetector\/latest-input.jpg",
+        "model" : "google\/owlv2-base-patch16-ensemble",
+        "provider" : "owlv2"
+      },
+      "orangeBucket" : "not_grounded",
+      "pan" : 0,
+      "right_hanging" : false,
+      "sequence" : 88,
+      "upper" : 6306
+    },
+    {
+      "can" : "not_grounded",
+      "captured_at_ms" : 1792704630390.9358,
+      "hanging_confidence" : 0,
+      "left_hanging" : false,
+      "local_inference" : {
+        "assessment" : "workspace_object_detector",
+        "candidates" : [
+          {
+            "box" : [
+              0.50946722030639646,
+              0.62794540405273436,
+              1,
+              0.99949142456054685
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.77362751960754395,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.55232772827148435,
+              0.44989528656005862,
+              0.92620697021484377,
+              0.87458923339843753
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.18068172037601471,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.49943399429321289,
+              0.29234888076782228,
+              0.58589801788330076,
+              0.38219978332519533
+            ],
+            "query" : "a stapler",
+            "score" : 0.1611960232257843,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.56295299530029297,
+              0.64154998779296879,
+              0.98901071548461916,
+              0.99869087219238284
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.11597993969917297,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.060177838802337645,
+              0.17845796585083007,
+              0.17799633741378784,
+              0.37624248504638674
+            ],
+            "query" : "a stapler",
+            "score" : 0.1059679314494133,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.00016311556100845337,
+              0.39674755096435549,
+              0.14498066902160645,
+              0.62055240631103514
+            ],
+            "query" : "a stapler",
+            "score" : 0.10556633770465851,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.98050327301025386,
+              0.39311950683593749,
+              0.99913101196289067,
+              0.51098556518554683
+            ],
+            "query" : "a stapler",
+            "score" : 0.095722511410713196,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.00011348538100719452,
+              0.28066326141357423,
+              0.055767393112182616,
+              0.37907920837402342
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.081651933491230011,
+            "target" : "other"
+          }
+        ],
+        "device" : "mps",
+        "inference_ms" : 1139.540125,
+        "input_captured_at_ms" : 1792704630390.9358,
+        "input_sequence" : 392,
+        "latest_input_file" : "\/Users\/rob\/Library\/Application Support\/Cerebro\/WorkspaceDetector\/latest-input.jpg",
+        "model" : "google\/owlv2-base-patch16-ensemble",
+        "provider" : "owlv2"
+      },
+      "orangeBucket" : "not_grounded",
+      "pan" : 0,
+      "right_hanging" : false,
+      "sequence" : 392,
+      "upper" : 6306
+    },
+    {
+      "can" : "not_grounded",
+      "captured_at_ms" : 1792704634690.906,
+      "hanging_confidence" : 0,
+      "left_hanging" : false,
+      "local_inference" : {
+        "assessment" : "workspace_object_detector",
+        "candidates" : [
+          {
+            "box" : [
+              0.00098164379596710205,
+              0.0022016525268554687,
+              0.11312727928161621,
+              0.7717388916015625
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.51597529649734497,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.83735713958740232,
+              0.81704093933105471,
+              0.93784093856811523,
+              1
+            ],
+            "query" : "a stapler",
+            "score" : 0.18029312789440155,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.064707189798355103,
+              0.49234291076660158,
+              0.93576917648315427,
+              0.99954238891601566
+            ],
+            "query" : "a stapler",
+            "score" : 0.13202777504920959,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0,
+              0.0021503686904907225,
+              0.11023057699203491,
+              0.7729057312011719
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.11825289577245712,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.23424165248870848,
+              0,
+              0.4476350784301758,
+              0.29407072067260742
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.10148268938064575,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.059153884649276733,
+              0.73326705932617187,
+              0.3881537914276123,
+              1
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.098142564296722412,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.0014657005667686462,
+              0.00017905235290527344,
+              0.093080437183380133,
+              0.34826019287109378
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.094801381230354309,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.32441210746765137,
+              0.49376678466796875,
+              0.90544424057006834,
+              1
+            ],
+            "query" : "a stapler",
+            "score" : 0.082585327327251434,
+            "target" : "other"
+          }
+        ],
+        "device" : "mps",
+        "inference_ms" : 1456.1959170000023,
+        "input_captured_at_ms" : 1792704634690.906,
+        "input_sequence" : 521,
+        "latest_input_file" : "\/Users\/rob\/Library\/Application Support\/Cerebro\/WorkspaceDetector\/latest-input.jpg",
+        "model" : "google\/owlv2-base-patch16-ensemble",
+        "provider" : "owlv2"
+      },
+      "orangeBucket" : "not_grounded",
+      "pan" : -35,
+      "right_hanging" : false,
+      "sequence" : 521,
+      "upper" : 5650
+    },
+    {
+      "can" : "not_grounded",
+      "captured_at_ms" : 1792704636857.6162,
+      "hanging_confidence" : 0,
+      "left_hanging" : false,
+      "local_inference" : {
+        "assessment" : "workspace_object_detector",
+        "candidates" : [
+          {
+            "box" : [
+              0.00031708180904388428,
+              0.0037405729293823243,
+              0.11218906641006469,
+              0.77930084228515628
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.56814831495285034,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.83577814102172854,
+              0.8146563720703125,
+              0.93762922286987305,
+              1
+            ],
+            "query" : "a stapler",
+            "score" : 0.15852802991867065,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.066085278987884521,
+              0.4931770324707031,
+              0.93196449279785154,
+              1
+            ],
+            "query" : "a stapler",
+            "score" : 0.11755066365003586,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.23293807506561279,
+              0.00029654502868652343,
+              0.44535632133483888,
+              0.29913257598876952
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.11091232299804688,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.060860645771026609,
+              0.7327906799316406,
+              0.38918054103851318,
+              0.99953224182128908
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.10033048689365387,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.3201876640319824,
+              0.49367980957031249,
+              0.88919916152954104,
+              1
+            ],
+            "query" : "a stapler",
+            "score" : 0.092553786933422089,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.032130002975463867,
+              0.48054203033447268,
+              0.13021466732025147,
+              0.61067089080810544
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.082762487232685089,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.29931535720825198,
+              0.72682037353515627,
+              0.39795813560485838,
+              0.84887710571289066
+            ],
+            "query" : "a stapler",
+            "score" : 0.081117682158946991,
+            "target" : "other"
+          }
+        ],
+        "device" : "mps",
+        "inference_ms" : 1058.4612089999971,
+        "input_captured_at_ms" : 1792704636857.6162,
+        "input_sequence" : 586,
+        "latest_input_file" : "\/Users\/rob\/Library\/Application Support\/Cerebro\/WorkspaceDetector\/latest-input.jpg",
+        "model" : "google\/owlv2-base-patch16-ensemble",
+        "provider" : "owlv2"
+      },
+      "orangeBucket" : "not_grounded",
+      "pan" : -35,
+      "right_hanging" : false,
+      "sequence" : 586,
+      "upper" : 5650
+    },
+    {
+      "can" : "not_grounded",
+      "captured_at_ms" : 1792704641590.959,
+      "hanging_confidence" : 0,
+      "left_hanging" : false,
+      "local_inference" : {
+        "assessment" : "workspace_object_detector",
+        "candidates" : [
+          {
+            "box" : [
+              0.43113512992858888,
+              0.12911280632019043,
+              0.60882301330566402,
+              0.46972831726074221
+            ],
+            "query" : "an orange plastic bucket",
+            "score" : 0.33193579316139221,
+            "target" : "orangeBucket"
+          },
+          {
+            "box" : [
+              0.016063138842582703,
+              0.82487625122070307,
+              0.17887820005416871,
+              0.99994621276855467
+            ],
+            "query" : "a stapler",
+            "score" : 0.11903482675552368,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.42438917160034179,
+              0.60455940246582029,
+              0.6871393203735352,
+              0.99833175659179685
+            ],
+            "query" : "a stapler",
+            "score" : 0.11828335374593735,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.9170717239379883,
+              0.50672111511230467,
+              0.99690303802490232,
+              0.69438766479492187
+            ],
+            "query" : "a stapler",
+            "score" : 0.10620784014463425,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.26973118782043459,
+              0.044499702453613281,
+              0.41978254318237307,
+              0.12036386489868164
+            ],
+            "query" : "a stapler",
+            "score" : 0.1027727946639061,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.16934003829956054,
+              0.52427482604980469,
+              0.95651855468750002,
+              1
+            ],
+            "query" : "a stapler",
+            "score" : 0.096745364367961884,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.27152743339538576,
+              0.11498983383178711,
+              0.33627150058746336,
+              0.18291023254394531
+            ],
+            "query" : "a stapler",
+            "score" : 0.095338419079780579,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.18359122276306153,
+              0.52315917968750003,
+              0.6448997497558594,
+              0.97143974304199221
+            ],
+            "query" : "a stapler",
+            "score" : 0.090540602803230286,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.93657884597778318,
+              0.059249830245971677,
+              0.98410530090332027,
+              0.12304157257080078
+            ],
+            "query" : "a stapler",
+            "score" : 0.082447357475757599,
+            "target" : "other"
+          }
+        ],
+        "device" : "mps",
+        "inference_ms" : 1137.4997499999999,
+        "input_captured_at_ms" : 1792704641590.959,
+        "input_sequence" : 728,
+        "latest_input_file" : "\/Users\/rob\/Library\/Application Support\/Cerebro\/WorkspaceDetector\/latest-input.jpg",
+        "model" : "google\/owlv2-base-patch16-ensemble",
+        "provider" : "owlv2"
+      },
+      "orangeBucket" : "not_grounded",
+      "pan" : 35,
+      "right_hanging" : false,
+      "sequence" : 728,
+      "upper" : 5650
+    },
+    {
+      "error" : "Local detector lost the advancing live camera.",
+      "local_inference" : {
+        "assessment" : "workspace_object_detector",
+        "candidates" : [
+          {
+            "box" : [
+              0.43113512992858888,
+              0.12911280632019043,
+              0.60882301330566402,
+              0.46972831726074221
+            ],
+            "query" : "an orange plastic bucket",
+            "score" : 0.33193579316139221,
+            "target" : "orangeBucket"
+          },
+          {
+            "box" : [
+              0.016063138842582703,
+              0.82487625122070307,
+              0.17887820005416871,
+              0.99994621276855467
+            ],
+            "query" : "a stapler",
+            "score" : 0.11903482675552368,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.42438917160034179,
+              0.60455940246582029,
+              0.6871393203735352,
+              0.99833175659179685
+            ],
+            "query" : "a stapler",
+            "score" : 0.11828335374593735,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.9170717239379883,
+              0.50672111511230467,
+              0.99690303802490232,
+              0.69438766479492187
+            ],
+            "query" : "a stapler",
+            "score" : 0.10620784014463425,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.26973118782043459,
+              0.044499702453613281,
+              0.41978254318237307,
+              0.12036386489868164
+            ],
+            "query" : "a stapler",
+            "score" : 0.1027727946639061,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.16934003829956054,
+              0.52427482604980469,
+              0.95651855468750002,
+              1
+            ],
+            "query" : "a stapler",
+            "score" : 0.096745364367961884,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.27152743339538576,
+              0.11498983383178711,
+              0.33627150058746336,
+              0.18291023254394531
+            ],
+            "query" : "a stapler",
+            "score" : 0.095338419079780579,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.18359122276306153,
+              0.52315917968750003,
+              0.6448997497558594,
+              0.97143974304199221
+            ],
+            "query" : "a stapler",
+            "score" : 0.090540602803230286,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.93657884597778318,
+              0.059249830245971677,
+              0.98410530090332027,
+              0.12304157257080078
+            ],
+            "query" : "a stapler",
+            "score" : 0.082447357475757599,
+            "target" : "other"
+          }
+        ],
+        "device" : "mps",
+        "inference_ms" : 1137.4997499999999,
+        "input_captured_at_ms" : 1792704641590.959,
+        "input_sequence" : 728,
+        "latest_input_file" : "\/Users\/rob\/Library\/Application Support\/Cerebro\/WorkspaceDetector\/latest-input.jpg",
+        "model" : "google\/owlv2-base-patch16-ensemble",
+        "provider" : "owlv2"
+      },
+      "pan" : 35,
+      "upper" : 5650
+    },
+    {
+      "error" : "Local detector lost the advancing live camera.",
+      "local_inference" : {
+        "assessment" : "workspace_object_detector",
+        "candidates" : [
+          {
+            "box" : [
+              0.43113512992858888,
+              0.12911280632019043,
+              0.60882301330566402,
+              0.46972831726074221
+            ],
+            "query" : "an orange plastic bucket",
+            "score" : 0.33193579316139221,
+            "target" : "orangeBucket"
+          },
+          {
+            "box" : [
+              0.016063138842582703,
+              0.82487625122070307,
+              0.17887820005416871,
+              0.99994621276855467
+            ],
+            "query" : "a stapler",
+            "score" : 0.11903482675552368,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.42438917160034179,
+              0.60455940246582029,
+              0.6871393203735352,
+              0.99833175659179685
+            ],
+            "query" : "a stapler",
+            "score" : 0.11828335374593735,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.9170717239379883,
+              0.50672111511230467,
+              0.99690303802490232,
+              0.69438766479492187
+            ],
+            "query" : "a stapler",
+            "score" : 0.10620784014463425,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.26973118782043459,
+              0.044499702453613281,
+              0.41978254318237307,
+              0.12036386489868164
+            ],
+            "query" : "a stapler",
+            "score" : 0.1027727946639061,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.16934003829956054,
+              0.52427482604980469,
+              0.95651855468750002,
+              1
+            ],
+            "query" : "a stapler",
+            "score" : 0.096745364367961884,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.27152743339538576,
+              0.11498983383178711,
+              0.33627150058746336,
+              0.18291023254394531
+            ],
+            "query" : "a stapler",
+            "score" : 0.095338419079780579,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.18359122276306153,
+              0.52315917968750003,
+              0.6448997497558594,
+              0.97143974304199221
+            ],
+            "query" : "a stapler",
+            "score" : 0.090540602803230286,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.93657884597778318,
+              0.059249830245971677,
+              0.98410530090332027,
+              0.12304157257080078
+            ],
+            "query" : "a stapler",
+            "score" : 0.082447357475757599,
+            "target" : "other"
+          }
+        ],
+        "device" : "mps",
+        "inference_ms" : 1137.4997499999999,
+        "input_captured_at_ms" : 1792704641590.959,
+        "input_sequence" : 728,
+        "latest_input_file" : "\/Users\/rob\/Library\/Application Support\/Cerebro\/WorkspaceDetector\/latest-input.jpg",
+        "model" : "google\/owlv2-base-patch16-ensemble",
+        "provider" : "owlv2"
+      },
+      "pan" : 0,
+      "upper" : 5650
+    },
+    {
+      "pan" : -70,
+      "status" : "outside_current_neck_envelope",
+      "upper" : 6306
+    },
+    {
+      "pan" : 70,
+      "status" : "outside_current_neck_envelope",
+      "upper" : 6306
+    },
+    {
+      "can" : "not_grounded",
+      "captured_at_ms" : 1792704651924.406,
+      "hanging_confidence" : 0,
+      "left_hanging" : false,
+      "local_inference" : {
+        "assessment" : "workspace_object_detector",
+        "candidates" : [
+          {
+            "box" : [
+              0.34075479507446288,
+              0.12385201454162598,
+              0.38542318344116211,
+              0.25070207595825195
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.27339708805084229,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.65274744033813481,
+              0.12945178985595704,
+              0.68138771057128911,
+              0.15179329872131347
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.25653034448623657,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.61385564804077153,
+              0.20493110656738281,
+              0.64642782211303706,
+              0.2955734634399414
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.24673177301883698,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.31313111782073977,
+              0.17350765228271484,
+              0.34200606346130369,
+              0.24763442993164062
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.22860914468765259,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.32994987964630129,
+              0.48207836151123046,
+              0.40278015136718748,
+              0.65845642089843748
+            ],
+            "query" : "a water bottle",
+            "score" : 0.19195820391178131,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.35739331245422362,
+              0.20099315643310547,
+              0.3809042453765869,
+              0.25725831985473635
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.18667842447757721,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.41726655960083009,
+              0.52816791534423824,
+              0.44776086807250975,
+              0.64546600341796878
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.18500781059265137,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.39288372993469239,
+              0.56406257629394529,
+              0.43770246505737304,
+              0.65466499328613281
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.17112995684146881,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.33670403957366946,
+              4.2140483856201172e-05,
+              0.38346114158630373,
+              0.038335804939270017
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.15367293357849121,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              6.1520375311374664e-05,
+              0.57495056152343749,
+              0.029114794731140137,
+              0.63546215057373046
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.14368836581707001,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.37949726581573484,
+              0.1989289093017578,
+              0.40527052879333497,
+              0.26184415817260742
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.13976439833641052,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.31446077823638918,
+              0.57397277832031246,
+              0.3337962865829468,
+              0.65401603698730471
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.13340049982070923,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.2839232921600342,
+              0.32804374694824218,
+              0.30522749423980711,
+              0.38018642425537108
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.12018124014139175,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.63419151306152344,
+              0.054074726104736327,
+              0.66342353820800781,
+              0.10998867988586426
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.11761625856161118,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.27947137355804441,
+              0.12077827453613281,
+              0.2995715379714966,
+              0.23902406692504882
+            ],
+            "query" : "an aluminum beverage can",
+            "score" : 0.11476511508226395,
+            "target" : "can"
+          },
+          {
+            "box" : [
+              0.33608913421630859,
+              0.48209777832031248,
+              0.40807290077209474,
+              0.5883376693725586
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.10464979708194733,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.27554378509521482,
+              0.49895294189453127,
+              0.33291683197021482,
+              0.57226150512695317
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.094976603984832764,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.3159195899963379,
+              0.1967220687866211,
+              0.33757061958312989,
+              0.24744462966918945
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.090857438743114471,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.58613424301147465,
+              0.0163061261177063,
+              0.63792009353637691,
+              0.12636680603027345
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.089192517101764679,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.39037871360778809,
+              0.52775016784667972,
+              0.40601658821105957,
+              0.607713737487793
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.087619476020336151,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.14925862550735475,
+              0.49129695892333985,
+              0.1773845672607422,
+              0.53823806762695314
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.086101733148097992,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.32328791618347169,
+              0.32870788574218751,
+              0.34586727619171143,
+              0.38238441467285156
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.085395023226737976,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.30454871654510496,
+              0.32684558868408203,
+              0.32489428520202634,
+              0.37993179321289061
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.081780731678009033,
+            "target" : "other"
+          }
+        ],
+        "device" : "mps",
+        "inference_ms" : 1158.1175839999958,
+        "input_captured_at_ms" : 1792704651924.406,
+        "input_sequence" : 1038,
+        "latest_input_file" : "\/Users\/rob\/Library\/Application Support\/Cerebro\/WorkspaceDetector\/latest-input.jpg",
+        "model" : "google\/owlv2-base-patch16-ensemble",
+        "provider" : "owlv2"
+      },
+      "orangeBucket" : "not_grounded",
+      "pan" : 0,
+      "right_hanging" : false,
+      "sequence" : 1038,
+      "upper" : 6906
+    },
+    {
+      "can" : "not_grounded",
+      "captured_at_ms" : 1792704653924.429,
+      "hanging_confidence" : 0,
+      "left_hanging" : false,
+      "local_inference" : {
+        "assessment" : "workspace_object_detector",
+        "candidates" : [
+          {
+            "box" : [
+              0.34309494495391846,
+              0.1333445453643799,
+              0.38756871223449707,
+              0.26138811111450194
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.28501740097999573,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.3159865140914917,
+              0.18351888656616211,
+              0.34551537036895752,
+              0.25769138336181641
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.26828578114509583,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.60931434631347658,
+              0.21464422225952148,
+              0.64489498138427737,
+              0.30343286514282225
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.26554900407791138,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.39553096294403078,
+              0.56821384429931643,
+              0.4353318691253662,
+              0.65871551513671878
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.22443364560604095,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.33295249938964844,
+              0.48736373901367186,
+              0.39659690856933594,
+              0.66079139709472656
+            ],
+            "query" : "a water bottle",
+            "score" : 0.21706032752990723,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.33742394447326662,
+              0.00040550082921981813,
+              0.38596465587615969,
+              0.050335474014282226
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.20709392428398132,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.6514797687530518,
+              0.13901626586914062,
+              0.67887716293334965,
+              0.16001399993896484
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.18390081822872162,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.28580017089843751,
+              0.33142250061035156,
+              0.30854058265686035,
+              0.38736728668212889
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.16761514544487,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.32535328865051272,
+              0.3352717971801758,
+              0.34713075160980222,
+              0.38900047302246094
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.12388619780540466,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0,
+              0.58029602050781248,
+              0.028200194239616394,
+              0.64881698608398441
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.11214351654052734,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.59759407043457036,
+              0.62575714111328129,
+              0.64791531562805171,
+              0.66414337158203129
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.10854288190603256,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.39592659473419189,
+              0.53378829956054685,
+              0.43792295455932617,
+              0.65422752380371096
+            ],
+            "query" : "a water bottle",
+            "score" : 0.098547257483005524,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.1529805064201355,
+              0.49733463287353513,
+              0.18096542358398438,
+              0.54450756072998052
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.091713212430477142,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.63185195922851567,
+              0.17714939117431641,
+              0.66699404716491695,
+              0.31500968933105467
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.090617470443248749,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.28286454677581785,
+              0.1327359676361084,
+              0.30285987854003904,
+              0.25001134872436526
+            ],
+            "query" : "an aluminum beverage can",
+            "score" : 0.089169017970561981,
+            "target" : "can"
+          },
+          {
+            "box" : [
+              0.31959340572357176,
+              0.20493812561035157,
+              0.34123036861419676,
+              0.25648475646972657
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.089076705276966095,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.29045133590698241,
+              0.63889175415039068,
+              0.31743049621582031,
+              0.66037269592285153
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.086403541266918182,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.08746992945671081,
+              0.90441802978515629,
+              0.17028250694274902,
+              0.99972839355468746
+            ],
+            "query" : "an open orange bucket",
+            "score" : 0.084260091185569763,
+            "target" : "orangeBucket"
+          },
+          {
+            "box" : [
+              0.28354635238647463,
+              0.13300102233886718,
+              0.3014476537704468,
+              0.17713729858398439
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.081946805119514465,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.13238089084625243,
+              0.57740726470947268,
+              0.1596812129020691,
+              0.63690879821777346
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.080600738525390625,
+            "target" : "other"
+          }
+        ],
+        "device" : "mps",
+        "inference_ms" : 1323.7523339999982,
+        "input_captured_at_ms" : 1792704653924.429,
+        "input_sequence" : 1098,
+        "latest_input_file" : "\/Users\/rob\/Library\/Application Support\/Cerebro\/WorkspaceDetector\/latest-input.jpg",
+        "model" : "google\/owlv2-base-patch16-ensemble",
+        "provider" : "owlv2"
+      },
+      "orangeBucket" : "not_grounded",
+      "pan" : 0,
+      "right_hanging" : false,
+      "sequence" : 1098,
+      "upper" : 6906
+    },
+    {
+      "pointing_guided_pan" : -32.715247929096222,
+      "pointing_is_object_confirmation" : false,
+      "upper" : 6157
+    },
+    {
+      "can" : {
+        "confidence" : 0.64012134075164795,
+        "position" : [
+          0.57566826634899071,
+          -0.35545185291371134,
+          0.91838164504066044
+        ]
+      },
+      "captured_at_ms" : 1792704662491.114,
+      "hanging_confidence" : 0,
+      "left_hanging" : false,
+      "local_inference" : {
+        "assessment" : "workspace_object_detector",
+        "candidates" : [
+          {
+            "box" : [
+              9.72747802734375e-05,
+              0.48265113830566408,
+              0.26887414455413816,
+              1
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.77734571695327759,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.36278944015502929,
+              0.25855541229248047,
+              0.44872312545776366,
+              0.5024534225463867
+            ],
+            "query" : "an aluminum beverage can",
+            "score" : 0.64012134075164795,
+            "target" : "can"
+          },
+          {
+            "box" : [
+              0.37871253490447998,
+              0.11842260360717774,
+              0.50761508941650391,
+              0.3221550750732422
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.58815181255340576,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.29248807430267332,
+              0.22358320236206056,
+              0.36801753044128416,
+              0.27495452880859372
+            ],
+            "query" : "a stapler",
+            "score" : 0.46117493510246277,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.36604385375976561,
+              0.0066184401512145996,
+              0.43754339218139648,
+              0.24589147567749023
+            ],
+            "query" : "a water bottle",
+            "score" : 0.28109866380691528,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.46256227493286134,
+              0.077818307876586917,
+              0.5186009407043457,
+              0.16137588500976563
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.25026100873947144,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.50811433792114258,
+              0.16811586380004884,
+              0.56939816474914551,
+              0.23813512802124023
+            ],
+            "query" : "a stapler",
+            "score" : 0.16893307864665985,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.66844749450683594,
+              0.088119983673095703,
+              0.68051385879516602,
+              0.19563983917236327
+            ],
+            "query" : "a red Coca-Cola soda can",
+            "score" : 0.16361279785633087,
+            "target" : "can"
+          },
+          {
+            "box" : [
+              0.5655489921569824,
+              0.17611900329589844,
+              0.65118026733398438,
+              0.37788623809814453
+            ],
+            "query" : "a stapler",
+            "score" : 0.15300227701663971,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.04384297728538513,
+              0.3014604377746582,
+              0.092158609628677363,
+              0.42293819427490237
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.11476579308509827,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.56611890792846675,
+              0.42603382110595706,
+              0.62463645935058598,
+              0.60318950653076175
+            ],
+            "query" : "a stapler",
+            "score" : 0.1139228418469429,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.28561232089996336,
+              0.10281218528747559,
+              0.32603607177734373,
+              0.19205629348754882
+            ],
+            "query" : "a stapler",
+            "score" : 0.10751967132091522,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.36686391830444337,
+              0.2588655090332031,
+              0.43502306938171387,
+              0.31742511749267577
+            ],
+            "query" : "an aluminum beverage can",
+            "score" : 0.10150115191936493,
+            "target" : "can"
+          },
+          {
+            "box" : [
+              0.0032644420862197876,
+              0.49474174499511719,
+              0.25569844245910645,
+              0.95086624145507814
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.097038693726062775,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.24061646461486816,
+              0.084457626342773442,
+              0.38374373912811277,
+              0.23411054611206056
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.096483588218688965,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.3706523895263672,
+              0.32457603454589845,
+              0.44402503967285156,
+              0.40912528991699221
+            ],
+            "query" : "a red Coca-Cola soda can",
+            "score" : 0.09315016120672226,
+            "target" : "can"
+          },
+          {
+            "box" : [
+              0.36416521072387698,
+              0.25915908813476562,
+              0.44739813804626466,
+              0.50468322753906247
+            ],
+            "query" : "a red Coca-Cola soda can",
+            "score" : 0.091520905494689941,
+            "target" : "can"
+          },
+          {
+            "box" : [
+              0.63059592247009277,
+              0.078628869056701661,
+              0.66273870468139651,
+              0.24090274810791015
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.080829508602619171,
+            "target" : "other"
+          }
+        ],
+        "device" : "mps",
+        "inference_ms" : 1168.3075409999972,
+        "input_captured_at_ms" : 1792704662491.114,
+        "input_sequence" : 1355,
+        "latest_input_file" : "\/Users\/rob\/Library\/Application Support\/Cerebro\/WorkspaceDetector\/latest-input.jpg",
+        "model" : "google\/owlv2-base-patch16-ensemble",
+        "provider" : "owlv2"
+      },
+      "orangeBucket" : "not_grounded",
+      "pan" : -32.715247929096222,
+      "right_hanging" : false,
+      "sequence" : 1355,
+      "upper" : 6157
+    },
+    {
+      "can" : {
+        "confidence" : 0.64260381460189819,
+        "position" : [
+          0.57603413776235701,
+          -0.35510485913839068,
+          0.91867249204180301
+        ]
+      },
+      "captured_at_ms" : 1792704664491.1409,
+      "hanging_confidence" : 0,
+      "left_hanging" : false,
+      "local_inference" : {
+        "assessment" : "workspace_object_detector",
+        "candidates" : [
+          {
+            "box" : [
+              0.00051434338092803955,
+              0.47830741882324218,
+              0.26953279972076416,
+              1
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.784831702709198,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.36181976795196535,
+              0.25736106872558595,
+              0.44834213256835936,
+              0.50225746154785156
+            ],
+            "query" : "an aluminum beverage can",
+            "score" : 0.64260381460189819,
+            "target" : "can"
+          },
+          {
+            "box" : [
+              0.37883777618408204,
+              0.11664949417114258,
+              0.50775547027587886,
+              0.31996589660644531
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.59493446350097656,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.29233446121215823,
+              0.22194501876831055,
+              0.3674419164657593,
+              0.27345048904418945
+            ],
+            "query" : "a stapler",
+            "score" : 0.4716096818447113,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.36591787338256837,
+              0.0048038363456726074,
+              0.43696851730346681,
+              0.2459445571899414
+            ],
+            "query" : "a water bottle",
+            "score" : 0.26679843664169312,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.46234741210937502,
+              0.07511181831359863,
+              0.51816139221191404,
+              0.15537853240966798
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.244916632771492,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.56641559600830083,
+              0.1762007713317871,
+              0.65107135772705083,
+              0.37556777954101561
+            ],
+            "query" : "a stapler",
+            "score" : 0.22226530313491821,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.50708198547363281,
+              0.16200624465942381,
+              0.57047057151794434,
+              0.23990188598632811
+            ],
+            "query" : "a stapler",
+            "score" : 0.19199705123901367,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.66770052909851074,
+              0.080272083282470708,
+              0.68092918395996094,
+              0.19705522537231446
+            ],
+            "query" : "a red Coca-Cola soda can",
+            "score" : 0.12607572972774506,
+            "target" : "can"
+          },
+          {
+            "box" : [
+              0.28382539749145508,
+              0.09688792228698731,
+              0.32532424926757814,
+              0.18950267791748046
+            ],
+            "query" : "a stapler",
+            "score" : 0.11499896645545959,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.56663613319396977,
+              0.4346722412109375,
+              0.62451930046081539,
+              0.6014530944824219
+            ],
+            "query" : "a stapler",
+            "score" : 0.11297597736120224,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.044189441204071048,
+              0.30895256042480468,
+              0.086126494407653811,
+              0.41798995971679687
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.10860522091388702,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.24255378246307374,
+              0.085325059890747068,
+              0.3827894926071167,
+              0.23236736297607422
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.10346278548240662,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.0034449398517608643,
+              0.49333362579345702,
+              0.2528921365737915,
+              0.96024383544921876
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.091259971261024475,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.41878623962402345,
+              0.0072843462228775026,
+              0.44117746353149412,
+              0.086834583282470706
+            ],
+            "query" : "a red Coca-Cola soda can",
+            "score" : 0.090045332908630371,
+            "target" : "can"
+          },
+          {
+            "box" : [
+              0.3654379606246948,
+              0.27584625244140626,
+              0.44692077636718752,
+              0.50257400512695316
+            ],
+            "query" : "a red Coca-Cola soda can",
+            "score" : 0.088130533695220947,
+            "target" : "can"
+          },
+          {
+            "box" : [
+              0.3793542146682739,
+              0.0014551311731338501,
+              0.43602890968322755,
+              0.079023003578186035
+            ],
+            "query" : "a stapler",
+            "score" : 0.087464451789855957,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.36819193363189695,
+              0.31629627227783202,
+              0.44366912841796874,
+              0.4088594055175781
+            ],
+            "query" : "a red Coca-Cola soda can",
+            "score" : 0.08659864217042923,
+            "target" : "can"
+          },
+          {
+            "box" : [
+              0.62974405288696289,
+              0.09021570205688477,
+              0.66176948547363279,
+              0.24728897094726562
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.083491601049900055,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.36545758247375487,
+              0.25730104446411134,
+              0.43465762138366698,
+              0.31631816864013673
+            ],
+            "query" : "an aluminum beverage can",
+            "score" : 0.081175759434700012,
+            "target" : "can"
+          }
+        ],
+        "device" : "mps",
+        "inference_ms" : 1130.1829160000025,
+        "input_captured_at_ms" : 1792704664491.1409,
+        "input_sequence" : 1415,
+        "latest_input_file" : "\/Users\/rob\/Library\/Application Support\/Cerebro\/WorkspaceDetector\/latest-input.jpg",
+        "model" : "google\/owlv2-base-patch16-ensemble",
+        "provider" : "owlv2"
+      },
+      "orangeBucket" : "not_grounded",
+      "pan" : -32.715247929096222,
+      "right_hanging" : false,
+      "sequence" : 1415,
+      "upper" : 6157
+    },
+    {
+      "can" : "not_grounded",
+      "captured_at_ms" : 1792704668324.5559,
+      "hanging_confidence" : 0,
+      "left_hanging" : false,
+      "local_inference" : {
+        "assessment" : "workspace_object_detector",
+        "candidates" : [
+          {
+            "box" : [
+              0,
+              0.19632217407226563,
+              0.10696147680282593,
+              0.42633914947509766
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.54862868785858154,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.00013531744480133057,
+              0.39707752227783205,
+              0.06633228063583374,
+              0.64824516296386714
+            ],
+            "query" : "a red Coca-Cola soda can",
+            "score" : 0.24834655225276947,
+            "target" : "can"
+          },
+          {
+            "box" : [
+              0.16070927381515504,
+              0.23691844940185547,
+              0.26736345291137698,
+              0.42244049072265627
+            ],
+            "query" : "a stapler",
+            "score" : 0.17106921970844269,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.0025623291730880737,
+              0.46069137573242186,
+              0.064598309993743899,
+              0.64475296020507811
+            ],
+            "query" : "a red Coca-Cola soda can",
+            "score" : 0.10385434329509735,
+            "target" : "can"
+          },
+          {
+            "box" : [
+              0.10559259653091431,
+              0.40750228881835937,
+              0.23616576194763184,
+              0.61077835083007814
+            ],
+            "query" : "a stapler",
+            "score" : 0.098215140402317047,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.017628130316734315,
+              0.14803789138793946,
+              0.093052101135253903,
+              0.23092517852783204
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.098011530935764313,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.090752291679382327,
+              0.21266769409179687,
+              0.16687040328979491,
+              0.29010305404663084
+            ],
+            "query" : "a stapler",
+            "score" : 0.094866611063480377,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.017544984817504883,
+              0.14735260009765624,
+              0.087131190299987796,
+              0.19665754318237305
+            ],
+            "query" : "an aluminum beverage can",
+            "score" : 0.082183092832565308,
+            "target" : "can"
+          }
+        ],
+        "device" : "mps",
+        "inference_ms" : 1276.8030420000046,
+        "input_captured_at_ms" : 1792704668324.5559,
+        "input_sequence" : 1530,
+        "latest_input_file" : "\/Users\/rob\/Library\/Application Support\/Cerebro\/WorkspaceDetector\/latest-input.jpg",
+        "model" : "google\/owlv2-base-patch16-ensemble",
+        "provider" : "owlv2"
+      },
+      "orangeBucket" : "not_grounded",
+      "pan" : -47.715247929096222,
+      "right_hanging" : false,
+      "sequence" : 1530,
+      "upper" : 6157
+    },
+    {
+      "can" : "not_grounded",
+      "captured_at_ms" : 1792704670324.5691,
+      "hanging_confidence" : 0,
+      "left_hanging" : false,
+      "local_inference" : {
+        "assessment" : "workspace_object_detector",
+        "candidates" : [
+          {
+            "box" : [
+              0.0010853670537471771,
+              0.19555868148803712,
+              0.10684778690338134,
+              0.42481464385986328
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.53021830320358276,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.00022730976343154907,
+              0.40660789489746096,
+              0.064950042963027949,
+              0.64859619140625002
+            ],
+            "query" : "a red Coca-Cola soda can",
+            "score" : 0.31862062215805054,
+            "target" : "can"
+          },
+          {
+            "box" : [
+              0.15927352905273437,
+              0.23369035720825196,
+              0.26656880378723147,
+              0.42246784210205079
+            ],
+            "query" : "a stapler",
+            "score" : 0.16825909912586212,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.092507076263427732,
+              0.21194097518920899,
+              0.1662276268005371,
+              0.29133756637573244
+            ],
+            "query" : "a stapler",
+            "score" : 0.11896364390850067,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.015776056051254272,
+              0.14881843566894531,
+              0.090510141849517819,
+              0.22788581848144532
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.11051058024168015,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.0078606918454170224,
+              0.47334053039550783,
+              0.06368871927261352,
+              0.64495864868164066
+            ],
+            "query" : "a red Coca-Cola soda can",
+            "score" : 0.10161949694156647,
+            "target" : "can"
+          },
+          {
+            "box" : [
+              0.016418862342834472,
+              0.14721732139587401,
+              0.085319590568542478,
+              0.1967339324951172
+            ],
+            "query" : "an aluminum beverage can",
+            "score" : 0.092081397771835327,
+            "target" : "can"
+          },
+          {
+            "box" : [
+              0.11430920362472534,
+              0.40614212036132813,
+              0.22966921329498291,
+              0.49621315002441407
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.081012234091758728,
+            "target" : "other"
+          }
+        ],
+        "device" : "mps",
+        "inference_ms" : 1216.0113340000009,
+        "input_captured_at_ms" : 1792704670324.5691,
+        "input_sequence" : 1590,
+        "latest_input_file" : "\/Users\/rob\/Library\/Application Support\/Cerebro\/WorkspaceDetector\/latest-input.jpg",
+        "model" : "google\/owlv2-base-patch16-ensemble",
+        "provider" : "owlv2"
+      },
+      "orangeBucket" : "not_grounded",
+      "pan" : -47.715247929096222,
+      "right_hanging" : false,
+      "sequence" : 1590,
+      "upper" : 6157
+    },
+    {
+      "can" : {
+        "confidence" : 0.58948332071304321,
+        "position" : [
+          0.54913563688414335,
+          -0.39326204706770562,
+          0.91990762447198471
+        ]
+      },
+      "captured_at_ms" : 1792704674557.9487,
+      "hanging_confidence" : 0,
+      "left_hanging" : false,
+      "local_inference" : {
+        "assessment" : "workspace_object_detector",
+        "candidates" : [
+          {
+            "box" : [
+              0.17234259843826294,
+              0.40272529602050783,
+              0.5920514583587646,
+              1
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.75186610221862793,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.69856824874877932,
+              0.26563610076904298,
+              0.80272006988525391,
+              0.51850315093994137
+            ],
+            "query" : "a red Coca-Cola soda can",
+            "score" : 0.58948332071304321,
+            "target" : "can"
+          },
+          {
+            "box" : [
+              0.73470253944396968,
+              0.13265847206115722,
+              0.89100732803344729,
+              0.35298095703124999
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.55383926630020142,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.64543762207031252,
+              0.21795024871826171,
+              0.72107291221618652,
+              0.26761402130126954
+            ],
+            "query" : "a stapler",
+            "score" : 0.36643069982528687,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.73939709663391118,
+              0.0093109607696533203,
+              0.82470407485961916,
+              0.2590203857421875
+            ],
+            "query" : "a water bottle",
+            "score" : 0.30904164910316467,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.89566812515258787,
+              0.50792270660400396,
+              0.99734535217285158,
+              0.69623199462890628
+            ],
+            "query" : "a stapler",
+            "score" : 0.16509155929088593,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.73291378021240239,
+              0.2760746765136719,
+              0.79110641479492183,
+              0.31981447219848635
+            ],
+            "query" : "an aluminum beverage can",
+            "score" : 0.14274381101131439,
+            "target" : "can"
+          },
+          {
+            "box" : [
+              0.26430540084838866,
+              0.35426658630371094,
+              0.32800869941711425,
+              0.47288700103759768
+            ],
+            "query" : "a coffee mug",
+            "score" : 0.13874746859073639,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.31387712955474856,
+              0.40549156188964841,
+              0.58890223503112793,
+              0.7869772338867187
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.12314144521951675,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.18526911735534668,
+              0.80760620117187498,
+              0.4089043140411377,
+              0.99811981201171873
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.1188250407576561,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.9506050109863281,
+              0.22603057861328124,
+              0.99863233566284182,
+              0.4730880355834961
+            ],
+            "query" : "a stapler",
+            "score" : 0.11510723084211349,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.83261070251464842,
+              0.44582504272460938,
+              0.9429954528808594,
+              0.54547466278076173
+            ],
+            "query" : "a computer keyboard",
+            "score" : 0.11386460810899734,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.84179925918579102,
+              0.097824373245239252,
+              0.91062688827514648,
+              0.21205802917480468
+            ],
+            "query" : "an aluminum beverage can",
+            "score" : 0.093913577497005463,
+            "target" : "can"
+          },
+          {
+            "box" : [
+              0.65644216537475586,
+              0.088205547332763673,
+              0.69691181182861328,
+              0.17194540023803712
+            ],
+            "query" : "a stapler",
+            "score" : 0.093636937439441681,
+            "target" : "other"
+          },
+          {
+            "box" : [
+              0.71264362335205078,
+              0.32881412506103513,
+              0.80118370056152344,
+              0.43084354400634767
+            ],
+            "query" : "a red Coca-Cola soda can",
+            "score" : 0.088311761617660522,
+            "target" : "can"
+          }
+        ],
+        "device" : "mps",
+        "inference_ms" : 1138.3147499999993,
+        "input_captured_at_ms" : 1792704674557.9487,
+        "input_sequence" : 1717,
+        "latest_input_file" : "\/Users\/rob\/Library\/Application Support\/Cerebro\/WorkspaceDetector\/latest-input.jpg",
+        "model" : "google\/owlv2-base-patch16-ensemble",
+        "provider" : "owlv2"
+      },
+      "orangeBucket" : "not_grounded",
+      "pan" : -17.715247929096222,
+      "right_hanging" : false,
+      "sequence" : 1717,
+      "upper" : 6157
+    },
+    {
+      "guided_error" : "Local detector lost the advancing live camera."
+    }
+  ],
+  "visually_confirmed" : [
+    "can"
+  ]
+}

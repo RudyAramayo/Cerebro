@@ -22,6 +22,7 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
+		AE2610222000000000000002 /* ROBWorkspaceObjectDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE2610222000000000000001; };
 		AE2610221000000000000002 /* ROBWorkspaceSearchPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE2610221000000000000001; };
 		AE2610211000000000000002 /* ROBGhostMotionPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE2610211000000000000001; };
 		AE2610211000000000000004 /* ROBGhostGestureEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE2610211000000000000003; };
@@ -268,6 +269,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		AE2610222000000000000001 /* ROBWorkspaceObjectDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBWorkspaceObjectDetector.swift; sourceTree = "<group>"; };
 		AE2610221000000000000001 /* ROBWorkspaceSearchPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBWorkspaceSearchPlan.swift; sourceTree = "<group>"; };
 		AE2610211000000000000001 /* ROBGhostMotionPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBGhostMotionPlan.swift; sourceTree = "<group>"; };
 		AE2610211000000000000003 /* ROBGhostGestureEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBGhostGestureEditor.swift; sourceTree = "<group>"; };
@@ -709,6 +711,7 @@
 				AE2610211000000000000001 /* ROBGhostMotionPlan.swift */,
 				AE2610211000000000000003 /* ROBGhostGestureEditor.swift */,
 				AE2610221000000000000001 /* ROBWorkspaceSearchPlan.swift */,
+				AE2610222000000000000001 /* ROBWorkspaceObjectDetector.swift */,
 				AC2309260000000000000003 /* ROBArmRoutineVision.swift */,
 				AC2309260000000000000005 /* ROBArmRoutineCoordinator.swift */,
 				AC2509230000000000000001 /* ROBShowMotionCoordinator.swift */,
@@ -1141,6 +1144,7 @@
 				AE2610211000000000000002 /* ROBGhostMotionPlan.swift in Sources */,
 				AE2610211000000000000004 /* ROBGhostGestureEditor.swift in Sources */,
 				AE2610221000000000000002 /* ROBWorkspaceSearchPlan.swift in Sources */,
+				AE2610222000000000000002 /* ROBWorkspaceObjectDetector.swift in Sources */,
 				AC2309260000000000000004 /* ROBArmRoutineVision.swift in Sources */,
 				AC2309260000000000000006 /* ROBArmRoutineCoordinator.swift in Sources */,
 				AC2509230000000000000002 /* ROBShowMotionCoordinator.swift in Sources */,

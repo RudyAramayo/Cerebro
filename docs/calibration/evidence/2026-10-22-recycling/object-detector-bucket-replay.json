@@ -1,0 +1,126 @@
+{
+  "cameraImageSHA256": "f54d49d84ca16b2bd73de2b04740afd8a276e2ce14cf4b9c6d2f039f6ead5098",
+  "expectedCanBox": null,
+  "expectedBucketBox": [
+    0.59,
+    0.15,
+    0.79,
+    0.51
+  ],
+  "negativeCrop": [
+    0,
+    0,
+    180,
+    170
+  ],
+  "threshold": 0.35,
+  "positive": {
+    "provider": "owlv2",
+    "model": "google/owlv2-base-patch16-ensemble",
+    "device": "cpu",
+    "width": 640,
+    "height": 400,
+    "inference_ms": 9450.695291,
+    "candidates": [
+      {
+        "target": "orangeBucket",
+        "query": "a bucket",
+        "score": 0.7130527496337891,
+        "box": [
+          0.5944953441619873,
+          0.15840133666992187,
+          0.7809970855712891,
+          0.5032135009765625
+        ]
+      },
+      {
+        "target": "other",
+        "query": "a water bottle",
+        "score": 0.14007064700126648,
+        "box": [
+          0.0025493428111076355,
+          0.012651348114013672,
+          0.06601985692977905,
+          0.10413053512573242
+        ]
+      },
+      {
+        "target": "other",
+        "query": "a stapler",
+        "score": 0.11317283660173416,
+        "box": [
+          0.24529604911804198,
+          0.6529154968261719,
+          0.4128400802612305,
+          1
+        ]
+      },
+      {
+        "target": "other",
+        "query": "a stapler",
+        "score": 0.10769429057836533,
+        "box": [
+          0.25121781826019285,
+          0.47785728454589843,
+          0.9194883346557617,
+          1
+        ]
+      },
+      {
+        "target": "other",
+        "query": "a stapler",
+        "score": 0.09709904342889786,
+        "box": [
+          0.3463548421859741,
+          0.0007738709449768066,
+          0.4222114086151123,
+          0.08540230751037597
+        ]
+      },
+      {
+        "target": "orangeBucket",
+        "query": "an orange plastic bucket",
+        "score": 0.09244673699140549,
+        "box": [
+          0.6170503616333007,
+          0.31437957763671875,
+          0.723539400100708,
+          0.40086265563964846
+        ]
+      },
+      {
+        "target": "other",
+        "query": "a stapler",
+        "score": 0.08822552114725113,
+        "box": [
+          0.457990026473999,
+          0.07402964591979981,
+          0.5239532470703125,
+          0.12810977935791015
+        ]
+      }
+    ]
+  },
+  "negative": {
+    "provider": "owlv2",
+    "model": "google/owlv2-base-patch16-ensemble",
+    "device": "cpu",
+    "width": 180,
+    "height": 170,
+    "inference_ms": 9743.638083,
+    "candidates": [
+      {
+        "target": "other",
+        "query": "a coffee mug",
+        "score": 0.19345428049564362,
+        "box": [
+          0.010618507862091064,
+          0.02811019841362448,
+          0.23904442257351347,
+          0.246002758250517
+        ]
+      }
+    ]
+  },
+  "result": "passed; one local scene and target-free crop only"
+}

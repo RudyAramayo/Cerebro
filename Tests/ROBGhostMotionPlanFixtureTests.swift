@@ -221,6 +221,14 @@ import simd
         let observationJSON = String(data: try JSONEncoder().encode(observation), encoding: .utf8)!
         let decodedObservation = try ROBWorkspaceObservation.decode(observationJSON)
         precondition(decodedObservation.can.usable)
+        let detectorCan = ROBWorkspaceDetection(visible: true, confidence: 0.576, box: [0.66,0.26,0.76,0.51],
+            aim: [0.71,0.385], depthPoint: [0.71,0.385], confidenceThreshold: 0.35)
+        precondition(detectorCan.usable, "A raw OWLv2 score must use the detector's threshold without inflating confidence")
+        let redecodedCan = try JSONDecoder().decode(ROBWorkspaceDetection.self, from: JSONEncoder().encode(detectorCan))
+        precondition(!redecodedCan.usable, "JSON must never set a lower native acceptance threshold")
+        let bucketBoxOnly = ROBWorkspaceDetection(visible: true, confidence: 0.6, box: [0.1,0.2,0.6,0.8],
+            aim: [], depthPoint: [], confidenceThreshold: 0.35)
+        precondition(bucketBoxOnly.visuallyUsable && !bucketBoxOnly.usable, "A bucket rectangle cannot invent a rim/release position")
         let wrappedObservation = try ROBWorkspaceObservation.decode("Here is the observation:\n```JSON\n" + observationJSON + "\n```")
         precondition(wrappedObservation.can.usable)
         let bareFence = try ROBWorkspaceObservation.decode("```\n" + observationJSON + "\n```")
@@ -230,6 +238,9 @@ import simd
         expectBlocked { _ = try ROBWorkspaceObservation.decode(String(observationJSON.dropLast())) }
         expectBlocked { _ = try ROBWorkspaceObservation.decode(observationJSON.replacingOccurrences(of: "0.85", with: "1.85")) }
         let view = ROBWorkspaceView(panDegrees: 0, upperTarget: 6906)
+        precondition(ROBWorkspaceView.sweep.count == 32 && ROBWorkspaceView.sweep.contains { $0.upperTarget == 5300 })
+        precondition(zip(ROBWorkspaceView.sweep, ROBWorkspaceView.sweep.dropFirst()).allSatisfy { abs($0.panDegrees - $1.panDegrees) <= 15 },
+            "Search must inspect intermediate views rather than jumping between distant sides")
         func ground(_ depth: @escaping (Int,Int) -> UInt16?) -> ROBWorkspaceLocatedObject? {
             ROBWorkspaceGrounding.locate(target: .can, detection: object, width: 640, height: 480,
                 fx: 500, fy: 500, cx: 319.5, cy: 239.5, depth: depth,
@@ -250,6 +261,9 @@ import simd
         precondition(!located.agrees(with: changedObject))
         let hint = ROBWorkspacePointingHint(x: 0.65, y: 0.5, dx: 0.15, dy: 0, distanceMeters: 1)
         precondition(hint.agrees(with: hint) && hint.guidedView(from: view).panDegrees < 0)
+        let guidedViews = hint.searchViews(from: view, boundedPan: { max(-40, min(40, $0)) })
+        precondition(guidedViews.count >= 6 && guidedViews.allSatisfy { (-40...40).contains($0.panDegrees) && (5300...7500).contains($0.upperTarget) })
+        precondition(Set(guidedViews.map(\.upperTarget)).count >= 3, "Pointing must search a neighborhood of heights")
         precondition(!hint.agrees(with: .init(x: 0.65, y: 0.5, dx: -0.15, dy: 0, distanceMeters: 1)))
         print("Local search: typed observations, calibrated depth projection, distinct-frame confirmation and pointing direction; missing/mixed depth and invalid facts rejected")
 

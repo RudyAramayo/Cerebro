@@ -52,17 +52,36 @@ visibility independently; an unobserved arm is reported as unconfirmed, never
 used to reset encoder zero. An inspection failure does not issue arm hold,
 mode or jaw commands. An active/pending arm operation still owns the workspace.
 
-The shared service sweeps bounded neck pan/tilt views through the normal
-mechanical envelope, command ramps, settling and manual-priority rules. It uses
-the installed on-device MLX vision model, not a cloud conversation. Its only
-output schema contains observed object boxes, aiming/rim pixels and hanging-arm
-facts. Two distinct RGB-D observations must agree within 5 cm. Missing factory
+The shared service sweeps 32 views through the normal mechanical envelope,
+command ramps and manual-priority rules. Pan advances in 15-degree intervals,
+with table, lower-workspace/floor and upper rows. It pauses 1.5 seconds after the
+neck reports ready, then requires advancing fresh frames spanning at least
+300 ms. This is a settling/focus allowance, not a measured focus guarantee.
+Transient camera/view failures get one settled retry; delayed camera delivery
+gets up to two seconds to advance, without changing capture timestamps.
+
+Object search uses a dedicated offline OWLv2 detector, rather than asking a
+generative model to write detections. The previous local VLM repeated the
+all-absent example in 16 live observations despite a visible Coke can. The new
+worker returns typed boxes and raw scores for cans/buckets and distractor
+queries for mugs, bottles, keyboards and staplers. Native code uses a 0.35 raw
+score threshold without inflating scores; VLM JSON cannot lower its own threshold.
+Bucket queries include a general shape query because color-qualified text alone
+was weak on the actual camera view. Every bucket candidate must also contain at
+least 18% red/orange pixels (R ≥ 50, R > 1.25G, R > 1.5B); this rejects the nearby
+blue container without lowering the raw model threshold. This appearance check
+does not establish a bucket opening or release geometry.
+The native service loads the model before capturing an image, matches request
+IDs to results, bounds output and timeouts, and terminates cancelled inference.
+It has no robot-control interface. Hanging inspection still uses local MLX.
+
+Two distinct RGB-D observations must agree within 5 cm. Missing factory
 intrinsics, missing/mixed depth or uncertain detections cannot become targets.
 Search does not require the entire scene to be motionless: the neck view and
 individual target confirmations govern it. Older discoveries are re-observed.
 Views outside the current calibrated neck envelope are skipped immediately.
 
-The observation decoder accepts a single complete JSON object with optional
+The legacy hanging observation decoder accepts a single complete JSON object with optional
 Markdown wrapping or a short preamble. It rejects invalid coordinates, extra
 answers and trailing instructions. A format failure gets one fresh-image retry;
 invalid geometric values do not. Reports include bounded actual model replies
@@ -72,18 +91,65 @@ and decode errors. If every view fails inference, the outcome is
 If an object is missing, ROB addresses the nearest visible person's view (or the
 forward view if none was measured), asks them to point, and watches for a stable
 extended-index gesture. The projected 2D finger direction selects a bounded
-camera view and two adjacent views. It is an approximate search hint, not a
+camera neighborhood at several pan/tilt intervals and finger-ray extensions,
+clamped to the current neck calibration. A stable pointing gesture observed
+during the main scan is followed immediately once; it need not wait for the
+whole scan to finish. If necessary ROB asks again after the raster scan.
+It is an approximate search hint, not a
 calibrated 3D pointing ray or proof of the object. The object must still receive
-two fresh visual/depth confirmations. ROB reports found/not found aloud.
+two fresh visual confirmations; a transfer additionally requires depth/rim
+localization. A search-only operation ends when both objects are visually
+confirmed and reports `visually_found`, without claiming a bucket release
+position. ROB reports found/not found aloud.
 
 Each search saves observations, capture times, sequences, view targets, found
 positions and the actual outcome in Application Support/Cerebro/WorkspaceSearch.
-These historical reports never authorize later motion.
+Progress is saved after each view, including interruptions; an interrupted
+search never claims object absence. These historical reports never authorize
+later motion. The latest exact detector input is retained locally as
+WorkspaceDetector/latest-input.jpg for debugging and overwritten by the next input.
+
+Install once with `python3 Scripts/setup-workspace-detector.py`. This creates a
+separate WorkspaceDetector virtual environment and downloads Google's
+[OWLv2 model](https://huggingface.co/google/owlv2-base-patch16-ensemble) at revision
+`cfd3195ba4ea9592eec887ded089f4c08eff231d`, using safetensors. Runtime loading is
+local-only with Hugging Face network/telemetry disabled. Dependencies and model
+weights remain outside the app/repository in Application Support/Cerebro.
+See the [official detector API](https://huggingface.co/docs/transformers/model_doc/owlv2).
+
+The detector replay correctly boxed the visible can at raw score 0.576
+and accepted no can/bucket in a target-free keyboard/chair crop. A second replay
+boxed the actual bucket at 0.713 and rejected a crop of the blue container; all
+accepted bucket boxes agreed with the manually checked bucket region. The first live
+native run confirmed the can in two RGB-D frames and reported its provisional
+position; warmed MPS inference was about 1.1–1.5 seconds. The orange bucket was
+not confirmed, and Rob reported pointing/search coverage was inadequate. The
+32-view settling raster completed its main sweep, then followed a stable human
+pointing hint and confirmed the bucket in two distinct frames near pan +21°,
+upper target 5757. This diagnostic was deliberately stopped after both objects
+were visible to load the classification correction; its report retains an
+`interrupted` outcome and does not claim a completed transfer. These few local
+scenes/crops are not a broad accuracy benchmark.
+
+The final installed build completed a new search with `visually_found` and
+“I found the Coke can and orange bucket.” It used eight raster positions plus a
+can refresh (18 decoded observations), confirming the bucket at pan 0°, upper
+target 5650 with raw scores 0.499 and 0.514. No reach, grip or carry was sent.
+The [detector validation record](calibration/evidence/2026-10-22-recycling/object-detector-validation.json)
+links the live outcomes, replay checks and build/source hashes. Camera pixels
+remain local and are not included in these committed records.
+
+A can box currently supplies its side-wall center. A bucket box establishes
+visual identity only; it does not invent an opening/rim release point. Rim/depth
+localization remains required for automatic transfer; a taught five-anchor task
+can be used for a fixed station.
 
 ## Pick and place
 
 `left_recycle_can` covers search, pointing assistance if needed, planning and
-execution under the original authorization, bounded to six minutes. A local IK
+execution under the original authorization, bounded to ten minutes to allow the
+deliberate search and settling intervals (the executor stops at 590 seconds).
+A local IK
 planner generates five anchors: pickup approach, grasp, 6 cm test lift, release
 12 cm above the observed bucket rim, and retreat. The proposal includes exact
 targets, timing, model/mapping/session IDs and jaw-action boundaries. Only the
