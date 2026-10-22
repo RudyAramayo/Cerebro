@@ -10,6 +10,7 @@ import AppKit
     private static let neckOnlyCommands = ["left_search_workspace", "left_check_hanging"]
     static let currentLimitKey = "ROBLeftArmCurrentJumpLimitRaw"
     private(set) var isRunning = false
+    var isNeckOnlyInspection: Bool { isRunning && Self.neckOnlyCommands.contains(activeCommand) }
     private(set) var status = "Left arm ready for a supervised trial"
     private(set) var lastRecordingPath = ""
     /// Local readiness within the one controller-approved object cycle.

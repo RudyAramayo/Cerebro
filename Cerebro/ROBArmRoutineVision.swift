@@ -445,10 +445,12 @@ final class ROBArmRoutineVision {
     var finishView: (() -> Void)?
     var announce: ((String) -> Void)?
     private(set) var lastReport: NSDictionary = [:]
+    @nonobjc private(set) var locatedObjects: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
 
     @MainActor @nonobjc func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true,
         check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
         let vision = ROBArmRoutineVision.shared
+        locatedObjects = [:]
         var found: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
         var visuallyFound = Set<ROBWorkspaceTarget>()
         var evidence: [[String: Any]] = []
@@ -661,6 +663,7 @@ final class ROBArmRoutineVision {
                         "I still couldn't confirm the \(unseen.joined(separator: " and "))."
         announce?(message); progress(message)
         finished = true
+        locatedObjects = found
         persist(status, message)
         return found
     }

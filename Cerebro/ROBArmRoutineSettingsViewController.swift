@@ -47,7 +47,7 @@ import AppKit
         let workspaceHelp = NSTextField(wrappingLabelWithString: "Recycle can scans for an empty Coke can and an open orange bucket with an offline object detector, asks a nearby person to point if needed, then attempts a locally planned pick-and-place under ONE spoken or controller authorization. Search only and Check hanging move only the neck camera and need no arm approval or gateway connection. No cloud conversation is required after the vision model is installed. Camera-to-arm geometry is provisional; supervise the attempt and keep Stop + hold ready.")
         let workspaceButtons = NSStackView(views: [button("Start 15-minute left-arm session", #selector(startArmSession)),
             button("End arm session", #selector(endArmSession)), button("Recycle can → orange bucket", #selector(recycleCan)),
-            button("Search only", #selector(searchWorkspace)), button("Check hanging", #selector(checkHanging))])
+            button("Search only", #selector(searchWorkspace)), button("Preview can grab", #selector(previewCan)), button("Check hanging", #selector(checkHanging))])
         workspaceButtons.orientation = .vertical; workspaceButtons.alignment = .leading; workspaceButtons.spacing = 6
         let leftHelp = NSTextField(wrappingLabelWithString: "Grip and return uses one controller approval for the complete left-arm cycle: raise and open empty jaws, grip at intensity 2, release into a supporting hand, then lower the empty arm. Continue when the object is placed with fingers clear, when the receiver supports it, and when it is clear of the jaws. These readiness steps stay inside the same approval. Keep the controller open; Stop + hold remains available. Wave and Ghost gestures open the blue preview. Never grip a person's hand.")
         let cycleStart = button("Grip and return · one approval", #selector(leftObjectCycle))
@@ -147,6 +147,7 @@ import AppKit
     @objc private func endArmSession() { run("end_arm_session") }
     @objc private func recycleCan() { run("left_recycle_can") }
     @objc private func searchWorkspace() { run("left_search_workspace") }
+    @objc private func previewCan() { showGhost("can") }
     @objc private func checkHanging() { run("left_check_hanging") }
     @objc private func continueObjectCycle() {
         _ = ROBLeftArmTrial.shared.continueOperation(stage: displayedCycleStage)

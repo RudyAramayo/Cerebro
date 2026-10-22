@@ -146,6 +146,50 @@ can be used for a fixed station.
 
 ## Pick and place
 
+### Detected-can ghost rehearsal
+
+Settings → Arms → **Preview can grab** opens the controller-input SceneKit view,
+runs a new RGB-D search and labels the measured can center in the same robot
+coordinate frame as the mesh. The panel shows X forward / Y left / Z up, capture
+sequence and age. The marker remains while editing the ghost; observations older
+than 60 seconds are explicitly marked historical, and a new rehearsal requires
+a fresh confirmed target.
+
+The arm selector defaults to **Left arm**, honoring Rob's report that the table
+blocks the right arm. Object-side proximity alone must not choose an arm. The
+left ghost presents, raises before crossing, approaches above the can and tries
+the grasp pose. The preview includes wrist joint 7 and constrains the provisional
+tool approach (+Z) and captured jaw-opening (+Y) axes to horizontal. The narrow
+local X dimension is the gripper plane normal, not the jaw-opening direction.
+The final approach uses short Cartesian stages with the same orientation target
+and the nearest equivalent wrist-roll branch, avoiding an end-of-approach flip.
+A grasp requires both
+position error ≤12 mm and tilt ≤5°; position-only arrival cannot imply a usable
+grasp. Bounded alternate shoulder seeds help solve a cross-body reach.
+The target is never moved to make the simulation succeed. If the model cannot
+reach it, the displayed gap remains and no closing/lift is simulated. Otherwise
+the animation shows symbolic jaw closure and a 6 cm lift when that pose solves.
+The cyan path and labeled target can be scrubbed or replayed with **Play ×4**.
+
+This rehearsal uses a separate non-executable data type, leaves the other arm and
+original/measured robot unchanged, and never requests an arm grant or sends arm
+or jaw commands. Table collision geometry and the actual gripper/tool-axis mapping
+remain unverified; this is a model preview, not a commissioned physical route.
+
+The SceneKit viewport stays visible and interactive through searches, pending
+approval and arm operations. There are no blocking viewport snapshots or image
+overlays. It renders at 30 FPS normally and 15 FPS during physical arm operations;
+depth-cloud work stays on the existing background queue, with one pending frame
+per camera and publication capped at 8 Hz normally / 2 Hz during arm operations.
+Fresh capture, neck/base placement checks and explicit captured-world history
+labels remain; arm-operation flags alone no longer blank the cloud. This display
+change does not alter actuator feedback, grants, watchdogs or perception gates.
+The [ghost validation record](calibration/evidence/2026-10-22-recycling/can-ghost-validation.json)
+includes the completed native camera test, exact build/source hashes and the
+plan, live-render and depth-publication fixture results. The fixture checks
+horizontal jaw orientation between the final approach waypoints, not just at
+the last pose. No camera images, grants or physical grip claims are included.
+
 `left_recycle_can` covers search, pointing assistance if needed, planning and
 execution under the original authorization, bounded to ten minutes to allow the
 deliberate search and settling intervals (the executor stops at 590 seconds).

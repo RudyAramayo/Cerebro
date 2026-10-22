@@ -10,9 +10,7 @@ import simd
     @nonobjc private let scene: SCNScene
     @nonobjc private let capturedRobot: SCNNode
     @nonobjc private weak var sceneView: SCNView?
-    private var frozenPreview: NSImageView?
     private var previewFrozen = false
-    private var preparationSnapshotRefreshed = false
     private let headLinks: Set<String> = ["lower_neck_link", "neck_pan_link", "upper_neck_link", "insta360_link", "oak_link"]
     private var acceptedHeadTargets: ROBHeadCameraPoseEstimator?
     @nonobjc private var model: ROBGhostRobotModel?
@@ -27,6 +25,15 @@ import simd
     @nonobjc private var poses: [[String: Double]] = []
     @nonobjc private var saved: [ROBGhostGesture] = []
     @nonobjc private var proposal: ROBLeftGestureProposal?
+    @nonobjc private var canPreview: ROBCanGrabPreview?
+    @nonobjc private var displayedCan: ROBWorkspaceLocatedObject?
+    private var lastCanInfoUpdate = 0.0
+    private var canRequestID: UUID?
+    @nonobjc private var canPlanTask: Task<Void, Never>?
+    @nonobjc private let canOverlay = SCNNode()
+    @nonobjc private let carriedCan = SCNNode()
+    private let canInfo = NSTextField(wrappingLabelWithString: "Can target: not measured")
+    private let canArm = NSPopUpButton()
     private var liveBaseline = false
     private var tabletopEditing = false
     private var ownsPendingRequest = false
@@ -70,6 +77,8 @@ import simd
                 SIMD4(-scale, 0, 0, 0), SIMD4(0, scale, 0, 0), SIMD4(0, 0, 0, 1)))
             renderRoot.simdTransform = capturedRobot.presentation.simdWorldTransform * modelBasis
             scene.rootNode.addChildNode(renderRoot)
+            canOverlay.name = "Workspace can overlay"
+            renderRoot.addChildNode(canOverlay)
             for (link, geometry, ghostGeometry) in try capturedGeometry(model) {
                 let originalMaterial = SCNMaterial()
                 originalMaterial.diffuse.contents = headLinks.contains(link) ? NSColor.lightGray : NSColor.white
@@ -103,51 +112,21 @@ import simd
         timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.tick() }
     }
 
-    func invalidate() { timer?.invalidate(); timer = nil; setPreviewFrozen(false); renderRoot.removeFromParentNode(); capturedRobot.isHidden = false }
+    func invalidate() { canRequestID = nil; canPlanTask?.cancel(); timer?.invalidate(); timer = nil; setPreviewFrozen(false); renderRoot.removeFromParentNode(); capturedRobot.isHidden = false }
 
-    /// Keep the reviewed picture embedded while physical execution records its
-    /// own telemetry. SceneKit must not compete with the motion watchdog.
+    /// Lock the reviewed edits, while keeping the viewport live and interactive.
+    /// Retain this selector for existing execution callers; it no longer hides
+    /// SceneKit or takes a synchronous snapshot on the control thread.
     func setPreviewFrozen(_ frozen: Bool) {
-        guard frozen != previewFrozen, let view = sceneView else { return }
         previewFrozen = frozen
-        if frozen {
-            preparationSnapshotRefreshed = false
-            if let host = view.superview {
-                let picture = NSImageView(); picture.image = view.snapshot()
-                picture.imageScaling = .scaleProportionallyUpOrDown
-                picture.translatesAutoresizingMaskIntoConstraints = false
-                host.addSubview(picture, positioned: .above, relativeTo: view)
-                NSLayoutConstraint.activate([picture.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-                    picture.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-                    picture.topAnchor.constraint(equalTo: view.topAnchor), picture.bottomAnchor.constraint(equalTo: view.bottomAnchor)])
-                frozenPreview = picture
-            }
-            view.isHidden = true
-        } else {
-            frozenPreview?.removeFromSuperview(); frozenPreview = nil; view.isHidden = false
-            if !ROBLeftArmTrial.shared.isRunning && !ROBArmRoutineCoordinator.shared.isRunning {
-                updateOriginal(originalPositions); updateGhost(ghostDisplayPositions, updateFields: false)
-            }
-        }
+        sceneView?.isHidden = false
+        sceneView?.rendersContinuously = true
+        sceneView?.isPlaying = true
         updateHeadInfo()
     }
 
-    /// Called synchronously after the neck settles and before arm position
-    /// mode/travel starts. Refresh the static picture once, never per frame.
+    /// Accepted neck changes already update live nodes; no preparation snapshot.
     func refreshPreparedHeadPreview() {
-        guard headEstimate != nil, let view = sceneView else { return }
-        if !previewFrozen {
-            // Normal arm controls may launch outside this editor. Camera
-            // preparation is the last safe point to capture their picture.
-            setPreviewFrozen(true)
-            preparationSnapshotRefreshed = true
-            updateHeadInfo()
-            return
-        }
-        guard !preparationSnapshotRefreshed,
-              let picture = frozenPreview else { return }
-        preparationSnapshotRefreshed = true
-        picture.image = view.snapshot()
         updateHeadInfo()
     }
 
@@ -182,8 +161,7 @@ import simd
             headInfo.stringValue = "Head: command estimate unavailable"; return
         }
         let targets = acceptedHeadTargets.map { "L\($0.lowerTarget) / U\($0.upperTarget) · " } ?? ""
-        let frozen = previewFrozen ? (preparationSnapshotRefreshed
-            ? " · picture frozen after neck preparation" : " · picture awaiting neck preparation") : ""
+        let frozen = previewFrozen ? " · live view; reviewed edits locked" : ""
         headInfo.stringValue = String(format: "Head command estimate: %@optical tilt %+.1f°%@\nNeck reference: L6011/U6906 · Insta mount ≈20° back", targets,
             pitch.doubleValue * 180 / .pi, frozen)
     }
@@ -216,6 +194,7 @@ import simd
     }
 
     func reviewPresetNamed(_ name: String) {
+        if name == "can" { findAndPreviewCan(); return }
         presets.selectItem(at: name == "wave" ? 1 : 0)
         selectPreset()
         timeline.doubleValue = 0; play()
@@ -240,6 +219,9 @@ import simd
         for field in xyz { field.widthAnchor.constraint(equalToConstant: 76).isActive = true }
         let xyzLabels = row([NSTextField(labelWithString: "Forward X / Left Y / Up Z · meters")])
         let targets = row(xyz + [button("Move ghost", #selector(moveTarget))])
+        canArm.addItems(withTitles: ["Left arm", "Right arm"])
+        canArm.selectItem(at: 0)
+        canArm.identifier = NSUserInterfaceItemIdentifier("ghost-can-arm")
         let nudgeRow = row([button("X−", #selector(nudgeXMinus)), button("X+", #selector(nudgeXPlus)),
             button("Y−", #selector(nudgeYMinus)), button("Y+", #selector(nudgeYPlus)),
             button("Z−", #selector(nudgeZMinus)), button("Z+", #selector(nudgeZPlus))])
@@ -255,6 +237,7 @@ import simd
         currentHelp.textColor = .secondaryLabelColor
         currentPlot.heightAnchor.constraint(equalToConstant: 75).isActive = true
         let stack = NSStackView(views: [title, help, referenceInfo, headInfo, continueButton, presets, name, joints, angle, angleText, xyzLabels, targets, nudgeRow,
+            row([canArm, button("Find Coke can + ghost grab", #selector(findAndPreviewCan))]), canInfo,
             button("Teach can → bucket task", #selector(newTabletopTask)), posesRow, poseCount, preview, timeline, identity, executeButton,
             row([stop, button("Review stopped return", #selector(recover))]),
             button("Replay current recording…", #selector(loadRecording)), currentPlot, currentHelp, status])
@@ -269,11 +252,142 @@ import simd
             scroll.bottomAnchor.constraint(equalTo: panelView.bottomAnchor), document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
             stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 14), stack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -14),
             stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 16), stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -16)])
-        for value in [help, referenceInfo, headInfo, continueButton, presets, name, joints, angle, timeline, identity, executeButton, currentPlot, currentHelp, status] {
+        for value in [help, referenceInfo, headInfo, canInfo, continueButton, presets, name, joints, angle, timeline, identity, executeButton, currentPlot, currentHelp, status] {
             value.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         status.isSelectable = true; identity.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
         status.font = .systemFont(ofSize: 11)
+        canInfo.identifier = NSUserInterfaceItemIdentifier("ghost-can-target")
+        canInfo.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+    }
+
+    @objc private func findAndPreviewCan() {
+        guard !ROBLeftArmTrial.shared.isRunning, !ROBArmRoutineCoordinator.shared.isRunning,
+              !ROBControllerArmApproval.shared.isPending, let model else { return }
+        invalidateReview()
+        canOverlay.childNodes.forEach { $0.removeFromParentNode() }
+        displayedCan = nil
+        canInfo.stringValue = "Finding a fresh RGB-D can target…"
+        status.stringValue = "Neck-camera search, then ghost rehearsal. Arms and jaws stay unchanged."
+        let request = UUID(); canRequestID = request
+        let side = canArm.indexOfSelectedItem == 1 ? "right" : "left"
+        ROBArmRoutineCoordinator.shared.performCommand("left_search_workspace", target: "") { [weak self] result in
+            guard let self, self.canRequestID == request else { return }
+            guard let can = ROBWorkspaceSearch.shared.locatedObjects[.can] else {
+                self.canInfo.stringValue = "Can target: no confirmed RGB-D position"
+                self.status.stringValue = result["detail"] as? String ?? "The can was not localized."
+                return
+            }
+            let baseline = self.freshBaseline().map { model.positions(vendorLeft: $0.q) } ?? model.reference
+            self.status.stringValue = "Can measured. Computing the ghost reach…"
+            self.canPlanTask = Task { @MainActor [weak self] in
+                do {
+                    let preview = try await Task.detached(priority: .userInitiated) {
+                        try ROBCanGrabPreview.make(can: can, model: model, baseline: baseline, side: side)
+                    }.value
+                    guard let self, !Task.isCancelled, self.canRequestID == request else { return }
+                    self.showCanPreview(preview)
+                    self.play()
+                } catch {
+                    guard let self, self.canRequestID == request else { return }
+                    self.status.stringValue = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    /// Display a measured target and a non-executable model rehearsal. This
+    /// method cannot request an arm grant or submit a gesture proposal.
+    @nonobjc func showCanPreview(_ preview: ROBCanGrabPreview) {
+        invalidateReview(); canPreview = preview
+        displayedCan = preview.can; presets.selectItem(at: 2)
+        canArm.selectItem(at: preview.side == "right" ? 1 : 0)
+        tabletopEditing = false; poses = []; name.stringValue = "Coke can grab — ghost only"
+        canOverlay.childNodes.forEach { $0.removeFromParentNode() }
+        let point = preview.can.point
+        func material(_ color: NSColor) -> SCNMaterial {
+            let value = SCNMaterial(); value.diffuse.contents = color; value.lightingModel = .constant
+            value.isDoubleSided = true; value.readsFromDepthBuffer = false; value.writesToDepthBuffer = false
+            return value
+        }
+        let red = material(.systemRed), blue = material(.systemCyan), white = material(.white)
+        let marker = SCNNode(geometry: SCNSphere(radius: 0.018)); marker.geometry?.materials = [red]
+        marker.name = "Detected Coke can RGB-D center"
+        marker.simdPosition = SIMD3<Float>(point); marker.renderingOrder = 25
+        canOverlay.addChildNode(marker)
+        let can = SCNCylinder(radius: 0.033, height: 0.115); can.materials = [red]
+        let outline = SCNNode(geometry: can); outline.eulerAngles.x = .pi / 2
+        outline.opacity = 0.45; marker.addChildNode(outline)
+        let text = SCNText(string: "COKE CAN · RGB-D\n" + String(format: "X %.3f  Y %.3f  Z %.3f m", point.x, point.y, point.z) +
+            "\n\(preview.side.capitalized) ghost · simulation only", extrusionDepth: 0)
+        text.font = .boldSystemFont(ofSize: 6); text.flatness = 0.2; text.materials = [white]
+        let label = SCNNode(geometry: text); label.name = "Coke can label"
+        label.position = SCNVector3(0, 0, 0.11); label.scale = SCNVector3(0.005, 0.005, 0.005)
+        label.constraints = [SCNBillboardConstraint()]; label.renderingOrder = 30; marker.addChildNode(label)
+        var points: [SCNVector3] = []
+        var previous = preview.baseline
+        for step in preview.steps {
+            for sample in 0...8 {
+                let fraction = Double(sample) / 8
+                var q = previous
+                for (joint, value) in step.pose { q[joint] = previous[joint, default: 0] + (value - previous[joint, default: 0]) * fraction }
+                if let frame = model?.frames(q)[preview.side + "_tool"] {
+                    points.append(SCNVector3(frame.columns.3.x, frame.columns.3.y, frame.columns.3.z))
+                }
+            }
+            previous = step.pose
+        }
+        if points.count > 1 {
+            let source = SCNGeometrySource(vertices: points)
+            let indices = (0..<(points.count-1)).flatMap { [UInt32($0), UInt32($0+1)] }
+            let path = SCNGeometry(sources: [source], elements: [SCNGeometryElement(indices: indices, primitiveType: .line)])
+            path.materials = [blue]
+            let node = SCNNode(geometry: path); node.name = "Can grab ghost trajectory"; node.renderingOrder = 20
+            canOverlay.addChildNode(node)
+        }
+        let carried = SCNCylinder(radius: 0.033, height: 0.115); carried.materials = [blue]
+        carriedCan.geometry = carried; carriedCan.eulerAngles.x = .pi / 2; carriedCan.opacity = 0.45
+        carriedCan.name = "Simulated held can"; carriedCan.isHidden = true; canOverlay.addChildNode(carriedCan)
+        ghost = preview.steps.last?.pose ?? preview.baseline
+        joints.selectItem(withTitle: preview.side + "_joint7"); selectJoint()
+        for i in 0..<3 { xyz[i].stringValue = String(format: "%.3f", point[i]) }
+        timeline.minValue = 0; timeline.maxValue = preview.seconds; timeline.doubleValue = 0
+        identity.stringValue = "\(preview.side.capitalized) arm selected · ghost only\nRGB-D sequence \(preview.can.sequence) · capture \(Int64(preview.can.capturedAt)) ms\nCamera/arm transform provisional; table clearance unverified"
+        poseCount.stringValue = "\(preview.steps.count) ghost stages · " +
+            (preview.reachesCan ? "approach / grasp / close / lift" : "closest reach only")
+        executeButton.isEnabled = false; renderTime(0)
+    }
+
+    private func renderCanTime(_ time: Double, preview: ROBCanGrabPreview) {
+        var previous = preview.baseline, elapsed = 0.0
+        var pose = previous, stage = preview.steps.last?.stage ?? "Can target"
+        for step in preview.steps {
+            let fraction = max(0, min(1, (time - elapsed) / step.seconds))
+            pose = previous
+            for (joint, value) in step.pose { pose[joint] = previous[joint, default: 0] + (value - previous[joint, default: 0]) * fraction }
+            stage = step.stage
+            if time <= elapsed + step.seconds { break }
+            previous = step.pose; elapsed += step.seconds
+        }
+        updateGhost(pose, updateFields: false)
+        carriedCan.isHidden = !stage.hasPrefix("Lift")
+        if !carriedCan.isHidden, let model, let grasp = preview.steps.first(where: { $0.stage == "Grasp pose" }),
+           let start = model.frames(grasp.pose)[preview.side + "_tool"], let current = model.frames(pose)[preview.side + "_tool"] {
+            let delta = current.columns.3 - start.columns.3
+            carriedCan.simdPosition = SIMD3<Float>(preview.can.point + SIMD3(delta.x, delta.y, delta.z))
+        }
+        refreshCanInfo()
+        status.stringValue = "\(stage) · GHOST ONLY\n" + (preview.reachesCan
+            ? String(format: "Grasp model error %.1f mm; gripper tilt %.1f° from horizontal. Jaw closure/retention simulated; tool mounting and table clearance unverified.", preview.graspError * 1000, preview.gripperTiltDegrees)
+            : String(format: "Hand gap %.1f cm; gripper tilt %.1f° from horizontal. No grasp or lift is claimed.", preview.graspError * 100, preview.gripperTiltDegrees))
+    }
+
+    private func refreshCanInfo() {
+        guard let can = displayedCan else { canInfo.stringValue = "Can target: not measured"; return }
+        let point = can.point
+        let age = max(0, (Date().timeIntervalSince1970 * 1000 - can.capturedAt) / 1000)
+        canInfo.stringValue = String(format: "Coke can · X %.3f / Y %.3f / Z %.3f m\nLast seen %.0f s ago", point.x, point.y, point.z, age) +
+            (age > 60 ? " · historical target; rescan" : " · RGB-D position")
     }
 
     private struct CapturedRig: Decodable {
@@ -385,6 +499,9 @@ import simd
         return (sample.positionsRadians.map(\.doubleValue), generation)
     }
     private func invalidateReview() {
+        canRequestID = nil; canPlanTask?.cancel(); canPlanTask = nil; canPreview = nil
+        canOverlay.childNodes.filter { $0.name != "Detected Coke can RGB-D center" }.forEach { $0.removeFromParentNode() }
+        refreshCanInfo()
         if ownsPendingRequest, !ROBLeftArmTrial.shared.isRunning, ROBControllerArmApproval.shared.isPending {
             ROBControllerArmApproval.shared.cancel(reason: "Ghost was edited; review and approve a new path.")
         }
@@ -522,8 +639,7 @@ import simd
     }
     @objc private func executeReviewed() {
         guard let proposal, let model, liveBaseline, !replayingRecording else { return }
-        // Freeze the preview while awaiting/executing the real operation.
-        // A concurrent ×4 animation needlessly contends with live feedback.
+        // Keep the reviewed path fixed while the measured scene stays live.
         playing = false
         executeButton.isEnabled = false
         ownsPendingRequest = true
@@ -547,13 +663,15 @@ import simd
         status.stringValue = "Stop + hold requested. A stopped custom path needs a newly reviewed return."
     }
     @objc private func play() {
-        guard proposal != nil || !record.isEmpty else { return }
+        guard canPreview != nil || proposal != nil || !record.isEmpty else { return }
+        if timeline.doubleValue >= timeline.maxValue - 0.001 { timeline.doubleValue = 0 }
         playing = true; animationStarted = ProcessInfo.processInfo.systemUptime - timeline.doubleValue / 4
     }
     @objc private func scrub() { playing = false; renderTime(timeline.doubleValue) }
     private func renderTime(_ time: Double) {
         guard let model else { return }
         clock.stringValue = String(format: "%.1f s", time)
+        if let canPreview { renderCanTime(time, preview: canPreview); return }
         if replayingRecording, !record.isEmpty {
             let sample = record.last(where: { $0.time <= time }) ?? record[0]
             updateOriginal(model.positions(vendorLeft: sample.positions))
@@ -608,24 +726,20 @@ import simd
         guard let model else { return }
         refreshInteractionStage()
         let busy = ROBLeftArmTrial.shared.isRunning || ROBArmRoutineCoordinator.shared.isRunning
+        let physicalMotion = (ROBLeftArmTrial.shared.isRunning && !ROBLeftArmTrial.shared.isNeckOnlyInspection)
+            || ROBArmRoutineCoordinator.shared.isRunning
+        sceneView?.isHidden = false; sceneView?.rendersContinuously = true; sceneView?.isPlaying = true
+        sceneView?.preferredFramesPerSecond = physicalMotion ? 15 : 30
         for view in [presets, joints, angle, name] as [NSControl] { view.isEnabled = !busy }
         if busy || (ownsPendingRequest && ROBControllerArmApproval.shared.isPending) {
-            // For operations launched elsewhere, hide without taking a costly
-            // snapshot after motion has already started.
-            sceneView?.isHidden = true; playing = false; executeButton.isEnabled = false
-            referenceInfo.stringValue = busy ? "Preview frozen · measured motion and currents are being recorded."
-                : "Preview frozen · waiting for controller approval."
+            playing = false; executeButton.isEnabled = false
             if busy { status.stringValue = ROBLeftArmTrial.shared.status }
-            return
         }
-        if previewFrozen { setPreviewFrozen(false) }
-        else if sceneView?.isHidden == true {
-            sceneView?.isHidden = false
-            updateGhost(ghostDisplayPositions, updateFields: false)
-        }
+        if previewFrozen && !busy && !ROBControllerArmApproval.shared.isPending { setPreviewFrozen(false) }
         let base = capturedRobot.presentation.simdWorldTransform * modelBasis
         if renderRoot.simdTransform != base { renderRoot.simdTransform = base }
         let now = ProcessInfo.processInfo.systemUptime
+        if now - lastCanInfoUpdate >= 1 { lastCanInfoUpdate = now; refreshCanInfo() }
         if !replayingRecording, now - lastOriginalUpdate > 0.2 {
             lastOriginalUpdate = now
             let baseline = freshBaseline()

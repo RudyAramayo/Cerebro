@@ -265,6 +265,30 @@ import simd
         precondition(guidedViews.count >= 6 && guidedViews.allSatisfy { (-40...40).contains($0.panDegrees) && (5300...7500).contains($0.upperTarget) })
         precondition(Set(guidedViews.map(\.upperTarget)).count >= 3, "Pointing must search a neighborhood of heights")
         precondition(!hint.agrees(with: .init(x: 0.65, y: 0.5, dx: -0.15, dy: 0, distanceMeters: 1)))
+        let previewNow = Date().timeIntervalSince1970 * 1000
+        let previewHand = model.toolPosition(model.positions(vendorLeft: center))!
+        let previewCan = ROBWorkspaceLocatedObject(target: .can, position: [previewHand.x, previewHand.y, previewHand.z], confidence: 0.8,
+            capturedAt: previewNow, sequence: 71, view: view)
+        let grabPreview = try ROBCanGrabPreview.make(can: previewCan, model: model, baseline: model.reference, now: previewNow)
+        precondition(grabPreview.side == "left" && grabPreview.reachesCan && grabPreview.graspError <= 0.012)
+        precondition(grabPreview.gripperTiltDegrees <= 5, "A successful grasp requires horizontal approach and jaw axes")
+        precondition(grabPreview.steps.contains { $0.stage == "Close jaws (simulation)" })
+        precondition(grabPreview.steps.allSatisfy { step in
+            model.joints.filter { !$0.name.hasPrefix("left_joint") }.allSatisfy { step.pose[$0.name] == model.reference[$0.name] }
+        }, "Can rehearsal must keep the other arm and body at their starting pose")
+        expectBlocked { _ = try ROBCanGrabPreview.make(can: previewCan, model: model, baseline: model.reference, now: previewNow + 60_001) }
+        expectBlocked { _ = try ROBCanGrabPreview.make(can: .init(target: .can, position: [.nan,0,0], confidence: 0.8,
+            capturedAt: previewNow, sequence: 72, view: view), model: model, baseline: model.reference, now: previewNow) }
+        let rightCan = ROBWorkspaceLocatedObject(target: .can, position: [0.589,-0.300,0.873], confidence: 0.6,
+            capturedAt: previewNow, sequence: 73, view: view)
+        let rightPreview = try ROBCanGrabPreview.make(can: rightCan, model: model, baseline: model.reference, side: "right", now: previewNow)
+        precondition(rightPreview.side == "right")
+        precondition(rightPreview.reachesCan || !rightPreview.steps.contains { $0.stage.contains("simulation") }, "An unreachable can must not appear gripped or lifted")
+        let crossBody = try ROBCanGrabPreview.make(can: rightCan, model: model, baseline: model.reference, now: previewNow)
+        precondition(crossBody.side == "left" && crossBody.steps.allSatisfy { step in
+            model.joints.filter { $0.name.hasPrefix("right_joint") }.allSatisfy { step.pose[$0.name] == model.reference[$0.name] }
+        }, "A can on the right must still use the operator-selected left arm when the table blocks the right")
+        print(String(format: "Can ghost: selected left cross-body reach, unchanged right arm, explicit clearance uncertainty; grasp gap %.1f mm; stale/invalid targets and false grip/lift rejected", crossBody.graspError * 1000))
         print("Local search: typed observations, calibrated depth projection, distinct-frame confirmation and pointing direction; missing/mixed depth and invalid facts rejected")
 
         let hand = model.toolPosition(model.positions(vendorLeft: center))!

@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-22T22:32:17.159592+00:00",
+  "baseCommit": "68258caf30b3cc0667c2d9d323c7d2684dbff4f8",
+  "scope": "Fresh offline RGB-D can search, labeled SceneKit target and left-arm ghost rehearsal; continuous viewport.",
+  "checks": {
+    "plan": {
+      "result": "passed",
+      "logSHA256": "c155181107e31b46a3d180176587706806f322a8b7863f5f6ad8db0a19d6ef8a",
+      "lastOutput": "Ghost motion plan fixtures passed; model preview assumptions are not physical calibration"
+    },
+    "render": {
+      "result": "passed",
+      "logSHA256": "720762223a3fd3d8d8683256d545af79b669484105b93088e57bb1833ba4ed87",
+      "lastOutput": "Ghost editor: captured URDF/blue overlay, shared head/cloud FK, live viewport without snapshots, 30/15 FPS search/motion display, stage-bound Continue controls and embedded resizing passed; offline execution disabled; no hardware transport linked"
+    },
+    "depth": {
+      "result": "passed",
+      "logSHA256": "bd5381a2972534a50f8e90eee3fb6e65c383cde7a38f444b677f8de874b67be9",
+      "lastOutput": "Production depth-floor integration passed:8/25/29degree floor bootstrap, rigid0.3m object height, tabletop rejection,9.5mm acceptance, HEAD captured-world retention with age labels and fresh replacement during arm operations, unchanged BELLY250ms noise hold/700ms freshness, no resurrection after base clears, independent cameras, RGB pairing and20k cap"
+    }
+  },
+  "preview": {
+    "arm": "left by default; operator selector, not object-side proximity",
+    "jawOpeningAxisLocal": [
+      0,
+      1,
+      0
+    ],
+    "approachAxisLocal": [
+      0,
+      0,
+      1
+    ],
+    "orientation": "Both axes horizontal; wrist-roll joint 7 participates; nearest previous wrist branch and short Cartesian final-approach stages.",
+    "validation": "Render fixture directly checks local-Y jaw and local-Z approach heights at intermediate samples; no final-approach wrist half-turn.",
+    "newTargetMaximumAgeSeconds": 60,
+    "requiresGraspPositionErrorMillimetersAtMost": 12,
+    "requiresGripperTiltDegreesAtMost": 5,
+    "hardwareProposalCreated": false,
+    "armOrJawCommandSent": false,
+    "simulatedCloseOrLiftOnMiss": false
+  },
+  "rendering": {
+    "viewportHiddenDuringOperations": false,
+    "synchronousProductionSnapshots": false,
+    "framesPerSecond": {
+      "normalAndSearch": 30,
+      "physicalArmOperation": 15
+    },
+    "maximumCloudPublicationHzPerCamera": {
+      "normalAndSearch": 8,
+      "physicalArmOperation": 2
+    },
+    "onePendingBackgroundCloudPerCamera": true,
+    "captureNeckBaseAndHistoryChecksPreserved": true,
+    "physicalArmMotionWithNewRenderingNotCommissioned": true
+  },
+  "build": {
+    "result": "passed",
+    "configuration": "Signed arm64 Debug, isolated intended source; user edits preserved outside build.",
+    "signatureVerification": "codesign --verify --deep --strict passed",
+    "buildLogSHA256": "6d495035f6706de696c6177b3a8abb2e8d58d41f15751d712c2cdbf2fdb1e165",
+    "executablesSHA256": {
+      "Cerebro": "8ea513047dde75e68184784f59d10e8ddfa42b3cdde63a299634189a49c770d4",
+      "Cerebro.debug.dylib": "857489f0e6bb7d2501da378060ebf2c548461fb91b23b69635b04122dbaf4bda"
+    },
+    "changedBuildInputsMatchStagedIndex": true,
+    "changedBuildInputsSHA256": {
+      "Cerebro/ROBArmRoutineSettingsViewController.swift": "ebcc12de3af585a3bbaaea67e058a2b302daea02c5853eec5131c086e1a12478",
+      "Cerebro/ROBArmRoutineVision.swift": "836ac373e7ffa6eebf7e1fac5042d5c6134028bbac3a2fc9f745b09b1627990b",
+      "Cerebro/ROBGhostGestureEditor.swift": "96962c0dc022eea6899b811462d8bfec5e8687e276ffb3a0a2b454dbcc5f2d1f",
+      "Cerebro/ROBLeftArmTrial.swift": "a1bdbfd8447965ea898f9cd4a688366eca318d3fb10a6f119e3d15eb9820fd47",
+      "Cerebro/ROBSCNViewController.m": "e91a8249853476670e04932de7d0cd2f156e4927b573d88460df17d7daead439",
+      "Cerebro/ROBWorkspaceSearchPlan.swift": "b8c41f47056f5cfa959ed19973ef8221564f8a9220c439d21243ef2ed3838f13"
+    },
+    "installed": "/Applications/Cerebro.app",
+    "wakeSessionOfferRestored": true
+  },
+  "nativeSearch": {
+    "file": "7D7D0B96-6ACB-4F24-A0BA-B03D45BA8E35.json",
+    "status": "visually_found",
+    "detail": "I found the Coke can and orange bucket.",
+    "canPositionMeters": [
+      0.5881650925242545,
+      -0.2986119165897579,
+      0.8707294873546642
+    ],
+    "canCapturedAtMilliseconds": 1792708321705.1572,
+    "decodedObservations": 18,
+    "evidenceFile": "can-ghost-native-search.json.gz",
+    "evidenceSHA256": "61d2e7d482ad44a7a9f0134b639ff7e89fb469ef28a9f0cc30d3f782d41ec429"
+  },
+  "limitations": [
+    "Camera/arm and actual tool mounting remain provisional.",
+    "Table collision geometry is not measured; the operator selected left because the right arm is blocked.",
+    "The cross-body model has a remaining reach gap; no physical grip, carry or placement was attempted."
+  ],
+  "privacy": "No camera images or grants committed.",
+  "nativePreviewUI": {
+    "arm": "left",
+    "jointShown": "left_joint7",
+    "wristRollDegrees": 0.01650670763999737,
+    "jawTiltFromHorizontalDegreesRounded": 1.5,
+    "handGapMetersRounded": 0.053,
+    "stages": 8,
+    "captureSequence": 2194,
+    "captureMilliseconds": 1792708321705,
+    "canPositionMetersRounded": [
+      0.588,
+      -0.299,
+      0.871
+    ],
+    "hardwareExecutionButtonEnabled": false,
+    "outcome": "Corrected Y jaw-opening axis remains horizontal through the final approach. No grip or lift simulated because the model is short of the can.",
+    "viewport": "Live scene and camera clouds observed during search and after playback; no fixed image overlay."
+  }
+}

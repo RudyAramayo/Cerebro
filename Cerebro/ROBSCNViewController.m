@@ -355,6 +355,8 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     self.robo_scnView.pointOfView = cameraNode;
     self.robo_scnView.allowsCameraControl = YES;
     self.robo_scnView.preferredFramesPerSecond = 30;
+    self.robo_scnView.rendersContinuously = YES;
+    self.robo_scnView.playing = YES;
     self.robo_scnView.defaultCameraController.target = SCNVector3Make(0, 0.78, 0);
     self.robo_scnView.showsStatistics = YES;
     self.robo_scnView.backgroundColor = NSColor.blackColor;
@@ -688,8 +690,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 
 - (void)armTrialViewPrepared:(NSNotification *)notification
 {
-    // The executor posts synchronously after camera settling, before position
-    // mode or arm travel. Capture once here, outside the motion watchdog loop.
+    // Update live accepted head geometry without taking a control-thread snapshot.
     if (!NSThread.isMainThread || !self.serialBox.isNeckCommandStateKnown ||
         NSProcessInfo.processInfo.systemUptime < self.serialBox.neckCommandReadyAtUptime) return;
     [self refreshHeadModelEstimate];
@@ -704,16 +705,13 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     }
     ROBDepthCloudFrame *frame = [notification.object isKindOfClass:ROBDepthCloudFrame.class] ? notification.object : nil;
     if (frame == nil || self.robo_scnView.scene == nil) return;
-    if (ROBLeftArmTrial.shared.isRunning || ROBArmRoutineCoordinator.shared.isRunning) {
-        [self refreshFloorCloudVisibilityAtUptime:NSProcessInfo.processInfo.systemUptime];
-        return;
-    }
     BOOL belly = frame.isBelly;
     if (belly ? self.bellyCloudUpdatePending : self.cloudUpdatePending) return;
     double now = NSProcessInfo.processInfo.systemUptime;
-    // Display at most eight clouds/second per camera. Camera capture and arm
-    // monitoring keep their own cadence; rendering must not flood the UI loop.
-    if (now - (belly ? self.lastBellyCloudSubmission : self.lastHeadCloudSubmission) < 0.125) return;
+    // Keep display live with one pending background job per camera. Reduce
+    // publication during physical arm operations; capture/watchdogs are separate.
+    BOOL armMotion = (ROBLeftArmTrial.shared.isRunning && !ROBLeftArmTrial.shared.isNeckOnlyInspection) || ROBArmRoutineCoordinator.shared.isRunning;
+    if (now - (belly ? self.lastBellyCloudSubmission : self.lastHeadCloudSubmission) < (armMotion ? 0.5 : 0.125)) return;
     if (belly) self.lastBellyCloudSubmission = now; else self.lastHeadCloudSubmission = now;
     [self refreshHeadModelEstimate];
     NSArray<NSNumber *> *affine = [self.ghostGestureEditor depthCloudCameraTransform:belly];
@@ -797,7 +795,6 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 
 - (void)refreshFloorCloudVisibilityAtUptime:(NSTimeInterval)now
 {
-    BOOL moving = ROBLeftArmTrial.shared.isRunning || ROBArmRoutineCoordinator.shared.isRunning;
     SCNMatrix4 robot = self.robotNode.presentationNode.worldTransform;
     ROBSerialBox *serial = self.serialBox;
     NSArray *neck = @[@(serial.commandedLowerNeckTiltTarget), @(serial.commandedNeckPanTarget),
@@ -807,7 +804,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     BOOL headNeckChanged = self.headFloorCloudContext && ![self.headFloorCloudContext[1] isEqual:neck];
     BOOL bellyPoseChanged = self.bellyFloorCloudContext &&
         !SCNMatrix4EqualToMatrix4([self.bellyFloorCloudContext[0] SCNMatrix4Value], robot);
-    if (moving || headBaseChanged || self.liveRGBCloudNode.geometry == nil) {
+    if (headBaseChanged || self.liveRGBCloudNode.geometry == nil) {
         self.liveRGBCloudNode.hidden = YES;
         self.liveRGBCloudNode.geometry = nil;
         self.headFloorHoldingAcceptedFrame = NO;
@@ -815,7 +812,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
                now-self.lastHeadCloudUptime > 0.7) {
         self.headFloorHoldingAcceptedFrame = self.liveRGBCloudNode.geometry != nil;
     }
-    if (moving || bellyPoseChanged || now > self.bellyCloudDisplayUntil) {
+    if (bellyPoseChanged || now > self.bellyCloudDisplayUntil) {
         self.liveBellyRGBCloudNode.hidden = YES;
         self.liveBellyRGBCloudNode.geometry = nil;
         self.bellyCloudDisplayUntil = 0;
@@ -828,7 +825,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     // These vertices are already placed in the scene's world frame. Retain
     // the captured geometry, never reproject it using a newer neck command.
     // Display history has no age timeout. Failed input cannot renew its capture
-    // timestamp or context; arm/base invalidation still clears it immediately.
+    // timestamp or context; changed base placement still clears it immediately.
     [self refreshFloorCloudVisibilityAtUptime:now];
     self.headFloorHoldingAcceptedFrame = self.liveRGBCloudNode.geometry != nil;
     [self refreshFloorStatus];
@@ -956,8 +953,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
             serial.commandedNeckPanTarget == targets[1].integerValue &&
             serial.commandedUpperNeckTiltTarget == targets[2].integerValue &&
             frame.capturedUptime >= serial.neckCommandReadyAtUptime;
-        if (ROBLeftArmTrial.shared.isRunning || ROBArmRoutineCoordinator.shared.isRunning ||
-            !SCNMatrix4EqualToMatrix4(robotTransform, self.robotNode.presentationNode.worldTransform)) {
+        if (!SCNMatrix4EqualToMatrix4(robotTransform, self.robotNode.presentationNode.worldTransform)) {
             node.hidden = YES;
             node.geometry = nil;
             return;

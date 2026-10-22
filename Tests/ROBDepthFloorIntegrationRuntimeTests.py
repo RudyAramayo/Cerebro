@@ -369,7 +369,8 @@ int main(void) { @autoreleasepool {
     assert(!h.liveBellyRGBCloudNode.geometry);
     h.serialBox.neckCommandReadyAtUptime=0;
 
-    // Base movement and active arms still invalidate retained world placement.
+    // Base movement invalidates world placement. Arm operation flags alone do
+    // not blank the display or prevent genuinely fresh clouds from publishing.
     // Neither time, retained histories nor rejected input can resurrect a
     // cleared cloud; only a genuinely fresh settled frame may replace it.
     publish(h,f,camera,targets);
@@ -389,20 +390,21 @@ int main(void) { @autoreleasepool {
     f.isBelly=YES; publish(h,f,camera,targets); f.isBelly=NO;
     ROBLeftArmTrial.shared.isRunning=YES;
     [h refreshFloorCloudVisibilityAtUptime:NSProcessInfo.processInfo.systemUptime];
-    assert(!h.liveRGBCloudNode.geometry && !h.liveBellyRGBCloudNode.geometry);
+    assert(h.liveRGBCloudNode.geometry && h.liveBellyRGBCloudNode.geometry);
+    f.capturedUptime=NSProcessInfo.processInfo.systemUptime;
+    publish(h,f,camera,targets);
+    assert(!h.liveRGBCloudNode.hidden && h.lastHeadCloudUptime==f.capturedUptime);
     ROBLeftArmTrial.shared.isRunning=NO;
-    [h retainHeadCloudForDisplayAtUptime:acceptedAt+86400];
-    publish(h,noise,camera,targets);
-    assert(h.liveRGBCloudNode.hidden && !h.liveRGBCloudNode.geometry && !h.headFloorHoldingAcceptedFrame && h.lastHeadCloudUptime==acceptedAt);
     publish(h,f,camera,targets);
     assert(!h.liveRGBCloudNode.hidden && h.liveRGBCloudNode.geometry && !h.headFloorHoldingAcceptedFrame && h.lastHeadCloudUptime==f.capturedUptime);
     acceptedAt=h.lastHeadCloudUptime;
     ROBArmRoutineCoordinator.shared.isRunning=YES;
     [h refreshFloorCloudVisibilityAtUptime:NSProcessInfo.processInfo.systemUptime];
-    assert(!h.liveRGBCloudNode.geometry);
+    assert(h.liveRGBCloudNode.geometry);
+    f.capturedUptime=NSProcessInfo.processInfo.systemUptime;
+    publish(h,f,camera,targets);
+    assert(!h.liveRGBCloudNode.hidden && h.lastHeadCloudUptime==f.capturedUptime);
     ROBArmRoutineCoordinator.shared.isRunning=NO;
-    publish(h,noise,camera,targets);
-    assert(!h.liveRGBCloudNode.geometry && h.lastHeadCloudUptime==acceptedAt);
     publish(h,f,camera,targets);
     assert(!h.liveRGBCloudNode.hidden && h.liveRGBCloudNode.geometry && h.lastHeadCloudUptime==f.capturedUptime);
     ROBDepthCloudFrame *cap=[ROBDepthCloudFrame new]; cap.width=566; cap.height=565;
@@ -415,7 +417,7 @@ int main(void) { @autoreleasepool {
     [h processDepthFrame:cap robotTransform:world cameraTransform:camera neckTargets:targets]; h.robotNode.worldTransform=moved; drain(h);
     assert(!h.liveRGBCloudNode.geometry);
     CVPixelBufferRelease(nearBudget.rgbPixelBuffer); CVPixelBufferRelease(noise.rgbPixelBuffer); CVPixelBufferRelease(empty.rgbPixelBuffer);
-    CVPixelBufferRelease(f.rgbPixelBuffer); puts("Production depth-floor integration passed:8/25/29degree floor bootstrap, rigid0.3m object height, tabletop rejection,9.5mm acceptance, indefinite HEAD captured-world retention with aligned/raw age labels and fresh replacement, unchanged BELLY250ms noise hold/700ms freshness, no resurrection after base/arm clears, independent cameras, RGB pairing and20k cap");
+    CVPixelBufferRelease(f.rgbPixelBuffer); puts("Production depth-floor integration passed:8/25/29degree floor bootstrap, rigid0.3m object height, tabletop rejection,9.5mm acceptance, HEAD captured-world retention with age labels and fresh replacement during arm operations, unchanged BELLY250ms noise hold/700ms freshness, no resurrection after base clears, independent cameras, RGB pairing and20k cap");
 } return 0; }
 '''
 

@@ -25,6 +25,14 @@ final class ROBArmRoutineCoordinator {
     static let shared = ROBArmRoutineCoordinator()
     let isRunning = false
     func cancel(reason: String) {}
+    func performCommand(_ command: String, target: String, completion: @escaping (NSDictionary) -> Void) {
+        precondition(command == "left_search_workspace", "Ghost can search attempted a motion command")
+        completion(["detail":"Fixture camera only"])
+    }
+}
+final class ROBWorkspaceSearch {
+    static let shared = ROBWorkspaceSearch()
+    var locatedObjects: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
 }
 final class ROBAmberGestureExecutor {
     static let shared = ROBAmberGestureExecutor()
@@ -34,6 +42,7 @@ final class ROBAmberGestureExecutor {
 final class ROBLeftArmTrial {
     static let shared = ROBLeftArmTrial()
     var isRunning = false
+    var isNeckOnlyInspection = false
     let status = "Fixture only", lastRecordingPath = ""
     var interactionStage = ""
     var continuedStages: [String] = []
@@ -251,24 +260,18 @@ final class GhostFixtureSnapshotView: NSView {
         precondition(!execute.isEnabled, "Offline preview offered hardware execution")
         let pauseHost = NSView(frame: view.frame); pauseHost.addSubview(view)
         editor.setPreviewFrozen(true)
-        precondition(view.isHidden && pauseHost.subviews.count == 2)
+        precondition(!view.isHidden && view.rendersContinuously && view.isPlaying && pauseHost.subviews.count == 1)
         let frozenHead = originalHead.simdTransform
         let originalArm = scene.rootNode.childNodes.flatMap(\.childNodes).first { $0.name == "Original URDF left_two_Link" }!
         let frozenArm = originalArm.simdTransform
-        let frozenImage = pauseHost.subviews.compactMap { $0 as? NSImageView }.first!
-        let beforePreparation = frozenImage.image!
         editor.setHeadCommand(pan: 0, lowerPitch: 0, upperPitch: -.pi / 10, known: true)
         precondition(originalHead.simdTransform != frozenHead && originalArm.simdTransform == frozenArm,
             "Accepted neck update must move the head without changing the frozen arm")
         precondition(headGhost.simdTransform == originalHead.simdTransform)
-        precondition(frozenImage.image === beforePreparation, "Neck command resnapshotted during motion")
         editor.refreshPreparedHeadPreview()
-        let preparedImage = frozenImage.image!
-        precondition(preparedImage !== beforePreparation && view.isHidden)
-        precondition(preparedImage.tiffRepresentation != beforePreparation.tiffRepresentation,
-            "Prepared neck snapshot still displays the preapproval pose")
+        precondition(!view.isHidden && pauseHost.subviews.count == 1, "Preparation must not replace the live viewport with a snapshot")
         editor.refreshPreparedHeadPreview()
-        precondition(frozenImage.image === preparedImage, "Duplicate preparation checkpoint resnapshotted")
+        precondition(!view.isHidden && pauseHost.subviews.count == 1)
         let preparedCamera = editor.depthCloudCameraTransform(false)
         let preparedOrigin = originalHead.simdWorldTransform * SIMD4<Float>(opticalInHead.columns.3)
         precondition(abs(preparedOrigin.x - preparedCamera[3].floatValue) < 1e-6 &&
@@ -278,7 +281,7 @@ final class GhostFixtureSnapshotView: NSView {
         precondition(!view.isHidden && pauseHost.subviews.count == 1 && originalHead.simdTransform != frozenHead)
         // Settings can start a cycle without owning an editor preview request.
         editor.refreshPreparedHeadPreview()
-        precondition(view.isHidden && pauseHost.subviews.count == 2)
+        precondition(!view.isHidden && pauseHost.subviews.count == 1)
         editor.setPreviewFrozen(false)
         let continuation = controls.first { $0.identifier?.rawValue == "ghost-continue-interaction" } as! NSButton
         func awaitContinuation(_ title: String?) {
@@ -294,6 +297,12 @@ final class GhostFixtureSnapshotView: NSView {
         }
         let trial = ROBLeftArmTrial.shared
         trial.isRunning = true
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        precondition(!view.isHidden && view.isPlaying && view.preferredFramesPerSecond == 15)
+        trial.isNeckOnlyInspection = true
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        precondition(!view.isHidden && view.preferredFramesPerSecond == 30)
+        trial.isNeckOnlyInspection = false
         for (stage, title) in [("object_placed", "Object placed; fingers clear → grip"),
                                ("receiver_supporting", "Hand supporting → release"),
                                ("object_clear", "Object clear → lower")] {
@@ -312,6 +321,50 @@ final class GhostFixtureSnapshotView: NSView {
         awaitContinuation(nil)
         let blue = scene.rootNode.childNodes.flatMap(\.childNodes).filter { $0.name?.hasPrefix("Blue ghost ") == true }
         precondition(blue.count >= 40)
+        let canTarget = ROBWorkspaceLocatedObject(target: .can, position: [0.589,-0.300,0.873], confidence: 0.6,
+            capturedAt: Date().timeIntervalSince1970 * 1000, sequence: 1234,
+            view: .init(panDegrees: -45, upperTarget: 6306))
+        let canPreview = try ROBCanGrabPreview.make(can: canTarget, model: model, baseline: model.reference)
+        precondition(canPreview.gripperTiltDegrees <= 5, "Cross-body ghost gripper is not horizontal")
+        var previousCanPose = canPreview.baseline
+        for step in canPreview.steps {
+            if step.stage.hasPrefix("Final approach") || step.stage.hasPrefix("Closest horizontal") || step.stage == "Grasp pose" {
+                precondition(abs(step.pose["left_joint7", default: 0] - previousCanPose["left_joint7", default: 0]) < .pi/2,
+                    "Final approach chose the opposite wrist-roll branch")
+                for fraction in [0.0, 0.25, 0.5, 0.75, 1] {
+                    var pose = previousCanPose
+                    for (joint, value) in step.pose { pose[joint] = previousCanPose[joint, default: 0] + (value-previousCanPose[joint, default: 0])*fraction }
+                    let frame = model.frames(pose)["left_tool"]!
+                    precondition(abs(frame.columns.1.z) < sin(5 * .pi/180) && abs(frame.columns.2.z) < sin(5 * .pi/180),
+                        "The captured gripper's Y jaw opening became vertical between approach stages")
+                }
+            }
+            previousCanPose = step.pose
+        }
+        let originalLeft = headNode("Original URDF", "left_two_Link").simdTransform
+        editor.showCanPreview(canPreview)
+        let marker = scene.rootNode.childNode(withName: "Detected Coke can RGB-D center", recursively: true)!
+        precondition(simd_distance(marker.simdPosition, SIMD3<Float>(canTarget.point)) < 1e-6,
+            "Can label is not anchored at its measured robot-frame position")
+        let label = marker.childNode(withName: "Coke can label", recursively: true)!
+        precondition((label.geometry as! SCNText).string as? String == "COKE CAN · RGB-D\nX 0.589  Y -0.300  Z 0.873 m\nLeft ghost · simulation only")
+        timeline.doubleValue = timeline.maxValue; NSApp.sendAction(timeline.action!, to: timeline.target, from: timeline)
+        precondition(!execute.isEnabled && headNode("Original URDF", "left_two_Link").simdTransform == originalLeft,
+            "Can rehearsal changed measured/original geometry or offered execution")
+        precondition(headNode("Blue ghost", "left_two_Link").simdTransform != originalLeft)
+        if !canPreview.reachesCan {
+            precondition(scene.rootNode.childNode(withName: "Simulated held can", recursively: true)!.isHidden)
+        }
+        let replay = controls.compactMap { $0 as? NSButton }.first { $0.title == "Play ×4" }!
+        NSApp.sendAction(replay.action!, to: replay.target, from: replay)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        precondition(timeline.doubleValue < timeline.maxValue / 2, "Replay must restart a completed ghost rehearsal")
+        timeline.doubleValue = timeline.maxValue; NSApp.sendAction(timeline.action!, to: timeline.target, from: timeline)
+        print(String(format: "Can overlay: robot-frame label, selected left cross-body ghost, unchanged original, disabled hardware; grasp gap %.1f mm, horizontal tilt %.2f degrees", canPreview.graspError * 1000, canPreview.gripperTiltDegrees))
+        if CommandLine.arguments.last != "can" {
+            presets.selectItem(at: selection); NSApp.sendAction(presets.action!, to: presets.target, from: presets)
+            timeline.doubleValue = timeline.maxValue; NSApp.sendAction(timeline.action!, to: timeline.target, from: timeline)
+        }
         let renderer = SCNRenderer(device: nil, options: nil); renderer.scene = scene; renderer.pointOfView = camera
         let picture = renderer.snapshot(atTime: 0, with: CGSize(width: 960, height: 820), antialiasingMode: .multisampling4X)
         let imageView = GhostFixtureSnapshotView(frame: NSRect(x: 0, y: 0, width: 960, height: 820)); imageView.picture = picture
@@ -339,6 +392,6 @@ final class GhostFixtureSnapshotView: NSView {
         guard let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) else { fatalError("No UI bitmap") }
         content.cacheDisplay(in: content.bounds, to: bitmap)
         try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[1]))
-        print("Ghost editor: captured URDF/blue overlay, shared head/cloud FK, one post-preparation snapshot, frozen arm, stage-bound Continue controls and embedded resizing passed; offline execution disabled; no hardware transport linked")
+        print("Ghost editor: captured URDF/blue overlay, shared head/cloud FK, live viewport without snapshots, 30/15 FPS search/motion display, stage-bound Continue controls and embedded resizing passed; offline execution disabled; no hardware transport linked")
     }
 }

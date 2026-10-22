@@ -135,6 +135,148 @@ struct ROBWorkspaceLocatedObject: Codable {
     }
 }
 
+/// Visual rehearsal only. Deliberately separate from executable proposals:
+/// selecting a right-hand model does not assert a right-arm hardware mapping.
+struct ROBCanGrabPreview {
+    struct Step {
+        let pose: [String: Double]
+        let seconds: Double
+        let stage: String
+    }
+    let can: ROBWorkspaceLocatedObject
+    let side: String
+    let baseline: [String: Double]
+    let steps: [Step]
+    let graspError: Double
+    let gripperTiltDegrees: Double
+    let reachesCan: Bool
+    var seconds: Double { steps.reduce(0) { $0 + $1.seconds } }
+
+    static func make(can: ROBWorkspaceLocatedObject, model: ROBGhostRobotModel,
+                     baseline: [String: Double], side: String = "left", now: Double = Date().timeIntervalSince1970 * 1000) throws -> Self {
+        guard can.target == .can, can.position.count == 3, can.position.allSatisfy(\.isFinite),
+              ["left", "right"].contains(side),
+              can.confidence.isFinite, (0.35...1).contains(can.confidence), can.sequence > 0,
+              can.capturedAt.isFinite, now.isFinite, (0...60_000).contains(now - can.capturedAt),
+              baseline.values.allSatisfy(\.isFinite) else {
+            throw ROBGhostMotionError.blocked("Find the can again; its measured position is missing or older than 60 seconds.")
+        }
+        func tip(_ q: [String: Double]) -> SIMD3<Double> {
+            let frame = model.frames(q)[side + "_tool"]!
+            return SIMD3(frame.columns.3.x, frame.columns.3.y, frame.columns.3.z)
+        }
+        let chain = model.joints.filter { $0.name.hasPrefix(side + "_joint") }
+        // Captured gripper: +Z approaches, +Y spans the jaw opening; +X is
+        // its thin plane normal. Keep +Y/+Z horizontal, including wrist roll.
+        func features(_ q: [String: Double]) -> [Double] {
+            let frame = model.frames(q)[side + "_tool"]!
+            return [frame.columns.3.x, frame.columns.3.y, frame.columns.3.z,
+                frame.columns.1.z * 0.25, frame.columns.2.z * 0.25]
+        }
+        func tiltDegrees(_ q: [String: Double]) -> Double {
+            let values = features(q)
+            return asin(min(1, max(abs(values[3]), abs(values[4])) / 0.25)) * 180 / .pi
+        }
+        func loss(_ q: [String: Double], _ target: SIMD3<Double>) -> Double {
+            let values = features(q)
+            return simd_length_squared(tip(q) - target) + values[3]*values[3] + values[4]*values[4]
+        }
+        func solve(_ matrix: [Double], _ rhs: [Double]) -> [Double]? {
+            var a = matrix, b = rhs
+            for column in 0..<5 {
+                let pivot = (column..<5).max { abs(a[$0*5+column]) < abs(a[$1*5+column]) }!
+                guard abs(a[pivot*5+column]) > 1e-12 else { return nil }
+                for k in 0..<5 { a.swapAt(column*5+k, pivot*5+k) }; b.swapAt(column, pivot)
+                let divisor = a[column*5+column]
+                for k in column..<5 { a[column*5+k] /= divisor }; b[column] /= divisor
+                for row in 0..<5 where row != column {
+                    let factor = a[row*5+column]
+                    for k in column..<5 { a[row*5+k] -= factor * a[column*5+k] }
+                    b[row] -= factor * b[column]
+                }
+            }
+            return b.allSatisfy(\.isFinite) ? b : nil
+        }
+        func closest(_ target: SIMD3<Double>, _ seed: [String: Double]) -> [String: Double] {
+            var q = seed, best = seed, bestLoss = Double.infinity
+            let goal = [target.x, target.y, target.z, 0, 0]
+            for _ in 0..<250 {
+                let current = features(q), delta = zip(goal, current).map(-)
+                let loss = delta.reduce(0) { $0 + $1*$1 }
+                if loss < bestLoss { bestLoss = loss; best = q }
+                if sqrt(delta.prefix(3).reduce(0) { $0 + $1*$1 }) < 0.004 && max(abs(current[3]), abs(current[4])) < 0.008 { break }
+                let columns = chain.map { joint -> [Double] in
+                    var shifted = q; shifted[joint.name, default: 0] += 0.0001
+                    return zip(features(shifted), current).map { ($0 - $1) / 0.0001 }
+                }
+                var normal = [Double](repeating: 0, count: 25)
+                for row in 0..<5 { for col in 0..<5 {
+                    normal[row*5+col] = columns.reduce(row == col ? 0.0004 : 0) { $0 + $1[row]*$1[col] }
+                } }
+                guard let correction = solve(normal, delta) else { break }
+                let changes = columns.map { zip($0, correction).reduce(0) { $0 + $1.0*$1.1 } }
+                let scale = min(1, 0.06 / max(0.000001, changes.map(abs).max() ?? 0))
+                for (joint, change) in zip(chain, changes) {
+                    q[joint.name] = max(joint.lower, min(joint.upper, q[joint.name, default: 0] + change * scale))
+                }
+            }
+            // Equivalent half-turns preserve the horizontal jaw line. Prefer
+            // the branch nearest the starting wrist, avoiding approach flips.
+            let wrist = side + "_joint7"
+            let reference = seed[wrist, default: baseline[wrist, default: 0]]
+            let joint = chain.first { $0.name == wrist }!
+            for delta in [-Double.pi, Double.pi] {
+                let candidate = best[wrist, default: 0] + delta
+                if (joint.lower...joint.upper).contains(candidate), abs(candidate-reference) < abs(best[wrist, default: 0]-reference) {
+                    best[wrist] = candidate
+                }
+            }
+            return best
+        }
+        var seed = baseline
+        let front = model.positions(vendorLeft: ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.frontIndex)!)
+        for i in 1...6 { seed["\(side)_joint\(i)"] = (side == "left" ? 1 : -1) * front["left_joint\(i)"]! }
+        var previous = baseline, steps: [Step] = []
+        func append(_ pose: [String: Double], _ stage: String, dwell: Double = 0) {
+            let angle = chain.map { abs(pose[$0.name, default: 0] - previous[$0.name, default: 0]) }.max() ?? 0
+            steps.append(.init(pose: pose, seconds: max(0.8, angle / 0.6) + dwell, stage: stage)); previous = pose
+        }
+        append(seed, "Present ghost hand")
+        let frontTip = tip(seed)
+        let level = closest(frontTip, seed)
+        append(level, "Level gripper horizontally")
+        let raised = closest(SIMD3(frontTip.x, frontTip.y, max(frontTip.z, can.point.z + 0.15)), level)
+        append(raised, "Raise before crossing")
+        let approachTarget = can.point + SIMD3(0, 0, 0.12)
+        var approach = closest(approachTarget, raised)
+        // A cross-body target can trap the numerical solver in a local
+        // minimum. Compare bounded shoulder seeds; never move the target.
+        for shoulder in [-1.5, -0.5, 0.5, 1.5] where simd_distance(tip(approach), approachTarget) > 0.012 || tiltDegrees(approach) > 5 {
+            var alternate = raised; alternate[side + "_joint1"] = shoulder
+            let candidate = closest(approachTarget, alternate)
+            if loss(candidate, approachTarget) < loss(approach, approachTarget) { approach = candidate }
+        }
+        append(approach, "Cross above can (table clearance unverified)")
+        var grasp = approach
+        for index in 1...4 {
+            grasp = closest(can.point + SIMD3(0, 0, 0.12 * (1 - Double(index)/4)), grasp)
+            if index < 4 { append(grasp, "Final approach — horizontal jaws") }
+        }
+        let error = simd_distance(tip(grasp), can.point)
+        let tilt = tiltDegrees(grasp)
+        let ready = error <= 0.012 && tilt <= 5
+        append(grasp, ready ? "Grasp pose" : "Closest horizontal reach — grasp unconfirmed")
+        if ready {
+            append(grasp, "Close jaws (simulation)", dwell: 1)
+            let liftTarget = can.point + SIMD3(0, 0, 0.06)
+            let lift = closest(liftTarget, grasp)
+            if simd_distance(tip(lift), liftTarget) <= 0.012 && tiltDegrees(lift) <= 5 { append(lift, "Lift 6 cm (simulation)", dwell: 1) }
+        }
+        return .init(can: can, side: side, baseline: baseline, steps: steps, graspError: error,
+            gripperTiltDegrees: tilt, reachesCan: ready)
+    }
+}
+
 struct ROBWorkspacePointingHint: Equatable {
     let x: Double, y: Double
     let dx: Double, dy: Double
