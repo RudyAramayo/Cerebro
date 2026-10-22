@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-22T01:04:03.155309+00:00",
+  "baseCommit": "3c6bc56ff9f3c3ab5871ebefa25238aeebc6cd21",
+  "sourceSHA256": {
+    "Cerebro/ROBSCNViewController.m": "618a4f625c594bc0193bdeb02e19d44264a586029adc7b80a9929d80dcf69121",
+    "Cerebro/ROBDepthFloorRectification.h": "1d7577fdfd07d8a752ffb769e43c2f257c5207de94ee5704b9f9cc2039c499ed",
+    "Tests/ROBDepthFloorRectificationFixtureTests.c": "3989ad25a53b8749c7521c5618c6646e93c71e1b75784151dc61f6b034472e0c",
+    "Tests/ROBDepthFloorIntegrationRuntimeTests.py": "6670c3a08af5a70104534e22fda6896263b8e0e6a66e476357f9967e8ecc4061",
+    "Scripts/test-depth-floor-rectification.sh": "7a753c678fce87e6099b29e7eacc64ab06d37df8fdeb5a5dd42d8db97ecae97f"
+  },
+  "reference": "Operator identified the wooden floor as a calibrated flat plane. This update estimates display alignment only; it has not collected a live floor calibration.",
+  "method": "Fit an upward near-ground plane in robot-local physical meters, apply one rigid normal-to-Y rotation and vertical translation to every point, then restore1.2 presentation scale and diagnostic robot world transform. No per-point floor snapping; object dimensions and signed floor heights retained. Original depth, robot model, URDF, actuator transforms and collision inputs unchanged.",
+  "candidateGates": {
+    "lowerImageFractionStart": 0.55,
+    "imageHorizontalRange": [
+      0.08,
+      0.92
+    ],
+    "depthMeters": [
+      0.35,
+      4.0
+    ],
+    "absoluteExpectedGroundHeightMeters": 0.3,
+    "horizontalRadiusMeters": [
+      0.65,
+      4.0
+    ]
+  },
+  "fitLimits": {
+    "maximumPointsDisplayed": 20000,
+    "maximumCandidates": 2048,
+    "primaryRansacTrials": 96,
+    "secondaryRansacTrialsMaximum": 32,
+    "minimumInliers": 80,
+    "minimumSupportFraction": 0.55,
+    "minimumSpanMeters": 0.4,
+    "maximumTiltDegrees": 30,
+    "maximumVerticalOffsetMeters": 0.35,
+    "inlierBandMeters": 0.02,
+    "maximumRMSMeters": 0.009
+  },
+  "checks": {
+    "cerebro-flat-floor-fit.log": {
+      "result": "passed",
+      "sha256": "caeebf84437a025e5d020f5f12012727b9c26d50e3be52b243227fde0ce79672"
+    },
+    "cerebro-flat-floor-projection.log": {
+      "result": "passed",
+      "sha256": "0c5053d95ed1a3cb07c86f988e417ee3461f54738cdff962602c8383ca6e2766"
+    },
+    "cerebro-depth-floor-integration.log": {
+      "result": "passed",
+      "sha256": "716cce4b1f6f4cc187ffb302fd170c801260ad34a1e8725d80e1499ac4018f20"
+    },
+    "cerebro-flat-floor-build.log": {
+      "result": "passed",
+      "sha256": "cae32524329c02a78ff93871a5ab0264a179c3a34df984e490b575abf8f908fa"
+    }
+  },
+  "sanitizers": "Pure fitter ASan and UBSan passed in agent review.",
+  "integration": "Real processor/helper extraction verified1.2 units and nonidentity base transform, quantized floor RMS<1.5mm (max<4mm),0.3m object height within2mm,1280 RGBpoint pairs, strict20k cap, changed-neck/base rejection, stale hiding and sparse/raw fallback. Synthetic software evidence only.",
+  "build": {
+    "result": "arm64 Debug target build succeeded from isolated intended-change worktree",
+    "signature": "codesign --verify --deep --strict passed",
+    "executablesSHA256": {
+      "Cerebro": "b513c07dafd05f26cfed9eed819a7b9a95c3411ddcc9d26c5dd6d345505ddc7b"
+    },
+    "installed": false,
+    "runningRobotTouched": false
+  },
+  "limitations": "Per-frame fits are not retained after floor disappears. Near-ground low planar objects can be geometrically indistinguishable from floor; candidate gates and the operator flat-floor assumption are required. No semantic wood recognition, surveyed world frame, measured neck feedback or force/collision certification. Insufficient or ambiguous evidence retains raw cloud with HUD reason.",
+  "liveVerification": "Deferred at operator request while away; no live motion, camera command, app reload or interactive approval requested."
+}

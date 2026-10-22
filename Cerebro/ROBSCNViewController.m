@@ -2,6 +2,7 @@
 #import "ROBBaseControllerModel.h"
 #import "ROBSerialBox.h"
 #import "ROBDepthCloudProjection.h"
+#import "ROBDepthFloorRectification.h"
 #import <QuartzCore/QuartzCore.h>
 #import <simd/quaternion.h>
 #import "Cerebro-Swift.h"
@@ -12,6 +13,21 @@ static NSTimeInterval const ROBLegacyIRWarningDisplayInterval = 3.0;
 static NSInteger const ROBIRBlockedDistanceCentimeters = 25;
 static CGFloat const ROBDiagnosticMaximumTreadSpeed = 0.9;
 static CGFloat const ROBDiagnosticTrackWidth = 0.86;
+static NSUInteger const ROBMaximumDisplayedCloudPoints = 20000;
+static NSUInteger const ROBMaximumFloorCandidatePoints = 2048;
+
+// The operator identified the wooden floor as a level reference. Select only
+// lower-image, near-ground points outside the robot's footprint. RGB wood
+// colour is not evidence that a surface is the floor.
+static BOOL ROBIsFloorCandidate(ROBDepthFloorPoint point, double opticalDepth,
+                               NSInteger x, NSInteger y, NSInteger width, NSInteger height)
+{
+    double radius = hypot(point.x, point.z);
+    return y >= height * 0.55 && x >= width * 0.08 && x <= width * 0.92 &&
+        opticalDepth >= 0.35 && opticalDepth <= 4.0 &&
+        isfinite(point.x) && isfinite(point.y) && isfinite(point.z) &&
+        fabs(point.y) <= 0.30 && radius >= 0.65 && radius <= 4.0;
+}
 
 static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 {
@@ -41,6 +57,9 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 @property (readwrite, retain) NSTextField *detailLabel;
 @property (readwrite, retain) NSTextField *irStatusLabel;
 @property (readwrite, retain) NSTextField *cloudStatusLabel;
+@property (readwrite, retain) NSTextField *floorStatusLabel;
+@property (readwrite, copy) NSString *headFloorSummary;
+@property (readwrite, copy) NSString *bellyFloorSummary;
 @property NSTimeInterval lastHeadCloudUptime;
 @property NSTimeInterval lastBellyCloudUptime;
 @property NSTimeInterval lastHeadCloudSubmission;
@@ -174,7 +193,9 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     self.irStatusLabel = [self hudLabelWithSize:11 weight:NSFontWeightMedium];
     self.cloudStatusLabel = [self hudLabelWithSize:10 weight:NSFontWeightRegular];
     self.cloudStatusLabel.stringValue = @"HEAD DEPTH: waiting for a settled neck command";
-    NSStackView *stack = [NSStackView stackViewWithViews:@[self.statusLabel, self.detailLabel, self.irStatusLabel, self.cloudStatusLabel]];
+    self.floorStatusLabel = [self hudLabelWithSize:10 weight:NSFontWeightRegular];
+    self.floorStatusLabel.stringValue = @"FLAT FLOOR REFERENCE: waiting for sufficient visible floor";
+    NSStackView *stack = [NSStackView stackViewWithViews:@[self.statusLabel, self.detailLabel, self.irStatusLabel, self.cloudStatusLabel, self.floorStatusLabel]];
     stack.orientation = NSUserInterfaceLayoutOrientationVertical;
     stack.alignment = NSLayoutAttributeLeading;
     stack.spacing = 3;
@@ -489,6 +510,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
         self.cloudStatusLabel.stringValue = @"HEAD DEPTH HIDDEN: stale frame or unknown/moving neck";
     }
     if (cloudNow - self.lastBellyCloudUptime > 0.7) self.liveBellyRGBCloudNode.hidden = YES;
+    [self refreshFloorStatus];
     NSTimeInterval age = self.lastReceivedUptime > 0
         ? NSProcessInfo.processInfo.systemUptime - self.lastReceivedUptime
         : DBL_MAX;
@@ -625,6 +647,15 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     [self.ghostGestureEditor setHeadCommandEstimate:pose];
 }
 
+- (void)refreshFloorStatus
+{
+    NSString *head = self.liveRGBCloudNode.hidden ? @"HEAD: waiting for fresh settled view"
+        : (self.headFloorSummary ?: @"HEAD: acquiring floor");
+    NSString *belly = self.liveBellyRGBCloudNode.hidden ? @"BELLY: waiting for fresh view"
+        : (self.bellyFloorSummary ?: @"BELLY: acquiring floor");
+    self.floorStatusLabel.stringValue = [NSString stringWithFormat:@"FLAT FLOOR REFERENCE · %@\n%@", head, belly];
+}
+
 - (void)armTrialViewPrepared:(NSNotification *)notification
 {
     // The executor posts synchronously after camera settling, before position
@@ -758,8 +789,18 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     double fy = frame.hasCalibratedIntrinsics ? frame.cameraFY : focal;
     double cx = frame.hasCalibratedIntrinsics ? frame.cameraCX : (double)(width - 1) / 2;
     double cy = frame.hasCalibratedIntrinsics ? frame.cameraCY : (double)(height - 1) / 2;
-    NSMutableArray<NSValue *> *points = [NSMutableArray arrayWithCapacity:(width / 4) * (height / 4)];
-    NSMutableArray<NSNumber *> *colors = [NSMutableArray arrayWithCapacity:(width / 4) * (height / 4)];
+    // Fit in physical metres, before the diagnostic base's world translation
+    // and yaw. The captured model's 1.2 presentation scale is display-only.
+    double presentationScale = ROBScanVisualModel.presentationScale;
+    NSInteger step = MAX(4, (NSInteger)ceil(sqrt((double)width * height / ROBMaximumDisplayedCloudPoints)));
+    while (((width + step - 1) / step) * ((height + step - 1) / step) > ROBMaximumDisplayedCloudPoints) step++;
+    NSUInteger capacity = ((width + step - 1) / step) * ((height + step - 1) / step);
+    NSMutableData *metricPoints = [NSMutableData dataWithCapacity:capacity * sizeof(ROBDepthFloorPoint)];
+    NSMutableData *floorCandidates = [NSMutableData dataWithCapacity:ROBMaximumFloorCandidatePoints * sizeof(ROBDepthFloorPoint)];
+    NSUInteger candidatesSeen = 0;
+    uint32_t floorSampleState = 0x9E3779B9;
+    NSMutableArray<NSValue *> *points = [NSMutableArray arrayWithCapacity:capacity];
+    NSMutableArray<NSNumber *> *colors = [NSMutableArray arrayWithCapacity:capacity];
     CVPixelBufferRef rgb = frame.rgbPixelBuffer;
     if (rgb != NULL) CVPixelBufferLockBaseAddress(rgb, kCVPixelBufferLock_ReadOnly);
     uint8_t *rgbBase = rgb != NULL ? CVPixelBufferGetBaseAddress(rgb) : NULL;
@@ -767,33 +808,67 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     size_t rgbWidth = rgb != NULL ? CVPixelBufferGetWidth(rgb) : 0;
     size_t rgbHeight = rgb != NULL ? CVPixelBufferGetHeight(rgb) : 0;
 
-    for (NSInteger y = 0; y < height; y += 4) {
-        for (NSInteger x = 0; x < width; x += 4) {
+    for (NSInteger y = 0; y < height; y += step) {
+        for (NSInteger x = 0; x < width; x += step) {
             NSInteger offset = (y * width + x) * 2;
             uint16_t mm = bytes[offset] | ((uint16_t)bytes[offset + 1] << 8);
             if (mm < 150 || mm > 10000) continue;
-            float z = (float)mm / 1000.0f;
+            double z = (double)mm / 1000.0;
             ROBDepthPoint projected = ROBDepthCloudProject(camera, (x - cx) * z / fx, (y - cy) * z / fy, z);
-            SCNVector3 local = SCNVector3Make(projected.x, projected.y, projected.z);
-            SCNVector3 world = SCNVector3Make(
-                robotTransform.m11 * local.x + robotTransform.m21 * local.y + robotTransform.m31 * local.z + robotTransform.m41,
-                robotTransform.m12 * local.x + robotTransform.m22 * local.y + robotTransform.m32 * local.z + robotTransform.m42,
-                robotTransform.m13 * local.x + robotTransform.m23 * local.y + robotTransform.m33 * local.z + robotTransform.m43
-            );
+            ROBDepthFloorPoint metric = {projected.x / presentationScale, projected.y / presentationScale, projected.z / presentationScale};
+            if (!isfinite(metric.x) || !isfinite(metric.y) || !isfinite(metric.z)) continue;
+            [metricPoints appendBytes:&metric length:sizeof(metric)];
+            if (ROBIsFloorCandidate(metric, z, x, y, width, height)) {
+                candidatesSeen++;
+                if (candidatesSeen <= ROBMaximumFloorCandidatePoints) {
+                    [floorCandidates appendBytes:&metric length:sizeof(metric)];
+                } else {
+                    // Deterministic reservoir sampling spans the full image;
+                    // taking only the first points would bias the fitted plane.
+                    floorSampleState = floorSampleState * 1664525u + 1013904223u;
+                    NSUInteger slot = floorSampleState % candidatesSeen;
+                    if (slot < ROBMaximumFloorCandidatePoints)
+                        ((ROBDepthFloorPoint *)floorCandidates.mutableBytes)[slot] = metric;
+                }
+            }
             uint32_t rgba = 0x80D8FFFF;
             if (rgbBase != NULL && x < rgbWidth && y < rgbHeight) {
                 uint8_t *pixel = rgbBase + y * rgbRowBytes + x * 4;
                 rgba = ((uint32_t)pixel[2] << 24) | ((uint32_t)pixel[1] << 16) |
                        ((uint32_t)pixel[0] << 8) | 0xFF;
             }
-            [points addObject:[NSValue valueWithSCNVector3:world]];
             [colors addObject:@(rgba)];
         }
     }
     if (rgb != NULL) CVPixelBufferUnlockBaseAddress(rgb, kCVPixelBufferLock_ReadOnly);
+    // This is a fresh per-frame display correction, never a persisted camera,
+    // URDF or collision calibration. No old correction survives a changed view.
+    ROBDepthFloorModel floor = ROBDepthFloorFit(floorCandidates.bytes,
+        floorCandidates.length / sizeof(ROBDepthFloorPoint), ROBDepthFloorDefaultOptions());
+    const ROBDepthFloorPoint *metric = metricPoints.bytes;
+    for (NSUInteger index = 0; index < metricPoints.length / sizeof(ROBDepthFloorPoint); index++) {
+        // Keep depth noise and object shapes: align the whole cloud rigidly,
+        // rather than snapping near-floor objects or every point to y=0.
+        ROBDepthFloorPoint aligned = ROBDepthFloorRectify(floor, metric[index], false);
+        SCNVector3 local = SCNVector3Make(aligned.x * presentationScale, aligned.y * presentationScale, aligned.z * presentationScale);
+        SCNVector3 world = SCNVector3Make(
+            robotTransform.m11 * local.x + robotTransform.m21 * local.y + robotTransform.m31 * local.z + robotTransform.m41,
+            robotTransform.m12 * local.x + robotTransform.m22 * local.y + robotTransform.m32 * local.z + robotTransform.m42,
+            robotTransform.m13 * local.x + robotTransform.m23 * local.y + robotTransform.m33 * local.z + robotTransform.m43);
+        [points addObject:[NSValue valueWithSCNVector3:world]];
+    }
+    NSString *floorSummary = floor.valid ? [NSString stringWithFormat:@"aligned · %.0f%% support · %.0f mm RMS · %.1f° correction",
+        floor.inlierFraction * 100, floor.rmsMeters * 1000, floor.tiltRadians * 180 / M_PI]
+        : [NSString stringWithFormat:@"raw cloud · floor %s", ROBDepthFloorRejectionName(floor.rejection)];
     SCNGeometry *geometry = [self pointGeometry:points colors:colors pointSize:2];
     dispatch_async(dispatch_get_main_queue(), ^{
         if (ROBLeftArmTrial.shared.isRunning || ROBArmRoutineCoordinator.shared.isRunning) {
+            if (isBelly) self.bellyCloudUpdatePending = NO; else self.cloudUpdatePending = NO;
+            return;
+        }
+        if (!SCNMatrix4EqualToMatrix4(robotTransform, self.robotNode.presentationNode.worldTransform)) {
+            // A display-base move during fitting invalidates this frame's
+            // placement. Viewer orbit and window resizing leave it unchanged.
             if (isBelly) self.bellyCloudUpdatePending = NO; else self.cloudUpdatePending = NO;
             return;
         }
@@ -802,6 +877,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
             self.lastBellyCloudUptime = frame.capturedUptime;
             self.liveBellyRGBCloudNode.hidden = NSProcessInfo.processInfo.systemUptime - frame.capturedUptime > 0.7;
             self.bellyCloudUpdatePending = NO;
+            self.bellyFloorSummary = [@"BELLY: " stringByAppendingString:floorSummary];
         } else {
             ROBSerialBox *serial = self.serialBox;
             BOOL samePose = serial.isNeckCommandStateKnown && serial.commandedLowerNeckTiltTarget == targets[0].integerValue &&
@@ -811,7 +887,9 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
             self.lastHeadCloudUptime = frame.capturedUptime;
             self.liveRGBCloudNode.hidden = !samePose || NSProcessInfo.processInfo.systemUptime - frame.capturedUptime > 0.7;
             self.cloudUpdatePending = NO;
+            self.headFloorSummary = [@"HEAD: " stringByAppendingString:floorSummary];
         }
+        [self refreshFloorStatus];
     });
 }
 

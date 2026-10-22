@@ -19,6 +19,27 @@ accepted neck command estimates. It does not assume that the head is level.
 - Points, original robot and blue ghost share the AppKit robot's presentation
   scale and base transform. The belly camera stays attached to its body mount
   and is independent of head movement.
+- Rob identified the wooden floor as a calibrated flat reference. Each fresh
+  head/belly cloud now fits a near-ground plane in physical metres, then applies
+  one rigid rotation and vertical translation to the entire cloud so that plane
+  coincides with the scene's `y=0` floor. The display's 1.2 scale is removed for
+  fitting and reapplied before the existing robot-to-world transform. Object
+  shapes, pairwise distances, floor-relative heights and measured depth noise
+  remain intact; points are not individually flattened or stretched.
+  Candidates come from the lower image, within 0.30 m of expected ground and
+  outside the robot footprint. Bounded RANSAC and covariance refitting reject
+  insufficient coverage/support, walls, elevated planes, excessive residual
+  noise and competing floor levels. Geometry does not identify wood or prove
+  that a low surface is the floor; the operator's flat-floor assumption and
+  near-ground gates are required. With insufficient evidence the cloud stays
+  raw, and the HUD gives the reason. A valid fit shows support, residual RMS and
+  angular correction for each camera.
+  Fits are per-frame: a correction is never reused after changing the view or
+  losing visible floor. Existing camera/neck freshness checks remain, and a
+  changed diagnostic base transform rejects a result prepared at an old pose.
+  The point display is capped at 20,000 points and fitting at 2,048 candidates.
+  This is a display alignment, not persisted camera/URDF calibration or actuator
+  collision/force evidence. The original depth frames are unchanged.
 - Deprojection uses the aligned frame's `fx`, `fy`, `cx` and `cy` when valid.
   Missing calibration retains the previous 69° FOV estimate and is labeled
   **estimated intrinsics** in the scene HUD.
@@ -59,3 +80,10 @@ stationary surface round trips and invalid affine transforms. The render fixture
 also verifies that the cloud origin equals the rendered head's optical mount
 and that an untouched ghost head matches the original. All fixtures are isolated
 from cameras and actuators. The signed macOS build checks integration.
+`bash Scripts/test-depth-floor-rectification.sh` checks noisy tilted floors,
+outliers, rigid distance/height preservation, sparse/line/wall/table/ambiguous
+plane rejection, numerical inputs and bounded sampling without camera access.
+`python3 Tests/ROBDepthFloorIntegrationRuntimeTests.py` compiles the actual
+frame-processing method with inert application state. It verifies physical
+scale, floor/object heights, RGB indexing, the point cap, stale-frame hiding,
+changed neck/base pose rejection and raw-cloud fallback without hardware.

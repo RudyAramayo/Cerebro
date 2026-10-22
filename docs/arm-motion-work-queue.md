@@ -92,7 +92,12 @@ until the current test and controller workflow are finished.
    6011 / upper 5650: Rob confirmed the hanging arm is visible at J2, with distal
    joints still cropped. A small lower-neck refinement to 6200 was applied. This is
    supplementary visual evidence, not a complete independent pose verification.
-3. **Deferred until 1 and 2 are complete — camera-to-URDF calibration.** Capture
+3. **Deferred until 1 and 2 are complete — camera-to-URDF calibration.**
+   Rob's wooden floor is now the flat reference for a display-only plane fit:
+   level each supported cloud rigidly against `y=0`, retaining object geometry
+   and raw depth. This does not change URDF origins or replace the independent
+   camera/servo calibration below. Visual verification awaits his return.
+   Capture
    synchronized fresh camera/depth observations and encoder readings during
    small, approved independent joint movements. Fit camera extrinsics, arm
    mounting transforms, joint origins/axes, driver directions and encoder
