@@ -1,0 +1,53 @@
+{
+  "camera_arm_mapping" : "provisional URDF\/neck command prior, not measured hand-eye calibration",
+  "created_at" : "2026-10-22T20:20:18Z",
+  "detail" : "I still couldn't confirm the Coke can and orange bucket.",
+  "inference" : "on-device MLX; no cloud session",
+  "left_hanging_observed" : false,
+  "objects" : {
+
+  },
+  "right_hanging_observed" : false,
+  "schema_version" : 1,
+  "status" : "not_found",
+  "views" : [
+    {
+      "error" : "The camera view did not settle within 3 seconds. Keep the workspace still and retry; no new motion was sent.",
+      "pan" : 0,
+      "upper" : 6306
+    },
+    {
+      "error" : "Local search returned an invalid observation; no arm target was accepted.",
+      "pan" : -35,
+      "upper" : 5650
+    },
+    {
+      "error" : "Local search returned an invalid observation; no arm target was accepted.",
+      "pan" : 35,
+      "upper" : 5650
+    },
+    {
+      "error" : "Local search returned an invalid observation; no arm target was accepted.",
+      "pan" : 0,
+      "upper" : 5650
+    },
+    {
+      "pan" : -70,
+      "status" : "view_unavailable",
+      "upper" : 6306
+    },
+    {
+      "pan" : 70,
+      "status" : "view_unavailable",
+      "upper" : 6306
+    },
+    {
+      "error" : "Local search returned an invalid observation; no arm target was accepted.",
+      "pan" : 0,
+      "upper" : 6906
+    }
+  ],
+  "visually_confirmed" : [
+
+  ]
+}

@@ -216,15 +216,9 @@ import Foundation
             startTimer(); beginAcceptedOperation(); return
         }
         update("Awaiting spoken or controller authorization: \(summary)")
-        let spoken: String
-        if summary.hasPrefix("Authorize a 15-minute") {
-            spoken = "Authorize a fifteen minute supervised left-arm session, including startup, local searches, empty-can recycling, reviewed gestures and lowering the empty arm, without asking again for each routine. Stop ends the session."
-        } else if summary.contains("No arm activation") || summary.contains("never resets encoders") {
-            spoken = "Run the local camera search and report what I find. This moves the neck camera only."
-        } else if summary.contains("recycling task") || summary.contains("can-to-bucket") {
-            spoken = "Run the complete supervised recycling attempt: find the empty Coke can and orange bucket, ask for pointing help if needed, prepare the left arm, grip gently, lift, carry, release and retreat."
-        } else { spoken = String(summary.prefix(650)) }
-        announceApproval?(spoken + " Say yes, proceed to authorize the complete operation, or no to cancel.")
+        // Rob requested this exact brief spoken prompt. The immutable complete
+        // scope remains in the controller request and Settings status.
+        announceApproval?("Can I move my arms?")
         startTimer()
         tick()
     }

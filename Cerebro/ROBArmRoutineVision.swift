@@ -354,21 +354,36 @@ final class ROBArmRoutineVision {
     /// projection; a current callback never refreshes the capture timestamp.
     func observeWorkspace() async throws -> (ROBWorkspaceObservation, Frame) {
         let token = try inspectionEpoch()
-        let result = try await ROBMLXEngine.shared.observeWorkspaceSearch {
-            let frame = try await self.settledInspectionFrame(epoch: token, requireStaticScene: false)
-            guard let cg = self.context.createCGImage(frame.image, from: frame.image.extent),
-                  let jpeg = NSBitmapImageRep(cgImage: cg).representation(using: .jpeg, properties: [.compressionFactor: 0.85]) else {
-                throw ROBArmRoutineError.blocked("Local search could not read the camera image.")
+        var diagnostics: [[String: Any]] = []
+        for attempt in 0...1 {
+            let result = try await ROBMLXEngine.shared.observeWorkspaceSearch(formatRetry: attempt > 0) {
+                let frame = try await self.settledInspectionFrame(epoch: token, requireStaticScene: false)
+                guard let cg = self.context.createCGImage(frame.image, from: frame.image.extent),
+                      let jpeg = NSBitmapImageRep(cgImage: cg).representation(using: .jpeg, properties: [.compressionFactor: 0.85]) else {
+                    throw ROBArmRoutineError.blocked("Local search could not read the camera image.")
+                }
+                return (jpeg: jpeg, evidence: frame)
             }
-            return (jpeg: jpeg, evidence: frame)
+            try Task.checkCancellation()
+            guard let current = try inspectionFrame(epoch: token), isFresh(current),
+                  current.sequence > result.evidence.sequence,
+                  Date().timeIntervalSince1970 * 1000 - result.evidence.capturedAt < 30_000 else {
+                throw ROBArmRoutineError.blocked("Local search lost the advancing live camera.")
+            }
+            do {
+                let observation = try ROBWorkspaceObservation.decode(result.raw)
+                diagnostics.append(["attempt": attempt + 1, "status": "decoded", "sequence": NSNumber(value: result.evidence.sequence),
+                    "response_sample": ROBArmObservationCodec.diagnosticSample(result.raw)])
+                recordInspection(["assessment": "workspace_search", "attempts": diagnostics])
+                return (observation, result.evidence)
+            } catch {
+                diagnostics.append(["attempt": attempt + 1, "status": "invalid", "error": error.localizedDescription,
+                    "response_sample": ROBArmObservationCodec.diagnosticSample(result.raw)])
+                recordInspection(["assessment": "workspace_search", "attempts": diagnostics])
+                guard attempt == 0, (error as? ROBWorkspaceObservationError)?.canRetryFormat == true else { throw error }
+            }
         }
-        try Task.checkCancellation()
-        guard let current = try inspectionFrame(epoch: token), isFresh(current),
-              current.sequence > result.evidence.sequence,
-              Date().timeIntervalSince1970 * 1000 - result.evidence.capturedAt < 30_000 else {
-            throw ROBArmRoutineError.blocked("Local search lost the advancing live camera.")
-        }
-        return (try ROBWorkspaceObservation.decode(result.raw), result.evidence)
+        throw ROBArmRoutineError.blocked("Local vision could not produce a readable search observation.")
     }
 }
 
@@ -379,6 +394,7 @@ final class ROBArmRoutineVision {
     static let shared = ROBWorkspaceSearch()
     var prepareView: ((Double, Int) -> Bool)?
     var viewReady: ((Double, Int) -> Bool)?
+    var canUseView: ((Double, Int) -> Bool)?
     var finishView: (() -> Void)?
     var announce: ((String) -> Void)?
     private(set) var lastReport: NSDictionary = [:]
@@ -390,9 +406,14 @@ final class ROBArmRoutineVision {
         var visuallyFound = Set<ROBWorkspaceTarget>()
         var evidence: [[String: Any]] = []
         var leftHanging = false, rightHanging = false
+        var validObservations = 0
         var nearest: (view: ROBWorkspaceView, distance: Double)?
         defer { finishView?() }
         func moveView(_ view: ROBWorkspaceView) async throws -> Bool {
+            if canUseView?(view.panDegrees, view.upperTarget) == false {
+                evidence.append(["pan": view.panDegrees, "upper": view.upperTarget, "status": "outside_current_neck_envelope"])
+                return false
+            }
             let deadline = ProcessInfo.processInfo.systemUptime + 12
             progress(String(format: "Local search: camera pan %+.0f°, tilt target %d", view.panDegrees, view.upperTarget))
             while ProcessInfo.processInfo.systemUptime < deadline {
@@ -415,6 +436,7 @@ final class ROBArmRoutineVision {
                     throw ROBArmRoutineError.blocked("Search camera moved during inspection.")
                 }
                 let (observation, frame) = try await vision.observeWorkspace()
+                validObservations += 1
                 try check()
                 guard viewReady?(view.panDegrees, view.upperTarget) == true else {
                     throw ROBArmRoutineError.blocked("Search camera changed before depth projection.")
@@ -431,6 +453,7 @@ final class ROBArmRoutineVision {
                     "sequence": NSNumber(value: frame.sequence), "captured_at_ms": frame.capturedAt,
                     "left_hanging": observation.leftArmHanging, "right_hanging": observation.rightArmHanging,
                     "hanging_confidence": observation.hangingConfidence]
+                entry["local_inference"] = vision.healthSnapshot()["inspection"]
                 for target in targets {
                     let detection = observation[target]
                     if detection.usable, let previous = priorVisual[target], previous.sequence != frame.sequence,
@@ -462,11 +485,12 @@ final class ROBArmRoutineVision {
                 try check()
                 // An absent object, invalid model answer or unusable depth is
                 // a failed view, not a request for another human permission.
-                evidence.append(["pan": view.panDegrees, "upper": view.upperTarget, "error": error.localizedDescription])
+                evidence.append(["pan": view.panDegrees, "upper": view.upperTarget, "error": error.localizedDescription,
+                    "local_inference": vision.healthSnapshot()["inspection"] ?? [:]])
             }
             if targets.isEmpty ? leftHanging && rightHanging : targets.allSatisfy({ found[$0] != nil }) { break }
         }
-        if !targets.isEmpty, targets.contains(where: { !visuallyFound.contains($0) }) {
+        if validObservations > 0, !targets.isEmpty, targets.contains(where: { !visuallyFound.contains($0) }) {
             let missing = targets.filter { !visuallyFound.contains($0) }.map(\.spokenName).joined(separator: " and ")
             let humanView = nearest?.view ?? ROBWorkspaceView(panDegrees: 0, upperTarget: 6906)
             if try await moveView(humanView) {
@@ -516,9 +540,10 @@ final class ROBArmRoutineVision {
         let missing = targets.filter { found[$0] == nil }.map(\.spokenName)
         let unseen = targets.filter { !visuallyFound.contains($0) }.map(\.spokenName)
         let status = targets.isEmpty ? (leftHanging && rightHanging ? "observed_hanging" : "hanging_unconfirmed")
-            : missing.isEmpty ? "found" : unseen.isEmpty ? "depth_unconfirmed" : "not_found"
+            : validObservations == 0 ? "vision_unavailable" : missing.isEmpty ? "found" : unseen.isEmpty ? "depth_unconfirmed" : "not_found"
         let message = targets.isEmpty ? (leftHanging && rightHanging ? "I can see both robot arms hanging." : "I couldn't confirm both arms hanging from these views.")
-            : missing.isEmpty ? "I found the \(targets.map(\.spokenName).joined(separator: " and "))."
+            : validObservations == 0 ? "My local search could not produce a usable camera observation. I cannot yet confirm the can or bucket. I haven't sent a reach."
+                : missing.isEmpty ? "I found the \(targets.map(\.spokenName).joined(separator: " and "))."
                 : unseen.isEmpty ? "I can see the can and orange bucket, but I couldn't confirm their depth positions. I haven't sent a reach."
                     : "I still couldn't confirm the \(unseen.joined(separator: " and "))."
         announce?(message); progress(message)
@@ -527,6 +552,7 @@ final class ROBArmRoutineVision {
             "camera_arm_mapping": "provisional URDF/neck command prior, not measured hand-eye calibration",
             "left_hanging_observed": leftHanging, "right_hanging_observed": rightHanging,
             "visually_confirmed": visuallyFound.map(\.rawValue).sorted(),
+            "decoded_observations": validObservations,
             "views": evidence, "objects": found.mapValues { ["position": $0.position, "captured_at_ms": $0.capturedAt] } .reduce(into: [String: Any]()) { $0[$1.key.rawValue] = $1.value }]
         do {
             let directory = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,

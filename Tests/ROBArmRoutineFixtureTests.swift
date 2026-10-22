@@ -216,6 +216,7 @@ final class ROBArmRoutineVision {
         testRenditions()
         let r = ROBArmRoutineCoordinator.shared, g = ROBAmberGatewayClient.shared, v = ROBArmRoutineVision.shared
         let approvals = ROBControllerArmApproval.shared
+        var requestCount = 0
         let device = UUID(), session = UUID()
         let hello = ROBRobotActionMessage.controllerHello(senderID: "fixture-controller", acceptsActions: true, capabilities: ["arm_operation"])
         _ = approvals.receive(hello, device: device, session: session)
@@ -227,6 +228,7 @@ final class ROBArmRoutineVision {
         RunLoop.main.add(heartbeat, forMode: .common)
         approvals.send = { request, _, _ in
             if request.kind == .actionRequest {
+                requestCount += 1
                 DispatchQueue.main.async {
                     _ = approvals.receive(.actionStatus(callID: request.callID!, state: .accepted,
                         detail: "Fixture operator approves", result: [:], senderID: "fixture-controller", recipientID: request.senderID),
@@ -286,8 +288,10 @@ final class ROBArmRoutineVision {
         print("Gateway failure: exact SSH error returned promptly with no activation or gripper motion")
 
         g.feedbackReadyAt = ProcessInfo.processInfo.systemUptime + 0.3
+        let beforeInactiveReturn = requestCount
         let inactive = await run("relax")
         precondition(inactive["status"] as? String == "completed")
+        precondition(requestCount == beforeInactiveReturn, "Already hanging arms requested approval")
         precondition(!g.commands.contains { $0.hasPrefix("position_mode") || $0.hasPrefix("calibrate") })
         g.q["left"]![4] = 0.5; g.commands = []
         let unknown = await run("prepare")
@@ -425,8 +429,16 @@ final class ROBArmRoutineVision {
         precondition(!g.commands.contains { $0.hasPrefix("deactivate") }, "Torque removed after failed return")
         precondition(g.commands.contains("priority_hold:left"))
         v.fresh = true; g.commands = []
+        let sessionGrant: NSDictionary = await withCheckedContinuation { continuation in
+            approvals.beginArmSession { continuation.resume(returning: $0) }
+        }
+        precondition(sessionGrant["status"] as? String == "completed" && approvals.armSessionActive)
+        let beforeReturn = requestCount
         let relax = await run("relax")
         precondition(relax["status"] as? String == "completed", relax.description)
+        precondition(requestCount == beforeReturn, "Returning empty arms requested approval")
+        precondition(approvals.armSessionActive, "An empty-arm return needlessly discarded the active session")
+        approvals.cancel(reason: "Fixture session ended")
         precondition(g.mode.values.allSatisfy { $0 == 0 })
         precondition(g.commands.firstIndex(of: "deactivate:left")! > g.commands.lastIndex(of: "waypoint_0:right")!)
         precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty)

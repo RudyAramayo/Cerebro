@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "createdUTC": "2026-10-22T20:07:10.130701+00:00",
-  "baseCommit": "cc03e5669cf422662889e3ace690a7241f4ad758",
+  "baseCommit": "d620fda9f7c9136f81b6b3b7be433ef1514058cf",
   "checks": {
     "plan-tests": {
       "logSHA256": "021edb871638cf5a1aeba1d2d3621860dc4deb6a67f19be09f6c29de405c59a5",
@@ -19,9 +19,9 @@
       "lastOutput": "Arm routine fixtures passed (no hardware access)"
     },
     "approval-final-tests": {
-      "logSHA256": "73ddb9452c626e971a68d01cae4f9656fa36a4716baa059e9a6cb1bbf31fd93e",
+      "logSHA256": "3903ab6fe56739fb503906a601bd0fa5855bc431b9efa5a8b761bb66fe89a6a5",
       "result": "passed",
-      "lastOutput": "Controller/spoken arm approval and session reuse: 84 checks passed; no hardware access"
+      "lastOutput": "Controller/spoken arm approval and session reuse: 85 checks passed; no hardware access"
     },
     "tunnel-tests": {
       "logSHA256": "463eb49b695728b98a5a9218dc7e304583e051b92c0735c5adbfd5ec2d4a82a2",
@@ -42,6 +42,21 @@
       "logSHA256": "9b38d7689bf0f22c3aa372fa53d5804c691018ae4b4cd7a8ee854d15176d831c",
       "result": "passed",
       "lastOutput": "Ghost editor: captured URDF/blue overlay, shared head/cloud FK, one post-preparation snapshot, frozen arm, stage-bound Continue controls and embedded resizing passed; offline execution disabled; no hardware transport linked"
+    },
+    "final-executor-tests": {
+      "logSHA256": "8ca46bc53bc4fe621d6e9793668932647278710cd1dd3d42c1226d683615a3f8",
+      "result": "passed",
+      "lastOutput": "Left-arm trial fixtures passed; no hardware transport exists in this executable"
+    },
+    "final-paired-tests": {
+      "logSHA256": "1d105434dcea547e82ae731fcd8be784187b99c4c5c3ec00cb0758c58f273701",
+      "result": "passed",
+      "lastOutput": "Arm routine fixtures passed (no hardware access)"
+    },
+    "format-plan-tests": {
+      "logSHA256": "021edb871638cf5a1aeba1d2d3621860dc4deb6a67f19be09f6c29de405c59a5",
+      "result": "passed",
+      "lastOutput": "Ghost motion plan fixtures passed; model preview assumptions are not physical calibration"
     }
   },
   "build": {
@@ -49,12 +64,13 @@
     "configuration": "signed arm64 Debug, isolated app-only scheme; installation aggregate excluded",
     "signatureVerification": "codesign --verify --deep --strict passed against system trust store",
     "executablesSHA256": {
-      "Cerebro": "104bc295113af6393d1bb44df1b7972287862832545c5a42bcf2fd14773af8e6",
-      "Cerebro.debug.dylib": "9a573cb85b1fcbca8922744e9b3adbe9008912d25ec390c0a1fdb297a7e74de9"
+      "Cerebro": "73713dae1ba7ee0a3f111dba8731624188bd48234cafecb38470bc237deac27c",
+      "Cerebro.debug.dylib": "2f3868275def363b093a0f71f192d2c0bd82613997e4a94f8b140e10fa462366"
     },
-    "buildLogSHA256": "6d495035f6706de696c6177b3a8abb2e8d58d41f15751d712c2cdbf2fdb1e165",
+    "buildLogSHA256": "90dfd47e83d07728f26c6b79d8ddb98fb5790a952b5f099c0c18af58797a9156",
     "installed": true,
-    "installation": "/Applications/Cerebro.app"
+    "installation": "/Applications/Cerebro.app",
+    "sourceMatchesStagedIndex": true
   },
   "scope": "Pre-existing paired camera/hand bypasses and unrelated user changes excluded from intended build and commit, preserved in main working tree.",
   "authorization": {
@@ -62,7 +78,13 @@
     "taskSeconds": 360,
     "voice": "Only final local microphone result; stable candidate endpoints dictation at 750 ms; no chat/camera/model/serial authorization.",
     "scope": "physical LEFT arm; complete preparation/search/recycling/reviewed gestures/empty return; no per-waypoint approval",
-    "persistedGrant": false
+    "persistedGrant": false,
+    "spokenPrompt": "Can I move my arms?",
+    "noNewGrantRequired": [
+      "registered empty-arm return to hanging and deactivation",
+      "neck-only object search",
+      "neck-only hanging-arm inspection"
+    ]
   },
   "perception": {
     "provider": "installed on-device MLX VLM, no cloud conversation",
@@ -71,34 +93,45 @@
     "cameraArmCalibration": "provisional URDF/neck command prior; no new measured hand-eye calibration"
   },
   "hardware": {
-    "commissioning": "pending; fixtures do not establish a physical recycling success",
+    "commissioning": "Partial live commissioning. Empty preparation and returns executed. No can pickup or bucket placement established.",
     "preInstallReadOnlyObservation": "Authenticated Amber tunnel at 10.0.0.26; both arms have fresh per-joint CAN replies, zero positions and inactive status. User manually restored tunnel during development.",
-    "physicalMotionForThisChange": "none yet",
+    "physicalMotionForThisChange": "See first-live-session.json: successful preparation, search with no reach, empty return, later watchdog stop and subsequent successful empty return.",
     "placementVerified": false,
     "loadedAtUTC": "2026-10-22T20:09:33.893300+00:00",
-    "runningSession": "Relaunched only after fresh inactive/zero arm telemetry. No approval was synthesized or clicked. A final status fix exposes terminal authorization results and session expiry instead of hiding them behind Arms idle.",
-    "liveState": "Final app loaded. Settings \u2192 Arms shows the startup session awaiting spoken or controller authorization and No active arm rehearsal session. No new arm recording since relaunch; actual spoken approval, search accuracy and physical transfer remain unverified.",
-    "finalLoadedAtUTC": "2026-10-22T20:17:21.350106+00:00",
-    "automaticTunnelVerified": "After normal relaunch, without Connect Tunnel: Gateway ready; SSH tunnel active to 10.0.0.26; gateway authenticated/exclusive controller. Both arms show all CAN replies current at about 20 Hz, positions zero and inactive status."
+    "runningSession": "Final signed build relaunched after measured empty-arm return/deactivation. No approval synthesized or controller Approve clicked.",
+    "liveState": "Final UI verified Left arm is already hanging and inactive without asking for approval or reactivating. Offer one arm session at launch / wake restored to enabled.",
+    "finalLoadedAtUTC": "2026-10-22T20:59:48.482079+00:00",
+    "automaticTunnelVerified": "After normal relaunch, without Connect Tunnel: Gateway ready; SSH tunnel active to 10.0.0.26; gateway authenticated/exclusive controller. Both arms show all CAN replies current at about 20 Hz, positions zero and inactive status.",
+    "operatorPointingReport": "Rob reported that after he pointed at the can, ROB looked in the correct direction. This does not establish a visual/depth confirmation or successful grasp.",
+    "cameraOnlySearch": {
+      "report": "final-search-response.json",
+      "reportSHA256": "1f3f242dcfd1156d0e94069998d1d091b81f1bf634f4262b8e11bbf7584f793f",
+      "status": "not_found",
+      "detail": "I still couldn't confirm the Coke can and orange bucket.",
+      "decodedObservations": 16,
+      "visuallyConfirmed": [],
+      "armSessionActiveDuringSearch": false
+    }
   },
   "sourceSHA256": {
     "Cerebro/GeminiRoboticsProtocol.swift": "db9736edb4b8ea8c30826d50c1131ee00a9bdf2a8e5b7d04de0615d19f2d3c1a",
     "Cerebro/ROBAmberGatewayClient.swift": "62ae1a72e046c0e9fc124475314ba6b7e2defa58384eacd202f05c76402d2580",
-    "Cerebro/ROBArmRoutineCoordinator.swift": "4713983a15645a4797849624078d7f35b60de1ed47722a164900662d9a9e55d7",
+    "Cerebro/ROBArmRoutineCoordinator.swift": "8711f00fb6231795ccca8518fba98022c3f7100f512b099fc64442cb198b4e40",
     "Cerebro/ROBArmRoutinePlan.swift": "14803e791ed00d0586d7226e397903c186e7ffd984421124f810ece78e27afaa",
-    "Cerebro/ROBArmRoutineSettingsViewController.swift": "0918db5fdfbe87c91f3c94995d3f0301c634a0478971ea810366a84ff822d335",
-    "Cerebro/ROBArmRoutineVision.swift": "73322820b9827088d461c2045a340e7a79995bca91728117af5df4059b8d2420",
-    "Cerebro/ROBControllerArmApproval.swift": "3fdbc97572309a35592d20152897e63139f3ac6c1984836fcaa5b8021c312165",
+    "Cerebro/ROBArmRoutineSettingsViewController.swift": "e96bd2ab1f3dd07f6fa9eabc03bc6551a02294b1a53d1f522bcff854e0d87c02",
+    "Cerebro/ROBArmRoutineVision.swift": "3e31321bc3f1e48b5004b557da205a5b974285daf08b0ab7aa90de42ffefccc3",
+    "Cerebro/ROBControllerArmApproval.swift": "74c4d4b069890082b8960a3608aaa0ccca0d74c16a2fcdfc6cdcd569d767d194",
     "Cerebro/ROBGhostGestureEditor.swift": "19e569e1b8e01ff61d8e7ff21792da5eb7430ae1c55fcc402e20706e3a74f47a",
     "Cerebro/ROBGhostMotionPlan.swift": "9acb94cd01c2e35ba7acd6ade1617046f964f9e9cf086dd4f1e9947d07cad840",
-    "Cerebro/ROBLeftArmTrial.swift": "c844dc28c8bff2d560dd1bb8c2dfa753bfb51b851750abce23b3c5ab2693821a",
-    "Cerebro/ROBMLXRuntime.swift": "d402ce28c1a19159d9adb4fe879f17244b9ed7facc6f30898f23ad2d116fb57e",
-    "Cerebro/ROBMainViewController.mm": "7eb837464bf9cee334b4378838a2c70460de1c7dcb8ea04caf118832ff192bd0",
+    "Cerebro/ROBLeftArmTrial.swift": "3ee6917790783b9152020d23fe15da76c479672365802e4654326c8dfacaa749",
+    "Cerebro/ROBMLXRuntime.swift": "61f5a4546afe51623a1778028d7154ff41d0b0999e805f0d0dde80f4562e2053",
+    "Cerebro/ROBMainViewController.mm": "1b2e8869e94d9785f2b2959325ea0cae9982cf3ea4987050b7fad45f2d0fbd05",
     "Cerebro/ROBRealtimePreferences.swift": "6f5ff8e0e72c68aff3dc270e437138059930ea3b87fa6c0c1b687f6988834c3b",
     "Cerebro/ROBSerialBox.h": "475953b04de43ff37a3a378adb741c63cee499704b1cded08db844d4cd146ab2",
     "Cerebro/ROBSerialBox.m": "3f13e57050d08ecf8d9d4f40cb56a3aa6b3703306eaf2ddd9158251d296fc932",
     "Cerebro/ROBSpeechBox.h": "93d07358eb770282b4162cc285e91b46867d83aab74324ab3fceaa42627886eb",
     "Cerebro/ROBSpeechBox.m": "0f1f7673d2295ba658ac015e2146837a02efd9ac29ace92e065353d9b2e9abfc",
-    "Cerebro/ROBWorkspaceSearchPlan.swift": "3d2b5a9c7d9bb2e444db95f9287afd758196adcb6a3f6ea0aeb58e8713aaa95f"
-  }
+    "Cerebro/ROBWorkspaceSearchPlan.swift": "a869c4704acb8b787d7f3593966b3bfea0b17a4534c118b9f9c01b5c1871d012"
+  },
+  "updatedUTC": "2026-10-22T20:59:48.385538+00:00"
 }

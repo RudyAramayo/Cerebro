@@ -30,7 +30,7 @@ import AppKit
         let explanation = NSTextField(wrappingLabelWithString:
             "One Vision Pro or iPhone approval covers the complete taught arm route under your supervision, including an incomplete camera view. Watch the arms and keep Stop + hold ready. Startup brings hanging arms forward, checks calibration and requests both grippers open. Every Prepare opens both jaws automatically, reusing current calibration; empty-jaw calibration runs only when needed. Support any held object before approving preparation. Paired forward travel took about 22 seconds in one supervised trial; camera checks and gripper work take additional time.")
         let commands = NSTextField(wrappingLabelWithString:
-            "Say or type ‘relax’ to lower the arms gently and turn off holding torque. ‘Grab this’ or ‘hold this’ brings the arms forward and attempts a gentle close when the camera sees the object between a gripper’s jaws. These commands are available without enabling startup calibration. Each complete operation needs one spoken or controller authorization; a rehearsal session covers its included left-arm routines. Stop + hold is immediate.")
+            "Say or type ‘relax’ to lower the arms gently and turn off holding torque. ‘Grab this’ or ‘hold this’ brings the arms forward and attempts a gentle close when the camera sees the object between a gripper’s jaws. These commands are available without enabling startup calibration. Task motions need one spoken or controller authorization; a rehearsal session covers its included left-arm routines. Returning empty arms to hanging needs no approval. Stop + hold is immediate.")
         let limitation = NSTextField(wrappingLabelWithString:
             "‘Copy my pose’ records five seconds from the main camera. Replay and greeting use only the taught arm route and leave the grippers unchanged; confirm empty jaws when approving. Live camera, person/hand detection, motor feedback and Stop remain active. Full human pose copying and general reaching need validated geometry.")
         limitation.textColor = .secondaryLabelColor
@@ -44,7 +44,7 @@ import AppKit
         teaching.spacing = 10
         let leftTitle = NSTextField(labelWithString: "Left arm — supervised trial")
         leftTitle.font = .boldSystemFont(ofSize: 15)
-        let workspaceHelp = NSTextField(wrappingLabelWithString: "Recycle can scans for an empty Coke can and an open orange bucket with on-device MLX, asks a nearby person to point if needed, then attempts a locally planned pick-and-place under ONE spoken or controller authorization. Search only and Check hanging move only the neck camera. No cloud conversation is required after the vision model is installed. Camera-to-arm geometry is provisional; supervise the attempt and keep Stop + hold ready.")
+        let workspaceHelp = NSTextField(wrappingLabelWithString: "Recycle can scans for an empty Coke can and an open orange bucket with on-device MLX, asks a nearby person to point if needed, then attempts a locally planned pick-and-place under ONE spoken or controller authorization. Search only and Check hanging move only the neck camera and need no arm approval or gateway connection. No cloud conversation is required after the vision model is installed. Camera-to-arm geometry is provisional; supervise the attempt and keep Stop + hold ready.")
         let workspaceButtons = NSStackView(views: [button("Start 15-minute left-arm session", #selector(startArmSession)),
             button("End arm session", #selector(endArmSession)), button("Recycle can → orange bucket", #selector(recycleCan)),
             button("Search only", #selector(searchWorkspace)), button("Check hanging", #selector(checkHanging))])
@@ -177,7 +177,7 @@ import AppKit
         changeCurrentLimit()
         observingLeftOperation = ROBLeftArmTrial.commands.contains(command)
         ROBArmRoutineCoordinator.shared.performCommand(command, target: "") { [weak self] result in
-            self?.state.stringValue = result["detail"] as? String ?? "Arm routine ended"
+            self?.refresh()
         }
     }
 }

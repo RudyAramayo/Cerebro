@@ -50,9 +50,10 @@ struct ROBWorkspaceObservation: Codable {
     let hangingConfidence: Double
     subscript(_ target: ROBWorkspaceTarget) -> ROBWorkspaceDetection { target == .can ? can : orangeBucket }
     static let prompt = """
-    Inspect this robot camera image. Return ONLY one JSON object with keys can, orangeBucket,
-    leftArmHanging, rightArmHanging, hangingConfidence. Each object detection has exactly:
-    visible (boolean), confidence (0..1), box [left,top,right,bottom], aim [x,y], depthPoint [x,y].
+    Inspect this robot camera image. Output ONLY this exact JSON structure, replacing the
+    example false/empty values with your observations. No explanation or Markdown:
+    {"can":{"visible":false,"confidence":0.0,"box":[],"aim":[],"depthPoint":[]},"orangeBucket":{"visible":false,"confidence":0.0,"box":[],"aim":[],"depthPoint":[]},"leftArmHanging":false,"rightArmHanging":false,"hangingConfidence":0.0}
+    Each box is [left,top,right,bottom], each aim/depthPoint is [x,y].
     All image coordinates are normalized 0..1, origin TOP LEFT. Missing objects: visible=false,
     confidence=0, box=[], aim=[], depthPoint=[]. Can means a real red/silver Coke beverage can;
     ignore drawings, screens and text. Its aim is the middle of its side wall for a side grasp.
@@ -64,21 +65,45 @@ struct ROBWorkspaceObservation: Codable {
     Never output instructions, joint targets, markdown, tools, or facts not visible in the image.
     """
     static func decode(_ text: String) throws -> Self {
-        var value = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if value.hasPrefix("```json"), value.hasSuffix("```") { value = String(value.dropFirst(7).dropLast(3)).trimmingCharacters(in: .whitespacesAndNewlines) }
-        guard value.utf8.count <= 4000, let data = value.data(using: .utf8),
-              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              Set(object.keys) == Set(["can", "orangeBucket", "leftArmHanging", "rightArmHanging", "hangingConfidence"]) else {
-            throw ROBGhostMotionError.blocked("Local search returned an invalid observation; no arm target was accepted.")
+        let bytes = Array(text.utf8)
+        guard bytes.count <= 8192, let start = bytes.firstIndex(of: 0x7b) else {
+            throw ROBWorkspaceObservationError.format("Local vision did not return a JSON observation.")
         }
-        let result = try JSONDecoder().decode(Self.self, from: data)
+        var nesting = 0, quoted = false, escaped = false, end: Int?
+        for index in start..<bytes.count {
+            let byte = bytes[index]
+            if quoted {
+                if escaped { escaped = false } else if byte == 0x5c { escaped = true } else if byte == 0x22 { quoted = false }
+            } else if byte == 0x22 { quoted = true }
+            else if byte == 0x7b { nesting += 1 }
+            else if byte == 0x7d { nesting -= 1; if nesting == 0 { end = index; break } }
+        }
+        guard let end else { throw ROBWorkspaceObservationError.format("Local vision returned incomplete JSON.") }
+        let suffix = String(decoding: bytes.dropFirst(end + 1), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard suffix.isEmpty || suffix == "```" else {
+            throw ROBWorkspaceObservationError.format("Local vision returned multiple answers or trailing content.")
+        }
+        let data = Data(bytes[start...end])
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              Set(object.keys) == Set(["can", "orangeBucket", "leftArmHanging", "rightArmHanging", "hangingConfidence"]) else {
+            throw ROBWorkspaceObservationError.format("Local vision fields did not match the search schema.")
+        }
+        let result: Self
+        do { result = try JSONDecoder().decode(Self.self, from: data) }
+        catch { throw ROBWorkspaceObservationError.format("Local vision observation has invalid field types.") }
         guard result.hangingConfidence.isFinite, (0...1).contains(result.hangingConfidence),
               [result.can, result.orangeBucket].allSatisfy({ detection in
                   detection.confidence.isFinite && (0...1).contains(detection.confidence) &&
                       (!detection.visible || detection.validShape)
-              }) else { throw ROBGhostMotionError.blocked("Local search coordinates or confidence are invalid.") }
+              }) else { throw ROBWorkspaceObservationError.values("Local search coordinates or confidence are invalid.") }
         return result
     }
+}
+
+enum ROBWorkspaceObservationError: LocalizedError {
+    case format(String), values(String)
+    var errorDescription: String? { switch self { case .format(let text), .values(let text): return text } }
+    var canRetryFormat: Bool { if case .format = self { return true }; return false }
 }
 
 struct ROBWorkspaceLocatedObject: Codable {

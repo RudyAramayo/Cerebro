@@ -5690,6 +5690,11 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             fabs([ROBTorsoControlCenter shared].commandedVelocity) < 0.001 &&
             [serial isNeckReadyForWorkspaceSearchWithPanDegrees:pan upperTarget:upper];
     };
+    workspace.canUseView = ^BOOL(double pan, NSInteger upper) {
+        ROBSerialBox *serial = weakSelf.serialBox;
+        return serial != nil && serial.neckCommandStateKnown &&
+            pan >= serial.currentNeckPanMinimumDegrees && pan <= serial.currentNeckPanMaximumDegrees;
+    };
     workspace.announce = ^(NSString *text) { [weakSelf.speechBox sayIt:text]; };
     ROBShowMotionCoordinator *rehearsal = [ROBShowMotionCoordinator shared];
     rehearsal.cameraDemand = routine.cameraDemand;
@@ -5735,9 +5740,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 - (void)performLocalArmText:(NSString *)text command:(NSString *)command
 {
     [self appendConversationText:text fromUser:YES];
-    [self.speechBox sayIt:[command isEqual:@"teach"]
-        ? @"Show both shoulders, hips and wrists to the main camera. I will record five seconds of slow arm movement."
-        : @"Waiting for approval on your Vision Pro or iPhone."];
+    if ([command isEqual:@"teach"]) {
+        [self.speechBox sayIt:@"Show both shoulders, hips and wrists to the main camera. I will record five seconds of slow arm movement."];
+    }
     __weak ROBMainViewController *weakSelf = self;
     [[ROBArmRoutineCoordinator shared] performCommand:command target:([command isEqual:@"replay"] ? @"last" : text) completion:^(NSDictionary *result) {
         NSString *detail = result[@"detail"] ?: @"The arm routine ended.";

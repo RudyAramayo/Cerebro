@@ -170,7 +170,15 @@ enum ROBArmRoutineError: LocalizedError {
         guard ["startup", "prepare", "grab", "hold", "relax", "wave", "replay"].contains(command) else {
             completion(["status": "rejected", "detail": "Unknown arm routine."]); return
         }
-        if command == "relax" { cancel(reason: "Relax requested; waiting for controller approval") }
+        if command == "relax" {
+            if ROBControllerArmApproval.shared.isPending {
+                ROBControllerArmApproval.shared.cancel(reason: "Empty-arm return requested")
+            }
+            cancelAuthorized(reason: "Empty-arm return requested")
+            performAuthorizedCommand(command, target: target,
+                inspectionPanDegrees: ROBArmRoutinePlan.inspectionPanDegrees(), completion: completion)
+            return
+        }
         guard !ROBControllerArmApproval.shared.isPending else {
             completion(["status": "busy", "detail": ROBControllerArmApproval.shared.status]); return
         }
@@ -295,7 +303,7 @@ enum ROBArmRoutineError: LocalizedError {
         startupTicket = nil
         activeRendition = rendition
         self.inspectionPanDegrees = inspectionPanDegrees
-        supervisedRoute = ROBControllerArmApproval.shared.authorizesSupervisedArmRoute()
+        supervisedRoute = command == "relax" || ROBControllerArmApproval.shared.authorizesSupervisedArmRoute()
         owner = id; isRunning = true; activeCommand = command; failure = nil; self.completion = completion
         deadline = ProcessInfo.processInfo.systemUptime + 90
         superviseCamera = false; moving = false; generation = 0
@@ -345,7 +353,7 @@ enum ROBArmRoutineError: LocalizedError {
     private func check() throws {
         try Task.checkCancellation()
         if let failure { throw ROBArmRoutineError.blocked(failure) }
-        if supervisedRoute && !ROBControllerArmApproval.shared.authorizesSupervisedArmRoute() {
+        if supervisedRoute && activeCommand != "relax" && !ROBControllerArmApproval.shared.authorizesSupervisedArmRoute() {
             throw ROBArmRoutineError.blocked("Controller supervision ended; an arm hold was requested.")
         }
         if activeCommand != "teach", generation == 0, !gateway.isReady(),

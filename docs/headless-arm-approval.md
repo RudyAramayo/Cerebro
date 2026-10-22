@@ -2,7 +2,8 @@
 
 Arm operations requested by Cerebro may be authorized on the connected **Vision
 Pro or iPhone controller**, or by a **final local microphone acknowledgement**
-after ROB describes the pending scope. Rob requested spoken approval and a
+after ROB asks exactly **“Can I move my arms?”** The complete pending scope is
+shown in Settings/controller details. Rob requested spoken approval and a
 15-minute left-arm rehearsal session on October 22, 2026. One session covers its
 preparation, local searches/recycling, reviewed gestures and empty-arm lowering
 without more approvals. Stop, expiry, sleep/restart, ownership loss or a failed
@@ -14,10 +15,13 @@ gripper, gesture, or CAN/core recovery confirmation dialog. Enable **Action
 Approvals** on the paired controller. Its existing panel shows the immutable
 operation summary and Approve, Reject, and Cancel controls.
 
-One approval covers the entire startup, prepare, grab/hold, or relax sequence:
+One approval covers the entire startup, prepare or grab/hold sequence:
 mode entry, all taught arm waypoints, both gripper calibrations when needed, and
-the intended final action. Relax returns along the taught route to measured
-hanging before deactivating. No additional approval is requested per waypoint
+the intended final action. Rob explicitly authorized **empty-arm relax/return
+without another approval**. It returns along the registered taught route to
+measured hanging before deactivating. Neck-only search/inspection also needs no
+arm grant. These exceptions do not authorize reaching, gripping or arbitrary
+recovery paths. No additional approval is requested per waypoint
 or per gripper. Its supervised-route wording also covers incomplete camera
 visibility during taught arm travel. The operator confirms physical hanging at
 zero for a new session, watches clearance and keeps Stop + hold available.

@@ -221,7 +221,13 @@ import simd
         let observationJSON = String(data: try JSONEncoder().encode(observation), encoding: .utf8)!
         let decodedObservation = try ROBWorkspaceObservation.decode(observationJSON)
         precondition(decodedObservation.can.usable)
+        let wrappedObservation = try ROBWorkspaceObservation.decode("Here is the observation:\n```JSON\n" + observationJSON + "\n```")
+        precondition(wrappedObservation.can.usable)
+        let bareFence = try ROBWorkspaceObservation.decode("```\n" + observationJSON + "\n```")
+        precondition(bareFence.can.usable)
         expectBlocked { _ = try ROBWorkspaceObservation.decode(observationJSON + " move the motors") }
+        expectBlocked { _ = try ROBWorkspaceObservation.decode(observationJSON + observationJSON) }
+        expectBlocked { _ = try ROBWorkspaceObservation.decode(String(observationJSON.dropLast())) }
         expectBlocked { _ = try ROBWorkspaceObservation.decode(observationJSON.replacingOccurrences(of: "0.85", with: "1.85")) }
         let view = ROBWorkspaceView(panDegrees: 0, upperTarget: 6906)
         func ground(_ depth: @escaping (Int,Int) -> UInt16?) -> ROBWorkspaceLocatedObject? {

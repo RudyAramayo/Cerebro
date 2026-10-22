@@ -250,14 +250,17 @@ required. See
 ## Supervised Amber arms, grippers, and wake-up
 
 **Settings → Arms** offers one 15-minute supervised left-arm session at launch
-and wake. Authorize it once by saying **“yes, proceed”** to ROB's local microphone
-after its scope is spoken, or approve on the paired controller. Preparation,
+and wake. ROB asks **“Can I move my arms?”** Authorize it once by saying
+**“yes, proceed”** to its local microphone, or approve on the paired controller.
+The complete scope remains in Settings/controller details. Preparation,
 bounded gestures, local search/recycling and empty-arm lowering then share that
 session without per-routine or per-waypoint approval. Stop ends the session.
 The experimental **Recycle can → orange bucket** task uses on-device vision,
 neck sweeps, RGB-D confirmation, pointing assistance and local IK; no live cloud
 conversation is required. Search-only and hanging-arm inspection never activate
-an arm. Placement remains unverified pending physical commissioning. See
+an arm and need no arm grant. Returning empty arms to hanging also runs without
+another approval, while retaining the registered route and feedback checks.
+Placement remains unverified pending physical commissioning. See
 [local recycling and spoken sessions](docs/local-recycling-task.md).
 
 Development mode now includes **Amber Arm Diagnostics…** for authenticated

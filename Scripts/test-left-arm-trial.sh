@@ -12,4 +12,5 @@ xcrun swiftc -swift-version 5 -parse-as-library \
   "$repo_dir/Cerebro/ROBLeftArmTrial.swift" \
   "$repo_dir/Tests/ROBLeftArmTrialFixtureTests.swift" \
   -o "$fixture_dir/left-arm"
+cp -R "$repo_dir/Cerebro/Resources/ShadowPlanner" "$fixture_dir/ShadowPlanner"
 "$fixture_dir/left-arm" "$repo_dir"

@@ -32,7 +32,8 @@ final class ROBAmberGestureExecutor {
 final class ROBAmberGatewayTunnel {
     static let shared = ROBAmberGatewayTunnel()
     var failureDetail: String?
-    func connect(host: String? = nil) {}
+    var connections = 0
+    func connect(host: String? = nil) { connections += 1 }
 }
 final class ROBAmberGatewayTelemetry {
     let arm = "right"
@@ -171,7 +172,11 @@ final class ROBAmberGatewayClient: NSObject {
 final class ROBWorkspaceSearch {
     static let shared = ROBWorkspaceSearch()
     var lastReport: NSDictionary = ["detail": "Fixture search only"]
+    var fail = false
+    var onInspect: (() -> Void)?
     @MainActor func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
+        onInspect?()
+        if fail { throw ROBArmRoutineError.blocked("Fixture observation unavailable") }
         try check(); return [:]
     }
 }
@@ -273,6 +278,28 @@ final class ROBArmRoutineCoordinator {
             }
             return true
         }
+        // Neck-only observations do not request arm authority, connect a
+        // gateway, or issue a hold even when their camera inspection fails.
+        g.ready = false
+        ROBWorkspaceSearch.shared.onInspect = {
+            let stale = ROBAmberGatewayTelemetry(sequence: 1, positions: g.q["right"]!, stale: true, status: 0)
+            NotificationCenter.default.post(name: .ROBAmberGatewayTelemetryDidUpdate, object: g, userInfo: ["telemetry": stale])
+        }
+        for command in ["left_search_workspace", "left_check_hanging"] {
+            let searched = await run(command)
+            precondition(searched["status"] as? String == "accepted_unverified", searched.description)
+            precondition(approvals == 0 && g.commands.isEmpty)
+        }
+        ROBWorkspaceSearch.shared.fail = true
+        let failedSearch = await run("left_search_workspace")
+        precondition(failedSearch["status"] as? String == "blocked")
+        precondition(approvals == 0 && g.commands.isEmpty && ROBAmberGatewayTunnel.shared.connections == 0)
+        ROBWorkspaceSearch.shared.fail = false; ROBWorkspaceSearch.shared.onInspect = nil; g.ready = true
+        print("Neck-only search and hanging checks: no arm approval, gateway connection, motor or hold commands, including failure")
+        let alreadyHanging = await run("left_relax")
+        precondition(alreadyHanging["status"] as? String == "completed", alreadyHanging.description)
+        precondition(approvals == 0 && g.commands == ["mode_query:right"])
+        g.commands = []
         // Rejection is inert, including gripper commands and mode changes.
         approve = false
         let rejected = await run("left_wave")
@@ -409,12 +436,14 @@ final class ROBArmRoutineCoordinator {
         precondition(!g.commands.contains { $0.hasPrefix("gripper_hold") || $0.hasPrefix("gripper_release") || $0.hasPrefix("calibrate") })
         print("Object handoff: empty preparation calibrates once; grip/release never moves an arm, reopens before closing, or recalibrates around an object")
         g.commands = []
+        let approvalsBeforeReturn = approvals
         let relax = await run("left_relax")
         precondition(relax["status"] as? String == "completed", relax.description)
+        precondition(approvals == approvalsBeforeReturn, "Empty-arm return requested another approval")
         precondition(g.mode["right"] == 0 && g.q["left"]! == rightBefore)
         precondition(g.commands.firstIndex(of: "deactivate:right")! > g.commands.lastIndex(of: "waypoint_0:right")!)
         precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty)
-        print("Left return: reverse taught route, measured hanging before torque-off, right arm unchanged")
+        print("Left return: no approval or unnecessary activation at hanging; reverse taught route, measured hanging before torque-off, right arm unchanged")
         // Trip only after real position-mode entry/dispatch. No automatic retry.
         g.commands = []; g.current = 0.2
         UserDefaults.standard.set(0.1, forKey: ROBLeftArmTrial.currentLimitKey)
@@ -453,7 +482,7 @@ final class ROBArmRoutineCoordinator {
             precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty)
         }
         print("Stop/faults: stale feedback, replaced session, camera loss and operator cancellation prevent any subsequent waypoint and retain torque")
-        precondition(approvals == 20)
+        precondition(approvals == 19)
 
         // One authenticated approval covers the complete, bounded interaction.
         // Local readiness cannot be queued early or skip any physical step.

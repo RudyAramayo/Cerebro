@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-22T20:32:32.398167+00:00",
+  "authorization": "One live left-arm session, observed authorized until 13:31 local time. No Codex acceptance or controller Approve click was supplied. Preparation, search and empty lowering executed without another approval prompt.",
+  "arm": "physical LEFT / R11 / gateway right",
+  "trials": [
+    {
+      "phase": "prepare",
+      "source": "left_prepare-FD8A5727-BAD0-4525-BDCD-C9B15F9B9207.csv",
+      "archive": "prepare.csv.gz",
+      "sourceSHA256": "424939f0afbcabc4d192f808a44d6df8e6481fba892a2fea3581ee8325002674",
+      "archiveSHA256": "b0be44484432797fbc826ce69d3e1d78a20746017d2a54c6a3b67257d776fc3e",
+      "elapsedSeconds": 19.815384291669034,
+      "samples": 390,
+      "lastPhase": "release object",
+      "finalPositionsRadians": [
+        -1.048561089674718,
+        0.9966102736583246,
+        -0.6017295303946075,
+        0.001090830782496456,
+        -0.5924574687433877,
+        -0.5942300687649444,
+        0.0
+      ],
+      "maximumFeedbackAgeMilliseconds": 48.75831466637641,
+      "peakCurrentJumpRaw": 1.84375
+    },
+    {
+      "phase": "search",
+      "source": "left_recycle_can-5574F91E-3D92-498A-8AA0-BE73535002A9.csv",
+      "archive": "search.csv.gz",
+      "sourceSHA256": "e9f3a446288576ceb182389e0d2f37188c944e3a2a89c5009d0e1985c1aceac1",
+      "archiveSHA256": "e1a49c0eca08cf6370170f1b0359d552fa130516f499810996f741502c610ccd",
+      "elapsedSeconds": 86.93932479166324,
+      "samples": 1633,
+      "lastPhase": "preflight",
+      "finalPositionsRadians": [
+        -1.048288381979094,
+        0.9959285044192643,
+        -0.6013204688511713,
+        0.0,
+        -0.59327559183026,
+        -0.5940937149171324,
+        -0.003272492347489368
+      ],
+      "maximumFeedbackAgeMilliseconds": 53.397857331560715,
+      "peakCurrentJumpRaw": 1.4921875
+    },
+    {
+      "phase": "empty-return",
+      "source": "left_relax-18693E11-669E-4652-9224-22143FB3034D.csv",
+      "archive": "empty-return.csv.gz",
+      "sourceSHA256": "d231dfda330e3088bebee21939d4667a25e39b7e4fed967099bbe3910fa94c74",
+      "archiveSHA256": "0e0f014e86220681cfafeea5df5ac797ba87a5eab170e37dc68d5fe904914c59",
+      "elapsedSeconds": 15.578917833336163,
+      "samples": 305,
+      "lastPhase": "deactivating",
+      "finalPositionsRadians": [
+        0.0,
+        0.009681123194656046,
+        -0.000136353847812057,
+        -0.002999784651865254,
+        -0.001499892325932627,
+        0.00136353847812057,
+        -0.000409061543436171
+      ],
+      "maximumFeedbackAgeMilliseconds": 38.43265200039069,
+      "peakCurrentJumpRaw": 2.09375
+    },
+    {
+      "phase": "prepare-watchdog-stop",
+      "source": "left_prepare-F03B72F9-1FBB-4ABA-844B-BBFB033BB312.csv",
+      "archive": "prepare-watchdog-stop.csv.gz",
+      "sourceSHA256": "dd6c8a9d90e54f17096dcca9ca13b9908e03d75c76d444c6f719334157a3d276",
+      "archiveSHA256": "1b50f2827c1566dcc5cc9623d655c52ab444df57704d9abbe722fe1ed1217fe3",
+      "elapsedSeconds": 6.725497041665221,
+      "samples": 108,
+      "lastPhase": "waypoint 1",
+      "finalPositionsRadians": [
+        0.0,
+        0.1289907400302059,
+        0.0,
+        0.0,
+        0.0,
+        0.000136353847812057,
+        0.0
+      ],
+      "maximumRecordedSampleGapSeconds": 1.2957089583323977,
+      "maximumFeedbackAgeMilliseconds": 35.81894966495101
+    },
+    {
+      "phase": "recovery-empty-return",
+      "source": "left_relax-2EF9ED89-FFCB-46E9-9888-8E62C177270D.csv",
+      "archive": "recovery-empty-return.csv.gz",
+      "sourceSHA256": "eccbc514d79f7ae70db1823669c7a94af7e53b27628335b2830c14ba4d70ea71",
+      "archiveSHA256": "ffe3aa57f478c32619d3fba9f679771f24d5c58b64b40abd5e7835e3552d538b",
+      "elapsedSeconds": 5.3008584166636865,
+      "samples": 101,
+      "lastPhase": "deactivating",
+      "finalPositionsRadians": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "maximumRecordedSampleGapSeconds": 0.19430204166928888,
+      "maximumFeedbackAgeMilliseconds": 94.4866890015851
+    }
+  ],
+  "physicalTransfer": "No reach, grip or carry was sent. The local VLM replies failed schema decoding. The old search outcome said not_found; this means unreadable observations, not verified object absence.",
+  "placementVerified": false,
+  "searchReportSHA256": "b73a30f3a8805658f2199c56ecb4df4ba8f8fa6eab790f9b5e669c998591746e",
+  "followup": {
+    "preparation": "After loading the schema fix, one new live session began preparation. The gateway rejected a renewal with no active lease for right arm. Execution held at the first waypoint; a 1.2957-second application recording gap preceded the failure. Root cause of the application pause is not established. No watchdog bounds changed.",
+    "operatorIntervention": "Diagnostics recorded operator-initiated left-arm deactivation at 13:44:25 local time. Codex did not initiate that command.",
+    "return": "A fresh live spoken/controller approval authorized the complete empty-arm return. UI verified Left arm reached hanging and is inactive. Recorded elapsed time 5.3009 seconds. No Codex approval was supplied.",
+    "searchFixLiveVerification": {
+      "report": "final-search-response.json",
+      "reportSHA256": "1f3f242dcfd1156d0e94069998d1d091b81f1bf634f4262b8e11bbf7584f793f",
+      "status": "not_found",
+      "detail": "I still couldn't confirm the Coke can and orange bucket.",
+      "decodedObservations": 16,
+      "visuallyConfirmed": [],
+      "armSessionActiveDuringSearch": false
+    },
+    "operatorPointingReport": "Rob reported that after he pointed at the can, ROB looked in the correct direction. This does not establish a visual/depth confirmation or successful grasp.",
+    "firstCameraOnlyRetry": "Interrupted by an unsolicited stale arm-current callback despite no arm session. Fixed by excluding neck-only operations from motor telemetry recording; regression fixture injects stale telemetry with the gateway unavailable and verifies no authorization, connection, mode, jaw or hold command.",
+    "approvalFreeHanging": "Final UI verified Left arm is already hanging and inactive without asking for approval or reactivating. Offer one arm session at launch / wake restored to enabled."
+  },
+  "updatedUTC": "2026-10-22T20:47:15.085794+00:00"
+}

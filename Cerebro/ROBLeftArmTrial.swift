@@ -7,6 +7,7 @@ import AppKit
     static let shared = ROBLeftArmTrial()
     static let commands = ["left_wave", "left_prepare", "left_grip", "left_release", "left_relax", "left_object_cycle",
         "left_pick_place", "left_recycle_can", "left_search_workspace", "left_check_hanging"]
+    private static let neckOnlyCommands = ["left_search_workspace", "left_check_hanging"]
     static let currentLimitKey = "ROBLeftArmCurrentJumpLimitRaw"
     private(set) var isRunning = false
     private(set) var status = "Left arm ready for a supervised trial"
@@ -153,6 +154,7 @@ import AppKit
         sampleObserver = NotificationCenter.default.addObserver(forName: .ROBAmberGatewayTelemetryDidUpdate,
             object: gateway, queue: .main) { [weak self] note in
                 guard let self, self.isRunning, self.failure == nil,
+                      !Self.neckOnlyCommands.contains(self.activeCommand),
                       let sample = note.userInfo?["telemetry"] as? ROBAmberGatewayTelemetry,
                       sample.arm == self.arm else { return }
                 do { try self.record(sample) } catch { self.abort(error.localizedDescription) }
@@ -179,6 +181,12 @@ import AppKit
         }
         // Non-editor operations never inherit an old reviewed proposal.
         if !isRunning { proposal = nil }
+        if command == "left_relax", !isRunning,
+           !ROBArmRoutineCoordinator.shared.isRunning, !ROBShowMotionCoordinator.shared.isRunning {
+            if ROBControllerArmApproval.shared.isPending {
+                ROBControllerArmApproval.shared.cancel(reason: "Empty-arm return requested")
+            }
+        }
         guard !isRunning, !ROBArmRoutineCoordinator.shared.isRunning,
               !ROBShowMotionCoordinator.shared.isRunning, !ROBAmberGestureExecutor.shared.isExecuting,
               !ROBControllerArmApproval.shared.isPending else {
@@ -207,6 +215,11 @@ import AppKit
         let travel = ["left_wave", "left_prepare", "left_relax", "left_object_cycle"].contains(command)
         let workspace = ["left_recycle_can", "left_search_workspace", "left_check_hanging"].contains(command)
         let approvedSummary = action + notice + current + (workspace ? " Maximum 360 seconds including search, planning and movement." : travel ? " Maximum 180 seconds including preparation and settling." : "")
+        if Self.neckOnlyCommands.contains(command) || command == "left_relax" {
+            update(command == "left_relax" ? "Returning the empty left arm to hanging" : "Starting local neck-camera inspection")
+            start(command, summary: action, limit: limit, completion: completion)
+            return
+        }
         update("Awaiting spoken or controller authorization: \(action)")
         let execute: (@escaping (NSDictionary) -> Void) -> Void = { [weak self] done in
             self?.jawIntensity = intensity
@@ -279,7 +292,7 @@ import AppKit
         let workspace = ["left_recycle_can", "left_search_workspace", "left_check_hanging"].contains(command)
         deadline = ProcessInfo.processInfo.systemUptime + (workspace ? 350 : allowsArmTravel ? 170 : 115)
         vision.setActive(true); ROBArmRoutineCoordinator.shared.cameraDemand?(true)
-        if !gateway.isReady() { ROBAmberGatewayTunnel.shared.connect() }
+        if !Self.neckOnlyCommands.contains(command), !gateway.isReady() { ROBAmberGatewayTunnel.shared.connect() }
         let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in self?.monitor() }
         self.timer = timer; RunLoop.main.add(timer, forMode: .common)
         task = Task { @MainActor [weak self] in
@@ -297,7 +310,7 @@ import AppKit
     private func check() throws {
         try Task.checkCancellation()
         if let failure { throw ROBArmRoutineError.blocked(failure) }
-        guard ROBControllerArmApproval.shared.authorizesLeftArmTrial(summary) else {
+        guard Self.neckOnlyCommands.contains(activeCommand) || activeCommand == "left_relax" || ROBControllerArmApproval.shared.authorizesLeftArmTrial(summary) else {
             throw ROBArmRoutineError.blocked("Left-arm authorization ended; hold requested.")
         }
         guard ProcessInfo.processInfo.systemUptime < deadline else { throw ROBArmRoutineError.blocked("Left-arm trial timed out.") }
@@ -380,12 +393,17 @@ import AppKit
         }
         generation = connectedGeneration
         let q = try measured().positionsRadians.map(\.doubleValue)
+        if command == "left_relax", ROBArmRoutinePlan.near(q, Array(repeating: 0, count: 7)),
+           gateway.modes(forArm: arm).count == 7, gateway.modes(forArm: arm).allSatisfy({ $0.intValue == 0 }),
+           try measured().statuses.count == 7, try measured().statuses.allSatisfy({ $0.intValue == 0 }) {
+            return ["status": "completed", "measured": true, "detail": "Left arm is already hanging and inactive."]
+        }
         if command == "left_recycle_can" {
             let model = try workspaceModel()
             let objects = try await ROBWorkspaceSearch.shared.run(targets: ROBWorkspaceTarget.allCases,
                 model: model, check: { try self.check() }, progress: { self.update($0) })
             guard let can = objects[.can], let bucket = objects[.orangeBucket] else {
-                return ["status": ROBWorkspaceSearch.shared.lastReport["status"] as? String == "depth_unconfirmed" ? "not_localized" : "not_found", "measured": false, "arm_motion_sent": false,
+                return ["status": ["depth_unconfirmed", "vision_unavailable"].contains(ROBWorkspaceSearch.shared.lastReport["status"] as? String ?? "") ? "not_localized" : "not_found", "measured": false, "arm_motion_sent": false,
                     "detail": ROBWorkspaceSearch.shared.lastReport["detail"] ?? "Can or orange bucket was not confirmed.",
                     "workspace_search": ROBWorkspaceSearch.shared.lastReport]
             }
@@ -718,13 +736,14 @@ import AppKit
         guard isRunning, failure == nil else { return }
         failure = message; task?.cancel()
         interactionStage = ""; readinessConfirmed = false
-        _ = gateway.priorityHold(forArm: arm); leased = false
+        if !Self.neckOnlyCommands.contains(activeCommand) { _ = gateway.priorityHold(forArm: arm) }
+        leased = false
         update(message)
     }
 
     private func finish(_ result: NSDictionary, completion: @escaping (NSDictionary) -> Void) {
         timer?.invalidate(); timer = nil
-        if leased || result["status"] as? String == "blocked" { _ = gateway.priorityHold(forArm: arm) }
+        if !Self.neckOnlyCommands.contains(activeCommand), leased || result["status"] as? String == "blocked" { _ = gateway.priorityHold(forArm: arm) }
         leased = false
         if proposal?.kind == "tabletop" {
             // A failed close/open may leave a payload. Never offer the old

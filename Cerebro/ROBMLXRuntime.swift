@@ -298,7 +298,7 @@ public actor ROBMLXEngine {
 
     /// On-device object observations only. No cloud conversation, tool calls,
     /// generated motor values or chat-session dependency enters this service.
-    func observeWorkspaceSearch<Evidence>(frameProvider: () async throws -> (jpeg: Data, evidence: Evidence))
+    func observeWorkspaceSearch<Evidence>(formatRetry: Bool = false, frameProvider: () async throws -> (jpeg: Data, evidence: Evidence))
         async throws -> (raw: String, evidence: Evidence) {
         try await beginGPUOperation()
         defer { finishGPUOperation() }
@@ -307,9 +307,10 @@ public actor ROBMLXEngine {
         let frame = try await frameProvider()
         guard let image = CIImage(data: frame.jpeg) else { throw ROBMLXMessageVisionError.invalidInput }
         let staged = try floatBackedVisionImage(image)
-        let input = try await container.prepare(input: UserInput(prompt: ROBWorkspaceObservation.prompt, images: [.ciImage(staged)]))
+        let reminder = formatRetry ? "\nYour previous reply could not be decoded. Return the exact complete JSON structure above. No prose, omitted keys or tools. Inspect this NEW image independently.\n" : ""
+        let input = try await container.prepare(input: UserInput(prompt: ROBWorkspaceObservation.prompt + reminder, images: [.ciImage(staged)]))
         let generation = try await startGeneration(container: container, input: input,
-            parameters: GenerateParameters(maxTokens: 400, temperature: 0))
+            parameters: GenerateParameters(maxTokens: 512, temperature: 0))
         return (try await collectGeneration(generation, toolCallPolicy: .rejectAsVisionInput), frame.evidence)
     }
 

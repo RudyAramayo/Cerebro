@@ -14,12 +14,17 @@ replays motion, preserves an old gateway generation, or restores jaw calibration
 
 Settings → Arms offers a 15-minute supervised left-arm rehearsal session.
 Launch/wake offers this session once by default (the preference can be disabled).
-ROB describes the scope and accepts one final local microphone acknowledgement
-such as “yes, proceed,” or an authenticated iPhone/Vision Pro approval. Accepting
+ROB asks exactly “Can I move my arms?” and accepts one final local microphone
+acknowledgement such as “yes, proceed,” or an authenticated iPhone/Vision Pro
+approval. The complete pending scope remains in Settings/controller details. Accepting
 the session prepares the empty left arm. Covered preparation, local searches,
 reviewed gestures, empty-can recycling at intensity 2 and empty-arm lowering
-then execute without additional approvals or Continue buttons. Standalone tasks
-also accept one spoken or controller approval for the complete operation.
+then execute without additional approvals or Continue buttons. Standalone task
+motions also accept one spoken or controller approval for the complete operation.
+Rob additionally authorized empty-arm return to hanging without any new approval,
+for both `left_relax` and paired `relax`. The registered reverse route, fresh
+feedback, ownership, camera, deadline, Stop and measured hanging before torque-off
+still apply. Already hanging inactive arms are not energized for a left return.
 
 Spoken authorization is accepted only by SpeechBox's final on-device recognition
 delegate while ROB is not speaking. A stable candidate endpoints the current
@@ -41,9 +46,11 @@ orange bucket,” “check your arms are hanging,” “lower your left arm,” 
 ## Search and pointing
 
 `left_search_workspace` searches without activating or moving either arm and
-does not require arm CAN feedback. `left_check_hanging` inspects hanging-arm
+does not require arm authorization, a gateway connection or arm CAN feedback.
+`left_check_hanging` has the same neck-only admission and inspects hanging-arm
 visibility independently; an unobserved arm is reported as unconfirmed, never
-used to reset encoder zero.
+used to reset encoder zero. An inspection failure does not issue arm hold,
+mode or jaw commands. An active/pending arm operation still owns the workspace.
 
 The shared service sweeps bounded neck pan/tilt views through the normal
 mechanical envelope, command ramps, settling and manual-priority rules. It uses
@@ -53,6 +60,14 @@ facts. Two distinct RGB-D observations must agree within 5 cm. Missing factory
 intrinsics, missing/mixed depth or uncertain detections cannot become targets.
 Search does not require the entire scene to be motionless: the neck view and
 individual target confirmations govern it. Older discoveries are re-observed.
+Views outside the current calibrated neck envelope are skipped immediately.
+
+The observation decoder accepts a single complete JSON object with optional
+Markdown wrapping or a short preamble. It rejects invalid coordinates, extra
+answers and trailing instructions. A format failure gets one fresh-image retry;
+invalid geometric values do not. Reports include bounded actual model replies
+and decode errors. If every view fails inference, the outcome is
+`vision_unavailable`, rather than claiming that the objects are absent.
 
 If an object is missing, ROB addresses the nearest visible person's view (or the
 forward view if none was measured), asks them to point, and watches for a stable
@@ -103,3 +118,10 @@ distinct-frame confirmation, pointing direction, IK path and jaw boundaries,
 tampering, one authorization, loss of feedback after grip, session expiry,
 spoken rejection and late startup retry. These checks do not establish a live
 successful recycling task. Record the actual commissioning result separately.
+
+The first live session prepared the left arm in 19.8 seconds, scanned, then
+returned the empty arm to inactive hanging in 15.6 seconds under the same grant.
+The VLM replies failed decoding, so no reach/grip/carry occurred. A later
+preparation stopped on an expired gateway motion lease, with a 1.3-second gap in
+application recording just before the stop. The independent lease watchdog is
+unchanged. See the [live evidence](calibration/evidence/2026-10-22-recycling/first-live-session.json).

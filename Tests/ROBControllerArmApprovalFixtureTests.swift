@@ -242,7 +242,10 @@ final class ROBAmberGatewayClient: NSObject {
         do {
             let b = broker()
             var executed = 0, stopped = 0, spoken = 0
-            b.announceApproval = { _ in spoken += 1 }
+            b.announceApproval = { text in
+                spoken += 1
+                check(text == "Can I move my arms?", "Use Rob's exact brief spoken authorization prompt")
+            }
             b.requestLeftWorkspaceTask(summary: "One complete recycling task", execute: { _ in executed += 1 },
                 cancel: { stopped += 1 }, completion: { _ in })
             for text in ["say yes proceed", "if I say yes", "yes but don't move", "not approved", "\"yes proceed\""] {
