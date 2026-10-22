@@ -61,17 +61,21 @@ accepted neck command estimates. It does not assume that the head is level.
   evidence leaves a labeled raw cloud. Once a camera has aligned, rejected
   frames never automatically replace its cloud with raw points. Belly noise
   rejection can retain its actual accepted geometry for at most 250 ms;
-  other belly rejections discard it immediately. The head cloud instead keeps
-  its last published geometry for up to three seconds from capture while the
-  neck moves/settles, input is missing/stale/invalid, or a floor fit is rejected.
+  other belly rejections discard it immediately. At Rob's request, the head
+  cloud keeps its last published geometry without an age expiry, until a new
+  publishable frame replaces it. Neck movement/settling, missing/stale/invalid
+  input and rejected floor fits leave those captured vertices visible.
   These retained head vertices stay fixed at their original world-space capture
   position; newer neck commands move the model, not the old points. The HUD
-  labels this **HEAD DEPTH HELD** with its age and capture-pose status. A fresh
-  settled frame can replace it; failed input never renews its timestamp/deadline
-  or applies an old plane to new points. The timer expires either hold even
-  without incoming frames. Arm operations or a changed base transform clear
-  both clouds immediately. After expiry the cloud stays hidden until new
-  publishable data arrives. The HUD retains the rejection reason and reports
+  labels this **HEAD DEPTH HELD: … s old · fixed at capture pose · display
+  history**, showing its actual capture age to 0.1 s. A fresh settled
+  frame can replace it; failed input never renews its timestamp or applies an
+  old plane to new points. Belly's existing expiry timers still run without
+  incoming frames. Arm operations or a changed base transform clear both
+  clouds immediately; they remain hidden until new publishable data arrives.
+  The historical head cloud is visual only and provides no motion, collision
+  or force authority. See [persistent-display evidence](calibration/evidence/2026-10-21-flat-floor/head-persistent-display.json).
+  The HUD retains the rejection reason and reports
   held-frame age or hidden state, with RMS to 0.1 mm. A valid fit shows support,
   residual RMS and angular correction for each camera.
   Fits are per-frame: a correction is never applied to another frame after
@@ -104,8 +108,9 @@ accepted neck command estimates. It does not assume that the head is level.
   fresh because they arrive late. Frames older than 700 ms, unknown/off neck
   commands, changed targets during projection, invalid depth buffers and missing
   mount data cannot publish new head geometry. A previously published head
-  frame may remain visible only within the three-second history limit described
-  above. Motion in progress hides it; no fabricated horizontal pose is used.
+  frame remains visible at its capture pose until replacement or an arm/base
+  clear, as described above. This does not admit stale frames as new geometry;
+  no fabricated horizontal pose is used.
 
 The Maestro provides commanded targets rather than measured shaft feedback.
 The HUD therefore labels this **neck command estimate / URDF mount prior**.
@@ -128,5 +133,6 @@ plane rejection, numerical inputs and bounded sampling without camera access.
 `python3 Tests/ROBDepthFloorIntegrationRuntimeTests.py` compiles the actual
 frame-processing and visibility methods with inert application state. It verifies
 physical scale, 8°/25°/29° floors, preserved object heights, elevated tabletop
-rejection, RGB indexing, the point cap, bounded noise holds, stale-frame hiding,
-changed neck/base pose rejection and initial raw-cloud fallback without hardware.
+rejection, RGB indexing, the point cap, persistent captured head geometry,
+fresh-frame admission, unchanged belly expiry, arm/base clears and initial
+raw-cloud fallback without hardware.

@@ -11,6 +11,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 source = (ROOT / "Cerebro/ROBSCNViewController.m").read_text()
 helpers = source[source.index("static NSUInteger const ROBMaximumDisplayedCloudPoints"):source.index("static NSString *ROBDiagnosticInhibitReason")]
+status_method = source[source.index("- (void)refreshFloorStatus\n"):source.index("- (void)armTrialViewPrepared:")]
 method = source[source.index("- (void)refreshFloorCloudVisibilityAtUptime:"):source.rindex("\n@end")]
 HARNESS = r'''
 #import <Foundation/Foundation.h>
@@ -63,13 +64,17 @@ __HELPERS__
 @property(copy) NSArray<NSNumber *> *colors;
 @end
 @implementation FixtureGeometry @end
+@interface FixtureLabel : NSObject
+@property(copy) NSString *stringValue;
+@end
+@implementation FixtureLabel @end
 @interface Harness : NSObject
 @property(strong) FixtureNode *robotNode;
 @property(strong) SCNNode *liveRGBCloudNode, *liveBellyRGBCloudNode;
 @property(strong) ROBSerialBox *serialBox;
 @property BOOL cloudUpdatePending, bellyCloudUpdatePending;
 @property double lastHeadCloudUptime, lastBellyCloudUptime;
-@property double headCloudDisplayUntil, bellyCloudDisplayUntil;
+@property double bellyCloudDisplayUntil;
 @property BOOL headFloorAlignmentEstablished, bellyFloorAlignmentEstablished;
 @property BOOL headFloorHoldingAcceptedFrame, bellyFloorHoldingAcceptedFrame;
 @property BOOL headCloudHasCalibratedIntrinsics;
@@ -77,9 +82,11 @@ __HELPERS__
 @property(copy) NSString *headFloorSummary, *bellyFloorSummary;
 @property(strong) NSArray<NSValue *> *capturedPoints;
 @property(strong) NSArray<NSNumber *> *capturedColors;
+@property(strong) FixtureLabel *cloudStatusLabel, *floorStatusLabel;
 - (void)processDepthFrame:(ROBDepthCloudFrame *)frame robotTransform:(SCNMatrix4)robot cameraTransform:(ROBDepthCloudTransform)camera neckTargets:(NSArray<NSNumber *> *)targets;
 - (void)refreshFloorCloudVisibilityAtUptime:(NSTimeInterval)now;
 - (void)retainHeadCloudForDisplayAtUptime:(NSTimeInterval)now;
+- (void)refreshFloorStatus;
 @end
 @implementation Harness
 - (SCNGeometry *)pointGeometry:(NSArray *)p colors:(NSArray *)c pointSize:(CGFloat)s {
@@ -87,7 +94,7 @@ __HELPERS__
     if(p.count==0) return nil;
     FixtureGeometry *g=[FixtureGeometry new]; g.points=p; g.colors=c; return (SCNGeometry *)(id)g;
 }
-- (void)refreshFloorStatus {}
+__STATUS_METHOD__
 __METHOD__
 @end
 static void drain(Harness *h) {
@@ -118,6 +125,7 @@ static Harness *newHarness(SCNMatrix4 world) {
     h.liveRGBCloudNode=(SCNNode *)(id)[FixtureNode new]; h.liveBellyRGBCloudNode=(SCNNode *)(id)[FixtureNode new]; h.serialBox=[ROBSerialBox new];
     h.serialBox.isNeckCommandStateKnown=YES; h.serialBox.commandedLowerNeckTiltTarget=6011;
     h.serialBox.commandedNeckPanTarget=6000; h.serialBox.commandedUpperNeckTiltTarget=6306;
+    h.cloudStatusLabel=[FixtureLabel new]; h.floorStatusLabel=[FixtureLabel new];
     h.robotNode.worldTransform=world; return h;
 }
 static void publish(Harness *h, ROBDepthCloudFrame *f, ROBDepthCloudTransform camera, NSArray *targets) {
@@ -127,8 +135,19 @@ static void publish(Harness *h, ROBDepthCloudFrame *f, ROBDepthCloudTransform ca
 }
 static void assertHeadRetained(Harness *h, id geometry, double capturedAt, NSArray *context) {
     assert(!h.liveRGBCloudNode.hidden && h.liveRGBCloudNode.geometry==geometry && h.headFloorHoldingAcceptedFrame &&
-        h.lastHeadCloudUptime==capturedAt && fabs(h.headCloudDisplayUntil-(capturedAt+3))<1e-9 &&
+        h.lastHeadCloudUptime==capturedAt &&
         [h.headFloorCloudContext isEqual:context]);
+}
+static void assertHeadAgeLabel(Harness *h, double minimumAge) {
+    [h refreshFloorStatus];
+    NSString *label=h.cloudStatusLabel.stringValue;
+    NSString *prefix=@"HEAD DEPTH HELD: ";
+    assert([label hasPrefix:prefix] && [label containsString:@"s old"] &&
+        [label containsString:@"fixed at capture pose"] && [label containsString:@"display history"]);
+    double reportedAge=[[label substringFromIndex:prefix.length] doubleValue];
+    assert(reportedAge>=minimumAge && reportedAge<minimumAge+2);
+    assert([h.floorStatusLabel.stringValue containsString:@"HELD"] &&
+        [h.floorStatusLabel.stringValue containsString:@"s old at capture pose"]);
 }
 static ROBDepthCloudTransform tiltedCamera(double degrees) {
     double a=degrees*M_PI/180, c=cos(a), s=sin(a), scale=ROBScanVisualModel.presentationScale;
@@ -151,6 +170,15 @@ int main(void) { @autoreleasepool {
     ROBDepthCloudTransform camera;
     SCNMatrix4 world=SCNMatrix4MakeRotation(.4,0,1,0); world.m41=3; world.m42=5; world.m43=-2;
     Harness *h=newHarness(world);
+    // Before the first capture, absent geometry is hidden rather than shown
+    // as a live or retained depth view merely because no age deadline exists.
+    [h refreshFloorCloudVisibilityAtUptime:NSProcessInfo.processInfo.systemUptime];
+    [h refreshFloorStatus];
+    assert(h.liveRGBCloudNode.hidden && !h.liveRGBCloudNode.geometry && !h.headFloorHoldingAcceptedFrame && h.lastHeadCloudUptime==0);
+    assert([h.cloudStatusLabel.stringValue hasPrefix:@"HEAD DEPTH HIDDEN:"] &&
+        ![h.cloudStatusLabel.stringValue containsString:@"HELD"] &&
+        ![h.cloudStatusLabel.stringValue containsString:@"live captured view"] &&
+        [h.floorStatusLabel.stringValue containsString:@"CLOUD HIDDEN"]);
     ROBDepthCloudFrame *f=frameAtHeight(1,0,YES);
     // The old fixed +/-0.30m candidate-height gate passed8degrees but clipped
     // the25degree floor to0.16m depth coverage, making a valid floor unfit.
@@ -202,8 +230,20 @@ int main(void) { @autoreleasepool {
     missing.millimetersLittleEndian=[NSMutableData dataWithLength:160*160*2];
     publish(raw,missing,ROBDepthCloudMakeTransform(tableRows),targets);
     assertHeadRetained(raw,rawGeometry,rawAt,rawContext);
-    [raw refreshFloorCloudVisibilityAtUptime:rawAt+3.01];
-    assert(raw.liveRGBCloudNode.hidden && !raw.liveRGBCloudNode.geometry && raw.lastHeadCloudUptime==rawAt);
+    for(NSNumber *age in @[@4,@60,@86400]) {
+        [raw refreshFloorCloudVisibilityAtUptime:rawAt+age.doubleValue];
+        assertHeadRetained(raw,rawGeometry,rawAt,rawContext);
+    }
+    // Seed an old captured timestamp to exercise the actual HUD without a
+    // wall-clock delay. Geometry/context remain the same accepted raw frame.
+    rawAt=NSProcessInfo.processInfo.systemUptime-86400; raw.lastHeadCloudUptime=rawAt;
+    publish(raw,invalid,ROBDepthCloudMakeTransform(tableRows),targets);
+    assertHeadRetained(raw,rawGeometry,rawAt,rawContext);
+    assertHeadAgeLabel(raw,86400);
+    assert(!raw.headFloorAlignmentEstablished);
+    publish(raw,f,camera,targets);
+    assert(raw.liveRGBCloudNode.geometry!=rawGeometry && !raw.liveRGBCloudNode.hidden &&
+        !raw.headFloorHoldingAcceptedFrame && raw.headFloorAlignmentEstablished && raw.lastHeadCloudUptime==f.capturedUptime);
     CVPixelBufferRelease(table.rgbPixelBuffer);
 
     camera=tiltedCamera(8);
@@ -256,7 +296,7 @@ int main(void) { @autoreleasepool {
     assert([((FixtureGeometry *)(id)acceptedGeometry).points isEqual:acceptedWorldPoints]);
     publish(h,f,camera,newTargets); // A genuinely fresh, settled frame replaces it.
     assert(h.liveRGBCloudNode.geometry!=acceptedGeometry && !h.headFloorHoldingAcceptedFrame &&
-        h.lastHeadCloudUptime==f.capturedUptime && fabs(h.headCloudDisplayUntil-(f.capturedUptime+3))<1e-9 &&
+        h.lastHeadCloudUptime==f.capturedUptime &&
         ![h.headFloorCloudContext isEqual:acceptedContext]);
     h.serialBox.commandedUpperNeckTiltTarget--; h.serialBox.neckCommandReadyAtUptime=0;
     publish(h,f,camera,targets);
@@ -271,12 +311,25 @@ int main(void) { @autoreleasepool {
     publish(h,noise,changedCamera,targets); assertHeadRetained(h,acceptedGeometry,acceptedAt,acceptedContext);
     [h refreshFloorCloudVisibilityAtUptime:acceptedAt+.8];
     assertHeadRetained(h,acceptedGeometry,acceptedAt,acceptedContext);
-    [h refreshFloorCloudVisibilityAtUptime:acceptedAt+3.01];
-    assert(h.liveRGBCloudNode.hidden && !h.liveRGBCloudNode.geometry && !h.headFloorHoldingAcceptedFrame &&
-        h.lastHeadCloudUptime==acceptedAt && h.headFloorAlignmentEstablished);
-    // Further rejected input cannot resurrect expired geometry or revert raw.
+    for(NSNumber *age in @[@4,@60,@86400]) {
+        [h refreshFloorCloudVisibilityAtUptime:acceptedAt+age.doubleValue];
+        assertHeadRetained(h,acceptedGeometry,acceptedAt,acceptedContext);
+        assert([((FixtureGeometry *)(id)acceptedGeometry).points isEqual:acceptedWorldPoints]);
+    }
+    // Rejected fits retain even a day-old captured aligned frame and must not
+    // renew its original timestamp, change context, or relabel it as live.
+    acceptedAt=NSProcessInfo.processInfo.systemUptime-86400; h.lastHeadCloudUptime=acceptedAt;
     publish(h,noise,camera,targets);
-    assert(!h.liveRGBCloudNode.geometry && h.lastHeadCloudUptime==acceptedAt && ![h.headFloorSummary containsString:@"raw cloud"]);
+    assertHeadRetained(h,acceptedGeometry,acceptedAt,acceptedContext);
+    assert([((FixtureGeometry *)(id)acceptedGeometry).points isEqual:acceptedWorldPoints]);
+    assertHeadAgeLabel(h,86400);
+    assert(![h.headFloorSummary containsString:@"raw cloud"]);
+    publish(h,f,camera,targets);
+    assert(h.liveRGBCloudNode.geometry!=acceptedGeometry && !h.liveRGBCloudNode.hidden &&
+        !h.headFloorHoldingAcceptedFrame && h.lastHeadCloudUptime==f.capturedUptime && h.lastHeadCloudUptime>acceptedAt);
+    [h refreshFloorStatus];
+    assert([h.cloudStatusLabel.stringValue containsString:@"live captured view"] &&
+        ![h.cloudStatusLabel.stringValue containsString:@"HELD"]);
 
     // BELLY keeps its existing250ms noise-only hold and700ms normal freshness.
     Harness *belly=newHarness(world);
@@ -317,17 +370,41 @@ int main(void) { @autoreleasepool {
     h.serialBox.neckCommandReadyAtUptime=0;
 
     // Base movement and active arms still invalidate retained world placement.
+    // Neither time, retained histories nor rejected input can resurrect a
+    // cleared cloud; only a genuinely fresh settled frame may replace it.
     publish(h,f,camera,targets);
+    acceptedAt=h.lastHeadCloudUptime;
     SCNMatrix4 moved=world; moved.m41++; h.robotNode.worldTransform=moved;
     [h refreshFloorCloudVisibilityAtUptime:NSProcessInfo.processInfo.systemUptime];
     assert(!h.liveRGBCloudNode.geometry && !h.liveBellyRGBCloudNode.geometry && h.headFloorAlignmentEstablished);
+    [h retainHeadCloudForDisplayAtUptime:acceptedAt+86400];
+    publish(h,noise,camera,targets);
+    assert(h.liveRGBCloudNode.hidden && !h.liveRGBCloudNode.geometry && !h.headFloorHoldingAcceptedFrame && h.lastHeadCloudUptime==acceptedAt);
     h.robotNode.worldTransform=world;
+    publish(h,noise,camera,targets);
+    assert(!h.liveRGBCloudNode.geometry && h.lastHeadCloudUptime==acceptedAt);
     publish(h,f,camera,targets);
+    assert(!h.liveRGBCloudNode.hidden && h.liveRGBCloudNode.geometry && !h.headFloorHoldingAcceptedFrame && h.lastHeadCloudUptime==f.capturedUptime);
+    acceptedAt=h.lastHeadCloudUptime;
     f.isBelly=YES; publish(h,f,camera,targets); f.isBelly=NO;
     ROBLeftArmTrial.shared.isRunning=YES;
     [h refreshFloorCloudVisibilityAtUptime:NSProcessInfo.processInfo.systemUptime];
     assert(!h.liveRGBCloudNode.geometry && !h.liveBellyRGBCloudNode.geometry);
     ROBLeftArmTrial.shared.isRunning=NO;
+    [h retainHeadCloudForDisplayAtUptime:acceptedAt+86400];
+    publish(h,noise,camera,targets);
+    assert(h.liveRGBCloudNode.hidden && !h.liveRGBCloudNode.geometry && !h.headFloorHoldingAcceptedFrame && h.lastHeadCloudUptime==acceptedAt);
+    publish(h,f,camera,targets);
+    assert(!h.liveRGBCloudNode.hidden && h.liveRGBCloudNode.geometry && !h.headFloorHoldingAcceptedFrame && h.lastHeadCloudUptime==f.capturedUptime);
+    acceptedAt=h.lastHeadCloudUptime;
+    ROBArmRoutineCoordinator.shared.isRunning=YES;
+    [h refreshFloorCloudVisibilityAtUptime:NSProcessInfo.processInfo.systemUptime];
+    assert(!h.liveRGBCloudNode.geometry);
+    ROBArmRoutineCoordinator.shared.isRunning=NO;
+    publish(h,noise,camera,targets);
+    assert(!h.liveRGBCloudNode.geometry && h.lastHeadCloudUptime==acceptedAt);
+    publish(h,f,camera,targets);
+    assert(!h.liveRGBCloudNode.hidden && h.liveRGBCloudNode.geometry && h.lastHeadCloudUptime==f.capturedUptime);
     ROBDepthCloudFrame *cap=[ROBDepthCloudFrame new]; cap.width=566; cap.height=565;
     NSMutableData *dense=[NSMutableData dataWithLength:566*565*2]; for(int i=0;i<566*565;i++) ((uint16_t *)dense.mutableBytes)[i]=1000;
     cap.millimetersLittleEndian=dense; cap.capturedUptime=NSProcessInfo.processInfo.systemUptime; h.cloudUpdatePending=YES;
@@ -338,7 +415,7 @@ int main(void) { @autoreleasepool {
     [h processDepthFrame:cap robotTransform:world cameraTransform:camera neckTargets:targets]; h.robotNode.worldTransform=moved; drain(h);
     assert(!h.liveRGBCloudNode.geometry);
     CVPixelBufferRelease(nearBudget.rgbPixelBuffer); CVPixelBufferRelease(noise.rgbPixelBuffer); CVPixelBufferRelease(empty.rgbPixelBuffer);
-    CVPixelBufferRelease(f.rgbPixelBuffer); puts("Production depth-floor integration passed:8/25/29degree floor bootstrap, rigid0.3m object height, tabletop rejection,9.5mm acceptance, HEAD3s captured-world persistence/fresh replacement, unchanged BELLY250ms noise hold/700ms freshness, no raw resurrection, independent cameras, base/arm invalidation, RGB pairing and20k cap");
+    CVPixelBufferRelease(f.rgbPixelBuffer); puts("Production depth-floor integration passed:8/25/29degree floor bootstrap, rigid0.3m object height, tabletop rejection,9.5mm acceptance, indefinite HEAD captured-world retention with aligned/raw age labels and fresh replacement, unchanged BELLY250ms noise hold/700ms freshness, no resurrection after base/arm clears, independent cameras, RGB pairing and20k cap");
 } return 0; }
 '''
 
@@ -346,7 +423,7 @@ int main(void) { @autoreleasepool {
 def main():
     with tempfile.TemporaryDirectory(prefix="cerebro-depth-floor-integration-") as folder:
         harness = Path(folder) / "integration.m"
-        harness.write_text(HARNESS.replace("__HELPERS__", helpers).replace("__METHOD__", method))
+        harness.write_text(HARNESS.replace("__HELPERS__", helpers).replace("__STATUS_METHOD__", status_method).replace("__METHOD__", method))
         binary = Path(folder) / "integration"
         subprocess.run(["xcrun", "clang", "-fobjc-arc", "-fblocks", "-framework", "Foundation", "-framework", "SceneKit", "-framework", "CoreVideo", "-I", str(ROOT / "Cerebro"), str(harness), "-o", str(binary)], check=True, timeout=120)
         subprocess.run([str(binary)], check=True, timeout=30)

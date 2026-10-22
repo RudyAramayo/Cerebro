@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-22T05:09:57.981961+00:00",
+  "baseCommit": "d0055c6ed9af7d3af16834e3c79a919bda134080",
+  "request": "Keep the last upper-camera cloud visible with its age instead of deleting it after three seconds.",
+  "change": "Remove the head display deadline and rejected-floor-fit age cutoff. Keep the actual last published geometry fixed at its world-space capture pose until an accepted replacement arrives. The HUD labels retained points HEAD DEPTH HELD with their original capture age and display history. Empty startup geometry remains hidden until the first usable capture.",
+  "unchanged": "New head frames still need age <=700 ms, known/settled neck commands, matching targets at publication, valid data and camera transform. Rejected input cannot refresh capture time/context or reproject old points. Arm operations and changed base transforms clear both clouds immediately. Belly 250 ms noise hold and 700 ms normal freshness remain unchanged. No motor, force, gripper, neck, stepper, approval or collision policy changes.",
+  "scope": "One captured cloud is retained in the current scene/session, not an accumulated map or saved room scan. Historical display geometry is not used as fresh motion/collision/force evidence. After an intentional clear, another publishable frame is required; the existing floor-alignment latch is preserved.",
+  "sourceSHA256": {
+    "Cerebro/ROBSCNViewController.m": "54427d6a4cf857cc2c3926ed5763683c5e50b9138a02057ca452e278c5cddd57",
+    "Tests/ROBDepthFloorIntegrationRuntimeTests.py": "95660139234594049c15d7c858f10ee9caf39ad9e6533fba9496184f16b8e108"
+  },
+  "checks": {
+    "cerebro-depth-floor-indefinite-retention-tests.log": {
+      "result": "passed",
+      "sha256": "bfb5189b8923942ac4782873f2c00559a35154941489e995b90464ebc4c21777"
+    },
+    "cerebro-head-persistent-display-floor.log": {
+      "result": "passed",
+      "sha256": "8426b445c622ecea65e65054241be50e6fbd2335c8c42e26ad224fa71c18d9df"
+    },
+    "cerebro-head-persistent-display-final-build.log": {
+      "result": "passed",
+      "sha256": "717b13e646de8589765be5e5e8e1b7efa054c167c716e5a49cb356e5881312ae"
+    }
+  },
+  "regressions": [
+    "Production visibility, publication and HUD methods extracted into an inert harness with no camera or actuator transport",
+    "Raw and aligned geometry identity, exact world points, timestamp and context retained at simulated ages4 s,60 s and24 h",
+    "Actual HUD reports day-old capture age, HELD, fixed capture pose and display history",
+    "Missing/invalid/stale/wrong-neck data and floor rejections do not replace or renew old points",
+    "Fresh settled accepted frames replace old history and restore live status",
+    "Initial empty scene stays hidden rather than reporting live/held geometry",
+    "Base changes, left-arm trials and paired-arm routines clear geometry; rejected input cannot resurrect it",
+    "Belly expiry, candidate/floor/object-height checks, RGB pairing and20k point cap retained"
+  ],
+  "build": {
+    "result": "Signed arm64 Debug development build succeeded",
+    "signature": "codesign --verify --deep --strict passed on built and installed bundles",
+    "installedExecutableSHA256": "b88181a0cdcf11a8fd31b9e25887e9b8a294adb4c9a557e3687b3ba808065f08",
+    "installedAndLaunched": true,
+    "source": "Existing isolated intended-change worktree at794c524 plus current ROBSCNViewController, ROBTorsoControlsViewController, ROBGhostMotionPlan and ROBGhostGestureEditor. Concurrent unrelated working-tree edits excluded."
+  },
+  "reloadPreflight": {
+    "UTC": "2026-10-22T05:08:30.369Z",
+    "telemetry": "Both arms: all joint CAN replies current,19.7 Hz,receipt age0.05 s. All14 motor raw statuses0 and currents0. Left q=[0,0,0,-0.003,0,0.00232,0]; right all zero.",
+    "actions": "Disconnected Cerebro arm tunnel, quit and installed final signed development bundle. No arm, gripper, torque, recovery or explicit neck commands. Separate torso-stepper terminal left untouched. Existing startup/person tracking remains active."
+  },
+  "liveVerification": {
+    "UTC": "2026-10-22T05:09:03.799Z",
+    "head": "Controller scene receiving live calibrated head points; raw labeled view because visible floor support is insufficient.",
+    "belly": "Aligned57% support,9.5 mm RMS,18.5 degree correction at first inspection; subsequent screenshot also showed head points and aligned belly.",
+    "qualification": "Indefinite holds and age labels verified using simulated long gaps in production-method tests. Live inspection had fresh input; camera/neck motion was not induced to create a dropout. No private chat or room image saved to the repository."
+  }
+}
