@@ -26,16 +26,30 @@ accepted neck command estimates. It does not assume that the head is level.
   fitting and reapplied before the existing robot-to-world transform. Object
   shapes, pairwise distances, floor-relative heights and measured depth noise
   remain intact; points are not individually flattened or stretched.
-  Candidates come from the lower image, within 0.30 m of expected ground and
-  outside the robot footprint. Bounded RANSAC and covariance refitting reject
+  Candidates come from the lower image and outside the robot footprint. Their
+  raw height must be compatible with a floor intercept within 0.35 m and tilt
+  within 30°: `abs(y) <= 0.35 + horizontalRadius * tan(30°)`. This admits a tilted
+  floor before fitting it. The original fixed ±0.30 m band reduced the live
+  belly floor to a 14 cm strip and prevented alignment. The plane's angle,
+  height, coverage and support bounds remain unchanged. The live wooden floor
+  measured 9.0–9.1 mm residual RMS, so this display uses a 10 mm RMS noise budget
+  instead of the pure fitter's 9 mm default. Bounded RANSAC and covariance refitting reject
   insufficient coverage/support, walls, elevated planes, excessive residual
   noise and competing floor levels. Geometry does not identify wood or prove
   that a low surface is the floor; the operator's flat-floor assumption and
-  near-ground gates are required. With insufficient evidence the cloud stays
-  raw, and the HUD gives the reason. A valid fit shows support, residual RMS and
-  angular correction for each camera.
-  Fits are per-frame: a correction is never reused after changing the view or
-  losing visible floor. Existing camera/neck freshness checks remain, and a
+  near-ground gates are required. Before the first accepted fit, insufficient
+  evidence leaves a labeled raw cloud. Once a camera has aligned, rejected
+  frames never automatically replace its cloud with raw points. Noise-only
+  rejection can briefly retain the actual last accepted geometry, for at most
+  250 ms from that frame's capture. Rejected frames do not advance its timestamp
+  or apply an old plane to new points. The freshness timer expires that hold
+  even if no new frame arrives; other rejections, changed pose/neck command
+  epoch, and arm motion discard it immediately. The cloud stays hidden until
+  a new fit passes. The HUD retains the rejection reason and reports held-frame
+  age or hidden state, with RMS to 0.1 mm. A valid fit shows support, residual
+  RMS and angular correction for each camera.
+  Fits are per-frame: a correction is never applied to another frame after
+  changing the view or losing visible floor. Existing camera/neck freshness checks remain, and a
   changed diagnostic base transform rejects a result prepared at an old pose.
   The point display is capped at 20,000 points and fitting at 2,048 candidates.
   This is a display alignment, not persisted camera/URDF calibration or actuator
@@ -84,6 +98,7 @@ from cameras and actuators. The signed macOS build checks integration.
 outliers, rigid distance/height preservation, sparse/line/wall/table/ambiguous
 plane rejection, numerical inputs and bounded sampling without camera access.
 `python3 Tests/ROBDepthFloorIntegrationRuntimeTests.py` compiles the actual
-frame-processing method with inert application state. It verifies physical
-scale, floor/object heights, RGB indexing, the point cap, stale-frame hiding,
-changed neck/base pose rejection and raw-cloud fallback without hardware.
+frame-processing and visibility methods with inert application state. It verifies
+physical scale, 8°/25°/29° floors, preserved object heights, elevated tabletop
+rejection, RGB indexing, the point cap, bounded noise holds, stale-frame hiding,
+changed neck/base pose rejection and initial raw-cloud fallback without hardware.

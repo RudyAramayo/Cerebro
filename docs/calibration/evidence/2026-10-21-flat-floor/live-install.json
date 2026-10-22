@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-22T03:37:36.148806+00:00",
+  "sourceBase": "794c524830acfa82b34abb7e95a0bd60dba786d3",
+  "startupFixCommit": "eb02d7d",
+  "sourceSHA256": {
+    "Cerebro/ROBSCNViewController.m": "be96ee388f0aed0887b2a4f4fb090f63220eea128978d201ac43c418ac26a79c",
+    "Cerebro/ROBTorsoControlsViewController.m": "d2fb5bb556d2c1f26fa0a1a289a0f68b135f2c881b720075b68f52bad3ada813",
+    "Cerebro/ROBDepthFloorRectification.h": "1d7577fdfd07d8a752ffb769e43c2f257c5207de94ee5704b9f9cc2039c499ed",
+    "Tests/ROBDepthFloorIntegrationRuntimeTests.py": "e7e4bbb86c2ecc700c0d97c6263d2a8c8d07ed9e29e45db352841cf37938909c",
+    "Tests/ROBTorsoKeyframeTablesRuntimeTests.py": "d0f07a27434c8b7821e8470c8c6d667005ef91aa2accea5b0bdf2bac2092aa4e"
+  },
+  "build": {
+    "kind": "signed local arm64 Debug development build, not a store release",
+    "result": "BUILD SUCCEEDED",
+    "source": "Isolated worktree at sourceBase plus exactly the controller and torso table sources hashed above. Concurrent unrelated workspace changes and the separate Amber port-recovery commit are excluded.",
+    "installedExecutableSHA256": "48581f63ea8940c40592ce758649628d8968afe27856759f6b1dbfb58e824ca3",
+    "signature": "codesign --verify --deep --strict passed",
+    "installed": true,
+    "launched": true
+  },
+  "preflight": {
+    "UTC": "2026-10-22T03:35:37.462Z",
+    "bothArms": "fresh CAN replies, approximately19.7Hz, received0.07s ago; every motor raw status0 and current0",
+    "physicalLeftRadians": [
+      0,
+      0,
+      0,
+      -0.003,
+      0,
+      0.00232,
+      0
+    ],
+    "physicalRightRadians": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "appReload": "Disconnected Cerebro tunnel then quit and atomically replaced signed bundle. No arm, torque, gripper or controller-recovery operation requested.",
+    "otherTorsoStepperProcess": "Left running and unchanged; no listener/process cleanup used."
+  },
+  "startupRepair": {
+    "failure": "First floor-only clean build crashed restoring sequence details: row count used currentSequence but view indexed a different namedSequence.",
+    "change": "Count and display use currentSequence; guard negative/stale selections and clear reused cells. Motor/slider handling unchanged.",
+    "validation": "Real Swift-array bridging runtime fixture with inert views and persistence seam passed; fixed app relaunch verified."
+  },
+  "observationsBeforeCandidateFix": {
+    "operator": "Floor appeared tilted20\u201325degrees when orbiting scene.",
+    "belly": {
+      "imageCandidates": 5857,
+      "heightCandidates": 250,
+      "rangeCandidates": 250,
+      "inliers": 245,
+      "spanMeters": [
+        1.19,
+        0.14
+      ],
+      "minorRMSMeters": 0.02,
+      "rmsMillimeters": 3,
+      "rejection": "poor coverage"
+    },
+    "cause": "Fixed raw height \u00b10.30m selected only a thin strip of the tilted floor."
+  },
+  "candidateFix": {
+    "heightFeasibility": "abs(y) <= .35 + horizontalRadius*tan(30degrees)",
+    "retained": "Lower-image ROI, depth/radius/self exclusion,2048 fit cap,30degree plane tilt,.35m plane intercept,55% support,80 inliers,coverage and ambiguity checks."
+  },
+  "noisePolicy": {
+    "observedProblem": "Operator confirmed alternating aligned/raw, then excessive disappearing with9mm cutoff. Measured real floor9.0\u20139.1mm RMS.",
+    "displayMaximumRMSMillimeters": 10,
+    "pureFitterDefaultRMSMillimeters": 9,
+    "holdMaximumSeconds": 0.25,
+    "behavior": "Once aligned, this camera never automatically publishes raw again for this view lifetime. Noise may retain only the actual accepted geometry until250ms after its capture; rejected frames cannot renew it. Timer expiry, other rejection, changed robot/neck epoch/intrinsics/affine or arm operation discards old geometry. A new accepted fit restores it. No previous plane is applied to new points."
+  },
+  "tests": {
+    "cerebro-floor-final-build.log": {
+      "result": "passed",
+      "sha256": "f10a4b29fd2679b5e9898f8b6f76510f9d6fc13c519a97f4c6129e38450a05bc"
+    },
+    "cerebro-floor-final-integration.log": {
+      "result": "passed",
+      "sha256": "6a0c5bfdce70aa886f31e9586aa7cd674eeb3351e1cc7674d296172aba6a09c4"
+    },
+    "cerebro-floor-wedge-fit.log": {
+      "result": "passed",
+      "sha256": "23f04591725400e17fc65de1b5a4fa9125770e50e71c92d3b646bbba33ab271e"
+    },
+    "cerebro-floor-wedge-projection.log": {
+      "result": "passed",
+      "sha256": "0c5053d95ed1a3cb07c86f988e417ee3461f54738cdff962602c8383ca6e2766"
+    },
+    "cerebro-torso-keyframe-tables-unique-tests.log": {
+      "result": "passed",
+      "sha256": "47dd21b72995ef4966ef0b4a0740a9175ed75571780e3ede01027e4d70aae34b"
+    }
+  },
+  "integrationCoverage": [
+    "Production processor8/25/29degree floor fits",
+    "Rigid0.3m object height and RGB pairing",
+    "0.75m tabletop rejected by floor-height prior",
+    "9.5mm floor accepted by10mm display budget;11mm rejected",
+    "Accepted-frame-only250ms hold, no timestamp renewal, timer-only expiry",
+    "No raw resurrection after expiry/other failures/pose changes",
+    "Independent head/belly, neck ready epoch, base/intrinsics/affine invalidation",
+    "Malformed/stale input and arm-active hiding",
+    "20000 point cap"
+  ],
+  "finalLiveSamples": [
+    {
+      "UTC": "2026-10-22T03:36:56.701Z",
+      "belly": "aligned71% support,8.7mm RMS,18.9degree correction",
+      "head": "raw initial fallback; insufficient floor candidates at estimated+56.2degree optical pitch"
+    },
+    {
+      "UTC": "2026-10-22T03:37:44.597Z",
+      "belly": "aligned71% support,9.3mm RMS,18.8degree correction",
+      "head": "raw initial fallback; insufficient floor candidates at estimated+56.2degree optical pitch"
+    },
+    {
+      "UTC": "2026-10-22T03:38:47.562Z",
+      "belly": "aligned69% support,9.4mm RMS,18.5degree correction",
+      "head": "raw initial fallback; insufficient floor candidates at estimated+56.3degree optical pitch"
+    }
+  ],
+  "limitations": "Display alignment only. Belly floor was operator-accepted; the head neck/model mapping is visibly inconsistent with physical orientation and remains under investigation. No persistent URDF/camera calibration, surveyed length validation, raw depth modification, actuator collision or force certification. Full calibration and live arm/object-cycle test remain queued.",
+  "operatorResult": "Belly-camera floor looks pretty good. Head cloud appears on ceiling while the physical front camera faces the wall; lower-neck changes are not visible on the model. Head mapping investigation remains active."
+}

@@ -96,7 +96,22 @@ until the current test and controller workflow are finished.
    Rob's wooden floor is now the flat reference for a display-only plane fit:
    level each supported cloud rigidly against `y=0`, retaining object geometry
    and raw depth. This does not change URDF origins or replace the independent
-   camera/servo calibration below. Visual verification awaits his return.
+   camera/servo calibration below. After Rob returned, the signed development
+   build was loaded with both arms freshly measured near zero and inactive.
+   A restored torso sequence-table indexing crash was fixed without changing
+   motor/slider handling. Live diagnostics identified the floor candidate gate
+   clipping the belly floor to a 14 cm strip; the corrected selection admits
+   the existing 30° fit bound. Belly fits measured approximately 18° correction,
+   66–69% support and 9 mm RMS. Rob observed level/raw oscillation at the noise
+   cutoff; the display noise budget was adjusted from 9 to 10 mm for the
+   measured 9.0–9.1 mm floor residual. Accepted geometry also has a bounded
+   250 ms noise hold, then hides rather than automatically returning to raw.
+   Rob accepted the resulting belly floor. He reported that the head cloud
+   appears on the ceiling while the physical camera faces forward, and lower
+   neck changes are absent from the model; head mapping investigation is active.
+   See [live floor evidence](calibration/evidence/2026-10-21-flat-floor/live-install.json).
+   The separately running
+   torso-stepper terminal process was left unchanged. No arm test was performed.
    Capture
    synchronized fresh camera/depth observations and encoder readings during
    small, approved independent joint movements. Fit camera extrinsics, arm
