@@ -45,15 +45,21 @@ accepted neck command estimates. It does not assume that the head is level.
   that a low surface is the floor; the operator's flat-floor assumption and
   near-ground gates are required. Before the first accepted fit, insufficient
   evidence leaves a labeled raw cloud. Once a camera has aligned, rejected
-  frames never automatically replace its cloud with raw points. Noise-only
-  rejection can briefly retain the actual last accepted geometry, for at most
-  250 ms from that frame's capture. Rejected frames do not advance its timestamp
-  or apply an old plane to new points. The freshness timer expires that hold
-  even if no new frame arrives; other rejections, changed pose/neck command
-  epoch, and arm motion discard it immediately. The cloud stays hidden until
-  a new fit passes. The HUD retains the rejection reason and reports held-frame
-  age or hidden state, with RMS to 0.1 mm. A valid fit shows support, residual
-  RMS and angular correction for each camera.
+  frames never automatically replace its cloud with raw points. Belly noise
+  rejection can retain its actual accepted geometry for at most 250 ms;
+  other belly rejections discard it immediately. The head cloud instead keeps
+  its last published geometry for up to three seconds from capture while the
+  neck moves/settles, input is missing/stale/invalid, or a floor fit is rejected.
+  These retained head vertices stay fixed at their original world-space capture
+  position; newer neck commands move the model, not the old points. The HUD
+  labels this **HEAD DEPTH HELD** with its age and capture-pose status. A fresh
+  settled frame can replace it; failed input never renews its timestamp/deadline
+  or applies an old plane to new points. The timer expires either hold even
+  without incoming frames. Arm operations or a changed base transform clear
+  both clouds immediately. After expiry the cloud stays hidden until new
+  publishable data arrives. The HUD retains the rejection reason and reports
+  held-frame age or hidden state, with RMS to 0.1 mm. A valid fit shows support,
+  residual RMS and angular correction for each camera.
   Fits are per-frame: a correction is never applied to another frame after
   changing the view or losing visible floor. Existing camera/neck freshness checks remain, and a
   changed diagnostic base transform rejects a result prepared at an old pose.
@@ -82,9 +88,10 @@ accepted neck command estimates. It does not assume that the head is level.
   capture timestamps are mapped to the host monotonic clock; absent or unusable
   timestamps get a conservative 400 ms allowance. Old frames do not become
   fresh because they arrive late. Frames older than 700 ms, unknown/off neck
-  commands, motion in progress, changed targets during projection, invalid
-  depth buffers and missing mount data hide the cloud instead of displaying
-  a fabricated horizontal pose.
+  commands, changed targets during projection, invalid depth buffers and missing
+  mount data cannot publish new head geometry. A previously published head
+  frame may remain visible only within the three-second history limit described
+  above. Motion in progress hides it; no fabricated horizontal pose is used.
 
 The Maestro provides commanded targets rather than measured shaft feedback.
 The HUD therefore labels this **neck command estimate / URDF mount prior**.

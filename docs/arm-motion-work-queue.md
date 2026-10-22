@@ -116,6 +116,11 @@ until the current test and controller workflow are finished.
    loaded; live L7014/U7698 now reports about 6° down and the head cloud is
    forward in the scene. Operator neck-posture acceptance remains pending.
    See [neck direction evidence](calibration/evidence/2026-10-21-flat-floor/neck-direction.json).
+   At Rob's request, the head cloud now retains its captured world-space
+   geometry for up to three seconds through neck settling or input/fit gaps,
+   labeled with held age. Fresh settled data replaces it; failed frames cannot
+   renew it. Belly behavior remains unchanged. The signed build is loaded and
+   isolated persistence checks pass; see [head persistence evidence](calibration/evidence/2026-10-21-flat-floor/head-persistence.json).
    See [live floor evidence](calibration/evidence/2026-10-21-flat-floor/live-install.json).
    The separately running
    torso-stepper terminal process was left unchanged. No arm test was performed.
