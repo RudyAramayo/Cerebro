@@ -42,11 +42,13 @@ final class ROBAmberGatewayTelemetry {
     let positionsRadians: [NSNumber]
     let statuses: [NSNumber]
     let effectiveSampleAgeMilliseconds: Double
+    let sampleAgeAtReceiptMilliseconds: Double
     let effectiveGripperFeedbackAgeMilliseconds = 1.0
-    init(sequence: UInt64, positions: [Double], stale: Bool, status: Int) {
+    init(sequence: UInt64, positions: [Double], stale: Bool, status: Int, queuedMilliseconds: Double = 0) {
         self.sequence = sequence; positionsRadians = positions.map(NSNumber.init(value:))
         statuses = Array(repeating: NSNumber(value: status), count: 7)
-        effectiveSampleAgeMilliseconds = stale ? 1000 : 1
+        sampleAgeAtReceiptMilliseconds = stale ? 1000 : 1
+        effectiveSampleAgeMilliseconds = sampleAgeAtReceiptMilliseconds + queuedMilliseconds
     }
 }
 final class ROBAmberGatewayClient: NSObject {
@@ -226,6 +228,54 @@ final class ROBArmRoutineCoordinator {
             ROBLeftArmTrial.shared.perform(command) { continuation.resume(returning: $0) }
         }
     }
+    @MainActor static func delayedTelemetryTests() async throws {
+        let trial = ROBLeftArmTrial.shared, g = ROBAmberGatewayClient.shared
+        let search = ROBWorkspaceSearch.shared
+        for scenario in ["delivery", "source", "live_loss", "malformed", "current_jump"] {
+            g.q["right"] = Array(repeating: 0, count: 7); g.mode["right"] = 1
+            g.stale = false; g.commands = []; g.activeLeases = []
+            ROBArmRoutineVision.shared.fresh = true
+            UserDefaults.standard.set(scenario == "current_jump" ? 0.5 : 0, forKey: ROBLeftArmTrial.currentLimitKey)
+            search.objects = [.can: .init(target: .can, position: [10,0,1], confidence: 0.9,
+                capturedAt: Date().timeIntervalSince1970 * 1000, sequence: 444,
+                view: .init(panDegrees: 0, upperTarget: 6306))]
+            search.onInspect = {
+                let initial = g.sequence
+                if scenario == "current_jump" {
+                    let fresh = ROBAmberGatewayTelemetry(sequence: initial + 1, positions: g.q["right"]!, stale: false, status: 1)
+                    NotificationCenter.default.post(name: .ROBAmberGatewayTelemetryDidUpdate, object: g, userInfo: ["telemetry": fresh])
+                }
+                let queued = ROBAmberGatewayTelemetry(sequence: initial + 2, positions: g.q["right"]!,
+                    stale: scenario == "source", status: 1, queuedMilliseconds: 700)
+                if scenario == "malformed" { queued.currents[3] = NSNumber(value: Double.nan) }
+                if scenario == "current_jump" { queued.currents = Array(repeating: NSNumber(value: 5), count: 7) }
+                g.sequence = initial + 3 // a strictly newer cache exists while the UI drains its older notification
+                g.stale = scenario == "live_loss"
+                NotificationCenter.default.post(name: .ROBAmberGatewayTelemetryDidUpdate, object: g,
+                    userInfo: ["telemetry": queued])
+            }
+            let result = await run("left_recycle_can")
+            search.onInspect = nil; g.stale = false
+            if scenario == "delivery" {
+                precondition(result["status"] as? String == "needs_help", result.description)
+                precondition(result["delayed_telemetry_samples"] as? Int == 1)
+                precondition((result["max_delayed_telemetry_age_ms"] as? Double ?? 0) >= 700)
+                let csv = try String(contentsOfFile: result["current_recording"] as! String)
+                precondition(csv.contains(",701.0,preflight"), "Queued history must retain its actual delivery age")
+            } else {
+                precondition(result["status"] as? String == "blocked", "\(scenario): \(result)")
+                precondition(g.commands.contains("priority_hold:right"), "A genuine feedback/current fault did not request hold")
+            }
+            precondition(g.commands.allSatisfy { ["mode_query:right", "priority_hold:right"].contains($0) },
+                "A recording/recovery check activated, moved, deactivated or gripped an arm")
+            precondition(g.q["right"] == Array(repeating: 0, count: 7))
+            precondition(!ROBControllerArmApproval.shared.authorizesLeftArmTrial("invented"),
+                "Recovered feedback restored an old motion grant")
+        }
+        search.objects = [:]; search.onInspect = nil
+        UserDefaults.standard.set(0, forKey: ROBLeftArmTrial.currentLimitKey)
+        print("Delayed telemetry: 700 ms queued history retained only with newer live feedback; stale source, true feedback loss, malformed currents and historical current jumps still stop; no motion or grant recovery")
+    }
     @MainActor static func tests() async throws {
         let plan = ROBLeftArmInteractionPlan.self
         for index in 0...6 {
@@ -301,6 +351,7 @@ final class ROBArmRoutineCoordinator {
         precondition(approvals == 0 && g.commands.isEmpty && ROBAmberGatewayTunnel.shared.connections == 0)
         ROBWorkspaceSearch.shared.fail = false; ROBWorkspaceSearch.shared.onInspect = nil; g.ready = true
         print("Neck-only search and hanging checks: no arm approval, gateway connection, motor or hold commands, including failure")
+        if CommandLine.arguments.last == "telemetry" { try await delayedTelemetryTests(); return }
         let alreadyHanging = await run("left_relax")
         precondition(alreadyHanging["status"] as? String == "completed", alreadyHanging.description)
         precondition(approvals == 0 && g.commands == ["mode_query:right"])
@@ -334,8 +385,12 @@ final class ROBArmRoutineCoordinator {
         precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty)
         print("Left wave: one approval, 11 registered corridor segments instead of 46 stops, no right-arm or jaw commands, current CSV saved")
         g.commands = []
+        g.mode["right"] = 1 // operator's green/active mode; the next approved prepare restores position mode itself
         let prepare = await run("left_prepare")
         precondition(prepare["status"] as? String == "accepted_unverified", prepare.description)
+        precondition(g.commands.firstIndex(of: "position_mode:right")! < g.commands.firstIndex(where: { $0.hasPrefix("waypoint_") })!,
+            "Active-mode recovery did not restore position control before movement")
+        precondition(!g.commands.contains("deactivate:right"), "Preparation required a manual-style torque-off/on cycle")
         precondition(g.commands.filter { $0.hasPrefix("calibrate") } == ["calibrate:right"])
         precondition(g.commands.contains("gripper_release:right"))
         let heldForPrepare = g.commands.firstIndex(of: "priority_hold:right")!
@@ -613,6 +668,7 @@ final class ROBArmRoutineCoordinator {
         precondition(g.commands == ["mode_query:right"], "Visual bucket detection admitted reaching without release geometry")
         search.objects = [:]; search.announce = nil
         print("Recycling assistance: one short request before motion for a distant can, even without bucket depth; reachable can never substitutes for missing release geometry")
+        try await delayedTelemetryTests()
     }
     static func main() async throws { setbuf(stdout, nil); try await tests(); print("Left-arm trial fixtures passed; no hardware transport exists in this executable") }
 }

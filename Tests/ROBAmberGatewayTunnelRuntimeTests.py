@@ -306,10 +306,18 @@ TESTS = r'''
         wait({ automatic.detail.contains("gateway authenticated") })
         automatic.maintainAutomaticConnection()
         precondition(FixtureProcess.launched.last === automaticallyRetried)
+        let connectsBeforeLoss = gateway.connects
+        gateway.state = .failed
+        automatic.maintainAutomaticConnection()
+        wait({ gateway.connects > connectsBeforeLoss })
+        gateway.state = .ready
+        wait({ automatic.detail.contains("gateway authenticated") })
+        precondition(FixtureProcess.launched.last === automaticallyRetried && !automaticallyRetried.terminated,
+            "A lost gateway connection required manually restarting the healthy SSH tunnel")
         automatic.disconnect()
         clock += 100; automatic.maintainAutomaticConnection()
         precondition(FixtureProcess.launched.last === automaticallyRetried && automaticallyRetried.terminated)
-        print("Tunnel: late robot startup automatically retries telemetry; authenticated reuse and explicit disconnect never replay motion")
+        print("Tunnel: late startup retries and automatic reconnection after gateway loss; healthy SSH reused, explicit disconnect retained, no motor interface or replay")
     }
 }
 '''

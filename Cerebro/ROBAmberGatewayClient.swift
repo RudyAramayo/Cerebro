@@ -45,10 +45,9 @@ import Security
         super.init()
     }
 
-    /// Gateway age at receipt plus elapsed local monotonic time. Consumers must
-    /// use this value instead of treating a frozen cached sample as perpetually
-    /// fresh when telemetry delivery stops.
-    public var effectiveSampleAgeMilliseconds: Double {
+    /// Historical packet quality, excluding time spent queued for UI delivery.
+    /// This value is for recording only, never live motion admission.
+    public var sampleAgeAtReceiptMilliseconds: Double {
         guard sampleAgeMilliseconds.isFinite,
               sampleAgeMilliseconds >= 0,
               controllerSampleAgeMilliseconds.isFinite,
@@ -56,12 +55,15 @@ import Security
               jointFeedbackAgeMilliseconds.count == 7,
               jointFeedbackAgeMilliseconds.allSatisfy({ $0.doubleValue.isFinite && $0.doubleValue >= 0 })
               else { return .infinity }
-        let elapsed = max(
-            0,
-            ProcessInfo.processInfo.systemUptime - receivedAtUptime
-        ) * 1_000
         return max(max(sampleAgeMilliseconds, controllerSampleAgeMilliseconds),
-                   jointFeedbackAgeMilliseconds.map(\.doubleValue).max() ?? .infinity) + elapsed
+                   jointFeedbackAgeMilliseconds.map(\.doubleValue).max() ?? .infinity)
+    }
+
+    /// Live consumers must include local elapsed time; a frozen cached packet
+    /// must never remain fresh merely because it was fresh when received.
+    public var effectiveSampleAgeMilliseconds: Double {
+        sampleAgeAtReceiptMilliseconds
+            + max(0, ProcessInfo.processInfo.systemUptime - receivedAtUptime) * 1_000
     }
 
     public var effectiveGripperFeedbackAgeMilliseconds: Double {

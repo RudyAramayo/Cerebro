@@ -1,0 +1,192 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-22T23:21:08.471396+00:00",
+  "baseCommit": "e9798531b75838edd1db64ef4a824d917413230b",
+  "finalSourceSHA256": {
+    "Cerebro/ROBAmberGatewayClient.swift": "2d12ad812b7074b0ad48133ad7245faa1d0e441620cfe5c90dc598abf5925cb7",
+    "Cerebro/ROBLeftArmTrial.swift": "b875218b6350a3ad1677f9181a993b9fb17af542022a3a57144bc3458b797343"
+  },
+  "physicalTrialBuild": {
+    "installedBinarySHA256": "a6abc3cb39cedb0683b1b67981755280943f0f8943c7aaebaf86369513d0cf33",
+    "sourceSHA256": {
+      "Cerebro/ROBAmberGatewayClient.swift": "2d12ad812b7074b0ad48133ad7245faa1d0e441620cfe5c90dc598abf5925cb7",
+      "Cerebro/ROBLeftArmTrial.swift": "bb87014a9308cb9430234657131a9ef4b961e476905277d0b863ebc4a10d3105"
+    },
+    "note": "Physical prepare, failed scan and empty return used this installed binary. The final update adds only motor/gripper age details to the live-feedback error message."
+  },
+  "finalBuild": {
+    "result": "passed",
+    "configuration": "Signed arm64 local Debug; isolated source excludes unrelated user edits.",
+    "installedBinarySHA256": "3c2bfe19ad303d00f1bd513909dae830b37ee83482249dc4e06d9e1aa3b05bff",
+    "buildLogSHA256": "6d495035f6706de696c6177b3a8abb2e8d58d41f15751d712c2cdbf2fdb1e165",
+    "codeSignature": "codesign --verify --deep --strict passed",
+    "automaticReconnectionObserved": true,
+    "connectButtonPressed": false,
+    "leftMode": "inactive; read-only mode query accepted",
+    "leftFeedbackHzDisplayed": 19.7,
+    "leftControllerAgeMSDisplayed": 5.08,
+    "rightFeedbackHzDisplayed": 19.7,
+    "wakeSessionOfferRestored": true
+  },
+  "regression": {
+    "baselineResult": "expected failure, exit 133",
+    "baselineError": "Invalid or stale left-arm current recording",
+    "baselineLogSHA256": "9958b449ed426cee424e3c3890a654f09a4d4604a1d1388a6eaeed90ee535651",
+    "finalResult": "passed with 700 ms queued delivery while newer live feedback remains fresh",
+    "liveAdmissionLimitMS": 250,
+    "retainsHistoricalCurrentsAndTrueCurrentJumpStops": true
+  },
+  "validation": [
+    {
+      "name": "focused-final",
+      "command": "bash Scripts/test-left-arm-trial.sh telemetry",
+      "result": "passed",
+      "logSHA256": "08ed13df09d3d6d5935e8f041d01db478c48d977ecf068412fb09cf1279f0ab7"
+    },
+    {
+      "name": "full-trial",
+      "command": "bash Scripts/test-left-arm-trial.sh",
+      "result": "passed",
+      "logSHA256": "5a65a554093ed5e7b104bae36ff83dc9772a9afc96d8b7fd625a4e710423efb8"
+    },
+    {
+      "name": "gateway-final",
+      "command": "python3 Tests/ROBAmberGatewayCompatibilityRuntimeTests.py",
+      "result": "passed",
+      "logSHA256": "eb8e5a327959d8e25d555914f3aa4bee41d3113b84b4252b83a737e1032e30ab"
+    },
+    {
+      "name": "automatic-tunnel",
+      "command": "python3 Tests/ROBAmberGatewayTunnelRuntimeTests.py",
+      "result": "passed",
+      "logSHA256": "ffca182a0aee5444d229eae5ca2ee4087d74f7ceb76ca377437012dbc22180dc"
+    }
+  ],
+  "nativeTrials": [
+    {
+      "label": "telemetry-original-recording-stop",
+      "status": "blocked",
+      "detail": "Invalid or stale left-arm current recording; no reaching/gripping.",
+      "source": "left_recycle_can-3DC37F48-7EBB-474E-8776-E79C329E3FB4.csv",
+      "csvGzip": "telemetry-original-recording-stop.csv.gz",
+      "csvSHA256": "12ef683698dc7d8034cbd30b60b17751c7f2c69e820c0762e3e90a807be7cc41",
+      "csvGzipSHA256": "1d61a9c7678f26a447adb1face6555ab9e8ba16b0e542a8d334d7873c9b16293",
+      "completeSamples": 261,
+      "durationSeconds": 14.036051083334314,
+      "maxRecordedDeliveryAgeMS": 95.98426800250199,
+      "delayedSamples": 0,
+      "finalPositionsRadians": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "phases": [
+        "preflight"
+      ]
+    },
+    {
+      "label": "telemetry-fixed-prepare",
+      "status": "accepted_unverified",
+      "detail": "Physical left arm reached the registered front pose; empty calibration and open were accepted.",
+      "source": "left_prepare-0AB8709F-164E-41FA-B9E1-1807A43ED603.csv",
+      "csvGzip": "telemetry-fixed-prepare.csv.gz",
+      "csvSHA256": "10dd805bde735590cf0408b3b1fbc2700fed98a55d866ea7ffe64a8e7e463f2a",
+      "csvGzipSHA256": "084c04e8b62a927fe35a3973d8866f45dd04379b9bb5290e9d512834cfe86d6b",
+      "completeSamples": 422,
+      "durationSeconds": 21.41938783333171,
+      "maxRecordedDeliveryAgeMS": 35.198814331234054,
+      "delayedSamples": 0,
+      "finalPositionsRadians": [
+        -1.050197335848463,
+        0.997564750593009,
+        -0.6014568226989834,
+        -0.000954476934684399,
+        -0.5938210072215082,
+        -0.5946391303083806,
+        0.0
+      ],
+      "phases": [
+        "preflight",
+        "camera preparation",
+        "waypoint 1",
+        "waypoint 4",
+        "waypoint 6",
+        "waypoint 18",
+        "waypoint 28",
+        "holding front for gripper",
+        "empty gripper calibration",
+        "release object"
+      ]
+    },
+    {
+      "label": "telemetry-fixed-live-feedback-stop",
+      "status": "blocked",
+      "detail": "Fresh left-arm motor and gripper feedback is required. No pickup path or jaw command was issued.",
+      "source": "left_recycle_can-B3925E74-B66C-40B9-BFA9-BC79D787488A.csv",
+      "csvGzip": "telemetry-fixed-live-feedback-stop.csv.gz",
+      "csvSHA256": "c2cb334f932fc9655322727226a514e44df012bf608f46e5aafbd083895ce07c",
+      "csvGzipSHA256": "0afee7086f88623dd906f1ab4f2de288b1c40ce3efc9a622f1ec62bccfabe7cb",
+      "completeSamples": 1320,
+      "durationSeconds": 67.22388499999943,
+      "maxRecordedDeliveryAgeMS": 47.881995000394646,
+      "delayedSamples": 0,
+      "finalPositionsRadians": [
+        -1.049379212761591,
+        0.9967466275061366,
+        -0.6011841150033593,
+        -0.000818123086872342,
+        -0.5943664226127564,
+        -0.5946391303083806,
+        0.0
+      ],
+      "phases": [
+        "preflight"
+      ]
+    },
+    {
+      "label": "telemetry-fixed-empty-return",
+      "status": "completed",
+      "detail": "Empty return requested through Arms settings without a new grant; measured hanging and inactive confirmed.",
+      "source": "left_relax-6FC01805-7C85-45AD-8E05-EDD7E498D417.csv",
+      "csvGzip": "telemetry-fixed-empty-return.csv.gz",
+      "csvSHA256": "34ab19dc43a8654bc40184ec19fba556f1273ff32afb0cae01b4b5ef7c641e63",
+      "csvGzipSHA256": "bb99724f692d8f74713feac554c70524ab3c3751971390f07314895a8b20bfd3",
+      "completeSamples": 310,
+      "durationSeconds": 15.725827916663548,
+      "maxRecordedDeliveryAgeMS": 53.40070633430672,
+      "delayedSamples": 0,
+      "finalPositionsRadians": [
+        0.000272707695624114,
+        0.009681123194656046,
+        0.0,
+        -0.002863430804053197,
+        0.002318015412804969,
+        0.00136353847812057,
+        0.0
+      ],
+      "phases": [
+        "preflight",
+        "camera preparation",
+        "waypoint 18",
+        "waypoint 6",
+        "waypoint 4",
+        "waypoint 1",
+        "waypoint 0",
+        "deactivating"
+      ]
+    }
+  ],
+  "authorization": "One real spoken session covered physical preparation and the subsequent recycling scan without per-step prompts. The feedback fault ended that session. The registered empty return required no new grant. No grant was manufactured or restored.",
+  "automaticRecoveryScope": "Existing configured transport retries transient failures and the next authorized preparation restores position mode from active/inactive. No automatic torque-off/on cycle, stack restart or replay of the failed pickup was added.",
+  "remainingBlockers": [
+    "The recycling scan hit the current motor/gripper freshness check after 67.2 s. Its hardware/transport/scheduling cause remains unconfirmed; the final build adds separate motor/gripper ages to the error.",
+    "The corrected ghost pickup is not connected to hardware execution; bucket opening/release depth is still unavailable."
+  ],
+  "canPickedUp": false,
+  "canPlacedInBucket": false,
+  "cameraImagesIncluded": false
+}

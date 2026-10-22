@@ -119,6 +119,16 @@ struct GatewayCompatibilityFixtures {
             "statuses": [Double](repeating: 2.0, count: 7),
         ]
         try client.fixtureReceive(motorSample)
+        let capturedMotorSample = client.telemetry(forArm: "left")!
+        expect(capturedMotorSample.sampleAgeAtReceiptMilliseconds == 1,
+               "Historical recording quality must retain the controller and individual-joint ages")
+        Thread.sleep(forTimeInterval: 0.27)
+        expect(capturedMotorSample.sampleAgeAtReceiptMilliseconds == 1
+               && capturedMotorSample.effectiveSampleAgeMilliseconds > 250,
+               "Reading historical packet quality must never freshen live motor feedback")
+        expect(client.manualArmControlReadiness(forUDPPort: 26001, expectedSessionGeneration: 0)["allowed"] as? Bool == false,
+               "Historical receipt age bypassed the live 250 ms motion limit")
+        try client.fixtureReceive(motorSample)
         let admitted = client.manualArmControlReadiness(forUDPPort: 26001, expectedSessionGeneration: 0)
         expect(admitted["allowed"] as? Bool == true, "Fresh physical-right feedback was not admitted on L10")
         let admittedGeneration = (admitted["sessionGeneration"] as! NSNumber).uint64Value

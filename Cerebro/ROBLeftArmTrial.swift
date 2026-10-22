@@ -48,6 +48,8 @@ import AppKit
     private var currentLimit = 0.0
     private var peakJump = 0.0
     private var sampleCount = 0
+    private var delayedSampleCount = 0
+    private var maxDelayedSampleAge = 0.0
     private var phase = "preflight"
     private var activeCommand = ""
     private var readinessConfirmed = false
@@ -344,11 +346,16 @@ import AppKit
     }
 
     private func measured() throws -> ROBAmberGatewayTelemetry {
-        guard let sample = gateway.telemetry(forArm: arm), sample.sequence > 0,
+        let current = gateway.telemetry(forArm: arm)
+        guard let sample = current, sample.sequence > 0,
               sample.effectiveSampleAgeMilliseconds <= 250, sample.effectiveGripperFeedbackAgeMilliseconds <= 250,
               sample.positionsRadians.count == 7, sample.currents.count == 7,
               sample.positionsRadians.allSatisfy({ $0.doubleValue.isFinite }), sample.currents.allSatisfy({ $0.doubleValue.isFinite }) else {
-            throw ROBArmRoutineError.blocked("Fresh left-arm motor and gripper feedback is required.")
+            let detail = current.map {
+                String(format: " Motor age %.0f ms, gripper age %.0f ms, sequence %llu.",
+                    $0.effectiveSampleAgeMilliseconds, $0.effectiveGripperFeedbackAgeMilliseconds, $0.sequence)
+            } ?? " No telemetry sample is available."
+            throw ROBArmRoutineError.blocked("Fresh left-arm motor and gripper feedback is required." + detail)
         }
         return sample
     }
@@ -737,21 +744,36 @@ import AppKit
         lastRecordingPath = url.path; logStarted = ProcessInfo.processInfo.systemUptime
         if let proposal { try proposal.encoded().write(to: url.deletingPathExtension().appendingPathExtension("proposal.json"), options: .atomic) }
         lastSequence = 0; previousCurrents = nil; peakJump = 0; sampleCount = 0
+        delayedSampleCount = 0; maxDelayedSampleAge = 0
     }
 
     private func record(_ sample: ROBAmberGatewayTelemetry) throws {
         guard log != nil, sample.sequence > lastSequence else { return }
-        guard sample.effectiveSampleAgeMilliseconds <= 250, sample.positionsRadians.count == 7,
+        let deliveredAge = sample.effectiveSampleAgeMilliseconds
+        guard sample.sampleAgeAtReceiptMilliseconds <= 250, deliveredAge.isFinite, sample.positionsRadians.count == 7,
               sample.positionsRadians.allSatisfy({ $0.doubleValue.isFinite }),
               sample.currents.count == 7, sample.currents.allSatisfy({ $0.doubleValue.isFinite }) else {
             throw ROBArmRoutineError.blocked("Invalid or stale left-arm current recording; hold requested.")
+        }
+        if deliveredAge > 250 {
+            // Notifications carry the packet captured on the gateway queue,
+            // not necessarily the latest packet after a busy UI resumes.
+            // Retain that historical current sample only if actual live motor
+            // AND gripper feedback is fresh and strictly newer. All live
+            // admission, session checks and the independent lease stay intact.
+            try check()
+            let current = try measured()
+            guard current.sequence > sample.sequence else {
+                throw ROBArmRoutineError.blocked("Left-arm telemetry stopped advancing; hold requested.")
+            }
+            delayedSampleCount += 1; maxDelayedSampleAge = max(maxDelayedSampleAge, deliveredAge)
         }
         let currents = sample.currents.map(\.doubleValue)
         let changes = zip(currents, previousCurrents ?? currents).map { $0 - $1 }
         let jump = changes.map(abs).max() ?? 0
         peakJump = max(peakJump, jump); previousCurrents = currents; lastSequence = sample.sequence; sampleCount += 1
         let elapsed = ProcessInfo.processInfo.systemUptime - logStarted
-        let rows = (0..<7).map { "\(elapsed),\(sample.sequence),left,right,\($0 + 1),\(sample.positionsRadians[$0]),\(currents[$0]),\(changes[$0]),\(sample.effectiveSampleAgeMilliseconds),\(phase)\n" }.joined()
+        let rows = (0..<7).map { "\(elapsed),\(sample.sequence),left,right,\($0 + 1),\(sample.positionsRadians[$0]),\(currents[$0]),\(changes[$0]),\(deliveredAge),\(phase)\n" }.joined()
         try log?.write(contentsOf: Data(rows.utf8))
         if currentLimit > 0, jump > currentLimit {
             throw ROBArmRoutineError.blocked("Left-arm current jump \(jump) exceeded \(currentLimit) raw units; hold requested. Inspect the recording before retrying.")
@@ -789,6 +811,8 @@ import AppKit
         log = nil
         output["current_recording"] = lastRecordingPath
         output["current_samples"] = sampleCount
+        output["delayed_telemetry_samples"] = delayedSampleCount
+        output["max_delayed_telemetry_age_ms"] = maxDelayedSampleAge
         output["peak_current_jump_raw"] = peakJump
         output["current_jump_limit_raw"] = currentLimit
         if let proposal {

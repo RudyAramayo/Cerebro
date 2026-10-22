@@ -257,3 +257,46 @@ The VLM replies failed decoding, so no reach/grip/carry occurred. A later
 preparation stopped on an expired gateway motion lease, with a 1.3-second gap in
 application recording just before the stop. The independent lease watchdog is
 unchanged. See the [live evidence](calibration/evidence/2026-10-22-recycling/first-live-session.json).
+
+### Delayed telemetry notifications and automatic control readiness
+
+The next physical recycling request stopped during its neck scan, before arm
+travel, with “Invalid or stale left-arm current recording.” Its CSV retained
+261 complete samples at zero over 14.0 seconds, including a 0.73-second gap in
+recorded samples. That gap alone does not establish whether motor data or UI
+delivery paused. Subsequent diagnostics showed current CAN feedback; Rob then
+manually deactivated/activated the left arm, which reported active mode at zero.
+
+The hardware-free regression reproduces the same error by delaying an otherwise
+valid telemetry notification 700 ms while the gateway already holds a newer,
+fresh packet. The recorder now retains this historical current sample, its
+actual delivery age and any current jump only when its controller/joint feedback
+was valid at receipt AND a strictly newer live motor/gripper sample is within
+the existing 250 ms limit. Source-stale packets, loss of current feedback,
+invalid values and current-jump limits still stop. Results report delayed sample
+count and maximum delivery age. Live motion admission and the gateway watchdog
+are unchanged; historical receipt age never authorizes motion.
+
+Configured telemetry transport already reconnects automatically after transient
+gateway loss, reusing a healthy SSH tunnel. Feedback recovery is reported by the
+existing health monitor. The next authorized preparation changes active (green)
+or inactive mode to position control itself and waits for measured mode feedback;
+no manual deactivate/activate cycle is needed. Recovery does not replay a failed
+movement, restore a previous grant, or deactivate a potentially loaded arm.
+
+The installed fix completed a physical empty-left preparation in 21.4 seconds
+(422 seven-joint samples, maximum recorded feedback age 35.2 ms), without another
+manual mode toggle. The same spoken session then scanned for recycling for
+67.2 seconds before the live motor/gripper freshness check stopped it. That is a
+different check from the delayed-recording notification regression; its underlying
+transport/hardware/scheduling cause remains unconfirmed. No reaching or gripping
+occurred in that scan. Once feedback was available, the registered empty return
+ran without a new grant, reached hanging and deactivated in 15.7 seconds
+(310 complete samples). This validates preparation and return, not can placement.
+Future live-feedback stops include separate motor/gripper ages and sequence.
+The [telemetry recovery validation record](calibration/evidence/2026-10-22-recycling/telemetry-recovery-validation.json)
+includes the failing baseline, passing regression/transport fixtures, exact build
+hashes and all four native CSV traces. Reconnection was observed after the final
+reload without pressing Connect; a read-only mode query confirmed the left arm
+inactive with current CAN replies. The scan's feedback-freshness fault and the
+unfinished physical pickup/drop implementation remain explicit blockers.
