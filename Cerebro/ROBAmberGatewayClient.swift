@@ -253,6 +253,8 @@ extension Notification.Name {
     private var task: Process?
     private var activeHost: String?
     private var connectionTimer: Timer?
+    private var portRecoveryTask: Process?
+    private var gatewayAuthenticated = false
     @nonobjc var sshIdentityPath: () -> String? = {
         let path = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".ssh/cerebro_amber_ed25519").path
@@ -277,9 +279,14 @@ extension Notification.Name {
             DispatchQueue.main.async { [weak self] in self?.connect(host: requestedHost) }
             return
         }
+        startConnection(host: requestedHost, allowPortRecovery: true)
+    }
+
+    private func startConnection(host requestedHost: String?, allowPortRecovery: Bool) {
         let configuration = ROBAmberGatewayConfiguration.shared
         let trimmedHost = requestedHost?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let host = trimmedHost.isEmpty ? configuration.sshHost : trimmedHost
+        if portRecoveryTask != nil, activeHost == host { return }
         // A second request must not interrupt authentication, invalidate an
         // approved session, or race a still-exiting SSH child for port 7443.
         if let process = task, process.isRunning, activeHost == host {
@@ -345,6 +352,14 @@ extension Notification.Name {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             DispatchQueue.main.async { [weak self, weak process] in
                 guard let self, let process, process === self.task else { return }
+                let localPortOccupied = errorText?.split(whereSeparator: \.isNewline).contains {
+                    $0.hasPrefix("bind ") && $0.contains(":7443:")
+                        && $0.contains("Address already in use")
+                } == true
+                if allowPortRecovery, !self.gatewayAuthenticated, localPortOccupied {
+                    self.recoverOccupiedPort(host: host)
+                    return
+                }
                 let message: String
                 if process.terminationStatus == 5 || errorText?.contains("Permission denied") == true {
                     let credential = identity == nil ? "the saved SSH password in Amber Arm Diagnostics" : "the installed Amber public key in ~/.ssh/authorized_keys"
@@ -388,6 +403,7 @@ extension Notification.Name {
             guard gatewayStarted else { return }
             let snapshot = gateway.connectionSnapshot()
             if gateway.isReady() {
+                self.gatewayAuthenticated = true
                 self.connectionTimer?.invalidate(); self.connectionTimer = nil
                 self.update(running: true, detail: "SSH tunnel active to \(host); gateway authenticated")
             } else if (snapshot["state"] as? NSNumber)?.intValue == ROBAmberGatewayState.failed.rawValue {
@@ -398,6 +414,71 @@ extension Notification.Name {
         }
         connectionTimer = timer
         RunLoop.main.add(timer, forMode: .common)
+    }
+
+    // Equivalent to killing the process using :7443, restricted to TCP listeners
+    // so gateway clients (including Cerebro itself) are never selected by lsof.
+    // Try the current user's permission first; sudo must never prompt in the app.
+    @nonobjc private static let portRecoveryScript = """
+    listeners=$(/usr/bin/sudo -n /usr/sbin/lsof -nP -t -iTCP:7443 -sTCP:LISTEN 2>/dev/null) ||
+        listeners=$(/usr/sbin/lsof -nP -t -iTCP:7443 -sTCP:LISTEN)
+    lookup_status=$?
+    if [ "$lookup_status" -gt 1 ]; then
+        echo "Could not identify the listener on port 7443" >&2
+        exit "$lookup_status"
+    fi
+    for pid in $listeners; do
+        case "$pid" in
+            ''|*[!0-9]*) echo "Invalid listener process ID" >&2; exit 1 ;;
+        esac
+        if [ "$pid" = "$PPID" ]; then
+            echo "Cerebro itself owns port 7443; cannot clear its own listener" >&2
+            exit 1
+        fi
+        /bin/kill -9 "$pid" 2>/dev/null || /usr/bin/sudo -n /bin/kill -9 "$pid" || exit $?
+    done
+    """
+
+    private func recoverOccupiedPort(host: String) {
+        disconnect()
+        let recovery = Process()
+        recovery.executableURL = URL(fileURLWithPath: "/bin/sh")
+        recovery.arguments = ["-c", Self.portRecoveryScript]
+        recovery.standardInput = FileHandle.nullDevice
+        recovery.standardOutput = FileHandle.nullDevice
+        let errorPipe = Pipe()
+        recovery.standardError = errorPipe
+        recovery.terminationHandler = { [weak self, weak recovery] _ in
+            guard let recovery else { return }
+            let data = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            let reason = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            DispatchQueue.main.async { [weak self, weak recovery] in
+                guard let self, let recovery, recovery === self.portRecoveryTask else { return }
+                guard recovery.terminationStatus == 0 else {
+                    self.fail("Could not clear port 7443: \(reason.isEmpty ? "exit \(recovery.terminationStatus)" : String(reason.prefix(2_048)))")
+                    return
+                }
+                // Give a SIGKILLed listener time to release its socket. A user
+                // disconnect or host change cancels this pending retry.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self, weak recovery] in
+                    guard let self, let recovery, recovery === self.portRecoveryTask else { return }
+                    self.portRecoveryTask = nil
+                    self.startConnection(host: host, allowPortRecovery: false)
+                }
+            }
+        }
+        do {
+            try recovery.run()
+            portRecoveryTask = recovery
+            activeHost = host
+            update(running: true, detail: "Port 7443 is in use; clearing its listener and retrying SSH")
+            connectionTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { [weak self] _ in
+                self?.fail("Clearing port 7443 timed out")
+            }
+        } catch {
+            fail("Could not clear port 7443: \(error.localizedDescription)")
+        }
     }
 
     private func fail(_ message: String) {
@@ -416,6 +497,10 @@ extension Notification.Name {
         task?.terminationHandler = nil
         if task?.isRunning == true { task?.terminate() }
         task = nil
+        portRecoveryTask?.terminationHandler = nil
+        if portRecoveryTask?.isRunning == true { portRecoveryTask?.terminate() }
+        portRecoveryTask = nil
+        gatewayAuthenticated = false
         activeHost = nil
         failureDetail = nil
         update(running: false, detail: "Tunnel disconnected")

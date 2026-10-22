@@ -53,6 +53,23 @@ fixture `python3 -B Tests/ROBAmberGatewayConnectionRuntimeTests.py` exercises
 delayed-listener recovery, cancellation, and failure at the retry/deadline bound
 using the production Network.framework client without robot access.
 
+If SSH reports `Address already in use` while binding local port 7443 before
+initial authentication, Cerebro automatically finds the TCP listener, sends it
+SIGKILL, and retries the SSH tunnel once using the same host and saved
+credentials. The cleanup implements the requested
+`sudo kill -9 $(sudo lsof -t -i :7443)` recovery with `lsof` restricted to TCP
+listeners so it does not kill connected clients. It tries noninteractive sudo
+for discovery, falls back to ordinary permissions, and uses noninteractive sudo
+for SIGKILL if needed. A required administrator password is shown as a failure
+instead of opening a desktop prompt. Cleanup has a five-second deadline;
+disconnecting or changing hosts cancels its pending retry. Repeated bind
+failures, other SSH errors, and ended authenticated sessions do not trigger
+another cleanup or automatic reconnect. This recovery never replays robot
+commands. `python3 -B Tests/ROBAmberGatewayTunnelRuntimeTests.py` exercises the
+recovery lifecycle with simulated processes; `python3 -B
+Tests/ROBAmberGatewayPortRecoveryTests.py` verifies the cleanup on isolated
+loopback ports without touching port 7443.
+
 Diagnostics buffers every received sample but redraws its plots, tables, and
 schematic at 2 Hz. This reduces main-thread work while keeping the operator's
 controls responsive; it does not change gateway telemetry or control rates.

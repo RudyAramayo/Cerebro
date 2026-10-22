@@ -62,14 +62,15 @@ final class FixtureProcess: NSObject {
 
 TESTS = r'''
 @main struct TunnelFixture {
-    static func wait(_ predicate: () -> Bool, seconds: Double = 2) {
+    static func wait(_ predicate: () -> Bool, seconds: Double = 2, line: UInt = #line) {
         let deadline = ProcessInfo.processInfo.systemUptime + seconds
         while !predicate() {
-            precondition(ProcessInfo.processInfo.systemUptime < deadline, "Tunnel fixture timed out")
+            precondition(ProcessInfo.processInfo.systemUptime < deadline, "Tunnel fixture timed out at line \(line)")
             RunLoop.main.run(until: Date().addingTimeInterval(0.01))
         }
     }
     static func main() {
+        setbuf(stdout, nil)
         let tunnel = ROBAmberGatewayTunnel()
         tunnel.sshIdentityPath = { nil }
         let gateway = ROBAmberGatewayClient.shared
@@ -188,6 +189,101 @@ TESTS = r'''
         precondition(tunnel.failureDetail!.contains("installed Amber public key"))
         precondition(!tunnel.isRunning)
         print("Tunnel: key-only startup without password, direct noninteractive SSH and key-specific failure passed")
+
+        let bindError = "bind [127.0.0.1]:7443: Address already in use\nchannel_setup_fwd_listener_tcpip: cannot listen to port: 7443\nCould not request local forwarding."
+        func beginRecovery() -> FixtureProcess {
+            tunnel.connect(host: "occupied-robot.invalid")
+            let occupied = FixtureProcess.launched.last!
+            occupied.exit(255, error: bindError)
+            wait({ FixtureProcess.launched.last !== occupied })
+            let recovery = FixtureProcess.launched.last!
+            precondition(recovery.executableURL?.path == "/bin/sh")
+            precondition(recovery.arguments![0] == "-c")
+            precondition(recovery.arguments![1].contains("-iTCP:7443 -sTCP:LISTEN"))
+            precondition(recovery.arguments![1].contains("/bin/kill -9"))
+            precondition(recovery.arguments![1].contains("/usr/bin/sudo -n"))
+            precondition(!(recovery.standardInput is Pipe))
+            precondition(tunnel.detail.contains("clearing its listener"))
+            return recovery
+        }
+        let recovery = beginRecovery()
+        let duringRecovery = FixtureProcess.launched.count
+        tunnel.connect(); tunnel.connect(host: " occupied-robot.invalid ")
+        precondition(FixtureProcess.launched.count == duringRecovery)
+        recovery.exit(0, error: "")
+        wait({ FixtureProcess.launched.count == duringRecovery + 1 })
+        let retried = FixtureProcess.launched.last!
+        precondition(retried.executableURL?.path == "/usr/bin/ssh")
+        precondition(retried.arguments!.contains("amber@occupied-robot.invalid"))
+        retried.exit(255, error: bindError)
+        wait({ tunnel.failureDetail != nil })
+        precondition(FixtureProcess.launched.count == duringRecovery + 1,
+                     "A persistent bind failure retried more than once")
+        precondition(tunnel.failureDetail!.contains("Address already in use"))
+        print("Tunnel: port conflict clears listener, coalesces duplicate requests and retries once passed")
+
+        let successfulRecovery = beginRecovery()
+        let beforeSuccessfulRetry = FixtureProcess.launched.count
+        successfulRecovery.exit(0, error: "")
+        wait({ FixtureProcess.launched.count == beforeSuccessfulRetry + 1 })
+        let connectsBeforeRecovery = gateway.connects
+        wait({ gateway.connects > connectsBeforeRecovery })
+        gateway.state = .ready
+        wait({ tunnel.detail.contains("gateway authenticated") })
+        let authenticated = FixtureProcess.launched.last!
+        let authenticatedLaunches = FixtureProcess.launched.count
+        authenticated.exit(255, error: bindError)
+        wait({ tunnel.failureDetail != nil })
+        precondition(FixtureProcess.launched.count == authenticatedLaunches,
+                     "Recovery restarted an authenticated session")
+        print("Tunnel: recovered tunnel authenticates, established sessions never auto-reconnect passed")
+
+        let deniedRecovery = beginRecovery()
+        let beforeDeniedRecovery = FixtureProcess.launched.count
+        deniedRecovery.exit(1, error: "sudo: a password is required")
+        wait({ tunnel.failureDetail != nil })
+        precondition(tunnel.failureDetail!.contains("Could not clear port 7443"))
+        precondition(tunnel.failureDetail!.contains("password is required"))
+        precondition(FixtureProcess.launched.count == beforeDeniedRecovery && !tunnel.isRunning)
+
+        let cancelledRecovery = beginRecovery()
+        let lateRecoveryCallback = cancelledRecovery.terminationHandler!
+        tunnel.disconnect()
+        tunnel.connect(host: "replacement-robot.invalid")
+        let replacement = FixtureProcess.launched.last!
+        cancelledRecovery.exit(0, error: "")
+        lateRecoveryCallback(cancelledRecovery)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.35))
+        precondition(FixtureProcess.launched.last === replacement && !replacement.terminated)
+        precondition(tunnel.failureDetail == nil)
+        tunnel.disconnect()
+
+        let pendingRecovery = beginRecovery()
+        let beforePendingCancel = FixtureProcess.launched.count
+        pendingRecovery.exit(0, error: "")
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        tunnel.disconnect()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.35))
+        precondition(FixtureProcess.launched.count == beforePendingCancel)
+
+        let hungRecovery = beginRecovery()
+        let beforeHungRecovery = FixtureProcess.launched.count
+        wait({ tunnel.failureDetail?.contains("Clearing port 7443 timed out") == true }, seconds: 6)
+        precondition(hungRecovery.terminated && !tunnel.isRunning)
+        precondition(FixtureProcess.launched.count == beforeHungRecovery)
+        print("Tunnel: cleanup permissions, cancellation, stale completions and timeout passed")
+
+        for error in ["bind [127.0.0.1]:7444: Address already in use",
+                      "bind [127.0.0.1]:7443: Permission denied",
+                      "ssh: connect to host robot port 22: Connection refused"] {
+            tunnel.connect()
+            let unrelated = FixtureProcess.launched.last!
+            let beforeUnrelated = FixtureProcess.launched.count
+            unrelated.exit(255, error: error)
+            wait({ tunnel.failureDetail != nil })
+            precondition(FixtureProcess.launched.count == beforeUnrelated)
+        }
+        print("Tunnel: other ports and non-bind failures never kill a listener passed")
     }
 }
 '''
@@ -209,7 +305,7 @@ def main():
         subprocess.run(["xcrun", "swiftc", "-swift-version", "5", "-parse-as-library",
                         "-module-cache-path", "/private/tmp/cerebro-swift-module-cache",
                         str(swift), "-o", str(binary)], check=True, timeout=60)
-        subprocess.run([str(binary)], check=True, timeout=25)
+        subprocess.run([str(binary)], check=True, timeout=40)
 
 
 if __name__ == "__main__":
