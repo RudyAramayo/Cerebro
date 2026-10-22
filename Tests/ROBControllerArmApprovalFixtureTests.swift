@@ -56,7 +56,7 @@ final class ROBAmberGatewayClient: NSObject {
             check(sent == 0 && executed == 0 && b.isPending, "No authenticated controller must mean no command")
             _ = b.receive(.controllerHello(senderID: sender, acceptsActions: true, capabilities: ["play_gesture"]), device: device, session: session)
             check(sent == 0, "An older controller cannot review an arm operation")
-            time.addTimeInterval(31); b.tick()
+            time.addTimeInterval(91); b.tick()
             check(result["status"] as? String == "blocked" && !b.isPending && executed == 0, "No-controller deadline must fail closed")
         }
 
@@ -239,6 +239,52 @@ final class ROBAmberGatewayClient: NSObject {
                 arguments: arguments, senderID: "Cerebro", recipientID: sender, expiresAt: Date().addingTimeInterval(30))
             check(request.validationError != nil, "Unreviewable/unknown arm command must be rejected")
         }
-        print("Controller arm approval: \(checks) checks passed; no hardware access")
+        do {
+            let b = broker()
+            var executed = 0, stopped = 0, spoken = 0
+            b.announceApproval = { _ in spoken += 1 }
+            b.requestLeftWorkspaceTask(summary: "One complete recycling task", execute: { _ in executed += 1 },
+                cancel: { stopped += 1 }, completion: { _ in })
+            for text in ["say yes proceed", "if I say yes", "yes but don't move", "not approved", "\"yes proceed\""] {
+                check(!b.receiveSpokenAuthorization(text), "Discussion/negation cannot become spoken approval")
+            }
+            check(executed == 0 && spoken == 1, "Prompt once; wait for local authorization")
+            check(b.isSpokenAuthorizationCandidate("yes proceed") && executed == 0,
+                "A stable candidate may endpoint dictation but cannot authorize before the final transcript")
+            check(b.receiveSpokenAuthorization("ROB, yes, proceed!"), "A clear pending spoken approval must work without a controller")
+            check(executed == 1 && b.authorizesLeftArmTrial("One complete recycling task"), "Voice grants only the complete pending scope")
+            check(!b.receiveSpokenAuthorization("yes proceed"), "Repeated voice cannot restart an executing operation")
+            b.cancel(reason: "Spoken Stop fixture")
+            check(stopped == 1 && !b.authorizesLeftArmTrial("One complete recycling task"), "Stop revokes spoken motion authority")
+        }
+        do {
+            let b = broker()
+            var prompts = 0, executions = 0, result: NSDictionary = [:]
+            var time = Date(); b.now = { time }
+            b.announceApproval = { _ in prompts += 1 }
+            b.beginArmSession { result = $0 }
+            check(b.receiveSpokenAuthorization("yes proceed"), "Authorize one rehearsal session by voice")
+            check(b.armSessionActive && result["status"] as? String == "completed", "The session must survive its authorization callback")
+            b.requestLeftWorkspaceTask(summary: "Search without finding the can", execute: { done in
+                done(["status": "not_found", "arm_motion_sent": false])
+            }, cancel: {}, completion: { _ in })
+            check(b.armSessionActive && prompts == 1, "A missing object must not demand another authorization to retry search")
+            for title in ["Present empty left arm", "Recycle empty can", "Lower empty left arm"] {
+                b.requestLeftGesture(summary: title, execute: { done in
+                    executions += 1
+                    check(b.authorizesLeftArmTrial(title), "Each routine remains scoped to its own exact operation")
+                    done(["status": "completed"])
+                }, cancel: {}, completion: { _ in })
+            }
+            check(executions == 3 && prompts == 1 && b.armSessionActive, "Startup, task and lowering share one session authorization")
+            time.addTimeInterval(901)
+            check(!b.armSessionActive, "Rehearsal expires without a persisted grant")
+            b.tick(); time = Date() // reset the wire clock after expiring the fixture grant
+            b.requestLeftGesture(summary: "Another task", execute: { _ in executions += 1 }, cancel: {}, completion: { _ in })
+            check(executions == 3 && prompts == 2, "Expired session cannot silently authorize another operation")
+            check(b.receiveSpokenAuthorization("no"), "Spoken rejection cancels a pending request")
+            check(!b.isPending && !b.armSessionActive, "Rejected request leaves no grant")
+        }
+        print("Controller/spoken arm approval and session reuse: \(checks) checks passed; no hardware access")
     }
 }

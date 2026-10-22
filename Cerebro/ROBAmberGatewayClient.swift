@@ -255,6 +255,12 @@ extension Notification.Name {
     private var connectionTimer: Timer?
     private var portRecoveryTask: Process?
     private var gatewayAuthenticated = false
+    private var automaticConnectionDesired = false
+    private var automaticRetryBlocked = false
+    private var automaticRetryAttempt = 0
+    private var automaticRetryAt = 0.0
+    private var automaticConnectionTimer: Timer?
+    @nonobjc var automaticConnectionNow: () -> Double = { ProcessInfo.processInfo.systemUptime }
     @nonobjc var sshIdentityPath: () -> String? = {
         let path = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".ssh/cerebro_amber_ed25519").path
@@ -271,7 +277,29 @@ extension Notification.Name {
         let configuration = ROBAmberGatewayConfiguration.shared
         guard configuration.hasGatewayToken,
               configuration.hasSSHPassword || sshIdentityPath() != nil else { return }
+        automaticConnectionDesired = true
+        automaticRetryBlocked = false
+        if automaticConnectionTimer == nil {
+            let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.maintainAutomaticConnection() }
+            automaticConnectionTimer = timer
+            RunLoop.main.add(timer, forMode: .common)
+        }
         connect()
+    }
+
+    /// Telemetry reconnection only. Every new gateway generation invalidates
+    /// previous motion/calibration; no queued arm command is replayed here.
+    @nonobjc func maintainAutomaticConnection() {
+        guard automaticConnectionDesired, !automaticRetryBlocked else { return }
+        let gateway = ROBAmberGatewayClient.shared
+        if gateway.isReady() { automaticRetryAttempt = 0; return }
+        guard connectionTimer == nil, portRecoveryTask == nil,
+              automaticConnectionNow() >= automaticRetryAt else { return }
+        if task?.isRunning == true {
+            startConnection(host: nil, allowPortRecovery: false)
+        } else {
+            startConnection(host: nil, allowPortRecovery: true)
+        }
     }
 
     public func connect(host requestedHost: String? = nil) {
@@ -299,7 +327,7 @@ extension Notification.Name {
             beginGatewayConnection(process: process, host: host, token: token, delay: 0)
             return
         }
-        disconnect()
+        closeTransport()
         let identity = sshIdentityPath()
         let password = identity == nil ? configuration.sshPassword() : nil
         guard let token = configuration.gatewayToken(),
@@ -440,7 +468,7 @@ extension Notification.Name {
     """
 
     private func recoverOccupiedPort(host: String) {
-        disconnect()
+        closeTransport()
         let recovery = Process()
         recovery.executableURL = URL(fileURLWithPath: "/bin/sh")
         recovery.arguments = ["-c", Self.portRecoveryScript]
@@ -482,9 +510,21 @@ extension Notification.Name {
     }
 
     private func fail(_ message: String) {
-        disconnect()
+        closeTransport()
         failureDetail = message
         update(running: false, detail: message)
+        if automaticConnectionDesired {
+            let lower = message.lowercased()
+            let transient = ["no route to host", "network is unreachable", "connection refused", "timed out",
+                "connection reset", "broken pipe", "server not responding", "connection closed", "could not resolve hostname"]
+                .contains { lower.contains($0) }
+            automaticRetryBlocked = !transient
+            if transient {
+                let delay = min(30, 2 * pow(2, Double(min(automaticRetryAttempt, 4))))
+                automaticRetryAttempt += 1; automaticRetryAt = automaticConnectionNow() + delay
+                update(running: false, detail: message + " • Automatic telemetry retry in \(Int(delay)) seconds")
+            }
+        }
     }
 
     public func disconnect() {
@@ -492,6 +532,13 @@ extension Notification.Name {
             DispatchQueue.main.async { [weak self] in self?.disconnect() }
             return
         }
+        automaticConnectionDesired = false
+        automaticConnectionTimer?.invalidate(); automaticConnectionTimer = nil
+        automaticRetryAttempt = 0; automaticRetryAt = 0
+        closeTransport()
+    }
+
+    private func closeTransport() {
         ROBAmberGatewayClient.shared.disconnect()
         connectionTimer?.invalidate(); connectionTimer = nil
         task?.terminationHandler = nil

@@ -1,7 +1,15 @@
 # Headless arm authorization
 
-Arm operations requested by Cerebro are approved on the connected **Vision Pro
-or iPhone controller**. The droid does not open an arm activation, deactivation,
+Arm operations requested by Cerebro may be authorized on the connected **Vision
+Pro or iPhone controller**, or by a **final local microphone acknowledgement**
+after ROB describes the pending scope. Rob requested spoken approval and a
+15-minute left-arm rehearsal session on October 22, 2026. One session covers its
+preparation, local searches/recycling, reviewed gestures and empty-arm lowering
+without more approvals. Stop, expiry, sleep/restart, ownership loss or a failed
+motion ends it. Typed/model/camera/serial text cannot authorize. See
+[current local task/session behavior](local-recycling-task.md).
+
+The droid does not open an arm activation, deactivation,
 gripper, gesture, or CAN/core recovery confirmation dialog. Enable **Action
 Approvals** on the paired controller. Its existing panel shows the immutable
 operation summary and Approve, Reject, and Cancel controls.
@@ -19,8 +27,9 @@ the complete described operation, not future operations or arbitrary reaching.
 Motor feedback, current RGB-D frames, person/hand detection, route limits and
 Stop remain enforced. Startup/grab gripper calibration and closing still require
 a visible stationary jaw assessment. Supervised greeting/replay leave jaws unchanged.
-The startup preference requests approval after launch/wake;
-it does not grant unattended motion authority.
+The legacy paired-startup preference requests one operation approval. The new
+launch/wake preference offers the bounded left-arm session once; accepting it
+prepares the empty left arm. Neither preference persists a motion grant.
 
 The supervised **Grip and return** (`left_object_cycle`) operation uses one
 immutable controller approval for the entire physical-left cycle: empty-arm

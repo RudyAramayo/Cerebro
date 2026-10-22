@@ -29,6 +29,8 @@ FOUNDATION_EXPORT NSString * _Nonnull ROBResolvedSpeechAcknowledgementPhrase(voi
 - (void)willSpeakWord:(NSRange)characterRange ofString:(NSString *)string;
 
 @optional
+- (BOOL)acceptLocalMicrophoneAuthorization:(NSString *)transcript;
+- (BOOL)shouldFinalizeLocalMicrophoneAuthorization:(NSString *)transcript;
 - (void)didCaptureAudioBuffer:(AVAudioPCMBuffer *)buffer;
 
 @end

@@ -1475,7 +1475,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     if (armTool || pickTool) {
         NSString *command = pickTool ? @"grab" : call.arguments[@"command"];
         // Stop stays immediate even during another operation or stage dialogue.
-        if (armTool && [command isEqual:@"stop"]) {
+        if (armTool && ( [command isEqual:@"stop"] || [command isEqual:@"end_arm_session"] )) {
             if (self.stageShowCoordinator.isRunning) {
                 [self.stageShowCoordinator cancelWithReason:@"Live model requested arm stop"];
             } else {
@@ -1493,7 +1493,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         if (![command isKindOfClass:NSString.class] || ![object isKindOfClass:NSString.class] ||
             ![clip isKindOfClass:NSString.class] || clip.length > 36 ||
             ![[NSSet setWithArray:call.arguments.allKeys] isSubsetOfSet:allowed] || object.length > 160 ||
-            ![@[@"prepare", @"grab", @"hold", @"relax", @"status", @"wave", @"teach", @"replay", @"left_wave", @"left_prepare", @"left_grip", @"left_release", @"left_relax", @"left_object_cycle"] containsObject:command] ||
+            ![@[@"prepare", @"grab", @"hold", @"relax", @"status", @"wave", @"teach", @"replay", @"left_wave", @"left_prepare", @"left_grip", @"left_release", @"left_relax", @"left_object_cycle", @"left_pick_place", @"left_recycle_can", @"left_search_workspace", @"left_check_hanging", @"arm_session", @"end_arm_session"] containsObject:command] ||
             (call.arguments[@"clip_id"] && ![command isEqual:@"replay"]) ||
             (call.arguments[@"object"] && ![@[@"grab", @"hold", @"teach"] containsObject:command])) {
             [robAI sendToolResponseWithCallID:call.callID name:call.name result:
@@ -2775,7 +2775,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
 
     if (!self.stageShowCoordinator.isRunning && (addressesROB || !self.ignoreText)) {
         NSString *armCommand = [ROBArmRoutineCoordinator commandForText:textInput];
-        if (armCommand != nil && (!geminiMicrophoneAvailable || [armCommand isEqualToString:@"relax"])) {
+        if (armCommand != nil) {
             [self performLocalArmText:textInput command:armCommand];
             return;
         }
@@ -2879,6 +2879,21 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     }
     
     self.audioInputTaskController.textView.string = [self.audioInputTaskController.textView.string stringByAppendingString:[NSString stringWithFormat:@"\n%@\n",textInput]];
+}
+
+- (BOOL)acceptLocalMicrophoneAuthorization:(NSString *)transcript
+{
+    // This delegate is called only by SpeechBox's final on-device microphone
+    // recognition. Typed/controller text and serial/model transcripts use the
+    // ordinary inputText path and cannot authorize a pending operation.
+    if (self.speechBox.isSpeaking || self.stageShowCoordinator.isRunning) { return NO; }
+    return [[ROBControllerArmApproval shared] receiveSpokenAuthorization:transcript];
+}
+
+- (BOOL)shouldFinalizeLocalMicrophoneAuthorization:(NSString *)transcript
+{
+    return !self.speechBox.isSpeaking && !self.stageShowCoordinator.isRunning &&
+        [[ROBControllerArmApproval shared] isSpokenAuthorizationCandidate:transcript];
 }
 
 - (void) resetSpeechResponseAttentionTimer {
@@ -5653,6 +5668,29 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             (long)serial.commandedUpperNeckTiltTarget, serial.neckCommandSource ?: @"unknown source",
             serial.neckCommandSafetyStatus ?: @"unknown neck state"];
     };
+    ROBWorkspaceSearch *workspace = [ROBWorkspaceSearch shared];
+    [ROBControllerArmApproval shared].announceApproval = ^(NSString *text) { [weakSelf.speechBox sayIt:text]; };
+    workspace.prepareView = ^BOOL(double pan, NSInteger upper) {
+        ROBMainViewController *owner = weakSelf;
+        if (owner == nil || ![ROBLeftArmTrial shared].isRunning || owner.stageShowCoordinator.isRunning ||
+            owner.pendingRobotActionRequests.count > 0 || [ROBAmberStackMaintenanceController shared].isRunning ||
+            [ROBTorsoControlCenter shared].isArmed) { return NO; }
+        if (!armViewPreparationStarted) {
+            armViewPreparationStarted = YES;
+            [owner.serialBox stopBaseMotionAndDropHeartbeat];
+            if (owner.autonomyCoordinator.active) { [owner.autonomyCoordinator stopWithReason:@"Local workspace search"]; }
+            if (owner.followPersonCoordinator.active) { [owner.followPersonCoordinator stopWithReason:@"Local workspace search"]; }
+            owner.torsoControlsViewController.headTracking_enabled.state = NSControlStateValueOff;
+        }
+        return [owner.serialBox prepareNeckForWorkspaceSearchWithPanDegrees:pan upperTarget:upper];
+    };
+    workspace.viewReady = ^BOOL(double pan, NSInteger upper) {
+        ROBSerialBox *serial = weakSelf.serialBox;
+        return serial != nil && ![ROBTorsoControlCenter shared].isArmed &&
+            fabs([ROBTorsoControlCenter shared].commandedVelocity) < 0.001 &&
+            [serial isNeckReadyForWorkspaceSearchWithPanDegrees:pan upperTarget:upper];
+    };
+    workspace.announce = ^(NSString *text) { [weakSelf.speechBox sayIt:text]; };
     ROBShowMotionCoordinator *rehearsal = [ROBShowMotionCoordinator shared];
     rehearsal.cameraDemand = routine.cameraDemand;
     rehearsal.prepare = ^BOOL {

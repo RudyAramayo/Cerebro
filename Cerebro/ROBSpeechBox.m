@@ -709,11 +709,28 @@ matchesLanguagePrefixes:(NSArray<NSString *> *)languagePrefixes
 
             BOOL isFinal = result.isFinal;
             NSString *transcription = result.bestTranscription.formattedString;
-            if (transcription.length > 0 && ![transcription isEqualToString:self.currentTextInput]) {
+            // Approval is accepted only from a FINAL local microphone result.
+            // A partial "yes" must not authorize before "but don't move" arrives.
+            BOOL authorizationConsumed = isFinal && !self.isSpeaking && transcription.length > 0 &&
+                [self.delegate respondsToSelector:@selector(acceptLocalMicrophoneAuthorization:)] &&
+                [self.delegate acceptLocalMicrophoneAuthorization:transcription];
+            if (authorizationConsumed) {
+                [self.debounceSpeechInputTimer invalidate];
+                self.currentTextInput = transcription;
+            }
+            if (!authorizationConsumed && transcription.length > 0 && ![transcription isEqualToString:self.currentTextInput]) {
                 self.currentTextInput = transcription;
                 if (!self.isSpeaking) {
                     [self.debounceSpeechInputTimer invalidate];
                     self.debounceSpeechInputTimer = [NSTimer scheduledTimerWithTimeInterval:0.75 repeats:NO block:^(NSTimer *timer) {
+                        if (!self.isSpeaking && generation == self.recognitionGeneration &&
+                            [self.delegate respondsToSelector:@selector(shouldFinalizeLocalMicrophoneAuthorization:)] &&
+                            [self.delegate shouldFinalizeLocalMicrophoneAuthorization:transcription]) {
+                            // Closing this utterance yields a final local result;
+                            // only the final-result delegate can grant approval.
+                            [self.speechRequest endAudio];
+                            return;
+                        }
                         [self.delegate inputText:transcription];
                     }];
                 }

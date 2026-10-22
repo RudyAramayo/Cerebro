@@ -5,6 +5,8 @@ import Foundation
 /// The folded endpoint in the calibration notebook has no validated route.
 enum ROBArmRoutinePlan {
     static let startupDefaultsKey = "ROBCalibrateArmsOnStartup"
+    static let sessionOnWakeKey = "ROBOfferArmSessionOnWake"
+    static var sessionOnWake: Bool { UserDefaults.standard.object(forKey: sessionOnWakeKey) as? Bool ?? true }
     static let inspectionPanDefaultsKey = "ROBArmInspectionPanDegrees"
     static func inspectionPanDegrees(defaults: UserDefaults = .standard) -> Double {
         let value = (defaults.object(forKey: inspectionPanDefaultsKey) as? NSNumber)?.doubleValue ?? 0

@@ -284,6 +284,32 @@ TESTS = r'''
             precondition(FixtureProcess.launched.count == beforeUnrelated)
         }
         print("Tunnel: other ports and non-bind failures never kill a listener passed")
+
+        // Launch before the robot is online: retry telemetry with backoff,
+        // without reopening a debugger or replaying a motor command.
+        let automatic = ROBAmberGatewayTunnel()
+        automatic.sshIdentityPath = { "/fixture/cerebro_amber_ed25519" }
+        var clock = 1000.0
+        automatic.automaticConnectionNow = { clock }
+        automatic.connectIfConfigured()
+        let offline = FixtureProcess.launched.last!
+        offline.exit(255, error: "ssh: connect to host robot port 22: No route to host")
+        wait({ automatic.failureDetail != nil })
+        let afterOffline = FixtureProcess.launched.count
+        clock += 1; automatic.maintainAutomaticConnection()
+        precondition(FixtureProcess.launched.count == afterOffline)
+        clock += 2; automatic.maintainAutomaticConnection()
+        precondition(FixtureProcess.launched.count == afterOffline + 1)
+        let automaticallyRetried = FixtureProcess.launched.last!
+        wait({ gateway.state == .connecting })
+        gateway.state = .ready
+        wait({ automatic.detail.contains("gateway authenticated") })
+        automatic.maintainAutomaticConnection()
+        precondition(FixtureProcess.launched.last === automaticallyRetried)
+        automatic.disconnect()
+        clock += 100; automatic.maintainAutomaticConnection()
+        precondition(FixtureProcess.launched.last === automaticallyRetried && automaticallyRetried.terminated)
+        print("Tunnel: late robot startup automatically retries telemetry; authenticated reuse and explicit disconnect never replay motion")
     }
 }
 '''

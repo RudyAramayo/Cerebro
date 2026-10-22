@@ -293,6 +293,10 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 /// Uses upright clearance and camera tilt about 9 degrees below level.
 - (BOOL)prepareNeckForArmInteraction;
 - (BOOL)isNeckReadyForArmInteraction;
+/// Bounded local workspace search, retaining the existing calibrated envelope,
+/// center-first recovery, manual priority and command-space settling policy.
+- (BOOL)prepareNeckForWorkspaceSearchWithPanDegrees:(double)panDegrees upperTarget:(NSInteger)upperTarget;
+- (BOOL)isNeckReadyForWorkspaceSearchWithPanDegrees:(double)panDegrees upperTarget:(NSInteger)upperTarget;
 /// Typed ingress for autonomous neck gestures. Pan is calibrated degrees;
 /// lower/upper are Maestro command targets because those axes do not yet have
 /// verified degree calibration. Acceptance reports a commanded (unverified)

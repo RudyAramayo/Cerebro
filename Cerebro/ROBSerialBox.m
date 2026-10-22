@@ -4465,6 +4465,42 @@ static NSDictionary<NSString *, id> *ROBMaestroSerialMatch(io_object_t service)
     return [self isNeckReadyForArmViewWithPanDegrees:0 upperTarget:ROBNeckSafetyArmInteractionUpperTarget];
 }
 
+- (BOOL)isNeckReadyForWorkspaceSearchWithPanDegrees:(double)panDegrees upperTarget:(NSInteger)upperTarget
+{
+    ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
+    int32_t panTarget = ROBNeckSafetyTargetOff;
+    return NSThread.isMainThread && self.maestroConnectionValid && self.neckCommandStateKnown &&
+        isfinite(panDegrees) && fabs(panDegrees) <= 70 && upperTarget >= 5300 && upperTarget <= 7500 &&
+        ROBNeckSafetyPanDegreesToTarget(&configuration, panDegrees, &panTarget) &&
+        self.commandedNeckPanTarget == panTarget && self.commandedLowerNeckTiltTarget == 6011 &&
+        self.commandedUpperNeckTiltTarget == upperTarget &&
+        NSProcessInfo.processInfo.systemUptime >= self.neckCommandReadyAtUptime;
+}
+
+- (BOOL)prepareNeckForWorkspaceSearchWithPanDegrees:(double)panDegrees upperTarget:(NSInteger)upperTarget
+{
+    ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];
+    int32_t panTarget = ROBNeckSafetyTargetOff;
+    if (!NSThread.isMainThread || !self.maestroConnectionValid || !self.neckCommandStateKnown ||
+        !isfinite(panDegrees) || fabs(panDegrees) > 70 || upperTarget < 5300 || upperTarget > 7500 ||
+        !ROBNeckSafetyPanDegreesToTarget(&configuration, panDegrees, &panTarget) ||
+        self.commandedNeckPanTarget == ROBNeckSafetyTargetOff ||
+        self.commandedLowerNeckTiltTarget == ROBNeckSafetyTargetOff ||
+        self.commandedUpperNeckTiltTarget == ROBNeckSafetyTargetOff) { return NO; }
+    if ([self isNeckReadyForWorkspaceSearchWithPanDegrees:panDegrees upperTarget:upperTarget]) { return YES; }
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (now < self.manualNeckOverrideUntil || now < self.gestureNeckAuthorityUntil ||
+        now < self.visionNeckAuthorityUntil) { return NO; }
+    self.torsoNeckAuthorityRequiresOperatorAction = YES;
+    // The existing staging owns recovery from a non-upright neck. All subsequent
+    // search targets still pass through the normal mechanical envelope/ramp.
+    if (self.commandedLowerNeckTiltTarget != 6011 && ![self prepareNeckForPersonFollow]) { return NO; }
+    (void)[self applySafeNeckPanTarget:panTarget lowerTiltTarget:(int)self.commandedLowerNeckTiltTarget
+                  desiredUpperTarget:(int)upperTarget includeLower:NO
+       allowSupervisedLowerRecovery:NO source:@"Local workspace search"];
+    return [self isNeckReadyForWorkspaceSearchWithPanDegrees:panDegrees upperTarget:upperTarget];
+}
+
 - (BOOL)isNeckReadyForArmViewWithPanDegrees:(double)panDegrees upperTarget:(int32_t)upperTarget
 {
     ROBNeckSafetyConfig configuration = [self neckSafetyConfiguration];

@@ -46,11 +46,14 @@ enum ROBArmRoutineError: LocalizedError {
 
     func capabilitySnapshot() -> NSDictionary {
         ["status": isRunning || ROBLeftArmTrial.shared.isRunning ? "running" : "idle", "detail": status,
-         "commands": ["status", "prepare", "grab", "hold", "relax", "wave", "teach", "replay", "stop"] + ROBLeftArmTrial.commands,
+         "commands": ["status", "prepare", "grab", "hold", "relax", "wave", "teach", "replay", "stop", "arm_session", "end_arm_session"] + ROBLeftArmTrial.commands,
+         "arm_session": ROBControllerArmApproval.shared.armSessionDetail,
          "left_arm_trial": ["status": ROBLeftArmTrial.shared.status, "running": ROBLeftArmTrial.shared.isRunning,
              "current_recording": ROBLeftArmTrial.shared.lastRecordingPath,
              "instructions": "left_wave moves only the physical left arm. left_prepare presents and opens empty jaws. left_grip closes on an operator-positioned object without arm travel. left_release opens after the receiver supports it. left_relax lowers the empty arm. left_object_cycle combines the five-segment raise, empty-jaw setup/opening, stationary intensity-2 grip and return, then empty-arm lowering and deactivation under one controller approval, bounded to 180 seconds. Use the local readiness controls when the object is placed with fingers clear, the receiver supports it, and the object is clear of the jaws. Readiness does not require another approval. Standalone commands each need one approval. Never grip a human hand; retention and force remain unverified."],
          "gateway_ready": gateway.isReady(), "camera": "main face RGB-D",
+         "workspace_search": ROBWorkspaceSearch.shared.lastReport,
+         "recycling_task": "left_recycle_can searches with local MLX and neck sweeps, confirms the can and orange bucket twice with aligned depth, asks a nearby person to point if missing, then attempts a bounded locally planned transfer at intensity 2. One controller approval; no per-step Continue. Geometry is provisional; placement and retention are unmeasured. left_search_workspace and left_check_hanging never activate an arm. left_pick_place runs the saved tabletop route.",
          "camera_ready": vision.fresh, "camera_detail": vision.readinessDescription,
          "motion_owner": "local coordinator; paired arms and bounded segments",
          "corridor_revision": ROBArmRendition.revision,
@@ -83,6 +86,13 @@ enum ROBArmRoutineError: LocalizedError {
         guard value.range(of: "\\b(?:not|don't|don’t|stop|wait|never|unless|until|if|explain|quote|say)\\b", options: .regularExpression) == nil,
               !value.contains("\""), !value.contains("‘"), !value.contains("'") else { return nil }
         let prefix = "^(?:(?:rob|robbie|robot)[, ]+)?(?:(?:please|can you|could you|would you|i want you to) )?(?:please )?"
+        if value.range(of: prefix + "(?:start|begin|enable|authorize) (?:the |a )?(?:autonomous |rehearsal )?arm(?:s)? session[.!?]*$", options: .regularExpression) != nil { return "arm_session" }
+        if value.range(of: prefix + "(?:end|disable|cancel) (?:the |this )?arm(?:s)? session[.!?]*$", options: .regularExpression) != nil { return "end_arm_session" }
+        if value.range(of: prefix + "(?:recycle|clean up) (?:this |that |the |an? |empty )*(?:coke |soda )?can(?: in(?:to)? (?:the )?(?:orange )?bucket)?[.!?]*$", options: .regularExpression) != nil ||
+            value.range(of: prefix + "(?:pick up|grab|take) .*(?:can|coke).*(?:put|place|drop|recycle).*(?:bucket|recycling)[.!?]*$", options: .regularExpression) != nil { return "left_recycle_can" }
+        if value.range(of: prefix + "(?:find|look for|search for) (?:the |an? )?(?:orange bucket|coke can|can and (?:the )?orange bucket)[.!?]*$", options: .regularExpression) != nil { return "left_search_workspace" }
+        if value.range(of: prefix + "(?:check|inspect|look at) (?:whether |if )?(?:the |your )?arms(?: are)? hanging[.!?]*$", options: .regularExpression) != nil { return "left_check_hanging" }
+        if value.range(of: prefix + "(?:run|start) (?:the )?(?:saved )?(?:tabletop|can to bucket|can-to-bucket) task[.!?]*$", options: .regularExpression) != nil { return "left_pick_place" }
         for (pattern, command) in [
             ("(?:run |start )?(?:the )?left object cycle", "left_object_cycle"),
             ("(?:pick up|grip|take) (?:this|the object) (?:with (?:your |the )?left (?:arm|gripper|hand) )?and (?:return|give) it(?: back)?(?: to me)?(?:,? then lower (?:your |the )?left arm)?", "left_object_cycle"),
@@ -108,7 +118,8 @@ enum ROBArmRoutineError: LocalizedError {
 
     func wakeIfEnabled() {
         precondition(Thread.isMainThread)
-        guard UserDefaults.standard.bool(forKey: ROBArmRoutinePlan.startupDefaultsKey),
+        guard ROBArmRoutinePlan.sessionOnWake || UserDefaults.standard.bool(forKey: ROBArmRoutinePlan.startupDefaultsKey),
+              !ROBControllerArmApproval.shared.armSessionActive,
               startupTicket == nil, !isRunning else { return }
         let ticket = UUID()
         startupTicket = ticket
@@ -118,13 +129,27 @@ enum ROBArmRoutineError: LocalizedError {
             guard let self else { return }
             guard self.startupTicket == ticket else { return }
             self.startupTicket = nil
-            guard UserDefaults.standard.bool(forKey: ROBArmRoutinePlan.startupDefaultsKey) else { return }
-            self.performCommand("startup", target: "") { _ in }
+            guard ROBArmRoutinePlan.sessionOnWake || UserDefaults.standard.bool(forKey: ROBArmRoutinePlan.startupDefaultsKey) else { return }
+            self.performCommand(ROBArmRoutinePlan.sessionOnWake ? "arm_session" : "startup", target: "") { _ in }
         }
     }
 
     func performCommand(_ command: String, target: String, completion: @escaping (NSDictionary) -> Void) {
         precondition(Thread.isMainThread)
+        if command == "arm_session" {
+            guard !ownsPhysicalMotion, !ROBControllerArmApproval.shared.isPending else {
+                completion(["status": "busy", "detail": "Finish or stop the active motion before beginning an arm session."]); return
+            }
+            ROBControllerArmApproval.shared.beginArmSession { result in
+                guard result["status"] as? String == "completed" else { completion(result); return }
+                ROBLeftArmTrial.shared.perform("left_prepare", completion: completion)
+            }
+            return
+        }
+        if command == "end_arm_session" {
+            ROBControllerArmApproval.shared.cancel(reason: "Arm rehearsal session ended by operator")
+            completion(["status": "completed", "detail": "Arm rehearsal authorization ended; hold requested for an active operation."]); return
+        }
         if ROBLeftArmTrial.commands.contains(command) {
             ROBLeftArmTrial.shared.statusChanged = { [weak self] in self?.setStatus($0) }
             ROBLeftArmTrial.shared.perform(command, completion: completion)

@@ -66,6 +66,7 @@ final class ROBAmberGatewayClient: NSObject {
     var confirmHold = true
     var rejectRelease = false
     var afterRelease: (() -> Void)?
+    var afterGrip: (() -> Void)?
     var afterStateQuery: (() -> Void)?
     var sequence: UInt64 = 1, nextID: UInt64 = 1
     var feedbackReadyAt = 0.0
@@ -162,9 +163,19 @@ final class ROBAmberGatewayClient: NSObject {
         precondition(calibrated.contains(arm), "Uncalibrated jaw command")
         let id = ack("gripper_\(action)", arm, accepted: action != "release" || !rejectRelease)
         if action == "release" { afterRelease?() }
+        if action == "hold" { afterGrip?() }
         return id
     }
 }
+
+final class ROBWorkspaceSearch {
+    static let shared = ROBWorkspaceSearch()
+    var lastReport: NSDictionary = ["detail": "Fixture search only"]
+    @MainActor func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
+        try check(); return [:]
+    }
+}
+
 final class ROBArmRoutineVision {
     static let shared = ROBArmRoutineVision()
     var fresh = true, handsClear = true, blocked = false, objectInRight = false
@@ -343,6 +354,42 @@ final class ROBArmRoutineCoordinator {
         let recordedProposal = try JSONDecoder().decode(ROBLeftGestureProposal.self, from: Data(contentsOf: manifest))
         precondition(recordedProposal == frozen)
         print("Ghost execution: exact approved ID/index/duration, physical-left only, unchanged jaws, measured return and matching recording manifest")
+        let centerQ = ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.frontIndex)!
+        let hand = model.toolPosition(model.positions(vendorLeft: centerQ))!
+        let view = ROBWorkspaceView(panDegrees: 0, upperTarget: 6906)
+        let can = ROBWorkspaceLocatedObject(target: .can, position: [hand.x,hand.y,hand.z], confidence: 0.9,
+            capturedAt: 1000, sequence: 1, view: view)
+        let bucket = ROBWorkspaceLocatedObject(target: .orangeBucket, position: [hand.x,hand.y + 0.08,hand.z - 0.10],
+            confidence: 0.9, capturedAt: 1500, sequence: 2, view: view)
+        let task = try ROBWorkspaceGrounding.task(can: can, bucket: bucket, model: model)
+        let tabletop = try ROBLeftGestureCompiler.compile(kind: "tabletop", name: task.name, poses: task.poses,
+            model: model, baseline: centerQ, generation: g.generation)
+        g.assertStationaryGripperApproval = false; g.expectedGripperIntensity = 2
+        g.commands = []; g.gripperIntensities = []
+        let taskApprovalCount = approvals
+        let transferred = await run(tabletop, model: model)
+        precondition(transferred["status"] as? String == "accepted_unverified", transferred.description)
+        precondition(transferred["motion_completed"] as? Bool == true && transferred["placement_verified"] as? Bool == false)
+        precondition(approvals == taskApprovalCount + 1 && trial.interactionStage.isEmpty)
+        precondition(g.gripperIntensities == [2,2,2])
+        precondition(g.commands.filter { $0.hasPrefix("gripper_") && !$0.hasPrefix("gripper_state") } ==
+            ["gripper_release:right", "gripper_hold:right", "gripper_release:right"])
+        precondition(g.q["right"] == tabletop.steps.last!.positions && g.mode["right"] == 2)
+        precondition(!g.commands.contains { $0.hasPrefix("deactivate") || $0.hasSuffix(":left") })
+        precondition(g.commands.filter { $0.hasPrefix("ghost_step") }.count == tabletop.steps.count)
+        print("Recycling execution: one approval, no Continue, exact frozen path, hold before each jaw, intensity 2, final held retreat and honest unverified placement")
+        // A lost motor after closing must not release, retreat or initiate the
+        // previous empty-arm recovery. This tests the actual task executor.
+        g.commands = []; g.q["right"] = centerQ; g.afterGrip = { g.stale = true }
+        let interruptedTask = await run(tabletop, model: model)
+        precondition(interruptedTask["status"] as? String == "blocked")
+        precondition(g.commands.filter { $0 == "gripper_release:right" }.count == 1)
+        precondition(g.commands.contains("priority_hold:right"))
+        g.stale = false; g.afterGrip = nil
+        do { _ = try trial.recoveryProposal(model: model); preconditionFailure("Offered empty-arm recovery with a possible held can") }
+        catch { }
+        g.q["right"] = centerQ; g.commands = []; g.expectedGripperIntensity = 10
+        print("Recycling interruption: lost feedback after grip cancels release/retreat and never offers an empty-arm return")
         g.commands = []
         let interrupted = try ROBLeftGestureCompiler.compile(kind: "custom", name: "Interrupted ghost", poses: [pose], model: model,
             baseline: g.q["right"]!, generation: g.generation)
@@ -406,7 +453,7 @@ final class ROBArmRoutineCoordinator {
             precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty)
         }
         print("Stop/faults: stale feedback, replaced session, camera loss and operator cancellation prevent any subsequent waypoint and retain torque")
-        precondition(approvals == 18)
+        precondition(approvals == 20)
 
         // One authenticated approval covers the complete, bounded interaction.
         // Local readiness cannot be queued early or skip any physical step.

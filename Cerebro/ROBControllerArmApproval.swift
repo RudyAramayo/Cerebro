@@ -6,8 +6,11 @@ import Foundation
     static let shared = ROBControllerArmApproval()
     static let supervisedRouteNotice = "Supervised taught route: by approving, confirm both arms are physically hanging at zero for a new session, the route is clear and grippers are empty for a greeting. Watch the arms even if camera visibility is poor; keep Stop + hold ready. Gripper calibration and closing still require a camera check."
     static let supervisedGreetingName = "Supervised greet: confirm hanging/clear route/empty jaws; watch despite poor view; neck scan, arms front, wave"
-    private(set) var status = "Arm operations require approval on Vision Pro or iPhone"
+    private(set) var status = "Arm operations need spoken or controller authorization"
     var isPending: Bool { pending != nil }
+    var armSessionActive: Bool { armSession.map(sessionIsFresh) ?? false }
+    var armSessionDetail: String { armSessionActive ? "Left-arm rehearsal authorized for \(max(0, Int(armSession!.expires.timeIntervalSince(now())))) more seconds" : "No active arm rehearsal session" }
+    var announceApproval: ((String) -> Void)?
     @nonobjc var send: ((ROBRobotActionMessage, UUID, UUID) -> Bool)?
     @nonobjc var sessionIsActive: (UUID, UUID) -> Bool = {
         ROBControlLiveSessionRegistry.isActiveOperator(controllerID: $0, sessionID: $1)
@@ -34,7 +37,16 @@ import Foundation
         var request: ROBRobotActionMessage?
         var started: Date?
         let executionLimit: TimeInterval
+        var voiceAuthorized = false
+        var armSessionID: String? = nil
     }
+    private struct ArmSession {
+        let id: String
+        let peer: Peer?
+        let voiceAuthorized: Bool
+        let expires: Date
+    }
+    private var armSession: ArmSession?
     private var peers: [UUID: Peer] = [:]
     private var pending: Pending?
     private var timer: Timer?
@@ -57,7 +69,92 @@ import Foundation
         execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
         cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
         request(action: "arm_operation", arguments: ["operation": "manual", "arm": "left", "summary": summary],
-            summary: summary, executionLimit: 180, execute: execute, cancel: cancel, completion: completion)
+            summary: summary, executionLimit: 180, allowArmSession: true, execute: execute, cancel: cancel, completion: completion)
+    }
+
+    /// One bounded task includes local search, pointing assistance, planning,
+    /// all arm segments and gripper actions. No nested approval per step.
+    @nonobjc func requestLeftWorkspaceTask(summary: String,
+        execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
+        cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
+        request(action: "arm_operation", arguments: ["operation": "manual", "arm": "left", "summary": summary],
+            summary: summary, executionLimit: 360, allowArmSession: true, execute: execute, cancel: cancel, completion: completion)
+    }
+    @nonobjc func requestLeftStationary(summary: String,
+        execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
+        cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
+        request(action: "arm_operation", arguments: ["operation": "manual", "arm": "left", "summary": summary],
+            summary: summary, allowArmSession: true, execute: execute, cancel: cancel, completion: completion)
+    }
+
+    func beginArmSession(completion: @escaping (NSDictionary) -> Void) {
+        let summary = "Authorize a 15-minute supervised LEFT-arm rehearsal: local neck-camera search and pointing assistance, empty-arm preparation/calibration/opening, bounded reviewed gestures, empty-can recycling at intensity 2, and lowering the empty left arm. One authorization covers these complete routines and all waypoints. No driving, right-arm motion, arbitrary raw joint commands or force escalation. The model/hand-eye geometry is provisional; watch clearance and keep Stop available. Stop, sleep/restart, expiry or controller loss ends this session."
+        request(action: "arm_operation", arguments: ["operation": "manual", "arm": "left", "summary": summary],
+            summary: summary, execute: { [weak self] done in
+                guard let self, let p = self.pending else { return }
+                self.armSession = ArmSession(id: p.id, peer: p.peer, voiceAuthorized: p.voiceAuthorized,
+                    expires: self.now().addingTimeInterval(900))
+                done(["status": "completed", "measured": false,
+                    "detail": "Left-arm rehearsal authorized for 15 minutes. Complete local routines no longer ask again. Stop ends the session; held objects must be supported before lowering."])
+            }, cancel: {}, completion: completion)
+    }
+
+    private func sessionIsFresh(_ session: ArmSession) -> Bool {
+        session.expires > now() && (session.voiceAuthorized || session.peer.map(peerIsFresh) == true)
+    }
+
+    private func authorizationIsLive(_ p: Pending) -> Bool {
+        guard let started = p.started, (0..<p.executionLimit).contains(now().timeIntervalSince(started)) else { return false }
+        if let id = p.armSessionID {
+            return armSession.map { $0.id == id && sessionIsFresh($0) } == true
+        }
+        return p.voiceAuthorized || p.peer.map(peerIsFresh) == true
+    }
+
+    /// Call only from the live local microphone transcript path, after echo
+    /// suppression. Camera text, typed chat and model tool calls never enter it.
+    func receiveSpokenAuthorization(_ text: String) -> Bool {
+        precondition(Thread.isMainThread)
+        guard let p = pending, p.started == nil, now().timeIntervalSince(p.created) < Self.operatorApprovalSeconds else { return false }
+        guard let accepted = Self.spokenDecision(text) else { return false }
+        if !accepted { cancel(reason: "Local spoken rejection; no new motion authorized."); return true }
+        pending?.voiceAuthorized = true
+        beginAcceptedOperation()
+        return true
+    }
+
+    /// Endpoint a stable microphone candidate promptly, then wait for its
+    /// recognizer FINAL result before granting anything. Continuous dictation
+    /// otherwise may not finalize a short "yes" until its minute-long timeout.
+    func isSpokenAuthorizationCandidate(_ text: String) -> Bool {
+        guard let p = pending, p.started == nil, now().timeIntervalSince(p.created) < Self.operatorApprovalSeconds else { return false }
+        return Self.spokenDecision(text) != nil
+    }
+
+    private static func spokenDecision(_ text: String) -> Bool? {
+        let value = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefix = "^(?:(?:hey )?(?:rob|robbie|robot)[, ]+)?"
+        if value.range(of: prefix + "(?:no|no thanks|cancel|reject|do not proceed|don't proceed)[.!?]*$", options: .regularExpression) != nil {
+            return false
+        }
+        return value.range(of: prefix + "(?:yes(?:[, ]+(?:please|proceed|go ahead|do it|continue))?|(?:ok|okay)(?:[, ]+(?:proceed|go ahead|do it))?|sure|proceed|go ahead|approved|permission granted)[.!?]*$", options: .regularExpression) != nil ? true : nil
+    }
+
+    private func beginAcceptedOperation() {
+        guard let p = pending, p.started == nil else { return }
+        pending?.started = now()
+        update("Authorized complete operation: \(p.summary)")
+        publish(.executing, detail: status, result: [:])
+        p.execute { [weak self] result in
+            guard let self, self.pending?.id == p.id else { return }
+            precondition(Thread.isMainThread)
+            let outcome = result["status"] as? String ?? "failed"
+            let succeeded = ["completed", "accepted_unverified", "ready_for_object", "grip_attempted"].contains(outcome)
+            let observationOnly = ["not_found", "not_localized", "not_reachable"].contains(outcome)
+                && result["arm_motion_sent"] as? Bool == false
+            if !succeeded, !observationOnly, p.armSessionID != nil { self.armSession = nil }
+            self.finish(result, state: succeeded ? .completed : .failed)
+        }
     }
 
     /// Existing controllers already review named play_gesture requests and
@@ -71,16 +168,16 @@ import Foundation
 
     func authorizesMotionPath(_ name: String) -> Bool {
         guard let p = pending, p.started != nil, p.action == "play_gesture",
-              p.arguments["gesture"] as? String == name, let peer = p.peer else { return false }
-        return peerIsFresh(peer) && now().timeIntervalSince(p.started!) < 120
+              p.arguments["gesture"] as? String == name else { return false }
+        return authorizationIsLive(p)
     }
 
     /// Exact one-shot scope for the operator-supervised physical-left trial.
     func authorizesLeftArmTrial(_ summary: String) -> Bool {
-        guard let p = pending, let started = p.started, let peer = p.peer,
+        guard let p = pending,
               p.action == "arm_operation", p.arguments["operation"] as? String == "manual",
               p.arguments["arm"] as? String == "left", p.summary == summary,
-              peerIsFresh(peer), (0..<p.executionLimit).contains(now().timeIntervalSince(started)) else { return false }
+              authorizationIsLive(p) else { return false }
         return true
     }
 
@@ -88,13 +185,13 @@ import Foundation
     /// operator-supervised travel may replace the semantic route inspection.
     /// Never persist or infer this scope from a model's request or a preference.
     func authorizesSupervisedArmRoute() -> Bool {
-        guard let p = pending, let started = p.started, let peer = p.peer,
-              peerIsFresh(peer), (0..<120).contains(now().timeIntervalSince(started)) else { return false }
+        guard let p = pending, authorizationIsLive(p) else { return false }
         return (p.action == "arm_operation" && p.summary.hasSuffix(Self.supervisedRouteNotice))
             || (p.action == "play_gesture" && p.summary == Self.supervisedGreetingName)
     }
 
     private func request(action: String, arguments: NSDictionary, summary: String, executionLimit: TimeInterval = 120,
+                         allowArmSession: Bool = false,
                          execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
                          cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
         precondition(Thread.isMainThread)
@@ -109,17 +206,42 @@ import Foundation
         }
         pending = Pending(id: probe.callID!, action: action, arguments: arguments.copy() as! NSDictionary, summary: summary,
             created: now(), execute: execute, cancel: cancel, completion: completion, executionLimit: executionLimit)
-        update("Waiting for Vision Pro or iPhone to approve: \(summary)")
+        if allowArmSession, let session = armSession, sessionIsFresh(session) {
+            pending?.peer = session.peer; pending?.voiceAuthorized = session.voiceAuthorized
+            pending?.armSessionID = session.id
+            startTimer(); beginAcceptedOperation(); return
+        }
+        update("Awaiting spoken or controller authorization: \(summary)")
+        let spoken: String
+        if summary.hasPrefix("Authorize a 15-minute") {
+            spoken = "Authorize a fifteen minute supervised left-arm session, including startup, local searches, empty-can recycling, reviewed gestures and lowering the empty arm, without asking again for each routine. Stop ends the session."
+        } else if summary.contains("No arm activation") || summary.contains("never resets encoders") {
+            spoken = "Run the local camera search and report what I find. This moves the neck camera only."
+        } else if summary.contains("recycling task") || summary.contains("can-to-bucket") {
+            spoken = "Run the complete supervised recycling attempt: find the empty Coke can and orange bucket, ask for pointing help if needed, prepare the left arm, grip gently, lift, carry, release and retreat."
+        } else { spoken = String(summary.prefix(650)) }
+        announceApproval?(spoken + " Say yes, proceed to authorize the complete operation, or no to cancel.")
+        startTimer()
+        tick()
+    }
+
+    private func startTimer() {
+        timer?.invalidate()
         let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in self?.tick() }
         self.timer = timer
         RunLoop.main.add(timer, forMode: .common)
-        tick()
     }
 
     /// Called only after AutoNet has authenticated an operator device/session.
     @nonobjc func receive(_ message: ROBRobotActionMessage, device: UUID, session: UUID) -> Bool {
         precondition(Thread.isMainThread)
         guard sessionIsActive(device, session), message.validationError == nil else { return false }
+        if message.kind == .actionCancel, let grant = armSession, message.callID == grant.id,
+           let peer = grant.peer, peer.device == device, peer.session == session,
+           message.senderID == peer.sender, message.recipientID == senderID {
+            cancel(reason: "Controller ended the arm rehearsal session; hold requested.")
+            return true
+        }
         if message.kind == .controllerHello {
             if message.acceptsActions {
                 peers[device] = Peer(device: device, session: session, sender: message.senderID, seen: now(),
@@ -129,7 +251,8 @@ import Foundation
                 }
             } else {
                 peers.removeValue(forKey: device)
-                if pending?.peer?.device == device, pending?.peer?.session == session {
+                if armSession?.peer?.device == device, armSession?.voiceAuthorized == false { armSession = nil }
+                if pending?.peer?.device == device, pending?.peer?.session == session, pending?.voiceAuthorized != true {
                     self.cancel(reason: "The controller stopped accepting arm operations.")
                 }
             }
@@ -152,17 +275,7 @@ import Foundation
                 finish(["status": "expired", "detail": "Controller approval expired; no operation was started."], state: .expired)
                 return true
             }
-            pending?.started = now() // Commit once before any execution callback.
-            update("Controller approved: \(p.summary)")
-            publish(.executing, detail: status, result: [:])
-            p.execute { [weak self] result in
-                guard let self else { return }
-                precondition(Thread.isMainThread)
-                guard self.pending?.id == p.id else { return }
-                let outcome = result["status"] as? String ?? "failed"
-                let succeeded = ["completed", "accepted_unverified", "ready_for_object", "grip_attempted"].contains(outcome)
-                self.finish(result, state: succeeded ? .completed : .failed)
-            }
+            beginAcceptedOperation()
         } else if message.isTerminal {
             // A controller can reject/cancel, but cannot assert hardware success.
             if p.started != nil { cancel(reason: "The controller ended the arm operation; hold requested.") }
@@ -186,6 +299,7 @@ import Foundation
 
     func cancel(reason: String) {
         precondition(Thread.isMainThread)
+        armSession = nil
         guard let p = pending else { return }
         // Clear before callbacks, so cancellation/replayed accepts cannot restart.
         finish(["status": "cancelled", "detail": reason], state: .cancelled, cancelExecution: p.started != nil)
@@ -193,7 +307,15 @@ import Foundation
 
     @nonobjc func tick() {
         precondition(Thread.isMainThread)
+        if let session = armSession, !sessionIsFresh(session) {
+            armSession = nil
+            if pending?.armSessionID != nil { cancel(reason: "Arm rehearsal session ended; hold requested."); return }
+        }
         guard let p = pending else { return }
+        if p.started != nil, p.voiceAuthorized || p.armSessionID != nil {
+            if !authorizationIsLive(p) { cancel(reason: "Authorized arm operation expired; hold requested.") }
+            return
+        }
         if let peer = p.peer {
             guard peerIsFresh(peer) else {
                 cancel(reason: "The approving controller disconnected; arm hold requested."); return
@@ -207,8 +329,8 @@ import Foundation
             }
             return
         }
-        guard now().timeIntervalSince(p.created) < 30 else {
-            finish(["status": "blocked", "detail": "Connect Vision Pro or iPhone and enable Action Approvals. No arm operation was started."], state: .expired)
+        guard now().timeIntervalSince(p.created) < Self.operatorApprovalSeconds else {
+            finish(["status": "blocked", "detail": "No spoken or controller authorization arrived. No arm operation was started."], state: .expired)
             return
         }
         guard let peer = peers.values.filter({ now().timeIntervalSince($0.seen) < 15 &&

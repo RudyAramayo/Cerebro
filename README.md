@@ -249,6 +249,17 @@ required. See
 
 ## Supervised Amber arms, grippers, and wake-up
 
+**Settings → Arms** offers one 15-minute supervised left-arm session at launch
+and wake. Authorize it once by saying **“yes, proceed”** to ROB's local microphone
+after its scope is spoken, or approve on the paired controller. Preparation,
+bounded gestures, local search/recycling and empty-arm lowering then share that
+session without per-routine or per-waypoint approval. Stop ends the session.
+The experimental **Recycle can → orange bucket** task uses on-device vision,
+neck sweeps, RGB-D confirmation, pointing assistance and local IK; no live cloud
+conversation is required. Search-only and hanging-arm inspection never activate
+an arm. Placement remains unverified pending physical commissioning. See
+[local recycling and spoken sessions](docs/local-recycling-task.md).
+
 Development mode now includes **Amber Arm Diagnostics…** for authenticated
 telemetry, modes, bounded arm actions, per-session gripper calibration/control,
 plots, and controller-stack recovery. The diagnostics window keeps explicit
@@ -452,11 +463,11 @@ It writes one neutral/braked base frame and then stops USB writes, allowing the
 existing Arduino heartbeat deadman to de-energize the treads instead of keeping
 it alive with a stale nonzero command.
 
-Picking and general arm motion remain reported as unavailable rather than
-pretending success: the repository still lacks calibrated camera-to-arm
-transforms, complete four-axis neck mapping, joint feedback, IK, collision
-checking, and a verified grasp executor. The session and result protocols are
-in place for those capabilities as they are added.
+General picking remains unavailable outside the bounded experimental left-arm
+recycling task. Joint feedback, model IK and a local task executor exist, but
+camera-to-arm calibration, complete environment collision checking and measured
+grasp/placement verification still require commissioning. Accepted gripper
+commands never count as a verified successful pickup.
 
 Use **Settings → Gemini** to disconnect the AI session or toggle Gemini
 microphone and sampled-camera input without restarting Cerebro. Local

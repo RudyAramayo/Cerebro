@@ -28,6 +28,7 @@ import simd
     @nonobjc private var saved: [ROBGhostGesture] = []
     @nonobjc private var proposal: ROBLeftGestureProposal?
     private var liveBaseline = false
+    private var tabletopEditing = false
     private var ownsPendingRequest = false
     private var replayingRecording = false
     private var playing = false
@@ -254,7 +255,7 @@ import simd
         currentHelp.textColor = .secondaryLabelColor
         currentPlot.heightAnchor.constraint(equalToConstant: 75).isActive = true
         let stack = NSStackView(views: [title, help, referenceInfo, headInfo, continueButton, presets, name, joints, angle, angleText, xyzLabels, targets, nudgeRow,
-            posesRow, poseCount, preview, timeline, identity, executeButton,
+            button("Teach can → bucket task", #selector(newTabletopTask)), posesRow, poseCount, preview, timeline, identity, executeButton,
             row([stop, button("Review stopped return", #selector(recover))]),
             button("Replay current recording…", #selector(loadRecording)), currentPlot, currentHelp, status])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10
@@ -396,9 +397,11 @@ import simd
     @objc private func selectPreset() {
         guard let model else { return }
         invalidateReview(); poses = []
+        tabletopEditing = false
         let index = presets.indexOfSelectedItem
         if index >= 3, saved.indices.contains(index - 3) {
             let value = saved[index - 3]; poses = value.poses; name.stringValue = value.name
+            tabletopEditing = value.kind == "tabletop"
             ghost = poses.last ?? model.reference
         } else if index == 0 {
             name.stringValue = "Centered handoff"; ghost = model.positions(vendorLeft: ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.frontIndex)!)
@@ -426,7 +429,7 @@ import simd
     @objc private func moveTarget() {
         guard !ROBLeftArmTrial.shared.isRunning, let model,
               let x = Double(xyz[0].stringValue), let y = Double(xyz[1].stringValue), let z = Double(xyz[2].stringValue) else { return }
-        guard let solution = model.solveLeft(target: SIMD3(x, y, z), from: ghost, frontWorkspace: true) else {
+        guard let solution = model.solveLeft(target: SIMD3(x, y, z), from: ghost, frontWorkspace: !tabletopEditing) else {
             status.stringValue = "That ghost target could not be reached within the model bounds."; return
         }
         invalidateReview(); presets.selectItem(at: 2); ghost = solution; updateGhost(ghost); selectJoint()
@@ -444,20 +447,42 @@ import simd
     @objc private func nudgeZMinus() { nudge(2, -1) }
     @objc private func nudgeZPlus() { nudge(2, 1) }
     @objc private func addPose() {
-        guard !ROBLeftArmTrial.shared.isRunning, poses.count < 12 else { return }
+        guard !ROBLeftArmTrial.shared.isRunning, poses.count < (tabletopEditing ? 5 : 12) else { return }
         invalidateReview(); presets.selectItem(at: 2); poses.append(ghost); poseCount.stringValue = "\(poses.count) custom poses"
+        updateTabletopHelp()
     }
     @objc private func undoPose() {
         guard !ROBLeftArmTrial.shared.isRunning else { return }
         invalidateReview(); if !poses.isEmpty { poses.removeLast() }
         if let last = poses.last { ghost = last; updateGhost(ghost) }; poseCount.stringValue = "\(poses.count) custom poses"
+        updateTabletopHelp()
+    }
+    @objc private func newTabletopTask() {
+        guard !ROBLeftArmTrial.shared.isRunning, let model else { return }
+        invalidateReview(); presets.selectItem(at: 2); tabletopEditing = true; poses = []
+        name.stringValue = "Coke can to orange bucket"
+        ghost = model.positions(vendorLeft: ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.frontIndex)!)
+        updateGhost(ghost); selectJoint(); updateTabletopHelp()
+    }
+    private func updateTabletopHelp() {
+        guard tabletopEditing else { return }
+        poseCount.stringValue = "\(poses.count)/5 task positions"
+        status.stringValue = poses.count < 5 ? "Move the blue hand for \(ROBTabletopPickPlace.stages[poses.count]), then Add pose. Ghost edits send no motor commands."
+            : "Five positions taught. Review approach, grip, lift, bucket release and retreat; Save gesture makes this the saved tabletop task."
     }
     @objc private func saveGesture() {
         guard !name.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         guard let model else { return }
         let value = ROBGhostGesture(name: String(name.stringValue.prefix(100)), poses: poses.isEmpty ? [ghost] : poses,
             modelID: model.modelID, referenceID: model.referenceID, geometryID: model.geometryID,
-            kind: presets.indexOfSelectedItem == 0 ? "center" : presets.indexOfSelectedItem == 1 ? "wave" : "custom")
+            kind: tabletopEditing ? "tabletop" : presets.indexOfSelectedItem == 0 ? "center" : presets.indexOfSelectedItem == 1 ? "wave" : "custom")
+        if tabletopEditing {
+            do {
+                _ = try ROBLeftGestureCompiler.compile(kind: "tabletop", name: value.name, poses: value.poses,
+                    model: model, baseline: ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.frontIndex)!, generation: 1)
+                UserDefaults.standard.set(try JSONEncoder().encode(value), forKey: ROBTabletopPickPlace.savedKey)
+            } catch { status.stringValue = error.localizedDescription; return }
+        }
         invalidateReview()
         saved.removeAll { $0.name == value.name }; saved.append(value); saved = Array(saved.suffix(40))
         if let data = try? JSONEncoder().encode(saved) { UserDefaults.standard.set(data, forKey: "ROBGhostSavedGestures.v1") }
@@ -470,7 +495,7 @@ import simd
         if fresh == nil, !ROBAmberGatewayClient.shared.isReady() { ROBAmberGatewayTunnel.shared.connect() }
         let baseline = fresh?.q ?? Array(repeating: 0, count: 7)
         let savedIndex = presets.indexOfSelectedItem - 3
-        let kind = presets.indexOfSelectedItem == 0 ? "center" : presets.indexOfSelectedItem == 1 ? "wave"
+        let kind = tabletopEditing ? "tabletop" : presets.indexOfSelectedItem == 0 ? "center" : presets.indexOfSelectedItem == 1 ? "wave"
             : saved.indices.contains(savedIndex) ? saved[savedIndex].kind : "custom"
         do {
             let index = presets.indexOfSelectedItem - 3
@@ -478,7 +503,7 @@ import simd
                 throw ROBGhostMotionError.blocked("Saved gesture uses an older robot model. Inspect and save it against this model before execution.")
             }
             proposal = try ROBLeftGestureCompiler.compile(kind: kind, name: name.stringValue,
-                poses: kind == "custom" ? (poses.isEmpty ? [ghost] : poses) : [], model: model,
+                poses: kind == "custom" || kind == "tabletop" ? (poses.isEmpty ? [ghost] : poses) : [], model: model,
                 baseline: baseline, generation: fresh?.generation ?? 1)
             showReview()
         } catch {

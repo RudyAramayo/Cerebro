@@ -123,6 +123,15 @@ final class ROBAmberGatewayClient: NSObject {
         return id
     }
 }
+
+final class ROBWorkspaceSearch {
+    static let shared = ROBWorkspaceSearch()
+    var lastReport: NSDictionary = ["detail": "Fixture search only"]
+    @MainActor func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
+        try check(); return [:]
+    }
+}
+
 final class ROBArmRoutineVision {
     static let shared = ROBArmRoutineVision()
     var fresh = true, handsClear = true, blocked = false, objectInRight = false

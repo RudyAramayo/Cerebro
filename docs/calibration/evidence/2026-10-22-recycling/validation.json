@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-22T20:07:10.130701+00:00",
+  "baseCommit": "cc03e5669cf422662889e3ace690a7241f4ad758",
+  "checks": {
+    "plan-tests": {
+      "logSHA256": "021edb871638cf5a1aeba1d2d3621860dc4deb6a67f19be09f6c29de405c59a5",
+      "result": "passed",
+      "lastOutput": "Ghost motion plan fixtures passed; model preview assumptions are not physical calibration"
+    },
+    "executor-tests": {
+      "logSHA256": "73529ccdc8eeec44652a637e70ffa7817fe0dc1db0da6bc47f32c30ea51d21e8",
+      "result": "passed",
+      "lastOutput": "Left-arm trial fixtures passed; no hardware transport exists in this executable"
+    },
+    "paired-tests": {
+      "logSHA256": "b5be7cd2c1aa9741270ba067bfaa53a5774441a968280ee8925a19b52e2b6513",
+      "result": "passed",
+      "lastOutput": "Arm routine fixtures passed (no hardware access)"
+    },
+    "approval-final-tests": {
+      "logSHA256": "73ddb9452c626e971a68d01cae4f9656fa36a4716baa059e9a6cb1bbf31fd93e",
+      "result": "passed",
+      "lastOutput": "Controller/spoken arm approval and session reuse: 84 checks passed; no hardware access"
+    },
+    "tunnel-tests": {
+      "logSHA256": "463eb49b695728b98a5a9218dc7e304583e051b92c0735c5adbfd5ec2d4a82a2",
+      "result": "passed",
+      "lastOutput": "Tunnel: late robot startup automatically retries telemetry; authenticated reuse and explicit disconnect never replay motion"
+    },
+    "realtime-tests": {
+      "logSHA256": "6c9c19f779268901ef1a2a835c41c167782199611f540d0ac8f509e2d890f4d2",
+      "result": "passed",
+      "lastOutput": "Realtime fixtures passed: GA envelopes, PCM resampling, turn/tool correlation, cancellation, media gates, provider routing and bounded dual dialogue"
+    },
+    "gemini-tests": {
+      "logSHA256": "143ea499aff386cd1de12c87c65d4c74a200ee5e419c83b524dc56b9bfb8a5f7",
+      "result": "passed",
+      "lastOutput": "Gemini Robotics protocol fixtures passed"
+    },
+    "render-tests": {
+      "logSHA256": "9b38d7689bf0f22c3aa372fa53d5804c691018ae4b4cd7a8ee854d15176d831c",
+      "result": "passed",
+      "lastOutput": "Ghost editor: captured URDF/blue overlay, shared head/cloud FK, one post-preparation snapshot, frozen arm, stage-bound Continue controls and embedded resizing passed; offline execution disabled; no hardware transport linked"
+    }
+  },
+  "build": {
+    "result": "passed",
+    "configuration": "signed arm64 Debug, isolated app-only scheme; installation aggregate excluded",
+    "signatureVerification": "codesign --verify --deep --strict passed against system trust store",
+    "executablesSHA256": {
+      "Cerebro": "db68af35b051ec421d5d8e815490995c5e16379fc4c18415fb8aa0048d236ca6",
+      "Cerebro.debug.dylib": "fa002570d513e183172aa8c4bdb73e480ac98ab10ea393d7bfe498ba48595f40"
+    },
+    "buildLogSHA256": "86bc66fce30500a3fac4a418af64ee449c4de9996fe415093c1f2f530e5420ad",
+    "installed": false
+  },
+  "scope": "Pre-existing paired camera/hand bypasses and unrelated user changes excluded from intended build and commit, preserved in main working tree.",
+  "authorization": {
+    "sessionSeconds": 900,
+    "taskSeconds": 360,
+    "voice": "Only final local microphone result; stable candidate endpoints dictation at 750 ms; no chat/camera/model/serial authorization.",
+    "scope": "physical LEFT arm; complete preparation/search/recycling/reviewed gestures/empty return; no per-waypoint approval",
+    "persistedGrant": false
+  },
+  "perception": {
+    "provider": "installed on-device MLX VLM, no cloud conversation",
+    "confirmation": "two distinct RGB-D frames within 5 cm; factory intrinsics required for a reach",
+    "pointing": "nearest measured visible person view, stable extended index, approximate 2D search hint, object confirmation still required",
+    "cameraArmCalibration": "provisional URDF/neck command prior; no new measured hand-eye calibration"
+  },
+  "hardware": {
+    "commissioning": "pending; fixtures do not establish a physical recycling success",
+    "preInstallReadOnlyObservation": "Authenticated Amber tunnel at 10.0.0.26; both arms have fresh per-joint CAN replies, zero positions and inactive status. User manually restored tunnel during development.",
+    "physicalMotionForThisChange": "none yet",
+    "placementVerified": false
+  }
+}

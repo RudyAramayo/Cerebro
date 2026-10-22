@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import Vision
+import simd
 
 /// A separate camera consumer, independent of preview/detector preferences.
 /// Inference observes the scene; the fixed local routine owns all actuation.
@@ -29,6 +30,10 @@ final class ROBArmRoutineVision {
         let depthCoverage: Double
         let thumbnail: [UInt8]
         let demonstration: ROBArmDemonstrationSample?
+        var depth: CameraDepthFrame? = nil
+        var intrinsics: CameraIntrinsics? = nil
+        var pointing: ROBWorkspacePointingHint? = nil
+        var nearestPerson: (x: Double, y: Double, distance: Double)? = nil
     }
 
     func setActive(_ value: Bool, teaching: Bool = false) {
@@ -78,6 +83,8 @@ final class ROBArmRoutineVision {
             people.upperBodyOnly = true
             let body = VNDetectHumanBodyPoseRequest()
             var demonstration: ROBArmDemonstrationSample?
+            var pointing: ROBWorkspacePointingHint?
+            var nearestPerson: (x: Double, y: Double, distance: Double)?
             var clear = false
             do {
                 try VNImageRequestHandler(cvPixelBuffer: pixels).perform(needsBody ? [hands, people, body] : [hands, people])
@@ -113,6 +120,33 @@ final class ROBArmRoutineVision {
                         }
                     }
                     if distances.isEmpty || distances.min()! < 1200 { clear = false }
+                    if !distances.isEmpty {
+                        distances.sort(); let distance = Double(distances[distances.count / 2]) / 1000
+                        if nearestPerson == nil || distance < nearestPerson!.distance {
+                            nearestPerson = (Double(box.midX), Double(1 - box.midY), distance)
+                        }
+                    }
+                }
+                // A pointing estimate guides only the next camera view. Require
+                // an extended index and folded middle/ring fingers; prefer the
+                // nearest measured hand, never infer an object's existence.
+                for hand in hands.results ?? [] where hand.confidence >= 0.5 {
+                    guard let points = try? hand.recognizedPoints(.all),
+                          let wrist = points[.wrist], let tip = points[.indexTip], let base = points[.indexMCP],
+                          let middle = points[.middleTip], let ring = points[.ringTip],
+                          [wrist, tip, base, middle, ring].allSatisfy({ $0.confidence >= 0.5 }) else { continue }
+                    func distance(_ a: VNRecognizedPoint, _ b: VNRecognizedPoint) -> Double {
+                        hypot(a.location.x - b.location.x, a.location.y - b.location.y)
+                    }
+                    guard distance(wrist, tip) > distance(wrist, middle) * 1.25,
+                          distance(wrist, tip) > distance(wrist, ring) * 1.25,
+                          distance(base, tip) > 0.03,
+                          let mm = depth.distanceMillimeters(x: Int(wrist.location.x * Double(depth.width - 1)),
+                            y: Int((1 - wrist.location.y) * Double(depth.height - 1))) else { continue }
+                    let hint = ROBWorkspacePointingHint(x: tip.location.x, y: 1 - tip.location.y,
+                        dx: tip.location.x - base.location.x, dy: base.location.y - tip.location.y,
+                        distanceMeters: Double(mm) / 1000)
+                    if pointing == nil || hint.distanceMeters < pointing!.distanceMeters { pointing = hint }
                 }
             } catch { clear = false }
             var valid = 0, total = 0
@@ -142,7 +176,8 @@ final class ROBArmRoutineVision {
             self.frames[key] = Frame(image: CIImage(cgImage: immutable), capturedAt: captured,
                                      sequence: frame.sequence, handsClear: clear,
                                      depthCoverage: Double(valid) / Double(max(1, total)), thumbnail: thumbnail,
-                                     demonstration: demonstration)
+                                     demonstration: demonstration, depth: depth, intrinsics: frame.intrinsics,
+                                     pointing: pointing, nearestPerson: nearestPerson)
         }
     }
 
@@ -216,7 +251,7 @@ final class ROBArmRoutineVision {
         return Double(changed) / Double(before.count)
     }
 
-    private func settledInspectionFrame(epoch token: UUID) async throws -> Frame {
+    private func settledInspectionFrame(epoch token: UUID, requireStaticScene: Bool = true) async throws -> Frame {
         // Called only when the coordinator has stopped motion and the GPU is
         // ready. A previously captured frame may still depict the neck/arms
         // settling, even though the latest commanded pose is now stationary.
@@ -234,7 +269,7 @@ final class ROBArmRoutineVision {
                     guard let difference = Self.sceneChangeFraction(anchor?.thumbnail ?? frame.thumbnail, frame.thumbnail) else {
                         throw ROBArmRoutineError.blocked("The inspected camera view is unavailable.")
                     }
-                    if anchor == nil || difference >= 0.025 ||
+                    if anchor == nil || (requireStaticScene && difference >= 0.025) ||
                         previous.map({ frame.capturedAt - $0.capturedAt > 700 }) == true {
                         anchor = frame; distinctSamples = 0
                     }
@@ -312,5 +347,196 @@ final class ROBArmRoutineVision {
             }
         }
         throw ROBArmRoutineError.blocked("The scene changed during the second camera inspection; no further arm movement was requested.")
+    }
+
+    /// Acquire the actual pixels after the local model/GPU is ready. The caller
+    /// holds a specific settled neck view throughout both inference and depth
+    /// projection; a current callback never refreshes the capture timestamp.
+    func observeWorkspace() async throws -> (ROBWorkspaceObservation, Frame) {
+        let token = try inspectionEpoch()
+        let result = try await ROBMLXEngine.shared.observeWorkspaceSearch {
+            let frame = try await self.settledInspectionFrame(epoch: token, requireStaticScene: false)
+            guard let cg = self.context.createCGImage(frame.image, from: frame.image.extent),
+                  let jpeg = NSBitmapImageRep(cgImage: cg).representation(using: .jpeg, properties: [.compressionFactor: 0.85]) else {
+                throw ROBArmRoutineError.blocked("Local search could not read the camera image.")
+            }
+            return (jpeg: jpeg, evidence: frame)
+        }
+        try Task.checkCancellation()
+        guard let current = try inspectionFrame(epoch: token), isFresh(current),
+              current.sequence > result.evidence.sequence,
+              Date().timeIntervalSince1970 * 1000 - result.evidence.capturedAt < 30_000 else {
+            throw ROBArmRoutineError.blocked("Local search lost the advancing live camera.")
+        }
+        return (try ROBWorkspaceObservation.decode(result.raw), result.evidence)
+    }
+}
+
+/// Repeatable local search, also callable as a search-only arm operation. Neck
+/// requests use the normal serial policy; the owning task reserves the arms,
+/// brakes the base and owns its one controller approval throughout the scan.
+@objcMembers final class ROBWorkspaceSearch: NSObject {
+    static let shared = ROBWorkspaceSearch()
+    var prepareView: ((Double, Int) -> Bool)?
+    var viewReady: ((Double, Int) -> Bool)?
+    var finishView: (() -> Void)?
+    var announce: ((String) -> Void)?
+    private(set) var lastReport: NSDictionary = [:]
+
+    @MainActor @nonobjc func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel,
+        check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
+        let vision = ROBArmRoutineVision.shared
+        var found: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
+        var visuallyFound = Set<ROBWorkspaceTarget>()
+        var evidence: [[String: Any]] = []
+        var leftHanging = false, rightHanging = false
+        var nearest: (view: ROBWorkspaceView, distance: Double)?
+        defer { finishView?() }
+        func moveView(_ view: ROBWorkspaceView) async throws -> Bool {
+            let deadline = ProcessInfo.processInfo.systemUptime + 12
+            progress(String(format: "Local search: camera pan %+.0f°, tilt target %d", view.panDegrees, view.upperTarget))
+            while ProcessInfo.processInfo.systemUptime < deadline {
+                try check()
+                if prepareView?(view.panDegrees, view.upperTarget) == true,
+                   viewReady?(view.panDegrees, view.upperTarget) == true { return true }
+                try await Task.sleep(nanoseconds: 100_000_000)
+            }
+            evidence.append(["pan": view.panDegrees, "upper": view.upperTarget, "status": "view_unavailable"])
+            return false
+        }
+        func inspect(_ view: ROBWorkspaceView) async throws {
+            guard try await moveView(view) else { return }
+            var prior: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
+            var priorVisual: [ROBWorkspaceTarget: (detection: ROBWorkspaceDetection, sequence: UInt64)] = [:]
+            var priorHanging: ROBWorkspaceObservation?
+            for _ in 0..<2 {
+                try check()
+                guard viewReady?(view.panDegrees, view.upperTarget) == true else {
+                    throw ROBArmRoutineError.blocked("Search camera moved during inspection.")
+                }
+                let (observation, frame) = try await vision.observeWorkspace()
+                try check()
+                guard viewReady?(view.panDegrees, view.upperTarget) == true else {
+                    throw ROBArmRoutineError.blocked("Search camera changed before depth projection.")
+                }
+                if let person = frame.nearestPerson, nearest == nil || person.distance < nearest!.distance {
+                    nearest = (view, person.distance)
+                }
+                if let previous = priorHanging, previous.hangingConfidence >= 0.7, observation.hangingConfidence >= 0.7 {
+                    leftHanging = leftHanging || (previous.leftArmHanging && observation.leftArmHanging)
+                    rightHanging = rightHanging || (previous.rightArmHanging && observation.rightArmHanging)
+                }
+                priorHanging = observation
+                var entry: [String: Any] = ["pan": view.panDegrees, "upper": view.upperTarget,
+                    "sequence": NSNumber(value: frame.sequence), "captured_at_ms": frame.capturedAt,
+                    "left_hanging": observation.leftArmHanging, "right_hanging": observation.rightArmHanging,
+                    "hanging_confidence": observation.hangingConfidence]
+                for target in targets {
+                    let detection = observation[target]
+                    if detection.usable, let previous = priorVisual[target], previous.sequence != frame.sequence,
+                       hypot(detection.aim[0] - previous.detection.aim[0], detection.aim[1] - previous.detection.aim[1]) <= 0.08 {
+                        visuallyFound.insert(target)
+                    }
+                    if detection.usable { priorVisual[target] = (detection, frame.sequence) }
+                    else { priorVisual.removeValue(forKey: target) }
+                    guard let depth = frame.depth, let k = frame.intrinsics,
+                          let located = ROBWorkspaceGrounding.locate(target: target, detection: detection,
+                            width: depth.width, height: depth.height, fx: k.fx, fy: k.fy, cx: k.cx, cy: k.cy,
+                            depth: { depth.distanceMillimeters(x: $0, y: $1) }, view: view, model: model,
+                            capturedAt: frame.capturedAt, sequence: frame.sequence) else {
+                        prior.removeValue(forKey: target); entry[target.rawValue] = "not_grounded"; continue
+                    }
+                    entry[target.rawValue] = ["position": located.position, "confidence": located.confidence]
+                    if let previous = prior[target], previous.agrees(with: located) { found[target] = located }
+                    prior[target] = located
+                }
+                evidence.append(entry)
+            }
+        }
+        let sweep = targets.isEmpty ? [ROBWorkspaceView(panDegrees: 0, upperTarget: 5300),
+            .init(panDegrees: -35, upperTarget: 5300), .init(panDegrees: 35, upperTarget: 5300)] : ROBWorkspaceView.sweep
+        for view in sweep {
+            do { try await inspect(view) }
+            catch is CancellationError { throw CancellationError() }
+            catch {
+                try check()
+                // An absent object, invalid model answer or unusable depth is
+                // a failed view, not a request for another human permission.
+                evidence.append(["pan": view.panDegrees, "upper": view.upperTarget, "error": error.localizedDescription])
+            }
+            if targets.isEmpty ? leftHanging && rightHanging : targets.allSatisfy({ found[$0] != nil }) { break }
+        }
+        if !targets.isEmpty, targets.contains(where: { !visuallyFound.contains($0) }) {
+            let missing = targets.filter { !visuallyFound.contains($0) }.map(\.spokenName).joined(separator: " and ")
+            let humanView = nearest?.view ?? ROBWorkspaceView(panDegrees: 0, upperTarget: 6906)
+            if try await moveView(humanView) {
+                announce?("I couldn't find the \(missing). Could you point toward it and hold your pointing hand still for a moment?")
+                progress("Waiting for a nearby person's pointing gesture")
+                let deadline = ProcessInfo.processInfo.systemUptime + 20
+                var prior: ROBWorkspacePointingHint?, priorSequence: UInt64 = 0
+                var guided: ROBWorkspaceView?
+                while ProcessInfo.processInfo.systemUptime < deadline {
+                    try check()
+                    guard viewReady?(humanView.panDegrees, humanView.upperTarget) == true else {
+                        throw ROBArmRoutineError.blocked("Search view changed while waiting for pointing.")
+                    }
+                    if let frame = vision.snapshot()["face"], vision.fresh, frame.sequence != priorSequence {
+                        priorSequence = frame.sequence
+                        if let pointing = frame.pointing {
+                            if let previous = prior, previous.agrees(with: pointing) {
+                                guided = pointing.guidedView(from: humanView); break
+                            }
+                            prior = pointing
+                        } else { prior = nil }
+                    }
+                    try await Task.sleep(nanoseconds: 100_000_000)
+                }
+                if let guided {
+                    evidence.append(["pointing_guided_pan": guided.panDegrees, "upper": guided.upperTarget,
+                        "pointing_is_object_confirmation": false])
+                    for offset in [0.0, -15, 15] {
+                        let view = ROBWorkspaceView(panDegrees: max(-70, min(70, guided.panDegrees + offset)), upperTarget: guided.upperTarget)
+                        do { try await inspect(view) } catch is CancellationError { throw CancellationError() }
+                        catch { try check(); evidence.append(["guided_error": error.localizedDescription]) }
+                        if targets.allSatisfy({ found[$0] != nil }) { break }
+                    }
+                }
+            }
+        }
+        // Refresh older discoveries after a long sweep; never send a reach to
+        // a remembered cloud or silently treat historical points as current.
+        for target in targets {
+            if let object = found[target], Date().timeIntervalSince1970 * 1000 - object.capturedAt > 20_000 {
+                found.removeValue(forKey: target)
+                visuallyFound.remove(target)
+                do { try await inspect(object.view) } catch is CancellationError { throw CancellationError() }
+                catch { try check(); evidence.append(["refresh_error": error.localizedDescription]) }
+            }
+        }
+        let missing = targets.filter { found[$0] == nil }.map(\.spokenName)
+        let unseen = targets.filter { !visuallyFound.contains($0) }.map(\.spokenName)
+        let status = targets.isEmpty ? (leftHanging && rightHanging ? "observed_hanging" : "hanging_unconfirmed")
+            : missing.isEmpty ? "found" : unseen.isEmpty ? "depth_unconfirmed" : "not_found"
+        let message = targets.isEmpty ? (leftHanging && rightHanging ? "I can see both robot arms hanging." : "I couldn't confirm both arms hanging from these views.")
+            : missing.isEmpty ? "I found the \(targets.map(\.spokenName).joined(separator: " and "))."
+                : unseen.isEmpty ? "I can see the can and orange bucket, but I couldn't confirm their depth positions. I haven't sent a reach."
+                    : "I still couldn't confirm the \(unseen.joined(separator: " and "))."
+        announce?(message); progress(message)
+        var report: [String: Any] = ["schema_version": 1, "status": status, "detail": message,
+            "created_at": ISO8601DateFormatter().string(from: Date()), "inference": "on-device MLX; no cloud session",
+            "camera_arm_mapping": "provisional URDF/neck command prior, not measured hand-eye calibration",
+            "left_hanging_observed": leftHanging, "right_hanging_observed": rightHanging,
+            "visually_confirmed": visuallyFound.map(\.rawValue).sorted(),
+            "views": evidence, "objects": found.mapValues { ["position": $0.position, "captured_at_ms": $0.capturedAt] } .reduce(into: [String: Any]()) { $0[$1.key.rawValue] = $1.value }]
+        do {
+            let directory = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                appropriateFor: nil, create: true).appendingPathComponent("Cerebro/WorkspaceSearch", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let file = directory.appendingPathComponent("\(UUID().uuidString).json")
+            try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys, .prettyPrinted]).write(to: file, options: .atomic)
+            report["recording"] = file.path
+        } catch { report["recording_error"] = error.localizedDescription }
+        lastReport = report as NSDictionary
+        return found
     }
 }

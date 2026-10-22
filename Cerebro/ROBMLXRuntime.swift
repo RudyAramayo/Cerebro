@@ -296,6 +296,23 @@ public actor ROBMLXEngine {
         return (try await collectGeneration(generation, toolCallPolicy: .rejectAsVisionInput), frame.evidence)
     }
 
+    /// On-device object observations only. No cloud conversation, tool calls,
+    /// generated motor values or chat-session dependency enters this service.
+    func observeWorkspaceSearch<Evidence>(frameProvider: () async throws -> (jpeg: Data, evidence: Evidence))
+        async throws -> (raw: String, evidence: Evidence) {
+        try await beginGPUOperation()
+        defer { finishGPUOperation() }
+        try Task.checkCancellation()
+        let container = try await loadVLM()
+        let frame = try await frameProvider()
+        guard let image = CIImage(data: frame.jpeg) else { throw ROBMLXMessageVisionError.invalidInput }
+        let staged = try floatBackedVisionImage(image)
+        let input = try await container.prepare(input: UserInput(prompt: ROBWorkspaceObservation.prompt, images: [.ciImage(staged)]))
+        let generation = try await startGeneration(container: container, input: input,
+            parameters: GenerateParameters(maxTokens: 400, temperature: 0))
+        return (try await collectGeneration(generation, toolCallPolicy: .rejectAsVisionInput), frame.evidence)
+    }
+
     /// Accepts at most one selected frame per interval. The caller returns
     /// immediately; inference remains fully outside capture and control paths.
     public func offerVisionFrame(_ image: CIImage, source: String = "main-camera", minimumInterval: TimeInterval = 5) {

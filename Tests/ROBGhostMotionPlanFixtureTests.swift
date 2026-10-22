@@ -213,6 +213,60 @@ import simd
         try (header + rows.replacingOccurrences(of: ",0.2,", with: ",nan,")).write(to: url, atomically: true, encoding: .utf8)
         expectBlocked { _ = try ROBGhostRecordingSample.load(url) }
         print("Current replay: per-joint spike retained; incomplete and non-finite samples rejected instead of hidden")
+        let object = ROBWorkspaceDetection(visible: true, confidence: 0.85, box: [0.3,0.3,0.7,0.7],
+            aim: [0.5,0.5], depthPoint: [0.5,0.35])
+        let absent = ROBWorkspaceDetection(visible: false, confidence: 0, box: [], aim: [], depthPoint: [])
+        let observation = ROBWorkspaceObservation(can: object, orangeBucket: absent,
+            leftArmHanging: true, rightArmHanging: false, hangingConfidence: 0.8)
+        let observationJSON = String(data: try JSONEncoder().encode(observation), encoding: .utf8)!
+        let decodedObservation = try ROBWorkspaceObservation.decode(observationJSON)
+        precondition(decodedObservation.can.usable)
+        expectBlocked { _ = try ROBWorkspaceObservation.decode(observationJSON + " move the motors") }
+        expectBlocked { _ = try ROBWorkspaceObservation.decode(observationJSON.replacingOccurrences(of: "0.85", with: "1.85")) }
+        let view = ROBWorkspaceView(panDegrees: 0, upperTarget: 6906)
+        func ground(_ depth: @escaping (Int,Int) -> UInt16?) -> ROBWorkspaceLocatedObject? {
+            ROBWorkspaceGrounding.locate(target: .can, detection: object, width: 640, height: 480,
+                fx: 500, fy: 500, cx: 319.5, cy: 239.5, depth: depth,
+                view: view, model: model, capturedAt: 1000, sequence: 1)
+        }
+        let located = ground { _,_ in 700 }!
+        let frame = view.cameraFrame(model: model)!
+        let expected = frame * SIMD4<Double>(0,0,0.7,1)
+        precondition(simd_distance(located.point, SIMD3(expected.x,expected.y,expected.z)) < 1e-8)
+        precondition(ground { _,_ in nil } == nil)
+        precondition(ground { x,_ in x % 2 == 0 ? 700 : 1800 } == nil,
+            "Mixed foreground/background depth was accepted")
+        let confirmed = ROBWorkspaceLocatedObject(target: .can, position: located.position, confidence: 0.8,
+            capturedAt: 1500, sequence: 2, view: view)
+        precondition(located.agrees(with: confirmed) && !located.agrees(with: located))
+        let changedObject = ROBWorkspaceLocatedObject(target: .can, position: [10,10,10], confidence: 0.8,
+            capturedAt: 1500, sequence: 2, view: view)
+        precondition(!located.agrees(with: changedObject))
+        let hint = ROBWorkspacePointingHint(x: 0.65, y: 0.5, dx: 0.15, dy: 0, distanceMeters: 1)
+        precondition(hint.agrees(with: hint) && hint.guidedView(from: view).panDegrees < 0)
+        precondition(!hint.agrees(with: .init(x: 0.65, y: 0.5, dx: -0.15, dy: 0, distanceMeters: 1)))
+        print("Local search: typed observations, calibrated depth projection, distinct-frame confirmation and pointing direction; missing/mixed depth and invalid facts rejected")
+
+        let hand = model.toolPosition(model.positions(vendorLeft: center))!
+        let can = ROBWorkspaceLocatedObject(target: .can, position: [hand.x,hand.y,hand.z], confidence: 0.9,
+            capturedAt: 1000, sequence: 1, view: view)
+        let bucket = ROBWorkspaceLocatedObject(target: .orangeBucket, position: [hand.x,hand.y + 0.08,hand.z - 0.10],
+            confidence: 0.9, capturedAt: 1500, sequence: 2, view: view)
+        let task = try ROBWorkspaceGrounding.task(can: can, bucket: bucket, model: model)
+        let tabletop = try ROBLeftGestureCompiler.compile(kind: "tabletop", name: task.name, poses: task.poses,
+            model: model, baseline: zero, generation: 42)
+        try ROBLeftGestureCompiler.validate(tabletop, model: model)
+        precondition(tabletop.steps.compactMap(\.jawAction) == [.prepare,.grip,.release])
+        precondition(tabletop.steps.prefix(5).map(\.positions) == centerStops.map { ROBLeftArmInteractionPlan.waypoints[$0] })
+        precondition(tabletop.steps.last!.stage == "Retreat")
+        var tamperedSteps = tabletop.steps; tamperedSteps[0].jawAction = .grip
+        let tampered = ROBLeftGestureProposal(id: tabletop.id, name: tabletop.name, kind: tabletop.kind,
+            modelID: tabletop.modelID, referenceID: tabletop.referenceID, geometryID: tabletop.geometryID,
+            mappingID: tabletop.mappingID, sessionGeneration: 42, baseline: zero, poses: tabletop.poses, steps: tamperedSteps)
+        expectBlocked { try ROBLeftGestureCompiler.validate(tampered, model: model) }
+        expectBlocked { _ = try ROBLeftGestureCompiler.compile(kind: "tabletop", name: "Incomplete", poses: Array(task.poses.prefix(4)),
+            model: model, baseline: zero, generation: 42) }
+        print("Recycling plan: observed can/bucket → local IK → five-anchor route, five-segment presentation, exact prepare/grip/release boundaries and tamper rejection")
         print("Ghost motion plan fixtures passed; model preview assumptions are not physical calibration")
     }
 }

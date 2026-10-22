@@ -260,7 +260,15 @@ struct ROBGhostGesture: Codable, Equatable {
 /// The model mapping is explicitly a prior for this supervised trial, not a
 /// replacement for the queued camera/URDF calibration.
 struct ROBLeftGestureProposal: Codable, Equatable {
-    struct Step: Codable, Equatable { let positions: [Double]; let seconds: Double }
+    enum JawAction: String, Codable { case prepare, grip, release }
+    struct Step: Codable, Equatable {
+        let positions: [Double]
+        let seconds: Double
+        // Optional for compatibility with existing saved gestures/recordings.
+        // Performed only after measured arrival and a confirmed position hold.
+        var jawAction: JawAction? = nil
+        var stage: String? = nil
+    }
     let id: UUID
     let name: String
     let kind: String
@@ -294,6 +302,10 @@ enum ROBLeftGestureCompiler {
 
     static func compile(kind: String, name: String, poses: [[String: Double]] = [], model: ROBGhostRobotModel,
                         baseline: [Double], generation: UInt64, id: UUID = UUID()) throws -> ROBLeftGestureProposal {
+        if kind == "tabletop" {
+            return try ROBTabletopPickPlace.compile(name: name, poses: poses, model: model,
+                baseline: baseline, generation: generation, id: id)
+        }
         guard baseline.count == 7, baseline.allSatisfy(\.isFinite), generation > 0,
               !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, name.count <= 100,
               ["center", "wave", "custom", "lower"].contains(kind), poses.count <= 12 else {
@@ -384,6 +396,107 @@ enum ROBLeftGestureCompiler {
     /// a longer segment traverses the same modeled/swept positions.
     static func compactRoute(baseline: [Double], targets: [[Double]]) -> [[Double]] {
         ROBArmRoutinePlan.compactTargetIndices(baseline: baseline, targets: targets).map { targets[$0] }
+    }
+}
+
+/// A fixed-station experimental task. The operator teaches five positions;
+/// Cerebro chooses the transitions locally inside one immutable approval.
+/// Neither image text nor a language model can supply joint targets here.
+enum ROBTabletopPickPlace {
+    static let stages = ["Pickup approach", "Grasp can", "Small lift", "Bucket release", "Retreat"]
+    static let savedKey = "ROBTabletopPickPlace.v1"
+    static let intensity = 2
+
+    static func saved() -> ROBGhostGesture? {
+        guard let data = UserDefaults.standard.data(forKey: savedKey), data.count <= 200_000,
+              let value = try? JSONDecoder().decode(ROBGhostGesture.self, from: data),
+              value.kind == "tabletop", value.poses.count == stages.count else { return nil }
+        return value
+    }
+
+    static func compile(name: String, poses: [[String: Double]], model: ROBGhostRobotModel,
+                        baseline: [Double], generation: UInt64, id: UUID = UUID()) throws -> ROBLeftGestureProposal {
+        guard poses.count == stages.count, baseline.count == 7, baseline.allSatisfy(\.isFinite), generation > 0,
+              !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, name.count <= 100,
+              let approach = ROBLeftArmInteractionPlan.executionRoute(from: baseline, hanging: false) else {
+            throw ROBGhostMotionError.blocked("Teach five tabletop positions: pickup approach, grasp, small lift, bucket release and retreat. Start from the known arm route.")
+        }
+        let center = ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.frontIndex)!
+        let reference = model.positions(vendorLeft: center)
+        var targets: [[Double]] = []
+        for pose in poses {
+            guard pose.allSatisfy({ key, value in value.isFinite && model.joints.contains(where: { $0.name == key }) }) else {
+                throw ROBGhostMotionError.blocked("Tabletop position contains an unknown or invalid joint.")
+            }
+            for joint in model.joints {
+                let value = pose[joint.name] ?? reference[joint.name] ?? 0
+                if joint.name.hasPrefix("left_joint") {
+                    guard (joint.lower...joint.upper).contains(value) else {
+                        throw ROBGhostMotionError.blocked("Tabletop position exceeds the URDF limit for \(joint.name).")
+                    }
+                } else if abs(value - (reference[joint.name] ?? 0)) > 0.000001 {
+                    throw ROBGhostMotionError.blocked("Tabletop execution supports only the physical left arm. \(joint.name) is preview-only.")
+                }
+            }
+            let q = model.vendorLeft(pose)
+            guard q.allSatisfy({ abs($0) <= 3.1 }), abs(q[6]) <= 0.001 else {
+                throw ROBGhostMotionError.blocked("Tabletop joint targets exceed the transport limits; J7 must remain unchanged.")
+            }
+            targets.append(q)
+        }
+        guard let grasp = model.toolPosition(poses[1]), let lift = model.toolPosition(poses[2]),
+              let bucket = model.toolPosition(poses[3]), lift.z - grasp.z >= 0.015,
+              lift.z - grasp.z <= 0.15, hypot(lift.x - grasp.x, lift.y - grasp.y) <= 0.10,
+              simd_distance(bucket, grasp) >= 0.04 else {
+            throw ROBGhostMotionError.blocked("Teach a small upward test lift (1.5–15 cm, at most 10 cm sideways) and a separate bucket release position. Model distances are provisional.")
+        }
+        var steps: [ROBLeftGestureProposal.Step] = []
+        var previous = baseline
+        func append(_ target: [Double], stage: String, action: ROBLeftGestureProposal.JawAction? = nil) throws {
+            guard let seconds = ROBLeftArmInteractionPlan.duration(from: previous, to: target,
+                padding: ROBArmRoutinePlan.tolerance), seconds <= 5 else {
+                throw ROBGhostMotionError.blocked("A tabletop segment exceeds the bounded timing window.")
+            }
+            steps.append(.init(positions: target, seconds: seconds, jawAction: action, stage: stage))
+            previous = target
+        }
+        guard let compactApproach = ROBLeftArmInteractionPlan.compactRoute(from: baseline, indices: approach) else {
+            throw ROBGhostMotionError.blocked("Tabletop start is outside the registered approach.")
+        }
+        for index in compactApproach { try append(ROBLeftArmInteractionPlan.target(index: index)!, stage: "Present empty arm") }
+        // Keep jaw boundaries even when the start already equals the front pose.
+        if steps.last?.positions == center {
+            steps[steps.count - 1].jawAction = .prepare
+        } else { try append(center, stage: "Open empty gripper", action: .prepare) }
+        for (index, target) in targets.enumerated() {
+            let start = previous
+            let travel = 1.5 * zip(start, target).reduce(0.0) { $0 + abs($1.0 - $1.1) }
+            let checks = max(1, Int(ceil(travel / 0.01)))
+            for sample in 0...checks {
+                let t = Double(sample) / Double(checks)
+                let q = zip(start, target).map { $0 + ($1 - $0) * t }
+                guard model.treadSeparation(vendorLeft: q) >= 0.030 else {
+                    throw ROBGhostMotionError.blocked("The taught tabletop path enters the model's tread clearance margin. Adjust the taught position before review.")
+                }
+            }
+            // Bound individual travel while preserving every taught corner and
+            // jaw boundary. No extra approval is made at these subdivisions.
+            let delta = zip(start, target).map { abs($0 - $1) }.max() ?? 0
+            let count = max(1, Int(ceil(delta / 0.30)))
+            for part in 1...count {
+                let t = Double(part) / Double(count)
+                let q = zip(start, target).map { $0 + ($1 - $0) * t }
+                let action: ROBLeftGestureProposal.JawAction? = part == count
+                    ? (index == 1 ? .grip : index == 3 ? .release : nil) : nil
+                try append(q, stage: stages[index], action: action)
+            }
+        }
+        guard steps.count <= 80, steps.reduce(0, { $0 + $1.seconds }) <= 110 else {
+            throw ROBGhostMotionError.blocked("Tabletop path is too long for one operation. Use closer positions or present the empty arm first.")
+        }
+        return ROBLeftGestureProposal(id: id, name: name, kind: "tabletop", modelID: model.modelID,
+            referenceID: model.referenceID, geometryID: model.geometryID, mappingID: ROBGhostRobotModel.mappingID,
+            sessionGeneration: generation, baseline: baseline, poses: poses, steps: steps)
     }
 }
 
