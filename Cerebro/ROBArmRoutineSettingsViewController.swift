@@ -114,6 +114,7 @@ import AppKit
         } else {
             state.stringValue = left.isRunning || observingLeftOperation ? left.status : ROBArmRoutineCoordinator.shared.status
         }
+        state.stringValue += "\n" + ROBControllerArmApproval.shared.armSessionDetail
         displayedCycleStage = left.interactionStage
         switch displayedCycleStage {
         case "object_placed": cycleContinue.title = "Object placed; fingers clear → Grip"

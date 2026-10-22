@@ -49,11 +49,12 @@
     "configuration": "signed arm64 Debug, isolated app-only scheme; installation aggregate excluded",
     "signatureVerification": "codesign --verify --deep --strict passed against system trust store",
     "executablesSHA256": {
-      "Cerebro": "db68af35b051ec421d5d8e815490995c5e16379fc4c18415fb8aa0048d236ca6",
-      "Cerebro.debug.dylib": "fa002570d513e183172aa8c4bdb73e480ac98ab10ea393d7bfe498ba48595f40"
+      "Cerebro": "104bc295113af6393d1bb44df1b7972287862832545c5a42bcf2fd14773af8e6",
+      "Cerebro.debug.dylib": "9a573cb85b1fcbca8922744e9b3adbe9008912d25ec390c0a1fdb297a7e74de9"
     },
-    "buildLogSHA256": "86bc66fce30500a3fac4a418af64ee449c4de9996fe415093c1f2f530e5420ad",
-    "installed": false
+    "buildLogSHA256": "6d495035f6706de696c6177b3a8abb2e8d58d41f15751d712c2cdbf2fdb1e165",
+    "installed": true,
+    "installation": "/Applications/Cerebro.app"
   },
   "scope": "Pre-existing paired camera/hand bypasses and unrelated user changes excluded from intended build and commit, preserved in main working tree.",
   "authorization": {
@@ -73,6 +74,31 @@
     "commissioning": "pending; fixtures do not establish a physical recycling success",
     "preInstallReadOnlyObservation": "Authenticated Amber tunnel at 10.0.0.26; both arms have fresh per-joint CAN replies, zero positions and inactive status. User manually restored tunnel during development.",
     "physicalMotionForThisChange": "none yet",
-    "placementVerified": false
+    "placementVerified": false,
+    "loadedAtUTC": "2026-10-22T20:09:33.893300+00:00",
+    "runningSession": "Relaunched only after fresh inactive/zero arm telemetry. No approval was synthesized or clicked. A final status fix exposes terminal authorization results and session expiry instead of hiding them behind Arms idle.",
+    "liveState": "Final app loaded. Settings \u2192 Arms shows the startup session awaiting spoken or controller authorization and No active arm rehearsal session. No new arm recording since relaunch; actual spoken approval, search accuracy and physical transfer remain unverified.",
+    "finalLoadedAtUTC": "2026-10-22T20:17:21.350106+00:00",
+    "automaticTunnelVerified": "After normal relaunch, without Connect Tunnel: Gateway ready; SSH tunnel active to 10.0.0.26; gateway authenticated/exclusive controller. Both arms show all CAN replies current at about 20 Hz, positions zero and inactive status."
+  },
+  "sourceSHA256": {
+    "Cerebro/GeminiRoboticsProtocol.swift": "db9736edb4b8ea8c30826d50c1131ee00a9bdf2a8e5b7d04de0615d19f2d3c1a",
+    "Cerebro/ROBAmberGatewayClient.swift": "62ae1a72e046c0e9fc124475314ba6b7e2defa58384eacd202f05c76402d2580",
+    "Cerebro/ROBArmRoutineCoordinator.swift": "4713983a15645a4797849624078d7f35b60de1ed47722a164900662d9a9e55d7",
+    "Cerebro/ROBArmRoutinePlan.swift": "14803e791ed00d0586d7226e397903c186e7ffd984421124f810ece78e27afaa",
+    "Cerebro/ROBArmRoutineSettingsViewController.swift": "0918db5fdfbe87c91f3c94995d3f0301c634a0478971ea810366a84ff822d335",
+    "Cerebro/ROBArmRoutineVision.swift": "73322820b9827088d461c2045a340e7a79995bca91728117af5df4059b8d2420",
+    "Cerebro/ROBControllerArmApproval.swift": "3fdbc97572309a35592d20152897e63139f3ac6c1984836fcaa5b8021c312165",
+    "Cerebro/ROBGhostGestureEditor.swift": "19e569e1b8e01ff61d8e7ff21792da5eb7430ae1c55fcc402e20706e3a74f47a",
+    "Cerebro/ROBGhostMotionPlan.swift": "9acb94cd01c2e35ba7acd6ade1617046f964f9e9cf086dd4f1e9947d07cad840",
+    "Cerebro/ROBLeftArmTrial.swift": "c844dc28c8bff2d560dd1bb8c2dfa753bfb51b851750abce23b3c5ab2693821a",
+    "Cerebro/ROBMLXRuntime.swift": "d402ce28c1a19159d9adb4fe879f17244b9ed7facc6f30898f23ad2d116fb57e",
+    "Cerebro/ROBMainViewController.mm": "7eb837464bf9cee334b4378838a2c70460de1c7dcb8ea04caf118832ff192bd0",
+    "Cerebro/ROBRealtimePreferences.swift": "6f5ff8e0e72c68aff3dc270e437138059930ea3b87fa6c0c1b687f6988834c3b",
+    "Cerebro/ROBSerialBox.h": "475953b04de43ff37a3a378adb741c63cee499704b1cded08db844d4cd146ab2",
+    "Cerebro/ROBSerialBox.m": "3f13e57050d08ecf8d9d4f40cb56a3aa6b3703306eaf2ddd9158251d296fc932",
+    "Cerebro/ROBSpeechBox.h": "93d07358eb770282b4162cc285e91b46867d83aab74324ab3fceaa42627886eb",
+    "Cerebro/ROBSpeechBox.m": "0f1f7673d2295ba658ac015e2146837a02efd9ac29ace92e065353d9b2e9abfc",
+    "Cerebro/ROBWorkspaceSearchPlan.swift": "3d2b5a9c7d9bb2e444db95f9287afd758196adcb6a3f6ea0aeb58e8713aaa95f"
   }
 }

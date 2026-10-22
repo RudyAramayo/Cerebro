@@ -140,9 +140,14 @@ enum ROBArmRoutineError: LocalizedError {
             guard !ownsPhysicalMotion, !ROBControllerArmApproval.shared.isPending else {
                 completion(["status": "busy", "detail": "Finish or stop the active motion before beginning an arm session."]); return
             }
-            ROBControllerArmApproval.shared.beginArmSession { result in
+            ROBControllerArmApproval.shared.beginArmSession { [weak self] result in
+                self?.setStatus(result["detail"] as? String ?? "Arm-session request ended")
                 guard result["status"] as? String == "completed" else { completion(result); return }
-                ROBLeftArmTrial.shared.perform("left_prepare", completion: completion)
+                ROBLeftArmTrial.shared.statusChanged = { [weak self] in self?.setStatus($0) }
+                ROBLeftArmTrial.shared.perform("left_prepare") { prepared in
+                    self?.setStatus(prepared["detail"] as? String ?? "Left-arm preparation ended")
+                    completion(prepared)
+                }
             }
             return
         }

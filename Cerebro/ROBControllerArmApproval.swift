@@ -9,7 +9,11 @@ import Foundation
     private(set) var status = "Arm operations need spoken or controller authorization"
     var isPending: Bool { pending != nil }
     var armSessionActive: Bool { armSession.map(sessionIsFresh) ?? false }
-    var armSessionDetail: String { armSessionActive ? "Left-arm rehearsal authorized for \(max(0, Int(armSession!.expires.timeIntervalSince(now())))) more seconds" : "No active arm rehearsal session" }
+    var armSessionDetail: String {
+        guard armSessionActive, let session = armSession else { return "No active arm rehearsal session" }
+        let end = DateFormatter.localizedString(from: session.expires, dateStyle: .none, timeStyle: .short)
+        return "Left-arm session authorized until \(end). Covered routines do not ask again. Stop ends the session."
+    }
     var announceApproval: ((String) -> Void)?
     @nonobjc var send: ((ROBRobotActionMessage, UUID, UUID) -> Bool)?
     @nonobjc var sessionIsActive: (UUID, UUID) -> Bool = {
@@ -300,16 +304,20 @@ import Foundation
     func cancel(reason: String) {
         precondition(Thread.isMainThread)
         armSession = nil
-        guard let p = pending else { return }
+        guard let p = pending else {
+            timer?.invalidate(); timer = nil; update(reason); return
+        }
         // Clear before callbacks, so cancellation/replayed accepts cannot restart.
         finish(["status": "cancelled", "detail": reason], state: .cancelled, cancelExecution: p.started != nil)
     }
 
     @nonobjc func tick() {
         precondition(Thread.isMainThread)
+        if armSession == nil && pending == nil { timer?.invalidate(); timer = nil; return }
         if let session = armSession, !sessionIsFresh(session) {
             armSession = nil
             if pending?.armSessionID != nil { cancel(reason: "Arm rehearsal session ended; hold requested."); return }
+            update("Arm rehearsal authorization expired or its controller disconnected.")
         }
         guard let p = pending else { return }
         if p.started != nil, p.voiceAuthorized || p.armSessionID != nil {
@@ -416,7 +424,8 @@ import Foundation
     private func finish(_ result: NSDictionary, state: ROBRobotActionState, cancelExecution: Bool = false) {
         guard let p = pending else { return }
         publish(state, detail: result["detail"] as? String ?? "Arm operation ended", result: result)
-        pending = nil; timer?.invalidate(); timer = nil
+        pending = nil
+        if armSessionActive { startTimer() } else { timer?.invalidate(); timer = nil }
         if cancelExecution { p.cancel() }
         update(result["detail"] as? String ?? "Arm operation ended")
         p.completion(result)
