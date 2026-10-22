@@ -89,6 +89,8 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
         self.cloudQueue = dispatch_queue_create("com.orbitusrobotics.Cerebro.live-rgb-cloud", DISPATCH_QUEUE_SERIAL);
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(receivedDepthCloudFrame:)
                                                      name:@"ROBDepthCloudFrame" object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(armTrialViewPrepared:)
+                                                     name:@"ROBLeftArmTrialViewPrepared" object:nil];
         self.freshnessTimer = [NSTimer scheduledTimerWithTimeInterval:0.1
                                                                target:self
                                                              selector:@selector(refreshFreshness:)
@@ -107,6 +109,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 {
     [self.ghostGestureEditor invalidate];
     [[NSNotificationCenter defaultCenter] removeObserver:self name:@"ROBDepthCloudFrame" object:nil];
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:@"ROBLeftArmTrialViewPrepared" object:nil];
     [self.freshnessTimer invalidate];
     self.freshnessTimer = nil;
     self.robo_scnView.playing = NO;
@@ -614,12 +617,22 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     double pan = 0;
     BOOL known = serial.isNeckCommandStateKnown &&
         ROBNeckSafetyPanTargetToDegrees(&config, (int32_t)serial.commandedNeckPanTarget, &pan);
-    const double radiansPerTarget = M_PI / (180.0 * 33.3333333333);
-    // Joint display mapping is independent of the optional camera-leveling
-    // compensation gain. Keep the existing mounting-direction prior.
-    double lower = (serial.commandedLowerNeckTiltTarget - ROBNeckSafetyUprightLowerTarget) * radiansPerTarget;
-    double upper = (serial.commandedUpperNeckTiltTarget - ROBNeckSafetyUprightUpperTarget) * radiansPerTarget;
-    [self.ghostGestureEditor setHeadCommandPan:pan * M_PI / 180.0 lowerPitch:lower upperPitch:upper known:known];
+    // Use accepted targets and the existing upright/level references once.
+    // Optional leveling gains and old cloud frames do not define this pose.
+    ROBHeadCameraPoseEstimator *pose = [ROBHeadCameraPoseEstimator estimatePanRadians:pan * M_PI / 180.0
+        lowerTarget:serial.commandedLowerNeckTiltTarget upperTarget:serial.commandedUpperNeckTiltTarget
+        uprightLowerTarget:ROBNeckSafetyUprightLowerTarget levelUpperTarget:ROBNeckSafetyUprightUpperTarget known:known];
+    [self.ghostGestureEditor setHeadCommandEstimate:pose];
+}
+
+- (void)armTrialViewPrepared:(NSNotification *)notification
+{
+    // The executor posts synchronously after camera settling, before position
+    // mode or arm travel. Capture once here, outside the motion watchdog loop.
+    if (!NSThread.isMainThread || !self.serialBox.isNeckCommandStateKnown ||
+        NSProcessInfo.processInfo.systemUptime < self.serialBox.neckCommandReadyAtUptime) return;
+    [self refreshHeadModelEstimate];
+    [self.ghostGestureEditor refreshPreparedHeadPreview];
 }
 
 - (void)receivedDepthCloudFrame:(NSNotification *)notification
@@ -652,18 +665,14 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     ROBNeckSafetyConfig config = serial ? [serial neckSafetyConfiguration] : ROBNeckSafetyDefaultConfig();
     double pan = 0;
     if (!belly && !ROBNeckSafetyPanTargetToDegrees(&config, (int32_t)serial.commandedNeckPanTarget, &pan)) return;
-    // Accepted Maestro targets are command estimates, not shaft feedback. The
-    // display direction prior is independent of optional leveling compensation.
-    const double radiansPerTarget = M_PI / (180.0 * 33.3333333333);
-    double lower = belly ? 0 : (serial.commandedLowerNeckTiltTarget - ROBNeckSafetyUprightLowerTarget) * radiansPerTarget;
-    double upper = belly ? 0 : (serial.commandedUpperNeckTiltTarget - ROBNeckSafetyUprightUpperTarget) * radiansPerTarget;
     ROBDepthCloudTransform camera = ROBDepthCloudMakeTransform(rows);
     if (!camera.valid) return;
     NSArray<NSNumber *> *targets = @[@(serial.commandedLowerNeckTiltTarget), @(serial.commandedNeckPanTarget), @(serial.commandedUpperNeckTiltTarget)];
     if (belly) self.bellyCloudUpdatePending = YES; else self.cloudUpdatePending = YES;
     if (!belly) self.cloudStatusLabel.stringValue = [NSString stringWithFormat:
         @"HEAD DEPTH: neck command estimate · pan %+.1f° / tilt %+.1f° · %@ intrinsics · URDF mount prior",
-        pan, (lower + upper) * 180 / M_PI, frame.hasCalibratedIntrinsics ? @"calibrated" : @"estimated"];
+        pan, self.ghostGestureEditor.headOpticalPitchRadians.doubleValue * 180 / M_PI,
+        frame.hasCalibratedIntrinsics ? @"calibrated" : @"estimated"];
     SCNMatrix4 robot = self.robotNode.presentationNode.worldTransform;
     dispatch_async(self.cloudQueue, ^{ [self processDepthFrame:frame robotTransform:robot cameraTransform:camera neckTargets:targets]; });
 }

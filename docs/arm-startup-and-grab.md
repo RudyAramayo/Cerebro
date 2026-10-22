@@ -7,6 +7,18 @@ Settings → Arms now starts with **Wave left**, **Present / open**, **Grip obje
 approval on the authenticated iPhone or Vision Pro. The summary describes the
 whole operation; no per-waypoint or extra spoken confirmation is needed.
 
+**Grip and return · one approval** combines the left object interaction into one
+bounded operation. It raises the empty left arm in five segments, calibrates the
+empty jaws only when needed, and opens them. Continue after placing the object
+with fingers clear; the cycle closes at raw intensity 2 and holds stationary.
+Continue when the receiver supports the object to release it, then confirm the
+object is clear to reverse the empty arm to hanging and deactivate. These are
+readiness controls inside the same controller approval, available in Arms
+settings and the ghost/controller input window. Keep the approving controller
+open throughout. Stop and all feedback, camera, session and current-monitoring
+checks stay active during the waits. This composed cycle still needs physical
+verification; earlier tests exercised its component motions and Coke-can grip.
+
 - **Wave left** preserves the low hanging/front route through waypoint 6, then
   moves J3/J5 together to −0.60 rad at waypoint 18. The next leg combines
   J6 inward to −0.60 with J2 rising to the accepted +1.00 handoff at waypoint 28.

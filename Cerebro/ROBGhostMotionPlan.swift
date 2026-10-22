@@ -7,6 +7,34 @@ enum ROBGhostMotionError: LocalizedError {
     var errorDescription: String? { if case .blocked(let text) = self { return text }; return nil }
 }
 
+/// Accepted Maestro commands converted once for the model and its camera.
+/// These are the existing command-space mounting priors, not shaft feedback.
+@objcMembers final class ROBHeadCameraPoseEstimator: NSObject {
+    let panRadians: Double
+    let lowerPitch: Double
+    let upperPitch: Double
+    let lowerTarget: Int
+    let upperTarget: Int
+
+    private init(panRadians: Double, lowerPitch: Double, upperPitch: Double,
+                 lowerTarget: Int, upperTarget: Int) {
+        self.panRadians = panRadians; self.lowerPitch = lowerPitch; self.upperPitch = upperPitch
+        self.lowerTarget = lowerTarget; self.upperTarget = upperTarget
+    }
+
+    @objc(estimatePanRadians:lowerTarget:upperTarget:uprightLowerTarget:levelUpperTarget:known:)
+    static func estimate(panRadians: Double, lowerTarget: Int, upperTarget: Int,
+                         uprightLowerTarget: Int, levelUpperTarget: Int, known: Bool) -> ROBHeadCameraPoseEstimator? {
+        guard known, panRadians.isFinite,
+              [lowerTarget, upperTarget, uprightLowerTarget, levelUpperTarget].allSatisfy({ (1...16383).contains($0) }) else { return nil }
+        let radiansPerTarget = Double.pi / (180 * 33.3333333333)
+        return ROBHeadCameraPoseEstimator(panRadians: panRadians,
+            lowerPitch: Double(lowerTarget - uprightLowerTarget) * radiansPerTarget,
+            upperPitch: Double(upperTarget - levelUpperTarget) * radiansPerTarget,
+            lowerTarget: lowerTarget, upperTarget: upperTarget)
+    }
+}
+
 /// The bundled canonical URDF drives every displayed joint, including axes
 /// that have no commissioned hardware mapping. This type has no motor IO.
 final class ROBGhostRobotModel {

@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-22T00:52:41.767647+00:00",
+  "baseCommit": "d895f90d0838ea60e01f1f79795c023725f86564",
+  "sourceSHA256": {
+    "Cerebro/ROBLeftArmTrial.swift": "77f5bfb3d727084b860f587a1c71c3bf84bccef79127ece2523297b80ff852eb",
+    "Cerebro/ROBArmRoutineSettingsViewController.swift": "f1c1b10b839c7f47330714a84892c9430aa6fff61d3febc51a851a59d2d101f2",
+    "Cerebro/ROBGhostGestureEditor.swift": "e9a613087baf76db9d73e4a16f5c16d35eb2217ed1ce592420ff88b437a285e1",
+    "Cerebro/ROBGhostMotionPlan.swift": "2eaa8f4dd63dc8dc3e58b84d7cf6d30d1b99841ff16e249958bcc65b8da0fc0c",
+    "Cerebro/ROBSCNViewController.m": "5b82f4ba803ba58121c1c191f212db1d890ca56a312fe12e7b2d6af37e47bc56",
+    "Cerebro/ROBArmRoutineCoordinator.swift": "40d981af9d7c6cba7c488aab0f7c2455f3f22a1110fe4fd9bec04ccfee13113d",
+    "Cerebro/GeminiRoboticsProtocol.swift": "fc351bacaea27ea6e40f1b94fcda285e32c93373a4122470e517f0d1dcbe2217",
+    "Cerebro/ROBRealtimePreferences.swift": "4b81a6d9e06cd3f05bf7e6d21d1f941066181a60782781394ea74faab75ade3e",
+    "Cerebro/ROBMainViewController.mm": "0972654138cf8278ef56351bedee3504ec598db056f94a885a80bab8c909b4ac",
+    "Tests/ROBLeftArmTrialFixtureTests.swift": "f37e7c20ac97e9d26a0e6e3b23316a09ea913d0129aba9ccc8afc00f54cb8fd1",
+    "Tests/ROBGhostEditorRenderFixture.swift": "a1ff3930e604789d79cb89ac737520019d5ce15877505f6d480952e3250e80e3"
+  },
+  "checks": {
+    "cerebro-object-cycle-core-final-tests.log": {
+      "result": "passed",
+      "logSHA256": "eca9daf0517b8a112632d3bdb3cf4fed2b65b47c4cf2b1f64cd9e7fa622c2f8a"
+    },
+    "cerebro-cycle-approval.log": {
+      "result": "passed",
+      "logSHA256": "15078604fb0b299e12fc3878b930027d8926a09c9c1a1cf8441a40c7d3b07151"
+    },
+    "cerebro-object-cycle-gemini.log": {
+      "result": "passed",
+      "logSHA256": "143ea499aff386cd1de12c87c65d4c74a200ee5e419c83b524dc56b9bfb8a5f7"
+    },
+    "cerebro-object-cycle-realtime.log": {
+      "result": "passed",
+      "logSHA256": "6c9c19f779268901ef1a2a835c41c167782199611f540d0ac8f509e2d890f4d2"
+    },
+    "cerebro-object-cycle-routines-scoped.log": {
+      "result": "passed",
+      "logSHA256": "305c53c49609ceac2d396b53c4f1933e71d9b5f5d19e7d5a5ec013f5ea158a21"
+    },
+    "cerebro-neck-cycle-motion.log": {
+      "result": "passed",
+      "logSHA256": "5e1814d091484191719d7a55c9abb81a39de8fcd50081098589b457667b6939e"
+    },
+    "cerebro-neck-cycle-render-final.log": {
+      "result": "passed",
+      "logSHA256": "524ab5010124fc69e7865ef2b7b6d60aec99683aa965b4baa6cc963cc50bfcbe"
+    }
+  },
+  "build": {
+    "result": "passed",
+    "configuration": "arm64 Debug; target Cerebro only, no install aggregate",
+    "source": "Detached intended-change worktree; unrelated user changes excluded",
+    "signatureVerification": "codesign --verify --deep --strict passed",
+    "executablesSHA256": {
+      "Cerebro": "3987e22e552d6901bd96e0f633f2feeb0501a8d2300c25cf1dd61cbb30f5e91b"
+    },
+    "buildLogSHA256": "f7e1a13745901b2d2b2270db18a6ceab1f7ae8bb2ff8c449a174ccf12349d636",
+    "installed": false,
+    "runningSessionChanged": false
+  },
+  "objectCycle": {
+    "command": "left_object_cycle",
+    "controllerApprovals": 1,
+    "outboundEndpointIndices": [
+      1,
+      4,
+      6,
+      18,
+      28
+    ],
+    "emptyReturnEndpointIndices": [
+      18,
+      6,
+      4,
+      1,
+      0
+    ],
+    "jawIntensityRaw": 2,
+    "readinessStages": [
+      "object_placed",
+      "receiver_supporting",
+      "object_clear"
+    ],
+    "readinessMeaning": "Local stage-bound Continue signals within the live approved operation; no extra controller approvals, no LLM readiness commands. No automatic timed closing, release or lower.",
+    "waitLimitSeconds": 45,
+    "executorLimitSeconds": 170,
+    "approvalLimitSeconds": 180,
+    "recordCurrentsDuringWaits": true,
+    "currentJumpLimitDefaultRaw": 0,
+    "heldObjectArmTravel": false,
+    "gripperPositionAndForceMeasured": false
+  },
+  "neckPreview": {
+    "calibrationChanged": false,
+    "uprightLowerTarget": 6011,
+    "levelUpperTarget": 6906,
+    "interactionUpperTarget": 6306,
+    "interactionOpticalPitchDegrees": -18,
+    "snapshot": "One refresh after settled camera preparation, before arm position entry/lease/travel. Head-chain transforms and current FK angle display follow accepted command estimates; frozen arm picture is retained during motion. Pixel-change, single-refresh, shared camera/model FK, unchanged arm and embedded resize fixtures pass."
+  },
+  "scope": "Unrelated pre-existing tunnel recovery and paired camera-bypass edits were preserved and excluded from the intended build/commit. The working-tree paired suite fails with those existing bypasses; the full intended-change paired suite with committed guards passed.",
+  "hardware": "No live operation was run for this change. Operator is away for several hours and requested development without further tests or approvals. Running robot session remains untouched; composite object cycle and loaded neck display need physical verification on return."
+}

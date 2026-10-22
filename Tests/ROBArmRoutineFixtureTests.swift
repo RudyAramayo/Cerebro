@@ -232,6 +232,12 @@ final class ROBArmRoutineVision {
             precondition(ROBArmRoutineCoordinator.commandForText(text) == nil, text)
         }
         precondition(ROBArmRoutineCoordinator.commandForText("Rob, wave at Sam") == "wave")
+        for text in ["left object cycle", "Rob, start the left object cycle", "pick up and return the object with your left hand", "take this with your left hand and give it back to me, then lower your left arm"] {
+            precondition(ROBArmRoutineCoordinator.commandForText(text) == "left_object_cycle", text)
+        }
+        for text in ["explain the left object cycle", "do not start the left object cycle", "wait until I say left object cycle", "we discussed a left object cycle"] {
+            precondition(ROBArmRoutineCoordinator.commandForText(text) == nil, text)
+        }
         precondition(ROBArmRoutineCoordinator.commandForText("wave your left arm") == "left_wave")
         precondition(ROBArmRoutineCoordinator.commandForText("open your left gripper") == "left_prepare")
         precondition(ROBArmRoutineCoordinator.commandForText("hold this with your left hand") == "left_grip")

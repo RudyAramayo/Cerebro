@@ -18,6 +18,18 @@ import simd
         }
         let upright = model.headPositions(pan: 0, lowerPitch: 0, upperPitch: 0)!
         precondition(upright["lower_neck"] == 0 && upright["upper_neck"] == 0 && upright["neck_pan"] == 0)
+        let acceptedUpright = ROBHeadCameraPoseEstimator.estimate(panRadians: 0, lowerTarget: 6011,
+            upperTarget: 6906, uprightLowerTarget: 6011, levelUpperTarget: 6906, known: true)!
+        precondition(acceptedUpright.lowerPitch == 0 && acceptedUpright.upperPitch == 0)
+        let acceptedSocial = ROBHeadCameraPoseEstimator.estimate(panRadians: .pi / 6, lowerTarget: 6011,
+            upperTarget: 6306, uprightLowerTarget: 6011, levelUpperTarget: 6906, known: true)!
+        precondition(abs(acceptedSocial.upperPitch + .pi / 10) < 1e-9 && acceptedSocial.lowerPitch == 0)
+        precondition(ROBHeadCameraPoseEstimator.estimate(panRadians: 0, lowerTarget: 6011,
+            upperTarget: 6906, uprightLowerTarget: 6011, levelUpperTarget: 6906, known: false) == nil)
+        precondition(ROBHeadCameraPoseEstimator.estimate(panRadians: 0, lowerTarget: 0,
+            upperTarget: 6906, uprightLowerTarget: 6011, levelUpperTarget: 6906, known: true) == nil)
+        precondition(ROBHeadCameraPoseEstimator.estimate(panRadians: .nan, lowerTarget: 6011,
+            upperTarget: 6906, uprightLowerTarget: 6011, levelUpperTarget: 6906, known: true) == nil)
         // A captured lean-back pose must not survive an upright command.
         var zeroNeck = model.reference
         zeroNeck.merge(upright) { _, command in command }

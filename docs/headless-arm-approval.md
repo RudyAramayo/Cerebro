@@ -22,6 +22,25 @@ a visible stationary jaw assessment. Supervised greeting/replay leave jaws uncha
 The startup preference requests approval after launch/wake;
 it does not grant unattended motion authority.
 
+The supervised **Grip and return** (`left_object_cycle`) operation uses one
+immutable controller approval for the entire physical-left cycle: empty-arm
+raise, empty-jaw calibration if needed, open, grip at raw intensity 2, stationary
+release into a supporting hand, empty-arm return and deactivation. It uses the
+same five-segment front approach as the current left controls. Right-arm motion
+is excluded. The complete execution remains bounded to 180 seconds by its
+approval, with the executor's stricter 170-second deadline.
+
+Three Continue controls record readiness within that active operation: object
+placed with fingers clear; receiver supporting the object; object clear of the
+jaws. They do not create a second approval or expand the approved path. Only the
+currently displayed stage can advance, once. Closing and releasing never happen
+on a timer. Until object-clear readiness, the arm stays at the front handoff;
+no object-carrying descent is attempted. Stop, controller loss, stale feedback,
+camera loss, a changed gateway session or timeout requests hold and ends the
+cycle. It does not automatically release a possibly held object. The cycle
+records currents throughout, including its waits. Intensity 2 retained the Coke
+can in the recorded test, but is not a calibrated force or a measured grasp.
+
 Diagnostics and legacy Torso controls use the same controller approval service.
 Arm side, targets, selected gesture and gripper intensity are captured before
 review. Gateway session and hardware interlocks are checked again on acceptance.

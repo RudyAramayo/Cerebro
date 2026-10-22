@@ -59,6 +59,8 @@ final class ROBAmberGatewayClient: NSObject {
     var mode = ["left": 0, "right": 0]
     var commands: [String] = []
     var calibrated: Set<String> = []
+    var expectedGripperIntensity = 10
+    var gripperIntensities: [Int] = []
     var activeLeases: Set<String> = []
     var rejectHold = false
     var confirmHold = true
@@ -155,7 +157,8 @@ final class ROBAmberGatewayClient: NSObject {
             precondition(!ROBLeftArmTrial.shared.authorizesTaughtWaypoint(arm: arm,
                 expectedSessionGeneration: generation), "Stationary gripper approval authorized arm travel")
         }
-        precondition(force == 10)
+        precondition(force == expectedGripperIntensity)
+        gripperIntensities.append(force)
         precondition(calibrated.contains(arm), "Uncalibrated jaw command")
         let id = ack("gripper_\(action)", arm, accepted: action != "release" || !rejectRelease)
         if action == "release" { afterRelease?() }
@@ -227,6 +230,7 @@ final class ROBArmRoutineCoordinator {
         print("Interaction plan: tested approach unchanged, one joint at a time at front, reverse unwinds before descent, off-route poses rejected")
         let trial = ROBLeftArmTrial.shared, g = ROBAmberGatewayClient.shared
         precondition(!trial.authorizesTaughtWaypoint(arm: "right", expectedSessionGeneration: g.generation))
+        precondition(!trial.continueOperation(stage: "object_placed"), "Idle readiness admitted an operation")
         let broker = ROBControllerArmApproval.shared
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("left-arm-fixture-" + UUID().uuidString)
         trial.recordingDirectory = folder
@@ -403,6 +407,105 @@ final class ROBArmRoutineCoordinator {
         }
         print("Stop/faults: stale feedback, replaced session, camera loss and operator cancellation prevent any subsequent waypoint and retain torque")
         precondition(approvals == 18)
+
+        // One authenticated approval covers the complete, bounded interaction.
+        // Local readiness cannot be queued early or skip any physical step.
+        g.onWaypoint = nil; g.stale = false; ROBArmRoutineVision.shared.fresh = true
+        g.q["right"] = Array(repeating: 0, count: 7); g.mode["right"] = 0
+        g.activeLeases = []; g.calibrated = []; g.commands = []
+        g.expectedGripperIntensity = 2; g.gripperIntensities = []
+        var readyStages: [String] = []
+        var scheduledStages: Set<String> = []
+        let beforeCycle = approvals
+        var preparedViews = 0
+        let viewObserver = NotificationCenter.default.addObserver(forName: Notification.Name("ROBLeftArmTrialViewPrepared"),
+            object: trial, queue: .main) { note in
+                preparedViews += 1
+                precondition(note.userInfo?["executionID"] is UUID)
+                precondition(g.activeLeases.isEmpty, "Prepared-view snapshot was requested during a motion lease")
+                precondition(!g.commands.contains { $0.hasPrefix("position_mode") || $0.hasPrefix("waypoint") })
+            }
+        trial.statusChanged = { _ in
+            let stage = trial.interactionStage
+            guard !stage.isEmpty, scheduledStages.insert(stage).inserted else { return }
+            let count = g.commands.count
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                precondition(trial.interactionStage == stage && trial.isRunning)
+                precondition(g.commands.count == count, "Waiting for readiness dispatched a motor or jaw command")
+                precondition(g.commands.filter { $0.hasPrefix("waypoint") }.count == 5,
+                    "Object cycle moved a potentially held object")
+                precondition(!g.activeLeases.contains("right"))
+                precondition(!trial.authorizesTaughtWaypoint(arm: "right", expectedSessionGeneration: g.generation))
+                let wrong = stage == "object_placed" ? "receiver_supporting" : "object_placed"
+                precondition(!trial.continueOperation(stage: wrong), "Out-of-order readiness skipped a stage")
+                readyStages.append(stage)
+                precondition(trial.continueOperation(stage: stage))
+                precondition(!trial.continueOperation(stage: stage), "A duplicate readiness signal was accepted")
+            }
+        }
+        let cycle = await run("left_object_cycle")
+        trial.statusChanged = nil
+        NotificationCenter.default.removeObserver(viewObserver)
+        precondition(cycle["status"] as? String == "completed", cycle.description)
+        precondition(cycle["gripper_measured"] as? Bool == false)
+        precondition(approvals == beforeCycle + 1 && preparedViews == 1)
+        precondition(readyStages == ["object_placed", "receiver_supporting", "object_clear"])
+        precondition(g.gripperIntensities == [2, 2, 2])
+        precondition(g.commands.filter { $0.hasPrefix("gripper_") && $0 != "gripper_state:right" } ==
+            ["gripper_release:right", "gripper_hold:right", "gripper_release:right"])
+        precondition(g.commands.filter { $0.hasPrefix("calibrate") }.count == 1, "Cycle recalibrated around an object")
+        precondition(g.commands.filter { $0.hasPrefix("waypoint") } ==
+            [1,4,6,18,28,18,6,4,1,0].map { "waypoint_\($0):right" })
+        precondition(g.mode["right"] == 0 && g.q["right"]! == Array(repeating: 0, count: 7))
+        precondition(g.q["left"]! == rightBefore && g.commands.allSatisfy { $0.hasSuffix(":right") })
+        precondition(trial.interactionStage.isEmpty && !trial.continueOperation(stage: "object_clear"))
+        print("Object cycle: one approval, three non-skippable readiness waits, intensity 2, stationary object handoff, five-leg raise/empty return and verified deactivation")
+
+        // Faults at readiness never trigger a surprise jaw action or lower.
+        for (failedStage, fault) in [("object_placed", "stale"), ("object_placed", "session"),
+                                     ("object_placed", "cancel"), ("receiver_supporting", "cancel"),
+                                     ("object_clear", "stale"), ("receiver_supporting", "expired")] {
+            g.q["right"] = Array(repeating: 0, count: 7); g.mode["right"] = 0
+            g.activeLeases = []; g.commands = []; g.gripperIntensities = []
+            g.stale = false; ROBArmRoutineVision.shared.fresh = true
+            g.calibrated = ["right"]
+            scheduledStages = []
+            var commandCountAtFault = 0
+            let clock = broker.now
+            trial.statusChanged = { _ in
+                let stage = trial.interactionStage
+                guard !stage.isEmpty, scheduledStages.insert(stage).inserted else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    if stage != failedStage {
+                        precondition(trial.continueOperation(stage: stage)); return
+                    }
+                    commandCountAtFault = g.commands.count
+                    switch fault {
+                    case "stale": g.stale = true
+                    case "session": g.generation += 1
+                    case "expired": broker.now = { clock().addingTimeInterval(181) }
+                    default: trial.cancel(reason: "Fixture Stop while waiting for object readiness")
+                    }
+                    precondition(!trial.continueOperation(stage: stage), "Faulted readiness resumed an operation")
+                }
+            }
+            let failed = await run("left_object_cycle")
+            trial.statusChanged = nil
+            while trial.isRunning { try await Task.sleep(nanoseconds: 10_000_000) }
+            broker.now = clock
+            precondition(["blocked", "cancelled"].contains(failed["status"] as? String ?? ""), failed.description)
+            precondition(commandCountAtFault > 0)
+            precondition(g.commands.dropFirst(commandCountAtFault).allSatisfy { $0 == "priority_hold:right" },
+                "Faulted object cycle sent a later jaw or lowering command")
+            let expected = failedStage == "object_placed" ? 1 : failedStage == "receiver_supporting" ? 2 : 3
+            precondition(g.gripperIntensities == Array(repeating: 2, count: expected))
+            precondition(g.commands.filter { $0.hasPrefix("waypoint") }.count == 5)
+            precondition(!g.commands.contains("deactivate:right") && g.mode["right"] == 2)
+            precondition(trial.interactionStage.isEmpty && ROBAmberArmMotionArbiter.shared.owners.isEmpty)
+        }
+        g.expectedGripperIntensity = 10; g.stale = false
+        precondition(approvals == beforeCycle + 7)
+        print("Object-cycle waits: stale feedback, replaced session, expired approval and Stop prevent subsequent close/release/lower, retain torque and invalidate readiness")
     }
     static func main() async throws { setbuf(stdout, nil); try await tests(); print("Left-arm trial fixtures passed; no hardware transport exists in this executable") }
 }

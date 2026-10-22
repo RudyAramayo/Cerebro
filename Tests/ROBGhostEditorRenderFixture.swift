@@ -33,7 +33,14 @@ final class ROBAmberGestureExecutor {
 }
 final class ROBLeftArmTrial {
     static let shared = ROBLeftArmTrial()
-    let isRunning = false, status = "Fixture only", lastRecordingPath = ""
+    var isRunning = false
+    let status = "Fixture only", lastRecordingPath = ""
+    var interactionStage = ""
+    var continuedStages: [String] = []
+    func continueOperation(stage: String) -> Bool {
+        guard isRunning, !stage.isEmpty, interactionStage == stage else { return false }
+        continuedStages.append(stage); interactionStage = ""; return true
+    }
     func perform(proposal: ROBLeftGestureProposal, model: ROBGhostRobotModel, completion: @escaping (NSDictionary) -> Void) {
         preconditionFailure("A preview or editing action attempted physical execution")
     }
@@ -97,10 +104,54 @@ final class GhostFixtureSnapshotView: NSView {
         editor.setPreviewFrozen(true)
         precondition(view.isHidden && pauseHost.subviews.count == 2)
         let frozenHead = originalHead.simdTransform
+        let originalArm = scene.rootNode.childNodes.flatMap(\.childNodes).first { $0.name == "Original URDF left_two_Link" }!
+        let frozenArm = originalArm.simdTransform
+        let frozenImage = pauseHost.subviews.compactMap { $0 as? NSImageView }.first!
+        let beforePreparation = frozenImage.image!
         editor.setHeadCommand(pan: 0, lowerPitch: 0, upperPitch: -.pi / 10, known: true)
-        precondition(originalHead.simdTransform == frozenHead, "Paused preview still changed its model")
+        precondition(originalHead.simdTransform != frozenHead && originalArm.simdTransform == frozenArm,
+            "Accepted neck update must move the head without changing the frozen arm")
+        precondition(headGhost.simdTransform == originalHead.simdTransform)
+        precondition(frozenImage.image === beforePreparation, "Neck command resnapshotted during motion")
+        editor.refreshPreparedHeadPreview()
+        let preparedImage = frozenImage.image!
+        precondition(preparedImage !== beforePreparation && view.isHidden)
+        precondition(preparedImage.tiffRepresentation != beforePreparation.tiffRepresentation,
+            "Prepared neck snapshot still displays the preapproval pose")
+        editor.refreshPreparedHeadPreview()
+        precondition(frozenImage.image === preparedImage, "Duplicate preparation checkpoint resnapshotted")
+        let preparedCamera = editor.depthCloudCameraTransform(false)
+        let preparedOrigin = originalHead.simdWorldTransform * SIMD4<Float>(opticalInHead.columns.3)
+        precondition(abs(preparedOrigin.x - preparedCamera[3].floatValue) < 1e-6 &&
+            abs(preparedOrigin.y - preparedCamera[7].floatValue) < 1e-6 &&
+            abs(preparedOrigin.z - preparedCamera[11].floatValue) < 1e-6)
         editor.setPreviewFrozen(false)
         precondition(!view.isHidden && pauseHost.subviews.count == 1 && originalHead.simdTransform != frozenHead)
+        // Settings can start a cycle without owning an editor preview request.
+        editor.refreshPreparedHeadPreview()
+        precondition(view.isHidden && pauseHost.subviews.count == 2)
+        editor.setPreviewFrozen(false)
+        let continuation = controls.first { $0.identifier?.rawValue == "ghost-continue-interaction" } as! NSButton
+        let trial = ROBLeftArmTrial.shared
+        trial.isRunning = true
+        for (stage, title) in [("object_placed", "Object placed; fingers clear → grip"),
+                               ("receiver_supporting", "Hand supporting → release"),
+                               ("object_clear", "Object clear → lower")] {
+            trial.interactionStage = stage
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            precondition(!continuation.isHidden && continuation.isEnabled && continuation.title == title)
+            NSApp.sendAction(continuation.action!, to: continuation.target, from: continuation)
+            precondition(trial.continuedStages.last == stage && trial.interactionStage.isEmpty)
+        }
+        trial.interactionStage = "object_placed"
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        let confirmedCount = trial.continuedStages.count
+        trial.interactionStage = "receiver_supporting"
+        NSApp.sendAction(continuation.action!, to: continuation.target, from: continuation)
+        precondition(trial.continuedStages.count == confirmedCount, "A stale continuation button advanced another stage")
+        trial.interactionStage = ""; trial.isRunning = false
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        precondition(continuation.isHidden)
         let blue = scene.rootNode.childNodes.flatMap(\.childNodes).filter { $0.name?.hasPrefix("Blue ghost ") == true }
         precondition(blue.count >= 40)
         let renderer = SCNRenderer(device: nil, options: nil); renderer.scene = scene; renderer.pointOfView = camera
@@ -130,6 +181,6 @@ final class GhostFixtureSnapshotView: NSView {
         guard let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) else { fatalError("No UI bitmap") }
         content.cacheDisplay(in: content.bounds, to: bitmap)
         try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[1]))
-        print("Ghost editor rendered the captured scan with 40+ URDF segments and blue overlay; panes stay embedded across resizing; offline execution disabled; no hardware transport linked")
+        print("Ghost editor: captured URDF/blue overlay, shared head/cloud FK, one post-preparation snapshot, frozen arm, stage-bound Continue controls and embedded resizing passed; offline execution disabled; no hardware transport linked")
     }
 }

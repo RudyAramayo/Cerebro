@@ -5,11 +5,14 @@ import AppKit
 /// Physical left is Amber R11, gateway `right`; never dispatch to L10 here.
 @objcMembers final class ROBLeftArmTrial: NSObject {
     static let shared = ROBLeftArmTrial()
-    static let commands = ["left_wave", "left_prepare", "left_grip", "left_release", "left_relax"]
+    static let commands = ["left_wave", "left_prepare", "left_grip", "left_release", "left_relax", "left_object_cycle"]
     static let currentLimitKey = "ROBLeftArmCurrentJumpLimitRaw"
     private(set) var isRunning = false
     private(set) var status = "Left arm ready for a supervised trial"
     private(set) var lastRecordingPath = ""
+    /// Local readiness within the one controller-approved object cycle.
+    /// Empty outside a wait; callers must echo the displayed expected stage.
+    private(set) var interactionStage = ""
     var statusChanged: ((String) -> Void)?
     @nonobjc var recordingDirectory: URL?
 
@@ -43,6 +46,8 @@ import AppKit
     private var peakJump = 0.0
     private var sampleCount = 0
     private var phase = "preflight"
+    private var activeCommand = ""
+    private var readinessConfirmed = false
     @nonobjc private var proposal: ROBLeftGestureProposal?
     private var proposalStep = -1
     @nonobjc private var sentPath: [[Double]] = []
@@ -168,12 +173,13 @@ import AppKit
         case "left_prepare": action = "Raise the empty LEFT arm in five segments from hanging: retain the initial three tread-clearance moves, then coordinate J3/J5 together to -0.60 and J2/J6 together to +1.00/-0.60. The endpoints are unchanged; the two front sweeps are newly coordinated, model-checked supervised candidates. Watch actual arm/body/tread/cable clearance. Reverse any raised wave section first. Calibrate its EMPTY gripper only if needed, then open it. Keep fingers clear during calibration."
         case "left_grip": action = "Keep the LEFT arm stationary in front and close its already-calibrated gripper at intensity 10 around the presented OBJECT. Confirm the object is between the open jaws and all fingers are clear. Never grip a person's hand. No reopening, calibration or arm travel."
         case "left_release": action = "Keep the LEFT arm stationary in front and open its already-calibrated gripper to return the object. Confirm the receiver supports the object before approving. No calibration or arm travel."
+        case "left_object_cycle": action = "Complete one LEFT object handoff: raise the EMPTY arm along the five-segment registered corridor, calibrate its EMPTY jaws only if needed, and open. Pause for the local Object placed / fingers clear signal before closing at vendor intensity 2. Keep the arm stationary while holding; pause for Receiver supporting before opening at intensity 2. Pause for Object clear / jaws empty before reversing the empty arm to hanging and deactivating. These three readiness buttons continue this single approval, not new approvals. Never close on a person's hand. Opening, retention and force are unmeasured; confirm the physical state. No timed automatic close, release or lower."
         default: action = "Return the empty LEFT arm along its registered corridor: reverse the raised section, coordinate the J2/J6 and J3/J5 front sweeps, then reverse the original tread-clearance approach to hanging and deactivate it. Earlier stopped poses use the older corridor when needed. Remove any object first. Watch actual clearance."
         }
         let notice = " Camera centers at the upright neck pose and tilts about 18 degrees below level. New J6/J2/J4 angles are a supervised trial, not a verified collision-free route; watch their direction and tread/cable clearance. Right arm receives no commands. Confirm LEFT arm physically hangs at encoder zero for the first movement of a new session. Watch the live camera and direct view; Stop + hold remains available. Camera object estimates do not veto this supervised trial."
         let current = limit == 0 ? " Current recording only; automatic current cutoff is not configured."
             : " Request hold if any joint's current changes by more than \(limit) raw units between samples; this is not a calibrated force limit."
-        let travel = ["left_wave", "left_prepare", "left_relax"].contains(command)
+        let travel = ["left_wave", "left_prepare", "left_relax", "left_object_cycle"].contains(command)
         let approvedSummary = action + notice + current + (travel ? " Maximum 180 seconds including preparation and settling." : "")
         update("Awaiting controller approval: \(action)")
         let execute: (@escaping (NSDictionary) -> Void) -> Void = { [weak self] done in
@@ -193,6 +199,19 @@ import AppKit
     }
 
     func cancel(reason: String) { abort(reason) }
+
+    /// Readiness is not fresh motion authority: the original authenticated
+    /// controller approval, session and every live guard must remain valid.
+    @discardableResult func continueOperation(stage: String) -> Bool {
+        precondition(Thread.isMainThread)
+        guard isRunning, activeCommand == "left_object_cycle", !readinessConfirmed,
+              !interactionStage.isEmpty, interactionStage == stage else { return false }
+        do { try verifyFront() }
+        catch { abort(error.localizedDescription); return false }
+        readinessConfirmed = true; interactionStage = ""
+        update("Object-cycle readiness confirmed; continuing the approved operation")
+        return true
+    }
 
     /// Gateway admission is scoped to this accepted operation, physical side
     /// and session. Stationary grip/release approvals never permit arm travel.
@@ -221,9 +240,10 @@ import AppKit
             completion(["status": "blocked", "detail": "Another controller owns the right arm."]); return
         }
         owner = id; isRunning = true; self.summary = summary; currentLimit = limit
+        activeCommand = command; interactionStage = ""; readinessConfirmed = false
         lastRecordingPath = ""; sampleCount = 0; peakJump = 0
         failure = nil; generation = 0; cameraReady = false; positionReady = false; leased = false
-        allowsArmTravel = ["left_wave", "left_prepare", "left_relax", "left_ghost"].contains(command)
+        allowsArmTravel = ["left_wave", "left_prepare", "left_relax", "left_ghost", "left_object_cycle"].contains(command)
         proposalStep = -1; sentPath = []
         waiting = []; acks = [:]; holdConfirmations = [:]; leaseRenewals = [:]; phase = "preflight"
         deadline = ProcessInfo.processInfo.systemUptime + (allowsArmTravel ? 170 : 115)
@@ -266,6 +286,10 @@ import AppKit
             let statuses = gateway.telemetry(forArm: arm)?.statuses.map(\.intValue) ?? []
             guard modes.count == 7, statuses.count == 7, modes.allSatisfy({ $0 == 2 }), statuses.allSatisfy({ $0 == 2 }) else {
                 throw ROBArmRoutineError.blocked("Left arm left position mode or reported a motor fault.")
+            }
+            if !interactionStage.isEmpty,
+               ROBLeftArmInteractionPlan.stationaryFrontTarget(try measured().positionsRadians.map(\.doubleValue)) == nil {
+                throw ROBArmRoutineError.blocked("Left arm moved from its held front pose while awaiting object readiness.")
             }
         }
     }
@@ -337,6 +361,10 @@ import AppKit
         try await wait(10) { self.vision.fresh && ROBArmRoutineCoordinator.shared.viewIsStationary?() == true }
         cameraReady = true
         try record(measured())
+        if let owner {
+            NotificationCenter.default.post(name: Notification.Name("ROBLeftArmTrialViewPrepared"), object: self,
+                userInfo: ["executionID": owner])
+        }
         if !stationaryJaw {
             let modes = gateway.modes(forArm: arm).map(\.intValue)
             guard modes.count == 7, [0, 1, 2].contains(modes[0]), modes.allSatisfy({ $0 == modes[0] }) else {
@@ -360,49 +388,99 @@ import AppKit
         } else { try await move(route) }
         switch command {
         case "left_relax":
-            guard ROBArmRoutinePlan.near(try measured().positionsRadians.map(\.doubleValue), Array(repeating: 0, count: 7)) else {
-                throw ROBArmRoutineError.blocked("Hanging arrival not measured; torque remains on.")
-            }
-            positionReady = false; phase = "deactivating"
-            try await accepted { gateway.deactivateArm(arm) }
-            leased = false
-            try await wait(2) { let modes = self.gateway.modes(forArm: self.arm); return modes.count == 7 && modes.allSatisfy({ $0.intValue == 0 }) }
+            try await deactivateAtHanging()
             return ["status": "completed", "measured": true, "detail": "Left arm reached hanging and is inactive."]
         case "left_wave":
             try await move([ROBLeftArmInteractionPlan.waveIndex, ROBLeftArmInteractionPlan.waveRestIndex,
                 ROBLeftArmInteractionPlan.waveIndex, ROBLeftArmInteractionPlan.waveRestIndex])
             return ["status": "completed", "measured": true, "detail": "Left arm waved twice above the shoulder and is holding raised. Gripper unchanged."]
+        case "left_object_cycle":
+            return try await objectCycleAtFront()
         default:
-            // A settled leased trajectory still owns a gateway motion lease.
-            // Calibration deliberately refuses that lease. Stop renewals and
-            // drain their replies before the priority hold, which cancels the
-            // lease without removing torque. An accepted but unconfirmed hold
-            // is insufficient authority for a subsequent jaw command.
-            try verifyFront()
-            phase = "holding front for gripper"; update("Holding left arm before gripper setup")
-            leased = false
-            try await wait(1) { self.leaseRenewals.isEmpty }
-            try await accepted(requiresConfirmedHold: true) { gateway.priorityHold(forArm: arm) }
-            try await settleFront()
-            try await accepted { gateway.queryGripperState(forArm: arm) }
-            let calibrated = gateway.gripperSnapshot(forArm: arm)["calibrationState"] as? String == "command_accepted_unverified"
-            if !calibrated {
-                guard command == "left_prepare" else { throw ROBArmRoutineError.blocked("Use Present / open with empty jaws first. Grip/release never recalibrates.") }
-                phase = "empty gripper calibration"; update("Calibrating empty left gripper")
-                try await accepted { gateway.calibrateGripper(forArm: arm) }
-                let end = ProcessInfo.processInfo.systemUptime + 2
-                try await wait(3) { ProcessInfo.processInfo.systemUptime >= end }
-            }
-            try verifyFront()
-            phase = command == "left_grip" ? "grip object" : "release object"
-            update(command == "left_grip" ? "Closing left gripper on the presented object" : "Opening left gripper; support the object")
-            try await accepted { gateway.controlGripper(forArm: arm, action: command == "left_grip" ? "hold" : "release", force: 10) }
-            let end = ProcessInfo.processInfo.systemUptime + 1.5
-            try await wait(3) { ProcessInfo.processInfo.systemUptime >= end }
+            try await holdFrontForGripper()
+            try await requireGripperCalibration(allowEmptyCalibration: command == "left_prepare")
+            try await commandJaw(action: command == "left_grip" ? "hold" : "release", intensity: 10)
             return ["status": "accepted_unverified", "measured": false, "detail": command == "left_grip"
                 ? "Left grip command accepted; arm stays in front. Check object retention before releasing your support."
                 : "Left open command accepted; arm stays in front. Check the jaws and object before continuing."]
         }
+    }
+
+    @MainActor private func objectCycleAtFront() async throws -> NSDictionary {
+        // No travel authority while the object may be present. Only the final
+        // explicit empty-jaw readiness restores the bounded reverse route.
+        allowsArmTravel = false
+        try await holdFrontForGripper()
+        try await requireGripperCalibration(allowEmptyCalibration: true)
+        try await commandJaw(action: "release", intensity: 2)
+        try await awaitReadiness("object_placed", message: "Check the jaws are OPEN. Place the object between them and clear your fingers, then choose Object placed / fingers clear. No closing until you continue.")
+        try await holdFrontForGripper()
+        try await requireGripperCalibration(allowEmptyCalibration: false)
+        try await commandJaw(action: "hold", intensity: 2)
+        try await awaitReadiness("receiver_supporting", message: "Grip intensity 2 was accepted, not measured. Check retention before removing support. Support the object in the receiver's hand, then choose Receiver supporting to open. The arm stays stationary.")
+        try await holdFrontForGripper()
+        try await requireGripperCalibration(allowEmptyCalibration: false)
+        try await commandJaw(action: "release", intensity: 2)
+        try await awaitReadiness("object_clear", message: "Check the object has released into the receiver's hand and is completely clear of the EMPTY jaws. Choose Object clear / jaws empty to lower the arm.")
+        try await settleFront()
+        guard let reverse = ROBLeftArmInteractionPlan.executionRoute(from: try measured().positionsRadians.map(\.doubleValue), hanging: true) else {
+            throw ROBArmRoutineError.blocked("Left arm left the registered return corridor; no lowering sent.")
+        }
+        allowsArmTravel = true
+        try await move(reverse)
+        try await deactivateAtHanging()
+        return ["status": "completed", "measured": true, "gripper_measured": false, "gripper_intensity": 2,
+            "detail": "Object cycle completed after all three operator readiness signals. Left arm reached hanging and is inactive. Jaw commands were accepted; jaw position, retention and force remain unmeasured."]
+    }
+
+    @MainActor private func awaitReadiness(_ stage: String, message: String) async throws {
+        try verifyFront()
+        interactionStage = stage; readinessConfirmed = false; phase = "waiting \(stage)"
+        update(message + " Keep the approving controller open; Stop + hold remains available. Readiness waits are bounded to 45 seconds and the entire operation to 180 seconds.")
+        defer { interactionStage = ""; readinessConfirmed = false }
+        try await wait(min(45, max(0, deadline - ProcessInfo.processInfo.systemUptime))) { self.readinessConfirmed }
+    }
+
+    @MainActor private func holdFrontForGripper() async throws {
+        // Settling alone leaves a renewed gateway lease. Drain its replies,
+        // then require a confirmed measured-pose hold without removing torque.
+        try verifyFront()
+        phase = "holding front for gripper"; update("Holding left arm before gripper setup")
+        leased = false
+        try await wait(1) { self.leaseRenewals.isEmpty }
+        try await accepted(requiresConfirmedHold: true) { gateway.priorityHold(forArm: arm) }
+        try await settleFront()
+    }
+
+    @MainActor private func requireGripperCalibration(allowEmptyCalibration: Bool) async throws {
+        try await accepted { gateway.queryGripperState(forArm: arm) }
+        let calibrated = gateway.gripperSnapshot(forArm: arm)["calibrationState"] as? String == "command_accepted_unverified"
+        if !calibrated {
+            guard allowEmptyCalibration else { throw ROBArmRoutineError.blocked("Use Present / open with empty jaws first. Grip/release never recalibrates.") }
+            phase = "empty gripper calibration"; update("Calibrating empty left gripper")
+            try await accepted { gateway.calibrateGripper(forArm: arm) }
+            let end = ProcessInfo.processInfo.systemUptime + 2
+            try await wait(3) { ProcessInfo.processInfo.systemUptime >= end }
+        }
+    }
+
+    @MainActor private func commandJaw(action: String, intensity: Int) async throws {
+        try verifyFront()
+        phase = action == "hold" ? "grip object" : "release object"
+        update(action == "hold" ? "Closing left gripper on the presented object" : "Opening left gripper; support the object")
+        try await accepted { gateway.controlGripper(forArm: arm, action: action, force: intensity) }
+        let end = ProcessInfo.processInfo.systemUptime + 1.5
+        try await wait(3) { ProcessInfo.processInfo.systemUptime >= end }
+    }
+
+    @MainActor private func deactivateAtHanging() async throws {
+        guard ROBArmRoutinePlan.near(try measured().positionsRadians.map(\.doubleValue), Array(repeating: 0, count: 7)) else {
+            throw ROBArmRoutineError.blocked("Hanging arrival not measured; torque remains on.")
+        }
+        positionReady = false; phase = "deactivating"
+        try await accepted { gateway.deactivateArm(arm) }
+        leased = false
+        try await wait(2) { let modes = self.gateway.modes(forArm: self.arm); return modes.count == 7 && modes.allSatisfy({ $0.intValue == 0 }) }
     }
 
     private func verifyFront() throws {
@@ -527,6 +605,7 @@ import AppKit
     private func abort(_ message: String) {
         guard isRunning, failure == nil else { return }
         failure = message; task?.cancel()
+        interactionStage = ""; readinessConfirmed = false
         _ = gateway.priorityHold(forArm: arm); leased = false
         update(message)
     }
@@ -561,6 +640,7 @@ import AppKit
             ROBAmberArmMotionArbiter.shared.release(.right, owner: owner)
         }
         owner = nil; isRunning = false; task = nil; proposal = nil; proposalStep = -1
+        activeCommand = ""; interactionStage = ""; readinessConfirmed = false
         update(output["detail"] as? String ?? "Left-arm trial ended")
         completion(output as NSDictionary)
     }

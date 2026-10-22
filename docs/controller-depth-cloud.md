@@ -25,8 +25,16 @@ accepted neck command estimates. It does not assume that the head is level.
 - Display work is capped at 30 scene frames/second and eight cloud submissions
   per second per camera. Unchanged mesh transforms do not start transactions;
   requesting execution captures an embedded snapshot and hides the live 3D view
-  until the operation ends. Physical motion also suspends cloud submissions and
-  mesh updates. The same window remains open; live 3D resumes after completion,
+  until the operation ends. Once the neck has settled during camera preparation,
+  that picture is refreshed once before arm position entry or travel. This fixes
+  the earlier picture retaining the preapproval neck angle through the motion.
+  It also applies when an operation starts in Arms settings. Accepted command
+  changes still update only the five head-chain transforms underneath the static
+  picture; arm mesh updates and cloud submissions remain suspended. No repeated
+  snapshots compete with the arm watchdog. The sidebar separately displays the
+  current accepted lower/upper targets and the optical tilt from the same FK,
+  rather than using an older depth frame's direction. The same window remains
+  open; live 3D resumes after completion,
   refusal or interruption. Camera capture, encoder monitoring and the motion
   watchdog retain their own timing.
 - A frame must follow the neck's conservative command settling time. Frame

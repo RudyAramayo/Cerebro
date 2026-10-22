@@ -49,7 +49,7 @@ enum ROBArmRoutineError: LocalizedError {
          "commands": ["status", "prepare", "grab", "hold", "relax", "wave", "teach", "replay", "stop"] + ROBLeftArmTrial.commands,
          "left_arm_trial": ["status": ROBLeftArmTrial.shared.status, "running": ROBLeftArmTrial.shared.isRunning,
              "current_recording": ROBLeftArmTrial.shared.lastRecordingPath,
-             "instructions": "left_wave moves only the physical left arm. left_prepare presents and opens empty jaws. left_grip closes on an operator-positioned object without arm travel. left_release opens after the receiver supports it. left_relax lowers the empty arm. Each needs one controller approval. Never grip a human hand."],
+             "instructions": "left_wave moves only the physical left arm. left_prepare presents and opens empty jaws. left_grip closes on an operator-positioned object without arm travel. left_release opens after the receiver supports it. left_relax lowers the empty arm. left_object_cycle combines the five-segment raise, empty-jaw setup/opening, stationary intensity-2 grip and return, then empty-arm lowering and deactivation under one controller approval, bounded to 180 seconds. Use the local readiness controls when the object is placed with fingers clear, the receiver supports it, and the object is clear of the jaws. Readiness does not require another approval. Standalone commands each need one approval. Never grip a human hand; retention and force remain unverified."],
          "gateway_ready": gateway.isReady(), "camera": "main face RGB-D",
          "camera_ready": vision.fresh, "camera_detail": vision.readinessDescription,
          "motion_owner": "local coordinator; paired arms and bounded segments",
@@ -84,6 +84,9 @@ enum ROBArmRoutineError: LocalizedError {
               !value.contains("\""), !value.contains("‘"), !value.contains("'") else { return nil }
         let prefix = "^(?:(?:rob|robbie|robot)[, ]+)?(?:(?:please|can you|could you|would you|i want you to) )?(?:please )?"
         for (pattern, command) in [
+            ("(?:run |start )?(?:the )?left object cycle", "left_object_cycle"),
+            ("(?:pick up|grip|take) (?:this|the object) (?:with (?:your |the )?left (?:arm|gripper|hand) )?and (?:return|give) it(?: back)?(?: to me)?(?:,? then lower (?:your |the )?left arm)?", "left_object_cycle"),
+            ("pick up and return (?:this|the object)(?: with (?:your |the )?left (?:arm|gripper|hand))?", "left_object_cycle"),
             ("wave (?:with )?(?:your |the )?left arm", "left_wave"),
             ("(?:present|prepare|open) (?:your |the )?left (?:arm|gripper)", "left_prepare"),
             ("(?:grip|grab|hold) (?:this|the object) (?:with|in) (?:your |the )?left (?:arm|gripper|hand)", "left_grip"),

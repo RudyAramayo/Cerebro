@@ -12,6 +12,9 @@ import simd
     @nonobjc private weak var sceneView: SCNView?
     private var frozenPreview: NSImageView?
     private var previewFrozen = false
+    private var preparationSnapshotRefreshed = false
+    private let headLinks: Set<String> = ["lower_neck_link", "neck_pan_link", "upper_neck_link", "insta360_link", "oak_link"]
+    private var acceptedHeadTargets: ROBHeadCameraPoseEstimator?
     @nonobjc private var model: ROBGhostRobotModel?
     @nonobjc private var originalNodes: [String: SCNNode] = [:]
     @nonobjc private var ghostNodes: [String: SCNNode] = [:]
@@ -39,6 +42,9 @@ import simd
     private let xyz = (0..<3).map { _ in NSTextField(string: "0") }
     private let poseCount = NSTextField(labelWithString: "No custom poses")
     private let referenceInfo = NSTextField(wrappingLabelWithString: "Original model: waiting for left-arm feedback")
+    private let headInfo = NSTextField(wrappingLabelWithString: "Head: waiting for accepted neck commands")
+    private let continueButton = NSButton()
+    private var displayedInteractionStage = ""
     private let status = NSTextField(wrappingLabelWithString: "")
     private let identity = NSTextField(wrappingLabelWithString: "")
     private let timeline = NSSlider(value: 0, minValue: 0, maxValue: 1, target: nil, action: nil)
@@ -102,6 +108,7 @@ import simd
         guard frozen != previewFrozen, let view = sceneView else { return }
         previewFrozen = frozen
         if frozen {
+            preparationSnapshotRefreshed = false
             if let host = view.superview {
                 let picture = NSImageView(); picture.image = view.snapshot()
                 picture.imageScaling = .scaleProportionallyUpOrDown
@@ -119,6 +126,33 @@ import simd
                 updateOriginal(originalPositions); updateGhost(ghostDisplayPositions, updateFields: false)
             }
         }
+        updateHeadInfo()
+    }
+
+    /// Called synchronously after the neck settles and before arm position
+    /// mode/travel starts. Refresh the static picture once, never per frame.
+    func refreshPreparedHeadPreview() {
+        guard headEstimate != nil, let view = sceneView else { return }
+        if !previewFrozen {
+            // Normal arm controls may launch outside this editor. Camera
+            // preparation is the last safe point to capture their picture.
+            setPreviewFrozen(true)
+            preparationSnapshotRefreshed = true
+            updateHeadInfo()
+            return
+        }
+        guard !preparationSnapshotRefreshed,
+              let picture = frozenPreview else { return }
+        preparationSnapshotRefreshed = true
+        picture.image = view.snapshot()
+        updateHeadInfo()
+    }
+
+    func setHeadCommandEstimate(_ estimate: ROBHeadCameraPoseEstimator?) {
+        acceptedHeadTargets = estimate
+        setHeadCommand(pan: estimate?.panRadians ?? 0, lowerPitch: estimate?.lowerPitch ?? 0,
+            upperPitch: estimate?.upperPitch ?? 0, known: estimate != nil)
+        updateHeadInfo()
     }
 
     @objc(setHeadCommandPan:lowerPitch:upperPitch:known:)
@@ -126,9 +160,29 @@ import simd
         let value = known ? model?.headPositions(pan: pan, lowerPitch: lowerPitch, upperPitch: upperPitch) : nil
         guard value != headEstimate else { return }
         headEstimate = value
-        guard !previewFrozen, !ROBLeftArmTrial.shared.isRunning, !ROBArmRoutineCoordinator.shared.isRunning else { return }
-        updateOriginal(originalPositions)
-        updateGhost(ghostDisplayPositions, updateFields: false)
+        // Only the five head-chain nodes change. Arm poses and the approved
+        // path stay frozen, including while the static picture is displayed.
+        updateNodes(originalNodes.filter { headLinks.contains($0.key) }, positions: renderPositions(originalPositions, preview: false))
+        updateNodes(ghostNodes.filter { headLinks.contains($0.key) }, positions: renderPositions(ghostDisplayPositions, preview: true))
+        updateHeadInfo()
+    }
+
+    var headOpticalPitchRadians: NSNumber? {
+        guard headEstimate != nil, let model,
+              let camera = model.frames(renderPositions(model.reference, preview: false))["oak_optical_frame"] else { return nil }
+        let direction = camera.columns.2
+        return NSNumber(value: atan2(direction.z, hypot(direction.x, direction.y)))
+    }
+
+    private func updateHeadInfo() {
+        guard let pitch = headOpticalPitchRadians else {
+            headInfo.stringValue = "Head: command estimate unavailable"; return
+        }
+        let targets = acceptedHeadTargets.map { "L\($0.lowerTarget) / U\($0.upperTarget) · " } ?? ""
+        let frozen = previewFrozen ? (preparationSnapshotRefreshed
+            ? " · picture frozen after neck preparation" : " · picture awaiting neck preparation") : ""
+        headInfo.stringValue = String(format: "Head command estimate: %@optical tilt %+.1f°%@", targets,
+            pitch.doubleValue * 180 / .pi, frozen)
     }
 
     /// Row-major optical-to-scene affine transform, including the shared mesh
@@ -170,6 +224,11 @@ import simd
         let title = NSTextField(labelWithString: "Ghost gestures"); title.font = .boldSystemFont(ofSize: 19)
         let help = NSTextField(wrappingLabelWithString: "Original: captured robot with left encoders and accepted neck command estimates. Blue: proposed motion. Preview and save every named joint; execution currently supports supervised left-arm gestures. Other joints remain reference estimates.")
         help.textColor = .secondaryLabelColor
+        headInfo.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+        headInfo.identifier = NSUserInterfaceItemIdentifier("ghost-head-command")
+        continueButton.target = self; continueButton.action = #selector(continueInteraction)
+        continueButton.identifier = NSUserInterfaceItemIdentifier("ghost-continue-interaction")
+        continueButton.isHidden = true
         presets.target = self; presets.action = #selector(selectPreset)
         presets.identifier = NSUserInterfaceItemIdentifier("ghost-preset")
         name.placeholderString = "Gesture name"
@@ -192,7 +251,7 @@ import simd
         let currentHelp = NSTextField(wrappingLabelWithString: "Replay: original measured arm, blue approved target. Orange shows the largest joint current jump per sample; scrub to inspect all seven currents. Current units are not calibrated force.")
         currentHelp.textColor = .secondaryLabelColor
         currentPlot.heightAnchor.constraint(equalToConstant: 75).isActive = true
-        let stack = NSStackView(views: [title, help, referenceInfo, presets, name, joints, angle, angleText, xyzLabels, targets, nudgeRow,
+        let stack = NSStackView(views: [title, help, referenceInfo, headInfo, continueButton, presets, name, joints, angle, angleText, xyzLabels, targets, nudgeRow,
             posesRow, poseCount, preview, timeline, identity, executeButton,
             row([stop, button("Review stopped return", #selector(recover))]),
             button("Replay current recording…", #selector(loadRecording)), currentPlot, currentHelp, status])
@@ -207,7 +266,7 @@ import simd
             scroll.bottomAnchor.constraint(equalTo: panelView.bottomAnchor), document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
             stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 14), stack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -14),
             stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 16), stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -16)])
-        for value in [help, referenceInfo, presets, name, joints, angle, timeline, identity, executeButton, currentPlot, currentHelp, status] {
+        for value in [help, referenceInfo, headInfo, continueButton, presets, name, joints, angle, timeline, identity, executeButton, currentPlot, currentHelp, status] {
             value.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         status.isSelectable = true; identity.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
@@ -464,6 +523,7 @@ import simd
     }
     private func tick() {
         guard let model else { return }
+        refreshInteractionStage()
         let busy = ROBLeftArmTrial.shared.isRunning || ROBArmRoutineCoordinator.shared.isRunning
         for view in [presets, joints, angle, name] as [NSControl] { view.isEnabled = !busy }
         if busy || (ownsPendingRequest && ROBControllerArmApproval.shared.isPending) {
@@ -502,6 +562,28 @@ import simd
             timeline.doubleValue = time; renderTime(time)
             if time >= timeline.maxValue { playing = false }
         }
+    }
+
+    private func refreshInteractionStage() {
+        let stage = ROBLeftArmTrial.shared.interactionStage
+        let title: String
+        switch stage {
+        case "object_placed": title = "Object placed; fingers clear → grip"
+        case "receiver_supporting": title = "Hand supporting → release"
+        case "object_clear": title = "Object clear → lower"
+        default: title = ""
+        }
+        displayedInteractionStage = stage
+        continueButton.title = title
+        continueButton.isHidden = title.isEmpty
+        continueButton.isEnabled = !title.isEmpty && ROBLeftArmTrial.shared.isRunning
+    }
+
+    @objc private func continueInteraction() {
+        let stage = displayedInteractionStage
+        guard !stage.isEmpty, ROBLeftArmTrial.shared.continueOperation(stage: stage) else { return }
+        continueButton.isEnabled = false
+        refreshInteractionStage()
     }
     @objc private func loadRecording() {
         guard !ROBLeftArmTrial.shared.isRunning else { return }

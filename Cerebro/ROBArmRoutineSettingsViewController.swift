@@ -5,6 +5,9 @@ import AppKit
     private let state = NSTextField(wrappingLabelWithString: "")
     private let inspectionPan = NSPopUpButton(frame: .zero, pullsDown: false)
     private let currentLimit = NSTextField(string: "0")
+    private let cycleContinue = NSButton(title: "Continue object cycle", target: nil, action: nil)
+    private var displayedCycleStage = ""
+    private var observingLeftOperation = false
 
     override func loadView() {
         view = NSView(frame: NSRect(x: 0, y: 0, width: 680, height: 580))
@@ -38,11 +41,17 @@ import AppKit
         teaching.spacing = 10
         let leftTitle = NSTextField(labelWithString: "Left arm — supervised trial")
         leftTitle.font = .boldSystemFont(ofSize: 15)
-        let leftHelp = NSTextField(wrappingLabelWithString: "Wave left opens the blue-ghost review in the controller input scene. The handoff pose bends J6 inward; the wave adds J2 lift and the opposite J4 bend above the shoulder. New angles need a supervised trial. Request execution of a reviewed path, then approve on the phone/controller. For objects: Present / open → place object → Grip → support it → Release → Lower. Grip/release stay stationary; never close on a person's hand.")
-        let leftButtons = NSStackView(views: [button("Wave left", #selector(leftWave)), button("Ghost gestures…", #selector(openGhost)),
-            button("Present / open", #selector(leftPrepare)), button("Grip object", #selector(leftGrip)),
+        let leftHelp = NSTextField(wrappingLabelWithString: "Grip and return uses one controller approval for the complete left-arm cycle: raise and open empty jaws, grip at intensity 2, release into a supporting hand, then lower the empty arm. Continue when the object is placed with fingers clear, when the receiver supports it, and when it is clear of the jaws. These readiness steps stay inside the same approval. Keep the controller open; Stop + hold remains available. Wave and Ghost gestures open the blue preview. Never grip a person's hand.")
+        let cycleStart = button("Grip and return · one approval", #selector(leftObjectCycle))
+        cycleStart.identifier = NSUserInterfaceItemIdentifier("left-cycle-start")
+        let leftButtons = NSStackView(views: [cycleStart, button("Wave left", #selector(leftWave)), button("Ghost gestures…", #selector(openGhost))])
+        let individualButtons = NSStackView(views: [button("Present / open", #selector(leftPrepare)), button("Grip object", #selector(leftGrip)),
             button("Release to hand", #selector(leftRelease)), button("Lower arm", #selector(leftRelax))])
         leftButtons.spacing = 8
+        individualButtons.spacing = 8
+        cycleContinue.target = self; cycleContinue.action = #selector(continueObjectCycle)
+        cycleContinue.identifier = NSUserInterfaceItemIdentifier("left-cycle-continue")
+        cycleContinue.isHidden = true
         currentLimit.stringValue = String(UserDefaults.standard.double(forKey: ROBLeftArmTrial.currentLimitKey))
         currentLimit.widthAnchor.constraint(equalToConstant: 75).isActive = true
         currentLimit.target = self; currentLimit.action = #selector(changeCurrentLimit)
@@ -53,7 +62,7 @@ import AppKit
         currentRow.spacing = 8
         let recordingHelp = NSTextField(wrappingLabelWithString: "Current and position are recorded automatically. Set a current jump threshold after reviewing the raw values; it requests Stop + hold on a sample-to-sample jump. This is not a calibrated force limit.")
         recordingHelp.textColor = .secondaryLabelColor
-        let stack = NSStackView(views: [title, leftTitle, leftHelp, leftButtons, currentRow, recordingHelp, state,
+        let stack = NSStackView(views: [title, leftTitle, leftHelp, leftButtons, cycleContinue, individualButtons, currentRow, recordingHelp, state,
             startup, inspectionRow, explanation, commands, buttons, teaching, speechTest, limitation])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 14
         let scroll = NSScrollView()
@@ -88,7 +97,23 @@ import AppKit
                                   forKey: ROBArmRoutinePlan.inspectionPanDefaultsKey)
     }
     @objc private func refresh() {
-        state.stringValue = ROBArmRoutineCoordinator.shared.status
+        let left = ROBLeftArmTrial.shared
+        if left.isRunning {
+            state.stringValue = left.status
+        } else if ROBControllerArmApproval.shared.isPending {
+            state.stringValue = ROBControllerArmApproval.shared.status
+        } else {
+            state.stringValue = left.isRunning || observingLeftOperation ? left.status : ROBArmRoutineCoordinator.shared.status
+        }
+        displayedCycleStage = left.interactionStage
+        switch displayedCycleStage {
+        case "object_placed": cycleContinue.title = "Object placed; fingers clear → Grip"
+        case "receiver_supporting": cycleContinue.title = "Hand supporting object → Release"
+        case "object_clear": cycleContinue.title = "Object clear of jaws → Lower empty arm"
+        default: cycleContinue.title = "Continue object cycle"
+        }
+        cycleContinue.isHidden = displayedCycleStage.isEmpty
+        cycleContinue.isEnabled = left.isRunning && !displayedCycleStage.isEmpty
         inspectionPan.selectItem(at: [0.0, -10, 10].firstIndex(of: ROBArmRoutinePlan.inspectionPanDegrees()) ?? 0)
         inspectionPan.isEnabled = !ROBArmRoutineCoordinator.shared.ownsPhysicalMotion && !ROBControllerArmApproval.shared.isPending
         currentLimit.isEnabled = inspectionPan.isEnabled
@@ -102,10 +127,16 @@ import AppKit
     @objc private func leftWave() { showGhost("wave") }
     @objc private func openGhost() { showGhost("center") }
     private func showGhost(_ preset: String) {
+        observingLeftOperation = true
         NotificationCenter.default.post(name: Notification.Name("ROBShowControllerInputDiagnostics"), object: self,
             userInfo: ["ghostPreset": preset])
     }
     @objc private func leftPrepare() { run("left_prepare") }
+    @objc private func leftObjectCycle() { run("left_object_cycle") }
+    @objc private func continueObjectCycle() {
+        _ = ROBLeftArmTrial.shared.continueOperation(stage: displayedCycleStage)
+        refresh()
+    }
     @objc private func leftGrip() { run("left_grip") }
     @objc private func leftRelease() { run("left_release") }
     @objc private func leftRelax() { run("left_relax") }
@@ -129,6 +160,7 @@ import AppKit
     private func run(_ command: String) {
         view.window?.makeFirstResponder(nil)
         changeCurrentLimit()
+        observingLeftOperation = ROBLeftArmTrial.commands.contains(command)
         ROBArmRoutineCoordinator.shared.performCommand(command, target: "") { [weak self] result in
             self?.state.stringValue = result["detail"] as? String ?? "Arm routine ended"
         }

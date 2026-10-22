@@ -54,6 +54,17 @@ until the current test and controller workflow are finished.
    so authenticated recovery and a fresh trial remain pending. See
    [smooth-route checks](calibration/evidence/2026-10-21-smooth-left/validation.json)
    and [five-segment model evidence](calibration/evidence/2026-10-21-smooth-left/five-segment-model.json).
+   The new `left_object_cycle` composes raise/open, stationary grip at intensity
+   2, release into a supporting hand, then empty return/deactivation under one
+   controller approval. Object-placed, receiver-supporting and object-clear
+   Continue controls advance readiness inside that same bounded operation;
+   they never create new approvals or automatically release on timeout. This
+   composed cycle requires a fresh physical trial after CAN recovery.
+   On leaving for several hours, Rob requested development without further
+   live tests or approval requests. Keep the running robot untouched; finish
+   software validation and commit/push, and defer physical verification until
+   his return. [Object-cycle development evidence](calibration/evidence/2026-10-21-object-cycle/validation.json)
+   records that distinction.
    Confirm physical clearance before calling the added angles taught. See [arm trials](arm-startup-and-grab.md).
 2. **Implemented, live verification in progress — ghost motion editor.** Reuse the
    existing robot model and URDF joint names. Show the original robot with a
@@ -68,6 +79,12 @@ until the current test and controller workflow are finished.
    alignment. Rob identified the frozen model neck; v6 now articulates model and
    camera through shared URDF FK. V10 removes scan neck offsets at upright and
    makes lower display rotation independent of the optional leveling gain.
+   A later display fix refreshes the embedded preview once after the accepted
+   neck pose settles, before arm position entry/travel. Previously the snapshot
+   taken before approval retained an older neck pose throughout execution.
+   Current lower/upper targets and optical FK tilt now remain visible separately;
+   no neck calibration constants or URDF origins changed. Isolated model/render
+   checks pass; the running robot still needs visual verification after reload.
    The live current replay was verified, and a +2 cm XYZ ghost pose was saved as
    **Centered hello +2cm** and reviewed; it has not been physically executed.
    Check neck orientation against the physical robot after loading.
