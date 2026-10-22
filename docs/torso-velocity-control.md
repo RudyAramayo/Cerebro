@@ -26,15 +26,21 @@ Near a destination, the speed request follows a smooth quadratic taper over
 limited. Arrival tolerance is the greater of 0.75° or twice the camera's
 estimated angular uncertainty. **Stop**, Escape, window closure, or loss of
 local application focus drops motion authority. Releasing just the speed
-slider stops the turn while retaining arming and holding torque.
+slider stops the turn while retaining arming. After the controller reports
+zero actual velocity, Cerebro de-energizes the stepper to save power. Reaching
+a destination follows the same stop-and-release sequence.
 
 ## Use live camera feedback
 
 Install the existing runtime with `Scripts/setup-shadow-planner.sh` if needed.
 Disconnect Pololu Tic Control Center before using Cerebro; both applications
 cannot own the same USB controller. Select **Live camera**, wait for a confirmed
-heading, then explicitly select **Arm torso**. Selecting live mode or acquiring
-a camera estimate alone cannot energize the controller.
+heading, then explicitly select **Arm torso**. Arming performs preflight and
+leaves the stepper de-energized. Cerebro energizes it immediately before each
+fresh, authorized nonzero movement request. An armed, idle torso therefore
+draws no stepper holding power; the next authorized movement energizes it again.
+Selecting live mode or acquiring a camera estimate alone cannot energize the
+controller.
 
 The markerless worker fits the approved scan's base, tracks, lean structure,
 RPLidar mount and torso to synchronized OAK-D depth. It estimates camera pose,
@@ -66,19 +72,33 @@ no printed markers. Synthetic scan fits are not measurements of real accuracy.
 ## Motion and fault behavior
 
 - Camera evidence expires after 750 ms. Stale, missing, ambiguous, or invalid
-  evidence removes motion authority and requests a controlled stop.
+  evidence removes motion authority and requests a controlled stop followed by
+  power release. Stop, window closure and faults also drop motion authority and
+  request this stop-and-release sequence.
 - A large unexpected visual correction updates the estimated pose, stops
   movement, and requires explicit re-arming. Unobserved requested travel or
   observed movement in the opposite direction reports a fault. These checks
   detect disagreement; they do not diagnose a broken joint or a missed step.
-- One serialized Tic transport sends only the newest velocity demand. It
-  refreshes zero-speed holding commands as well, so a steady target does not
-  accidentally starve the watchdog. An expired queued demand cannot execute.
+- One serialized Tic transport sends only the newest velocity demand. An
+  expired queued demand cannot execute. On a normal stop it requests zero
+  velocity, polls the Tic's actual **Current velocity** until it reaches zero,
+  then de-energizes and verifies **Energized: No**. Polling renews the command
+  timeout while the motor decelerates. A brief zero-speed demand during a
+  direction reversal keeps power enabled so the following movement can proceed.
+  USB failures or a failed power-release verification are reported explicitly;
+  they are not treated as successful release.
+- Application shutdown waits up to five seconds for the USB stop-and-release
+  sequence before exiting, and logs an unconfirmed power-off if it cannot
+  finish. Explicit Stop can retry a previously failed release.
 - Preflight verifies the saved controller identity, Tic 36v4/full-step serial
   configuration, safe start, a 100–1000 ms command watchdog, decelerate-to-hold
   error response, voltage and active fault status. Arming first replaces any old
-  target with zero velocity and applies the runtime speed/acceleration limits.
-  Regular updates never clear safe start or automatically resume a fault.
+  target with zero velocity, applies the runtime speed/acceleration limits and
+  verifies the driver is de-energized. Arming grants motion authority separately
+  from motor power. Normal slider release or heading arrival keeps that
+  authority while releasing power; faults require explicit re-arming. Only a
+  fresh authorized movement request clears the intentional idle safe start.
+  Ordinary updates never automatically resume a fault.
 - The existing scale is 36,800 pulses per torso revolution. Physical polarity
   and scale still require a supervised low-speed camera comparison. The live
   UI does not certify cable freedom, clearance or unlimited physical turns.
@@ -101,7 +121,11 @@ Run `Scripts/test-torso-control.sh` and `Scripts/test-shadow-planner.sh`.
 Fixtures cover circular wrap, taper and settling, reversal, slow and fast
 unobserved motion, opposite direction, stale/replayed evidence, camera rebase,
 Tic fault latching and watchdog updates, canceled arming, rehearsal isolation,
-VR reference selection and synthetic markerless recovery. The actual UI can be
-compiled with the coordinator fixture's `--show` option; its injected transport
-cannot access USB. A development Cerebro build and this inert UI were checked.
-No physical motor was energized or moved for these checks.
+VR reference selection and synthetic markerless recovery. Fake Tic fixtures
+also check that arming leaves power off, movement energizes before setting a
+nonzero target, release waits for zero actual velocity before de-energizing,
+normal idle retains arming, reversal retains power, and release failures remain
+visible. The actual UI can be compiled with the coordinator fixture's `--show`
+option; its injected transport cannot access USB. These fixtures validate
+command sequencing without energizing or moving physical hardware. Actual
+motor behavior still requires supervised hardware verification.

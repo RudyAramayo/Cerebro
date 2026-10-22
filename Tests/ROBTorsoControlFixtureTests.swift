@@ -98,25 +98,156 @@ import Foundation
 
         let fake = FakeTic()
         let transport = ROBTicVelocityTransport(execute: fake.execute)
-        var ready = false, detail = ""
-        transport.onState = { ready = $0; detail = $1 }
+        var ready = false
+        transport.onState = { value, _ in ready = value }
         transport.arm(profile: profile)
         try wait { ready }
+        try expect(!fake.energized && !fake.calls.contains(where: { $0.contains("--energize") }),
+                   "Arming at rest energized the motor")
+        try expect(fake.calls.contains(where: { $0.contains("--deenergize") }),
+                   "Arming did not verify a released motor")
         for _ in 0..<3 {
             transport.velocity(0, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
-            RunLoop.current.run(until: Date().addingTimeInterval(0.12))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.04))
         }
-        try expect(fake.calls.filter { $0 == ["--velocity", "0"] }.count >= 2, "Steady holding demand stopped feeding the watchdog")
-        try expect(fake.calls.filter { $0.contains("--exit-safe-start") }.count == 1, "Safe start was cleared repeatedly")
-        fake.fault = true
+        try expect(ready && !fake.energized && !fake.calls.contains(where: { $0.contains("--energize") }),
+                   "An idle zero demand energized or disarmed the torso")
+
         transport.velocity(1, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
-        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
-        transport.velocity(1, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
-        try wait { !ready && detail.contains("fault") }
+        try wait { fake.currentVelocity > 0 }
+        let firstWake = fake.calls.firstIndex(where: { $0.contains("--energize") })!
+        let firstMotion = fake.calls.firstIndex(where: { FakeTic.velocity($0).map { $0 != 0 } == true })!
+        try expect(FakeTic.velocity(fake.calls[firstWake]) == 0 && fake.calls[firstWake].contains("--exit-safe-start"),
+                   "Wake did not clear the old target to zero before energizing")
+        try expect(firstWake < firstMotion && fake.calls[(firstWake + 1)..<firstMotion].contains(["--status"]),
+                   "Nonzero movement preceded successful energized status verification")
+        let releasedBeforeReversal = fake.calls.filter { $0.contains("--deenergize") }.count
+        transport.velocity(0, validUntil: ProcessInfo.processInfo.systemUptime + 0.2, releaseWhenStopped: false)
+        try wait { fake.targetVelocity == 0 }
+        transport.velocity(-1, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
+        try wait { fake.currentVelocity < 0 }
+        try expect(fake.energized && fake.calls.filter { $0.contains("--deenergize") }.count == releasedBeforeReversal,
+                   "A transient reversal zero unnecessarily released motor power")
+
+        fake.decelerationPolls = 3
+        let releaseStart = fake.calls.count
+        transport.velocity(0, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
+        try wait { !fake.energized }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+        try expect(ready && !fake.releasedWhileMoving, "Idle release dropped authority or removed power before measured zero")
+        let releaseCalls = Array(fake.calls.dropFirst(releaseStart))
+        let powerOff = releaseCalls.firstIndex(where: { $0.contains("--deenergize") })!
+        try expect(releaseCalls[..<powerOff].contains(where: { $0.contains("--enter-safe-start") }) &&
+                   releaseCalls[..<powerOff].filter { $0.contains("--status") }.count >= 4,
+                   "Idle release did not wait for reported deceleration completion")
+        try expect(releaseCalls[..<powerOff].contains(where: { $0.contains("--reset-command-timeout") }),
+                   "Deceleration polling stopped renewing the independent watchdog")
+
+        transport.velocity(2, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
+        try wait { fake.currentVelocity > 0 }
+        try expect(fake.calls.filter { $0.contains("--energize") }.count == 2,
+                   "A new turn did not re-energize after an ordinary idle release")
+        transport.stop()
+        try wait { !ready && !fake.energized }
+        let stoppedCount = fake.calls.count
         transport.velocity(2, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
         RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-        try expect(fake.calls.filter { $0.contains("--exit-safe-start") }.count == 1, "Fault auto-resumed motion")
+        try expect(fake.calls.count == stoppedCount && !fake.releasedWhileMoving,
+                   "An explicit stop auto-resumed or released the motor while moving")
+        try expect(!fake.movedWithoutPower, "A nonzero demand was sent before the motor was energized and ready")
         try expect(!fake.calls.contains(where: { $0.contains("--home") || $0.contains("--halt-and-set-position") || $0.contains("--reset") || $0.contains("-p") }), "Velocity path emitted a home/reset/position command")
+
+        let faulted = FakeTic()
+        let faultTransport = ROBTicVelocityTransport(execute: faulted.execute)
+        var faultReady = false, faultDetail = ""
+        faultTransport.onState = { faultReady = $0; faultDetail = $1 }
+        faultTransport.arm(profile: profile); try wait { faultReady }
+        faultTransport.velocity(1, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
+        try wait { faulted.currentVelocity > 0 }
+        faulted.fault = true
+        RunLoop.current.run(until: Date().addingTimeInterval(0.28))
+        faultTransport.velocity(1, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
+        try wait { !faultReady && faultDetail.localizedCaseInsensitiveContains("fault") }
+        try wait { !faulted.energized }
+        let faultWakeCount = faulted.calls.filter { $0.contains("--energize") }.count
+        faultTransport.velocity(2, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        try expect(faulted.calls.filter { $0.contains("--energize") }.count == faultWakeCount,
+                   "A driver fault automatically resumed motion")
+
+        let stale = FakeTic()
+        let staleTransport = ROBTicVelocityTransport(execute: stale.execute)
+        var staleReady = false
+        staleTransport.onState = { value, _ in staleReady = value }
+        staleTransport.arm(profile: profile); try wait { staleReady }
+        staleTransport.velocity(1, validUntil: ProcessInfo.processInfo.systemUptime - 1)
+        try wait { !staleReady }
+        try expect(!stale.calls.contains(where: { $0.contains("--energize") }),
+                   "An already expired demand energized the motor")
+
+        let slowWake = FakeTic(), wakeGate = DispatchSemaphore(value: 0), wakeEntered = DispatchSemaphore(value: 0)
+        let slowTransport = ROBTicVelocityTransport { args in
+            let result = try slowWake.execute(args)
+            if args.contains("--energize") { wakeEntered.signal(); _ = wakeGate.wait(timeout: .now() + 2) }
+            return result
+        }
+        var slowReady = false
+        slowTransport.onState = { value, _ in slowReady = value }
+        slowTransport.arm(profile: profile); try wait { slowReady }
+        slowTransport.velocity(1, validUntil: ProcessInfo.processInfo.systemUptime + 0.04)
+        try expect(wakeEntered.wait(timeout: .now() + 1) == .success, "Delayed wake did not begin")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.06)); wakeGate.signal()
+        try wait { !slowReady && !slowWake.energized }
+        try expect(!slowWake.calls.contains(where: { FakeTic.velocity($0).map { $0 != 0 } == true }),
+                   "A demand that expired during wake still moved the torso")
+
+        let cancelledWake = FakeTic(), cancelGate = DispatchSemaphore(value: 0), cancelEntered = DispatchSemaphore(value: 0)
+        let cancelledTransport = ROBTicVelocityTransport { args in
+            let result = try cancelledWake.execute(args)
+            if args.contains("--energize") { cancelEntered.signal(); _ = cancelGate.wait(timeout: .now() + 2) }
+            return result
+        }
+        var cancelledReady = false
+        cancelledTransport.onState = { value, _ in cancelledReady = value }
+        cancelledTransport.arm(profile: profile); try wait { cancelledReady }
+        cancelledTransport.velocity(1, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
+        try expect(cancelEntered.wait(timeout: .now() + 1) == .success, "Cancelled wake did not begin")
+        cancelledTransport.stop(); cancelGate.signal()
+        try wait { !cancelledReady && !cancelledWake.energized }
+        try expect(!cancelledWake.calls.contains(where: { FakeTic.velocity($0).map { $0 != 0 } == true }),
+                   "An in-flight wake moved after Stop revoked its generation")
+
+        let failedRelease = FakeTic()
+        let releaseTransport = ROBTicVelocityTransport(execute: failedRelease.execute)
+        var releaseReady = false, releaseDetail = ""
+        releaseTransport.onState = { releaseReady = $0; releaseDetail = $1 }
+        releaseTransport.arm(profile: profile); try wait { releaseReady }
+        releaseTransport.velocity(1, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
+        try wait { failedRelease.currentVelocity > 0 }
+        failedRelease.failDeenergize = true
+        releaseTransport.velocity(0, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
+        try wait { !releaseReady }
+        try expect(failedRelease.energized && !releaseDetail.isEmpty,
+                   "A failed power release was reported as a successful idle state")
+        let failedWakeCount = failedRelease.calls.filter { $0.contains("--energize") }.count
+        releaseTransport.velocity(2, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        try expect(failedRelease.calls.filter { $0.contains("--energize") }.count == failedWakeCount,
+                   "A failed power release did not latch motion authority off")
+        failedRelease.failDeenergize = false
+        releaseTransport.stop(); try wait { !failedRelease.energized }
+
+        let shutdownMotor = FakeTic()
+        shutdownMotor.decelerationPolls = 3
+        let shutdownTransport = ROBTicVelocityTransport(execute: shutdownMotor.execute)
+        var shutdownReady = false
+        shutdownTransport.onState = { value, _ in shutdownReady = value }
+        shutdownTransport.arm(profile: profile); try wait { shutdownReady }
+        shutdownTransport.velocity(1, validUntil: ProcessInfo.processInfo.systemUptime + 0.2)
+        try wait { shutdownMotor.currentVelocity > 0 }
+        try expect(shutdownTransport.stopAndWait(timeout: 1), "Shutdown exited without confirmed motor power off")
+        try expect(!shutdownMotor.energized && !shutdownMotor.releasedWhileMoving,
+                   "Shutdown must wait for measured rest and power release without main callbacks")
 
         let blocking = FakeTic(); let gate = DispatchSemaphore(value: 0), entered = DispatchSemaphore(value: 0)
         let pending = ROBTicVelocityTransport { args in
@@ -128,16 +259,38 @@ import Foundation
         pending.stop(); gate.signal()
         RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         try expect(!blocking.calls.contains(where: { $0.contains("--energize") }), "Cancelled preflight still energized")
-        print("Torso fixtures passed: circular goals, camera rebase, smooth settling/reversal, stale/replayed/ambiguous evidence, observed stall, units, watchdog, fault latch, cancelled arm, no home or position commands")
+        print("Torso fixtures passed: circular goals, camera gates, taper/reversal, observed stall, zero-before-wake, measured-stop power release, idle resume, watchdog, stale wake, fault/release latches, cancelled arm, no home or position commands")
     }
 }
 
 private final class FakeTic {
     private let lock = NSLock()
     private var recorded: [[String]] = []
-    private var isReady = false
+    private var isEnergized = false
+    private var safeStart = true
+    private var measuredVelocity: Int32 = 0
+    private var requestedVelocity: Int32 = 0
+    private var lastReportedVelocity: Int32 = 0
+    private var stoppingPolls = 0
+    private var configuredDecelerationPolls = 0
+    private var prematureRelease = false
+    private var unpoweredMovement = false
+    private var blockedDeenergize = false
     private var hasFault = false
     var calls: [[String]] { lock.lock(); defer { lock.unlock() }; return recorded }
+    var energized: Bool { lock.lock(); defer { lock.unlock() }; return isEnergized }
+    var currentVelocity: Int32 { lock.lock(); defer { lock.unlock() }; return measuredVelocity }
+    var targetVelocity: Int32 { lock.lock(); defer { lock.unlock() }; return requestedVelocity }
+    var releasedWhileMoving: Bool { lock.lock(); defer { lock.unlock() }; return prematureRelease }
+    var movedWithoutPower: Bool { lock.lock(); defer { lock.unlock() }; return unpoweredMovement }
+    var decelerationPolls: Int {
+        get { lock.lock(); defer { lock.unlock() }; return configuredDecelerationPolls }
+        set { lock.lock(); configuredDecelerationPolls = newValue; lock.unlock() }
+    }
+    var failDeenergize: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return blockedDeenergize }
+        set { lock.lock(); blockedDeenergize = newValue; lock.unlock() }
+    }
     var fault: Bool {
         get { lock.lock(); defer { lock.unlock() }; return hasFault }
         set { lock.lock(); hasFault = newValue; lock.unlock() }
@@ -149,22 +302,62 @@ private final class FakeTic {
             try "product: 36v4\ncontrol_mode: serial\nstep_mode: 1\nsoft_error_response: decel_to_hold\ndisable_safe_start: false\ncommand_timeout: 1000\n"
                 .write(toFile: args[1], atomically: true, encoding: .utf8)
         }
-        if args.contains("--energize") { isReady = true }
-        if args.contains("--enter-safe-start") { isReady = false }
-        if args == ["--status"] { return Self.status(ready: isReady, fault: hasFault) }
+        if let velocity = Self.velocity(args) {
+            requestedVelocity = velocity
+            if velocity == 0 {
+                if measuredVelocity != 0 { stoppingPolls = configuredDecelerationPolls }
+                if stoppingPolls == 0 { measuredVelocity = 0 }
+            } else if isEnergized && !safeStart {
+                measuredVelocity = velocity; stoppingPolls = 0
+            } else { unpoweredMovement = true }
+        }
+        if args.contains("--energize") { isEnergized = true }
+        if args.contains("--exit-safe-start") { safeStart = false }
+        if args.contains("--enter-safe-start") {
+            safeStart = true; requestedVelocity = 0
+            if measuredVelocity != 0 { stoppingPolls = configuredDecelerationPolls }
+            if stoppingPolls == 0 { measuredVelocity = 0 }
+        }
+        if args.contains("--deenergize") {
+            if measuredVelocity != 0 || lastReportedVelocity != 0 { prematureRelease = true }
+            if blockedDeenergize {
+                throw NSError(domain: "FakeTic", code: 1,
+                              userInfo: [NSLocalizedDescriptionKey: "Injected deenergize failure; motor power remains on"])
+            }
+            isEnergized = false; requestedVelocity = 0; measuredVelocity = 0
+        }
+        if args.contains("--status") {
+            if safeStart || requestedVelocity == 0 {
+                if stoppingPolls > 0 { stoppingPolls -= 1 }
+                else { measuredVelocity = 0 }
+            }
+            lastReportedVelocity = measuredVelocity
+            return Self.status(ready: isEnergized, fault: hasFault, currentVelocity: measuredVelocity, safeStart: safeStart)
+        }
         return ""
     }
-    static func status(ready: Bool, fault: Bool = false) -> String {
-        """
+    static func velocity(_ args: [String]) -> Int32? {
+        guard let index = args.firstIndex(of: "--velocity"), index + 1 < args.count else { return nil }
+        return Int32(args[index + 1])
+    }
+    static func status(ready: Bool, fault: Bool = false, currentVelocity: Int32 = 0,
+                       safeStart: Bool? = nil) -> String {
+        let safeStart = safeStart ?? !ready
+        var errors: [String] = []
+        if fault { errors.append("Motor driver error") }
+        if !ready { errors.append("Intentionally de-energized") }
+        if safeStart { errors.append("Safe start violation") }
+        return """
         Name:                         Tic 36v4 High-Power Stepper Motor Controller
         VIN voltage:                  23.559 V
         Homing active:                No
         Step mode:                    Full step
-        Operation state:              \(ready && !fault ? "Normal" : "Soft error")
+        Operation state:              \(ready && !fault && !safeStart ? "Normal" : "Soft error")
         Energized:                    \(ready ? "Yes" : "No")
+        Current velocity:             \(currentVelocity)
         Position uncertain:           Yes
         Errors currently stopping the motor:
-        \(fault ? "  - Motor driver error" : ready ? "  None" : "  - Command timeout\n  - Safe start violation")
+        \(errors.isEmpty ? "  None" : errors.map { "  - " + $0 }.joined(separator: "\n"))
 
         Errors that occurred since last check:
           None

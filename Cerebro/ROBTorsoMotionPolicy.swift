@@ -82,14 +82,14 @@ struct ROBTorsoMotionPolicy {
         }
         armed = true; mode = .hold; velocity = 0; rate = 0
         targetHeading = heading; previousTick = now; stallStart = nil
-        status = "Armed — holding observed heading"
+        status = "Armed — ready at observed heading"
         return true
     }
 
     mutating func requestRate(_ normalized: Double) {
         guard armed, normalized.isFinite else { return }
         rate = min(1, max(-1, normalized)); mode = rate == 0 ? .hold : .velocity
-        status = mode == .hold ? "Slowing to a hold" : "Turning at requested speed"
+        status = mode == .hold ? "Slowing to a stop" : "Turning at requested speed"
     }
 
     mutating func requestHeading(_ heading: Double) {
@@ -100,7 +100,7 @@ struct ROBTorsoMotionPolicy {
 
     mutating func hold() {
         mode = .hold; rate = 0; stallStart = nil
-        if armed { status = "Slowing to a hold" }
+        if armed { status = "Slowing to a stop" }
     }
 
     mutating func invalidate(_ reason: String) {

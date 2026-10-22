@@ -42,7 +42,7 @@ import Cocoa
             let unexpectedLoss = !ready && (self.hardwareReady || self.arming)
             self.hardwareReady = ready
             self.hardwareDetail = self.usesLiveCamera ? detail : "Rehearsal — no motor output"
-            if ready {
+            if ready && self.arming {
                 self.arming = false
                 if !self.usesLiveCamera || !self.policy.arm(at: ProcessInfo.processInfo.systemUptime) { self.stop() }
             } else if self.usesLiveCamera && unexpectedLoss {
@@ -70,7 +70,7 @@ import Cocoa
     var targetHeading: Double { policy.targetHeading.map(ROBTorsoMotionPolicy.wrap) ?? .nan }
     var commandedVelocity: Double { policy.velocity }
     var isArmed: Bool { policy.armed }
-    var status: String { arming ? "Checking Tic settings and holding a zero-speed target…" : policy.status }
+    var status: String { arming ? "Checking Tic settings and confirming motor power off at rest…" : policy.status }
     var maximumSpeed: Double { policy.maximumSpeed }
     var canArm: Bool { !arming && policy.hasFreshObservation(at: ProcessInfo.processInfo.systemUptime) }
 
@@ -122,11 +122,11 @@ import Cocoa
         precondition(Thread.isMainThread)
         localLeverHeld = false; remoteBaseline = nil; remoteUntil = 0; motionUntil = 0
         policy.invalidate(usesLiveCamera ? "Stopped — re-arm to move" : "Rehearsal stopped")
-        stopHardware(); publish()
+        stopHardware(retry: true); publish()
     }
 
-    private func stopHardware() {
-        if hardwareReady || arming { transport.stop() }
+    private func stopHardware(retry: Bool = false) {
+        if hardwareReady || arming || (retry && usesLiveCamera) { transport.stop() }
         hardwareReady = false; arming = false
     }
 
@@ -181,7 +181,12 @@ import Cocoa
         if remoteBaseline == nil { stop() }
     }
 
-    @objc private func applicationTerminating() { stop() }
+    @objc private func applicationTerminating() {
+        stop()
+        if !transport.stopAndWait() {
+            NSLog("Torso shutdown: motor power-off could not be confirmed before termination")
+        }
+    }
 
     func closeControls() {
         stop(); vision.stop(); cameraDemandActive = false
@@ -212,10 +217,11 @@ import Cocoa
             if hardwareReady && !policy.armed { stopHardware() }
             else if hardwareReady && now - lastSent >= 0.09 {
                 lastSent = now
-                // Keep zero-speed hold alive too; unchanged demands must not
-                // starve the independent one-second Tic watchdog.
+                // Only settled hold requests release power; a brief zero at
+                // direction reversal retains drive until the turn finishes.
                 transport.velocity(velocity, validUntil: min(now + 0.2,
-                    (policy.observation?.capturedAt ?? 0) + policy.maximumObservationAge))
+                    (policy.observation?.capturedAt ?? 0) + policy.maximumObservationAge),
+                    releaseWhenStopped: policy.mode == .hold)
             }
         }
         publish()

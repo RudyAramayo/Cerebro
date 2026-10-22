@@ -26,13 +26,23 @@ final class ROBTicVelocityTransport {
     }
 
     typealias Executor = ([String]) throws -> String
-    private enum Demand { case arm(Profile), velocity(Double, TimeInterval), stop }
+    private enum Demand { case arm(Profile), velocity(Double, TimeInterval, Bool), stop }
+    private struct Release {
+        let id = UUID()
+        let token: UInt64
+        let readyWhenComplete: Bool
+        let detail: String?
+        let deadline: TimeInterval
+    }
     private let queue = DispatchQueue(label: "rob.torso.tic.usb", qos: .userInitiated)
     private let lock = NSLock()
     private var pending: Demand?
     private var draining = false
     private var generation: UInt64 = 0
     private var armed = false
+    private var driveActive = false
+    private var motorMayBeEnergized = false
+    private var release: Release?
     private var profile = Profile()
     private var lastStatusAt = 0.0
     private let execute: Executor
@@ -43,10 +53,24 @@ final class ROBTicVelocityTransport {
     }
 
     func arm(profile: Profile) { enqueue(.arm(profile), interrupt: true) }
-    func velocity(_ degreesPerSecond: Double, validUntil: TimeInterval) {
-        enqueue(.velocity(degreesPerSecond, validUntil), interrupt: false)
+    func velocity(_ degreesPerSecond: Double, validUntil: TimeInterval, releaseWhenStopped: Bool = true) {
+        enqueue(.velocity(degreesPerSecond, validUntil, releaseWhenStopped), interrupt: false)
     }
     func stop() { enqueue(.stop, interrupt: true) }
+
+    /// Application termination must not exit before the USB queue finishes
+    /// stopping and releasing the driver. Completion does not use main callbacks.
+    func stopAndWait(timeout: TimeInterval = 5) -> Bool {
+        dispatchPrecondition(condition: .notOnQueue(queue))
+        stop()
+        guard timeout.isFinite, (0 ... 10).contains(timeout) else { return false }
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        repeat {
+            if queue.sync(execute: { !armed && release == nil && !motorMayBeEnergized }) { return true }
+            Thread.sleep(forTimeInterval: 0.01)
+        } while ProcessInfo.processInfo.systemUptime < deadline
+        return false
+    }
 
     private func enqueue(_ demand: Demand, interrupt: Bool) {
         lock.lock()
@@ -88,15 +112,14 @@ final class ROBTicVelocityTransport {
             do {
                 switch demand {
                 case .stop:
-                    if armed {
-                        // The preflight requires decelerate-to-hold. Safe start
-                        // prevents a subsequent plain velocity packet resuming.
-                        _ = try execute(["--enter-safe-start"])
-                    }
+                    let ownedMotor = armed || motorMayBeEnergized || release != nil
                     armed = false
-                    publish(false, "Torso stopped; holding torque while powered", token: token)
+                    if ownedMotor {
+                        try beginRelease(readyWhenComplete: false, detail: nil, token: token)
+                    } else {
+                        publish(false, "Torso disarmed; no motor output requested", token: token)
+                    }
                 case .arm(let requested):
-                    if armed { _ = try execute(["--enter-safe-start"]) }
                     armed = false
                     guard let speed = requested.velocityUnits(requested.maximumDegreesPerSecond), speed > 0,
                           let acceleration = requested.accelerationUnits else {
@@ -113,23 +136,53 @@ final class ROBTicVelocityTransport {
                           let timeout = Int(settings["command_timeout"] ?? ""), (100 ... 1000).contains(timeout) else {
                         throw Self.error("Tic settings differ from the verified full-step, safe-start and watchdog profile")
                     }
-                    try Self.checkStatus(execute(["--status"]), starting: true)
+                    let status = try execute(["--status"])
+                    motorMayBeEnergized = Self.fields(status)["Energized"] != "No"
+                    try Self.checkStatus(status, starting: true)
                     guard current(token) else { continue }
-                    // ticcmd applies target velocity before energizing/exiting
-                    // safe start. Zero replaces any old target before arming.
-                    armed = true // A partial or timed-out arm must also receive a stop.
+                    // Set a zero target before applying limits. Arming grants
+                    // authority, but leaves the geared torso motor unpowered.
                     _ = try execute(["--velocity", "0", "--max-speed", String(speed),
                                      "--starting-speed", "0", "--max-accel", String(acceleration),
-                                     "--max-decel", String(acceleration), "--energize", "--exit-safe-start"])
+                                     "--max-decel", String(acceleration), "--enter-safe-start"])
+                    profile = requested
                     guard current(token) else { continue }
-                    try Self.checkStatus(execute(["--status"]), starting: false)
-                    profile = requested; lastStatusAt = ProcessInfo.processInfo.systemUptime
-                    publish(true, "Tic ready for camera-referenced velocity control", token: token)
-                case .velocity(let degrees, let validUntil):
+                    try beginRelease(readyWhenComplete: true, detail: nil, token: token)
+                case .velocity(let degrees, let validUntil, let releaseWhenStopped):
                     guard armed, current(token) else { continue }
                     guard ProcessInfo.processInfo.systemUptime <= validUntil,
                           let units = profile.velocityUnits(degrees), abs(degrees) <= profile.maximumDegreesPerSecond else {
                         throw Self.error("Torso demand expired or exceeded the armed speed limit")
+                    }
+                    if units == 0, releaseWhenStopped {
+                        if release == nil, driveActive {
+                            try beginRelease(readyWhenComplete: true, detail: nil, token: token)
+                        }
+                        continue
+                    }
+                    // A transient zero during reversal need not wake an idle
+                    // motor, or interrupt a power release already in progress.
+                    if units == 0, !driveActive { continue }
+                    if units != 0, !driveActive {
+                        release = nil
+                        try Self.checkStatus(execute(["--status"]), starting: true)
+                        guard current(token) else { continue }
+                        guard ProcessInfo.processInfo.systemUptime <= validUntil else {
+                            throw Self.error("Torso demand expired before energizing")
+                        }
+                        // ticcmd sets velocity before energize/exit-safe-start,
+                        // so explicitly clear any old target before powering up.
+                        motorMayBeEnergized = true
+                        _ = try execute(["--velocity", "0", "--energize", "--exit-safe-start"])
+                        guard current(token) else { continue }
+                        try Self.checkStatus(execute(["--status"]), starting: false)
+                        driveActive = true
+                        lastStatusAt = ProcessInfo.processInfo.systemUptime
+                        publish(true, "Torso motor energized for movement", token: token)
+                    }
+                    guard current(token) else { continue }
+                    guard ProcessInfo.processInfo.systemUptime <= validUntil else {
+                        throw Self.error("Torso demand expired before movement")
                     }
                     _ = try execute(["--velocity", String(units)])
                     if current(token), ProcessInfo.processInfo.systemUptime - lastStatusAt >= 0.25 {
@@ -138,17 +191,83 @@ final class ROBTicVelocityTransport {
                     }
                 }
             } catch {
-                let message = error.localizedDescription
-                // Best effort; the Tic's independent command watchdog remains
-                // enabled even if USB is lost or this stop cannot be delivered.
-                if armed { _ = try? execute(["--enter-safe-start"]) }
-                armed = false
-                lock.lock()
-                if token == generation { pending = nil }
-                lock.unlock()
-                publish(false, message, token: token)
+                fail(error.localizedDescription, token: token)
             }
         }
+    }
+
+    private func fail(_ detail: String, token: UInt64) {
+        let needsRelease = armed || motorMayBeEnergized || release != nil
+        armed = false; driveActive = false
+        lock.lock()
+        if token == generation { pending = nil }
+        lock.unlock()
+        publish(false, detail, token: token)
+        if needsRelease {
+            do { try beginRelease(readyWhenComplete: false, detail: detail, token: token) }
+            catch { releaseFailed(error.localizedDescription, prior: detail, token: token) }
+        }
+    }
+
+    /// Runs on the USB queue, with scheduled polls so a pending Stop or newer
+    /// demand can interrupt settling. Never infer physical rest from host demand.
+    private func beginRelease(readyWhenComplete: Bool, detail: String?, token: UInt64) throws {
+        driveActive = false
+        let timeout = max(3, profile.maximumDegreesPerSecond / profile.accelerationDegreesPerSecondSquared + 2)
+        let state = Release(token: token, readyWhenComplete: readyWhenComplete, detail: detail,
+                            deadline: ProcessInfo.processInfo.systemUptime + timeout)
+        release = state
+        _ = try execute(["--velocity", "0", "--enter-safe-start"])
+        pollRelease(id: state.id)
+    }
+
+    private func pollRelease(id: UUID) {
+        guard let state = release, state.id == id, current(state.token) else { return }
+        do {
+            guard ProcessInfo.processInfo.systemUptime <= state.deadline else {
+                throw Self.error("Timed out waiting for the torso motor to stop")
+            }
+            let status = try execute(["--status"])
+            guard try Self.currentVelocity(status) == 0 else {
+                // Status reads do not renew the Tic command watchdog. Keep
+                // safe-start deceleration alive without restoring motion.
+                _ = try execute(["--reset-command-timeout"])
+                queue.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.pollRelease(id: id) }
+                return
+            }
+            _ = try execute(["--deenergize"])
+            let offStatus = try execute(["--status"])
+            guard Self.fields(offStatus)["Energized"] == "No",
+                  try Self.currentVelocity(offStatus) == 0 else {
+                throw Self.error("Tic did not confirm motor power off at rest")
+            }
+            motorMayBeEnergized = false
+            release = nil
+            guard current(state.token) else { return }
+            if state.readyWhenComplete { try Self.checkStatus(offStatus, starting: true) }
+            armed = state.readyWhenComplete
+            let detail = state.detail.map { "\($0); motor de-energized after stopping" }
+                ?? (armed ? "Torso armed and stationary; motor de-energized" : "Torso stopped; motor de-energized")
+            publish(armed, detail, token: state.token)
+        } catch {
+            releaseFailed(error.localizedDescription, prior: state.detail, token: state.token)
+        }
+    }
+
+    private func releaseFailed(_ detail: String, prior: String?, token: UInt64) {
+        armed = false; driveActive = false; release = nil
+        if motorMayBeEnergized { _ = try? execute(["--enter-safe-start"]) }
+        let power = motorMayBeEnergized ? "motor power-off unconfirmed" : "motor de-energized"
+        publish(false, "\(prior.map { "\($0); " } ?? "")\(detail); \(power); re-arm explicitly", token: token)
+    }
+
+    static func currentVelocity(_ text: String) throws -> Int32 {
+        let values = fields(text)
+        guard values["Name"]?.contains("Tic 36v4") == true,
+              let value = values["Current velocity"].flatMap(Int32.init) else {
+            throw error("Tic current velocity is unavailable; stopped state cannot be verified")
+        }
+        return value
     }
 
     static func fields(_ text: String) -> [String: String] {
