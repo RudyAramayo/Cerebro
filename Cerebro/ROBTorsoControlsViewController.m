@@ -20,6 +20,11 @@ static NSString * const ROBAmberHostIPDefaultsKey = @"ROBAmberHostIP";
 static NSTimeInterval const kROBServoRenderIntervalSeconds = 0.1;
 static NSTimeInterval const kROBServoRenderToleranceSeconds = 0.01;
 
+static BOOL ROBTorsoTableRowIsValid(NSInteger row, NSUInteger count)
+{
+    return row >= 0 && (NSUInteger)row < count;
+}
+
 static NSTextField *ROBNeckLabel(NSString *text, NSRect frame)
 {
     NSTextField *label = [NSTextField labelWithString:text ?: @""];
@@ -142,7 +147,7 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
     //TODO: show this in a selectable tableView list
     keyframeAnimationManager.animations;
     
-    self.keyframeNameTextField.stringValue = keyframeAnimationManager.currentAnimation.currentKeyframe.name;
+    self.keyframeNameTextField.stringValue = keyframeAnimationManager.currentAnimation.currentKeyframe.name ?: @"";
 }
 
 - (void)safeNeckStartupCommandDidChange:(NSNotification *)notification
@@ -642,12 +647,16 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
     }
     
     KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
+    // Reused cells must not retain another row's text after deletion, reload,
+    // a stale selection, or a request for an invalid column/row.
+    cellView.textField.stringValue = @"";
 
     if (tableView == self.keyframeTableView) {
         // Populate the cell view with data
         if ([tableColumn.identifier isEqualToString:@"NamedKeyframes"]) { // Replace with your column identifier
-            if (row < keyframeAnimationManager.currentAnimation.namedKeyframes.count) {
-                cellView.textField.stringValue = keyframeAnimationManager.currentAnimation.namedKeyframes[row].name;
+            NSArray<Keyframe *> *keyframes = keyframeAnimationManager.currentAnimation.namedKeyframes;
+            if (ROBTorsoTableRowIsValid(row, keyframes.count)) {
+                cellView.textField.stringValue = keyframes[(NSUInteger)row].name ?: @"";
             }
         }
         return cellView;
@@ -656,13 +665,11 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
     if (tableView == self.keyframeSequenceDetailsTableView) {
         // Populate the cell view with data
         if ([tableColumn.identifier isEqualToString:@"SequenceDetails"]) { // Replace with your column identifier
-            if (row < keyframeAnimationManager.currentAnimation.namedSequences.count) {
-                int selectedSequenceRow = (int)self.keyframeSequencesTableView.selectedRow;
-                if (selectedSequenceRow == -1) {
-                    selectedSequenceRow = 0;
-                }
-                
-                cellView.textField.stringValue = keyframeAnimationManager.currentAnimation.namedSequences[selectedSequenceRow].keyframes[row].name;
+            // Count and display use the same current sequence. The selected
+            // table row may be absent/stale while AppKit restores a window.
+            NSArray<Keyframe *> *keyframes = keyframeAnimationManager.currentAnimation.currentSequence.keyframes;
+            if (ROBTorsoTableRowIsValid(row, keyframes.count)) {
+                cellView.textField.stringValue = keyframes[(NSUInteger)row].name ?: @"";
             }
         }
         return cellView;
@@ -670,8 +677,9 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
     if (tableView == self.keyframeSequencesTableView) {
         // Populate the cell view with data
         if ([tableColumn.identifier isEqualToString:@"NamedSequences"]) { // Replace with your column identifier
-            if (row < keyframeAnimationManager.currentAnimation.namedSequences.count) {
-                cellView.textField.stringValue = keyframeAnimationManager.currentAnimation.namedSequences[row].name;
+            NSArray<KeyframeSequence *> *sequences = keyframeAnimationManager.currentAnimation.namedSequences;
+            if (ROBTorsoTableRowIsValid(row, sequences.count)) {
+                cellView.textField.stringValue = sequences[(NSUInteger)row].name ?: @"";
             }
         }
         return cellView;
@@ -685,10 +693,10 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
     NSInteger selectedRow = [tableView selectedRow];
 
     if (tableView == self.keyframeTableView) {
-        if (selectedRow != -1) { // Check if a row is actually selected
-            KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
-
-            Keyframe *selectedKeyframe = keyframeAnimationManager.currentAnimation.namedKeyframes[selectedRow];
+        KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
+        NSArray<Keyframe *> *keyframes = keyframeAnimationManager.currentAnimation.namedKeyframes;
+        if (ROBTorsoTableRowIsValid(selectedRow, keyframes.count)) {
+            Keyframe *selectedKeyframe = keyframes[(NSUInteger)selectedRow];
             keyframeAnimationManager.currentAnimation.currentKeyframe = selectedKeyframe;
             self.keyframeNameTextField.stringValue = selectedKeyframe.name;
             [self.keyframeSequenceDetailsTableView reloadData];
@@ -701,10 +709,10 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
         
     }
     if (tableView == self.keyframeSequencesTableView) {
-        if (selectedRow != -1) { // Check if a row is actually selected
-            KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
-
-            KeyframeSequence *selectedSequence = keyframeAnimationManager.currentAnimation.namedSequences[selectedRow];
+        KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
+        NSArray<KeyframeSequence *> *sequences = keyframeAnimationManager.currentAnimation.namedSequences;
+        if (ROBTorsoTableRowIsValid(selectedRow, sequences.count)) {
+            KeyframeSequence *selectedSequence = sequences[(NSUInteger)selectedRow];
             keyframeAnimationManager.currentAnimation.currentSequence = selectedSequence;
             self.sequenceNameTextField.stringValue = selectedSequence.name;
             [self.keyframeSequenceDetailsTableView reloadData];
@@ -903,7 +911,9 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
                                                                                   handler:^(NSTableViewRowAction * _Nonnull action, NSInteger row) {
                 // Remove the keyframe from the model before updating the table.
                 KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
-                Keyframe *removedKeyframe = [keyframeAnimationManager.currentAnimation.namedKeyframes objectAtIndex:row];
+                NSArray<Keyframe *> *keyframes = keyframeAnimationManager.currentAnimation.namedKeyframes;
+                if (!ROBTorsoTableRowIsValid(row, keyframes.count)) return;
+                Keyframe *removedKeyframe = keyframes[(NSUInteger)row];
                 [keyframeAnimationManager.currentAnimation removeNamedKeyframeWithName:removedKeyframe.name];
                 [keyframeAnimationManager saveCurrentKeyframeAnimation];
                 
@@ -921,11 +931,8 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
                                                                                     title:@"Delete"
                                                                                   handler:^(NSTableViewRowAction * _Nonnull action, NSInteger row) {
                 // Remove the sequence keyframe from the model before updating the table.
-                int selectedSequenceRow = (int)self.keyframeSequencesTableView.selectedRow;
-                if (selectedSequenceRow == -1) {
-                    selectedSequenceRow = 0;
-                }
                 KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
+                if (!ROBTorsoTableRowIsValid(row, keyframeAnimationManager.currentAnimation.currentSequence.keyframes.count)) return;
                 [keyframeAnimationManager.currentAnimation removeSequenceKeyframeWithIndex:row];
                 [keyframeAnimationManager saveCurrentKeyframeAnimation];
                 
@@ -943,9 +950,8 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
                                                                                     title:@"Delete"
                                                                                   handler:^(NSTableViewRowAction * _Nonnull action, NSInteger row) {
                 // Remove the sequence from the model before updating the table.
-                int selectedSequenceRow = (int)self.keyframeSequencesTableView.selectedRow;
-
                 KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
+                if (!ROBTorsoTableRowIsValid(row, keyframeAnimationManager.currentAnimation.namedSequences.count)) return;
                 [keyframeAnimationManager.currentAnimation removeSequenceWithIndex:row];
                 [keyframeAnimationManager saveCurrentKeyframeAnimation];
                 
@@ -973,12 +979,13 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 - (IBAction)copyNamedKeyframeToCurrentSequence:(id)sender {
     KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
 
-    int selectedNamedKeyframe = (int) self.keyframeTableView.selectedRow;
+    NSInteger selectedNamedKeyframe = self.keyframeTableView.selectedRow;
     if (selectedNamedKeyframe == -1) {
         selectedNamedKeyframe = 0;
     }
-    if (selectedNamedKeyframe < keyframeAnimationManager.currentAnimation.namedKeyframes.count) {
-        Keyframe *keyframe = keyframeAnimationManager.currentAnimation.namedKeyframes[selectedNamedKeyframe];
+    NSArray<Keyframe *> *keyframes = keyframeAnimationManager.currentAnimation.namedKeyframes;
+    if (ROBTorsoTableRowIsValid(selectedNamedKeyframe, keyframes.count)) {
+        Keyframe *keyframe = keyframes[(NSUInteger)selectedNamedKeyframe];
         [keyframeAnimationManager.currentAnimation addKeyframeToCurrentSequence:keyframe];
         [self.keyframeSequenceDetailsTableView reloadData];
         [keyframeAnimationManager saveCurrentKeyframeAnimation];
@@ -988,12 +995,15 @@ static BOOL ROBNeckReadFiniteNumber(NSTextField *field, double *valueOut)
 
 - (IBAction) playCurrentlySelectedKeyframeAnimation:(id)sender {
     KeyframeAnimationManager *keyframeAnimationManager = [KeyframeAnimationManager shared];
-    int row = (int) self.keyframeTableView.selectedRow;
+    NSArray<Keyframe *> *keyframes = keyframeAnimationManager.currentAnimation.namedKeyframes;
+    NSInteger row = self.keyframeTableView.selectedRow;
     if (row == -1) {
         row = 0;
+        if (!ROBTorsoTableRowIsValid(row, keyframes.count)) return;
         [self.keyframeTableView selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
     }
-    Keyframe *keyframe = keyframeAnimationManager.currentAnimation.namedKeyframes[row];
+    if (!ROBTorsoTableRowIsValid(row, keyframes.count)) return;
+    Keyframe *keyframe = keyframes[(NSUInteger)row];
 
     BOOL shouldSleep = NO;
     if (!self.is_in_position_mode_R11 && keyframe.arm_R11_keyframe) {
