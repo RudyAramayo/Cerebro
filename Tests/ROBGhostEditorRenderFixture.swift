@@ -103,16 +103,46 @@ final class GhostFixtureSnapshotView: NSView {
             ROBHeadCameraPoseEstimator.estimateDisplay(panRadians: pan, lowerTarget: lower,
                 upperTarget: upper, known: true)!
         }
-        func assertAcceptedHead(_ lower: Int, _ upper: Int) {
-            editor.setHeadCommandEstimate(estimate(lower, upper))
+        func assertReferenceGeometry(_ original: SCNNode, _ ghost: SCNNode) {
+            func dimensions(_ geometry: SCNGeometry) -> [CGFloat] {
+                if let box = geometry as? SCNBox { return [box.width, box.height, box.length, box.chamferRadius] }
+                if let cylinder = geometry as? SCNCylinder { return [cylinder.radius, cylinder.height] }
+                if let sphere = geometry as? SCNSphere { return [sphere.radius] }
+                preconditionFailure("Head reference unexpectedly contains captured scan geometry")
+            }
+            precondition(original.childNodes.map(\.name) == ghost.childNodes.map(\.name),
+                "Normal and blue head reference hierarchies differ")
+            precondition((original.geometry == nil) == (ghost.geometry == nil))
+            if let geometry = original.geometry, let proposed = ghost.geometry {
+                precondition(type(of: geometry) == type(of: proposed) && dimensions(geometry) == dimensions(proposed),
+                    "Normal and blue head reference shapes differ")
+                precondition(geometry.firstMaterial !== proposed.firstMaterial &&
+                    geometry.firstMaterial!.transparency > 0.9 && proposed.firstMaterial!.transparency < 0.5,
+                    "Normal/blue head styling must keep separate opaque/translucent materials")
+            }
+            for (actual, proposed) in zip(original.childNodes, ghost.childNodes) {
+                precondition(actual.simdTransform == proposed.simdTransform,
+                    "Normal and blue head reference bindings differ")
+                if actual.geometry != nil {
+                    precondition(actual.renderingOrder == 0 && proposed.renderingOrder == 10,
+                        "Head reference geometry changed normal/blue render layering")
+                }
+                assertReferenceGeometry(actual, proposed)
+            }
+        }
+        func assertAcceptedHead(_ lower: Int, _ upper: Int, pan: Double = 0) {
+            editor.setHeadCommandEstimate(estimate(lower, upper, pan: pan))
             var expected = model.reference
             let radiansPerTarget = Double.pi / (180 * 33.3333333333)
             expected["lower_neck"] = Double(lower-6011) * radiansPerTarget
             expected["upper_neck"] = -Double(upper-6906) * radiansPerTarget
-            expected["neck_pan"] = 0
+            expected["neck_pan"] = pan
             let frames = model.frames(expected)
             for link in headLinks {
                 let originalNode = headNode("Original URDF", link), ghostNode = headNode("Blue ghost", link)
+                precondition(originalNode.geometry == nil && !originalNode.childNodes.isEmpty,
+                    "Normal \(link) still displays a captured scan fragment instead of the corrected reference")
+                assertReferenceGeometry(originalNode, ghostNode)
                 let frame = frames[link]!
                 for col in 0..<4 {
                     precondition(simd_distance(originalNode.simdTransform[col], SIMD4<Float>(frame[col])) < 1e-6,
@@ -129,44 +159,42 @@ final class GhostFixtureSnapshotView: NSView {
                 precondition(abs(renderedCamera[col][row] - cloud[row*4+col].floatValue) < 1e-6,
                     "Cloud optical ray/origin differs from the accepted rendered head chain")
             } }
-            let lens = headGhost.childNode(withName: "reference-oak-lens-0", recursively: true)!
             // The reference lens cylinder's local +Y is rotated into the
             // OAK link's +X forward axis; its center is the optical origin.
-            let lensMatrix = lens.simdWorldTransform
-            let lensForward = simd_normalize(SIMD3(lensMatrix.columns.1.x, lensMatrix.columns.1.y, lensMatrix.columns.1.z))
             let cloudForward = simd_normalize(SIMD3(cloud[2].floatValue, cloud[6].floatValue, cloud[10].floatValue))
-            precondition(simd_distance(lensForward, cloudForward) < 1e-6,
-                "Reference OAK lens does not face along the unchanged ghost/original optical ray")
-            precondition(simd_distance(SIMD3(lensMatrix.columns.3.x, lensMatrix.columns.3.y, lensMatrix.columns.3.z),
-                SIMD3(cloud[3].floatValue, cloud[7].floatValue, cloud[11].floatValue)) < 1e-6,
-                "Reference OAK lens center differs from the original cloud optical origin")
+            for head in [originalHead, headGhost] {
+                let lens = head.childNode(withName: "reference-oak-lens-0", recursively: true)!
+                let lensMatrix = lens.simdWorldTransform
+                let lensForward = simd_normalize(SIMD3(lensMatrix.columns.1.x, lensMatrix.columns.1.y, lensMatrix.columns.1.z))
+                precondition(simd_distance(lensForward, cloudForward) < 1e-6,
+                    "Normal/blue OAK lens does not face along the unchanged cloud optical ray")
+                precondition(simd_distance(SIMD3(lensMatrix.columns.3.x, lensMatrix.columns.3.y, lensMatrix.columns.3.z),
+                    SIMD3(cloud[3].floatValue, cloud[7].floatValue, cloud[11].floatValue)) < 1e-6,
+                    "Normal/blue OAK lens center differs from the cloud optical origin")
+            }
         }
         assertAcceptedHead(6011, 6906)
-        let referenceLower = headNode("Blue ghost", "lower_neck_link")
-        let stem = referenceLower.childNode(withName: "reference-lower-stem", recursively: true)!
-        let stemMatrix = stem.simdWorldTransform
-        let stemUp = simd_normalize(SIMD3(stemMatrix.columns.2.x, stemMatrix.columns.2.y, stemMatrix.columns.2.z))
-        precondition(simd_distance(stemUp, SIMD3<Float>(0, 1, 0)) < 1e-6,
-            "Neutral reference neck retained the captured scan's tilted visual binding")
-        precondition(abs((stem.geometry as! SCNBox).length - 0.13) < 1e-8 && abs(stem.position.z - 0.065) < 1e-6)
-        for (link, name) in [("lower_neck_link", "reference-lower-pitch-axis"),
-                             ("upper_neck_link", "reference-upper-pitch-axis")] {
-            let axis = headNode("Blue ghost", link).childNode(withName: name, recursively: true)!.simdWorldTransform.columns.1
-            precondition(simd_distance(simd_normalize(SIMD3(axis.x, axis.y, axis.z)), SIMD3<Float>(-1, 0, 0)) < 1e-6,
-                "Neutral reference servo pitch axis is not aligned to its URDF joint")
+        for prefix in ["Original URDF", "Blue ghost"] {
+            let stem = headNode(prefix, "lower_neck_link").childNode(withName: "reference-lower-stem", recursively: true)!
+            let stemMatrix = stem.simdWorldTransform
+            let stemUp = simd_normalize(SIMD3(stemMatrix.columns.2.x, stemMatrix.columns.2.y, stemMatrix.columns.2.z))
+            precondition(simd_distance(stemUp, SIMD3<Float>(0, 1, 0)) < 1e-6,
+                "Neutral normal/blue neck retained the captured scan's tilted visual binding")
+            precondition(abs((stem.geometry as! SCNBox).length - 0.13) < 1e-8 && abs(stem.position.z - 0.065) < 1e-6)
+            for (link, name) in [("lower_neck_link", "reference-lower-pitch-axis"),
+                                 ("upper_neck_link", "reference-upper-pitch-axis")] {
+                let axis = headNode(prefix, link).childNode(withName: name, recursively: true)!.simdWorldTransform.columns.1
+                precondition(simd_distance(simd_normalize(SIMD3(axis.x, axis.y, axis.z)), SIMD3<Float>(-1, 0, 0)) < 1e-6,
+                    "Neutral normal/blue servo pitch axis is not aligned to its URDF joint")
+            }
+            let instaMount = headNode(prefix, "insta360_link").childNode(withName: "reference-insta-mount", recursively: true)!
+            let instaAxis = instaMount.simdWorldTransform.columns.2
+            let backward20 = Float(20) * .pi / 180
+            precondition(simd_distance(simd_normalize(SIMD3(instaAxis.x, instaAxis.y, instaAxis.z)),
+                SIMD3<Float>(0, cos(backward20), sin(backward20))) < 1e-6,
+                "Normal/blue Insta mounting tilt must be independently 20 degrees backward at neutral")
         }
-        let instaMount = headNode("Blue ghost", "insta360_link").childNode(withName: "reference-insta-mount", recursively: true)!
-        let instaAxis = instaMount.simdWorldTransform.columns.2
-        let backward20 = Float(20) * .pi / 180
-        precondition(simd_distance(simd_normalize(SIMD3(instaAxis.x, instaAxis.y, instaAxis.z)),
-            SIMD3<Float>(0, cos(backward20), sin(backward20))) < 1e-6,
-            "Reference Insta mounting tilt must be independently 20 degrees backward at neutral")
-        for (link, count) in [("lower_neck_link", 2262), ("upper_neck_link", 1895),
-                              ("insta360_link", 4338), ("oak_link", 402)] {
-            precondition(headNode("Original URDF", link).geometry!.sources(for: .vertex).first!.vectorCount == count,
-                "Reference visualization replaced the original captured head geometry")
-        }
-        print("Reference head: neutral neck/servo axes, independent backward-20-degree Insta, OAK lens/cloud agreement and unchanged original scan/FK passed")
+        print("Reference head: shared normal/blue shapes, neutral neck/servo axes, independent backward-20-degree Insta, both OAK lenses/cloud agreement and unchanged FK passed")
         let uprightLower = headNode("Original URDF", "lower_neck_link").simdTransform
         let uprightPanPivot = headNode("Original URDF", "neck_pan_link").simdTransform.columns.3
         let uprightRay = editor.depthCloudCameraTransform(false)
@@ -198,9 +226,22 @@ final class GhostFixtureSnapshotView: NSView {
         for row in 0..<3 { precondition(abs(compensatedRay[row*4+2].doubleValue-uprightRay[row*4+2].doubleValue) < 1e-8) }
         precondition(abs(compensatedRay[11].doubleValue-uprightRay[11].doubleValue) > 0.02,
             "Compensated head direction incorrectly suppressed the lower pivot/camera-origin update")
-        editor.setHeadCommandEstimate(estimate(6011, 6306, pan: .pi / 12))
+        assertAcceptedHead(6011, 6306, pan: .pi / 12)
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
         let controls = descendants(editor.panelView)
+        let jointPicker = controls.compactMap { $0 as? NSPopUpButton }.first { $0.itemTitles.contains("lower_neck") }!
+        let jointAngle = controls.compactMap { $0 as? NSSlider }.first { $0.action == NSSelectorFromString("changeAngle") }!
+        let acceptedHeadFrames = headLinks.map { headNode("Original URDF", $0).simdTransform }
+        let acceptedHeadCloud = editor.depthCloudCameraTransform(false)
+        jointPicker.selectItem(withTitle: "lower_neck")
+        NSApp.sendAction(jointPicker.action!, to: jointPicker.target, from: jointPicker)
+        jointAngle.doubleValue = 20
+        NSApp.sendAction(jointAngle.action!, to: jointAngle.target, from: jointAngle)
+        precondition(headNode("Blue ghost", "lower_neck_link").simdTransform != acceptedHeadFrames[0],
+            "Explicit ghost neck edit did not update its preview")
+        precondition(headLinks.map { headNode("Original URDF", $0).simdTransform } == acceptedHeadFrames &&
+            editor.depthCloudCameraTransform(false) == acceptedHeadCloud,
+            "Explicit ghost neck edit changed the normal accepted model or cloud pose")
         let presets = controls.first { $0.identifier?.rawValue == "ghost-preset" } as! NSPopUpButton
         let selection = CommandLine.arguments.count > 2 ? Int(CommandLine.arguments[2]) ?? 1 : 1
         presets.selectItem(at: selection); NSApp.sendAction(presets.action!, to: presets.target, from: presets)

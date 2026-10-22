@@ -3,23 +3,29 @@
 The controller input scene projects aligned RGB-D points through the camera's
 accepted neck command estimates. It does not assume that the head is level.
 
-- The original robot's lower neck, pan, upper neck and attached camera meshes
-  follow accepted neck command estimates. The untouched blue head follows the
-  same pose; explicitly edited ghost neck angles remain preview-only overrides.
+- The normal robot's head follows accepted neck command estimates. The untouched
+  blue head follows the same pose; explicit ghost neck edits change only its
+  preview, not the normal model or the cloud's camera transform.
 - Rob confirmed lower **6011 / upper 6906** as the physical upright neck and
   forward, level front-camera reference. The display estimator uses that pair
   explicitly; it does not take its reference from the driver's safety settings.
   The current values coincide, so joint FK and camera projection are unchanged.
-- The captured scan has visible neck lean even at zero joint angles. The blue
-  ghost uses approximate mechanical reference shapes for the lower neck, pan,
-  upper neck, Insta housing and OAK housing/lenses on those same joint frames.
-  Its Insta mount has a separate 20° backward visual tilt. The original scan
-  remains intact, and the OAK optical frame is independent of that visual tilt.
-  These shapes clarify the preview; measured hardware calibration stays queued.
+- The captured scan has visible neck lean even at zero joint angles. Rob
+  accepted the blue head geometry and requested the same correction on the
+  normal model. Both now use the same approximate mechanical reference shapes
+  for five links: lower neck, pan, upper neck, Insta housing and OAK
+  housing/lenses. The normal model's previous captured head rendering is
+  replaced; the captured asset remains unchanged on disk, with other scan parts
+  retained. Both Insta housings have a separate 20° backward visual tilt; the
+  OAK optical frame is independent of it. Shared joint FK and cloud projection
+  are unchanged. This sends no servo command and does not calibrate hardware.
   The confirmed reference and rejected intermediate candidate are recorded in
   [evidence](calibration/evidence/2026-10-21-flat-floor/neck-reference-preview.json),
-  with a [model-only comparison](calibration/evidence/2026-10-21-flat-floor/neck-reference-preview.png).
-  Final visual acceptance of the loaded preview remains pending.
+  with the [earlier blue-only comparison](calibration/evidence/2026-10-21-flat-floor/neck-reference-preview.png).
+  See [shared neck model evidence](calibration/evidence/2026-10-21-flat-floor/shared-neck-model.json)
+  and [comparison](calibration/evidence/2026-10-21-flat-floor/shared-neck-model.png).
+  Visual review of the updated normal model remains pending; measured hardware
+  calibration stays queued.
 - The optical transform comes directly from that articulated URDF camera frame.
   The cloud uses the same joint FK, optical mount, basis and presentation scale,
   without a separate pivot rotation. Accepted upright lower 6011 and level upper
@@ -124,8 +130,9 @@ belly geometry and invalid commands.
 `bash Scripts/test-depth-cloud-projection.sh` checks optical axes, scale,
 stationary surface round trips and invalid affine transforms. The render fixture
 also verifies that the cloud origin equals the rendered head's optical mount
-and that untouched ghost link transforms match the original. It also checks the
-blue reference axes and OAK lenses against that shared camera frame. All fixtures are isolated
+and that untouched ghost link transforms match the normal model. It also checks
+both models' reference axes and OAK lenses against the shared camera frame.
+All fixtures are isolated
 from cameras and actuators. The signed macOS build checks integration.
 `bash Scripts/test-depth-floor-rectification.sh` checks noisy tilted floors,
 outliers, rigid distance/height preservation, sparse/line/wall/table/ambiguous

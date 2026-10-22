@@ -70,16 +70,18 @@ import simd
             renderRoot.simdTransform = capturedRobot.presentation.simdWorldTransform * modelBasis
             scene.rootNode.addChildNode(renderRoot)
             for (link, geometry, ghostGeometry) in try capturedGeometry(model) {
-                let original = SCNNode(geometry: geometry)
-                let originalMaterial = SCNMaterial(); originalMaterial.diffuse.contents = NSColor.white
+                let originalMaterial = SCNMaterial()
+                originalMaterial.diffuse.contents = headLinks.contains(link) ? NSColor.lightGray : NSColor.white
                 originalMaterial.lightingModel = .constant; originalMaterial.isDoubleSided = true
+                let original = referenceHeadNode(link: link, material: originalMaterial, renderingOrder: 0)
+                    ?? SCNNode(geometry: geometry)
                 original.geometry?.materials = [originalMaterial]; original.name = "Original URDF \(link)"
                 renderRoot.addChildNode(original); originalNodes[link] = original
                 let blue = SCNMaterial(); blue.diffuse.contents = NSColor.systemBlue
                 blue.transparency = 0.12
                 blue.lightingModel = .constant
                 blue.isDoubleSided = true; blue.writesToDepthBuffer = false; blue.readsFromDepthBuffer = false
-                let proposed = referenceHeadNode(link: link, material: blue) ?? SCNNode(geometry: ghostGeometry)
+                let proposed = referenceHeadNode(link: link, material: blue, renderingOrder: 10) ?? SCNNode(geometry: ghostGeometry)
                 proposed.geometry?.materials = [blue]; proposed.renderingOrder = 10; proposed.name = "Blue ghost \(link)"
                 renderRoot.addChildNode(proposed); ghostNodes[link] = proposed
             }
@@ -181,7 +183,7 @@ import simd
         let targets = acceptedHeadTargets.map { "L\($0.lowerTarget) / U\($0.upperTarget) · " } ?? ""
         let frozen = previewFrozen ? (preparationSnapshotRefreshed
             ? " · picture frozen after neck preparation" : " · picture awaiting neck preparation") : ""
-        headInfo.stringValue = String(format: "Head command estimate: %@optical tilt %+.1f°%@\nBlue neck: reference L6011/U6906 · Insta360 ≈20° back", targets,
+        headInfo.stringValue = String(format: "Head command estimate: %@optical tilt %+.1f°%@\nNeck reference: L6011/U6906 · Insta mount ≈20° back", targets,
             pitch.doubleValue * 180 / .pi, frozen)
     }
 
@@ -222,7 +224,7 @@ import simd
     private func row(_ views: [NSView]) -> NSStackView { let value = NSStackView(views: views); value.spacing = 7; return value }
     private func buildPanel() {
         let title = NSTextField(labelWithString: "Ghost gestures"); title.font = .boldSystemFont(ofSize: 19)
-        let help = NSTextField(wrappingLabelWithString: "Original: captured robot with left encoders and accepted neck command estimates. Blue: proposed motion. Preview and save every named joint; execution currently supports supervised left-arm gestures. Other joints remain reference estimates.")
+        let help = NSTextField(wrappingLabelWithString: "Robot: measured left arm and accepted neck command estimates. Blue: proposed motion. Preview and save every named joint; execution currently supports supervised left-arm gestures. Other joints remain reference estimates.")
         help.textColor = .secondaryLabelColor
         headInfo.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
         headInfo.identifier = NSUserInterfaceItemIdentifier("ghost-head-command")
@@ -315,17 +317,17 @@ import simd
     }
 
     /// The lean-back scan contains skewed neck housings even at zero FK angles.
-    /// Use a mechanical reference for the proposed head, on the same link frames.
+    /// Use the same mechanical reference for normal and proposed head geometry.
     /// Its dimensions are display envelopes; no motor or collision calibration
-    /// is inferred from these shapes. The original scan remains available beside it.
-    private func referenceHeadNode(link: String, material: SCNMaterial) -> SCNNode? {
+    /// is inferred from these shapes. The source scan asset remains unchanged.
+    private func referenceHeadNode(link: String, material: SCNMaterial, renderingOrder: Int) -> SCNNode? {
         guard headLinks.contains(link) else { return nil }
         let root = SCNNode()
         func add(_ geometry: SCNGeometry, _ name: String, _ position: SCNVector3,
                  angles: SCNVector3 = SCNVector3Zero, parent: SCNNode? = nil) {
             geometry.materials = [material]
             let node = SCNNode(geometry: geometry); node.name = name
-            node.position = position; node.eulerAngles = angles; node.renderingOrder = 10
+            node.position = position; node.eulerAngles = angles; node.renderingOrder = renderingOrder
             (parent ?? root).addChildNode(node)
         }
         func box(_ name: String, _ x: CGFloat, _ y: CGFloat, _ z: CGFloat, _ position: SCNVector3) {

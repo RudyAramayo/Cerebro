@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-22T05:24:00.220101+00:00",
+  "baseCommit": "65b1421c837c19a74dce136bf80d153031c3f4c0",
+  "request": "Make the normal robot neck match the accepted blue ghost geometry and reflect accepted servo value changes.",
+  "change": "Both normal and blue lower neck, pan, upper neck, Insta housing and OAK housing/lenses use the same mechanical reference factory on the existing URDF link frames. Normal head is opaque gray with normal depth behavior and render order0; blue retains translucent material and render order10. Separate node/geometry instances preserve independent styling and ghost edits. HUD refers to the shared neck reference.",
+  "servoTracking": "Normal neck always follows accepted pan/lower/upper estimates. Untouched blue neck follows the same estimates; an explicit ghost edit affects only its proposed pose. Current update pipeline and camera FK are unchanged. Confirmed6011/6906 gives an upright lower neck and level OAK; the Insta visual mount remains20 degrees backward relative to its link.",
+  "unchanged": "Driver safety references and motor commands, canonical URDF/link origins, arm mappingID, motion plans, current recording/replay, camera projection, persistent head-cloud policy and non-head captured geometry. Captured source asset remains unchanged on disk; its old head fragments are no longer drawn on the normal model.",
+  "qualification": "Neck values are accepted command estimates, not shaft measurements. Approximate display geometry is not measured hardware or collision calibration. Other uncommissioned servo mappings remain reference estimates. Full camera/URDF calibration stays queued.",
+  "sourceSHA256": {
+    "Cerebro/ROBGhostGestureEditor.swift": "09d452e1459ee59793b527bd6b7214f09caaf050ee36340fbb6eb1192f4923ec",
+    "Tests/ROBGhostEditorRenderFixture.swift": "8bcaeacf7eae7cd95d0fefb4d9ccb268b3f88b5a966c9e1b5a58edfc3244e403"
+  },
+  "capturedAsset": {
+    "path": "Cerebro/Resources/ShadowPlanner/robot-visual-rig.json",
+    "sha256": "4e39b62b2c45144b6a3660832b5879e825f6c115461ca97ba87cbf4a815bd8dc",
+    "matchesBaseCommit": true
+  },
+  "checks": {
+    "cerebro-shared-neck-render-tests.log": {
+      "result": "passed",
+      "sha256": "9b38d7689bf0f22c3aa372fa53d5804c691018ae4b4cd7a8ee854d15176d831c"
+    },
+    "cerebro-shared-neck-model-build.log": {
+      "result": "passed",
+      "sha256": "801ef94623f2d8696d169ab93755b6c079995044d5cd690813baebb43cda3b5c"
+    }
+  },
+  "coverage": [
+    "All five normal/blue head hierarchies, primitive classes/dimensions and local transforms match",
+    "Both parent FK chains match canonical neutral, articulated, compensated and pan poses",
+    "Both OAK lenses agree with the shared optical origin/direction",
+    "Opaque normal and translucent blue materials are separate; normal/blue render orders remain0/10",
+    "Explicit ghost neck edit moves blue only, leaving normal head transforms and cloud camera unchanged",
+    "Existing frozen snapshot, stage-bound Continue controls and embedded resizing checks passed with no hardware transport"
+  ],
+  "build": {
+    "isolatedBuild": "Signed arm64 Debug build succeeded from the existing intended-change worktree at794c524 plus current ROBSCNViewController, ROBTorsoControlsViewController, ROBGhostMotionPlan and ROBGhostGestureEditor. Unrelated working-tree edits excluded from that build.",
+    "isolatedExecutableSHA256": "52a01330ea1abdce9f8504a06b7ac913883442282ceaf165b4c8f5d50fc3d348",
+    "installedExecutableSHA256": "3911fde24a1fa48295854b0ba274f20b60cb85404811eb18a028af290b4655cb",
+    "runningExecutableSHA256": "3911fde24a1fa48295854b0ba274f20b60cb85404811eb18a028af290b4655cb",
+    "signature": "codesign --verify --deep --strict passed on isolated built, installed and running bundles",
+    "runningCopy": "Xcode DerivedData build. After the previous copy quit, a new Xcode process appeared; the running and installed executables match. Verified the new shared-neck HUD and normal geometry in that running app. Did not overwrite the Xcode build artifact or stop its debugger."
+  },
+  "reloadPreflight": {
+    "UTC": "2026-10-22T05:20:30.174Z",
+    "telemetry": "Both arms all joint CAN replies current, about22 Hz, receipt ages0.06/0.01 s; all14 raw statuses0 and currents0. Left q=[0,0,0,-0.003,0,0.00232,0]; right all zero.",
+    "actions": "Disconnected Cerebro arm tunnel, requested normal Quit, installed the separately signed development bundle and reconnected UI control to the subsequently relaunched Xcode copy. No arm, gripper, torque, recovery or explicit neck commands. Separate torso-stepper terminal untouched."
+  },
+  "liveVerification": {
+    "UTC": "2026-10-22T05:22:07.865Z",
+    "result": "Controller HUD says Robot: measured left arm and accepted neck command estimates, plus Neck reference: L6011/U6906. Normal head now visibly uses the same corrected reference shapes as blue; former tilted scan head fragments are absent. Live neck estimate at inspection wasL7014/U7790, optical about-3.4 degrees.",
+    "limits": "No physical servo movement was induced for validation. Automated fixture varied accepted estimates to verify tracking. Operator review of the updated normal model remains pending. Room/chat screenshot was inspected through UI but not saved to the repository."
+  },
+  "comparison": {
+    "path": "shared-neck-model.png",
+    "sha256": "f913b1a0da4470956efc1f28d6bd424dcc57fc8ee7b4c1e4b5a3107de5e767fb",
+    "meaning": "Model-only normal/blue side comparison at confirmed6011/6906; blue shown opaque for clarity, live overlay remains translucent."
+  }
+}
