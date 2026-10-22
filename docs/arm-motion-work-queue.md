@@ -85,6 +85,13 @@ until the current test and controller workflow are finished.
    Current lower/upper targets and optical FK tilt now remain visible separately;
    no neck calibration constants or URDF origins changed. Isolated model/render
    checks pass; the running robot still needs visual verification after reload.
+   Rob explicitly confirmed **6011/6906** for the physical vertical neck and
+   level front camera. The blue ghost now uses approximate mechanical head/neck
+   reference shapes on the same FK, with an independent 20° backward Insta
+   visual mount. The original scan, camera projection, driver safety references
+   and motor commands are unchanged. Final visual acceptance remains pending;
+   full measured calibration remains queued. See [reference evidence](calibration/evidence/2026-10-21-flat-floor/neck-reference-preview.json)
+   and [comparison](calibration/evidence/2026-10-21-flat-floor/neck-reference-preview.png).
    The live current replay was verified, and a +2 cm XYZ ghost pose was saved as
    **Centered hello +2cm** and reviewed; it has not been physically executed.
    Check neck orientation against the physical robot after loading.

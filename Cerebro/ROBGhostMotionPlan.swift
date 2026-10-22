@@ -8,8 +8,12 @@ enum ROBGhostMotionError: LocalizedError {
 }
 
 /// Accepted Maestro commands converted once for the model and its camera.
-/// These are the existing command-space mounting priors, not shaft feedback.
+/// These are command-space mounting priors, not shaft feedback.
 @objcMembers final class ROBHeadCameraPoseEstimator: NSObject {
+    // Operator-observed vertical neck / forward OAK posture. The driver's
+    // safety/clearance targets are separate and must not define visual zero.
+    static let displayUprightLowerTarget = 6011
+    static let displayLevelUpperTarget = 6906
     let panRadians: Double
     let lowerPitch: Double
     let upperPitch: Double
@@ -20,6 +24,14 @@ enum ROBGhostMotionError: LocalizedError {
                  lowerTarget: Int, upperTarget: Int) {
         self.panRadians = panRadians; self.lowerPitch = lowerPitch; self.upperPitch = upperPitch
         self.lowerTarget = lowerTarget; self.upperTarget = upperTarget
+    }
+
+    @objc(estimateDisplayPanRadians:lowerTarget:upperTarget:known:)
+    static func estimateDisplay(panRadians: Double, lowerTarget: Int, upperTarget: Int,
+                                known: Bool) -> ROBHeadCameraPoseEstimator? {
+        estimate(panRadians: panRadians, lowerTarget: lowerTarget, upperTarget: upperTarget,
+                 uprightLowerTarget: displayUprightLowerTarget,
+                 levelUpperTarget: displayLevelUpperTarget, known: known)
     }
 
     @objc(estimatePanRadians:lowerTarget:upperTarget:uprightLowerTarget:levelUpperTarget:known:)

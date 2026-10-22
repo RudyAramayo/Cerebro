@@ -92,17 +92,16 @@ final class GhostFixtureSnapshotView: NSView {
             abs(origin.y - downCamera[7].floatValue) < 1e-6 && abs(origin.z - downCamera[11].floatValue) < 1e-6,
             "Depth projection origin differs from the rendered head's optical mount")
 
-        // Regression for the live L7014/U7790 posture: the lower mechanism
-        // leans forward as its target increases, while the upper servo's
-        // increase counter-rotates it. Adding both as upward pitch aimed the
-        // model/cloud at the ceiling even though the real camera faced a wall.
+        // The operator confirmed a vertical neck and forward-facing OAK at
+        // L6011/U6906. The previously inferred L7014/U7790 must remain an
+        // articulated pose rather than silently becoming the display zero.
         let headLinks = ["lower_neck_link", "neck_pan_link", "upper_neck_link", "insta360_link", "oak_link"]
         func headNode(_ prefix: String, _ link: String) -> SCNNode {
             scene.rootNode.childNodes.flatMap(\.childNodes).first { $0.name == "\(prefix) \(link)" }!
         }
         func estimate(_ lower: Int, _ upper: Int, pan: Double = 0) -> ROBHeadCameraPoseEstimator {
-            ROBHeadCameraPoseEstimator.estimate(panRadians: pan, lowerTarget: lower, upperTarget: upper,
-                uprightLowerTarget: 6011, levelUpperTarget: 6906, known: true)!
+            ROBHeadCameraPoseEstimator.estimateDisplay(panRadians: pan, lowerTarget: lower,
+                upperTarget: upper, known: true)!
         }
         func assertAcceptedHead(_ lower: Int, _ upper: Int) {
             editor.setHeadCommandEstimate(estimate(lower, upper))
@@ -130,15 +129,57 @@ final class GhostFixtureSnapshotView: NSView {
                 precondition(abs(renderedCamera[col][row] - cloud[row*4+col].floatValue) < 1e-6,
                     "Cloud optical ray/origin differs from the accepted rendered head chain")
             } }
+            let lens = headGhost.childNode(withName: "reference-oak-lens-0", recursively: true)!
+            // The reference lens cylinder's local +Y is rotated into the
+            // OAK link's +X forward axis; its center is the optical origin.
+            let lensMatrix = lens.simdWorldTransform
+            let lensForward = simd_normalize(SIMD3(lensMatrix.columns.1.x, lensMatrix.columns.1.y, lensMatrix.columns.1.z))
+            let cloudForward = simd_normalize(SIMD3(cloud[2].floatValue, cloud[6].floatValue, cloud[10].floatValue))
+            precondition(simd_distance(lensForward, cloudForward) < 1e-6,
+                "Reference OAK lens does not face along the unchanged ghost/original optical ray")
+            precondition(simd_distance(SIMD3(lensMatrix.columns.3.x, lensMatrix.columns.3.y, lensMatrix.columns.3.z),
+                SIMD3(cloud[3].floatValue, cloud[7].floatValue, cloud[11].floatValue)) < 1e-6,
+                "Reference OAK lens center differs from the original cloud optical origin")
         }
         assertAcceptedHead(6011, 6906)
+        let referenceLower = headNode("Blue ghost", "lower_neck_link")
+        let stem = referenceLower.childNode(withName: "reference-lower-stem", recursively: true)!
+        let stemMatrix = stem.simdWorldTransform
+        let stemUp = simd_normalize(SIMD3(stemMatrix.columns.2.x, stemMatrix.columns.2.y, stemMatrix.columns.2.z))
+        precondition(simd_distance(stemUp, SIMD3<Float>(0, 1, 0)) < 1e-6,
+            "Neutral reference neck retained the captured scan's tilted visual binding")
+        precondition(abs((stem.geometry as! SCNBox).length - 0.13) < 1e-8 && abs(stem.position.z - 0.065) < 1e-6)
+        for (link, name) in [("lower_neck_link", "reference-lower-pitch-axis"),
+                             ("upper_neck_link", "reference-upper-pitch-axis")] {
+            let axis = headNode("Blue ghost", link).childNode(withName: name, recursively: true)!.simdWorldTransform.columns.1
+            precondition(simd_distance(simd_normalize(SIMD3(axis.x, axis.y, axis.z)), SIMD3<Float>(-1, 0, 0)) < 1e-6,
+                "Neutral reference servo pitch axis is not aligned to its URDF joint")
+        }
+        let instaMount = headNode("Blue ghost", "insta360_link").childNode(withName: "reference-insta-mount", recursively: true)!
+        let instaAxis = instaMount.simdWorldTransform.columns.2
+        let backward20 = Float(20) * .pi / 180
+        precondition(simd_distance(simd_normalize(SIMD3(instaAxis.x, instaAxis.y, instaAxis.z)),
+            SIMD3<Float>(0, cos(backward20), sin(backward20))) < 1e-6,
+            "Reference Insta mounting tilt must be independently 20 degrees backward at neutral")
+        for (link, count) in [("lower_neck_link", 2262), ("upper_neck_link", 1895),
+                              ("insta360_link", 4338), ("oak_link", 402)] {
+            precondition(headNode("Original URDF", link).geometry!.sources(for: .vertex).first!.vectorCount == count,
+                "Reference visualization replaced the original captured head geometry")
+        }
+        print("Reference head: neutral neck/servo axes, independent backward-20-degree Insta, OAK lens/cloud agreement and unchanged original scan/FK passed")
         let uprightLower = headNode("Original URDF", "lower_neck_link").simdTransform
         let uprightPanPivot = headNode("Original URDF", "neck_pan_link").simdTransform.columns.3
         let uprightRay = editor.depthCloudCameraTransform(false)
+        precondition(abs(editor.headOpticalPitchRadians!.doubleValue) < 1e-8,
+            "Operator-confirmed L6011/U6906 must render a vertical neck and forward OAK")
         assertAcceptedHead(7014, 7790)
-        let livePitch = editor.headOpticalPitchRadians!.doubleValue * 180 / .pi
-        precondition(abs(livePitch + 3.57) < 1e-5,
-            "L7014/U7790 should face almost forward/slightly down, not +56 degrees upward")
+        let articulated = estimate(7014, 7790)
+        precondition(abs(articulated.lowerPitch * 180 / .pi - 30.09) < 1e-5 &&
+            abs(-articulated.upperPitch * 180 / .pi + 26.52) < 1e-5,
+            "L7014/U7790 must articulate both joints from the confirmed display datum")
+        let articulatedPitch = editor.headOpticalPitchRadians!.doubleValue * 180 / .pi
+        precondition(abs(articulatedPitch + 3.57) < 1e-5,
+            "L7014/U7790 must face slightly down rather than redefine display neutral")
         precondition(headNode("Original URDF", "lower_neck_link").simdTransform != uprightLower)
         precondition(simd_distance(headNode("Original URDF", "neck_pan_link").simdTransform.columns.3, uprightPanPivot) > 0.06,
             "Lower-neck motion did not move its downstream pan pivot")
@@ -199,26 +240,35 @@ final class GhostFixtureSnapshotView: NSView {
         precondition(view.isHidden && pauseHost.subviews.count == 2)
         editor.setPreviewFrozen(false)
         let continuation = controls.first { $0.identifier?.rawValue == "ghost-continue-interaction" } as! NSButton
+        func awaitContinuation(_ title: String?) {
+            let deadline = Date().addingTimeInterval(1)
+            func ready() -> Bool {
+                if let title { return !continuation.isHidden && continuation.isEnabled && continuation.title == title }
+                return continuation.isHidden
+            }
+            while !ready() && Date() < deadline {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            }
+            precondition(ready(), "Continue controls did not reach the expected readiness stage within one second")
+        }
         let trial = ROBLeftArmTrial.shared
         trial.isRunning = true
         for (stage, title) in [("object_placed", "Object placed; fingers clear → grip"),
                                ("receiver_supporting", "Hand supporting → release"),
                                ("object_clear", "Object clear → lower")] {
             trial.interactionStage = stage
-            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-            precondition(!continuation.isHidden && continuation.isEnabled && continuation.title == title)
+            awaitContinuation(title)
             NSApp.sendAction(continuation.action!, to: continuation.target, from: continuation)
             precondition(trial.continuedStages.last == stage && trial.interactionStage.isEmpty)
         }
         trial.interactionStage = "object_placed"
-        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        awaitContinuation("Object placed; fingers clear → grip")
         let confirmedCount = trial.continuedStages.count
         trial.interactionStage = "receiver_supporting"
         NSApp.sendAction(continuation.action!, to: continuation.target, from: continuation)
         precondition(trial.continuedStages.count == confirmedCount, "A stale continuation button advanced another stage")
         trial.interactionStage = ""; trial.isRunning = false
-        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-        precondition(continuation.isHidden)
+        awaitContinuation(nil)
         let blue = scene.rootNode.childNodes.flatMap(\.childNodes).filter { $0.name?.hasPrefix("Blue ghost ") == true }
         precondition(blue.count >= 40)
         let renderer = SCNRenderer(device: nil, options: nil); renderer.scene = scene; renderer.pointOfView = camera

@@ -6,8 +6,22 @@ accepted neck command estimates. It does not assume that the head is level.
 - The original robot's lower neck, pan, upper neck and attached camera meshes
   follow accepted neck command estimates. The untouched blue head follows the
   same pose; explicitly edited ghost neck angles remain preview-only overrides.
+- Rob confirmed lower **6011 / upper 6906** as the physical upright neck and
+  forward, level front-camera reference. The display estimator uses that pair
+  explicitly; it does not take its reference from the driver's safety settings.
+  The current values coincide, so joint FK and camera projection are unchanged.
+- The captured scan has visible neck lean even at zero joint angles. The blue
+  ghost uses approximate mechanical reference shapes for the lower neck, pan,
+  upper neck, Insta housing and OAK housing/lenses on those same joint frames.
+  Its Insta mount has a separate 20° backward visual tilt. The original scan
+  remains intact, and the OAK optical frame is independent of that visual tilt.
+  These shapes clarify the preview; measured hardware calibration stays queued.
+  The confirmed reference and rejected intermediate candidate are recorded in
+  [evidence](calibration/evidence/2026-10-21-flat-floor/neck-reference-preview.json),
+  with a [model-only comparison](calibration/evidence/2026-10-21-flat-floor/neck-reference-preview.png).
+  Final visual acceptance of the loaded preview remains pending.
 - The optical transform comes directly from that articulated URDF camera frame.
-  The cloud uses the mesh's exact FK, optical mount, basis and presentation scale,
+  The cloud uses the same joint FK, optical mount, basis and presentation scale,
   without a separate pivot rotation. Accepted upright lower 6011 and level upper
   6906 map to zero URDF neck angles. The captured lean-back scan's lower/upper
   reference rotations are no longer retained at upright. Each accepted joint
@@ -105,7 +119,8 @@ belly geometry and invalid commands.
 `bash Scripts/test-depth-cloud-projection.sh` checks optical axes, scale,
 stationary surface round trips and invalid affine transforms. The render fixture
 also verifies that the cloud origin equals the rendered head's optical mount
-and that an untouched ghost head matches the original. All fixtures are isolated
+and that untouched ghost link transforms match the original. It also checks the
+blue reference axes and OAK lenses against that shared camera frame. All fixtures are isolated
 from cameras and actuators. The signed macOS build checks integration.
 `bash Scripts/test-depth-floor-rectification.sh` checks noisy tilted floors,
 outliers, rigid distance/height preservation, sparse/line/wall/table/ambiguous

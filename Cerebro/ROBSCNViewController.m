@@ -655,11 +655,12 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     double pan = 0;
     BOOL known = serial.isNeckCommandStateKnown &&
         ROBNeckSafetyPanTargetToDegrees(&config, (int32_t)serial.commandedNeckPanTarget, &pan);
-    // Use accepted targets and the existing upright/level references once.
+    // Use accepted targets and the operator-observed display reference once.
+    // Driver safety/clearance positions do not calibrate camera geometry.
     // Optional leveling gains and old cloud frames do not define this pose.
-    ROBHeadCameraPoseEstimator *pose = [ROBHeadCameraPoseEstimator estimatePanRadians:pan * M_PI / 180.0
+    ROBHeadCameraPoseEstimator *pose = [ROBHeadCameraPoseEstimator estimateDisplayPanRadians:pan * M_PI / 180.0
         lowerTarget:serial.commandedLowerNeckTiltTarget upperTarget:serial.commandedUpperNeckTiltTarget
-        uprightLowerTarget:ROBNeckSafetyUprightLowerTarget levelUpperTarget:ROBNeckSafetyUprightUpperTarget known:known];
+        known:known];
     [self.ghostGestureEditor setHeadCommandEstimate:pose];
 }
 

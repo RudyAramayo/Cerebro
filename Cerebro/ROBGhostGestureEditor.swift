@@ -75,11 +75,11 @@ import simd
                 originalMaterial.lightingModel = .constant; originalMaterial.isDoubleSided = true
                 original.geometry?.materials = [originalMaterial]; original.name = "Original URDF \(link)"
                 renderRoot.addChildNode(original); originalNodes[link] = original
-                let proposed = SCNNode(geometry: ghostGeometry)
                 let blue = SCNMaterial(); blue.diffuse.contents = NSColor.systemBlue
                 blue.transparency = 0.12
                 blue.lightingModel = .constant
                 blue.isDoubleSided = true; blue.writesToDepthBuffer = false; blue.readsFromDepthBuffer = false
+                let proposed = referenceHeadNode(link: link, material: blue) ?? SCNNode(geometry: ghostGeometry)
                 proposed.geometry?.materials = [blue]; proposed.renderingOrder = 10; proposed.name = "Blue ghost \(link)"
                 renderRoot.addChildNode(proposed); ghostNodes[link] = proposed
             }
@@ -181,7 +181,7 @@ import simd
         let targets = acceptedHeadTargets.map { "L\($0.lowerTarget) / U\($0.upperTarget) · " } ?? ""
         let frozen = previewFrozen ? (preparationSnapshotRefreshed
             ? " · picture frozen after neck preparation" : " · picture awaiting neck preparation") : ""
-        headInfo.stringValue = String(format: "Head command estimate: %@optical tilt %+.1f°%@", targets,
+        headInfo.stringValue = String(format: "Head command estimate: %@optical tilt %+.1f°%@\nBlue neck: reference L6011/U6906 · Insta360 ≈20° back", targets,
             pitch.doubleValue * 180 / .pi, frozen)
     }
 
@@ -312,6 +312,62 @@ import simd
             return (part.link, SCNGeometry(sources: [positions, normals, source(part.colors, .color, 4)], elements: [element]),
                 SCNGeometry(sources: [positions, normals], elements: [element]))
         }
+    }
+
+    /// The lean-back scan contains skewed neck housings even at zero FK angles.
+    /// Use a mechanical reference for the proposed head, on the same link frames.
+    /// Its dimensions are display envelopes; no motor or collision calibration
+    /// is inferred from these shapes. The original scan remains available beside it.
+    private func referenceHeadNode(link: String, material: SCNMaterial) -> SCNNode? {
+        guard headLinks.contains(link) else { return nil }
+        let root = SCNNode()
+        func add(_ geometry: SCNGeometry, _ name: String, _ position: SCNVector3,
+                 angles: SCNVector3 = SCNVector3Zero, parent: SCNNode? = nil) {
+            geometry.materials = [material]
+            let node = SCNNode(geometry: geometry); node.name = name
+            node.position = position; node.eulerAngles = angles; node.renderingOrder = 10
+            (parent ?? root).addChildNode(node)
+        }
+        func box(_ name: String, _ x: CGFloat, _ y: CGFloat, _ z: CGFloat, _ position: SCNVector3) {
+            add(SCNBox(width: x, height: y, length: z, chamferRadius: 0.004), name, position)
+        }
+        switch link {
+        case "lower_neck_link":
+            box("reference-lower-mount", 0.055, 0.07, 0.035, SCNVector3(0, 0, -0.0175))
+            box("reference-lower-stem", 0.025, 0.04, 0.13, SCNVector3(0, 0, 0.065))
+            box("reference-lower-servo", 0.05, 0.07, 0.05, SCNVector3(0, 0, 0.02))
+            add(SCNCylinder(radius: 0.024, height: 0.075), "reference-lower-pitch-axis", SCNVector3(0, 0, 0.02))
+        case "neck_pan_link":
+            add(SCNCylinder(radius: 0.025, height: 0.026), "reference-pan-servo", SCNVector3(0, 0, 0.013),
+                angles: SCNVector3(Float.pi/2, 0, 0))
+        case "upper_neck_link":
+            box("reference-upper-servo", 0.05, 0.07, 0.07, SCNVector3Zero)
+            add(SCNCylinder(radius: 0.022, height: 0.075), "reference-upper-pitch-axis", SCNVector3Zero)
+            box("reference-head-support", 0.025, 0.04, 0.04, SCNVector3(0, 0, 0.04))
+        case "insta360_link":
+            let mount = SCNNode(); mount.name = "reference-insta-mount"
+            mount.eulerAngles.y = -20 * .pi / 180; root.addChildNode(mount)
+            let sphere = SCNSphere(radius: 0.075); sphere.segmentCount = 24
+            add(sphere, "reference-insta-body", SCNVector3Zero, parent: mount)
+            for index in 0..<6 {
+                let angle = Float(index) * .pi / 3
+                add(SCNCylinder(radius: 0.013, height: 0.008), "reference-insta-lens-\(index)",
+                    SCNVector3(0.074*cos(angle), 0.074*sin(angle), 0),
+                    angles: SCNVector3(0, 0, angle - .pi/2), parent: mount)
+            }
+            for side: Float in [-1, 1] {
+                add(SCNCylinder(radius: 0.003, height: 0.05), "reference-insta-antenna-\(side)",
+                    SCNVector3(0, side*0.023, 0.098), angles: SCNVector3(Float.pi/2, 0, 0), parent: mount)
+            }
+        case "oak_link":
+            box("reference-oak-body", 0.025, 0.14, 0.035, SCNVector3Zero)
+            for index in -1...1 {
+                add(SCNCylinder(radius: 0.008, height: 0.004), "reference-oak-lens-\(index)",
+                    SCNVector3(0.015, Float(index)*0.045, 0), angles: SCNVector3(0, 0, -Float.pi/2))
+            }
+        default: break
+        }
+        return root
     }
 
     private func reloadPresets() {

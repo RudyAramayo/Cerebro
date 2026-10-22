@@ -39,6 +39,30 @@ import simd
             let direction = frames["oak_optical_frame"]!.columns.2
             return atan2(direction.z, hypot(direction.x, direction.y))
         }
+        let displayNeutral = ROBHeadCameraPoseEstimator.estimateDisplay(panRadians: 0,
+            lowerTarget: 6011, upperTarget: 6906, known: true)!
+        let displayFrames = head(0, displayNeutral.lowerPitch, displayNeutral.upperPitch)
+        precondition(displayNeutral.lowerPitch == 0 && displayNeutral.upperPitch == 0)
+        precondition(abs(opticalPitch(displayFrames)) < 1e-8,
+            "Observed upright posture must place the front camera parallel to the floor")
+        let neckUp = displayFrames["lower_neck_link"]!.columns.2
+        precondition(simd_distance(SIMD3(neckUp.x, neckUp.y, neckUp.z), SIMD3<Double>(0, 0, 1)) < 1e-8)
+        let displayLowerMoved = ROBHeadCameraPoseEstimator.estimateDisplay(panRadians: 0,
+            lowerTarget: 6411, upperTarget: 6906, known: true)!
+        let displayUpperMoved = ROBHeadCameraPoseEstimator.estimateDisplay(panRadians: 0,
+            lowerTarget: 6011, upperTarget: 6506, known: true)!
+        for changed in [displayLowerMoved, displayUpperMoved] {
+            precondition(abs(opticalPitch(head(0, changed.lowerPitch, changed.upperPitch)) + 12 * .pi / 180) < 1e-8,
+                "Observed neutral must remain articulated by each accepted neck command")
+        }
+        let inferredCandidate = ROBHeadCameraPoseEstimator.estimateDisplay(panRadians: 0,
+            lowerTarget: 7014, upperTarget: 7790, known: true)!
+        precondition(abs(inferredCandidate.lowerPitch) > 0.5 && abs(inferredCandidate.upperPitch) > 0.4,
+            "A later live target pair must not silently replace the operator-confirmed display zero")
+        precondition(ROBHeadCameraPoseEstimator.estimateDisplay(panRadians: 0,
+            lowerTarget: 6011, upperTarget: 6906, known: false) == nil)
+        precondition(ROBHeadCameraPoseEstimator.estimateDisplay(panRadians: 0,
+            lowerTarget: 0, upperTarget: 6906, known: true) == nil)
         let acceptedForward = ROBHeadCameraPoseEstimator.estimate(panRadians: 0, lowerTarget: 7014,
             upperTarget: 7790, uprightLowerTarget: 6011, levelUpperTarget: 6906, known: true)!
         let forwardHead = head(acceptedForward.panRadians, acceptedForward.lowerPitch, acceptedForward.upperPitch)

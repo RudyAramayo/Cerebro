@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-22T04:41:48.472656+00:00",
+  "baseCommit": "f000d6f3a4f29450cd08d341411adfcf6b716b6b",
+  "request": "Match the blue neck to the physical upright lower neck, level front camera and backward-leaning Insta360.",
+  "reference": {
+    "lowerTarget": 6011,
+    "upperTarget": 6906,
+    "basis": "Operator explicitly confirmed this command pair while the physical lower neck is vertical and the front camera is level. Insta360 housing described as about 20 degrees backward.",
+    "qualification": "Visual command-space prior, not measured shaft feedback or a multi-pose extrinsic calibration."
+  },
+  "change": "Blue ghost uses approximate mechanical reference shapes for five head/neck links on the existing URDF joint frames. Insta360 has an independent local visual tilt of 20 degrees backward. OAK lenses follow the shared optical frame. Display reference is explicit in the estimator and HUD.",
+  "unchanged": "Original captured scan geometry, shared joint FK and OAK projection numerics, driver safety references, servo commands and limits, collision hulls, arm steps and mapping ID, recording/replay compatibility, floor fitting and cloud persistence.",
+  "intermediateReview": [
+    "An initial mechanical preview retained 6011/6906. Later live accepted targets had changed near 7014/7790 during startup/person tracking.",
+    "7014/7790 was incorrectly inferred as a new upright reference. Operator reported the lower correction was too much.",
+    "Asked which displayed command pair corresponds to physical upright/level; operator explicitly answered 6011/6906. Restored that confirmed pair. The rejected candidate is not calibration evidence."
+  ],
+  "status": "Confirmed reference restored, signed final development build loaded and final checks passed. Latest-render visual acceptance remains pending; measured camera/URDF calibration remains queued.",
+  "sourceSHA256": {
+    "Cerebro/ROBGhostGestureEditor.swift": "e3c717fc74787779d32b35922034fa1d02084df8f865ac272c33ddc0981de50a",
+    "Cerebro/ROBGhostMotionPlan.swift": "d99d1adf8606850be29311dc2d6ea507dbf8ca3641d8782bf404a2495b93abc6",
+    "Cerebro/ROBSCNViewController.m": "cd1e716835c2672ab449a2460f23d553253370436cd94ed9b2070a6c00e3b3e7",
+    "Tests/ROBGhostEditorRenderFixture.swift": "4ad6f0f2b7dd6bcd01b33f27f8dc1126a5f0e50c1a336e53d102e1dd87f8dcc1",
+    "Tests/ROBGhostMotionPlanFixtureTests.swift": "fd155405a4f2c6d63c891816fc602a7fbaa6e71217ff6d677cb7a963bb3cc954"
+  },
+  "checks": {
+    "cerebro-neck-reference-motion-final.log": {
+      "result": "passed",
+      "sha256": "65be8d077eb0b3589f48e0a73642741539fe2d54e30b356c388eff1a8596ab95"
+    },
+    "cerebro-reference-head-render-final-tests.log": {
+      "result": "passed",
+      "sha256": "63d4387392c0ccc1a300bb83af73a9303f348b99ecc75d1f8cf882fdbc1d1903"
+    },
+    "cerebro-neck-reference-projection.log": {
+      "result": "passed",
+      "sha256": "0c5053d95ed1a3cb07c86f988e417ee3461f54738cdff962602c8383ca6e2766"
+    },
+    "cerebro-neck-reference-final-build.log": {
+      "result": "passed",
+      "sha256": "b4e52eac7035dc972d149b8b112294d23d5ed1498d603921a80b2c7b6c006d78"
+    }
+  },
+  "coverage": [
+    "Production display estimator at confirmed neutral, invalid/unknown targets, and independent lower/upper changes",
+    "7014/7790 stays an articulated pose rather than becoming a new zero",
+    "Original and ghost parent frames agree; OAK lens origin/direction agree with the shared optical transform",
+    "Original scan vertex counts preserved; Insta visual tilt independent of OAK",
+    "Existing arm motion, current replay, frozen snapshots, stage-bound Continue and embedded resizing regressions"
+  ],
+  "fixtureTiming": "A fixed 50 ms Continue-button readiness wait failed once. Replaced it with a condition-based wait bounded to one second; stale-button rejection remains immediate. Full final fixture passed.",
+  "build": {
+    "result": "Signed arm64 Debug development build succeeded",
+    "signature": "codesign --verify --deep --strict passed on built and installed app",
+    "installedAndLaunched": true,
+    "installedExecutableSHA256": "4073d38ade20a63b0e6181fa4eb00677888845d622b69ff5cc70c23121b13994",
+    "source": "Isolated intended-change worktree at 794c524 plus copied current ROBSCNViewController, ROBTorsoControlsViewController, ROBGhostMotionPlan and ROBGhostGestureEditor. Concurrent unrelated workspace edits excluded."
+  },
+  "reloadPreflight": {
+    "UTC": "2026-10-22T04:39:47.274Z",
+    "telemetry": "Both arms: all CAN replies current, 22.5 Hz, receipt age 0.06 s, all 14 raw statuses 0 and currents 0. Left q=[0,0,0,-0.003,0,0.00232,0]; right all zero.",
+    "actions": "Disconnected Cerebro arm tunnel and quit before signed app replacement. No arm, gripper, torque, recovery or explicit neck command. Separate torso-stepper terminal left untouched. Existing startup/person tracking can move the head."
+  },
+  "liveVerification": {
+    "UTC": "2026-10-22T04:40Z",
+    "display": "Controller window shows Blue neck: reference L6011/U6906 and Insta360 approximately 20 degrees back. Live accepted L7014/U7790 showed predicted optical tilt about -3.4 degrees as the background head posture changed.",
+    "qualification": "Verified loading and estimation; final neutral geometry verified in the isolated render fixture. No claim that the moving live head was at the confirmed neutral during this inspection."
+  },
+  "preview": {
+    "path": "neck-reference-preview.png",
+    "sha256": "9bd0ecdb2a23c914082615085e3767e69856f7aa87d350fd2961d34609d0eebc",
+    "meaning": "Model-only comparison at confirmed L6011/U6906. Blue is opaque in comparison for clarity; live overlay remains translucent. No room or private chat content."
+  },
+  "limits": "Approximate display envelopes are not exact CAD or collision calibration. Arm replay uses current live head estimates, not historical neck calibration. Full multi-pose camera-to-URDF calibration remains queued."
+}
