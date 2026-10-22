@@ -157,7 +157,10 @@ final class ROBGhostRobotModel {
     /// All three joints feed the same FK used for the mesh and depth camera.
     func headPositions(pan: Double, lowerPitch: Double, upperPitch: Double) -> [String: Double]? {
         guard [pan, lowerPitch, upperPitch].allSatisfy(\.isFinite) else { return nil }
-        let values = ["lower_neck": -lowerPitch, "neck_pan": pan,
+        // The two Maestro pitch servos have opposing mechanical directions.
+        // Increasing both targets counter-rotates the upper head as the lower
+        // neck leans forward; summing them incorrectly aimed the cloud upward.
+        let values = ["lower_neck": lowerPitch, "neck_pan": pan,
                       "upper_neck": -upperPitch]
         guard values.allSatisfy({ name, value in
             joints.contains { $0.name == name && ($0.lower...$0.upper).contains(value) }

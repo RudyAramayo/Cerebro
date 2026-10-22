@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-22T03:44:43.711962+00:00",
+  "problem": "Operator accepted belly floor, but reported unchanged lower-neck model and head cloud on ceiling while the physical front camera faced a wall.",
+  "diagnosis": "Accepted serial tracking uses the actual successful channel1 lower/channel2 upper writes. Both URDF pitch axes are +Y. Display mapped both Maestro target deltas to negative URDF rotation, adding their optical elevations. Catalog lean_forward increases both targets relative to upright, requiring opposed display signs.",
+  "change": "Map lower_neck=+lowerPitch and upper_neck=-upperPitch, retaining pan and upright6011/6906 and33.3333333333targets/degree. Model, untouched blue head and cloud continue to share one FK. Servo output, leveling policy, URDF axes/origins and arm paths unchanged.",
+  "predictedPanZero": {
+    "L7014_U7790_beforeDegrees": 56.61,
+    "L7014_U7790_afterDegrees": -3.57,
+    "L7014_U7698_afterDegrees": -6.33,
+    "upright_L6011_U6906": 0,
+    "upperOnly_L6011_U6306": -18
+  },
+  "sourceSHA256": {
+    "Cerebro/ROBGhostMotionPlan.swift": "375ce96bca13d49731551c17224bebc5697cb750fdd2d965c6b87e99c437eb8b",
+    "Cerebro/ROBGhostGestureEditor.swift": "e9a613087baf76db9d73e4a16f5c16d35eb2217ed1ce592420ff88b437a285e1",
+    "Cerebro/ROBSCNViewController.m": "be96ee388f0aed0887b2a4f4fb090f63220eea128978d201ac43c418ac26a79c",
+    "Tests/ROBGhostMotionPlanFixtureTests.swift": "bcbd0522ca148fa52c855736a5e91ccab3517c176ddf1785ee6f2e65e5397e59",
+    "Tests/ROBGhostEditorRenderFixture.swift": "23d13776abd57ede7f93bc70eb545c21544a5a37874cebc507f98d8cef54dc14"
+  },
+  "checks": {
+    "cerebro-lower-neck-sign-motion-tests.log": {
+      "result": "passed",
+      "sha256": "65be8d077eb0b3589f48e0a73642741539fe2d54e30b356c388eff1a8596ab95"
+    },
+    "cerebro-opposed-neck-render.log": {
+      "result": "passed",
+      "sha256": "524ab5010124fc69e7865ef2b7b6d60aec99683aa965b4baa6cc963cc50bfcbe"
+    },
+    "cerebro-neck-direction-build.log": {
+      "result": "passed",
+      "sha256": "b69e526cc8720cba902ce8a25c2c9752fd506bb016c9e373f3b4e1df8fc5a69e"
+    }
+  },
+  "regressions": [
+    "Accepted L7014/U7790 optical pitch -3.57 degrees",
+    "Positive lower target rotates downstream stem forward and camera downward",
+    "Original and untouched ghost all five head links match independent command mapping",
+    "Rendered optical ray and origin equal the cloud affine",
+    "Upper-only change leaves lower joint unchanged",
+    "Compensating paired deltas preserve optical direction while lower pivot and camera origin still move",
+    "Upright, upper-only down18degrees, pan, fixed belly, bounds and existing motion fixtures retained"
+  ],
+  "build": {
+    "source": "Same isolated intended-change development build described in live-install.json, plus the model source hashed above. Concurrent unrelated dirty changes/Amber recovery commit excluded.",
+    "result": "BUILD SUCCEEDED",
+    "signature": "codesign --verify --deep --strict passed",
+    "installedExecutableSHA256": "e322325e262f9c4829e4ecff08e137cd6548630fb72a564f7e2128663088e365",
+    "installedAndLaunched": true
+  },
+  "preflight": {
+    "UTC": "2026-10-22T03:42:04.108Z",
+    "bothArms": "Fresh approximately22.7Hz CAN feedback,0.10s receipt age, all14 raw motor statuses0 and current0; physical-left q=[0,0,0,-.003,0,.00232,0], right all0.",
+    "actions": "Disconnected Cerebro tunnel and reloaded local signed app. No arm/gripper/torque/recovery or explicit camera movement request. Other torso-stepper terminal left unchanged."
+  },
+  "liveReadings": [
+    {
+      "stage": "first scene opening",
+      "head": "L7014/U7698 predicted optical -6.2 degrees at approximately -6degree pan; head frame settling",
+      "belly": "aligned75% support,8.7mm RMS,18.5degree correction"
+    },
+    {
+      "UTC": "2026-10-22T03:43:32.821Z",
+      "head": "L6011/U6886 optical -0.6 degrees; visible forward cloud, initial raw because floor support insufficient",
+      "belly": "aligned76% support,8.4mm RMS,18.6degree correction"
+    }
+  ],
+  "operatorVisualAcceptance": null,
+  "limitations": "Command-space direction correction supported by catalog/URDF geometry and the reported physical wall view; not measured shaft feedback, new mount calibration or collision certification. Full calibration remains queued."
+}

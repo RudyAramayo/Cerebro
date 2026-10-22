@@ -108,7 +108,14 @@ until the current test and controller workflow are finished.
    250 ms noise hold, then hides rather than automatically returning to raw.
    Rob accepted the resulting belly floor. He reported that the head cloud
    appears on the ceiling while the physical camera faces forward, and lower
-   neck changes are absent from the model; head mapping investigation is active.
+   neck changes are absent from the model. Investigation found that both pitch
+   servos used the same display sign despite their opposing mechanisms. The
+   lower display sign is now corrected: L7014/U7790 predicts 3.6° down instead
+   of 56.6° up. Pure model/render regressions pass, including lower-pivot motion
+   when upper compensation keeps the optical ray level. The signed build is
+   loaded; live L7014/U7698 now reports about 6° down and the head cloud is
+   forward in the scene. Operator neck-posture acceptance remains pending.
+   See [neck direction evidence](calibration/evidence/2026-10-21-flat-floor/neck-direction.json).
    See [live floor evidence](calibration/evidence/2026-10-21-flat-floor/live-install.json).
    The separately running
    torso-stepper terminal process was left unchanged. No arm test was performed.

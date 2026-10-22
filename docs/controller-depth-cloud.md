@@ -12,8 +12,14 @@ accepted neck command estimates. It does not assume that the head is level.
   6906 map to zero URDF neck angles. The captured lean-back scan's lower/upper
   reference rotations are no longer retained at upright. Each accepted joint
   target moves its own model joint; optional camera-leveling compensation does
-  not set the display mapping or suppress lower-neck movement. The existing
-  mounting-direction and 33.333-targets/degree priors are retained. At lower
+  not set the display mapping or suppress lower-neck movement. The lower neck
+  maps increasing Maestro targets to positive URDF rotation; the upper neck
+  maps increasing targets to negative rotation. Their opposing mechanical
+  directions previously both used a negative sign, incorrectly adding the
+  angles. At L7014/U7790 that placed the camera about 56.6° upward instead of
+  3.6° downward, consistent with Rob's forward wall view. Both mesh neck joints
+  and the optical frame use this corrected mapping. The 33.333-targets/degree
+  scale and upright references are retained. At lower
   6011 / upper 6306 / centered pan the optical axis points approximately 18°
   down. These are display mapping priors, not newly measured camera calibration.
 - Points, original robot and blue ghost share the AppKit robot's presentation

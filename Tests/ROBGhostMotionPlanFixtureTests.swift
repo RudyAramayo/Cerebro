@@ -34,7 +34,25 @@ import simd
         var zeroNeck = model.reference
         zeroNeck.merge(upright) { _, command in command }
         let lowerOnly = model.headPositions(pan: 0, lowerPitch: 0.1, upperPitch: 0)!
-        precondition(lowerOnly["lower_neck"] == -0.1 && lowerOnly["upper_neck"] == 0)
+        precondition(lowerOnly["lower_neck"] == 0.1 && lowerOnly["upper_neck"] == 0)
+        func opticalPitch(_ frames: [String: simd_double4x4]) -> Double {
+            let direction = frames["oak_optical_frame"]!.columns.2
+            return atan2(direction.z, hypot(direction.x, direction.y))
+        }
+        let acceptedForward = ROBHeadCameraPoseEstimator.estimate(panRadians: 0, lowerTarget: 7014,
+            upperTarget: 7790, uprightLowerTarget: 6011, levelUpperTarget: 6906, known: true)!
+        let forwardHead = head(acceptedForward.panRadians, acceptedForward.lowerPitch, acceptedForward.upperPitch)
+        precondition(abs(opticalPitch(forwardHead) + 3.57 * .pi / 180) < 1e-8,
+            "Accepted lower/upper commands must counter-rotate, not point the cloud at the ceiling")
+        let acceptedLowerOnly = ROBHeadCameraPoseEstimator.estimate(panRadians: 0, lowerTarget: 6411,
+            upperTarget: 6906, uprightLowerTarget: 6011, levelUpperTarget: 6906, known: true)!
+        precondition(abs(opticalPitch(head(0, acceptedLowerOnly.lowerPitch, acceptedLowerOnly.upperPitch)) + 12 * .pi / 180) < 1e-8,
+            "Increasing the accepted lower target must pitch the optical direction downward")
+        let acceptedCompensated = ROBHeadCameraPoseEstimator.estimate(panRadians: 0, lowerTarget: 6411,
+            upperTarget: 7306, uprightLowerTarget: 6011, levelUpperTarget: 6906, known: true)!
+        let compensated = head(0, acceptedCompensated.lowerPitch, acceptedCompensated.upperPitch)
+        precondition(abs(opticalPitch(compensated)) < 1e-8,
+            "Equal positive lower/upper command deltas must preserve the level optical direction")
         let level = head(0, 0, 0), down = head(0, 0, -.pi / 10), turned = head(.pi / 6, 0, -.pi / 10)
         let forward = level["oak_optical_frame"]!.columns.2
         let downForward = down["oak_optical_frame"]!.columns.2
@@ -46,11 +64,13 @@ import simd
         precondition(level["lower_neck_link"]! == model.frames(zeroNeck)["lower_neck_link"]!)
         let lowerBent = head(0, 0.1, 0)
         let lowerAxis = lowerBent["lower_neck_link"]!.columns.2
-        precondition(lowerAxis.x < -0.09 && lowerAxis.z > 0.99)
+        precondition(lowerAxis.x > 0.09 && lowerAxis.z > 0.99)
         precondition(simd_distance(lowerBent["neck_pan_link"]!.columns.3, level["neck_pan_link"]!.columns.3) > 0.01)
         precondition(head(0, -0.1, 0.1)["lower_neck_link"]! != level["lower_neck_link"]!)
         precondition(model.headPositions(pan: .nan, lowerPitch: 0, upperPitch: 0) == nil)
-        print("Head FK: level/down/pan command priors articulate the camera and neck together; belly remains fixed")
+        precondition(compensated["lower_neck_link"]! != level["lower_neck_link"]!,
+            "Level camera compensation must not freeze the lower-neck joint")
+        print("Head FK: upright/upper-only preserved; lower rotates down, paired commands counter-rotate, 7014/7790 predicts -3.57 degrees; belly remains fixed")
         let oldFront = ROBLeftArmInteractionPlan.target(index: 18)!
         let center = ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.frontIndex)!
         let wave = ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.waveRestIndex)!

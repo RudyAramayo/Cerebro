@@ -91,6 +91,73 @@ final class GhostFixtureSnapshotView: NSView {
         precondition(abs(origin.x - downCamera[3].floatValue) < 1e-6 &&
             abs(origin.y - downCamera[7].floatValue) < 1e-6 && abs(origin.z - downCamera[11].floatValue) < 1e-6,
             "Depth projection origin differs from the rendered head's optical mount")
+
+        // Regression for the live L7014/U7790 posture: the lower mechanism
+        // leans forward as its target increases, while the upper servo's
+        // increase counter-rotates it. Adding both as upward pitch aimed the
+        // model/cloud at the ceiling even though the real camera faced a wall.
+        let headLinks = ["lower_neck_link", "neck_pan_link", "upper_neck_link", "insta360_link", "oak_link"]
+        func headNode(_ prefix: String, _ link: String) -> SCNNode {
+            scene.rootNode.childNodes.flatMap(\.childNodes).first { $0.name == "\(prefix) \(link)" }!
+        }
+        func estimate(_ lower: Int, _ upper: Int, pan: Double = 0) -> ROBHeadCameraPoseEstimator {
+            ROBHeadCameraPoseEstimator.estimate(panRadians: pan, lowerTarget: lower, upperTarget: upper,
+                uprightLowerTarget: 6011, levelUpperTarget: 6906, known: true)!
+        }
+        func assertAcceptedHead(_ lower: Int, _ upper: Int) {
+            editor.setHeadCommandEstimate(estimate(lower, upper))
+            var expected = model.reference
+            let radiansPerTarget = Double.pi / (180 * 33.3333333333)
+            expected["lower_neck"] = Double(lower-6011) * radiansPerTarget
+            expected["upper_neck"] = -Double(upper-6906) * radiansPerTarget
+            expected["neck_pan"] = 0
+            let frames = model.frames(expected)
+            for link in headLinks {
+                let originalNode = headNode("Original URDF", link), ghostNode = headNode("Blue ghost", link)
+                let frame = frames[link]!
+                for col in 0..<4 {
+                    precondition(simd_distance(originalNode.simdTransform[col], SIMD4<Float>(frame[col])) < 1e-6,
+                        "Accepted neck target omitted or reversed the original \(link)")
+                    precondition(simd_distance(ghostNode.simdTransform[col], originalNode.simdTransform[col]) < 1e-6,
+                        "Untouched ghost \(link) differs from accepted original")
+                }
+            }
+            let cloud = editor.depthCloudCameraTransform(false)
+            let renderedCamera = originalHead.simdWorldTransform * simd_float4x4(columns:
+                (SIMD4<Float>(opticalInHead.columns.0), SIMD4<Float>(opticalInHead.columns.1),
+                 SIMD4<Float>(opticalInHead.columns.2), SIMD4<Float>(opticalInHead.columns.3)))
+            for row in 0..<3 { for col in 0..<4 {
+                precondition(abs(renderedCamera[col][row] - cloud[row*4+col].floatValue) < 1e-6,
+                    "Cloud optical ray/origin differs from the accepted rendered head chain")
+            } }
+        }
+        assertAcceptedHead(6011, 6906)
+        let uprightLower = headNode("Original URDF", "lower_neck_link").simdTransform
+        let uprightPanPivot = headNode("Original URDF", "neck_pan_link").simdTransform.columns.3
+        let uprightRay = editor.depthCloudCameraTransform(false)
+        assertAcceptedHead(7014, 7790)
+        let livePitch = editor.headOpticalPitchRadians!.doubleValue * 180 / .pi
+        precondition(abs(livePitch + 3.57) < 1e-5,
+            "L7014/U7790 should face almost forward/slightly down, not +56 degrees upward")
+        precondition(headNode("Original URDF", "lower_neck_link").simdTransform != uprightLower)
+        precondition(simd_distance(headNode("Original URDF", "neck_pan_link").simdTransform.columns.3, uprightPanPivot) > 0.06,
+            "Lower-neck motion did not move its downstream pan pivot")
+        let liveLower = headNode("Original URDF", "lower_neck_link").simdTransform
+        assertAcceptedHead(7014, 6906)
+        precondition(headNode("Original URDF", "lower_neck_link").simdTransform == liveLower,
+            "An upper-only target change unexpectedly moved the lower joint")
+        // Equal opposite mechanical contributions keep the optical direction
+        // level, but cached rendering must still update the lower articulation
+        // and translated camera origin instead of treating the pose as equal.
+        assertAcceptedHead(6011, 6906)
+        assertAcceptedHead(6311, 7206)
+        let compensatedRay = editor.depthCloudCameraTransform(false)
+        precondition(abs(editor.headOpticalPitchRadians!.doubleValue) < 1e-8)
+        precondition(headNode("Original URDF", "lower_neck_link").simdTransform != uprightLower)
+        for row in 0..<3 { precondition(abs(compensatedRay[row*4+2].doubleValue-uprightRay[row*4+2].doubleValue) < 1e-8) }
+        precondition(abs(compensatedRay[11].doubleValue-uprightRay[11].doubleValue) > 0.02,
+            "Compensated head direction incorrectly suppressed the lower pivot/camera-origin update")
+        editor.setHeadCommandEstimate(estimate(6011, 6306, pan: .pi / 12))
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
         let controls = descendants(editor.panelView)
         let presets = controls.first { $0.identifier?.rawValue == "ghost-preset" } as! NSPopUpButton
