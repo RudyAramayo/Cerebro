@@ -176,5 +176,28 @@
       "scope": "hardware-free"
     }
   ],
-  "fullExecutorRegression": "The first full run reached all motion/handoff/fault checks but its old assistance assertion expected one read-only mode query; the new search phase correctly adds a second query. The fixture expectation was corrected; full rerun is in progress."
+  "fullExecutorRegression": {
+    "result": "passed",
+    "logSHA256": "ee28c2af4c28dcc9754da34a45db0cf4b415a5c04cb62b91ba525805c0e89675",
+    "scope": "Hardware-free production executor, motion/current/camera faults, complete task, handoff, recorded recovery admission, object readiness, no-grant returns and active telemetry regression."
+  },
+  "crossViewFix": {
+    "sourceSHA256": {
+      "Cerebro/ROBArmRoutineVision.swift": "667537a79eb6b5599a4957f7f494b0c643838a85dc080a3b1ace413687fe530c",
+      "Cerebro/ROBControllerArmApproval.swift": "fafbdd903ccb715c4ae50d332efdbaf22cdbd3035bfb0c7e2a81157bc11941e9",
+      "Cerebro/ROBGhostGestureEditor.swift": "4443b7fa67ae838722bb1457430045921dfe1d9f59efa6768d853cce865a8c43",
+      "Cerebro/ROBGhostMotionPlan.swift": "71fc0fcff95b92f922738ab928a67b4cd44009586b219247e93ccd63dd76c72e",
+      "Cerebro/ROBLeftArmTrial.swift": "dd128aea62361993fc94b566191ea67e7605fbeab1d603207f64b037b4243d8d",
+      "Cerebro/ROBMainViewController.mm": "bbc1cd21007714dc4f00904c8f8c208e9da5a4e5159853dbcf2d2515bae120e3",
+      "Cerebro/ROBSpeechBox.h": "815a73a87ad86c72d849e8b4c3204677f64328d77ba8f79c9b18c35bd57d888b",
+      "Cerebro/ROBSpeechBox.m": "ac5912eb78a19f5c8236fb1492e6457cba8615f8dad88a9d975824a350d15afb",
+      "Cerebro/ROBWorkspaceSearchPlan.swift": "dfafc6b7bc71fbf40a0c4177cf0c8bc62cc2b2f11f1c0dd34836b86a728aa813"
+    },
+    "binarySHA256": "330e13c83853da6c1c5e92c6d7d19985fad515e1c988f5e633a1fa4156a5c41d",
+    "build": "Signed Debug arm64; codesign --deep --strict verified; installed",
+    "regression": "Passed the actual 3.53cm /7.77s agreeing bucket pair across adjacent neck views; expired pairs, changed radius and refresh reuse rejected. All ghost/planner fixtures passed.",
+    "ghostLogSHA256": "763ca6e87a924c3c93c13f6612f2fd2fc4539142a1616b2131264ca764215f2f",
+    "runtimeChange": "Confirmation state persists across views within one search; visible unconfirmed geometry gets up to4 frames. Final target refresh clears the old pair. Existing5cm/30s agreement remains; bucket radii also agree within2cm.",
+    "liveOutcome": "Retry requested; no pickup/drop success claimed."
+  }
 }

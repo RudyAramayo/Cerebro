@@ -495,6 +495,7 @@ final class ROBArmRoutineVision {
         let vision = ROBArmRoutineVision.shared
         locatedObjects = [:]
         var found: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
+        var locationConfirmation = ROBWorkspaceLocationConfirmation()
         var visuallyFound = Set<ROBWorkspaceTarget>()
         var speech = ROBWorkspaceSearchSpeech()
         var announcements: [[String: Any]] = []
@@ -565,11 +566,13 @@ final class ROBArmRoutineVision {
         }
         func inspect(_ view: ROBWorkspaceView) async throws {
             guard try await moveView(view) else { return }
-            var prior: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
             var priorVisual: [ROBWorkspaceTarget: (detection: ROBWorkspaceDetection, sequence: UInt64)] = [:]
             var priorHanging: ROBWorkspaceObservation?
             var priorPointing: ROBWorkspacePointingHint?
-            for _ in 0..<2 {
+            var retryVisibleDepth = false
+            for attempt in 0..<4 {
+                if attempt >= 2 && (!requireDepth || !retryVisibleDepth) { break }
+                retryVisibleDepth = false
                 try check()
                 guard viewReady?(view.panDegrees, view.upperTarget) == true else {
                     throw ROBArmRoutineError.blocked("Search camera moved during inspection.")
@@ -630,14 +633,18 @@ final class ROBArmRoutineVision {
                             capturedAt: frame.capturedAt, sequence: frame.sequence)
                     }
                     guard let located = measurement else {
-                        prior.removeValue(forKey: target); entry[target.rawValue] = "not_grounded"; continue
+                        if detection.visuallyUsable, found[target] == nil { retryVisibleDepth = true }
+                        entry[target.rawValue] = "not_grounded"; continue
                     }
                     var geometry: [String: Any] = ["position": located.position, "confidence": located.confidence]
                     if let radius = located.openingRadius { geometry["opening_radius_m"] = radius }
                     if let correction = located.floorCorrectionDegrees { geometry["floor_camera_correction_degrees"] = correction }
                     entry[target.rawValue] = geometry
-                    if let previous = prior[target], previous.agrees(with: located) { found[target] = located }
-                    prior[target] = located
+                    if let confirmed = locationConfirmation.observe(located) { found[target] = confirmed }
+                    else {
+                        found.removeValue(forKey:target)
+                        retryVisibleDepth = true
+                    }
                 }
                 evidence.append(entry)
             }
@@ -733,6 +740,7 @@ final class ROBArmRoutineVision {
         for target in targets {
             if let object = found[target], Date().timeIntervalSince1970 * 1000 - object.capturedAt > 20_000 {
                 found.removeValue(forKey: target)
+                locationConfirmation.invalidate(target)
                 visuallyFound.remove(target)
                 do { try await inspect(object.view) } catch is CancellationError { throw CancellationError() }
                 catch { try check(); evidence.append(["refresh_error": error.localizedDescription]) }

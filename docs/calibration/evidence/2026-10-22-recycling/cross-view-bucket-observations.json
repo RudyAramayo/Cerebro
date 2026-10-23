@@ -1,0 +1,70 @@
+{
+  "sourceSearchID": "4F25A4BC-21EA-421E-9BC1-7C131E1BB202",
+  "bucketFits": [
+    {
+      "pan": 37.59788936153054,
+      "upper": 5563,
+      "sequence": 738,
+      "captured_at_ms": 1792716252525.7249,
+      "orangeBucket": {
+        "confidence": 0.562130868434906,
+        "floor_camera_correction_degrees": 31.579484033577362,
+        "opening_radius_m": 0.1069011876664228,
+        "position": [
+          0.34465624075934326,
+          0.40272925949572,
+          0.261343455903148
+        ]
+      }
+    },
+    {
+      "pan": 31.881389611959456,
+      "upper": 5557,
+      "sequence": 3876,
+      "captured_at_ms": 1792716357126.282,
+      "orangeBucket": {
+        "confidence": 0.5256356596946716,
+        "floor_camera_correction_degrees": 32.509493608548475,
+        "opening_radius_m": 0.09775845488331204,
+        "position": [
+          0.3164549455158322,
+          0.434146209902091,
+          0.27814959897984726
+        ]
+      }
+    },
+    {
+      "pan": 30,
+      "upper": 5650,
+      "sequence": 4109,
+      "captured_at_ms": 1792716364892.9692,
+      "orangeBucket": {
+        "confidence": 0.6388042569160461,
+        "floor_camera_correction_degrees": 29.216210608936752,
+        "opening_radius_m": 0.09969289226306155,
+        "position": [
+          0.34650060035664215,
+          0.45117583907018677,
+          0.2855762467846511
+        ]
+      }
+    },
+    {
+      "pan": 45,
+      "upper": 5650,
+      "sequence": 4368,
+      "captured_at_ms": 1792716373526.332,
+      "orangeBucket": {
+        "confidence": 0.6445425748825073,
+        "floor_camera_correction_degrees": 30.45130516180823,
+        "opening_radius_m": 0.09882471498090434,
+        "position": [
+          0.4084389627653027,
+          0.29889375365770293,
+          0.28192811136561213
+        ]
+      }
+    }
+  ],
+  "outcome": "Cancelled before arm travel to fix per-view confirmation state. Same bucket, arm hanging/inactive. No pickup or drop."
+}

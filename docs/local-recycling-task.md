@@ -104,6 +104,16 @@ after 24 hours and a changed robot model invalidates them. No remembered positio
 old detection, saved permission or confidence value satisfies a live confirmation.
 ROB says “Checking where I last saw them” and still takes two new observations.
 
+Depth confirmation retains valid observations across neck views within the same
+search. Two distinct, advancing RGB-D measurements must agree within 5 cm and
+30 seconds; bucket opening radii must also agree within 2 cm. A missing depth
+frame supplies no measurement and does not erase the last valid one. A view with
+a visible but unconfirmed target gets up to four frames before continuing the
+raster. The October 22 live trace showed two valid bucket fits 3.53 cm apart,
+7.77 seconds apart, from adjacent neck views; per-view state had discarded that
+agreement. An explicit final refresh clears the previous pair and still requires
+new measurements before reaching. Historical coordinates never complete a pair.
+
 The legacy hanging observation decoder accepts a single complete JSON object with optional
 Markdown wrapping or a short preamble. It rejects invalid coordinates, extra
 answers and trailing instructions. A format failure gets one fresh-image retry;

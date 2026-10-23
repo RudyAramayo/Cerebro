@@ -255,6 +255,23 @@ struct ROBWorkspaceLocatedObject: Codable {
     }
 }
 
+/// Fresh world-space measurements can agree across neck views. A missing
+/// depth sample supplies no evidence; it does not erase the last valid sample.
+struct ROBWorkspaceLocationConfirmation {
+    private var prior: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
+    mutating func observe(_ object: ROBWorkspaceLocatedObject) -> ROBWorkspaceLocatedObject? {
+        let previous = prior[object.target]
+        prior[object.target] = object
+        guard let previous, previous.agrees(with:object) else { return nil }
+        if object.target == .orangeBucket {
+            guard let a = previous.openingRadius, let b = object.openingRadius,
+                  a.isFinite, b.isFinite, abs(a-b) <= 0.02 else { return nil }
+        }
+        return object
+    }
+    mutating func invalidate(_ target:ROBWorkspaceTarget) { prior.removeValue(forKey:target) }
+}
+
 /// Operator-measured reach correction, bound to this robot's model/reference.
 /// Raw sightings remain unchanged and never become permission. No default
 /// offset is inferred when this local calibration file is absent.

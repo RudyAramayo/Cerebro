@@ -301,6 +301,28 @@ private extension ROBLeftCanReachCalibration {
         precondition(ROBWorkspaceFloorAlignment.fit(points: floorPoints.map { $0+SIMD3(0,0,0.8) },cameraFrame: camera) == nil,
             "A tabletop was accepted as the floor")
         print("Recall: durable per-model sighting hints, original successful camera view first then recentered view, expiry and no object-position reuse. Rim: measured circle plus recessed interior; lids and partial arcs rejected")
+        var crossView = ROBWorkspaceLocationConfirmation()
+        let measuredBucketA = ROBWorkspaceLocatedObject(target:.orangeBucket,
+            position:[0.3164549455,0.4341462099,0.2781495990],confidence:0.526,
+            capturedAt:1_792_716_357_126,sequence:3876,view:.init(panDegrees:31.8814,upperTarget:5557),openingRadius:0.09775845)
+        let measuredBucketB = ROBWorkspaceLocatedObject(target:.orangeBucket,
+            position:[0.3465006004,0.4511758391,0.2855762468],confidence:0.639,
+            capturedAt:1_792_716_364_893,sequence:4109,view:.init(panDegrees:30,upperTarget:5650),openingRadius:0.09969289)
+        precondition(crossView.observe(measuredBucketA) == nil)
+        precondition(crossView.observe(measuredBucketB)?.sequence == 4109,
+            "Live agreeing bucket measurements were lost when the neck changed views")
+        crossView.invalidate(.orangeBucket)
+        precondition(crossView.observe(measuredBucketB) == nil,"A refresh reused a previous confirmation")
+        var inconsistentRadius = measuredBucketB
+        inconsistentRadius = .init(target:.orangeBucket,position:measuredBucketB.position,confidence:0.8,
+            capturedAt:measuredBucketB.capturedAt+1000,sequence:4110,view:measuredBucketB.view,openingRadius:0.2)
+        precondition(crossView.observe(inconsistentRadius) == nil)
+        var expired = ROBWorkspaceLocationConfirmation()
+        precondition(expired.observe(measuredBucketA) == nil)
+        let tooLate = ROBWorkspaceLocatedObject(target:.orangeBucket,position:measuredBucketB.position,confidence:0.8,
+            capturedAt:measuredBucketA.capturedAt+30_001,sequence:5000,view:measuredBucketB.view,openingRadius:0.1)
+        precondition(expired.observe(tooLate) == nil,"Historical measurements supplied a live pair")
+        print("Cross-view bucket regression: actual fresh 3.53 cm agreement retained across neck views; refresh, radius mismatch and expired pairs rejected")
         precondition(ROBWorkspaceView.sweep.count == 32 && ROBWorkspaceView.sweep.contains { $0.upperTarget == 5300 })
         precondition(zip(ROBWorkspaceView.sweep, ROBWorkspaceView.sweep.dropFirst()).allSatisfy { abs($0.panDegrees - $1.panDegrees) <= 15 },
             "Search must inspect intermediate views rather than jumping between distant sides")
