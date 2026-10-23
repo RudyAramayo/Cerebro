@@ -40,8 +40,15 @@
       "lastLine": "Controller/spoken arm approval and session reuse: 93 checks passed; no hardware access"
     }
   },
-  "physicalResult": "Awaiting fresh native microphone/controller authorization for reviewed raised empty return and repeat recycling. No new pickup claimed.",
+  "physicalResult": "Corrected repeat NOT STARTED: two native session requests expired without final microphone/controller authorization. Cerebro reports No spoken or controller authorization arrived. No arm operation was started. Arm remains at previous empty retreat hold; no grant was restored or manufactured.",
   "pickupAndDropVerified": false,
   "cameraImagesIncluded": false,
-  "grantsPersisted": false
+  "grantsPersisted": false,
+  "runtimeAuthorization": {
+    "attempts": 2,
+    "result": "expired_without_authorization",
+    "newArmMotionSent": false,
+    "latestPhysicalRecording": "left_recycle_can-71623360-BA14-4D42-8228-25889143E316.csv",
+    "nativeStatus": "No spoken or controller authorization arrived. No arm operation was started."
+  }
 }
