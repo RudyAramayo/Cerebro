@@ -1,0 +1,524 @@
+{
+  "schemaVersion": 1,
+  "updatedUTC": "2026-10-23T22:25:22.854851+00:00",
+  "sourceParentCommit": "57bbd1c5776ffaf51463f12c7b443612d34b7883",
+  "installedBinarySHA256": "dae63642e0a6c52e3006b1be5dea08c924c701e913611698978925628169a03f",
+  "registrationVerified": false,
+  "neckEncoderFeedbackAvailable": false,
+  "markersRemainTapedAndFixed": true,
+  "printReference": {
+    "operatorReport": "The line is labelled 120 mm and physically measures 120 mm.",
+    "modelSymbolSideMeters": 0.12,
+    "twentyPercentRescaleApplied": false
+  },
+  "neutralLowerTarget": 6011,
+  "fullPanLowerBandUnchanged": [
+    5000,
+    6495
+  ],
+  "forwardOverlookExtension": {
+    "lowerBand": [
+      6496,
+      6645
+    ],
+    "positivePanMaximumRawTarget": 7333,
+    "minimumUsesExistingForwardSetting": true,
+    "preservesBroaderSavedForwardMaximum": true,
+    "above6645UsesOriginalForwardEnvelope": true,
+    "fullPanClaim": false
+  },
+  "manualLiveTrial": {
+    "panTarget": 7333,
+    "nominalPanDegrees": 39.99,
+    "upperTarget": 5700,
+    "acceptedLowerTargets": [
+      6011,
+      5961,
+      6011,
+      6111,
+      6211,
+      6261,
+      6495,
+      6645
+    ],
+    "panHeldDuringForwardSteps": true,
+    "operatorReportedMountToHangingArmClearanceMillimetersAt6645": 28,
+    "halfInchClearanceWasProposedNotAssumed": true,
+    "headTrackingPaused": true,
+    "followingOrArmMotionRequested": false,
+    "cameraLevelingRemainedOff": true
+  },
+  "relativeInertialObservations": {
+    "samePanUpperBaselineSession": "CF09F310-65F6-427E-844E-F215E1016CCB",
+    "stationaryBaselineFrames": 6,
+    "lower6111DirectionChangeDegrees": 5.061403668144368,
+    "lower6211DirectionChangeDegrees": 11.000626350365295,
+    "limitations": "Raw stationary accelerometer direction changes with unknown bias/scale; not encoder angles or full servo calibration."
+  },
+  "retakesAndReferenceFrames": [
+    {
+      "privateCaptureDirectory": "AD1314AB-2973-4577-AC98-2CBD02B11B8A",
+      "captureSHA256": "da5a858b0984c060d65d93df8ca61344c007d41ee2148617ed08ef6ecddcd2e1",
+      "targetID": "ROB:FLOOR:R01",
+      "samples": 45,
+      "poses": [
+        [
+          -40.05,
+          6011,
+          5580
+        ],
+        [
+          -40.05,
+          6011,
+          5630
+        ],
+        [
+          -36.06,
+          6011,
+          5480
+        ],
+        [
+          -36.06,
+          6011,
+          5555
+        ],
+        [
+          -36.06,
+          6011,
+          5580
+        ],
+        [
+          -36.06,
+          6011,
+          5630
+        ],
+        [
+          -36.06,
+          6011,
+          5705
+        ],
+        [
+          -36.06,
+          6011,
+          5780
+        ],
+        [
+          -32.07,
+          6011,
+          5580
+        ],
+        [
+          -32.07,
+          6011,
+          5630
+        ]
+      ],
+      "strictRefinement": {
+        "privateFile": "strict-full-45-refined.json",
+        "sha256": "eb8f05d8e346c4bc14c1f06315395e3091abdc9b0c44e5cec0627846b1e077cd",
+        "accepted": 15,
+        "rejected": 30
+      }
+    },
+    {
+      "privateCaptureDirectory": "2B7C20BE-AB3B-418D-9F1C-48CA211DE30D",
+      "captureSHA256": "fdff3580ab242449149fc6b19e9f5fa29a50cfba9c5b9a5a09ab1809b056332c",
+      "targetID": "ROB:FLOOR:L01",
+      "samples": 3,
+      "poses": [
+        [
+          39.99,
+          6111,
+          5700
+        ]
+      ],
+      "strictRefinement": {
+        "privateFile": "strict-three-view-refined.json",
+        "sha256": "27d34bccdcace883e6362b24172b6cd863e58ae49f19de5b600e7fb34932f827",
+        "accepted": 0,
+        "rejected": 3
+      }
+    },
+    {
+      "privateCaptureDirectory": "6A0856E9-5D7D-4C74-A0C0-E30D0E146D72",
+      "captureSHA256": "d3adeef9539df8332bec398aafb6bdddd05d277eef9e0141b4522321b6172b63",
+      "targetID": "ROB:FLOOR:L01",
+      "samples": 3,
+      "poses": [
+        [
+          39.99,
+          6211,
+          5700
+        ]
+      ],
+      "strictRefinement": {
+        "privateFile": "strict-three-view-refined.json",
+        "sha256": "61dbad2b45ad0d728763e7736c110275b00e2343921f1b733969e6b2b5234527",
+        "accepted": 1,
+        "rejected": 2
+      }
+    }
+  ],
+  "newCapturePolicy": {
+    "firstEligibleDeliveredFrameWarmupMilliseconds": 1000,
+    "exposureStabilityClaim": false,
+    "leftForwardCandidates": [
+      6111,
+      6186,
+      6261,
+      6495,
+      6645
+    ],
+    "everyPlannedHoldCheckedBeforeMotion": true,
+    "policySkippedHoldsRecordedSeparately": true,
+    "unreadableFloorHoldsRemainPartial": true,
+    "cameraPoseCancellationStorageErrorsStop": true,
+    "visibilityUpperTargetsPerLowerTargetPrediction": 0.823,
+    "freshCurrentViewBeforeOldHints": true,
+    "bothFloorForwardCandidates": [
+      6111,
+      6186,
+      6261,
+      6495,
+      6645
+    ],
+    "candidatesFilteredByExactActivePanLowerUpperPolicy": true,
+    "rightNegativePanRejects6645Extension": true,
+    "budgetsSeconds": {
+      "coldFirstStream": 15,
+      "normalDiscovery": 4,
+      "normalObservation": 8
+    },
+    "visibilityPredictionUsesActualReacquiredLowerUpperAnchor": true,
+    "zeroEligiblePostWarmupFramesIsCameraUnavailable": true,
+    "partialFloorMissBudget": {
+      "totalMissesAllowedBeforeStopping": 6,
+      "consecutiveMissesAllowedBeforeStopping": 3
+    }
+  },
+  "preferences": {
+    "automaticLeanZoomScanMode": false,
+    "emptyGripperStartupCalibrationRestored": true,
+    "wakeArmSessionOfferRestored": true,
+    "armStartupRouteEnabled": false,
+    "normalHeadTrackingRestored": true,
+    "cameraLeveling": false
+  },
+  "validation": {
+    "cPolicyBoundaries": "pass",
+    "productionGatewayFakeTransport": "pass",
+    "productionTrackingMethodRuntime": "pass",
+    "neckSafetyStatic": "pass",
+    "sandboxStatic": "pass",
+    "isolatedSignedDebugBuild": "pass",
+    "catalogStatic": "pass using actual isolated Debug Run scheme; absent per-user scheme is not tracked by the repository",
+    "independentReadOnlyReview": "pass; C policy, production gateway and production tracking runtime fixtures independently rerun",
+    "installedDeepStrictCodeSignature": "pass"
+  },
+  "forwardProfileStatus": "Final shared survey captured all four target IDs: 441 raw frames, 394 strict accepted; left-floor capture remains explicitly partial. Registration remains unverified.",
+  "privacy": {
+    "cameraImagesCommitted": false,
+    "rawDepthCommitted": false,
+    "deviceIdentifiersCommitted": false,
+    "grantsCreatedOrCommitted": false
+  },
+  "compensatedViewProof": {
+    "privateCaptureDirectory": "14B64E08-0315-4F09-A787-154650519624",
+    "captureSHA256": "392edd81e012231fc1940e632d9d661c129af32ecb0c6efd6bf61929c326c12f",
+    "panTarget": 7333,
+    "lowerTarget": 6645,
+    "upperTarget": 6200,
+    "samples": 3,
+    "strictRefinement": {
+      "privateFile": "strict-compensation-proof-refined.json",
+      "sha256": "dfa96ebf539841bc7c957b02b75a7c8b08bc2e46bc26d1a802700c984d3b2eab",
+      "accepted": 3,
+      "rejected": 0
+    },
+    "imageMedianGrayLevels": [
+      114,
+      114,
+      114
+    ],
+    "fullPatternAndQuietMarginClearInInspectedImage": true,
+    "visibilityUpperGainPrediction": 0.823,
+    "gainAppliedToGlobalLevelingOrURDF": false
+  },
+  "builtCompensatedBinarySHA256": "eda35b7b69c02df65e43b2414125d4cc9d6d5c07b49d8f495b91dc2d949a0716",
+  "productionSourceSHA256": {
+    "Cerebro.xcodeproj/project.pbxproj": "5b3abd5d9805e9cdfe49d4049e61395dc43a167a387ecce35721bc8395952430",
+    "Cerebro/CameraManager.swift": "7d28e16c757a5621703dbec3ec65ab066acb72747d8a2e73b49bd5c9a0cc4427",
+    "Cerebro/ROBMainViewController.mm": "53e4ffeb93e39e7da7ba870f6f554b21db7466eb876a49c8630a87cd1f0da60b",
+    "Cerebro/ROBNeckQRCalibration.swift": "46f48cb4a16473fc424fdee0941d2ecd7f2270f6425a8fe870d8ad73d5a694d3",
+    "Cerebro/ROBNeckQRMeasurement.swift": "8b23ad6d016815180816f0149133c8ef83302482a8883ed44b18168213ed53a5",
+    "Cerebro/ROBNeckSafetyPolicy.c": "2c0ee40e766f3d62bde7e2542ae15217027f9a24350712b3d81e45e685729e97",
+    "Cerebro/ROBNeckSafetyPolicy.h": "86089e3db615a4774353d49dfa871f0ce3f2757e7ef7e33a92db7a5d4959437e",
+    "Cerebro/ROBTestingSandboxWindowController.swift": "d07ba41dc2b0b408a761e94ef68bbfd6cdf07ac2c88d8cde7d25ef8ca1ec0560",
+    "Cerebro/Resources/ShadowPlanner/qr_corner_refinement.py": "6cb2afff066f145a4a5cf614d0ebb6ab99f96bb6b4d51f7f689ebf078a33c9e3",
+    "Cerebro/Resources/ShadowPlanner/qr_neck_calibration.py": "d44e9f58fe59602859425962d6f94c9f836429bfb713f74f4bd2738af381835d",
+    "Cerebro/Resources/ShadowPlanner/qr_neck_imu_report.py": "4911e0103d32117b7181f7c860e942b83bed633042004fa87498e8fd0f6ae7d7",
+    "Cerebro/Resources/ShadowPlanner/qr_neck_joint_calibration.py": "d07582dd845ddb489fa821f116529d29f5784dcae2199e1db6814e47f106a1f1",
+    "Cerebro/Resources/ShadowPlanner/qr_neck_multi_calibration.py": "aa7e6f2baf95576dbb49297ee411df77d1fdccc52feca9c7d6997a27e1ef1020",
+    "Cerebro/Resources/ShadowPlanner/qr_upper_neck_report.py": "a9d751d2f4379ed8076119b8791d8574f349e487c0f27f52345dcbd245616c74",
+    "Cerebro/Webcam_color.py": "47f11c65e0f356b157feae8526fd0df4fb2ea87d80ba8d6d93811bb8bcae0098",
+    "Tests/ROBNeckOutputRuntimeTests.py": "68a437b31aef425b4a369ae14828dc0ecb90e52d2c6f737c7786b8aa05f484de",
+    "Tests/ROBNeckSafetyPolicyFixtureTests.c": "4e684a25c4f2c4ca8d6bed72f5e57ad660732b1cfbe8c8f6be9558e874b3814e",
+    "Tests/ROBPersonTrackingSourceRuntimeTests.py": "221325b91ffa494af674d33f849edcd4f301f9ef92c83bf16418880190197ee5"
+  },
+  "installedBuildKind": "isolated signed local Debug; no production release or public distribution",
+  "productionSourceMatchesInstalledBuildInputs": true,
+  "buildIsolation": {
+    "excludedUnrelatedDirtyFiles": true,
+    "validationRunSchemeSHA256": "22fe0550d7643dfb2b66d09e1497587797b54057baeda507c469ffa2c48eef1a",
+    "catalogValidationNote": "Catalog test targets absent per-user scheme; validated actual isolated Debug scheme instead, with dispatch debugger/backtrace injection explicitly disabled. Run flags do not affect compiled product."
+  },
+  "finalNeutralCommandAfterInstall": {
+    "panRaw": 5799,
+    "lowerRaw": 6011,
+    "upperRaw": 6906,
+    "normalTrackingEnabledAfterReturn": true,
+    "subsequentTrackingMayMoveHead": true
+  },
+  "normalTracking": {
+    "retainedEstablishedLowerBand": [
+      5811,
+      6645
+    ],
+    "outwardRestrictedPanEdgeReturnsThroughNeutral": true,
+    "neutralLowerUpper": [
+      6011,
+      6906
+    ],
+    "broadLeanZoomEnabled": false
+  },
+  "surveyHistory": [
+    {
+      "sessionID": "8BBB27D9-0A15-4067-9735-0BD1734D0E14",
+      "captureRuntimeBinarySHA256": "eda35b7b69c02df65e43b2414125d4cc9d6d5c07b49d8f495b91dc2d949a0716",
+      "privateSummaryRelativePath": "SurveySessions/8BBB27D9-0A15-4067-9735-0BD1734D0E14/same-session-offline-summary.json",
+      "privateSummarySHA256": "159169a7cf1057ca7827fad323bee4fa28d21a6643db2d351e25baf8488d1fb7",
+      "counts": {
+        "targetsObserved": 3,
+        "targetsRequested": 4,
+        "rawFrames": 330,
+        "strictAcceptedFrames": 285,
+        "rejectedRawRetainedFrames": 45,
+        "uniqueActualTrainingPoses": 33,
+        "uniqueActualHeldOutPoses": 24
+      },
+      "targets": [
+        {
+          "targetID": "ROB:TABLE:001",
+          "status": "complete",
+          "samples": 111,
+          "strictAccepted": 111,
+          "strictRejectedRawRetained": 0,
+          "actualLowerTargets": [
+            5811,
+            6011,
+            6211
+          ],
+          "acceptedUniqueActualPoses": 23,
+          "sourceCaptureRelativeToPrivateCaptureRoot": "39CBF005-E649-4C92-904B-9242FC24259A/capture.json",
+          "sourceSHA256": "c0dfe665f7a5a3e690dbefbc9dc77610a56238d8ebad71dc7bb3537ffb17b9c5",
+          "refinedCaptureRelativeToPrivateCaptureRoot": "39CBF005-E649-4C92-904B-9242FC24259A/strict-session8BBB-refined.json",
+          "refinedSHA256": "9b935e72a62fc8c9c4f14fc104238fa1434412788bd1731da39620c3966d2463"
+        },
+        {
+          "targetID": "ROB:FLOOR:L01",
+          "status": "partial",
+          "samples": 108,
+          "strictAccepted": 63,
+          "strictRejectedRawRetained": 45,
+          "actualLowerTargets": [
+            6011,
+            6111,
+            6645
+          ],
+          "acceptedUniqueActualPoses": 11,
+          "sourceCaptureRelativeToPrivateCaptureRoot": "73C8C43B-CD03-4E1D-9CB2-145F8BEE07A8/capture.json",
+          "sourceSHA256": "7ca5fdc9ae4b97eeeab710de44036598e372f34931beaf2870d74919f2a6b3da",
+          "refinedCaptureRelativeToPrivateCaptureRoot": "73C8C43B-CD03-4E1D-9CB2-145F8BEE07A8/strict-session8BBB-refined.json",
+          "refinedSHA256": "f3e8292c5fb54e5fbb93dfd205af74a887bd5c4f04fb262890f28f578406b69c"
+        },
+        {
+          "targetID": "ROB:FLOOR:R01",
+          "status": "not_readable_at_verified_seed",
+          "samples": 0
+        },
+        {
+          "targetID": "ROB:WALL:R01",
+          "status": "complete",
+          "samples": 111,
+          "strictAccepted": 111,
+          "strictRejectedRawRetained": 0,
+          "actualLowerTargets": [
+            5811,
+            6011,
+            6211
+          ],
+          "acceptedUniqueActualPoses": 23,
+          "sourceCaptureRelativeToPrivateCaptureRoot": "A9FBE43D-59EE-4C93-A4C2-B63EB9B300BF/capture.json",
+          "sourceSHA256": "eeba4e418cd6fc50707c394823e06e4fe03d12b8e711af2a1193abe1ab2edb0c",
+          "refinedCaptureRelativeToPrivateCaptureRoot": "A9FBE43D-59EE-4C93-A4C2-B63EB9B300BF/strict-session8BBB-refined.json",
+          "refinedSHA256": "7dac9b5447d92616903b0847882351ff756d2368fed5ebb6973b581226d8cc10"
+        }
+      ],
+      "registrationVerified": false
+    },
+    {
+      "sessionID": "FBF4E5D7-DB07-426E-B700-0E3DD6D4C41F",
+      "captureRuntimeBinarySHA256": "8b5d06308ab51bda3ec1cb611081e51021ea4aaa5c617c09119189cbaa90cfd6",
+      "privateSummaryRelativePath": "SurveySessions/FBF4E5D7-DB07-426E-B700-0E3DD6D4C41F/same-session-offline-summary.json",
+      "privateSummarySHA256": "49561eb9de8161733cd6946e1dbe4f5db3fef8735944a9087528f914552eda2b",
+      "counts": {
+        "rawFrames": 441,
+        "strictAccepted": 394,
+        "rejectedRawRetained": 47,
+        "markers": 4,
+        "uniqueTrainingPoses": 51,
+        "uniqueHeldOutPoses": 29
+      },
+      "targets": [
+        {
+          "targetID": "ROB:TABLE:001",
+          "status": "complete",
+          "samples": 111,
+          "strictAccepted": 109,
+          "strictRejectedRawRetained": 2,
+          "actualLowerTargets": [
+            5811,
+            6011,
+            6211
+          ],
+          "acceptedUniqueActualPoses": 23,
+          "sourceCaptureRelativeToPrivateCaptureRoot": "63638AEA-F90B-4108-8D58-E6AA3419A28F/capture.json",
+          "sourceSHA256": "4418923b224e6f38381b3a4e981fedc765aaf86fbacb3fd63eab4303bbdc8109",
+          "refinedCaptureRelativeToPrivateCaptureRoot": "63638AEA-F90B-4108-8D58-E6AA3419A28F/strict-sessionFBF4-refined.json",
+          "refinedSHA256": "ce6aec9c210d2324ae5475b66741cc3fa4544331561eb490444e1d8b42f5127d"
+        },
+        {
+          "targetID": "ROB:FLOOR:L01",
+          "status": "partial",
+          "samples": 108,
+          "strictAccepted": 63,
+          "strictRejectedRawRetained": 45,
+          "actualLowerTargets": [
+            6011,
+            6111,
+            6645
+          ],
+          "acceptedUniqueActualPoses": 11,
+          "sourceCaptureRelativeToPrivateCaptureRoot": "05EC5C1C-EC9B-4874-80C8-DC417A9F9000/capture.json",
+          "sourceSHA256": "37a8d59c9287e6a20885471cb4ab33b862c9944b118c381fa02e0c150ac13de3",
+          "refinedCaptureRelativeToPrivateCaptureRoot": "05EC5C1C-EC9B-4874-80C8-DC417A9F9000/strict-sessionFBF4-refined.json",
+          "refinedSHA256": "f1a4e02902a6443f9a2565548980dc9566b9a3d1643c0be140715afdcf5cf834"
+        },
+        {
+          "targetID": "ROB:FLOOR:R01",
+          "status": "complete",
+          "samples": 111,
+          "strictAccepted": 111,
+          "strictRejectedRawRetained": 0,
+          "actualLowerTargets": [
+            6011,
+            6111,
+            6186,
+            6495
+          ],
+          "acceptedUniqueActualPoses": 23,
+          "sourceCaptureRelativeToPrivateCaptureRoot": "02386A27-893B-4586-AD11-4F9B97A12C5C/capture.json",
+          "sourceSHA256": "6dafc42eb6d06444af49c929133f03abbc11d0ef7117df91dc0b7a35ae0acd7f",
+          "refinedCaptureRelativeToPrivateCaptureRoot": "02386A27-893B-4586-AD11-4F9B97A12C5C/strict-sessionFBF4-refined.json",
+          "refinedSHA256": "69d4f5fbec92074ea37a952b3422d01d963a942931673de1860afae443fc91a2"
+        },
+        {
+          "targetID": "ROB:WALL:R01",
+          "status": "complete",
+          "samples": 111,
+          "strictAccepted": 111,
+          "strictRejectedRawRetained": 0,
+          "actualLowerTargets": [
+            5811,
+            6011,
+            6211
+          ],
+          "acceptedUniqueActualPoses": 23,
+          "sourceCaptureRelativeToPrivateCaptureRoot": "9700AA23-A4E3-4080-8554-DD952B5C5661/capture.json",
+          "sourceSHA256": "94e63e6c063bad0012ce2229ab6f234d4a2f2fc5622184cdf6390abb9373417d",
+          "refinedCaptureRelativeToPrivateCaptureRoot": "9700AA23-A4E3-4080-8554-DD952B5C5661/strict-sessionFBF4-refined.json",
+          "refinedSHA256": "2dc462ff5de3ee763d4ab47f5b456fd3f76fb1fc3034a31c886d1c52f1111438"
+        }
+      ],
+      "registrationVerified": false
+    }
+  ],
+  "finalModelDiagnostics": {
+    "fixed_factory_distortion|linear": {
+      "heldOutReprojectionRMSEPixels": 3.8958698653520027,
+      "floorLeftRight": {
+        "normalAngleDegrees": 7.771102138632198,
+        "centerSeparationMeters": 1.0366904011479314,
+        "leftPlaneToRightCenterMeters": 0.06957306233352936,
+        "rightPlaneToLeftCenterMeters": 0.07006374768105572
+      },
+      "parameterConditionNumber": 1309.1203691222197
+    },
+    "fixed_factory_distortion|quadratic_upper": {
+      "heldOutReprojectionRMSEPixels": 3.8557634836528525,
+      "floorLeftRight": {
+        "normalAngleDegrees": 6.8223607782462805,
+        "centerSeparationMeters": 1.0329142352200322,
+        "leftPlaneToRightCenterMeters": 0.0407496885105442,
+        "rightPlaneToLeftCenterMeters": 0.08049026570597835
+      },
+      "parameterConditionNumber": 8038.766043689052
+    },
+    "fixed_factory_distortion|quadratic_lower": {
+      "heldOutReprojectionRMSEPixels": 3.89419694466613,
+      "floorLeftRight": {
+        "normalAngleDegrees": 7.71196453574859,
+        "centerSeparationMeters": 1.036961962329808,
+        "leftPlaneToRightCenterMeters": 0.06752664236407434,
+        "rightPlaneToLeftCenterMeters": 0.0710798303755902
+      },
+      "parameterConditionNumber": 2532.3354274394496
+    },
+    "interpretation": "Measured pan-before-lower order and 155.79 mm link were evaluated offline. Signed mechanical and optical-center offsets remain unknown; fitted parameters are not promoted to runtime."
+  },
+  "rightCompensatedViewProof": {
+    "privateCaptureDirectory": "07377E92-4D1B-485F-A3C5-77AB2CA62D11",
+    "captureSHA256": "07ff139a86443434a066517401a5df38fb81b926140d053fdabc490f1e39188c",
+    "refinedCaptureSHA256": "e39faf6989c92473cf47cb1bd82b0f5ce77389b013777ef8e3d53d3e9ff2d08e",
+    "panRaw": 4931,
+    "nominalPanDegrees": -32.07,
+    "lowerRaw": 6495,
+    "upperRaw": 6028,
+    "strictAccepted": 3,
+    "rawFrames": 3,
+    "fullPatternAndQuietMarginClearInInspectedImage": true,
+    "imageMeanGrayLevels": [
+      111.0602578125,
+      111.0597109375,
+      111.0455546875
+    ],
+    "acceptedMoreThan1000MillisecondsAfterFirstEligibleFrame": true,
+    "registrationVerified": false
+  },
+  "mechanicalReferenceFile": "mechanical-reference.json",
+  "runtimeCalibrationChangesApplied": {
+    "worldTransform": false,
+    "servoAngleMap": false,
+    "runtimeURDF": false,
+    "automaticDepthRangeFit": false,
+    "existingManualDisplayCorrectionUnchanged": {
+      "towardRobotInches": 4,
+      "downwardPitchDegrees": 15
+    }
+  },
+  "privateResearchArchive": {
+    "manifestRelativePath": "SurveySessions/FBF4E5D7-DB07-426E-B700-0E3DD6D4C41F/Analysis/ResearchArchive-20261023/archive-manifest.json",
+    "manifestSHA256": "b7a5d34d7e0d4ba45db548dc2ad495c602f46decc8340818191154f50039db1a",
+    "rawArtifactsCommitted": false
+  }
+}

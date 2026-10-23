@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "recordedUTC": "2026-10-23T22:12:41.322235+00:00",
+  "source": "direct operator measurements and assembly description",
+  "jointOrder": [
+    "torso",
+    "neck_pan",
+    "lower_neck",
+    "upper_neck"
+  ],
+  "panLocation": "Inside torso; lower-neck servo mounted above pan motor",
+  "lowerToUpperServoCenterDistanceMeters": 0.15579,
+  "upperServoCenterToInsta360SphereCenterMeters": 0.165,
+  "insta360SphereCenterToFaceRgbFrontGlassMeters": 0.0965,
+  "faceCameraMounting": "Angled; exact signed offset vector and optical-center distance are not supplied",
+  "faceMeasurementReference": "Outside glass of the RGB lens",
+  "lowerToUpperLinkMaterials": [
+    "aluminum bar",
+    "UHMW polyethylene"
+  ],
+  "operatorMeasuredMountToHangingArmClearanceMeters": 0.028,
+  "clearanceCommandPose": {
+    "panRaw": 7333,
+    "lowerRaw": 6645,
+    "upperRaw": 5700
+  },
+  "modelInterpretation": {
+    "panBeforeLowerConfirmed": true,
+    "scalarDistancesDoNotSpecifySignedXYZVectors": true,
+    "outsideGlassIsNotAnIndependentlyMeasuredOpticalCenter": true,
+    "jointOriginsAlongParallelShaftAxesRequireConsistentReferencePoints": true,
+    "servoNeutralRaw6011Changed": false,
+    "worldRegistrationVerified": false,
+    "measuredGeometryPromotedToRuntimeUrdf": false
+  }
+}

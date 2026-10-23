@@ -252,6 +252,17 @@ bool ROBNeckSafetyLowerTargetHasFullPanClearance(
         && boundedLowerTarget <= ROBNeckSafetyFullPanLowerMaximumTarget;
 }
 
+bool ROBNeckSafetyLowerTargetIsInUprightLookaroundBand(
+    const ROBNeckSafetyConfig *config,
+    int32_t lowerTarget
+) {
+    return ROBNeckSafetyConfigIsValid(config)
+        && lowerTarget >= ROBNeckSafetyUprightLookaroundLowerMinimumTarget
+        && lowerTarget <= ROBNeckSafetyUprightLookaroundLowerMaximumTarget
+        && lowerTarget >= config->lowerMinimumTarget
+        && lowerTarget <= config->lowerMaximumTarget;
+}
+
 double ROBNeckSafetyMaestroMotionDuration(
     int32_t fromTarget,
     int32_t toTarget,
@@ -334,6 +345,20 @@ bool ROBNeckSafetyAllowedPanBounds(
         )) {
         boundsOut->minimumDegrees = config->forwardPanMinimumDegrees;
         boundsOut->maximumDegrees = config->forwardPanMaximumDegrees;
+        if (boundedLowerTarget <= ROBNeckSafetyForwardOverlookLowerMaximumTarget) {
+            const int32_t overlookPanMaximum = ROBNeckSafetyClampTarget(
+                ROBNeckSafetyForwardOverlookPanMaximumTarget,
+                config->panCenterTarget,
+                config->panMaximumTarget
+            );
+            const double overlookMaximumDegrees =
+                (double)(overlookPanMaximum - config->panCenterTarget)
+                / config->panTargetsPerDegree;
+            boundsOut->maximumDegrees = fmax(
+                config->forwardPanMaximumDegrees,
+                overlookMaximumDegrees
+            );
+        }
         return true;
     }
 

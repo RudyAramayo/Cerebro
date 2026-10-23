@@ -74,6 +74,8 @@ static void testConfigurationValidation(void) {
     EXPECT_NEAR(ROBNeckSafetyFullPanDegrees(&config), 60.0, 0.000001);
     EXPECT_INT(ROBNeckSafetyFullPanLowerThresholdTarget, 5000);
     EXPECT_INT(ROBNeckSafetyFullPanLowerMaximumTarget, 6495);
+    EXPECT_INT(ROBNeckSafetyForwardOverlookLowerMaximumTarget, 6645);
+    EXPECT_INT(ROBNeckSafetyForwardOverlookPanMaximumTarget, 7333);
     EXPECT_INT(ROBNeckSafetyUprightLowerTarget, 6011);
     EXPECT_INT(ROBNeckSafetyUprightUpperTarget, 6906);
     EXPECT_INT(ROBNeckSafetyDefaultForwardPanTarget, 5799);
@@ -318,14 +320,14 @@ static void testLowerClearancePanEnvelope(void) {
     EXPECT_NEAR(bounds.minimumDegrees, -full, 0.000001);
     EXPECT_NEAR(bounds.maximumDegrees, full, 0.000001);
 
-    // The exact next target and all higher known targets use the asymmetric
-    // forward envelope. Legacy serialized anchors do not change this boundary.
+    // Immediately above full-pan clearance, only the positive side gains the
+    // bounded forward-overlook extension. Higher targets retain the old range.
     bounds = testedPanBounds(
         &config,
         ROBNeckSafetyFullPanLowerMaximumTarget + 1
     );
     EXPECT_NEAR(bounds.minimumDegrees, -15.0, 0.000001);
-    EXPECT_NEAR(bounds.maximumDegrees, 2.1, 0.000001);
+    EXPECT_NEAR(bounds.maximumDegrees, 39.99, 0.000001);
 
     bounds = testedPanBounds(&config, config.lowerFullPanHighTarget);
     EXPECT_NEAR(bounds.minimumDegrees, -15.0, 0.000001);
@@ -353,6 +355,79 @@ static void testLowerClearancePanEnvelope(void) {
 
     bounds = testedPanBounds(&config, 12000);
     EXPECT_NEAR(bounds.minimumDegrees, -15.0, 0.000001);
+    EXPECT_NEAR(bounds.maximumDegrees, 2.1, 0.000001);
+}
+
+static void testForwardOverlookEnvelope(void) {
+    ROBNeckSafetyConfig config = ROBNeckSafetyDefaultConfig();
+    ROBNeckSafetyResult result;
+    ROBNeckSafetyPanBounds bounds;
+    config.cameraLevelingEnabled = false;
+
+    EXPECT_TRUE(ROBNeckSafetyApply(&config, 8000, 6495, 5700, &result));
+    EXPECT_INT(result.panTarget, 8000);
+    EXPECT_FALSE(result.panClamped);
+
+    const int32_t extensionEdges[] = { 6496, 6645 };
+    for (size_t index = 0; index < sizeof(extensionEdges) / sizeof(extensionEdges[0]); index++) {
+        const int32_t lower = extensionEdges[index];
+        EXPECT_FALSE(ROBNeckSafetyLowerTargetHasFullPanClearance(&config, lower));
+        bounds = testedPanBounds(&config, lower);
+        EXPECT_NEAR(bounds.minimumDegrees, -15.0, 0.000001);
+        EXPECT_NEAR(bounds.maximumDegrees, 39.99, 0.000001);
+        EXPECT_TRUE(ROBNeckSafetyApply(&config, 7333, lower, 5700, &result));
+        EXPECT_INT(result.panTarget, 7333);
+        EXPECT_INT(result.lowerTarget, lower);
+        EXPECT_INT(result.upperTarget, 5700);
+        EXPECT_FALSE(result.panClamped);
+        EXPECT_TRUE(ROBNeckSafetyApply(&config, 7334, lower, 5700, &result));
+        EXPECT_INT(result.panTarget, 7333);
+        EXPECT_TRUE(result.panClamped);
+        EXPECT_TRUE(ROBNeckSafetyApply(&config, 4000, lower, 5700, &result));
+        EXPECT_INT(result.panTarget, 5500);
+        EXPECT_TRUE(result.panClamped);
+    }
+
+    EXPECT_TRUE(ROBNeckSafetyApply(&config, 7333, 6646, 5700, &result));
+    EXPECT_INT(result.panTarget, 6070);
+    EXPECT_TRUE(result.panClamped);
+    bounds = testedPanBounds(&config, 6646);
+    EXPECT_NEAR(bounds.minimumDegrees, -15.0, 0.000001);
+    EXPECT_NEAR(bounds.maximumDegrees, 2.1, 0.000001);
+    bounds = testedPanBounds(&config, ROBNeckSafetyTargetOff);
+    EXPECT_NEAR(bounds.maximumDegrees, 2.1, 0.000001);
+    EXPECT_FALSE(ROBNeckSafetyAllowedPanBounds(NULL, 6645, &bounds));
+    EXPECT_TRUE(isnan(bounds.minimumDegrees));
+    EXPECT_TRUE(isnan(bounds.maximumDegrees));
+    EXPECT_FALSE(ROBNeckSafetyAllowedPanBounds(&config, 6645, NULL));
+
+    // The cap follows the active raw-target conversion, rather than assuming
+    // the default center or nominal 33.333 targets/degree.
+    config.panCenterTarget = 6100;
+    config.panTargetsPerDegree = 25.0;
+    bounds = testedPanBounds(&config, 6645);
+    EXPECT_NEAR(bounds.maximumDegrees, 49.32, 0.000001);
+    EXPECT_TRUE(ROBNeckSafetyApply(&config, 7500, 6645, 5700, &result));
+    EXPECT_INT(result.panTarget, 7333);
+    config.panMaximumTarget = 7200;
+    bounds = testedPanBounds(&config, 6645);
+    EXPECT_NEAR(bounds.maximumDegrees, 44.0, 0.000001);
+    EXPECT_TRUE(ROBNeckSafetyApply(&config, 7333, 6645, 5700, &result));
+    EXPECT_INT(result.panTarget, 7200);
+
+    // A pre-existing broader forward range is preserved. The extension never
+    // changes the saved negative side, and a cap below center adds no angle.
+    config = ROBNeckSafetyDefaultConfig();
+    config.restrictedPanDegrees = 45.0;
+    config.forwardPanMinimumDegrees = -25.0;
+    config.forwardPanMaximumDegrees = 45.0;
+    bounds = testedPanBounds(&config, 6645);
+    EXPECT_NEAR(bounds.minimumDegrees, -25.0, 0.000001);
+    EXPECT_NEAR(bounds.maximumDegrees, 45.0, 0.000001);
+    config = ROBNeckSafetyDefaultConfig();
+    config.panCenterTarget = 7400;
+    config.panMaximumTarget = 9000;
+    bounds = testedPanBounds(&config, 6645);
     EXPECT_NEAR(bounds.maximumDegrees, 2.1, 0.000001);
 }
 
@@ -757,15 +832,48 @@ static void testPostureSpecificUpperInterpolation(void) {
     ));
 }
 
+static void testUprightLookaroundRetention(void) {
+    ROBNeckSafetyConfig config = ROBNeckSafetyDefaultConfig();
+    const int32_t retained[] = { 5811, 5911, 6011, 6111, 6211, 6212, 6495, 6496, 6645 };
+    for (size_t index = 0; index < sizeof(retained) / sizeof(retained[0]); index++) {
+        EXPECT_TRUE(ROBNeckSafetyLowerTargetIsInUprightLookaroundBand(
+            &config, retained[index]
+        ));
+        ROBNeckSafetyPanBounds bounds = testedPanBounds(&config, retained[index]);
+        EXPECT_NEAR(bounds.minimumDegrees, retained[index] <= 6495 ? -60.0 : -15.0, 0.000001);
+        EXPECT_NEAR(bounds.maximumDegrees, retained[index] <= 6495 ? 60.0 : 39.99, 0.000001);
+    }
+    const int32_t notRetained[] = { -1, 0, 5000, 5810, 6646, 7676, 16384 };
+    for (size_t index = 0; index < sizeof(notRetained) / sizeof(notRetained[0]); index++) {
+        EXPECT_FALSE(ROBNeckSafetyLowerTargetIsInUprightLookaroundBand(
+            &config, notRetained[index]
+        ));
+    }
+    // Retention is a tracking preference, not a new collision boundary.
+    EXPECT_TRUE(ROBNeckSafetyLowerTargetHasFullPanClearance(&config, 5810));
+    EXPECT_TRUE(ROBNeckSafetyLowerTargetHasFullPanClearance(&config, 6212));
+    EXPECT_FALSE(ROBNeckSafetyLowerTargetIsInUprightLookaroundBand(NULL, 6011));
+    config.lowerMaximumTarget = 6550;
+    config.lowerFullPanHighTarget = 6500;
+    EXPECT_TRUE(ROBNeckSafetyConfigIsValid(&config));
+    EXPECT_TRUE(ROBNeckSafetyLowerTargetIsInUprightLookaroundBand(&config, 6550));
+    EXPECT_FALSE(ROBNeckSafetyLowerTargetIsInUprightLookaroundBand(&config, 6551));
+    EXPECT_FALSE(ROBNeckSafetyLowerTargetIsInUprightLookaroundBand(&config, 6645));
+    config.panTargetsPerDegree = NAN;
+    EXPECT_FALSE(ROBNeckSafetyLowerTargetIsInUprightLookaroundBand(&config, 6011));
+}
+
 int main(void) {
     testConfigurationValidation();
     testPostureSpecificUpperInterpolation();
     testLowerClearancePanEnvelope();
+    testForwardOverlookEnvelope();
     testPanDegreeConversion();
     testPanApplicationAndOffSentinel();
     testCounterRotation();
     testSettleGate();
     testMaestroMotionDuration();
+    testUprightLookaroundRetention();
 
     if (failures != 0) {
         fprintf(stderr, "ROB neck safety policy fixtures failed: %d\n", failures);

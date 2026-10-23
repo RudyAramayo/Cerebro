@@ -4490,8 +4490,12 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
                 == NSControlStateValueOn;
         BOOL lowerAlreadyAtUprightEndpoint = uprightTransitionAuthorized
             && currentLowerTarget == requestedUprightEndpoint.lowerTarget;
+        BOOL currentLowerHasFullPanClearance =
+            ROBNeckSafetyLowerTargetHasFullPanClearance(
+                &neckConfiguration, currentLowerTarget
+            );
         configuration.uprightTransitionEnabled =
-            !keepLowerNeckUpright
+            (!keepLowerNeckUpright || !currentLowerHasFullPanClearance)
             && !swordFocusSource
             && uprightTransitionAuthorized
             && !lowerAlreadyAtUprightEndpoint;
@@ -4513,12 +4517,18 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             || self.serialBox.personTrackingPostureSequenceActive) {
             return;
         }
-        // Enter the reviewed upright pose once. Once the lower neck is at
-        // 6011, leave upper tilt free to track the person; never keep resetting
-        // the upper camera to the entry target on successive observations.
+        // Enter upright lookaround once, retaining an established bounded
+        // lower-neck offset within its existing pan envelope. At a restricted
+        // outward edge, the reviewed upright transition below restores pan
+        // clearance; ordinary centering still preserves the accepted lower.
+        // Scan-mode high-pose recovery retains its exact upright entry.
+        BOOL lowerAtUprightTrackingPose = keepLowerNeckUpright
+            ? ROBNeckSafetyLowerTargetIsInUprightLookaroundBand(
+                &neckConfiguration, currentLowerTarget)
+            : currentLowerTarget == ROBNeckSafetyUprightLowerTarget;
         if ((keepLowerNeckUpright || highMainPoseRequestsUpright)
             && uprightTransitionAuthorized
-            && currentLowerTarget != ROBNeckSafetyUprightLowerTarget) {
+            && !lowerAtUprightTrackingPose) {
             int32_t highPosePanTarget = currentPanTarget;
             if (highPosePanTarget < uprightRight.panTarget) {
                 highPosePanTarget = (int32_t)uprightRight.panTarget;
@@ -5705,6 +5715,19 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     qrCalibration.viewReady = workspace.viewReady;
     qrCalibration.canUseView = workspace.canUseView;
     qrCalibration.boundedPan = workspace.boundedPan;
+    qrCalibration.calibrationViewAllowed = ^BOOL(double pan, NSInteger lower, NSInteger upper) {
+        ROBSerialBox *serial = weakSelf.serialBox;
+        if (serial == nil || lower < 5811 ||
+            lower > ROBNeckSafetyForwardOverlookLowerMaximumTarget ||
+            upper < 5300 || upper > 7500 || fabs(pan) > 70) { return NO; }
+        ROBNeckSafetyConfig config = [serial neckSafetyConfiguration];
+        config.cameraLevelingEnabled = false;
+        int32_t target = 0;
+        ROBNeckSafetyResult checked;
+        return ROBNeckSafetyPanDegreesToTarget(&config, pan, &target) &&
+            ROBNeckSafetyApply(&config, target, (int32_t)lower, (int32_t)upper, &checked) &&
+            checked.panTarget == target && checked.lowerTarget == lower && checked.upperTarget == upper;
+    };
     qrCalibration.calibrationViewReady = ^BOOL(double pan, NSInteger lower, NSInteger upper) {
         ROBSerialBox *serial = weakSelf.serialBox;
         if (serial == nil) { return NO; }
@@ -5734,7 +5757,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         ROBNeckSafetyConfig config = [serial neckSafetyConfiguration];
         int32_t target = 0;
         if (!ROBNeckSafetyPanDegreesToTarget(&config, pan, &target) ||
-            lower < 5811 || lower > 6211 || upper < 5300 || upper > 7500 || fabs(pan) > 70) { return NO; }
+            ![ROBNeckQRCalibration shared].calibrationViewAllowed(pan, lower, upper)) { return NO; }
         if ([ROBNeckQRCalibration shared].calibrationViewReady(pan, lower, upper)) { return YES; }
         if (NSProcessInfo.processInfo.systemUptime < serial.neckCommandReadyAtUptime) { return NO; }
         // Servo Control requests exact raw targets; that gateway intentionally

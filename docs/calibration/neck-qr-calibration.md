@@ -422,12 +422,12 @@ hint is never treated as a remembered world pose.
 That retry build is installed, but native window access subsequently returned
 `cgWindowNotFound` for Cerebro and other applications. The targeted retake was
 therefore not started. Offline calculations continued from saved observations.
-No calibration-complete claim is made. On return, restore desktop access, move
-the left-floor sheet out of the arm's sightline, and move the right-floor sheet
-outside direct sunlight/glare with its entire symbol and quiet margin visible.
-Both right-floor discovery images decoded but failed strict template corner
-refinement, so their corners are not admitted as metric measurements. Verify all
-printed rulers and symbol dimensions, then repeat the floor captures.
+No calibration-complete claim was made at that checkpoint. Desktop access and
+better lighting were subsequently restored. The operator requires the taped
+markers to remain fixed: change the neck viewpoint to address occlusion rather
+than moving the targets. The operator also confirmed that the printed reference
+line labelled 120 mm physically measures 120 mm; that observation does not
+support a 20-percent print-scale correction.
 
 For the protractor check, measure the same camera housing/bracket against the
 same level reference at each held target, including return visits. Also observe
@@ -435,6 +435,89 @@ whether the physical pan spindle stays vertical when the lower neck moves.
 Measure the lower/upper shaft centers, pan axis and optical lens position before
 replacing the canonical pivot geometry. A scaled room scan can then add a dense
 independent world reference.
+
+## Forward overlook with fixed floor targets
+
+The right-floor retake saved 45 observations; 15 passed strict template refinement,
+covering four distinct quality-passing poses. All lower targets were 6011, so
+that retake could not identify lower-neck response. The next left-floor retry
+found the payload but obtained no formal metric frames from its upright view.
+
+At unchanged raw pan 7333 (about +40 degrees under the nominal scale) and upper
+5700, the operator-directed lower moves produced three fresh decoded left-floor
+frames at 6111 and again at 6211. Comparing stationary raw accelerometer means
+with six same-pan/upper baseline frames at lower 6011 gave direction changes
+of approximately 5.06 and 11.00 degrees. These are conditional inertial direction
+measurements, not encoder angles or a complete servo calibration. Strict template
+acceptance was 0/3 at 6111 and 1/3 at 6211. The farther-forward image shows more
+of the code above the hanging arm. The first frames also changed brightness
+sharply, so geometric visibility and exposure settling must be distinguished.
+
+The operator then requested deeper holds at lower 6261, 6495 and 6645, with pan held. At 6645, the operator measured
+28 mm between the neck-servo mount and the hanging arm in the tested pose. The command policy now has a bounded forward-overlook
+extension: lower 6496–6645 permits the configured forward minimum through raw
+positive pan 7333. The original full-pan band remains 5000–6495; lower 6646
+returns to the previous tight forward window. A requested half-inch mount/arm
+clearance was a proposed target; the reported 28 mm is the actual operator
+measurement for that one pose, not a guarantee across every pan/upper angle.
+
+Keeping lower 6645 and pan fixed, increasing the upper target from 5700 to
+6200 brought the full left-floor symbol and its quiet margin clear of the arm.
+All three warmup-delayed frames passed strict template refinement (correlation
+approximately 0.9797); image medians were stable at 114/114/114. The signed
+image measurements predict approximately +0.823 upper target units per lower
+unit. Floor visibility requests use that estimate relative to an actually
+reacquired lower/upper anchor, then require fresh QR confirmation at every
+pose. This is a visibility prediction, not a promoted leveling gain or URDF fit.
+
+The floor test now tries forward lower positions before pan sweeps and checks
+each planned hold against the active command policy before requesting motion.
+Out-of-policy holds are recorded as skipped; unreadable floor holds remain
+explicitly partial, with bounded continuation. Camera, pose, cancellation and
+storage errors still stop. Both floor tests try the same candidate list, filtered by the exact active
+pan/lower/upper policy. At negative right-floor pan, the 6645 extension is
+rejected and forward tests stay at or below 6495.
+A final upright revisit is recorded. The first second of delivered eligible
+camera frames is discarded per run to reduce startup exposure transients;
+this fixed warmup does not certify automatic exposure stability.
+Cold stream startup has a separate 15-second budget; the normal discovery and
+measurement budgets remain 4 and 8 seconds. A timeout without any eligible
+post-warmup RGB/depth frame reports camera unavailability rather than a missing
+QR. In the fresh survey the first frame arrived about 5.4 seconds after folder
+creation, which explained why a shorter initial window lost the useful current
+view before archiving an observation.
+
+Numeric capture provenance, focused validation and the installed build checkpoint
+are recorded in [forward-overlook evidence](evidence/2026-10-23-neck-qr/forward-overlook-validation.json).
+
+### Final fixed-marker survey and measured mechanism
+
+The final shared session captured **441 raw observations across all four targets**.
+Strict refinement accepted table 109/111, left floor 63/108, right floor 111/111,
+and right wall 111/111: **394 accepted frames**. All rejected observations remain
+stored. The shallow left-floor views account for its template failures; deeper
+forward views cleared the hanging arm. The right-floor forward proof also
+passed 3/3 strict checks with stable exposure.
+
+The operator confirmed pan inside the torso with lower pitch mounted above it,
+then upper pitch connected by a 155.79 mm center-to-center link. They measured
+165 mm from the upper-servo center to the Insta360 sphere center and 96.5 mm
+from that sphere center to the angled face camera's outside RGB lens glass.
+[Mechanical reference](evidence/2026-10-23-neck-qr/mechanical-reference.json)
+records those measurements without inventing signed vectors or an optical-center
+position. A point along a shaft and a perpendicular distance to its rotation
+axis are different constraints; consistent axis-center references still matter.
+
+The measured-order model was evaluated privately with the measured link, a
+fitted lower-angle offset, factory RGB distortion and pose-held-out validation.
+The four-target linear model retained about 3.90 pixels held-out error; one
+upper-command curvature term improved it only about one percent and increased
+parameter coupling. The fitted floor planes remained about 7.8 degrees apart in the linear model
+and 6.8 degrees apart with the upper curvature term.
+No resulting camera transform, servo-angle map or runtime URDF change was
+promoted. Independent RGB-only fits support the reported focal length near
+489 pixels. Raw depth retains a separate systematic range/normal discrepancy;
+inverse-depth-offset fits improve range errors but remain diagnostic.
 
 ## October 23 commissioning checkpoint
 

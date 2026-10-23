@@ -17,6 +17,7 @@ source = (ROOT / "Cerebro/ROBMainViewController.mm").read_text()
 header = (ROOT / "Cerebro/ROBMainViewController.h").read_text()
 methods = [objective_c_method(source, name) for name in (
     "didSeeNewPeople:", "trackFaceBoundingBox:", "didTrackHumanPoses:",
+    "updatePersonTrackingHighPoseAtUptime:",
     "trackingPerson:(NSString *)userID x:",
 )]
 # The old, unreachable tracking implementation below the unconditional return
@@ -111,11 +112,12 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 @property BOOL personTrackingMayUpdateNeck, neckPanCommandKnown;
 @property BOOL lowerNeckTiltCommandKnown, upperNeckTiltCommandKnown;
 @property BOOL personTrackingUprightTransitionActive, personTrackingPostureSequenceActive;
+@property BOOL uprightRequestsAllowed;
 @property NSInteger commandedNeckPanTarget, commandedLowerNeckTiltTarget, commandedUpperNeckTiltTarget;
 @property double personTrackingCorrectionReadyAtUptime;
 @property double currentNeckPanMinimumDegrees, currentNeckPanMaximumDegrees;
 @property(copy) NSString *neckCommandSafetyStatus;
-@property(strong) NSMutableArray *requests;
+@property(strong) NSMutableArray *requests, *uprightRequests;
 - (ROBNeckSafetyConfig)neckSafetyConfiguration;
 - (ROBNeckCommandDisposition)requestPersonTrackingPanTarget:(NSInteger)pan desiredUpperTarget:(NSInteger)upper;
 - (ROBNeckCommandDisposition)requestPersonTrackingUprightPanTarget:(NSInteger)pan lowerTarget:(NSInteger)lower upperTarget:(NSInteger)upper;
@@ -130,8 +132,13 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
     return ROBNeckCommandDispositionAppliedCommand;
 }
 - (ROBNeckCommandDisposition)requestPersonTrackingUprightPanTarget:(NSInteger)pan lowerTarget:(NSInteger)lower upperTarget:(NSInteger)upper {
-    assert(!"These fixtures must retain the established upright lower pose");
-    return ROBNeckCommandDispositionRejected;
+    assert(self.uprightRequestsAllowed && "Unexpected upright re-entry while retaining the accepted lower pose");
+    [self.uprightRequests addObject:@[@(pan), @(lower), @(upper)]];
+    self.commandedNeckPanTarget = pan;
+    self.commandedLowerNeckTiltTarget = lower;
+    self.commandedUpperNeckTiltTarget = upper;
+    self.personTrackingUprightTransitionActive = YES;
+    return ROBNeckCommandDispositionAppliedCommand;
 }
 @end
 @interface Tracking : NSObject
@@ -139,12 +146,10 @@ typedef NS_ENUM(NSInteger, ROBNeckCommandDisposition) {
 /* DECLARATIONS */
 - (double)personTrackingDistanceMetersInNormalizedRect:(CGRect)rect;
 - (void)updatePersonTrackingPostureForDistance:(double)distance atUptime:(double)now;
-- (BOOL)updatePersonTrackingHighPoseAtUptime:(double)now source:(NSString *)source;
 @end
 @implementation Tracking
 - (double)personTrackingDistanceMetersInNormalizedRect:(CGRect)rect { return NAN; }
 - (void)updatePersonTrackingPostureForDistance:(double)distance atUptime:(double)now {}
-- (BOOL)updatePersonTrackingHighPoseAtUptime:(double)now source:(NSString *)source { return NO; }
 /* PRODUCTION */
 @end
 
@@ -159,6 +164,7 @@ static Tracking *controller(void) {
     serial.currentNeckPanMinimumDegrees = -60;
     serial.currentNeckPanMaximumDegrees = 60;
     serial.requests = [NSMutableArray array];
+    serial.uprightRequests = [NSMutableArray array];
     tracking.serialBox = serial;
     ROBTorsoControlsViewController *torso = [ROBTorsoControlsViewController new];
     for (NSString *key in @[@"headTracking_enabled", @"headPan_enabled", @"headTilt_enabled", @"headUpperNeckTilt_enabled"]) {
@@ -176,6 +182,23 @@ static Tracking *controller(void) {
     }
     tracking.torsoControlsViewController = torso;
     return tracking;
+}
+static void establishedPose(Tracking *tracking, NSInteger pan, NSInteger lower, NSInteger upper) {
+    ROBNeckSafetyConfig config = [tracking.serialBox neckSafetyConfiguration];
+    ROBNeckSafetyPanBounds bounds;
+    double panDegrees;
+    assert(ROBNeckSafetyAllowedPanBounds(&config, (int32_t)lower, &bounds));
+    assert(ROBNeckSafetyPanTargetToDegrees(&config, (int32_t)pan, &panDegrees));
+    assert(panDegrees >= bounds.minimumDegrees - 0.000001);
+    assert(panDegrees <= bounds.maximumDegrees + 0.000001);
+    tracking.serialBox.currentNeckPanMinimumDegrees = bounds.minimumDegrees;
+    tracking.serialBox.currentNeckPanMaximumDegrees = bounds.maximumDegrees;
+    tracking.serialBox.commandedNeckPanTarget = pan;
+    tracking.serialBox.commandedLowerNeckTiltTarget = lower;
+    tracking.serialBox.commandedUpperNeckTiltTarget = upper;
+    tracking.torsoControlsViewController.headPan.integerValue = pan;
+    tracking.torsoControlsViewController.headTilt.integerValue = lower;
+    tracking.torsoControlsViewController.headUpperNeckTilt.integerValue = upper;
 }
 static VNFaceObservation *face(void) {
     VNFaceObservation *face = [VNFaceObservation new];
@@ -260,7 +283,125 @@ int main(void) { @autoreleasepool {
     fixtureNow += 0.3;
     [tracking trackingPerson:@"recognized-face" x:0.5 y:0.5 z:-1];
     assert(tracking.personTrackingUpperBaselineTarget == 7000);
-    puts("ROB tracking source runtime fixtures passed: face ownership, pose fallback, stable acquisition, manual handoff");
+
+    // Default lookaround retains accepted lower offsets at either wide pan.
+    // The forward-overlook case uses its actual asymmetric cap, never a
+    // fabricated full-pan pose. Acquisition retains the current upper demand
+    // as its baseline and continues centering within that original band.
+    NSMutableArray *retainedPoses = [NSMutableArray array];
+    for (NSNumber *pan in @[@4500, @7500]) {
+        for (NSNumber *lower in @[@5811, @6011, @6211, @6212, @6495]) {
+            [retainedPoses addObject:@[pan, lower]];
+        }
+    }
+    [retainedPoses addObject:@[@7333, @6645]];
+    for (NSArray *pose in retainedPoses) {
+        NSNumber *pan = pose[0], *lower = pose[1];
+        tracking = controller();
+        establishedPose(tracking, pan.integerValue, lower.integerValue, 7000);
+        for (int tick = 0; tick < 16; tick++) {
+            fixtureNow += 0.3;
+            [tracking trackingPerson:@"recognized-face" x:0.5 y:1 z:-1];
+            assert(tracking.serialBox.uprightRequests.count == 0);
+            assert(tracking.serialBox.commandedLowerNeckTiltTarget == lower.integerValue);
+            assert(tracking.serialBox.commandedNeckPanTarget == pan.integerValue);
+            assert(tracking.torsoControlsViewController.headTilt.integerValue == lower.integerValue);
+            assert(tracking.personTrackingUpperBaselineTarget == 7000);
+        }
+        assert(tracking.serialBox.requests.count == 16);
+        assert(tracking.serialBox.commandedUpperNeckTiltTarget > 7000);
+        assert(tracking.serialBox.commandedUpperNeckTiltTarget <= 7200);
+    }
+
+    // A retained forward-overlook pose has a partial pan window. At either
+    // outward edge, request only the reviewed upright endpoint through the
+    // existing serial gateway; scan/lean gestures remain disabled by default.
+    for (NSArray *edge in @[@[@7333, @0.0, @7433], @[@5500, @1.0, @5400]]) {
+        tracking = controller();
+        establishedPose(tracking, [edge[0] integerValue], 6645, 7000);
+        tracking.serialBox.uprightRequestsAllowed = YES;
+        fixtureNow += 0.3;
+        [tracking trackingPerson:@"recognized-face" x:[edge[1] floatValue] y:0.5 z:-1];
+        assert(tracking.serialBox.requests.count == 0);
+        assert(tracking.serialBox.uprightRequests.count == 1);
+        assert(([tracking.serialBox.uprightRequests[0]
+            isEqual:@[edge[2], @6011, @6906]]));
+        assert(tracking.personTrackingUpperBaselineTarget == 6906);
+        assert(tracking.serialBox.personTrackingUprightTransitionActive);
+    }
+
+    // Away from an outward edge, the same accepted lower pose remains intact
+    // while actual horizontal centering continues inside its partial window.
+    for (NSNumber *faceX in @[@0.1, @0.9]) {
+        tracking = controller();
+        establishedPose(tracking, 6000, 6645, 7000);
+        fixtureNow += 0.3;
+        [tracking trackingPerson:@"recognized-face" x:faceX.floatValue y:0.5 z:-1];
+        assert(tracking.serialBox.uprightRequests.count == 0);
+        assert(tracking.serialBox.commandedLowerNeckTiltTarget == 6645);
+        assert(tracking.serialBox.requests.count == 1);
+        assert(tracking.serialBox.commandedNeckPanTarget != 6000);
+        assert(tracking.serialBox.commandedNeckPanTarget > 5500
+            && tracking.serialBox.commandedNeckPanTarget < 7333);
+    }
+
+    // The new edge recovery keeps the existing known-axis, owner/control and
+    // sword exclusions. None of these fixtures grants arm authority.
+    for (NSString *guard in @[@"unknownLower", @"unknownUpper", @"owner", @"control", @"sword"]) {
+        tracking = controller();
+        establishedPose(tracking, 7333, 6645, 7000);
+        if ([guard isEqualToString:@"unknownLower"]) tracking.serialBox.lowerNeckTiltCommandKnown = NO;
+        if ([guard isEqualToString:@"unknownUpper"]) tracking.serialBox.upperNeckTiltCommandKnown = NO;
+        if ([guard isEqualToString:@"owner"]) tracking.serialBox.personTrackingMayUpdateNeck = NO;
+        if ([guard isEqualToString:@"control"]) tracking.torsoControlsViewController.headUpperNeckTilt_enabled.state = NSControlStateValueOff;
+        fixtureNow += 0.3;
+        [tracking trackingPerson:[guard isEqualToString:@"sword"] ? @"main-camera-sword" : @"recognized-face"
+                              x:0 y:0.5 z:-1];
+        assert(tracking.serialBox.uprightRequests.count == 0);
+        assert(tracking.serialBox.commandedLowerNeckTiltTarget == 6645);
+        if ([guard isEqualToString:@"owner"] || [guard isEqualToString:@"control"])
+            assert(tracking.serialBox.requests.count == 0);
+    }
+
+    // The adjacent out-of-band targets must still enter exact reviewed
+    // upright through the gateway before face centering can resume.
+    for (NSArray *pose in @[@[@4500, @5810], @[@7500, @5810], @[@6000, @6646]]) {
+        NSNumber *pan = pose[0], *lower = pose[1];
+        tracking = controller();
+        establishedPose(tracking, pan.integerValue, lower.integerValue, 7000);
+        tracking.serialBox.uprightRequestsAllowed = YES;
+        fixtureNow += 0.3;
+        [tracking trackingPerson:@"recognized-face" x:0.5 y:1 z:-1];
+        assert(tracking.serialBox.requests.count == 0);
+        assert(tracking.serialBox.uprightRequests.count == 1);
+        assert(([tracking.serialBox.uprightRequests[0]
+            isEqual:@[pan, @6011, @6906]]));
+        assert(tracking.personTrackingUpperBaselineTarget == 6906);
+    }
+
+    // With scan mode enabled, a fresh high body pose must satisfy the real
+    // dwell before recovering to exactly 6011, even for a retained-band
+    // offset. An already exact upright pose needs no recovery.
+    [defaults setBool:YES forKey:ROBPersonTrackingAutomaticPostureChangesDefaultsKey];
+    for (NSNumber *lower in @[@5811, @6011, @6211]) {
+        tracking = controller();
+        establishedPose(tracking, 7500, lower.integerValue, 7000);
+        BOOL needsExactRecovery = lower.integerValue != 6011;
+        tracking.serialBox.uprightRequestsAllowed = needsExactRecovery;
+        for (int tick = 0; tick < 3; tick++) {
+            fixtureNow += 0.3;
+            [tracking didTrackHumanPoses:@[body(0.9)]];
+            assert(tracking.serialBox.uprightRequests.count == (needsExactRecovery && tick == 2 ? 1 : 0));
+        }
+        assert(tracking.personTrackingHighPoseActive);
+        assert(tracking.serialBox.requests.count == (needsExactRecovery ? 2 : 3));
+        if (needsExactRecovery) {
+            assert(([tracking.serialBox.uprightRequests[0]
+                isEqual:@[@7500, @6011, @6906]]));
+        }
+    }
+    [defaults removeObjectForKey:ROBPersonTrackingAutomaticPostureChangesDefaultsKey];
+    puts("ROB tracking source runtime fixtures passed: face ownership, pose fallback, stable acquisition, manual handoff, wide-pan lower retention, partial-pan edge recovery/guards, exact-entry boundaries, scan-mode recovery");
 } }
 '''
 

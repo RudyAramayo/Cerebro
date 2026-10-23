@@ -21,12 +21,22 @@ enum {
     ROBNeckSafetyTargetOff = 0,
     // Operator-confirmed Maestro 24 lower-neck band where the mechanism has
     // complete pan clearance. Values below the band remain symmetrically
-    // restricted; values above it use the forward/asymmetric envelope.
+    // restricted; values above it use a forward/asymmetric envelope.
     ROBNeckSafetyFullPanLowerThresholdTarget = 5000,
     ROBNeckSafetyFullPanLowerMaximumTarget = 6495,
+    // Operator-directed forward-overlook extension beyond full-pan clearance.
+    // Its positive pan cap is a raw target, converted with active calibration;
+    // it does not extend full pan or assert measured physical clearance.
+    ROBNeckSafetyForwardOverlookLowerMaximumTarget = 6645,
+    ROBNeckSafetyForwardOverlookPanMaximumTarget = 7333,
     // Calibrated collision-clear lift used before recovering an OFF/unknown
     // neck. This is intentionally distinct from the normal resting defaults.
     ROBNeckSafetyUprightLowerTarget = 6011,
+    // Retain an already-established lookaround/forward-overlook lower target.
+    // The gateway still enforces that target's pan envelope; this is not a
+    // full-pan claim or permission to bypass hard bounds or settling.
+    ROBNeckSafetyUprightLookaroundLowerMinimumTarget = 5811,
+    ROBNeckSafetyUprightLookaroundLowerMaximumTarget = 6645,
     // The front camera is mounted about 25 degrees nose-down. At the
     // calibrated 33.333 targets/degree, 6073 + 833 aims it level.
     ROBNeckSafetyUprightUpperTarget = 6906,
@@ -157,6 +167,15 @@ bool ROBNeckSafetyLowerTargetHasFullPanClearance(
     int32_t lowerTarget
 );
 
+// Whether lookaround may retain an already-established lower target 5811…6645
+// instead of resetting it to exactly 6011. The forward-overlook part retains
+// its asymmetric pan limit. This does not authorize lower travel or bypass
+// the gateway's recovery, calibration, hard bounds or settle gates.
+bool ROBNeckSafetyLowerTargetIsInUprightLookaroundBand(
+    const ROBNeckSafetyConfig *config,
+    int32_t lowerTarget
+);
+
 // Conservative duration of the Maestro output-value ramp between two raw
 // targets under compact-protocol speed/acceleration limits. Speed uses the
 // Maestro's (0.25 us)/(10 ms) units; acceleration uses
@@ -173,10 +192,12 @@ double ROBNeckSafetyMaestroMotionDuration(
 // servo is off or its pose is unknown and therefore returns the tightest
 // configured range (the validated forward range). A known target below the
 // Maestro 24 e-stop clearance band uses the symmetric restricted range; a
-// known target inside the inclusive band receives full pan, and a known target
-// above it uses the asymmetric forward range. Inputs outside the configured
-// hard range are evaluated at the nearest hard bound. Returns false and writes
-// NaN bounds when config or output is invalid.
+// known target inside the inclusive band receives full pan. Targets 6496…6645
+// use the configured forward minimum and the greater of its maximum or raw
+// target 7333 converted through active calibration and clipped to hard bounds.
+// Higher targets use the configured asymmetric forward range. Inputs outside
+// the configured hard range are evaluated at the nearest hard bound. Returns
+// false and writes NaN bounds when config or output is invalid.
 bool ROBNeckSafetyAllowedPanBounds(
     const ROBNeckSafetyConfig *config,
     int32_t lowerTarget,

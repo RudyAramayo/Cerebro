@@ -16,6 +16,7 @@ import simd
     var canUseView: ((Double, Int) -> Bool)?
     var boundedPan: ((Double) -> Double)?
     var prepareCalibrationView: ((Double, Int, Int) -> Bool)?
+    var calibrationViewAllowed: ((Double, Int, Int) -> Bool)?
     var calibrationViewReady: ((Double, Int, Int) -> Bool)?
     private(set) var selectedTargetID = ROBNeckQRMeasurement.targetID
     private(set) var awaitingProtractor = false
@@ -26,6 +27,10 @@ import simd
     @nonobjc private var views: [[String: Any]] = []
     @nonobjc private var folder: URL?
     @nonobjc private var frameSequence: UInt64 = 0
+    @nonobjc private var firstDeliveredFreshFrameTimestamp: Double?
+    private static let initialCameraWarmupMilliseconds = 1000.0
+    // Local floor visibility prediction only; never a servo calibration gain.
+    private static let floorVisibilityUpperTargetsPerLowerTarget = 0.823
     @nonobjc private var captureKind = "reference"
     @nonobjc private var stepContext: [String: Any] = [:]
     @nonobjc private var protractorReadings: [[String: Any]] = []
@@ -41,6 +46,12 @@ import simd
         let center: SIMD2<Double>
         let intrinsics: [Double]
         let evidence: String
+    }
+    private enum QRObservationError: LocalizedError {
+        case unreadable
+        var errorDescription: String? {
+            "The 120 mm QR target was not readable in this settled view. Captured views were saved."
+        }
     }
 
     func selectTarget(_ identifier: String) {
@@ -72,6 +83,7 @@ import simd
             throw ROBGhostMotionError.blocked("An arm is owned by another operation.")
         }
         owner = id; isRunning = true; frameSequence = 0; surveySessionID = nil
+        firstDeliveredFreshFrameTimestamp = nil
         captureAnchor = ROBWorkspaceCaptureAnchor()
         ROBArmRoutineVision.shared.setActive(true)
         cameraDemand?(true)
@@ -104,7 +116,16 @@ import simd
             "targetSizeSource": "120 mm printed calibration sheet", "poseSource": "accepted_neck_commands",
             "modelID": model.modelID, "geometryID": model.geometryID,
             "registrationVerified": false, "views": views, "captureKind": captureKind,
+            "initialCameraWarmupMilliseconds": Self.initialCameraWarmupMilliseconds,
+            "initialCameraWarmupPolicy": "fixed_interval_from_first_delivered_fresh_frame_not_proven_exposure_stability",
             "protractorReadings": protractorReadings]
+        if let firstDeliveredFreshFrameTimestamp {
+            payload["firstDeliveredFreshFrameTimestampMilliseconds"] = firstDeliveredFreshFrameTimestamp
+        }
+        if selectedTargetID.hasPrefix("ROB:FLOOR:") {
+            payload["floorVisibilityPrediction"] = ["upperTargetsPerLowerTarget":Self.floorVisibilityUpperTargetsPerLowerTarget,
+                "purpose":"empirical_visibility_prediction_not_calibration","registrationVerified":false] as [String:Any]
+        }
         if let correction = captureDisplayCorrection {
             payload["displayDepthCorrection"] = ["towardRobotMeters": correction.towardRobotMeters,
                 "downwardPitchDegrees": correction.downwardPitchDegrees, "identity": correction.identity]
@@ -149,15 +170,24 @@ import simd
             throw ROBGhostMotionError.blocked("The neck moved away from the requested calibration hold. The step was not accepted.")
         }
     }
+    /// A fixed startup interval, not an auto-exposure stability detector. Start
+    /// at an actual delivered fresh frame, since camera launch can take seconds.
+    @nonobjc private func cameraWarmupComplete(_ capturedAt: Double) -> Bool {
+        if firstDeliveredFreshFrameTimestamp == nil { firstDeliveredFreshFrameTimestamp = capturedAt }
+        return capturedAt >= firstDeliveredFreshFrameTimestamp! + Self.initialCameraWarmupMilliseconds
+    }
     @nonobjc private func observe(model: ROBGhostRobotModel, poseID: String, training: Bool,
                                  after minimumCapture: Double) async throws {
-        let deadline = ProcessInfo.processInfo.systemUptime + 8
-        var accepted = 0
+        let deadline = ProcessInfo.processInfo.systemUptime + (firstDeliveredFreshFrameTimestamp == nil ? 15 : 8)
+        var accepted = 0, eligibleFreshFrames = 0
         while accepted < 3 {
             try check()
             try checkRequestedPose()
             guard ProcessInfo.processInfo.systemUptime < deadline else {
-                throw ROBGhostMotionError.blocked("The 120 mm QR target was not readable in this settled view. Captured views were saved.")
+                guard eligibleFreshFrames > 0 else {
+                    throw ROBGhostMotionError.blocked("Camera unavailable: no eligible fresh RGB/depth frames arrived after startup warmup. QR visibility was not evaluated.")
+                }
+                throw QRObservationError.unreadable
             }
             let pose = try neck()
             guard ProcessInfo.processInfo.systemUptime >= pose.readyAt else {
@@ -185,6 +215,10 @@ import simd
                 try await Task.sleep(nanoseconds: 100_000_000); continue
             }
             frameSequence = frame.sequence
+            guard cameraWarmupComplete(frame.capturedAt) else {
+                try await Task.sleep(nanoseconds: 100_000_000); continue
+            }
+            eligibleFreshFrames += 1
             let expectedTarget = selectedTargetID
             let corners: [SIMD2<Double>]? = try await Task.detached(priority: .userInitiated) {
                 let request = VNDetectBarcodesRequest(); request.symbologies = [.qr]
@@ -373,7 +407,8 @@ import simd
             for value in seeds {
                 guard let id = value["targetID"] as? String, identifiers.contains(id), result[id] == nil,
                       let pan = value["panDegrees"] as? Double, pan.isFinite, abs(pan) <= 70,
-                      let lower = value["lowerTarget"] as? Int, (5811...6211).contains(lower),
+                      let lower = value["lowerTarget"] as? Int,
+                      (5811...Int(ROBNeckSafetyForwardOverlookLowerMaximumTarget)).contains(lower),
                       let upper = value["upperTarget"] as? Int, (5300...7500).contains(upper),
                       let name = value["evidence"] as? String, !name.contains("/"), !name.contains(".."),
                       let evidence = try? Data(contentsOf:directory.appendingPathComponent(name)),
@@ -398,12 +433,55 @@ import simd
         return found.first(where:{ $0.targetID == hint.targetID })
     }
 
+    @nonobjc private func predictedFloorUpper(anchorLower: Int, anchorUpper: Int, lower: Int) -> Int {
+        max(5300,min(7500,anchorUpper+Int((Self.floorVisibilityUpperTargetsPerLowerTarget*Double(lower-anchorLower)).rounded())))
+    }
+
+    @nonobjc private func floorForwardTargets(_ targetID: String, pan: Double, referenceLower: Int, upper: Int) -> [Int] {
+        var candidates = [6111,6186]
+        if targetID.hasPrefix("ROB:FLOOR:") {
+            candidates += [6261,6495,Int(ROBNeckSafetyForwardOverlookLowerMaximumTarget)]
+        }
+        return candidates.filter {
+            calibrationViewAllowed?(pan,$0,predictedFloorUpper(anchorLower:referenceLower,anchorUpper:upper,lower:$0)) == true
+        }
+    }
+
+    /// Peek past a hanging arm at fixed pan, predicting upper pitch to retain
+    /// framing. These raw commands do not assert measured shaft angles.
+    @nonobjc private func verifyFloorForward(_ targetID: String, pan: Double, referenceLower: Int, upper: Int,
+                                             directory: URL, index: inout Int) async throws -> SurveySeed? {
+        var best: SurveySeed?
+        for lower in floorForwardTargets(targetID,pan:pan,referenceLower:referenceLower,upper:upper) {
+            try check()
+            let predictedUpper = predictedFloorUpper(anchorLower:referenceLower,anchorUpper:upper,lower:lower)
+            guard calibrationViewAllowed?(pan,lower,predictedUpper) == true else { continue }
+            stepContext = ["requestedPanDegrees":pan,"requestedLowerTarget":lower,
+                           "requestedUpperTarget":predictedUpper,"floorForwardPeek":true,
+                           "floorVisibilityAnchorLower":referenceLower,"floorVisibilityAnchorUpper":upper,
+                           "floorVisibilityUpperTargetsPerLowerTarget":Self.floorVisibilityUpperTargetsPerLowerTarget,
+                           "floorVisibilityPredictionOnly":true]
+            update("Finding \(targetID): forward neck peek L \(lower), predicted U \(predictedUpper), same pan.")
+            try await settleCalibration(pan:pan,lower:lower,upper:predictedUpper)
+            let found = try await discoverTargets(directory:directory,index:index)
+            index += 1
+            if let measured = found.first(where: { $0.targetID == targetID }) {
+                if let previous = best {
+                    if measured.lower > previous.lower || (measured.lower == previous.lower && measured.score > previous.score) {
+                        best = measured
+                    }
+                } else { best = measured }
+            }
+        }
+        return best
+    }
+
     /// Discovery is separate from metric capture folders, so each marker's
     /// 9 + 28 holds remain bounded to 111 observations. No location guesses.
     @nonobjc private func discoverTargets(directory: URL, index: Int) async throws -> [SurveySeed] {
-        let deadline = ProcessInfo.processInfo.systemUptime + 4
+        let deadline = ProcessInfo.processInfo.systemUptime + (firstDeliveredFreshFrameTimestamp == nil ? 15 : 4)
         let after = Date().timeIntervalSince1970*1000
-        var count = 0, confirmations: [String: Int] = [:], candidates: [String: SurveySeed] = [:]
+        var count = 0, eligibleFreshFrames = 0, confirmations: [String: Int] = [:], candidates: [String: SurveySeed] = [:]
         while count < 2, ProcessInfo.processInfo.systemUptime < deadline {
             try check(); try checkRequestedPose()
             let pose = try neck()
@@ -422,6 +500,10 @@ import simd
                 throw ROBGhostMotionError.blocked("Survey RGB/depth framing or camera identity changed.")
             }
             frameSequence = frame.sequence
+            guard cameraWarmupComplete(frame.capturedAt) else {
+                try await Task.sleep(nanoseconds: 100_000_000); continue
+            }
+            eligibleFreshFrames += 1
             let detections: [(String, [SIMD2<Double>])] = try await Task.detached(priority: .userInitiated) {
                 let request = VNDetectBarcodesRequest(); request.symbologies = [.qr]
                 try VNImageRequestHandler(ciImage: frame.image, orientation: .up, options: [:]).perform([request])
@@ -472,12 +554,16 @@ import simd
                 "cameraMatrix": [k.fx,k.fy,k.cx,k.cy], "neckPanDegrees": pose.pan,
                 "lowerTarget": pose.lower, "neckUpperTarget": pose.upper,
                 "poseSource": "accepted_neck_commands", "registrationVerified": false, "detections": evidence]
+            record.merge(stepContext) { _, new in new }
             if let imu = k.inertial { record["imu"] = try JSONSerialization.jsonObject(with:JSONEncoder().encode(imu)) }
             try JSONSerialization.data(withJSONObject: record, options: [.prettyPrinted, .sortedKeys])
                 .write(to: directory.appendingPathComponent(name+".json"), options: .atomic)
             count += 1
         }
         try check(); try checkRequestedPose()
+        guard eligibleFreshFrames > 0 else {
+            throw ROBGhostMotionError.blocked("Camera unavailable: no eligible fresh RGB/depth frames arrived after startup warmup. QR visibility was not evaluated.")
+        }
         return candidates.values.filter { confirmations[$0.targetID, default: 0] >= 2 }
     }
 
@@ -497,6 +583,8 @@ import simd
                 var manifest: [String: Any] = ["schemaVersion": 1, "captureKind": "multi_target_neck_survey",
                     "sessionID": session, "sceneContextID": session, "robotBaseStationary": true,
                     "registrationVerified": false, "status": "discovering", "captures": [[String: Any]](),
+                    "initialCameraWarmupMilliseconds": Self.initialCameraWarmupMilliseconds,
+                    "initialCameraWarmupPolicy": "fixed_interval_from_first_delivered_fresh_frame_not_proven_exposure_stability",
                     "targetIDs": requestedIDs,
                     "trainingPolicy": "stable_actual_pose_hash_mod3",
                     "layoutSource": "operator reported ROB repositioned; all four fixed QR sheets placed; bucket beside left floor marker; two cans on table",
@@ -513,11 +601,41 @@ import simd
                     self.lastCapturePath = root.path
                     try self.writeSurvey(manifest, to: root)
                     let model = try self.model()
+                    // Keep a useful current view before visiting older command
+                    // hints. Only two fresh settled frames establish its ID.
+                    if let pose = try? self.neck(),
+                       self.calibrationViewAllowed?(pose.pan,pose.lower,pose.upper) == true {
+                        self.stepContext = ["requestedPanDegrees":pose.pan,"requestedLowerTarget":pose.lower,
+                                            "requestedUpperTarget":pose.upper,"currentViewFirst":true]
+                        try await self.settleCalibration(pan:pose.pan,lower:pose.lower,upper:pose.upper)
+                        let observed = try await self.discoverTargets(directory:root,index:discoveryIndex)
+                        for measured in observed where requestedIDs.contains(measured.targetID) {
+                            seeds[measured.targetID] = measured
+                        }
+                        discoveryIndex += 1
+                    }
                     for hint in hints {
+                        if seeds[hint.targetID] != nil { continue }
                         self.update("Reconfirming \(hint.targetID) in two fresh frames; saved commands are search hints only.")
-                        if let verified = try await self.verifySeed(hint,directory:root,index:&discoveryIndex) {
+                        let verified: SurveySeed?
+                        if hint.targetID.hasPrefix("ROB:FLOOR:") {
+                            verified = try await self.verifyFloorForward(hint.targetID,pan:hint.pan,referenceLower:hint.lower,upper:hint.upper,
+                                directory:root,index:&discoveryIndex)
+                        } else {
+                            verified = try await self.verifySeed(hint,directory:root,index:&discoveryIndex)
+                        }
+                        if let verified {
                             seeds[verified.targetID] = verified
                         }
+                    }
+                    // A selected floor marker may be visible only after leaning
+                    // forward at the operator's current view. Try that before
+                    // an upright scan can move away from the useful view.
+                    if requestedIDs.count == 1, let id = requestedIDs.first,
+                       id.hasPrefix("ROB:FLOOR:"), seeds[id] == nil {
+                        let pose = try self.neck()
+                        if let verified = try await self.verifyFloorForward(id,pan:pose.pan,referenceLower:pose.lower,upper:pose.upper,
+                            directory:root,index:&discoveryIndex) { seeds[id] = verified }
                     }
                     // Every search view is accepted and settled through the
                     // existing bounded neck path, then read in two fresh frames.
@@ -558,12 +676,13 @@ import simd
                         try self.check()
                         guard var seed = seeds[id] else { continue }
                         self.selectedTargetID = id
+                        let floorTarget = id.hasPrefix("ROB:FLOOR:")
                         // Keep the last measured seed distinct from a proposed
                         // endpoint. Never start a metric sweep from an unchecked
                         // final prediction or a failed recentering attempt.
                         let originalSeed = seed
                         var proposed = seed, lastVerified: SurveySeed?
-                        for attempt in 0..<3 {
+                        for attempt in 0..<(floorTarget ? 0 : 3) {
                             guard let measured = try await self.verifySeed(proposed,directory:root,index:&discoveryIndex) else { break }
                             lastVerified = measured
                             let yaw = atan((measured.center.x-0.5)*640/measured.intrinsics[0])*180 / .pi
@@ -576,8 +695,13 @@ import simd
                                 score:measured.score,center:measured.center,intrinsics:measured.intrinsics,evidence:measured.evidence)
                         }
                         var verifiedStart: SurveySeed?
-                        if let lastVerified { verifiedStart = try await self.verifySeed(lastVerified,directory:root,index:&discoveryIndex) }
-                        if verifiedStart == nil { verifiedStart = try await self.verifySeed(originalSeed,directory:root,index:&discoveryIndex) }
+                        if floorTarget {
+                            verifiedStart = try await self.verifyFloorForward(id,pan:seed.pan,referenceLower:seed.lower,upper:seed.upper,
+                                directory:root,index:&discoveryIndex)
+                        } else {
+                            if let lastVerified { verifiedStart = try await self.verifySeed(lastVerified,directory:root,index:&discoveryIndex) }
+                            if verifiedStart == nil { verifiedStart = try await self.verifySeed(originalSeed,directory:root,index:&discoveryIndex) }
+                        }
                         guard let verifiedStart else {
                             captures.append(["targetID":id,"status":"not_readable_at_verified_seed","samples":0])
                             manifest["captures"] = captures; try self.writeSurvey(manifest,to:root)
@@ -592,32 +716,54 @@ import simd
                         manifest["captures"] = captures
                         try self.writeSurvey(manifest,to:root)
                         var complete = true, failure = "", retryCount = 0
-                        let floorTarget = id.hasPrefix("ROB:FLOOR:")
+                        var missedHolds: [[String:Any]] = [], policySkippedHolds: [[String:Any]] = [], consecutiveMisses = 0
                         let panSpan: Double = floorTarget ? 4 : 8
-                        let lowerTargets = floorTarget ? [6011,5911,6111,6011] : [6011,5811,6211,6011]
+                        let forwardTargets = floorTarget ? self.floorForwardTargets(id,pan:seed.pan,referenceLower:seed.lower,upper:seed.upper) : []
+                        let lowerTargets = floorTarget ? [6111,forwardTargets.max() ?? 6111,6111,6011] : [6011,5811,6211,6011]
                         let upperOffset = floorTarget ? 50 : 75
-                        var holds: [(Double,Int,Int)] = [0,-75,-150,-75,0,75,150,75,0]
-                            .map { (seed.pan,6011,max(5300,min(7500,seed.upper+$0))) }
+                        var holds: [(Double,Int,Int)] = floorTarget
+                            ? lowerTargets.map { (seed.pan,$0,self.predictedFloorUpper(anchorLower:seed.lower,anchorUpper:seed.upper,lower:$0)) } : []
+                        holds += [0,-75,-150,-75,0,75,150,75,0]
+                            .map { (seed.pan,floorTarget ? seed.lower : 6011,max(5300,min(7500,seed.upper+$0))) }
                         for lower in lowerTargets {
                             let left = self.boundedPan?(seed.pan-panSpan) ?? seed.pan-panSpan
                             let right = self.boundedPan?(seed.pan+panSpan) ?? seed.pan+panSpan
-                            // Opposing pitch directions give a bounded
-                            // visibility prior; each endpoint still needs QR.
-                            let center = max(5300,min(7500,seed.upper+max(-150,min(150,lower-6011))))
-                            holds += [(seed.pan,lower,center),(left,lower,center),(left,lower,max(5300,center-upperOffset)),
+                            // Visibility predictions do not establish a pose;
+                            // each accepted endpoint still needs fresh QR.
+                            let center = floorTarget ? self.predictedFloorUpper(anchorLower:seed.lower,anchorUpper:seed.upper,lower:lower)
+                                : max(5300,min(7500,seed.upper+max(-150,min(150,lower-6011))))
+                            if !floorTarget { holds.append((seed.pan,lower,center)) }
+                            holds += [(left,lower,center),(left,lower,max(5300,center-upperOffset)),
                                       (seed.pan,lower,max(5300,center-upperOffset)),(right,lower,max(5300,center-upperOffset)),
                                       (right,lower,center),(seed.pan,lower,center)]
                         }
                         for index in holds.indices {
+                            try self.check()
                             let (pan,lower,upper) = holds[index]
+                            if floorTarget, self.calibrationViewAllowed?(pan,lower,upper) != true {
+                                complete = false
+                                policySkippedHolds.append(["stepIndex":index,"requestedPanDegrees":pan,
+                                    "requestedLowerTarget":lower,"requestedUpperTarget":upper,
+                                    "reason":"Outside the active command policy; no movement requested."])
+                                captures[captureIndex]["policySkippedHolds"] = policySkippedHolds
+                                manifest["captures"] = captures
+                                try self.writeSurvey(manifest,to:root)
+                                continue
+                            }
                             self.stepContext = ["stepIndex": index, "requestedPanDegrees": pan,
                                 "requestedLowerTarget": lower, "requestedUpperTarget": upper]
+                            if floorTarget {
+                                self.stepContext.merge(["floorVisibilityAnchorLower":seed.lower,"floorVisibilityAnchorUpper":seed.upper,
+                                    "floorVisibilityUpperTargetsPerLowerTarget":Self.floorVisibilityUpperTargetsPerLowerTarget,
+                                    "floorVisibilityPredictionOnly":true]) { _, new in new }
+                            }
                             self.update("\(id): hold \(index+1)/37, \(self.views.count)/111 samples. P \(String(format:"%.2f",pan))°, L \(lower), U \(upper).")
                             do {
                                 try await self.settleCalibration(pan: pan, lower: lower, upper: upper)
                                 try await self.observe(model: model, poseID: "step-\(index)", training: true,
                                     after: Date().timeIntervalSince1970*1000)
-                                if index >= 9, (index-9)%7 == 0, lower != 6011,
+                                consecutiveMisses = 0
+                                if !floorTarget, index >= 9, (index-9)%7 == 0, lower != 6011,
                                    let baseline = self.views.first?["centerPixel"] as? [Double],
                                    let observed = self.views.last?["centerPixel"] as? [Double],
                                    let k = self.views.last?["cameraMatrix"] as? [Double],
@@ -631,6 +777,22 @@ import simd
                             } catch {
                                 try self.check()
                                 let originalFailure = error.localizedDescription
+                                if floorTarget, error is QRObservationError {
+                                    complete = false; failure = originalFailure; consecutiveMisses += 1
+                                    missedHolds.append(["stepIndex":index,"requestedPanDegrees":pan,
+                                        "requestedLowerTarget":lower,"requestedUpperTarget":upper,"reason":originalFailure])
+                                    captures[captureIndex]["missedHolds"] = missedHolds
+                                    captures[captureIndex]["samples"] = self.views.count
+                                    manifest["captures"] = captures
+                                    try self.writeSurvey(manifest,to:root)
+                                    // Do not abandon the next forward hold just
+                                    // because the upright/occluded view failed.
+                                    if missedHolds.count <= 6, consecutiveMisses <= 3 { continue }
+                                    break
+                                }
+                                // A floor motion, pose, camera, or storage error
+                                // must not be mistaken for a visibility miss.
+                                if floorTarget { throw error }
                                 var recovered = false, localAttempt = 0
                                 while retryCount < 3, self.views.count+3 <= 128 {
                                     retryCount += 1; localAttempt += 1
@@ -658,11 +820,34 @@ import simd
                             manifest["captures"] = captures
                             try self.writeSurvey(manifest,to:root)
                         }
+                        var uprightRevisit: [String:Any] = [:]
+                        if floorTarget {
+                            try self.check()
+                            let returnUpper = self.predictedFloorUpper(anchorLower:seed.lower,anchorUpper:seed.upper,lower:6011)
+                            guard self.calibrationViewAllowed?(seed.pan,6011,returnUpper) == true else {
+                                throw ROBGhostMotionError.blocked("The upright floor revisit is outside the active command policy.")
+                            }
+                            self.stepContext = ["requestedPanDegrees":seed.pan,"requestedLowerTarget":6011,
+                                "requestedUpperTarget":returnUpper,"uprightReturnRevisit":true,
+                                "floorVisibilityAnchorLower":seed.lower,"floorVisibilityAnchorUpper":seed.upper,
+                                "floorVisibilityUpperTargetsPerLowerTarget":Self.floorVisibilityUpperTargetsPerLowerTarget,
+                                "floorVisibilityPredictionOnly":true]
+                            try await self.settleCalibration(pan:seed.pan,lower:6011,upper:returnUpper)
+                            let returned = try await self.discoverTargets(directory:root,index:discoveryIndex)
+                            discoveryIndex += 1
+                            uprightRevisit = ["panDegrees":seed.pan,"lowerTarget":6011,"upperTarget":returnUpper,
+                                "targetConfirmedInFreshFrames":returned.contains(where: { $0.targetID == id }),
+                                "discoveryIndex":discoveryIndex-1]
+                        }
                         captures[captureIndex] = ["targetID":id,"capturePath":markerFolder.appendingPathComponent("capture.json").path,
                             "status":complete ? "complete" : "partial","samples":self.views.count,
-                            "failure":failure,"seedPanDegrees":seed.pan,"seedUpperTarget":seed.upper,
+                            "failure":failure,"seedPanDegrees":seed.pan,"seedLowerTarget":seed.lower,"seedUpperTarget":seed.upper,
                             "seedEvidence":seed.evidence,"retryCount":retryCount,
-                            "visibilityProfile":floorTarget ? "floor_reduced_pan_lower_upper" : "standard"]
+                            "missedHolds":missedHolds,"policySkippedHolds":policySkippedHolds,"uprightRevisit":uprightRevisit,
+                            "floorForwardLowerTargets":forwardTargets,
+                            "floorVisibilityUpperTargetsPerLowerTarget":floorTarget ? Self.floorVisibilityUpperTargetsPerLowerTarget : 0,
+                            "floorVisibilityPredictionOnly":floorTarget,
+                            "visibilityProfile":floorTarget ? "floor_forward_occlusion_relief" : "standard"]
                         manifest["captures"] = captures
                         try self.writeSurvey(manifest,to:root)
                     }

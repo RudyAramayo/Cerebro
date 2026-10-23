@@ -353,6 +353,162 @@ int main(void) { @autoreleasepool {
     assert([box startSafeNeckStartup] == ROBNeckCommandDispositionAppliedCommand);
     assert(neckPackets(box).count == beforeRecovery + 2);
 
+    // A settled wide pan already lies inside the full-clearance band for a
+    // small explicit lower-neck change. Preserve that pan, update lower/upper
+    // together, and retain the actual ramp deadline without a centering packet.
+    for (NSNumber *widePan in @[@4500, @7500]) {
+        for (NSNumber *nearLower in @[@5811, @6211]) {
+            box = activeNeck();
+            box.commandedNeckPanTarget = widePan.intValue;
+            box.commandedNeckPanDegrees = (widePan.doubleValue - 6000) / 33.3333333333;
+            double beforeSmallLower = fixtureNow;
+            assert([box requestOperatorNeckPosePanTarget:widePan.intValue
+                        lowerTarget:nearLower.intValue upperTarget:6906]
+                == ROBNeckCommandDispositionAppliedCommand);
+            NSArray *expectedPair = @[@[@1, nearLower, @6906]];
+            assert([neckPackets(box) isEqualToArray:expectedPair]);
+            assert(box.commandedNeckPanTarget == widePan.intValue);
+            assert(box.commandedLowerNeckTiltTarget == nearLower.intValue);
+            assert(box.commandedUpperNeckTiltTarget == 6906);
+            double smallLowerReadyAt = box.neckCommandReadyAtUptime;
+            double expectedLowerWait = ROBNeckSafetyMaestroMotionDuration(6011, nearLower.intValue, 20, 2)
+                + kROBNeckClearanceSettleSeconds;
+            assert(fabs(smallLowerReadyAt - beforeSmallLower - expectedLowerWait) < 0.000001);
+            for (int repeat = 0; repeat < 100; repeat++) {
+                assert([box requestOperatorNeckPosePanTarget:widePan.intValue
+                            lowerTarget:nearLower.intValue upperTarget:6906]
+                    == ROBNeckCommandDispositionAppliedCommand);
+            }
+            assert([neckPackets(box) isEqualToArray:expectedPair]);
+            assert(box.neckCommandReadyAtUptime == smallLowerReadyAt);
+            settle(box);
+            assert(fabs(box.currentNeckPanMinimumDegrees + 60) < 0.000001
+                && fabs(box.currentNeckPanMaximumDegrees - 60) < 0.000001);
+
+            // Retaining a near-upright pose must not grant arbitrary automatic
+            // lower travel when the existing counter-rotation calibration is
+            // unconfirmed. This is a different path from an explicit operator
+            // endpoint request and still holds without sending any packet.
+            box = activeNeck();
+            box.neckSafetyCalibrationConfirmed = NO;
+            box.commandedNeckPanTarget = widePan.intValue;
+            assert([box applySafeNeckPanTarget:widePan.intValue lowerTiltTarget:nearLower.intValue
+                        desiredUpperTarget:6906 includeLower:YES allowSupervisedLowerRecovery:NO
+                        source:@"Gesture: unconfirmed near-upright fixture"]
+                == ROBNeckCommandDispositionHeldForSafety);
+            assert(box.commandedLowerNeckTiltTarget == 6011);
+            assert(box.commandedNeckPanTarget == widePan.intValue);
+            assert(neckPackets(box).count == 0);
+            assert([box.neckCommandSafetyStatus containsString:@"LOWER HELD: CALIBRATION REQUIRED"]);
+        }
+    }
+
+    // The bounded forward-overlook extension accepts the observed raw pan
+    // endpoint without recentering. The gateway still sends one exact coupled
+    // lower/upper packet, waits for its real ramp, and deduplicates repeats.
+    box = activeNeck();
+    box.commandedNeckPanTarget = 7333;
+    box.commandedNeckPanDegrees = (7333.0 - 6000) / 33.3333333333;
+    box.commandedLowerNeckTiltTarget = 6495;
+    box.commandedUpperNeckTiltTarget = 5700;
+    box.panEnvelopeLowerTarget = 6495;
+    double beforeOverlook = fixtureNow;
+    assert([box requestOperatorNeckPosePanTarget:7333 lowerTarget:6645 upperTarget:5700]
+        == ROBNeckCommandDispositionAppliedCommand);
+    NSArray *overlookPair = @[@[@1, @6645, @5700]];
+    assert([neckPackets(box) isEqualToArray:overlookPair]);
+    assert(box.commandedNeckPanTarget == 7333);
+    assert(box.commandedLowerNeckTiltTarget == 6645);
+    assert(box.commandedUpperNeckTiltTarget == 5700);
+    double overlookReadyAt = box.neckCommandReadyAtUptime;
+    double expectedOverlookWait = ROBNeckSafetyMaestroMotionDuration(6495, 6645, 20, 2)
+        + kROBNeckClearanceSettleSeconds;
+    assert(fabs(overlookReadyAt - beforeOverlook - expectedOverlookWait) < 0.000001);
+    for (int repeat = 0; repeat < 100; repeat++) {
+        assert([box requestOperatorNeckPosePanTarget:7333 lowerTarget:6645 upperTarget:5700]
+            == ROBNeckCommandDispositionAppliedCommand);
+    }
+    assert([neckPackets(box) isEqualToArray:overlookPair]);
+    assert(box.neckCommandReadyAtUptime == overlookReadyAt);
+    settle(box);
+    assert(fabs(box.currentNeckPanMinimumDegrees + 15) < 0.000001);
+    assert(fabs(box.currentNeckPanMaximumDegrees - (7333.0 - 6000) / 33.3333333333) < 0.000001);
+
+    // A single raw pan unit beyond the extension must stage before lowering;
+    // a wider initial pan does the same. One lower unit beyond 6645 must instead
+    // retain the existing asymmetric forward window (+2.1 degrees, raw 6070).
+    for (NSArray<NSNumber *> *transition in @[@[@7334, @6645, @7333],
+                                             @[@7500, @6645, @7333],
+                                             @[@7333, @6646, @6070]]) {
+        int originalPan = transition[0].intValue;
+        int destinationLower = transition[1].intValue;
+        int stagedPan = transition[2].intValue;
+        box = activeNeck();
+        box.commandedNeckPanTarget = originalPan;
+        box.commandedNeckPanDegrees = (originalPan - 6000.0) / 33.3333333333;
+        box.commandedLowerNeckTiltTarget = 6495;
+        box.commandedUpperNeckTiltTarget = 5700;
+        box.panEnvelopeLowerTarget = 6495;
+        assert([box requestOperatorNeckPosePanTarget:originalPan lowerTarget:destinationLower upperTarget:5700]
+            == ROBNeckCommandDispositionHeldForSafety);
+        NSArray *panOnly = @[@[@0, @(stagedPan)]];
+        assert([neckPackets(box) isEqualToArray:panOnly]);
+        assert(box.commandedLowerNeckTiltTarget == 6495);
+        assert(box.commandedUpperNeckTiltTarget == 5700);
+        assert(box.commandedNeckPanTarget == stagedPan);
+        double stagedReadyAt = box.neckCommandReadyAtUptime;
+        for (int repeat = 0; repeat < 25; repeat++) {
+            assert([box requestOperatorNeckPosePanTarget:originalPan lowerTarget:destinationLower upperTarget:5700]
+                == ROBNeckCommandDispositionHeldForSafety);
+        }
+        assert([neckPackets(box) isEqualToArray:panOnly]);
+        assert(box.neckCommandReadyAtUptime == stagedReadyAt);
+        settle(box);
+        assert([box requestOperatorNeckPosePanTarget:originalPan lowerTarget:destinationLower upperTarget:5700]
+            == ROBNeckCommandDispositionAppliedCommand);
+        NSArray *stagedThenCoupled = @[@[@0, @(stagedPan)], @[@1, @(destinationLower), @5700]];
+        assert([neckPackets(box) isEqualToArray:stagedThenCoupled]);
+        assert(box.commandedLowerNeckTiltTarget == destinationLower);
+        assert(box.commandedUpperNeckTiltTarget == 5700);
+        assert(box.commandedNeckPanTarget == stagedPan);
+        settle(box);
+        assert(fabs(box.currentNeckPanMinimumDegrees + 15) < 0.000001);
+        double expectedMaximum = destinationLower == 6645
+            ? (7333.0 - 6000) / 33.3333333333 : 2.1;
+        assert(fabs(box.currentNeckPanMaximumDegrees - expectedMaximum) < 0.000001);
+    }
+
+    // Actual envelope tightening still stages pan first. The near-upright
+    // retention behavior must not release lower motion while a wide pan lies
+    // outside either the forward window or the below-clearance symmetric one.
+    for (NSArray<NSNumber *> *transition in @[@[@4500, @7000, @5500], @[@7500, @4999, @7000]]) {
+        int originalPan = transition[0].intValue;
+        int destinationLower = transition[1].intValue;
+        int stagedPan = transition[2].intValue;
+        box = activeNeck();
+        box.commandedNeckPanTarget = originalPan;
+        assert([box requestOperatorNeckPosePanTarget:originalPan lowerTarget:destinationLower upperTarget:6906]
+            == ROBNeckCommandDispositionHeldForSafety);
+        NSArray *panOnly = @[@[@0, @(stagedPan)]];
+        assert([neckPackets(box) isEqualToArray:panOnly]);
+        assert(box.commandedLowerNeckTiltTarget == 6011);
+        assert(box.commandedNeckPanTarget == stagedPan);
+        double stagedReadyAt = box.neckCommandReadyAtUptime;
+        for (int repeat = 0; repeat < 25; repeat++) {
+            assert([box requestOperatorNeckPosePanTarget:originalPan lowerTarget:destinationLower upperTarget:6906]
+                == ROBNeckCommandDispositionHeldForSafety);
+        }
+        assert([neckPackets(box) isEqualToArray:panOnly]);
+        assert(box.neckCommandReadyAtUptime == stagedReadyAt);
+        settle(box);
+        assert([box requestOperatorNeckPosePanTarget:originalPan lowerTarget:destinationLower upperTarget:6906]
+            == ROBNeckCommandDispositionAppliedCommand);
+        NSArray *stagedThenCoupled = @[@[@0, @(stagedPan)], @[@1, @(destinationLower), @6906]];
+        assert([neckPackets(box) isEqualToArray:stagedThenCoupled]);
+        assert(box.commandedLowerNeckTiltTarget == destinationLower);
+        assert(box.commandedNeckPanTarget == stagedPan);
+    }
+
     // OFF and a changed lower pose retain the coupled safety path. Repeated
     // exact requests must not keep sending either channel or extend settling.
     box = activeNeck();
@@ -375,7 +531,7 @@ int main(void) { @autoreleasepool {
     NSUInteger offCount = neckPackets(box).count;
     render(box, 0, 0, 0, NO);
     assert(neckPackets(box).count == offCount);
-    puts("ROB neck output runtime fixtures passed: startup, pacing, deduplication, ownership, recovery, OFF");
+    puts("ROB neck output runtime fixtures passed: startup, pacing, deduplication, ownership, recovery, near-upright wide-pan pairs, forward-overlook endpoint/staging, tightening, unconfirmed automatic holds, OFF");
 } }
 '''
 

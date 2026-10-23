@@ -39,7 +39,8 @@ physical build.
 | --- | ---: | --- |
 | Below-5000 pan | ±30° | symmetric pan limit for a known lower-tilt target below the e-stop clearance band |
 | Full-pan band | 5000–6495 | fixed inclusive Maestro 24 lower-tilt band that permits complete pan |
-| Above-6495 pan | −15° to +2.1° | asymmetric forward pan limits for a known lower-tilt target above the clearance band |
+| Forward overlook, lower 6496–6645 | −15° to raw pan 7333 (about +40°) | operator-directed extension on the tested positive-pan side; preserves a broader saved forward maximum |
+| Above-6645 pan | −15° to +2.1° | original asymmetric forward limits beyond the overlook extension |
 | Unknown/off pan | −15° to +2.1° | fail-safe asymmetric pan limits when lower tilt has no known active command |
 | Lower clearance/up | 6011 | fixed lower-neck camera-leveling reference and temporary OFF/unknown startup lift |
 | Upper upright | 6906 | front-camera center target at lower upright, offset about +833 target units for the approximately -25° camera mount |
@@ -133,14 +134,36 @@ cannot jump from the existing camera pose to the authorized-follow target `7375`
 The shared gateway still applies the configured physical hard bounds. These
 tracking values are integer Maestro command targets, not measured joint angles.
 
-**Upright lookaround is the default.** Tracking enters the reviewed upright
-lower/upper pose (`6011`/`6906`) once through the existing safe gateway, preserving
-pan within the saved upright limits. Once lower tilt is upright, pan and upper
-tilt continue following people; upper tilt is not repeatedly reset. Near/far
+**Upright lookaround is the default.** Its neutral lower/upper pose remains
+`6011`/`6906`. Tracking retains an already-established lower target from **5811
+through 6645**, inclusive, instead of pulling an overlook adjustment back
+to exactly `6011`. Targets through `6495` retain the existing full-pan region.
+The operator-directed `6496`–`6645` extension keeps the configured forward
+minimum and caps positive pan at raw `7333`, approximately +40 degrees under
+the default scale. It does not permit the full left/right pan range. From outside
+the retention band, tracking enters the
+neutral pose through the existing staged gateway, preserving pan within the
+saved upright limits. Pan and upper tilt then continue following people;
+upper tilt is not repeatedly reset. Near/far
 depth changes, lost-attention returns, idle returns, and sword attention cannot
 request lean-forward or lean-back sequences in this mode. This prevents the
 repeated apparent zoom in/out when someone stands close to ROB. Manual poses
 and the supervised startup/recovery sequence retain their existing behavior.
+
+This is retention of an accepted lower command, not a new automatic lower-neck
+jog or a change to the upright calibration reference. Manual and QR-calibration
+lower moves still pass through the same calibration/recovery, coupled-axis and
+settling gates. Retention does not change the exact full-follow preparation pose or establish
+measured physical arm clearance. The separate forward-overlook extension above
+was added for the operator-directed positive-pan commissioning trial. Servo units are not a guaranteed number of degrees or inches; that
+mapping remains under measurement.
+
+At a retained forward-overlook pose with a narrower pan window, an outward
+tracking correction at either edge requests the existing reviewed `6011`/`6906`
+upright transition before continuing farther. Inside the window, tracking keeps
+the accepted lower offset. This recovery does not enable distance-based lean or
+zoom gestures and retains the existing authority, known-command and settling
+checks.
 
 **Settings → Tracking → Allow automatic lean/zoom gestures (scan mode)** is an
 explicit, persistent opt-in for the previous distance/search posture behavior.
@@ -394,13 +417,19 @@ The pan window is selected from the commanded lower-tilt target:
 - A known active lower target from `5000` through `6495`, inclusive, gets the
   complete calibrated pan range. With the shipped values this is ±60°, and it
   includes upright `6011`.
-- A known active lower target above `6495` uses the asymmetric forward window,
-  −15.0°…+2.1° with the shipped values.
+- A known active lower target from `6496` through `6645` uses the configured
+  forward minimum and the greater of its saved maximum or raw pan `7333`,
+  converted using the active center/scale and clipped to the hard pan bound.
+  With defaults this is −15.0°…+39.99°. This is the operator-directed forward
+  overlook extension, not full-pan clearance.
+- A known active lower target above `6645` uses the original asymmetric forward
+  window, −15.0°…+2.1° with the shipped values.
 - Once a full-clearance lower target is established in the current Maestro
   session, subsequent commands that remain in that region do not inherit the
   unknown/off −15.0°…+2.1° window from stale transition state.
 - There is no interpolation at either collision boundary: `4999` is symmetric,
-  `5000` and `6495` are full-pan, and `6496` is asymmetric. The gateway's
+  `5000` and `6495` are full-pan, `6496`–`6645` use the overlook window,
+  and `6646` returns to the original forward window. The gateway's
   settle interlock controls when a widening becomes active.
 
 The pan command readout shows `!` for the entire time the active envelope is
