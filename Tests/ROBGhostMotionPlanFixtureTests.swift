@@ -15,6 +15,210 @@ private extension ROBLeftCanReachCalibration {
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
         let model = try ROBGhostRobotModel(directory: root.appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
         precondition(model.modelID.count == 64 && model.joints.count == 44 && model.hulls.count >= 40)
+        if CommandLine.arguments.last == "can-sections" {
+            let view = ROBWorkspaceView(panDegrees:0,upperTarget:6306)
+            let frame = view.cameraFrame(model:model)!, inverse = simd_inverse(frame)
+            let width = 640, height = 480, fx = 500.0, fy = 500.0, cx = 319.5, cy = 239.5
+            let base = 0.7980352035511078, canHeight = 0.12, canDiameter = 0.066, planeX = 0.6
+            func pixel(_ point:SIMD3<Double>) -> SIMD2<Double> {
+                let p = inverse*SIMD4(point.x,point.y,point.z,1)
+                precondition(p.z > 0)
+                return SIMD2(fx*p.x/p.z+cx,fy*p.y/p.z+cy)
+            }
+            let corners = [base,base+canHeight].flatMap { z in
+                [-canDiameter/2,canDiameter/2].map { y in pixel(SIMD3(planeX,y,z)) }
+            }
+            let minX = corners.map(\.x).min()!, maxX = corners.map(\.x).max()!
+            let minY = corners.map(\.y).min()!, maxY = corners.map(\.y).max()!
+            let box = [minX/Double(width-1),minY/Double(height-1),maxX/Double(width-1),maxY/Double(height-1)]
+            let center = [(box[0]+box[2])/2,(box[1]+box[3])/2]
+            let detection = ROBWorkspaceDetection(visible:true,confidence:0.9,box:box,aim:center,depthPoint:center)
+            func depth(_ x:Int,_ y:Int) -> UInt16? {
+                guard (0..<width).contains(x), (0..<height).contains(y) else { return nil }
+                let direction = frame*SIMD4((Double(x)-cx)/fx,(Double(y)-cy)/fy,1,0)
+                let z = (planeX-frame.columns.3.x)/direction.x
+                guard z.isFinite, (0.15...3).contains(z) else { return nil }
+                return UInt16((z*1000).rounded())
+            }
+            func sections(_ candidate:ROBWorkspaceDetection, _ source:(Int,Int)->UInt16?) -> ROBWorkspaceCanSections? {
+                ROBWorkspaceCanSections.measure(detection:candidate,width:width,height:height,fx:fx,fy:fy,cx:cx,cy:cy,
+                    depth:source,view:view,model:model)
+            }
+            let measured = sections(detection,depth)!
+            precondition(measured.valid && abs(measured.heightMeters-canHeight) < 0.006)
+            precondition(abs(measured.diameterMeters-canDiameter) < 0.008)
+            precondition(measured.top[2] > measured.middle[2] && measured.middle[2] > measured.bottom[2])
+            precondition(abs(measured.middle[2]-(measured.top[2]+measured.bottom[2])/2) < 1e-12)
+            func observation(_ sections:ROBWorkspaceCanSections?,_ sequence:UInt64) -> ROBWorkspaceLocatedObject {
+                .init(target:.can,position:measured.middle,confidence:0.8,capturedAt:1000+Double(sequence)*100,
+                    sequence:sequence,view:view,sections:sections)
+            }
+            let middlePoint = SIMD3(measured.middle[0],measured.middle[1],measured.middle[2])
+            func body(_ height:Double,_ diameter:Double) -> ROBWorkspaceCanSections {
+                ROBWorkspaceCanSections.fit(topBand:middlePoint+SIMD3(0,0,height*0.32),middleBand:middlePoint,
+                    bottomBand:middlePoint-SIMD3(0,0,height*0.32),diameterMeters:diameter)!
+            }
+            var confirmation = ROBWorkspaceLocationConfirmation()
+            precondition(confirmation.observe(observation(measured,1)) == nil)
+            precondition(confirmation.observe(observation(body(measured.heightMeters+0.001,measured.diameterMeters),2)) != nil,
+                "Consistent advancing can section measurements must confirm")
+            precondition(confirmation.observe(observation(body(0.17,measured.diameterMeters),3)) == nil,
+                "Agreeing midpoints cannot confirm a can height jump")
+            var diameterConfirmation = ROBWorkspaceLocationConfirmation()
+            precondition(diameterConfirmation.observe(observation(body(0.12,0.05),1)) == nil)
+            precondition(diameterConfirmation.observe(observation(body(0.12,0.08),2)) == nil,
+                "Agreeing midpoints cannot confirm a can diameter jump")
+            var missingSections = ROBWorkspaceLocationConfirmation()
+            precondition(missingSections.observe(observation(measured,1)) == nil)
+            precondition(missingSections.observe(observation(nil,2)) == nil,
+                "Section-aware confirmation needs valid geometry in both frames")
+            precondition(sections(detection,{ x,y in (x+y)%47 == 0 ? 2500 : depth(x,y) }) != nil,
+                "Sparse reflective-depth outliers must not replace the body-band median")
+            precondition(sections(detection,{ _,_ in nil }) == nil)
+            precondition(sections(detection,{ x,y in abs(Double(y)-(minY+maxY)/2) < 10 ? nil : depth(x,y) }) == nil,
+                "A missing middle depth band must block section geometry")
+            let clipped = ROBWorkspaceDetection(visible:true,confidence:0.9,box:[0.01,box[1],box[2],box[3]],
+                aim:center,depthPoint:center)
+            precondition(sections(clipped,depth) == nil,"Clipped boxes cannot supply a measured full can height")
+            precondition(ROBWorkspaceCanSections.fit(topBand:SIMD3(0.6,0.04,0.86),middleBand:SIMD3(0.6,0,0.86),
+                bottomBand:SIMD3(0.6,-0.04,0.86),diameterMeters:canDiameter) == nil,
+                "A fallen can cannot be treated as upright")
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("rob-can-sections-"+UUID().uuidString+".json")
+            defer { try? FileManager.default.removeItem(at:file) }
+            var calibration = ROBLeftCanReachCalibration(modelID:model.modelID,referenceID:model.referenceID,
+                mappingID:ROBGhostRobotModel.mappingID,translationMeters:[-0.127,0,-0.0508],
+                source:"Isolated conservative same-table base datum fixture",canOutwardMeters:0.01,
+                tabletopCanBaseHeightMeters:base)
+            try calibration.saveFixture(to:file)
+            let loadedBase = try ROBLeftCanReachCalibration.loadTabletopCanBaseHeight(model:model,file:file)
+            precondition(loadedBase == base)
+            let raw = [0.56,-0.067,0.9243580983385508]
+            var can = ROBWorkspaceLocatedObject(target:.can,position:raw,confidence:0.8,capturedAt:1000,sequence:1,
+                view:view,sections:measured)
+            let offset = try ROBLeftCanReachCalibration.load(model:model,can:can,file:file)
+            precondition(abs(can.point.z+offset.z-(base+measured.heightMeters/2)) < 1e-12)
+            precondition(can.point.z+offset.z > base+0.05,"The middle-body grasp must clear the conservative tabletop datum")
+            precondition(can.position == raw && can.sections?.top == measured.top,"Calibration mutated raw section observations")
+            let decoded = try JSONDecoder().decode(ROBWorkspaceLocatedObject.self,from:JSONEncoder().encode(can))
+            precondition(decoded.sections?.valid == true && decoded.sections?.middle == measured.middle)
+            can.sections = nil
+            expectBlocked { _ = try ROBLeftCanReachCalibration.load(model:model,can:can,file:file) }
+            expectBlocked { _ = try ROBLeftCanReachCalibration.load(model:model,file:file) }
+            calibration.tabletopGraspHeightMeters = base
+            try calibration.saveFixture(to:file)
+            expectBlocked { _ = try ROBLeftCanReachCalibration.load(model:model,can:can,file:file) }
+            print("Can sections: synthetic 12cm upright RGB-D body, independent top/middle/base bands, unclipped height and diameter, robust median; missing/clipped/fallen geometry rejected, calibrated middle clears conservative same-table datum")
+            return
+        }
+        if CommandLine.arguments.last == "search-schedule" {
+            let now = Date().timeIntervalSince1970 * 1000
+            let canHint = ROBWorkspaceRecall.Sighting(target:.can,view:.init(panDegrees:-30,upperTarget:6306),
+                box:[0.0008170492947101593,0.6563320922851562,0.08337186574935913,0.9749293518066406],
+                confidence:0.6290956735610962,capturedAt:now-1000)
+            let bucketHint = ROBWorkspaceRecall.Sighting(target:.orangeBucket,view:.init(panDegrees:15,upperTarget:5650),
+                box:[0.16691629886627196,0.3721091842651367,0.382261323928833,0.7084024810791015],
+                confidence:0.5621610879898071,capturedAt:now-1000)
+            let recall = ROBWorkspaceRecall(modelID:model.modelID,geometryID:model.geometryID,sightings:[canHint,bucketHint])
+            var search = ROBWorkspaceSearchSchedule(targets:[.can,.orangeBucket],recall:recall,now:now)
+            precondition(search.next(confirmed:[]) == canHint.centeredView,
+                "A clipped historical can must be centered before repeating its clipped view")
+            precondition(search.next(confirmed:[.can]) == bucketHint.view,
+                "The missing bucket must be checked before more views of the already confirmed can")
+            let completedViews = search.attempted.count
+            precondition(search.next(confirmed:[.can,.orangeBucket]) == nil && search.attempted.count == completedViews,
+                "Both fresh confirmations must stop the search before another neck move")
+            precondition(completedViews == 2)
+            precondition(ROBWorkspaceSearchSchedule.recallQuality([0.4,0.4,0.6,0.7]) >
+                ROBWorkspaceSearchSchedule.recallQuality(canHint.box),"A clipped glimpse must not replace a better current-search recall view")
+
+            let emptyRecall = ROBWorkspaceRecall(modelID:model.modelID,geometryID:model.geometryID)
+            var fallback = ROBWorkspaceSearchSchedule(targets:[.can,.orangeBucket],recall:emptyRecall,now:now)
+            var raster: [ROBWorkspaceView] = []
+            while let view = fallback.next(confirmed:[]) { raster.append(view) }
+            precondition(ROBWorkspaceView.sweep.allSatisfy { original in
+                raster.contains { abs($0.panDegrees-original.panDegrees) < 3 && abs($0.upperTarget-original.upperTarget) < 100 }
+            },"Every original raster interval must remain available when recall fails")
+            precondition(raster.count < ROBWorkspaceView.sweep.count,
+                "A raster view already inspected must not incur another move and inference pair")
+            let coarse = [ROBWorkspaceView(panDegrees:0,upperTarget:6306),.init(panDegrees:-30,upperTarget:6306),
+                .init(panDegrees:30,upperTarget:6306),.init(panDegrees:0,upperTarget:5650),
+                .init(panDegrees:30,upperTarget:5650),.init(panDegrees:-30,upperTarget:5650)]
+            precondition(Array(raster.prefix(6)) == coarse,
+                "A rotated scene without recall must check broad front/left/right views before the detailed raster")
+            func canBox(_ box: [Double], _ confidence: Double) -> ROBWorkspaceDetection {
+                let center = [(box[0]+box[2])/2,(box[1]+box[3])/2]
+                return .init(visible:true,confidence:confidence,box:box,aim:center,depthPoint:center,confidenceThreshold:0.35)
+            }
+            let firstCan = canBox([0.2,0.2,0.3,0.6],0.8), repeatedCan = canBox([0.205,0.205,0.305,0.605],0.7)
+            let secondCan = canBox([0.6,0.2,0.7,0.6],0.6)
+            let distinctCans = ROBWorkspaceSearchSchedule.distinctCans([repeatedCan,secondCan,firstCan])
+            precondition(distinctCans.count == 2 && distinctCans[0].box == firstCan.box && distinctCans[1].box == secondCan.box,
+                "Repeated prompts for one can must merge while two separate physical cans remain distinct")
+            let manyCans = (0..<10).map { index in canBox([Double(index)/10,0.2,Double(index)/10+0.04,0.5],0.9) }
+            precondition(ROBWorkspaceSearchSchedule.distinctCans(manyCans).count == 8)
+
+            var nearby = ROBWorkspaceSearchSchedule(targets:[.can,.orangeBucket],recall:recall,now:now,
+                boundedPan:{ max(-35,min(35,$0)) })
+            var missingBucket: [ROBWorkspaceView] = []
+            while let view = nearby.next(confirmed:[.can]) { missingBucket.append(view) }
+            precondition(missingBucket.first == bucketHint.view)
+            precondition([0.0,30].allSatisfy { pan in missingBucket.prefix(6).contains {
+                abs($0.panDegrees-pan) < 3 && abs($0.upperTarget-5650) < 100
+            } },
+                "Look 15 degrees around the missing bucket hint before the full raster")
+            precondition(missingBucket.allSatisfy { (5300...7500).contains($0.upperTarget) && abs($0.panDegrees) <= 45 })
+            for index in missingBucket.indices {
+                precondition(!missingBucket.prefix(index).contains {
+                    abs($0.panDegrees-missingBucket[index].panDegrees) < 3 && abs($0.upperTarget-missingBucket[index].upperTarget) < 100
+                },"Recall, recentering and fallback must not repeat the same inspected view")
+            }
+            var hanging = ROBWorkspaceSearchSchedule(targets:[],recall:emptyRecall,now:now)
+            var hangingViews = 0
+            while hanging.next(confirmed:[]) != nil { hangingViews += 1 }
+            precondition(hangingViews == 3,"An empty object target list must retain the hanging inspection scan")
+            print("Search schedule: clipped can centered, missing bucket reached in2views, confirmed pair stops; fresh rotated scene gets6broadviews, all\(ROBWorkspaceView.sweep.count) fallback intervals retained, distinctcanNMS preserves2instances/max8, hanging scan retained")
+            return
+        }
+        if CommandLine.arguments.last == "can-vector" {
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("rob-can-vector-"+UUID().uuidString+".json")
+            defer { try? FileManager.default.removeItem(at:file) }
+            var calibration = ROBLeftCanReachCalibration(modelID:model.modelID,referenceID:model.referenceID,
+                mappingID:ROBGhostRobotModel.mappingID,translationMeters:[-0.127,0,-0.0508],
+                source:"Isolated one-centimeter deeper grasp fixture",canOutwardMeters:0.01)
+            try calibration.saveFixture(to:file)
+            let base = SIMD3<Double>(-0.127,0,-0.0508)
+            for xy in [SIMD2<Double>(0.56,-0.067),SIMD2<Double>(0.2,0.6)] {
+                let can = ROBWorkspaceLocatedObject(target:.can,position:[xy.x,xy.y,0.85],confidence:0.8,
+                    capturedAt:1000,sequence:1,view:.init(panDegrees:0,upperTarget:6306))
+                let offset = try ROBLeftCanReachCalibration.load(model:model,can:can,file:file)
+                let delta = SIMD2(offset.x-base.x,offset.y-base.y)
+                precondition(simd_length(delta-simd_normalize(xy)*0.01) < 1e-12 && offset.z == base.z)
+                precondition(can.position == [xy.x,xy.y,0.85],"Calibration mutated a raw sighting")
+            }
+            expectBlocked { _ = try ROBLeftCanReachCalibration.load(model:model,file:file) }
+            for invalid in [-0.001,0.031] {
+                calibration.canOutwardMeters = invalid
+                try calibration.saveFixture(to:file)
+                expectBlocked { _ = try ROBLeftCanReachCalibration.load(model:model,file:file) }
+            }
+            calibration.canOutwardMeters = 0.01
+            calibration.tabletopGraspHeightMeters = 0.7980352035511078
+            try calibration.saveFixture(to:file)
+            for rawZ in [0.8488352035511078,0.9243580983385508] {
+                let can = ROBWorkspaceLocatedObject(target:.can,position:[0.56,-0.067,rawZ],confidence:0.8,
+                    capturedAt:1000,sequence:1,view:.init(panDegrees:0,upperTarget:6306))
+                let offset = try ROBLeftCanReachCalibration.load(model:model,can:can,file:file)
+                let xy = SIMD2<Double>(0.56,-0.067), delta = SIMD2(offset.x-base.x,offset.y-base.y)
+                precondition(abs(can.point.z+offset.z-calibration.tabletopGraspHeightMeters!) < 1e-12)
+                precondition(simd_length(delta-simd_normalize(xy)*0.01) < 1e-12)
+                precondition(can.position == [0.56,-0.067,rawZ],"Tabletop calibration mutated the fresh sighting")
+            }
+            let highCan = ROBWorkspaceLocatedObject(target:.can,position:[0.56,-0.067,1.2],confidence:0.8,
+                capturedAt:1000,sequence:1,view:.init(panDegrees:0,upperTarget:6306))
+            expectBlocked { _ = try ROBLeftCanReachCalibration.load(model:model,can:highCan,file:file) }
+            print("Can-vector calibration: exactly1cm along each fresh horizontal can vector, fixed proven tabletop height across camera views, raw sightings unchanged; missing direction and out-of-range corrections rejected")
+            return
+        }
         if CommandLine.arguments.last == "raised-recovery" {
             let evidence = root.appendingPathComponent("docs/calibration/evidence/2026-10-22-recycling/height-yaw-live-missed-grasp.proposal.json")
             let previous = try JSONDecoder().decode(ROBLeftGestureProposal.self,from:Data(contentsOf:evidence))

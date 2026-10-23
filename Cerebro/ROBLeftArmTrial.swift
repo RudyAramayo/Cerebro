@@ -473,7 +473,7 @@ import AppKit
                 let baseline = model.positions(vendorLeft: q)
                 let reach = try await Task.detached(priority: .userInitiated) {
                     try ROBCanGrabPreview.make(can: can, model: model, baseline: baseline,
-                        reachOffset:ROBLeftCanReachCalibration.load(model:model,file:calibrationFile))
+                        reachOffset:ROBLeftCanReachCalibration.load(model:model,can:can,file:calibrationFile))
                 }.value
                 try check()
                 if let message = reach.helpRequest {
@@ -504,7 +504,7 @@ import AppKit
                 let baseline = model.positions(vendorLeft: q)
                 let compiled = try await Task.detached(priority: .userInitiated) { [generation] in
                     let plan = try ROBCanGrabPreview.make(can: can, model: model, baseline: baseline, bucket: bucket,
-                        reachOffset:ROBLeftCanReachCalibration.load(model:model,file:calibrationFile),
+                        reachOffset:ROBLeftCanReachCalibration.load(model:model,can:can,file:calibrationFile),
                         bucketYawDegrees:ROBLeftCanReachCalibration.loadBucketYaw(model:model,file:calibrationFile),
                         bucketInwardMeters:ROBLeftCanReachCalibration.loadBucketInward(model:model,file:calibrationFile))
                     let actions = Dictionary(uniqueKeysWithValues: plan.steps.enumerated().compactMap { index, step in

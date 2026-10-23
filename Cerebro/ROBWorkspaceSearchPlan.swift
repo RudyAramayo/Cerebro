@@ -181,6 +181,7 @@ struct ROBWorkspaceObservation: Codable {
     let leftArmHanging: Bool
     let rightArmHanging: Bool
     let hangingConfidence: Double
+    var cans: [ROBWorkspaceDetection]? = nil
     subscript(_ target: ROBWorkspaceTarget) -> ROBWorkspaceDetection { target == .can ? can : orangeBucket }
     static let prompt = """
     Inspect this robot camera image. Output ONLY this exact JSON structure, replacing the
@@ -239,6 +240,66 @@ enum ROBWorkspaceObservationError: LocalizedError {
     var canRetryFormat: Bool { if case .format = self { return true }; return false }
 }
 
+/// Upright can geometry measured from three independent RGB-D body bands.
+/// The detector's full box supplies endpoints only after unclipped depth and
+/// plausible physical height/diameter checks; these are observations, not poses.
+struct ROBWorkspaceCanSections: Codable {
+    let top: [Double]
+    let middle: [Double]
+    let bottom: [Double]
+    let heightMeters: Double
+    let diameterMeters: Double
+    var valid: Bool {
+        guard [top,middle,bottom].allSatisfy({ $0.count == 3 && $0.allSatisfy(\.isFinite) }),
+              heightMeters.isFinite, (0.09...0.18).contains(heightMeters),
+              diameterMeters.isFinite, (0.04...0.09).contains(diameterMeters) else { return false }
+        let a = SIMD3(top[0],top[1],top[2]), b = SIMD3(bottom[0],bottom[1],bottom[2])
+        let m = SIMD3(middle[0],middle[1],middle[2]), axis = a-b, length = simd_length(axis)
+        return length.isFinite && abs(length-heightMeters) <= 0.001 && axis.z >= 0.6*length &&
+            simd_distance(m,(a+b)/2) <= 0.001
+    }
+    static func fit(topBand:SIMD3<Double>,middleBand:SIMD3<Double>,bottomBand:SIMD3<Double>,
+                    diameterMeters:Double) -> Self? {
+        guard [topBand,middleBand,bottomBand].allSatisfy({ [$0.x,$0.y,$0.z].allSatisfy(\.isFinite) }),
+              diameterMeters.isFinite, (0.04...0.09).contains(diameterMeters) else { return nil }
+        let axis = topBand-bottomBand, length = simd_length(axis), height = length/0.64
+        guard length.isFinite, (0.09...0.18).contains(height), axis.z >= 0.6*length,
+              simd_distance(middleBand,(topBand+bottomBand)/2) <= 0.025 else { return nil }
+        let top = topBand + axis*(0.18/0.64), bottom = bottomBand-axis*(0.18/0.64), middle = (top+bottom)/2
+        let result = Self(top:[top.x,top.y,top.z],middle:[middle.x,middle.y,middle.z],
+            bottom:[bottom.x,bottom.y,bottom.z],heightMeters:height,diameterMeters:diameterMeters)
+        return result.valid ? result : nil
+    }
+    static func measure(detection:ROBWorkspaceDetection,width:Int,height:Int,
+                        fx:Double,fy:Double,cx:Double,cy:Double,depth:(Int,Int)->UInt16?,
+                        view:ROBWorkspaceView,model:ROBGhostRobotModel) -> Self? {
+        guard detection.usable, detection.box.allSatisfy({ (0.02...0.98).contains($0) }),
+              width > 1, height > 1, [fx,fy,cx,cy].allSatisfy(\.isFinite), fx > 0, fy > 0,
+              (0..<Double(width)).contains(cx), (0..<Double(height)).contains(cy),
+              let transform = view.cameraFrame(model:model) else { return nil }
+        let left = detection.box[0]*Double(width-1), right = detection.box[2]*Double(width-1)
+        let top = detection.box[1]*Double(height-1), bottom = detection.box[3]*Double(height-1), u = (left+right)/2
+        let radiusX = max(1,min(3,Int((right-left)*0.12))), radiusY = max(1,min(3,Int((bottom-top)*0.04)))
+        func band(_ fraction:Double) -> (point:SIMD3<Double>,depth:Double)? {
+            let v = top+(bottom-top)*fraction, x = Int(u.rounded()), y = Int(v.rounded())
+            var samples: [Double] = []
+            for dy in -radiusY...radiusY { for dx in -radiusX...radiusX {
+                guard (0..<width).contains(x+dx), (0..<height).contains(y+dy) else { continue }
+                if let mm = depth(x+dx,y+dy), (150...3000).contains(mm) { samples.append(Double(mm)/1000) }
+            } }
+            guard samples.count >= 9 else { return nil }
+            samples.sort(); let z = samples[samples.count/2], deviations = samples.map { abs($0-z) }.sorted()
+            guard deviations[deviations.count/2] <= 0.025,
+                  samples[samples.count*9/10]-samples[samples.count/10] <= 0.06 else { return nil }
+            let point = transform*SIMD4((u-cx)*z/fx,(v-cy)*z/fy,z,1)
+            return (SIMD3(point.x,point.y,point.z),z)
+        }
+        guard let upper = band(0.18), let middle = band(0.50), let lower = band(0.82) else { return nil }
+        return fit(topBand:upper.point,middleBand:middle.point,bottomBand:lower.point,
+            diameterMeters:(right-left)*middle.depth/fx)
+    }
+}
+
 struct ROBWorkspaceLocatedObject: Codable {
     let target: ROBWorkspaceTarget
     let position: [Double]
@@ -248,6 +309,7 @@ struct ROBWorkspaceLocatedObject: Codable {
     let view: ROBWorkspaceView
     var openingRadius: Double? = nil
     var floorCorrectionDegrees: Double? = nil
+    var sections: ROBWorkspaceCanSections? = nil
     var point: SIMD3<Double> { SIMD3(position[0], position[1], position[2]) }
     func agrees(with other: Self) -> Bool {
         target == other.target && sequence != other.sequence && other.capturedAt > capturedAt &&
@@ -266,6 +328,10 @@ struct ROBWorkspaceLocationConfirmation {
         if object.target == .orangeBucket {
             guard let a = previous.openingRadius, let b = object.openingRadius,
                   a.isFinite, b.isFinite, abs(a-b) <= 0.02 else { return nil }
+        } else if previous.sections != nil || object.sections != nil {
+            guard let a = previous.sections, let b = object.sections, a.valid, b.valid,
+                  abs(a.heightMeters-b.heightMeters) <= 0.015,
+                  abs(a.diameterMeters-b.diameterMeters) <= 0.015 else { return nil }
         }
         return object
     }
@@ -284,10 +350,41 @@ struct ROBLeftCanReachCalibration: Codable {
     var bucketYawDegrees: Double? = nil
     var bucketInwardMeters: Double? = nil
     var recoveryGraspClearanceMeters: Double? = nil
+    var canOutwardMeters: Double? = nil
+    var tabletopGraspHeightMeters: Double? = nil
+    var tabletopCanBaseHeightMeters: Double? = nil
     static var file: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Cerebro/LeftArmCalibration/can-reach.json") }
-    static func load(model: ROBGhostRobotModel, file: URL = file) throws -> SIMD3<Double> {
+    static func load(model: ROBGhostRobotModel, can: ROBWorkspaceLocatedObject? = nil, file: URL = file) throws -> SIMD3<Double> {
         guard let value = try configuration(model:model,file:file) else { return .zero }
-        return SIMD3(value.translationMeters[0],value.translationMeters[1],value.translationMeters[2])
+        var correction = SIMD3(value.translationMeters[0],value.translationMeters[1],value.translationMeters[2])
+        let outward = value.canOutwardMeters ?? 0
+        if outward > 0 || value.tabletopGraspHeightMeters != nil || value.tabletopCanBaseHeightMeters != nil {
+            guard let can, can.target == .can, can.position.count == 3, can.position.allSatisfy(\.isFinite) else {
+                throw ROBGhostMotionError.blocked("Find the can again before applying its measured reach calibration.")
+            }
+            if outward > 0 {
+                let direction = SIMD2(can.position[0],can.position[1]), distance = simd_length(direction)
+                guard distance.isFinite, distance >= 0.1 else {
+                    throw ROBGhostMotionError.blocked("The can direction is too close to the robot origin for its outward reach calibration.")
+                }
+                let offset = direction / distance * outward
+                correction += SIMD3(offset.x,offset.y,0)
+            }
+            if let base = value.tabletopCanBaseHeightMeters {
+                guard let sections = can.sections, sections.valid else {
+                    throw ROBGhostMotionError.blocked("Measure the can's top, middle and base before planning a middle-body grasp.")
+                }
+                correction.z = base + sections.heightMeters/2 - can.position[2]
+            } else if let height = value.tabletopGraspHeightMeters {
+                // A measured height is valid only on the calibrated tabletop.
+                // Preserve the raw camera observation and bound its correction.
+                correction.z = height - can.position[2]
+            }
+        }
+        guard [correction.x,correction.y,correction.z].allSatisfy({ $0.isFinite && abs($0) <= 0.15 }) else {
+            throw ROBGhostMotionError.blocked("The calibrated can reach correction exceeds its bounded translation.")
+        }
+        return correction
     }
     static func loadBucketYaw(model:ROBGhostRobotModel,file:URL = file) throws -> Double {
         try configuration(model:model,file:file)?.bucketYawDegrees ?? 0
@@ -298,6 +395,9 @@ struct ROBLeftCanReachCalibration: Codable {
     static func loadRecoveryGraspClearance(model:ROBGhostRobotModel,file:URL = file) throws -> Double {
         try configuration(model:model,file:file)?.recoveryGraspClearanceMeters ?? 0
     }
+    static func loadTabletopCanBaseHeight(model:ROBGhostRobotModel,file:URL = file) throws -> Double? {
+        try configuration(model:model,file:file)?.tabletopCanBaseHeightMeters
+    }
     private static func configuration(model:ROBGhostRobotModel,file:URL) throws -> Self? {
         guard FileManager.default.fileExists(atPath:file.path) else { return nil }
         let data = try Data(contentsOf:file)
@@ -307,7 +407,11 @@ struct ROBLeftCanReachCalibration: Codable {
               value.translationMeters.count == 3, value.translationMeters.allSatisfy({ $0.isFinite && abs($0) <= 0.15 }),
               (value.bucketYawDegrees ?? 0).isFinite, abs(value.bucketYawDegrees ?? 0) <= 30,
               (value.bucketInwardMeters ?? 0).isFinite, (0...0.08).contains(value.bucketInwardMeters ?? 0),
-              (value.recoveryGraspClearanceMeters ?? 0).isFinite, (0...0.15).contains(value.recoveryGraspClearanceMeters ?? 0) else {
+              (value.recoveryGraspClearanceMeters ?? 0).isFinite, (0...0.15).contains(value.recoveryGraspClearanceMeters ?? 0),
+              (value.canOutwardMeters ?? 0).isFinite, (0...0.03).contains(value.canOutwardMeters ?? 0),
+              value.tabletopGraspHeightMeters.map({ $0.isFinite && (0.30...1.40).contains($0) }) ?? true,
+              value.tabletopCanBaseHeightMeters.map({ $0.isFinite && (0.30...1.40).contains($0) }) ?? true,
+              value.tabletopGraspHeightMeters == nil || value.tabletopCanBaseHeightMeters == nil else {
             throw ROBGhostMotionError.blocked("The local left-can reach calibration is invalid or belongs to a different robot model.")
         }
         return value
@@ -672,5 +776,88 @@ enum ROBWorkspaceGrounding {
         }
         return .init(name: "Recycle Coke can into orange bucket", poses: poses, modelID: model.modelID,
             referenceID: model.referenceID, geometryID: model.geometryID, kind: "tabletop")
+    }
+}
+
+/// Camera attention only. Every selected view still needs settled live frames,
+/// local detection and two agreeing depth measurements before it can locate an object.
+struct ROBWorkspaceSearchSchedule {
+    private struct Job { let view: ROBWorkspaceView; let target: ROBWorkspaceTarget? }
+    private var pending: [Job]
+    private let requested: Set<ROBWorkspaceTarget>
+    private(set) var attempted: [ROBWorkspaceView] = []
+    let recallViews: [ROBWorkspaceView]
+    let plannedViewCount: Int
+
+    init(targets: [ROBWorkspaceTarget], recall: ROBWorkspaceRecall,
+         now: Double = Date().timeIntervalSince1970 * 1000,
+         boundedPan: (Double) -> Double = { max(-45,min(45,$0)) }) {
+        requested = Set(targets)
+        var recalled: [Job] = [], nearby: [Job] = []
+        for target in targets {
+            guard let sighting = recall.sightings.first(where: {
+                $0.target == target && $0.valid && (0...86_400_000).contains(now-$0.capturedAt)
+            }) else { continue }
+            // An old clipped glimpse is a direction hint: first look toward
+            // its center, rather than repeating the clipped camera pose.
+            let views = Self.clipped(sighting.box) ? [sighting.centeredView,sighting.view] : [sighting.view,sighting.centeredView]
+            recalled += views.map { Job(view:$0,target:target) }
+            let center = sighting.view
+            nearby += [(-15.0,0),(15.0,0),(0.0,-350),(0.0,350)].map { pan,upper in
+                Job(view:.init(panDegrees:boundedPan(center.panDegrees+pan),
+                    upperTarget:max(5300,min(7500,center.upperTarget+upper))),target:target)
+            }
+        }
+        recallViews = recalled.map(\.view)
+        let fallback = targets.isEmpty ? [ROBWorkspaceView(panDegrees:0,upperTarget:5300),
+            .init(panDegrees:-35,upperTarget:5300),.init(panDegrees:35,upperTarget:5300)] : ROBWorkspaceView.sweep
+        // After the robot/table rotates, useful old views may no longer exist.
+        // Cover the broad front and both sides before the detailed raster.
+        let coarse = !targets.isEmpty && recalled.isEmpty ? [
+            ROBWorkspaceView(panDegrees:0,upperTarget:6306),.init(panDegrees:-30,upperTarget:6306),
+            .init(panDegrees:30,upperTarget:6306),.init(panDegrees:0,upperTarget:5650),
+            .init(panDegrees:30,upperTarget:5650),.init(panDegrees:-30,upperTarget:5650)] : []
+        pending = recalled + nearby + (coarse + fallback).map { Job(view:$0,target:nil) }
+        plannedViewCount = pending.count
+    }
+    static func clipped(_ box: [Double]) -> Bool {
+        box.count != 4 || box[0] <= 0.02 || box[1] <= 0.02 || box[2] >= 0.98 || box[3] >= 0.98
+    }
+    static func recallQuality(_ box: [Double]) -> Double {
+        guard box.count == 4 else { return -.infinity }
+        return (clipped(box) ? -10 : 0)-hypot((box[0]+box[2])/2-0.5,(box[1]+box[3])/2-0.5)
+    }
+    static func distinctCans(_ detections: [ROBWorkspaceDetection]) -> [ROBWorkspaceDetection] {
+        var kept: [ROBWorkspaceDetection] = []
+        for candidate in detections.filter(\.visuallyUsable).sorted(by:{ $0.confidence > $1.confidence }) {
+            let box = candidate.box
+            let duplicate = kept.contains { existing in
+                let other = existing.box
+                let intersection = max(0,min(box[2],other[2])-max(box[0],other[0])) *
+                    max(0,min(box[3],other[3])-max(box[1],other[1]))
+                let area = (box[2]-box[0])*(box[3]-box[1]) + (other[2]-other[0])*(other[3]-other[1])-intersection
+                return area > 0 && intersection/area >= 0.5
+            }
+            if !duplicate { kept.append(candidate) }
+            if kept.count == 8 { break }
+        }
+        return kept
+    }
+    func hasAttempted(_ view: ROBWorkspaceView) -> Bool {
+        attempted.contains { abs($0.panDegrees-view.panDegrees) < 3 && abs($0.upperTarget-view.upperTarget) < 100 }
+    }
+    mutating func record(_ view: ROBWorkspaceView) {
+        if !hasAttempted(view) { attempted.append(view) }
+    }
+    mutating func next(confirmed: Set<ROBWorkspaceTarget>) -> ROBWorkspaceView? {
+        if !requested.isEmpty && requested.isSubset(of:confirmed) { return nil }
+        while !pending.isEmpty {
+            let job = pending.removeFirst()
+            if let target = job.target, confirmed.contains(target) { continue }
+            if hasAttempted(job.view) { continue }
+            record(job.view)
+            return job.view
+        }
+        return nil
     }
 }

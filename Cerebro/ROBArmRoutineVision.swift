@@ -389,27 +389,26 @@ final class ROBArmRoutineVision {
             guard advancing, Date().timeIntervalSince1970 * 1000 - frame.capturedAt < 30_000 else {
                 throw ROBWorkspaceDetectorError.failure("Local detector lost the advancing live camera.")
             }
-            func detection(_ target: String) -> ROBWorkspaceDetection {
+            func detections(_ target: String) -> [ROBWorkspaceDetection] {
                 let candidates = result.candidates.filter { $0.target == target && $0.score >= 0.35 }
                     .sorted { $0.score > $1.score }
-                guard let best = candidates.first else {
-                    return .init(visible: false, confidence: 0, box: [], aim: [], depthPoint: [])
+                return candidates.map { candidate in
+                    let center = [(candidate.box[0] + candidate.box[2]) / 2, (candidate.box[1] + candidate.box[3]) / 2]
+                    // A bucket box alone never establishes its opening/rim.
+                    return .init(visible:true,confidence:candidate.score,box:candidate.box,
+                        aim:target == "can" ? center : [],depthPoint:target == "can" ? center : [],confidenceThreshold:0.35)
                 }
-                let center = [(best.box[0] + best.box[2]) / 2, (best.box[1] + best.box[3]) / 2]
-                // An object box can locate an upright can wall. A bucket box
-                // alone does not establish its opening/rim, so do not invent
-                // a release point from the rectangle's center.
-                return .init(visible: true, confidence: best.score, box: best.box,
-                    aim: target == "can" ? center : [], depthPoint: target == "can" ? center : [], confidenceThreshold: 0.35)
             }
+            let cans = ROBWorkspaceSearchSchedule.distinctCans(detections("can"))
+            let absent = ROBWorkspaceDetection(visible:false,confidence:0,box:[],aim:[],depthPoint:[])
             recordInspection(["assessment": "workspace_object_detector", "provider": result.provider,
                 "model": result.model, "device": result.device, "inference_ms": result.inference_ms,
                 "input_sequence": NSNumber(value: frame.sequence), "input_captured_at_ms": frame.capturedAt,
                 "latest_input_file": inputURL.path, "candidates": result.candidates.map {
                     ["target": $0.target, "query": $0.query, "score": $0.score, "box": $0.box] as [String: Any]
                 }])
-            return (.init(can: detection("can"), orangeBucket: detection("orangeBucket"),
-                leftArmHanging: false, rightArmHanging: false, hangingConfidence: 0), frame)
+            return (.init(can:cans.first ?? absent,orangeBucket:detections("orangeBucket").first ?? absent,
+                leftArmHanging:false,rightArmHanging:false,hangingConfidence:0,cans:cans), frame)
         }
         var diagnostics: [[String: Any]] = []
         for attempt in 0...1 {
@@ -506,8 +505,15 @@ final class ROBArmRoutineVision {
         var livePointing: (hint: ROBWorkspacePointingHint, view: ROBWorkspaceView, capturedAt: Double)?
         var followedLivePointing = false
         var recall = ROBWorkspaceRecall.load(model: model)
-        let recalledViews = recall.views(targets: targets)
-        var recenterViews: [ROBWorkspaceView] = []
+        let tabletopCanBaseHeight: Double?
+        if targets.contains(.can) { tabletopCanBaseHeight = try ROBLeftCanReachCalibration.loadTabletopCanBaseHeight(model:model) }
+        else { tabletopCanBaseHeight = nil }
+        var selectedCanMeasurement: ROBWorkspaceLocatedObject?
+        var schedule = ROBWorkspaceSearchSchedule(targets:targets,recall:recall,
+            boundedPan:boundedPan ?? { max(-45,min(45,$0)) })
+        let recalledViews = schedule.recallViews
+        var bestRecallQuality: [ROBWorkspaceTarget: Double] = [:]
+        var recenterViews: [(target: ROBWorkspaceTarget, view: ROBWorkspaceView)] = []
         var recenteredViews: [ROBWorkspaceView] = []
         let reportID = UUID().uuidString
         let startedAt = ISO8601DateFormatter().string(from: Date())
@@ -566,6 +572,7 @@ final class ROBArmRoutineVision {
         }
         func inspect(_ view: ROBWorkspaceView) async throws {
             guard try await moveView(view) else { return }
+            schedule.record(view)
             var priorVisual: [ROBWorkspaceTarget: (detection: ROBWorkspaceDetection, sequence: UInt64)] = [:]
             var priorHanging: ROBWorkspaceObservation?
             var priorPointing: ROBWorkspacePointingHint?
@@ -602,31 +609,68 @@ final class ROBArmRoutineVision {
                     "left_hanging": observation.leftArmHanging, "right_hanging": observation.rightArmHanging,
                     "hanging_confidence": observation.hangingConfidence]
                 entry["local_inference"] = vision.healthSnapshot()["inspection"]
-                for target in targets {
-                    let detection = observation[target]
+                // A confirmed object does not need repeated geometry work in
+                // every view while the camera searches for the other object.
+                // The final age check below still requests fresh measurements.
+                for target in targets where found[target] == nil {
+                    var detection = observation[target]
+                    var measurement: ROBWorkspaceLocatedObject?
+                    if target == .can, let tableBase = tabletopCanBaseHeight,
+                       let depth = frame.depth, let k = frame.intrinsics {
+                        var candidates: [(detection: ROBWorkspaceDetection, object: ROBWorkspaceLocatedObject)] = []
+                        var rejected = 0
+                        for candidate in observation.cans ?? [observation.can] {
+                            guard let sections = ROBWorkspaceCanSections.measure(detection:candidate,width:depth.width,height:depth.height,
+                                fx:k.fx,fy:k.fy,cx:k.cx,cy:k.cy,depth:{ depth.distanceMillimeters(x:$0,y:$1) },view:view,model:model),
+                                  abs(sections.bottom[2]-tableBase) <= 0.15 else { rejected += 1; continue }
+                            let object = ROBWorkspaceLocatedObject(target:.can,position:sections.middle,confidence:candidate.confidence,
+                                capturedAt:frame.capturedAt,sequence:frame.sequence,view:view,sections:sections)
+                            guard (try? ROBLeftCanReachCalibration.load(model:model,can:object)) != nil else { rejected += 1; continue }
+                            candidates.append((candidate,object))
+                        }
+                        // Keep the same currently observed instance across
+                        // frames; a remembered point only ranks fresh objects.
+                        let selected: (detection: ROBWorkspaceDetection, object: ROBWorkspaceLocatedObject)?
+                        if let prior = selectedCanMeasurement,
+                           let nearest = candidates.min(by:{ simd_distance($0.object.point,prior.point) < simd_distance($1.object.point,prior.point) }),
+                           simd_distance(nearest.object.point,prior.point) <= 0.05 {
+                            selected = nearest
+                        } else { selected = candidates.max(by:{ $0.object.confidence < $1.object.confidence }) }
+                        if let selected {
+                            detection = selected.detection; measurement = selected.object
+                            selectedCanMeasurement = selected.object
+                        }
+                        entry["visible_table_cans"] = candidates.map { candidate -> [String: Any] in
+                            let object = candidate.object, sections = object.sections!
+                            return ["box":candidate.detection.box,"confidence":object.confidence,"position":object.position,
+                                "top":sections.top,"middle":sections.middle,"base":sections.bottom,
+                                "height_m":sections.heightMeters,"diameter_m":sections.diameterMeters,
+                                "calibrated_middle_height_m":tableBase+sections.heightMeters/2,
+                                "selected":selected.map({ $0.detection.box == candidate.detection.box }) ?? false]
+                        }
+                        entry["rejected_can_instances"] = rejected
+                        entry["tabletop_can_base_height_m"] = tableBase
+                    }
                     if detection.visuallyUsable, let previous = priorVisual[target], previous.sequence != frame.sequence,
                        hypot(detection.center[0] - previous.detection.center[0], detection.center[1] - previous.detection.center[1]) <= 0.08 {
-                        visuallyFound.insert(target)
-                        recall.remember(target: target, detection: detection, view: view, capturedAt: frame.capturedAt)
-                        do { try recall.save() } catch { entry["recall_save_error"] = error.localizedDescription }
+                        if target != .can || tabletopCanBaseHeight == nil || measurement != nil { visuallyFound.insert(target) }
                         if found[target] == nil {
                             let centered = ROBWorkspaceRecall.Sighting(target: target, view: view, box: detection.box,
                                 confidence: detection.confidence, capturedAt: frame.capturedAt).centeredView
                             if abs(centered.panDegrees - view.panDegrees) > 5 || abs(centered.upperTarget - view.upperTarget) > 180 {
-                                recenterViews.append(centered)
+                                recenterViews.append((target,centered))
                             }
                         }
                     }
                     if detection.visuallyUsable { priorVisual[target] = (detection, frame.sequence) }
                     else { priorVisual.removeValue(forKey: target) }
-                    var measurement: ROBWorkspaceLocatedObject?
                     if target == .orangeBucket {
                         measurement = await Task.detached(priority: .userInitiated) {
                             self.bucketLocation(detection, frame: frame, view: view, model: model)
                         }.value
                         try check()
                     }
-                    else if let depth = frame.depth, let k = frame.intrinsics {
+                    else if tabletopCanBaseHeight == nil, let depth = frame.depth, let k = frame.intrinsics {
                         measurement = ROBWorkspaceGrounding.locate(target: target, detection: detection,
                             width: depth.width, height: depth.height, fx: k.fx, fy: k.fy, cx: k.cx, cy: k.cy,
                             depth: { depth.distanceMillimeters(x: $0, y: $1) }, view: view, model: model,
@@ -640,13 +684,26 @@ final class ROBArmRoutineVision {
                     if let radius = located.openingRadius { geometry["opening_radius_m"] = radius }
                     if let correction = located.floorCorrectionDegrees { geometry["floor_camera_correction_degrees"] = correction }
                     entry[target.rawValue] = geometry
-                    if let confirmed = locationConfirmation.observe(located) { found[target] = confirmed }
+                    if let confirmed = locationConfirmation.observe(located) {
+                        found[target] = confirmed
+                        // The first fresh confirmed measurement replaces any
+                        // historical hint, even after an object was moved. Keep
+                        // the best confirmed view seen during this search.
+                        let quality = ROBWorkspaceSearchSchedule.recallQuality(detection.box)
+                        if bestRecallQuality[target].map({ quality > $0 }) ?? true {
+                            bestRecallQuality[target] = quality
+                            recall.remember(target:target,detection:detection,view:view,capturedAt:frame.capturedAt)
+                            do { try recall.save() } catch { entry["recall_save_error"] = error.localizedDescription }
+                        }
+                    }
                     else {
                         found.removeValue(forKey:target)
                         retryVisibleDepth = true
                     }
                 }
                 evidence.append(entry)
+                if !targets.isEmpty && targetsConfirmed() { break }
+                if targets.isEmpty && leftHanging && rightHanging { break }
             }
             if let message = speech.confirmed(visuallyFound, targets: targets) {
                 announce?(message)
@@ -681,16 +738,17 @@ final class ROBArmRoutineVision {
             }
         }
         if !recalledViews.isEmpty { announce?("Checking where I last saw them.") }
-        let sweep = targets.isEmpty ? [ROBWorkspaceView(panDegrees: 0, upperTarget: 5300),
-            .init(panDegrees: -35, upperTarget: 5300), .init(panDegrees: 35, upperTarget: 5300)] : recalledViews + ROBWorkspaceView.sweep
-        for (index, view) in sweep.enumerated() {
-            progress("Searching view \(index + 1) of \(sweep.count)")
+        var viewIndex = 0
+        while let view = schedule.next(confirmed:requireDepth ? Set(found.keys) : visuallyFound) {
+            viewIndex += 1
+            progress("Searching view \(viewIndex) of up to \(schedule.plannedViewCount)")
             try await inspectWithRetry(view)
             // A partial object at the image edge warrants looking directly
             // at it before continuing the raster, especially a bucket rim.
             while !targetsConfirmed(), !recenterViews.isEmpty, recenteredViews.count < 4 {
-                let centered = recenterViews.removeFirst()
-                guard !recenteredViews.contains(where: { abs($0.panDegrees - centered.panDegrees) < 5 && abs($0.upperTarget - centered.upperTarget) < 150 }) else { continue }
+                let candidate = recenterViews.removeFirst(), centered = candidate.view
+                guard found[candidate.target] == nil, !schedule.hasAttempted(centered),
+                      !recenteredViews.contains(where: { abs($0.panDegrees - centered.panDegrees) < 5 && abs($0.upperTarget - centered.upperTarget) < 150 }) else { continue }
                 recenteredViews.append(centered)
                 try await inspectWithRetry(centered)
                 persist("searching", "Centered a remembered or partially visible object; taking new measurements")
@@ -702,7 +760,7 @@ final class ROBArmRoutineVision {
                 announce?("Following your pointing direction.")
                 try await followPointing(pointing.hint, from: pointing.view)
             }
-            persist("searching", "Completed search view \(index + 1) of \(sweep.count)")
+            persist("searching", "Completed search view \(viewIndex); confirmed targets skip their remaining attention hints")
             if targets.isEmpty ? leftHanging && rightHanging : targetsConfirmed() { break }
         }
         if validObservations > 0, !targets.isEmpty, targets.contains(where: { !visuallyFound.contains($0) }) {

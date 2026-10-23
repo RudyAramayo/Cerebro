@@ -359,6 +359,40 @@ joints into this target, then choose the nearest horizontal wrist branch.
 The measured-hanging regression uses that residual and the actual new
 observations; the full corrected route passes without relaxing any limit.
 
+The first confirmed recycle was trial `DA779E5C`: the can was visibly lifted
+in the gripper, and Rob confirmed it landed inside the orange bucket. The
+48-step operation took 264.66 seconds, including about 169 seconds searching.
+Its telemetry and frozen proposal are archived as `first-confirmed-recycle`.
+
+For subsequent positions on the same table, optional `canOutwardMeters` adds
+a bounded horizontal correction along the fresh can vector from ROB (0–3 cm;
+local setting 1 cm). Rob reported the successful grasp was near the bottom.
+The new `tabletopCanBaseHeightMeters` mode instead targets the measured can's
+middle: the local base datum plus half its measured height. The 0.798035 m
+datum comes from that successful low grasp; it is a conservative operator
+calibration, not a measured table plane. It replaces the temporary fixed
+`tabletopGraspHeightMeters` setting. Both height modes cannot be enabled together.
+The datum is local to this table/model, bounded to 0.30–1.40 m, and the
+resulting correction still must stay within ±15 cm. Other table heights need
+recalibration. Camera/arm transforms and whole-gripper table clearance remain
+provisional.
+
+The local detector retains up to eight distinct can instances. Three robust
+RGB-D body bands locate each upright can's top, middle and base; clipped boxes,
+missing/inconsistent depth and implausible dimensions cannot authorize a
+middle grasp. Two fresh agreeing observations are still required. A base-height
+check excludes floor/bucket cans in this commissioned scene. The ghost view
+labels TOP, MIDDLE and BASE and shows the separate calibrated reach target.
+
+After a scene rotation, an empty valid recall file clears the old attention
+directions without migrating old reports. Search checks six broad views before
+the full raster, uses confirmed recall on subsequent searches, and skips
+attention hints for targets already found. Camera settling and fresh depth
+checks are unchanged. Two cans can be recycled as successive complete routines
+within one live 15-minute left-arm session; confirm the first release/empty hand
+before starting its registered recovery. This does not infer success from a
+completed motor sequence.
+
 ## Validation
 
 The plan, approval/session, executor, camera/model rendering and tunnel fixtures
