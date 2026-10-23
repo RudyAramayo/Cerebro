@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedUTC": "2026-10-23T19:32:10.932463+00:00",
+  "updatedUTC": "2026-10-23T19:45:47.304239+00:00",
   "sourceParentCommit": "b7078a3",
   "surveySessionID": "35BC194C-5CA9-4A66-9C7C-674CEBE94387",
   "sceneContextID": "35BC194C-5CA9-4A66-9C7C-674CEBE94387",
@@ -147,7 +147,7 @@
   },
   "blockers": {
     "floorLeft": "Partial QR occlusion by ROB arm; full-template refinement rejected the observations.",
-    "floorRight": "Found in two discovery frames, but formal target capture lost readability.",
+    "floorRight": "ID decoded in two discovery frames, but both failed strict template corner refinement and formal capture lost readability. Move outside direct sunlight/glare with the entire symbol and quiet margin visible, then freshly reverify and retake.",
     "targetedRetake": "Installed with verified-seed fallback and smaller floor steps; not yet executed because native window access returns cgWindowNotFound for Cerebro and other apps."
   },
   "startupPreferences": {
@@ -176,14 +176,14 @@
     "grantMaterialCommitted": false
   },
   "independentIMUUpperProfile": {
-    "fileSHA256": "13e59decde0f9e7afdba1ea161057121a5db617114e2c63ef5b799b940d099b0",
-    "privateFile": "imu-upper-profile.json",
+    "fileSHA256": "8fefcf4ef4942ec69c0f3f8fed83693c66c3e35a71a17f7f00fda2f7ccc08d28",
+    "privateFile": "imu-upper-profile-final.json",
     "summary": {
       "schemaVersion": 1,
       "status": "imu_upper_profile_unverified",
       "registrationVerified": false,
       "candidateURDFReady": false,
-      "acceptedRecordCount": 254,
+      "acceptedRecordCount": 365,
       "rejectedRecordCount": 8,
       "rejectedRecords": [
         {
@@ -222,9 +222,31 @@
       "coverage": [
         {
           "panDegrees": -60.0,
+          "lowerTarget": 5811,
+          "uniqueUpperLevels": 2,
+          "upperSpanTargetUnits": 75,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": -60.0,
           "lowerTarget": 6011,
-          "uniqueUpperLevels": 1,
-          "upperSpanTargetUnits": 0,
+          "uniqueUpperLevels": 3,
+          "upperSpanTargetUnits": 468,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": -60.0,
+          "lowerTarget": 6211,
+          "uniqueUpperLevels": 2,
+          "upperSpanTargetUnits": 75,
           "sourceSelection": "all_available_records",
           "minimumUniqueLevels": 5,
           "minimumSpanTargetUnits": 1000,
@@ -253,6 +275,39 @@
           "referenceUpper": 5300
         },
         {
+          "panDegrees": -53.19,
+          "lowerTarget": 5811,
+          "uniqueUpperLevels": 3,
+          "upperSpanTargetUnits": 117,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": -53.19,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 5,
+          "upperSpanTargetUnits": 300,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": -53.19,
+          "lowerTarget": 6211,
+          "uniqueUpperLevels": 3,
+          "upperSpanTargetUnits": 75,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
           "panDegrees": -50.01,
           "lowerTarget": 6011,
           "uniqueUpperLevels": 1,
@@ -268,6 +323,39 @@
           "lowerTarget": 6011,
           "uniqueUpperLevels": 1,
           "upperSpanTargetUnits": 0,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": -45.18,
+          "lowerTarget": 5811,
+          "uniqueUpperLevels": 2,
+          "upperSpanTargetUnits": 75,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": -45.18,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 2,
+          "upperSpanTargetUnits": 75,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": -45.18,
+          "lowerTarget": 6211,
+          "uniqueUpperLevels": 2,
+          "upperSpanTargetUnits": 75,
           "sourceSelection": "all_available_records",
           "minimumUniqueLevels": 5,
           "minimumSpanTargetUnits": 1000,
@@ -642,11 +730,11 @@
       "heldOutVectorRMSEMetersPerSecondSquared": 0.08957528140551901,
       "maximumEllipsePlaneNormalDisagreementDegrees": 0.590864115818538,
       "provenance": {
-        "inputSHA256": "d7d6126b6fd62c8818445e5b3830a2113fe0d2782336417c96b88d2647fa651f",
+        "inputSHA256": "40314a31ae9fb102292f5cee6490efa29218606acd67ab0c191670feba5fd0b1",
         "inputPath": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/survey.json",
         "sessionID": "35BC194C-5CA9-4A66-9C7C-674CEBE94387",
         "sceneContextID": "35BC194C-5CA9-4A66-9C7C-674CEBE94387",
-        "surveyStatusAtRead": "capturing",
+        "surveyStatusAtRead": "capture_complete_unverified",
         "sources": [
           {
             "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-0-0.json",
@@ -1110,11 +1198,12 @@
           },
           {
             "path": "privateCapture/6C0B2032-3D50-4719-8BF8-470DEB483A37/capture.json",
-            "sha256": "9e7137da0e99f1ab84f41e491165ed70829ab49f213e8e342edd9eba8af842c9"
+            "sha256": "5e7c477bda8994801c8f22cf09f0c39d09db9e8126e57f7d234d307f0e517554"
           }
         ]
       }
-    }
+    },
+    "regenerationNote": "Regenerated after final wall capture completed: 365 accepted plus 8 rejected records across all 373 survey observations. Wide-discovery-only fitted groups and the estimated scale are unchanged from the earlier in-progress snapshot; provenance now identifies the final capture bytes."
   },
   "sharedModelOrderComparison": {
     "fileSHA256": "c61e5879eafde7f84b4b286eb8b454cbfd7f3f1d0ebc329791fb4fa92d43a59a",
@@ -1320,5 +1409,242 @@
     "noDepthPointsRemoved": true,
     "notes": "Two-finder synthetic control has up to 1.24px hidden-corner error. Real sensitivity is conditional, not a physical uncertainty bound. Both right-floor discovery frames still fail."
   },
-  "completionState": "Software and analyses validated; physical floor calibration remains incomplete pending visibility and native desktop access."
+  "completionState": "Software and analyses validated; physical floor calibration remains incomplete pending visibility and native desktop access.",
+  "planarInitializationAudit": {
+    "privateDirectory": "Analysis/ResearchArchive-20261023/qr-final-planar-branch-audit-20261023",
+    "files": [
+      {
+        "name": "summary.json",
+        "sha256": "1c25c2dd72bfd37150efddb3ff52848f12983156eab1b4ce3661973508335aff"
+      },
+      {
+        "name": "audit-results.json",
+        "sha256": "aef29d542e860b3fda0cbb15060d39eecbc6627ea12a3e44e92a3afb7a60fc7b"
+      },
+      {
+        "name": "run-audit.py",
+        "sha256": "dc2d241dd09065ddab57d8cd7110019cd51ad6de34fbcce1bdb1fd33e03e0025"
+      },
+      {
+        "name": "ROB-WALL-R01-snapshot.json",
+        "sha256": "3bf33318d813242f9ace0df03c3e604e940fd41e227d8f0012984284c523b2c7"
+      },
+      {
+        "name": "ROB-TABLE-001-snapshot.json",
+        "sha256": "4e0c17b60fb04ac759483e93a4a749b6b26d1b579767376fbda90cde98068a7a"
+      },
+      {
+        "name": "manifest-snapshot.json",
+        "sha256": "5871bf2ac14a1820178f3e5474e9b7126358e013c388349a8e60b9365c5590a5"
+      },
+      {
+        "name": "virtual_model_definition.py",
+        "sha256": "da063f53f196e46af0b93dfa2cc6a7cdc03bf2d2417a0706120706676fcad5ae"
+      }
+    ],
+    "summary": {
+      "elapsedSeconds": 51.494582709,
+      "sourceCommit": "4d4ce8005864e5f6845c7a47eff9d8e612ab5f03",
+      "models": {
+        "canonical": {
+          "runCount": 16,
+          "alternativeHypothesisAvailableViews": 220,
+          "best": {
+            "planarBranchMask": 0,
+            "initializer": "nominal_mount",
+            "robustTrainingCost": 6072.229486557606,
+            "heldOutReprojectionRMSEPixels": 15.946806242086465,
+            "trainingReprojectionRMSEPixels": 13.172456826914145,
+            "scales": [
+              1.1996381719626636,
+              1.2134470988230426,
+              1.1606539364740913
+            ],
+            "cameraMountRadiusMeters": 0.42907547898103965,
+            "atBounds": [
+              "cameraX"
+            ]
+          },
+          "nearBestRunCountWithin0_1PercentTrainingCost": 7,
+          "nearBestRadiusMetersRange": [
+            0.4290723521114142,
+            0.42907571870035344
+          ],
+          "bestPerBranchMask": {
+            "0": {
+              "initializer": "nominal_mount",
+              "robustTrainingCost": 6072.229486557606,
+              "heldOutReprojectionRMSEPixels": 15.946806242086465,
+              "cameraMountRadiusMeters": 0.42907547898103965,
+              "scales": [
+                1.1996381719626636,
+                1.2134470988230426,
+                1.1606539364740913
+              ]
+            },
+            "1": {
+              "initializer": "nominal_mount",
+              "robustTrainingCost": 6513.06942791676,
+              "heldOutReprojectionRMSEPixels": 16.453317943057886,
+              "cameraMountRadiusMeters": 0.4328275523299574,
+              "scales": [
+                1.2059788621189556,
+                1.2002614814352757,
+                1.1593438812736545
+              ]
+            },
+            "2": {
+              "initializer": "inertial_orientation",
+              "robustTrainingCost": 6072.229486570208,
+              "heldOutReprojectionRMSEPixels": 15.946810244898312,
+              "cameraMountRadiusMeters": 0.42907571870035344,
+              "scales": [
+                1.1996382702829858,
+                1.2134465160506165,
+                1.1606536290019325
+              ]
+            },
+            "3": {
+              "initializer": "inertial_orientation",
+              "robustTrainingCost": 6513.06942720232,
+              "heldOutReprojectionRMSEPixels": 16.453342647570793,
+              "cameraMountRadiusMeters": 0.43282840328888156,
+              "scales": [
+                1.2059789207147809,
+                1.2002515067411246,
+                1.15933891896597
+              ]
+            }
+          }
+        },
+        "pan_before_lower": {
+          "runCount": 16,
+          "alternativeHypothesisAvailableViews": 220,
+          "best": {
+            "planarBranchMask": 0,
+            "initializer": "nominal_mount",
+            "robustTrainingCost": 862.6603919285233,
+            "heldOutReprojectionRMSEPixels": 4.377207195768325,
+            "trainingReprojectionRMSEPixels": 3.6737479847947654,
+            "scales": [
+              1.9241722299783262,
+              1.8100049340551279,
+              1.8066706509454074
+            ],
+            "cameraMountRadiusMeters": 0.020144956474647716,
+            "atBounds": []
+          },
+          "nearBestRunCountWithin0_1PercentTrainingCost": 8,
+          "nearBestRadiusMetersRange": [
+            0.020144884207696525,
+            0.020144956474647716
+          ],
+          "bestPerBranchMask": {
+            "0": {
+              "initializer": "nominal_mount",
+              "robustTrainingCost": 862.6603919285233,
+              "heldOutReprojectionRMSEPixels": 4.377207195768325,
+              "cameraMountRadiusMeters": 0.020144956474647716,
+              "scales": [
+                1.9241722299783262,
+                1.8100049340551279,
+                1.8066706509454074
+              ]
+            },
+            "1": {
+              "initializer": "hand_eye",
+              "robustTrainingCost": 1888.2035743051465,
+              "heldOutReprojectionRMSEPixels": 6.6691556911641365,
+              "cameraMountRadiusMeters": 0.027802531018159403,
+              "scales": [
+                2.012322888660184,
+                1.8887682263821346,
+                1.9008930752635924
+              ]
+            },
+            "2": {
+              "initializer": "hand_eye",
+              "robustTrainingCost": 862.6603919296963,
+              "heldOutReprojectionRMSEPixels": 4.377206609053936,
+              "cameraMountRadiusMeters": 0.020144903027969275,
+              "scales": [
+                1.9241722159736456,
+                1.8100047787689317,
+                1.8066705637243992
+              ]
+            },
+            "3": {
+              "initializer": "hand_eye",
+              "robustTrainingCost": 1888.2035743053627,
+              "heldOutReprojectionRMSEPixels": 6.669155875676066,
+              "cameraMountRadiusMeters": 0.027802555254456445,
+              "scales": [
+                2.0123229351274254,
+                1.888768316250477,
+                1.9008931421402757
+              ]
+            }
+          }
+        }
+      },
+      "heldOutImprovementFactorBestTrainingSelected": 3.6431463097070376,
+      "conclusion": "Alternative PnP/physical starts do not eliminate orientation-order improvement or restore the camera radius to the CAD prior. The virtual ordering remains diagnostic, not a measured hardware reparenting.",
+      "runnerSHA256": "dc2d241dd09065ddab57d8cd7110019cd51ad6de34fbcce1bdb1fd33e03e0025"
+    },
+    "selectionPolicy": "Best robust training objective within each model; whole-pose held-out observations never used to select initialization.",
+    "registrationVerified": false,
+    "candidateURDFReady": false
+  },
+  "kinematicPriorEvidence": {
+    "source": "Cerebro/Resources/ShadowPlanner/robot-visual-rig.json",
+    "sha256": "4e39b62b2c45144b6a3660832b5879e825f6c115461ca97ba87cbf4a815bd8dc",
+    "joints": [
+      {
+        "name": "lower_neck",
+        "parent": "torso_link",
+        "child": "lower_neck_link",
+        "axis": [
+          0,
+          1,
+          0
+        ],
+        "evidence": {
+          "note": "Inferred lower axis from torso-aligned upper-axis seeds and 156 mm spacing; sagittal/centerline assumptions pending isolated-joint captures. Candidate only; validate in Geometry Lab. Not a physical zero, travel limit, or motor command.",
+          "source": "scan_estimate"
+        },
+        "hardwareAnnotation": "Maestro channel 1; PWM-to-angle unmeasured"
+      },
+      {
+        "name": "neck_pan",
+        "parent": "lower_neck_link",
+        "child": "neck_pan_link",
+        "axis": [
+          0,
+          0,
+          1
+        ],
+        "evidence": {
+          "note": "Provisional pan location and chain order; no pan sweep observed. Replace with tomorrow\u2019s left/right pan fit. Candidate only; validate in Geometry Lab. Not a physical zero, travel limit, or motor command.",
+          "source": "scan_estimate"
+        },
+        "hardwareAnnotation": "Maestro channel 0; PWM-to-angle unmeasured"
+      },
+      {
+        "name": "upper_neck",
+        "parent": "neck_pan_link",
+        "child": "upper_neck_link",
+        "axis": [
+          0,
+          1,
+          0
+        ],
+        "evidence": {
+          "note": "130+26 = 156 mm from lower axis at zero pan. Upper pitch from fitted head sphere orientation; shaft direction and visual zero remain estimates. Candidate only; validate in Geometry Lab. Not a physical zero, travel limit, or motor command.",
+          "source": "scan_estimate"
+        },
+        "hardwareAnnotation": "Maestro channel 2; PWM-to-angle unmeasured"
+      }
+    ],
+    "interpretation": "The canonical order and shaft geometry were documented scan estimates; software channel mapping is consistent but physical joint order and pivots remain unverified."
+  }
 }

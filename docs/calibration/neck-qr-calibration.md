@@ -396,10 +396,20 @@ direction-dependent repeatability.
 
 The first inertial model comparison also favors placing pan before the pitch
 rotations, instead of the canonical `Ry(lower) Rz(pan) Ry(upper)` orientation.
-An independent shared table/wall pixel fit improved from 17.80 to 4.38 pixels
-held-out under that alternative ordering. However, its camera-pivot radius
-became inconsistent with the CAD prior. This is a mechanism/frame-order
-diagnostic, not an accepted URDF reparenting or camera-to-arm registration.
+A shared table/wall pixel audit tested 32 fits: both planar pose branches for
+each marker, four camera initializations, and two joint orders. Selecting by
+training cost, held-out error improved from **15.95 to 4.38 pixels** under the
+alternative ordering. Eight starts reproduced its fitted 20.145 mm camera-pivot
+radius, inconsistent with the 155.6 mm CAD prior. The discrepancy persists across
+the tested initializations. This is a mechanism/frame-order diagnostic, not an
+accepted URDF reparenting or camera-to-arm registration.
+
+The canonical visual-rig evidence itself labels the pan location and chain order
+provisional because no pan sweep had been observed. Its lower-axis location was
+inferred using sagittal/centerline assumptions and 156 mm spacing; upper shaft
+direction and visual zero were also estimates. Those priors do not independently
+verify the physical mechanism. Software channel mapping remains consistent:
+channel 0 pan, channel 1 lower neck, channel 2 upper neck.
 
 ### Targeted retakes and remaining physical checks
 
@@ -413,8 +423,11 @@ That retry build is installed, but native window access subsequently returned
 `cgWindowNotFound` for Cerebro and other applications. The targeted retake was
 therefore not started. Offline calculations continued from saved observations.
 No calibration-complete claim is made. On return, restore desktop access, move
-the left-floor sheet out of the arm's sightline, verify all printed rulers and
-symbol dimensions, and repeat the floor captures.
+the left-floor sheet out of the arm's sightline, and move the right-floor sheet
+outside direct sunlight/glare with its entire symbol and quiet margin visible.
+Both right-floor discovery images decoded but failed strict template corner
+refinement, so their corners are not admitted as metric measurements. Verify all
+printed rulers and symbol dimensions, then repeat the floor captures.
 
 For the protractor check, measure the same camera housing/bracket against the
 same level reference at each held target, including return visits. Also observe
