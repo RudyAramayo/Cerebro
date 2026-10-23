@@ -77,12 +77,14 @@ private extension ROBLeftCanReachCalibration {
             print("Raised recorded recovery: \(raised.steps.count) visited targets in reverse order, \(raised.seconds)s, minimum height above prior grasp \(minimumHeight-(floor-clearance))m; no jaw replay, front pose reached")
             return
         }
-        if CommandLine.arguments.last == "operator-alignment" {
-            let now = Date().timeIntervalSince1970 * 1000, baseline = model.positions(vendorLeft:Array(repeating:0,count:7))
+        if ["operator-alignment","measured-hanging"].contains(CommandLine.arguments.last ?? "") {
+            let measuredHanging = CommandLine.arguments.last == "measured-hanging"
+            let baselineQ: [Double] = measuredHanging ? [0,0,0,0,0,0,0.00272707695624114] : Array(repeating:0,count:7)
+            let now = Date().timeIntervalSince1970 * 1000, baseline = model.positions(vendorLeft:baselineQ)
             let view = ROBWorkspaceView(panDegrees:0,upperTarget:6306)
-            let can = ROBWorkspaceLocatedObject(target:.can,position:[0.5324488846561272,-0.06700092572478558,0.8835158279604254],
+            let can = ROBWorkspaceLocatedObject(target:.can,position:measuredHanging ? [0.5692687658021478,-0.08326221606964468,0.9243580983385508] : [0.5324488846561272,-0.06700092572478558,0.8835158279604254],
                 confidence:0.8,capturedAt:now,sequence:10,view:view)
-            let bucket = ROBWorkspaceLocatedObject(target:.orangeBucket,position:[0.3386968846760923,0.46298106639441516,0.27549540863399613],
+            let bucket = ROBWorkspaceLocatedObject(target:.orangeBucket,position:measuredHanging ? [0.32242477494949906,0.4546627224299035,0.2752971437682622] : [0.3386968846760923,0.46298106639441516,0.27549540863399613],
                 confidence:0.6,capturedAt:now,sequence:11,view:view,openingRadius:0.10133714336237384)
             let rawCan = can.position, rawBucket = bucket.position, rawRadius = bucket.openingRadius
             let previousOffset = SIMD3<Double>(-0.127,0,-0.1143), offset = SIMD3<Double>(-0.127,0,-0.0508)
@@ -104,14 +106,15 @@ private extension ROBLeftCanReachCalibration {
                 reachOffset:loadedOffset,bucketYawDegrees:loadedYaw,bucketInwardMeters:loadedInward)
             precondition(corrected.reachesCan && corrected.can.position == rawCan)
             precondition(can.position == rawCan && bucket.position == rawBucket && bucket.openingRadius == rawRadius)
-            precondition(abs(corrected.calibratedGraspPoint.z-0.8327158279604254) < 0.000001)
+            precondition(abs(corrected.calibratedGraspPoint.z-(can.point.z-0.0508)) < 0.000001)
+            precondition(ROBArmRoutinePlan.near(model.vendorLeft(corrected.steps[0].pose),ROBLeftArmInteractionPlan.target(index:ROBLeftArmInteractionPlan.frontIndex)!,tolerance:0.001),"Hanging wrist residual leaked into the registered front target")
             precondition(abs(corrected.calibratedGraspPoint.z-previousGrasp.calibratedGraspPoint.z-0.0635) < 0.000001,
                 "The table-contact correction must raise the grasp by 2.5 inches")
             precondition(corrected.calibratedGraspPoint.x == previousGrasp.calibratedGraspPoint.x &&
                 corrected.calibratedGraspPoint.y == previousGrasp.calibratedGraspPoint.y)
             let actions = Dictionary(uniqueKeysWithValues:corrected.steps.enumerated().compactMap { i,s in s.jawAction.map { (i,$0) } })
             let frozen = try ROBLeftGestureCompiler.compile(kind:"recycling",name:"Operator alignment regression",poses:corrected.steps.map(\.pose),
-                model:model,baseline:Array(repeating:0,count:7),generation:77,recyclingActions:actions)
+                model:model,baseline:baselineQ,generation:77,recyclingActions:actions)
             try ROBLeftGestureCompiler.validate(frozen,model:model)
             func release(_ plan:ROBCanGrabPreview) -> SIMD3<Double> { model.toolPosition(plan.steps.first { $0.jawAction == .release }!.pose)! }
             let pivot = model.frames(baseline)["left_one_Link"]!.columns.3

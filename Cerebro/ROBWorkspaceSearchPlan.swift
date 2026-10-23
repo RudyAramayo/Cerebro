@@ -494,7 +494,10 @@ struct ROBCanGrabPreview {
         }
         var seed = baseline
         let front = model.positions(vendorLeft: ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.frontIndex)!)
-        for i in 1...6 { seed["\(side)_joint\(i)"] = (side == "left" ? 1 : -1) * front["left_joint\(i)"]! }
+        // The first pose must be the complete registered front target. Small
+        // measured wrist residuals at hanging belong to the baseline, not this
+        // target; horizontal leveling chooses its nearest wrist branch next.
+        for i in 1...7 { seed["\(side)_joint\(i)"] = (side == "left" ? 1 : -1) * front["left_joint\(i)"]! }
         var previous = baseline, steps: [Step] = []
         func append(_ pose: [String: Double], _ stage: String, dwell: Double = 0, action: ROBLeftGestureProposal.JawAction? = nil) {
             let angle = chain.map { abs(pose[$0.name, default: 0] - previous[$0.name, default: 0]) }.max() ?? 0

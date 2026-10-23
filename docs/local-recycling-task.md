@@ -352,6 +352,13 @@ against tread, joint and timing limits. All retained targets must have been
 visited in the recorded operation. This reviewed return needs a new spoken
 or controller grant; it does not extend the approval-free hanging exception.
 
+The first corrected preflight exposed a separate planning defect: hanging J7
+retained a small 0.002727 rad residual in the preview's front pose, exceeding
+the compiler's strict 0.001 rad front check. Copy all seven registered front
+joints into this target, then choose the nearest horizontal wrist branch.
+The measured-hanging regression uses that residual and the actual new
+observations; the full corrected route passes without relaxing any limit.
+
 ## Validation
 
 The plan, approval/session, executor, camera/model rendering and tunnel fixtures

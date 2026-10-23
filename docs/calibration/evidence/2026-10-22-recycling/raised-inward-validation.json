@@ -40,15 +40,496 @@
       "lastLine": "Controller/spoken arm approval and session reuse: 93 checks passed; no hardware access"
     }
   },
-  "physicalResult": "Corrected repeat NOT STARTED: two native session requests expired without final microphone/controller authorization. Cerebro reports No spoken or controller authorization arrived. No arm operation was started. Arm remains at previous empty retreat hold; no grant was restored or manufactured.",
+  "physicalResult": "Raised EMPTY return and stationary preparation completed in 64.86 seconds. The first corrected recycling task parked the arm to hanging and deactivated in 15.26 seconds, then found both objects. Planning rejected the initial front pose because its joint7 retained a hanging-pose residual; no corrected reach or new grip was sent. A retry with all seven front-pose joints seeded is pending.",
   "pickupAndDropVerified": false,
   "cameraImagesIncluded": false,
   "grantsPersisted": false,
   "runtimeAuthorization": {
-    "attempts": 2,
-    "result": "expired_without_authorization",
-    "newArmMotionSent": false,
-    "latestPhysicalRecording": "left_recycle_can-71623360-BA14-4D42-8228-25889143E316.csv",
-    "nativeStatus": "No spoken or controller authorization arrived. No arm operation was started."
+    "historicalExpiredRequests": {
+      "attempts": 2,
+      "result": "expired_without_authorization",
+      "newArmMotionSent": false,
+      "nativeStatus": "No spoken or controller authorization arrived. No arm operation was started.",
+      "description": "These two expired requests preceded the subsequent genuine native microphone authorization."
+    },
+    "subsequentRequest": {
+      "result": "authorized_by_final_on_device_microphone_observed_by_root",
+      "sessionExpiresAtLocal": "2026-10-22 19:07 America/Los_Angeles",
+      "source": "Root agent observed the native final microphone approval and active left-arm session in the UI.",
+      "newArmMotionSent": true,
+      "transcriptIncluded": false,
+      "limitation": "No microphone transcript is available in these files. Approval is not inferred from motor telemetry.",
+      "sessionStateAfterFirstCorrectedTask": "revoked after not_reachable planning rejection; no saved grant will be replayed"
+    },
+    "grantsRestoredOrManufactured": false
+  },
+  "livePreparation": {
+    "createdUTC": "2026-10-23T01:54:29.209500+00:00",
+    "sourceCommit": "dc1739273e7380e640392fa4499afc77a2b06dd6",
+    "evidenceCommitAtStart": "60004a53673e5a05937053461d421692c42c1849",
+    "binarySHA256": "ff224fcf7534b635aa7ad24a2cad2b3f99325602659ed1d2bec3b5046bb40c5b",
+    "sourceRecording": "left_prepare-4499FCB3-BCA0-47F1-8DC9-86BC22C3062F.csv",
+    "archive": "raised-empty-return.csv.gz",
+    "recordingSHA256": "878cbfad37a221edde050b242f692f74e2a95c190914e4605218336651f9daac",
+    "archiveSHA256": "58d905136bdf40fdaccd7b939cce97d756bd83716660a86a43c53640fab09797",
+    "proposal": "raised-empty-return.proposal.json",
+    "proposalSHA256": "a80d5b087abb56b496971dd3835408980c9eab17a2bddbf8c03ea8a8099bb75c",
+    "proposalKind": "recover",
+    "plannedRecoveryTargets": 37,
+    "priorProposal": "height-yaw-live-missed-grasp.proposal.json",
+    "exactPriorTargetMatches": [
+      [
+        46
+      ],
+      [
+        45
+      ],
+      [
+        43,
+        44
+      ],
+      [
+        43,
+        44
+      ],
+      [
+        42
+      ],
+      [
+        41
+      ],
+      [
+        40
+      ],
+      [
+        39
+      ],
+      [
+        38
+      ],
+      [
+        37
+      ],
+      [
+        36
+      ],
+      [
+        35
+      ],
+      [
+        34
+      ],
+      [
+        33
+      ],
+      [
+        32
+      ],
+      [
+        31
+      ],
+      [
+        30
+      ],
+      [
+        29
+      ],
+      [
+        28
+      ],
+      [
+        27
+      ],
+      [
+        26
+      ],
+      [
+        25
+      ],
+      [
+        24
+      ],
+      [
+        23
+      ],
+      [
+        22
+      ],
+      [
+        21
+      ],
+      [
+        20
+      ],
+      [
+        19
+      ],
+      [
+        12
+      ],
+      [
+        11
+      ],
+      [
+        10
+      ],
+      [
+        8,
+        9
+      ],
+      [
+        8,
+        9
+      ],
+      [
+        7
+      ],
+      [
+        6
+      ],
+      [
+        5
+      ],
+      [
+        4
+      ]
+    ],
+    "priorLowestGraspStepSkipped": 16,
+    "recoveryJawActionsReplayed": false,
+    "minimumModeledHeightAbovePriorGraspMeters": 0.09001194764586495,
+    "modeledClearanceSource": "Previously passed raised-recovery software fixture for this recorded path; not a live table-distance measurement.",
+    "elapsedSeconds": 64.86338658333261,
+    "jointRows": 8876,
+    "completeSevenJointSamples": 1268,
+    "incompleteSevenJointSamples": 0,
+    "maxRecordedFeedbackAgeMS": 72.74617500415928,
+    "lastRecordedFeedbackAgeMS": 4.922861330237772,
+    "terminalPhase": "release object",
+    "phases": [
+      {
+        "phase": "preflight",
+        "seconds": 0.03576512499421369
+      },
+      {
+        "phase": "camera preparation",
+        "seconds": 5.169558999994479
+      },
+      {
+        "phase": "gesture step 0",
+        "seconds": 10.457447833330662
+      },
+      {
+        "phase": "gesture step 1",
+        "seconds": 11.62858954166586
+      },
+      {
+        "phase": "gesture step 2",
+        "seconds": 12.75001491666626
+      },
+      {
+        "phase": "gesture step 3",
+        "seconds": 13.972571541664365
+      },
+      {
+        "phase": "gesture step 4",
+        "seconds": 14.687525333334634
+      },
+      {
+        "phase": "gesture step 5",
+        "seconds": 15.755150833334483
+      },
+      {
+        "phase": "gesture step 6",
+        "seconds": 16.72123083333281
+      },
+      {
+        "phase": "gesture step 7",
+        "seconds": 17.636406499994337
+      },
+      {
+        "phase": "gesture step 8",
+        "seconds": 18.503020874995855
+      },
+      {
+        "phase": "gesture step 9",
+        "seconds": 19.519262166664703
+      },
+      {
+        "phase": "gesture step 10",
+        "seconds": 20.38524829166272
+      },
+      {
+        "phase": "gesture step 11",
+        "seconds": 21.251278833333345
+      },
+      {
+        "phase": "gesture step 12",
+        "seconds": 22.218124833329057
+      },
+      {
+        "phase": "gesture step 13",
+        "seconds": 23.237283958333137
+      },
+      {
+        "phase": "gesture step 14",
+        "seconds": 24.35668374999659
+      },
+      {
+        "phase": "gesture step 15",
+        "seconds": 25.63139333332947
+      },
+      {
+        "phase": "gesture step 16",
+        "seconds": 26.67082491666224
+      },
+      {
+        "phase": "gesture step 17",
+        "seconds": 27.7188055000006
+      },
+      {
+        "phase": "gesture step 18",
+        "seconds": 28.840226291664294
+      },
+      {
+        "phase": "gesture step 19",
+        "seconds": 29.959054250000918
+      },
+      {
+        "phase": "gesture step 20",
+        "seconds": 31.079191624994564
+      },
+      {
+        "phase": "gesture step 21",
+        "seconds": 32.148807791665604
+      },
+      {
+        "phase": "gesture step 22",
+        "seconds": 33.21920695833251
+      },
+      {
+        "phase": "gesture step 23",
+        "seconds": 34.33635366666567
+      },
+      {
+        "phase": "gesture step 24",
+        "seconds": 35.40622237500065
+      },
+      {
+        "phase": "gesture step 25",
+        "seconds": 36.627452749999065
+      },
+      {
+        "phase": "gesture step 26",
+        "seconds": 37.84947316666512
+      },
+      {
+        "phase": "gesture step 27",
+        "seconds": 38.91729425000085
+      },
+      {
+        "phase": "gesture step 28",
+        "seconds": 39.88501595833077
+      },
+      {
+        "phase": "gesture step 29",
+        "seconds": 40.800848208331445
+      },
+      {
+        "phase": "gesture step 30",
+        "seconds": 41.97126533333358
+      },
+      {
+        "phase": "gesture step 31",
+        "seconds": 43.34760283333162
+      },
+      {
+        "phase": "gesture step 32",
+        "seconds": 44.97708095832786
+      },
+      {
+        "phase": "gesture step 33",
+        "seconds": 45.74026216666243
+      },
+      {
+        "phase": "gesture step 34",
+        "seconds": 47.11528345833358
+      },
+      {
+        "phase": "gesture step 35",
+        "seconds": 48.439083791665325
+      },
+      {
+        "phase": "gesture step 36",
+        "seconds": 49.87467991666199
+      },
+      {
+        "phase": "holding front for gripper",
+        "seconds": 51.23908649999794
+      },
+      {
+        "phase": "empty gripper calibration",
+        "seconds": 51.595764375000726
+      },
+      {
+        "phase": "initializing empty jaws",
+        "seconds": 61.70754129166744
+      },
+      {
+        "phase": "release object",
+        "seconds": 63.23587924999447
+      }
+    ],
+    "finalPositionsRadians": [
+      -1.04801567428347,
+      0.9983828736798813,
+      -0.6011841150033593,
+      0.0,
+      -0.5975025611124337,
+      -0.6022749457858557,
+      -0.00722675393403902
+    ],
+    "jawInitialization": "The recording contains initializing empty jaws and release object phases. Command acknowledgment and these phases do not establish physical jaw opening.",
+    "physicalJawOpeningVerified": false,
+    "canPickedUp": false,
+    "canPlacedInBucket": false,
+    "cameraImagesIncluded": false,
+    "grantsPersisted": false
+  },
+  "firstCorrectedTask": {
+    "createdUTC": "2026-10-23T02:01:27.415946+00:00",
+    "recording": "left_recycle_can-EA35BBF8-86BB-453D-A759-A26D8BADFD9A.csv",
+    "archive": "raised-inward-preflight-rejected.csv.gz",
+    "recordingSHA256": "88e7f537c4c340db65d1b14a889f4e2c32afe51dc4d71074d795e79c5d306bfe",
+    "archiveSHA256": "191028383618fda5553a18e5a65b5003412c0bd2dba546f465e0dc3b1812bddb",
+    "elapsedRecordedSeconds": 15.255752166667662,
+    "jointRows": 2107,
+    "completeSevenJointSamples": 301,
+    "incompleteSevenJointSamples": 0,
+    "maxRecordedFeedbackAgeMS": 43.401898001718756,
+    "lastRecordedFeedbackAgeMS": 5.58665399713013,
+    "terminalRecordedPhase": "deactivating",
+    "phases": [
+      {
+        "phase": "preflight",
+        "seconds": 0.0002630000017234124
+      },
+      {
+        "phase": "camera preparation",
+        "seconds": 0.09264249999978347
+      },
+      {
+        "phase": "waypoint 18",
+        "seconds": 4.72026687500329
+      },
+      {
+        "phase": "waypoint 6",
+        "seconds": 6.756868041666166
+      },
+      {
+        "phase": "waypoint 4",
+        "seconds": 8.894440416668658
+      },
+      {
+        "phase": "waypoint 1",
+        "seconds": 11.538568833333557
+      },
+      {
+        "phase": "waypoint 0",
+        "seconds": 13.730332416671445
+      },
+      {
+        "phase": "deactivating",
+        "seconds": 15.255752166667662
+      }
+    ],
+    "inactiveSearchRecordingGap": "The motor CSV ends after measured hanging and deactivation. Subsequent neck-only search is recorded separately; this gap is not evidence of a feedback or lease failure.",
+    "search": {
+      "reportID": "255A78D2-E492-4CB7-87EB-04666A99BE44",
+      "status": "found",
+      "detail": "I found the Coke can and orange bucket.",
+      "objects": {
+        "can": {
+          "captured_at_ms": 1792720463644.191,
+          "position": [
+            0.5692687658021478,
+            -0.08326221606964468,
+            0.9243580983385508
+          ]
+        },
+        "orangeBucket": {
+          "captured_at_ms": 1792720476844.201,
+          "position": [
+            0.32242477494949906,
+            0.4546627224299035,
+            0.2752971437682622
+          ]
+        }
+      },
+      "decodedObservations": 12,
+      "settleSecondsPerView": 1.5,
+      "recallViews": [
+        {
+          "pan": -15,
+          "upper": 6306
+        },
+        {
+          "pan": -3.6958422660827637,
+          "upper": 6000
+        },
+        {
+          "pan": 30,
+          "upper": 5650
+        },
+        {
+          "pan": 33.8753729224205,
+          "upper": 5706
+        }
+      ],
+      "announcements": [
+        {
+          "at": "2026-10-23T01:54:02Z",
+          "message": "I see the can. I'm still looking for the bucket.",
+          "visually_confirmed": [
+            "can"
+          ]
+        },
+        {
+          "at": "2026-10-23T01:54:38Z",
+          "message": "I see the bucket.",
+          "visually_confirmed": [
+            "can",
+            "orangeBucket"
+          ]
+        }
+      ],
+      "historicalPositionsUsedForMotion": false,
+      "cameraArmMapping": "provisional URDF/neck command prior, not measured hand-eye calibration"
+    },
+    "nativeRejectionObservedByRoot": "Recycling needs a stationary grasp, small upward lift, separate release and upward retreat.",
+    "rootSourceDiagnosis": {
+      "issue": "Preview seed copied front joints 1 through 6 but retained measured hanging joint 7; fixed front joint 7 is 0 and the stationary grasp guard permits only 0.001 rad.",
+      "measuredHangingJoint7Radians": 0.00272707695624114,
+      "requiredFrontJoint7Radians": 0,
+      "guardToleranceRadians": 0.001,
+      "correction": "Seed all seven front-pose joints before compiling the recycling proposal.",
+      "source": "Root agent source inspection and isolated fixture; the CSV alone does not establish this planner diagnosis."
+    },
+    "frozenReachProposalWritten": false,
+    "correctedReachSent": false,
+    "newGripSent": false,
+    "canPickedUp": false,
+    "canPlacedInBucket": false,
+    "nextCorrectedRetry": "Pending rebuilt all-seven-joint seed correction and one fresh whole-task native runtime authorization; arm already hanging.",
+    "cameraImagesIncluded": false,
+    "grantsPersisted": false
+  },
+  "plannerWristFix": {
+    "cause": "Preview copied front joints1\u20136 but retained measured hanging J7=.00272707695624114; compiler correctly requires complete registered front within.001rad.",
+    "change": "Copy all seven registered front joints; retain strict compiler limits and nearest horizontal wrist branch.",
+    "installedBinarySHA256": "2000743ea64486e51703e7f02544d5b61ad8baa411a6e7667dcf5bb4d2cb8816",
+    "sourceSHA256": "b20f0ef32117f0bd2f2052aa2335ff2a74ef28f2bcc4d11c8c70f7bf600f0194",
+    "validation": "Operator alignment: grasp raised6.35cm, raw sightings unchanged, yaw remains20 degrees LEFT, release moves0.03625744010454962m inward; 47 validated physical steps, grasp error0.00024237549959629171m",
+    "validationLogSHA256": "717fbf4b9b961fed740f7d5d55e2271c207bdd5c43c299f4919c0d7507d7d539",
+    "retry": "Requested one native whole-task approval directly from hanging; not a replayed session."
   }
 }
