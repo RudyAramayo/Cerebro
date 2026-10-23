@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "recordedAt": "2026-10-22T23:51:41.312266+00:00",
+  "recordedAt": "2026-10-23T00:10:02.760720+00:00",
   "baseCommit": "8e77afb8570105a048b2c34266f1c30f6a4f9598",
   "sourceSHA256": {
     "Cerebro/ROBWorkspaceSearchPlan.swift": "c192abca991d488207831b7ae6e575b5bd5700c8e404fd923b4a4ac593133de7",
@@ -76,11 +76,187 @@
     }
   ],
   "livePhysicalTask": {
-    "status": "queued_for_single_real_microphone_or_controller_authorization",
+    "status": "stopped_before_release",
+    "authorization": "One real local microphone approval; initial unheard request expired without motion and was repeated at Rob's request. No per-step approval.",
+    "recording": "left_recycle_can-11149C94-29C3-4AA5-BC99-659F68C5E346.csv",
+    "csvGzip": "recall-gravity-live-missed-grasp.csv.gz",
+    "csvSHA256": "4ac6e846f718cf6c1ac4586924b666e7008d0a4bd1d3cc27070d422f07bd2a64",
+    "csvGzipSHA256": "856aafe8d2dea2b5c53112bf4b18ca6792dc6fe85b77ea1e071cc981c812c72a",
+    "proposal": "recall-gravity-live-missed-grasp.proposal.json",
+    "proposalSHA256": "73d570040d4b57c9e551202a783840bc9ba1d7718feb12a39e34144dbee00275",
+    "steps": 37,
+    "completedPrepareAndGripCommands": true,
+    "releaseCommandReached": false,
+    "durationSeconds": 104.80142975000126,
+    "completeSamples": 1994,
+    "phases": [
+      {
+        "seconds": 0.00030287499976111576,
+        "phase": "preflight"
+      },
+      {
+        "seconds": 49.6524050416665,
+        "phase": "camera preparation"
+      },
+      {
+        "seconds": 54.940608041666565,
+        "phase": "gesture step 0"
+      },
+      {
+        "seconds": 56.87522487500246,
+        "phase": "gesture step 1"
+      },
+      {
+        "seconds": 59.165361625000514,
+        "phase": "gesture step 2"
+      },
+      {
+        "seconds": 61.915657125002326,
+        "phase": "gesture step 3"
+      },
+      {
+        "seconds": 64.20596170833596,
+        "phase": "gesture step 4"
+      },
+      {
+        "seconds": 66.80313687500166,
+        "phase": "empty gripper calibration"
+      },
+      {
+        "seconds": 68.83795691666819,
+        "phase": "tabletop prepare"
+      },
+      {
+        "seconds": 70.51435691666848,
+        "phase": "gesture step 5"
+      },
+      {
+        "seconds": 71.88864254166765,
+        "phase": "gesture step 6"
+      },
+      {
+        "seconds": 73.21233370833579,
+        "phase": "gesture step 7"
+      },
+      {
+        "seconds": 74.63891487500223,
+        "phase": "gesture step 8"
+      },
+      {
+        "seconds": 76.16555612500088,
+        "phase": "gesture step 9"
+      },
+      {
+        "seconds": 77.5901700416689,
+        "phase": "gesture step 10"
+      },
+      {
+        "seconds": 78.96540383333559,
+        "phase": "gesture step 11"
+      },
+      {
+        "seconds": 80.08546150000257,
+        "phase": "gesture step 12"
+      },
+      {
+        "seconds": 81.42388108333398,
+        "phase": "gesture step 13"
+      },
+      {
+        "seconds": 82.58277562500007,
+        "phase": "gesture step 14"
+      },
+      {
+        "seconds": 83.75196462500026,
+        "phase": "gesture step 15"
+      },
+      {
+        "seconds": 85.99070000000211,
+        "phase": "tabletop grip"
+      },
+      {
+        "seconds": 87.56839454166766,
+        "phase": "gesture step 16"
+      },
+      {
+        "seconds": 88.8910925416676,
+        "phase": "gesture step 17"
+      },
+      {
+        "seconds": 89.8612238333335,
+        "phase": "gesture step 18"
+      },
+      {
+        "seconds": 90.98174208333512,
+        "phase": "gesture step 19"
+      },
+      {
+        "seconds": 92.05161833333477,
+        "phase": "gesture step 20"
+      },
+      {
+        "seconds": 93.17290462500023,
+        "phase": "gesture step 21"
+      },
+      {
+        "seconds": 94.24113750000106,
+        "phase": "gesture step 22"
+      },
+      {
+        "seconds": 95.36235745833255,
+        "phase": "gesture step 23"
+      },
+      {
+        "seconds": 96.68596850000176,
+        "phase": "gesture step 24"
+      },
+      {
+        "seconds": 97.75469704166608,
+        "phase": "gesture step 25"
+      },
+      {
+        "seconds": 98.77589812500082,
+        "phase": "gesture step 26"
+      },
+      {
+        "seconds": 99.84128583333586,
+        "phase": "gesture step 27"
+      },
+      {
+        "seconds": 100.86149616666808,
+        "phase": "gesture step 28"
+      },
+      {
+        "seconds": 101.8827775000027,
+        "phase": "gesture step 29"
+      }
+    ],
+    "largestApplicationRecordingGapSeconds": 2.2070494166655408,
+    "maxRecordedFeedbackAgeMS": 67.88439166575544,
+    "finalPositionsRadians": [
+      -0.7504915783575618,
+      1.394763509269531,
+      -0.6764514389956148,
+      0.4723297288209654,
+      -1.137736506143804,
+      -0.5490969451391535,
+      -1.191732629877378
+    ],
+    "failure": "no active lease for right arm",
+    "operatorFeedback": "Jaws remained closed during approach; physical reach was about 5 inches farther than the can; no bucket drop occurred.",
+    "cameraObservation": "The can remained on the table. Codex requested an additional priority hold after observing the missed reach and reading the lease fault.",
     "canPickedUp": false,
-    "canPlacedInBucket": false
+    "canPlacedInBucket": false,
+    "jawOpeningVerified": false,
+    "note": "The 2.207-second recording gap overlaps native menu/window inspection. UI scheduling is a plausible contributor, not a proven sole cause. The gateway watchdog and freshness bounds were not relaxed."
   },
   "cameraImagesIncluded": false,
   "rawDepthIncluded": false,
-  "grantsPersisted": false
+  "grantsPersisted": false,
+  "remainingWork": [
+    "Verify actual gripper opening before the next approach.",
+    "Correct reach using measured alignment / operator's approximately 12.7 cm overshoot report.",
+    "Recover the confirmed-empty arm along its executed frozen route before preparing another task.",
+    "Complete and verify actual pickup and gravity drop; no successful recycling is claimed."
+  ]
 }
