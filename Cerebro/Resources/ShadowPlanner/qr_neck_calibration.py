@@ -16,6 +16,7 @@ import numpy as np
 
 
 TARGET_ID = "ROB:TABLE:001"
+SUPPORTED_TARGET_IDS = {TARGET_ID, "ROB:FLOOR:L01", "ROB:FLOOR:R01", "ROB:WALL:R01"}
 SIDE_METERS = 0.12
 MAX_VIEWS = 128
 MAX_REPROJECTION_PIXELS = 2.0
@@ -206,18 +207,21 @@ def mean_transform(transforms):
 def fit(document, mode="fit"):
     if not isinstance(document, dict) or type(document.get("schemaVersion")) is not int or document["schemaVersion"] != 1:
         raise ValueError("Expected schemaVersion 1 object")
-    if document.get("targetID") != TARGET_ID or document.get("symbolSideMeters") != SIDE_METERS:
-        raise ValueError("Expected the measured ROB:TABLE:001 120mm target")
+    target_id = document.get("targetID")
+    if target_id not in SUPPORTED_TARGET_IDS or document.get("symbolSideMeters") != SIDE_METERS:
+        raise ValueError("Expected a supported measured ROB 120mm target")
     source = document.get("poseSource", "accepted_neck_commands")
     if not isinstance(source, str) or len(source) > 128:
         raise ValueError("Invalid poseSource")
     raw_views = document.get("views")
     if not isinstance(raw_views, list) or not (1 <= len(raw_views) <= MAX_VIEWS):
         raise ValueError(f"Expected 1 to {MAX_VIEWS} captured views")
+    if any(isinstance(view, dict) and view.get("targetID", target_id) != target_id for view in raw_views):
+        raise ValueError("A fixed-target capture cannot mix QR target IDs")
     views = [pose_for_view(view) for view in raw_views]
     if len({view["id"] for view in views}) != len(views):
         raise ValueError("View ids must be unique")
-    result = {"schemaVersion": 1, "status": "poses_unverified", "targetID": TARGET_ID,
+    result = {"schemaVersion": 1, "status": "poses_unverified", "targetID": target_id,
               "symbolSideMeters": SIDE_METERS, "poseSource": source,
               "registrationVerified": False, "uncertaintyMeters": None,
               "views": [{key: (value.reshape(-1).tolist() if isinstance(value, np.ndarray) else value)

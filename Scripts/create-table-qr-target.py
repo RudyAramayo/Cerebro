@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create ROB's measured, vector QR calibration sheet (no robot connection)."""
+"""Create ROB's measured, vector QR calibration sheets (no robot connection)."""
 
 from __future__ import annotations
 
@@ -19,14 +19,28 @@ PAYLOAD = "ROB:TABLE:001"
 SYMBOL_MM = 120.0
 QUIET_MODULES = 4
 STEM = "rob-table-calibration-qr"
+TARGETS = {
+    "table": (PAYLOAD, STEM, "ROB TABLE CALIBRATION",
+              "Fixed reference for neck and depth-camera calibration",
+              "Tape the sheet flat on the table. Keep the code and white margin clear."),
+    "floor-left": ("ROB:FLOOR:L01", "rob-floor-left-calibration-qr", "ROB LEFT FLOOR REFERENCE",
+                   "Place on ROB's left - left means the robot's own left",
+                   "Tape flat to the floor on ROB's left. Keep the code and white margin clear."),
+    "floor-right": ("ROB:FLOOR:R01", "rob-floor-right-calibration-qr", "ROB RIGHT FLOOR REFERENCE",
+                    "Place on ROB's right - right means the robot's own right",
+                    "Tape flat to the floor on ROB's right. Keep the code and white margin clear."),
+    "wall-right": ("ROB:WALL:R01", "rob-wall-right-calibration-qr", "ROB RIGHT WALL REFERENCE",
+                   "Place flat on the wall to ROB's right, with this title upright",
+                   "Tape flat to the right wall. Keep the code and white margin clear."),
+}
 
 
-def make_symbol() -> np.ndarray:
+def make_symbol(payload: str = PAYLOAD) -> np.ndarray:
     params = cv2.QRCodeEncoder_Params()
     params.version = 1
     params.correction_level = cv2.QRCodeEncoder_CORRECT_LEVEL_Q
     params.mode = cv2.QRCodeEncoder_MODE_ALPHANUMERIC
-    encoded = cv2.QRCodeEncoder_create(params).encode(PAYLOAD)
+    encoded = cv2.QRCodeEncoder_create(params).encode(payload)
     # OpenCV includes its own white border. Normalize to the actual 21-module
     # symbol; the PDF supplies a measured four-module quiet zone separately.
     ys, xs = np.where(encoded == 0)
@@ -36,7 +50,7 @@ def make_symbol() -> np.ndarray:
     preview = cv2.resize(np.pad(symbol, QUIET_MODULES, constant_values=255),
                          None, fx=20, fy=20, interpolation=cv2.INTER_NEAREST)
     decoded, _, _ = cv2.QRCodeDetector().detectAndDecode(preview)
-    assert decoded == PAYLOAD, "Generated QR failed its decode check"
+    assert decoded == payload, "Generated QR failed its decode check"
     return symbol
 
 
@@ -52,11 +66,12 @@ def dimension(c: canvas.Canvas, x1: float, y1: float,
             c.line(x1 - 1.6 * mm, y, x1 + 1.6 * mm, y)
 
 
-def create(output_dir: Path) -> tuple[Path, Path]:
+def create(output_dir: Path, target: str = "table") -> tuple[Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    pdf = output_dir / f"{STEM}.pdf"
-    metadata = output_dir / f"{STEM}.json"
-    symbol = make_symbol()
+    payload, stem, title, subtitle, placement = TARGETS[target]
+    pdf = output_dir / f"{stem}.pdf"
+    metadata = output_dir / f"{stem}.json"
+    symbol = make_symbol(payload)
     modules = symbol.shape[0]
     module_mm = SYMBOL_MM / modules
     quiet_mm = QUIET_MODULES * module_mm
@@ -69,18 +84,19 @@ def create(output_dir: Path) -> tuple[Path, Path]:
     quiet_y = symbol_y - quiet_mm * mm
 
     c = canvas.Canvas(str(pdf), pagesize=letter, pageCompression=1, invariant=1)
-    c.setTitle("ROB table calibration target - ROB:TABLE:001")
+    c.setTitle("ROB table calibration target - ROB:TABLE:001" if target == "table"
+               else f"{title.title()} - {payload}")
     c.setAuthor("ROB / Cerebro")
     c.setSubject("120 mm square QR calibration target; print at Actual Size")
     c.setViewerPreference("PrintScaling", "None")
     c.setFillColorRGB(0, 0, 0)
     c.setFont("Helvetica-Bold", 21)
-    c.drawCentredString(page_width / 2, 258 * mm, "ROB TABLE CALIBRATION")
+    c.drawCentredString(page_width / 2, 258 * mm, title)
     c.setFont("Helvetica", 10)
     c.drawCentredString(page_width / 2, 248 * mm,
-                        "Fixed reference for neck and depth-camera calibration")
+                        subtitle)
     c.setFont("Helvetica-Bold", 10)
-    c.drawCentredString(page_width / 2, 239 * mm, f"TARGET ID: {PAYLOAD}")
+    c.drawCentredString(page_width / 2, 239 * mm, f"TARGET ID: {payload}")
 
     # All annotations are outside the complete four-module quiet zone.
     dimension(c, symbol_x, 230 * mm, symbol_x + SYMBOL_MM * mm, 230 * mm)
@@ -132,15 +148,15 @@ def create(output_dir: Path) -> tuple[Path, Path]:
                         "Scale check: this line must measure exactly 100 mm.")
     c.setFont("Helvetica", 9)
     c.drawCentredString(page_width / 2, 11 * mm,
-                        "Tape the sheet flat on the table. Keep the code and white margin clear.")
+                        placement)
     c.showPage()
     c.save()
 
     half = SYMBOL_MM / 2000
     record = {
         "schemaVersion": 1,
-        "targetID": PAYLOAD,
-        "payload": PAYLOAD,
+        "targetID": payload,
+        "payload": payload,
         "symbology": "QR Code Model 2",
         "qrVersion": 1,
         "errorCorrection": "Q",
@@ -164,6 +180,12 @@ def create(output_dir: Path) -> tuple[Path, Path]:
         "quietZoneReference": "https://www.qrcode.com/en/howto/code.html/index.html",
         "pdfSHA256": hashlib.sha256(pdf.read_bytes()).hexdigest(),
     }
+    if target != "table":
+        record["intendedSurface"] = "floor" if target.startswith("floor-") else "wall"
+        record["intendedSide"] = "left" if target == "floor-left" else "right"
+        record["sideReference"] = "ROB's own left/right at placement, not the viewer's."
+        record["placementInstruction"] = placement
+        record["referencePoseMeasured"] = False
     metadata.write_text(json.dumps(record, indent=2) + "\n")
     return pdf, metadata
 
@@ -171,6 +193,10 @@ def create(output_dir: Path) -> tuple[Path, Path]:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=Path("output/pdf"))
+    parser.add_argument("--target", choices=(*TARGETS, "environment"), default="table",
+                        help="environment creates both floor sheets and the right-wall sheet")
     args = parser.parse_args()
-    for result in create(args.output_dir):
-        print(result.resolve())
+    targets = ("floor-left", "floor-right", "wall-right") if args.target == "environment" else (args.target,)
+    for target in targets:
+        for result in create(args.output_dir, target):
+            print(result.resolve())

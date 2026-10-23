@@ -8,6 +8,7 @@ SDK failures are reported and retried instead of terminating the service.
 """
 
 import argparse
+from collections import deque
 from datetime import timedelta
 import fcntl
 import json
@@ -32,6 +33,7 @@ MAX_RETRY_DELAY_SECONDS = 8.0
 QUEUE_WAIT = timedelta(milliseconds=500)
 SYNC_THRESHOLD = timedelta(milliseconds=20)
 CLIENT_SEND_TIMEOUT_SECONDS = 5.0
+IMU_DISABLED_AFTER_START_FAILURE = set()
 
 
 def emit(line):
@@ -222,6 +224,193 @@ def configure_latest_input(node_input, size=2):
     node_input.setBlocking(False)
 
 
+def configure_rgb_depth_alignment(pipeline, dai, platform, stereo, rgb_output):
+    """Use the SDK's documented alignment path for each device platform.
+
+    RVC2/RVC3 align in StereoDepth; RVC4 uses ImageAlign. This selects pixel
+    correspondence only: it never changes focal length, baseline or depth scale.
+    """
+    stereo_platforms = [getattr(dai.Platform, name, None) for name in ("RVC2", "RVC3")]
+    if platform is not None and platform in [value for value in stereo_platforms if value is not None]:
+        configure_latest_input(stereo.inputAlignTo)
+        rgb_output.link(stereo.inputAlignTo)
+        return stereo.depth, "stereo_input_align_to"
+    if platform == getattr(dai.Platform, "RVC4", None) and platform is not None:
+        align = pipeline.create(dai.node.ImageAlign)
+        configure_latest_input(align.input)
+        configure_latest_input(align.inputAlignTo)
+        stereo.depth.link(align.input)
+        rgb_output.link(align.inputAlignTo)
+        return align.outputAligned, "image_align"
+    raise RuntimeError("unsupported depth alignment platform: " + str(platform))
+
+
+def validated_imu_rotation(values):
+    try:
+        if len(values) != 9 or any(isinstance(value, (bool, str, bytes)) for value in values):
+            raise ValueError("expected nine numeric rotation values")
+        r = [float(value) for value in values]
+        if not all(math.isfinite(value) and abs(value) <= 1.01 for value in r):
+            raise ValueError("rotation must be finite and bounded")
+        for row in range(3):
+            for other in range(3):
+                dot = sum(r[row*3+k]*r[other*3+k] for k in range(3))
+                if abs(dot-(1 if row == other else 0)) > .01:
+                    raise ValueError("rotation must be orthonormal")
+        determinant = r[0]*(r[4]*r[8]-r[5]*r[7])-r[1]*(r[3]*r[8]-r[5]*r[6])+r[2]*(r[3]*r[7]-r[4]*r[6])
+        if abs(determinant-1) > .01:
+            raise ValueError("rotation must have determinant +1")
+        return r
+    except (TypeError, ValueError, OverflowError) as error:
+        raise RuntimeError("invalid IMU rotation: " + str(error)) from error
+
+
+def validated_imu_telemetry(value):
+    """Validate optional diagnostic sensor evidence, never actuator authority."""
+    if value is None:
+        return None
+    try:
+        if not isinstance(value, dict) or not isinstance(value["sensor"], str) or not value["sensor"].startswith("BNO08"):
+            raise ValueError("expected a supported sensor label")
+        if value["gravity_source"] != "stationary_accelerometer_mean" or value["axes"] != "sensor_native":
+            raise ValueError("unknown vector semantics")
+        for key in ("gravity_mps2", "acceleration_mps2", "gyro_rad_s", "gravity_std_mps2"):
+            vector = value[key]
+            if len(vector) != 3 or any(isinstance(item, (bool, str, bytes)) for item in vector):
+                raise ValueError("expected three numeric vector values")
+            if not all(math.isfinite(float(item)) and abs(float(item)) <= 100 for item in vector):
+                raise ValueError("vector is nonfinite or outside sensor bounds")
+        if any(item < 0 for item in value["gravity_std_mps2"]):
+            raise ValueError("standard deviation must be nonnegative")
+        for key in ("sample_count", "latest_timestamp_ns", "reference_timestamp_ns"):
+            if isinstance(value[key], bool) or not isinstance(value[key], int):
+                raise ValueError("count and timestamps must be integers")
+        if not 1 <= value["sample_count"] <= 1000:
+            raise ValueError("sample count is outside bounds")
+        if not 0 <= value["latest_timestamp_ns"] <= value["reference_timestamp_ns"] <= 2**63-1:
+            raise ValueError("timestamps must share the ordered RGB host-clock domain")
+        for key, maximum in (("window_milliseconds", 1000), ("age_milliseconds", 250)):
+            number = value[key]
+            if isinstance(number, (bool, str, bytes)) or not math.isfinite(float(number)) or not 0 <= number <= maximum:
+                raise ValueError("sample timing is outside bounds")
+        expected_age = (value["reference_timestamp_ns"]-value["latest_timestamp_ns"])/1_000_000
+        if abs(value["age_milliseconds"]-expected_age) > .001:
+            raise ValueError("sample age disagrees with timestamps")
+        if not isinstance(value["stationary"], bool):
+            raise ValueError("stationary quality must be Boolean")
+        validated_imu_rotation(value["imu_to_rgb_rotation"])
+        return value
+    except (KeyError, TypeError, ValueError, OverflowError) as error:
+        raise RuntimeError("invalid IMU telemetry: " + str(error)) from error
+
+
+class IMUDiagnosticWindow:
+    """Half-second raw sensor window in DepthAI's synchronized host clock.
+
+    The accelerometer mean is proper acceleration in native sensor axes. Its
+    sign relative to gravity is intentionally not inferred. Only stationary
+    observations can be interpreted as a gravity-direction diagnostic.
+    """
+    def __init__(self, sensor, imu_to_rgb_rotation):
+        self.sensor = sensor
+        self.rotation = validated_imu_rotation(imu_to_rgb_rotation)
+        self.acceleration = deque(maxlen=200)
+        self.gyro = deque(maxlen=200)
+        self.failed = False
+
+    def ingest(self, message):
+        for packet in message.packets:
+            for name, samples in (("acceleroMeter", self.acceleration), ("gyroscope", self.gyro)):
+                report = getattr(packet, name)
+                timestamp = timestamp_nanoseconds(report)
+                if timestamp <= 0 or (samples and timestamp <= samples[-1][0]):
+                    continue
+                raw = [report.x, report.y, report.z]
+                if any(isinstance(value, (bool, str, bytes)) for value in raw):
+                    raise RuntimeError("invalid IMU report vector")
+                vector = [float(value) for value in raw]
+                if not all(math.isfinite(value) and abs(value) <= 100 for value in vector):
+                    raise RuntimeError("invalid IMU report vector")
+                samples.append((timestamp, vector))
+
+    def snapshot(self, reference_timestamp_ns):
+        beginning = reference_timestamp_ns-500_000_000
+        acceleration = [(stamp, vector) for stamp, vector in self.acceleration if beginning <= stamp <= reference_timestamp_ns]
+        gyro = [(stamp, vector) for stamp, vector in self.gyro if beginning <= stamp <= reference_timestamp_ns]
+        if not acceleration or not gyro:
+            return None
+        latest = min(acceleration[-1][0], gyro[-1][0])
+        age = (reference_timestamp_ns-latest)/1_000_000
+        if age > 250:
+            return None
+        count = len(acceleration)
+        mean = [math.fsum(vector[axis] for _, vector in acceleration)/count for axis in range(3)]
+        deviation = [math.sqrt(math.fsum((vector[axis]-mean[axis])**2 for _, vector in acceleration)/count) for axis in range(3)]
+        gyro_mean = [math.fsum(vector[axis] for _, vector in gyro)/len(gyro) for axis in range(3)]
+        maximum_gyro_norm = max(math.sqrt(sum(item*item for item in vector)) for _, vector in gyro)
+        magnitude = math.sqrt(sum(item*item for item in mean))
+        window = (acceleration[-1][0]-acceleration[0][0])/1_000_000
+        def covered(samples):
+            return len(samples) >= 10 and all(second[0]-first[0] <= 50_000_000 for first, second in zip(samples, samples[1:]))
+        stationary = covered(acceleration) and covered(gyro) and window >= 100 and 8 <= magnitude <= 12 and max(deviation) <= .15 and maximum_gyro_norm < .03
+        return validated_imu_telemetry({"sensor": self.sensor, "gravity_source": "stationary_accelerometer_mean",
+            "axes": "sensor_native", "gravity_mps2": mean, "acceleration_mps2": mean,
+            "gyro_rad_s": gyro_mean, "sample_count": count, "window_milliseconds": window,
+            "latest_timestamp_ns": latest, "reference_timestamp_ns": reference_timestamp_ns,
+            "age_milliseconds": age, "gravity_std_mps2": deviation,
+            "imu_to_rgb_rotation": self.rotation, "stationary": stationary})
+
+
+def configure_optional_imu(pipeline, dai, device, calibration, rgb_socket, disabled=False):
+    """Feature-gated BNO08x raw telemetry; unavailable IMU leaves RGB-D intact."""
+    node = None
+    try:
+        if disabled:
+            emit("CEREBRO_DEPTHCAM_IMU unavailable=disabled_after_pipeline_start_failure")
+            return None, None
+        get_sensor = getattr(device, "getConnectedIMU", None)
+        sensor = str(get_sensor()) if callable(get_sensor) else "unavailable"
+        if not sensor.startswith("BNO08"):
+            emit("CEREBRO_DEPTHCAM_IMU unavailable=unsupported_sensor sensor=" + sensor)
+            return None, None
+        extrinsics = calibration.getImuToCameraExtrinsics(rgb_socket)
+        if len(extrinsics) != 4 or any(len(row) != 4 for row in extrinsics):
+            raise RuntimeError("missing factory IMU-to-RGB rotation")
+        window = IMUDiagnosticWindow(sensor, [extrinsics[row][column] for row in range(3) for column in range(3)])
+        sensors = [dai.IMUSensor.ACCELEROMETER_RAW, dai.IMUSensor.GYROSCOPE_RAW]
+        node = pipeline.create(dai.node.IMU)
+        node.enableIMUSensor(sensors, 100)
+        node.setBatchReportThreshold(5)
+        node.setMaxBatchReports(20)
+        queue = node.out.createOutputQueue(maxSize=20, blocking=False)
+        emit("CEREBRO_DEPTHCAM_IMU sensor={} rate_hz=100 source=stationary_accelerometer_mean axes=sensor_native".format(sensor))
+        return queue, window
+    except Exception as error:
+        if node is not None:
+            try:
+                pipeline.remove(node)
+            except Exception as removal_error:
+                emit_error("Unable to remove unavailable optional IMU: " + str(removal_error))
+        emit("CEREBRO_DEPTHCAM_IMU unavailable=initialization_failed reason=" + " ".join(str(error).split()))
+        return None, None
+
+
+def read_optional_imu(queue, window, rgb_frame):
+    if queue is None or window is None or window.failed:
+        return None
+    try:
+        for _ in range(20):
+            message = queue.tryGet()
+            if message is None:
+                break
+            window.ingest(message)
+        return window.snapshot(timestamp_nanoseconds(rgb_frame))
+    except Exception as error:
+        window.failed = True
+        emit_error("Optional IMU telemetry unavailable; RGB-D continues: " + str(error))
+        return None
+
+
 def frame_timing(rgb, depth, clock_now):
     return {
         "rgb_age_ms": round((clock_now - rgb.getTimestamp()).total_seconds() * 1000, 1),
@@ -284,6 +473,78 @@ def rgb_frame_intrinsics(rgb_frame, nominal_intrinsics, width, height):
             "legacy_eeprom")
 
 
+def rgb_frame_source_geometry(rgb_frame, published_intrinsics):
+    """Optional source/crop evidence, without guessing absent SDK metadata."""
+    get_transform = getattr(rgb_frame, "getTransformation", None)
+    if get_transform is None:
+        return None, None, None
+    if not callable(get_transform):
+        raise RuntimeError("invalid RGB frame transformation accessor")
+    transform = get_transform()
+    if transform is None:
+        return None, None, None
+    unavailable = object()
+
+    def optional(name):
+        getter = getattr(transform, name, None)
+        if getter is None:
+            return unavailable
+        if not callable(getter):
+            raise RuntimeError("invalid RGB source geometry accessor: " + name)
+        return getter()
+
+    def matrix_values(value, name):
+        try:
+            if len(value) != 3 or any(len(row) != 3 for row in value):
+                raise ValueError("expected a 3x3 matrix")
+            values = [item for row in value for item in row]
+            if any(isinstance(item, (bool, str, bytes)) for item in values):
+                raise ValueError("matrix must be numeric")
+            values = [float(item) for item in values]
+            if not all(math.isfinite(item) and abs(item) <= 1_000_000 for item in values):
+                raise ValueError("matrix must be finite and bounded")
+            return values
+        except (TypeError, ValueError, OverflowError) as error:
+            raise RuntimeError("invalid RGB " + name + ": " + str(error)) from error
+
+    source_size = optional("getSourceSize")
+    if source_size is not unavailable:
+        try:
+            if len(source_size) != 2:
+                raise ValueError("expected width and height")
+            if any(isinstance(item, (bool, str, bytes)) for item in source_size):
+                raise ValueError("dimensions must be numeric")
+            numbers = [float(item) for item in source_size]
+            if not all(math.isfinite(item) and item.is_integer() and 1 <= item <= 8192 for item in numbers):
+                raise ValueError("source dimensions must be integers from 1 to 8192")
+            source_size = [int(item) for item in numbers]
+        except (TypeError, ValueError, OverflowError) as error:
+            raise RuntimeError("invalid RGB source size: " + str(error)) from error
+    else:
+        source_size = None
+    source_matrix = optional("getSourceIntrinsicMatrix")
+    source_intrinsics = None
+    if source_matrix is not unavailable:
+        source_intrinsics = matrix_values(source_matrix, "source intrinsics")
+        size = source_size if source_size is not None else [8192, 8192]
+        source_intrinsics = validated_pinhole_intrinsics(source_intrinsics, *size, flattened=True)
+    image_matrix = optional("getMatrix")
+    image_transform = None
+    if image_matrix is not unavailable:
+        image_transform = matrix_values(image_matrix, "image transform")
+        a, b, c, d, e, f, g, h, i = image_transform
+        determinant = a*(e*i-f*h)-b*(d*i-f*g)+c*(d*h-e*g)
+        if not math.isfinite(determinant) or abs(determinant) <= 1e-12:
+            raise RuntimeError("invalid RGB image transform: singular matrix")
+    if source_intrinsics is not None and image_transform is not None:
+        product = [sum(image_transform[row*3+k]*source_intrinsics[k*3+column] for k in range(3))
+                   for row in range(3) for column in range(3)]
+        if not all(math.isclose(actual, expected, rel_tol=1e-5, abs_tol=1e-3)
+                   for actual, expected in zip(product, published_intrinsics)):
+            raise RuntimeError("invalid RGB source geometry: transform times source K disagrees with frame K")
+    return source_size, source_intrinsics, image_transform
+
+
 def validated_lens_position(value, name):
     """Return an optional integer lens position without rounding or guessing."""
     if value is None:
@@ -333,7 +594,8 @@ def rgb_frame_lens_position(rgb_frame):
 def frame_payload(
     rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
     sidewalk_deviation=None, sidewalk_confidence=None, chess_pieces=None,
-    captured_at_milliseconds=None, rgb_calibrated_lens_position=None
+    captured_at_milliseconds=None, rgb_calibrated_lens_position=None,
+    depth_alignment_method=None, imu_telemetry=None
 ):
     rgb_width = int(rgb_frame.getWidth())
     rgb_height = int(rgb_frame.getHeight())
@@ -342,6 +604,12 @@ def frame_payload(
     frame_intrinsics, intrinsics_source = rgb_frame_intrinsics(
         rgb_frame, rgb_intrinsics, rgb_width, rgb_height
     )
+    source_size, source_intrinsics, image_transform = rgb_frame_source_geometry(
+        rgb_frame, frame_intrinsics
+    )
+    if depth_alignment_method not in (None, "stereo_input_align_to", "image_align"):
+        raise RuntimeError("invalid depth alignment method")
+    imu_telemetry = validated_imu_telemetry(imu_telemetry)
     calibrated_lens_position = validated_lens_position(
         rgb_calibrated_lens_position, "RGB calibrated"
     )
@@ -399,6 +667,11 @@ def frame_payload(
         "right_length": len(right_bytes),
         "rgb_intrinsics": frame_intrinsics,
         "rgb_intrinsics_source": intrinsics_source,
+        "depth_alignment_method": depth_alignment_method,
+        "rgb_source_size": source_size,
+        "rgb_source_intrinsics": source_intrinsics,
+        "rgb_image_transform": image_transform,
+        "imu": imu_telemetry,
         "rgb_calibrated_lens_position": calibrated_lens_position,
         "rgb_frame_lens_position": frame_lens_position,
         "sidewalk_center_deviation": sidewalk_deviation,
@@ -414,12 +687,13 @@ def frame_payload(
 def send_frame(
     client, rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
     sidewalk_deviation=None, sidewalk_confidence=None, chess_pieces=None,
-    captured_at_milliseconds=None, rgb_calibrated_lens_position=None
+    captured_at_milliseconds=None, rgb_calibrated_lens_position=None,
+    depth_alignment_method=None, imu_telemetry=None
 ):
     header, rgb_bytes, depth_bytes, left_bytes, right_bytes = frame_payload(
         rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
         sidewalk_deviation, sidewalk_confidence, chess_pieces, captured_at_milliseconds,
-        rgb_calibrated_lens_position
+        rgb_calibrated_lens_position, depth_alignment_method, imu_telemetry
     )
     client.sendall(PROTOCOL_MAGIC + struct.pack(">I", len(header)) + header)
     client.sendall(rgb_bytes)
@@ -499,7 +773,7 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
     frame_size = (width, height)
     # Footage capture may request a color size above the OV9282 stereo
     # sensors' native output. Keep stereo at a supported aspect-matched size;
-    # ImageAlign below resamples depth into the selected RGB coordinate space.
+    # Platform-specific alignment resamples depth into the selected RGB pixels.
     mono_size = (min(width, 1280), min(height, 720))
     dai = load_depthai()
     device = None
@@ -562,11 +836,15 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
             left_output.link(stereo.left)
             right_output.link(stereo.right)
 
-            align = pipeline.create(dai.node.ImageAlign)
-            configure_latest_input(align.input)
-            configure_latest_input(align.inputAlignTo)
-            stereo.depth.link(align.input)
-            rgb_output.link(align.inputAlignTo)
+            aligned_depth_output, alignment_method = configure_rgb_depth_alignment(
+                pipeline, dai, device.getPlatform(), stereo, rgb_output
+            )
+            emit("CEREBRO_DEPTHCAM_ALIGNMENT method={} platform={}".format(
+                alignment_method, device.getPlatform()
+            ))
+            imu_retry_key = (role, mxid or "automatic")
+            imu_queue, imu_window = configure_optional_imu(pipeline, dai, device, calibration, rgb_socket,
+                disabled=imu_retry_key in IMU_DISABLED_AFTER_START_FAILURE)
 
             nn_model = None
             nn_queue = None
@@ -620,7 +898,7 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
             for name in ("rgb", "depth", "left", "right"):
                 configure_latest_input(sync.inputs[name], size=4)
             rgb_output.link(sync.inputs["rgb"])
-            align.outputAligned.link(sync.inputs["depth"])
+            aligned_depth_output.link(sync.inputs["depth"])
             stereo.rectifiedLeft.link(sync.inputs["left"])
             stereo.rectifiedRight.link(sync.inputs["right"])
             queue = sync.out.createOutputQueue(maxSize=1, blocking=False)
@@ -630,7 +908,16 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                 configure_latest_input(nn_model.inputDepth, size=1)
                 nn_queue = nn_model.out.createOutputQueue(maxSize=1, blocking=False)
 
-            pipeline.start()
+            try:
+                pipeline.start()
+            except Exception:
+                # The helper's existing retry opens a fresh pipeline. Sacrifice
+                # optional IMU telemetry after a startup failure so it cannot
+                # prevent subsequent RGB-D recovery in this process.
+                if imu_window is not None:
+                    IMU_DISABLED_AFTER_START_FAILURE.add(imu_retry_key)
+                    emit_error("Pipeline startup failed with optional IMU; retrying RGB-D without IMU telemetry")
+                raise
             intrinsic_matrix = calibration.getCameraIntrinsics(
                 rgb_socket, frame_size[0], frame_size[1]
             )
@@ -720,6 +1007,8 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                     captured_at_milliseconds=capture_time_milliseconds(
                         [rgb_frame, depth_frame], clock_now, time.time()),
                     rgb_calibrated_lens_position=calibrated_lens_position,
+                    depth_alignment_method=alignment_method,
+                    imu_telemetry=read_optional_imu(imu_queue, imu_window, rgb_frame),
                 )
                 send_finished = time.monotonic()
                 if send_finished - last_timing_at >= 5:

@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "targetID": "ROB:FLOOR:R01",
+  "payload": "ROB:FLOOR:R01",
+  "symbology": "QR Code Model 2",
+  "qrVersion": 1,
+  "errorCorrection": "Q",
+  "moduleCount": 21,
+  "symbolSideMeters": 0.12,
+  "moduleSideMeters": 0.005714285714285714,
+  "quietZoneModules": 4,
+  "quietZoneEachSideMeters": 0.022857142857142857,
+  "totalBlankFootprintSideMeters": 0.16571428571428573,
+  "physicalDimensionsExcludeQuietZone": true,
+  "frame": "Origin at symbol center; +X printed right, +Y printed up, +Z out of printed face.",
+  "cornerOrder": [
+    "topLeft",
+    "topRight",
+    "bottomRight",
+    "bottomLeft"
+  ],
+  "canonicalCornersMeters": [
+    [
+      -0.06,
+      0.06,
+      0
+    ],
+    [
+      0.06,
+      0.06,
+      0
+    ],
+    [
+      0.06,
+      -0.06,
+      0
+    ],
+    [
+      -0.06,
+      -0.06,
+      0
+    ]
+  ],
+  "cornerCorrespondence": "Canonical decoded QR orientation, not arbitrary image-top-left order after rotation.",
+  "pagePoints": [
+    612.0,
+    792.0
+  ],
+  "symbolBoundsPDFPoints": [
+    135.92125984251967,
+    232.84589426321708,
+    340.15748031496065,
+    340.15748031496065
+  ],
+  "scaleCheckLengthMeters": 0.1,
+  "scaleCheckPDFPoints": [
+    164.26771653543307,
+    79.37007874015748,
+    447.73228346456693,
+    79.37007874015748
+  ],
+  "printScaling": "Actual Size / 100%; verify the 100 mm line with a ruler.",
+  "quietZoneReference": "https://www.qrcode.com/en/howto/code.html/index.html",
+  "pdfSHA256": "56e91647e549e73698561020484ffb6a456aac649a8f0a5f3a4a58ce1601632a",
+  "intendedSurface": "floor",
+  "intendedSide": "right",
+  "sideReference": "ROB's own left/right at placement, not the viewer's.",
+  "placementInstruction": "Tape flat to the floor on ROB's right. Keep the code and white margin clear.",
+  "referencePoseMeasured": false
+}

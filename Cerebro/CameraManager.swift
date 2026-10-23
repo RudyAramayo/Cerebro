@@ -71,6 +71,52 @@ struct CameraDepthFrame {
 }
 
 /// Pinhole calibration for the RGB image to which depth is aligned.
+/// Sensor-native inertial observations, not a commissioned world orientation.
+struct CameraInertialObservation: Codable, Sendable {
+    let sensor: String
+    let gravityMps2: [Double]
+    let accelerationMps2: [Double]
+    let gyroRadS: [Double]
+    let sampleCount: Int
+    let windowMilliseconds: Double
+    let latestTimestampNs: UInt64
+    let referenceTimestampNs: UInt64
+    let ageMilliseconds: Double
+    let gravityStdMps2: [Double]
+    let imuToRGBRotation: [Double]
+    let stationary: Bool
+    let gravitySource: String
+    let axes: String
+
+    enum CodingKeys: String, CodingKey {
+        case sensor, stationary, axes
+        case gravityMps2 = "gravity_mps2", accelerationMps2 = "acceleration_mps2"
+        case gyroRadS = "gyro_rad_s", sampleCount = "sample_count"
+        case windowMilliseconds = "window_milliseconds", latestTimestampNs = "latest_timestamp_ns"
+        case referenceTimestampNs = "reference_timestamp_ns", ageMilliseconds = "age_milliseconds"
+        case gravityStdMps2 = "gravity_std_mps2", imuToRGBRotation = "imu_to_rgb_rotation"
+        case gravitySource = "gravity_source"
+    }
+
+    var isValid: Bool {
+        let vectors = [gravityMps2, accelerationMps2, gyroRadS, gravityStdMps2]
+        guard !sensor.isEmpty, vectors.allSatisfy({ $0.count == 3 && $0.allSatisfy(\.isFinite) }),
+              (1...1000).contains(sampleCount), windowMilliseconds.isFinite,
+              (0...1000).contains(windowMilliseconds), latestTimestampNs > 0,
+              referenceTimestampNs >= latestTimestampNs, ageMilliseconds.isFinite,
+              (0...250).contains(ageMilliseconds), gravityStdMps2.allSatisfy({ $0 >= 0 }),
+              imuToRGBRotation.count == 9, imuToRGBRotation.allSatisfy(\.isFinite),
+              gravitySource == "stationary_accelerometer_mean", axes == "sensor_native" else { return false }
+        for i in 0..<3 { for j in 0..<3 {
+            let dot = (0..<3).reduce(0.0) { $0+imuToRGBRotation[i*3+$1]*imuToRGBRotation[j*3+$1] }
+            guard abs(dot-(i == j ? 1 : 0)) < 0.001 else { return false }
+        } }
+        let r = imuToRGBRotation
+        let determinant = r[0]*(r[4]*r[8]-r[5]*r[7])-r[1]*(r[3]*r[8]-r[5]*r[6])+r[2]*(r[3]*r[7]-r[4]*r[6])
+        return abs(determinant-1) < 0.001
+    }
+}
+
 struct CameraIntrinsics: Sendable {
     let fx: Double
     let fy: Double
@@ -79,6 +125,11 @@ struct CameraIntrinsics: Sendable {
     var calibrationSource: String? = nil
     var calibratedLensPosition: Int? = nil
     var frameLensPosition: Int? = nil
+    var sourceSize: [Int]? = nil
+    var sourceIntrinsics: [Double]? = nil
+    var imageTransform: [Double]? = nil
+    var depthAlignmentMethod: String? = nil
+    var inertial: CameraInertialObservation? = nil
 
     func isValid(forWidth width: Int, height: Int) -> Bool {
         fx.isFinite && fy.isFinite && cx.isFinite && cy.isFinite
@@ -1507,7 +1558,12 @@ private final class DepthCameraServiceClient {
                         fx: values[0], fy: values[4], cx: values[2], cy: values[5],
                         calibrationSource: header.rgbIntrinsicsSource,
                         calibratedLensPosition: header.rgbCalibratedLensPosition,
-                        frameLensPosition: header.rgbFrameLensPosition
+                        frameLensPosition: header.rgbFrameLensPosition,
+                        sourceSize: header.rgbSourceSize,
+                        sourceIntrinsics: header.rgbSourceIntrinsics,
+                        imageTransform: header.rgbImageTransform,
+                        depthAlignmentMethod: header.depthAlignmentMethod,
+                        inertial: header.imu.flatMap { $0.isValid ? $0 : nil }
                     )
                     return result.isValid(forWidth: header.rgbWidth, height: header.rgbHeight)
                         ? result : nil
@@ -1690,6 +1746,11 @@ private struct DepthCameraPacketHeader: Decodable {
     let rgbIntrinsicsSource: String?
     let rgbCalibratedLensPosition: Int?
     let rgbFrameLensPosition: Int?
+    let rgbSourceSize: [Int]?
+    let rgbSourceIntrinsics: [Double]?
+    let rgbImageTransform: [Double]?
+    let depthAlignmentMethod: String?
+    let imu: CameraInertialObservation?
     let sidewalkCenterDeviation: Double?
     let sidewalkConfidence: Double?
     let chessPieces: [ROBChessPieceDetection]?
@@ -1717,6 +1778,11 @@ private struct DepthCameraPacketHeader: Decodable {
         case rgbIntrinsicsSource = "rgb_intrinsics_source"
         case rgbCalibratedLensPosition = "rgb_calibrated_lens_position"
         case rgbFrameLensPosition = "rgb_frame_lens_position"
+        case rgbSourceSize = "rgb_source_size"
+        case rgbSourceIntrinsics = "rgb_source_intrinsics"
+        case rgbImageTransform = "rgb_image_transform"
+        case depthAlignmentMethod = "depth_alignment_method"
+        case imu
         case sidewalkCenterDeviation = "sidewalk_center_deviation"
         case sidewalkConfidence = "sidewalk_confidence"
         case chessPieces = "chess_pieces"

@@ -79,6 +79,10 @@ import simd
         blocked { _ = try make(matrix:invalid) }
         for depth in [0.0,-0.1,Double.nan,Double.infinity,20.1] { blocked { _ = try make(depth:depth) } }
         for time in [0.0,-1,Double.nan,Double.infinity] { blocked { _ = try make(capture:time) } }
+        for target in ROBNeckQRMeasurement.supportedTargetIDs {
+            let measurement = try make(payload:target)
+            precondition(measurement.targetID == target)
+        }
         blocked { _ = try make(sequence:0) }; blocked { _ = try make(payload:"unrelated") }
         blocked { _ = try make(pan:.nan) }; blocked { _ = try make(pan:181) }
         blocked { _ = try make(upper:-1) }; blocked { _ = try make(upper:16_384) }

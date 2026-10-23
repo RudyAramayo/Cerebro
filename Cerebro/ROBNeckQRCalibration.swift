@@ -15,6 +15,10 @@ import simd
     var viewReady: ((Double, Int) -> Bool)?
     var canUseView: ((Double, Int) -> Bool)?
     var boundedPan: ((Double) -> Double)?
+    var prepareCalibrationView: ((Double, Int, Int) -> Bool)?
+    var calibrationViewReady: ((Double, Int, Int) -> Bool)?
+    private(set) var selectedTargetID = ROBNeckQRMeasurement.targetID
+    private(set) var awaitingProtractor = false
     @nonobjc private var task: Task<Void, Never>?
     @nonobjc private var fitTask: Task<Data, Error>?
     @nonobjc private var owner: UUID?
@@ -22,10 +26,35 @@ import simd
     @nonobjc private var views: [[String: Any]] = []
     @nonobjc private var folder: URL?
     @nonobjc private var frameSequence: UInt64 = 0
+    @nonobjc private var captureKind = "reference"
+    @nonobjc private var stepContext: [String: Any] = [:]
+    @nonobjc private var protractorReadings: [[String: Any]] = []
+    @nonobjc private var advanceRequested = false
+    @nonobjc private var captureDisplayCorrection: ROBWorkspaceDepthAlignment.Snapshot?
+    @nonobjc private var surveySessionID: String?
+    private struct SurveySeed {
+        let targetID: String
+        let pan: Double
+        let lower: Int
+        let upper: Int
+        let score: Double
+        let center: SIMD2<Double>
+        let intrinsics: [Double]
+        let evidence: String
+    }
+
+    func selectTarget(_ identifier: String) {
+        guard !isRunning, ROBNeckQRMeasurement.supportedTargetIDs.contains(identifier) else { return }
+        selectedTargetID = identifier
+        update("Selected \(identifier), 120 mm. Keep this target and ROB fixed during a capture.")
+    }
 
     private func update(_ text: String) {
         status = text
         NotificationCenter.default.post(name: Notification.Name("ROBNeckQRCalibrationDidChange"), object: self)
+    }
+    private func report(_ error: Error) {
+        update(error is CancellationError ? "QR calibration stopped. Captured samples are saved." : error.localizedDescription)
     }
     private func begin() throws {
         guard !isRunning, !ROBLeftArmTrial.shared.isRunning,
@@ -42,7 +71,7 @@ import simd
             ROBAmberArmMotionArbiter.shared.release(.left, owner: id)
             throw ROBGhostMotionError.blocked("An arm is owned by another operation.")
         }
-        owner = id; isRunning = true; frameSequence = 0
+        owner = id; isRunning = true; frameSequence = 0; surveySessionID = nil
         captureAnchor = ROBWorkspaceCaptureAnchor()
         ROBArmRoutineVision.shared.setActive(true)
         cameraDemand?(true)
@@ -53,25 +82,38 @@ import simd
             ROBAmberArmMotionArbiter.shared.release(.left, owner: owner)
             ROBAmberArmMotionArbiter.shared.release(.right, owner: owner)
         }
-        owner = nil; task = nil; isRunning = false
+        owner = nil; task = nil; isRunning = false; awaitingProtractor = false
         NotificationCenter.default.post(name: Notification.Name("ROBNeckQRCalibrationDidChange"), object: self)
     }
-    private func newCapture(model: ROBGhostRobotModel) throws {
+    private func newCapture(model: ROBGhostRobotModel, kind: String = "reference") throws {
         let root = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Cerebro/NeckQRCalibration", isDirectory: true)
         let destination = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700])
         folder = destination; views = []; lastCapturePath = destination.path
+        UserDefaults.standard.set(destination.path, forKey: "ROBNeckQRLastCapturePath")
+        captureKind = kind; stepContext = [:]; protractorReadings = []
+        captureDisplayCorrection = ROBWorkspaceDepthAlignment.snapshot()
         try save(model: model)
     }
     private func save(model: ROBGhostRobotModel) throws {
         guard let folder else { return }
-        let payload: [String: Any] = ["schemaVersion": 1, "targetID": ROBNeckQRMeasurement.targetID,
+        var payload: [String: Any] = ["schemaVersion": 1, "targetID": selectedTargetID,
             "symbolSideMeters": ROBNeckQRMeasurement.symbolSideMeters,
             "targetSizeSource": "120 mm printed calibration sheet", "poseSource": "accepted_neck_commands",
             "modelID": model.modelID, "geometryID": model.geometryID,
-            "registrationVerified": false, "views": views]
+            "registrationVerified": false, "views": views, "captureKind": captureKind,
+            "protractorReadings": protractorReadings]
+        if let correction = captureDisplayCorrection {
+            payload["displayDepthCorrection"] = ["towardRobotMeters": correction.towardRobotMeters,
+                "downwardPitchDegrees": correction.downwardPitchDegrees, "identity": correction.identity]
+        }
+        if let surveySessionID {
+            payload["surveySessionID"] = surveySessionID
+            payload["sceneContextID"] = surveySessionID
+            payload["trainingPolicy"] = "stable_actual_pose_hash_mod3"
+        }
         try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
             .write(to: folder.appendingPathComponent("capture.json"), options: .atomic)
     }
@@ -95,6 +137,17 @@ import simd
         guard isRunning, captureAnchor.permitsCurrent(ROBArmRoutineVision.shared.cameraGeneration) else {
             throw ROBGhostMotionError.blocked("Camera identity changed; start a fresh QR capture.")
         }
+        guard ROBWorkspaceDepthAlignment.snapshot() == captureDisplayCorrection else {
+            throw ROBGhostMotionError.blocked("The display depth correction changed during calibration; start a fresh capture.")
+        }
+    }
+    private func checkRequestedPose() throws {
+        guard let pan = stepContext["requestedPanDegrees"] as? Double,
+              let lower = stepContext["requestedLowerTarget"] as? Int,
+              let upper = stepContext["requestedUpperTarget"] as? Int else { return }
+        guard calibrationViewReady?(pan, lower, upper) == true else {
+            throw ROBGhostMotionError.blocked("The neck moved away from the requested calibration hold. The step was not accepted.")
+        }
     }
     @nonobjc private func observe(model: ROBGhostRobotModel, poseID: String, training: Bool,
                                  after minimumCapture: Double) async throws {
@@ -102,6 +155,7 @@ import simd
         var accepted = 0
         while accepted < 3 {
             try check()
+            try checkRequestedPose()
             guard ProcessInfo.processInfo.systemUptime < deadline else {
                 throw ROBGhostMotionError.blocked("The 120 mm QR target was not readable in this settled view. Captured views were saved.")
             }
@@ -131,15 +185,17 @@ import simd
                 try await Task.sleep(nanoseconds: 100_000_000); continue
             }
             frameSequence = frame.sequence
+            let expectedTarget = selectedTargetID
             let corners: [SIMD2<Double>]? = try await Task.detached(priority: .userInitiated) {
                 let request = VNDetectBarcodesRequest(); request.symbologies = [.qr]
                 try VNImageRequestHandler(ciImage: frame.image, orientation: .up, options: [:]).perform([request])
-                guard let target = request.results?.first(where: { $0.payloadStringValue == ROBNeckQRMeasurement.targetID }) else { return nil }
+                guard let target = request.results?.first(where: { $0.payloadStringValue == expectedTarget }) else { return nil }
                 return [target.topLeft, target.topRight, target.bottomRight, target.bottomLeft].map {
                     SIMD2(Double($0.x), Double($0.y))
                 }
             }.value
             try check()
+            try checkRequestedPose()
             let current = try neck()
             guard current.lower == pose.lower, current.upper == pose.upper,
                   abs(current.pan-pose.pan) < 0.01, abs(current.readyAt-pose.readyAt) < 0.000001 else {
@@ -163,17 +219,26 @@ import simd
                 }
             } }
             depths.sort()
-            let measurement = try ROBNeckQRMeasurement.make(cornersNormalized: corners, depthWidth: depth.width,
+            let measurement = try ROBNeckQRMeasurement.make(payload: expectedTarget, cornersNormalized: corners, depthWidth: depth.width,
                 depthHeight: depth.height, intrinsics: [k.fx,k.fy,k.cx,k.cy], opticalToBase: optical,
                 baseToNeck: neckFrame, capturedAtMilliseconds: frame.capturedAt, sequence: frame.sequence,
                 neckPanDegrees: pose.pan, neckUpperTarget: pose.upper,
                 centerDepthMeters: depths.count >= 8 ? depths[depths.count/2] : nil)
             var record = try JSONSerialization.jsonObject(with: JSONEncoder().encode(measurement)) as! [String: Any]
-            record["id"] = "\(poseID)-\(accepted)"; record["training"] = training
+            record["id"] = "\(poseID)-\(accepted)"
+            record["training"] = surveySessionID == nil ? training : Self.poseTraining(pan: pose.pan, lower: pose.lower, upper: pose.upper)
             record["imageSize"] = [depth.width, depth.height]; record["lowerTarget"] = pose.lower
+            record.merge(stepContext) { _, new in new }
             record["intrinsicsSource"] = k.calibrationSource ?? "unspecified"
             if let value = k.calibratedLensPosition { record["calibratedLensPosition"] = value }
             if let value = k.frameLensPosition { record["frameLensPosition"] = value }
+            if let value = k.sourceSize { record["rgbSourceSize"] = value }
+            if let value = k.sourceIntrinsics { record["rgbSourceIntrinsics"] = value }
+            if let value = k.imageTransform { record["rgbImageTransform"] = value }
+            record["depthAlignmentMethod"] = k.depthAlignmentMethod ?? "unspecified"
+            if let imu = k.inertial {
+                record["imu"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(imu))
+            }
             if depths.count >= 8 { record["centerDepthMeters"] = depths[depths.count/2] }
             if let folder {
                 let name = "\(poseID)-\(accepted)"
@@ -191,7 +256,7 @@ import simd
             }
             try check()
             views.append(record); try save(model: model); accepted += 1
-            update("I see ROB:TABLE:001. \(views.count) synchronized samples saved; 120 mm target. Arms unchanged.")
+            update("I see \(selectedTargetID). P \(String(format: "%.2f", pose.pan))°, L \(pose.lower), U \(pose.upper). \(views.count) samples saved.")
         }
     }
     func captureCurrentView() {
@@ -205,8 +270,8 @@ import simd
                     self.update("Reading the fixed 120 mm QR in the current settled neck view.")
                     let after = Date().timeIntervalSince1970*1000
                     try await self.observe(model: model, poseID: "reference", training: true, after: after)
-                    self.update("QR confirmed: 120 mm ROB:TABLE:001. Three reference frames saved. Ready for the neck sweep.")
-                } catch { self.update(error.localizedDescription) }
+                    self.update("QR confirmed: 120 mm \(self.selectedTargetID). Three reference frames saved.")
+                } catch { self.report(error) }
             }
         } catch { update(error.localizedDescription) }
     }
@@ -217,7 +282,7 @@ import simd
                 guard let self else { return }
                 defer { self.finish() }
                 do {
-                    let model = try self.model(); try self.newCapture(model: model)
+                    let model = try self.model(); try self.newCapture(model: model, kind: "pan_upper_sweep")
                     // Start at the existing table-inspection view, rather
                     // than preserving a greeting gaze above the workbench.
                     var upper = 6306
@@ -259,56 +324,563 @@ import simd
                         }
                     }
                     self.update("Neck sweep complete: \(self.views.count) samples, with separate validation views. Fit recorded views next.")
-                } catch { self.update(error.localizedDescription) }
+                } catch { self.report(error) }
             }
         } catch { update(error.localizedDescription) }
     }
-    func fitLastCapture() {
+    /// Isolate upper motion, then revisit interior targets from both directions.
+    /// The protractor variant holds indefinitely at each captured position.
+    func runUpperNeckCheck() { runMeasuredSweep(protractor: false, postures: false) }
+    func startProtractorCheck() { runMeasuredSweep(protractor: true, postures: false) }
+    func runPostureSweep() { runMeasuredSweep(protractor: false, postures: true) }
+
+    /// Use actual accepted pose keys consistently across markers and segments.
+    /// Repeated center holds must never leak between training and validation.
+    @nonobjc private static func poseTraining(pan: Double, lower: Int, upper: Int) -> Bool {
+        let key = String(format: "%.6f|%d|%d", pan, lower, upper)
+        var hash: UInt64 = 14695981039346656037
+        for byte in key.utf8 { hash = (hash ^ UInt64(byte)) &* 1099511628211 }
+        return hash % 3 != 2
+    }
+
+    private func writeSurvey(_ manifest: [String: Any], to directory: URL) throws {
+        try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
+            .write(to: directory.appendingPathComponent("survey.json"), options: .atomic)
+        UserDefaults.standard.set(directory.path, forKey:"ROBNeckQRLastSurveyPath")
+    }
+
+    /// Command hints only. A hint never supplies a world coordinate or a
+    /// current observation; two new frames must reconfirm its actual ID.
+    @nonobjc private func cachedSurveySeeds(_ identifiers: [String]) -> [SurveySeed] {
+        let root = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Cerebro/NeckQRCalibration/SurveySessions",isDirectory:true)
+            .resolvingSymlinksInPath()
+        var directories: [URL] = []
+        if let path = UserDefaults.standard.string(forKey:"ROBNeckQRLastSurveyPath") {
+            directories.append(URL(fileURLWithPath:path,isDirectory:true))
+        }
+        let existing = (try? FileManager.default.contentsOfDirectory(at:root,includingPropertiesForKeys:[.contentModificationDateKey])) ?? []
+        directories += existing.sorted {
+            ((try? $0.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate) ?? .distantPast) >
+            ((try? $1.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate) ?? .distantPast)
+        }
+        var result: [String:SurveySeed] = [:]
+        for directory in directories {
+            guard directory.resolvingSymlinksInPath().path.hasPrefix(root.path+"/"),
+                  let data = try? Data(contentsOf:directory.appendingPathComponent("survey.json")), data.count < 2_000_000,
+                  let manifest = try? JSONSerialization.jsonObject(with:data) as? [String:Any],
+                  let seeds = manifest["seeds"] as? [[String:Any]] else { continue }
+            for value in seeds {
+                guard let id = value["targetID"] as? String, identifiers.contains(id), result[id] == nil,
+                      let pan = value["panDegrees"] as? Double, pan.isFinite, abs(pan) <= 70,
+                      let lower = value["lowerTarget"] as? Int, (5811...6211).contains(lower),
+                      let upper = value["upperTarget"] as? Int, (5300...7500).contains(upper),
+                      let name = value["evidence"] as? String, !name.contains("/"), !name.contains(".."),
+                      let evidence = try? Data(contentsOf:directory.appendingPathComponent(name)),
+                      let record = try? JSONSerialization.jsonObject(with:evidence) as? [String:Any],
+                      let k = record["cameraMatrix"] as? [Double], k.count == 4, k.allSatisfy(\.isFinite),
+                      let detections = record["detections"] as? [[String:Any]],
+                      let detection = detections.first(where:{ $0["targetID"] as? String == id }),
+                      let center = detection["centerNormalized"] as? [Double], center.count == 2 else { continue }
+                result[id] = SurveySeed(targetID:id,pan:pan,lower:lower,upper:upper,
+                    score:value["score"] as? Double ?? 0,center:SIMD2(center[0],center[1]),intrinsics:k,evidence:name)
+            }
+            if result.count == identifiers.count { break }
+        }
+        return Array(result.values)
+    }
+
+    @nonobjc private func verifySeed(_ hint: SurveySeed, directory: URL, index: inout Int) async throws -> SurveySeed? {
+        stepContext = ["requestedPanDegrees":hint.pan,"requestedLowerTarget":hint.lower,"requestedUpperTarget":hint.upper]
+        try await settleCalibration(pan:hint.pan,lower:hint.lower,upper:hint.upper)
+        let found = try await discoverTargets(directory:directory,index:index)
+        index += 1
+        return found.first(where:{ $0.targetID == hint.targetID })
+    }
+
+    /// Discovery is separate from metric capture folders, so each marker's
+    /// 9 + 28 holds remain bounded to 111 observations. No location guesses.
+    @nonobjc private func discoverTargets(directory: URL, index: Int) async throws -> [SurveySeed] {
+        let deadline = ProcessInfo.processInfo.systemUptime + 4
+        let after = Date().timeIntervalSince1970*1000
+        var count = 0, confirmations: [String: Int] = [:], candidates: [String: SurveySeed] = [:]
+        while count < 2, ProcessInfo.processInfo.systemUptime < deadline {
+            try check(); try checkRequestedPose()
+            let pose = try neck()
+            guard let frame = ROBArmRoutineVision.shared.snapshot()["face"],
+                  frame.sequence > frameSequence, frame.capturedAt >= after,
+                  (0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
+                  let depth = frame.depth, let k = frame.intrinsics,
+                  k.isValid(forWidth: depth.width, height: depth.height) else {
+                try await Task.sleep(nanoseconds: 100_000_000); continue
+            }
+            let age = (Date().timeIntervalSince1970*1000-frame.capturedAt)/1000
+            guard ProcessInfo.processInfo.systemUptime-age >= pose.readyAt else { continue }
+            guard abs(Double(frame.image.extent.width/frame.image.extent.height)/(Double(depth.width)/Double(depth.height))-1) < 0.02,
+                  captureAnchor.accept(frameGeneration: frame.cameraGeneration,
+                                       currentGeneration: ROBArmRoutineVision.shared.cameraGeneration) else {
+                throw ROBGhostMotionError.blocked("Survey RGB/depth framing or camera identity changed.")
+            }
+            frameSequence = frame.sequence
+            let detections: [(String, [SIMD2<Double>])] = try await Task.detached(priority: .userInitiated) {
+                let request = VNDetectBarcodesRequest(); request.symbologies = [.qr]
+                try VNImageRequestHandler(ciImage: frame.image, orientation: .up, options: [:]).perform([request])
+                return (request.results ?? []).compactMap { observation in
+                    guard let id = observation.payloadStringValue,
+                          ROBNeckQRMeasurement.supportedTargetIDs.contains(id) else { return nil }
+                    let corners = [observation.topLeft, observation.topRight, observation.bottomRight, observation.bottomLeft]
+                        .map { SIMD2(Double($0.x), Double($0.y)) }
+                    return (id, corners)
+                }
+            }.value
+            try check(); try checkRequestedPose()
+            let current = try neck()
+            guard current.lower == pose.lower, current.upper == pose.upper,
+                  abs(current.pan-pose.pan) < 0.01, abs(current.readyAt-pose.readyAt) < 0.000001 else {
+                throw ROBGhostMotionError.blocked("The neck changed during survey detection.")
+            }
+            let name = "discovery-\(index)-\(count)"
+            let image = frame.image
+            try await Task.detached(priority: .utility) {
+                let context = CIContext(options: [.useSoftwareRenderer: true])
+                guard let cg = context.createCGImage(image, from: image.extent),
+                      let jpeg = NSBitmapImageRep(cgImage: cg).representation(using: .jpeg, properties: [.compressionFactor: 0.95]) else {
+                    throw ROBGhostMotionError.blocked("The discovery source image could not be saved.")
+                }
+                try jpeg.write(to: directory.appendingPathComponent(name+".jpg"), options: .atomic)
+                try depth.millimetersLittleEndian.write(to: directory.appendingPathComponent(name+".depth-u16le"), options: .atomic)
+            }.value
+            var evidence: [[String: Any]] = []
+            let identityCounts = Dictionary(grouping:detections,by:{ $0.0 }).mapValues { $0.count }
+            for (id, corners) in detections {
+                guard identityCounts[id] == 1 else { continue }
+                guard let center = try? ROBNeckQRMeasurement.centerNormalized(of: corners) else { continue }
+                let twiceArea = (0..<4).reduce(0.0) { value, i in
+                    value + corners[i].x*corners[(i+1)%4].y-corners[i].y*corners[(i+1)%4].x
+                }
+                let margin = corners.reduce(1.0) { min($0, min($1.x, min(1-$1.x, min($1.y, 1-$1.y)))) }
+                let score = abs(twiceArea)/2 * min(1, max(0, margin)/0.08)
+                confirmations[id, default: 0] += 1
+                let seed = SurveySeed(targetID: id, pan: pose.pan, lower: pose.lower, upper: pose.upper,
+                                      score: score, center: center, intrinsics: [k.fx,k.fy,k.cx,k.cy], evidence: name+".json")
+                if score > (candidates[id]?.score ?? -1) { candidates[id] = seed }
+                evidence.append(["targetID": id, "cornersNormalized": corners.map { [$0.x,$0.y] },
+                                 "centerNormalized": [center.x,center.y], "areaMarginScore": score])
+            }
+            var record: [String: Any] = ["schemaVersion": 1, "sequence": frame.sequence,
+                "capturedAtMilliseconds": frame.capturedAt, "imageSize": [depth.width,depth.height],
+                "cameraMatrix": [k.fx,k.fy,k.cx,k.cy], "neckPanDegrees": pose.pan,
+                "lowerTarget": pose.lower, "neckUpperTarget": pose.upper,
+                "poseSource": "accepted_neck_commands", "registrationVerified": false, "detections": evidence]
+            if let imu = k.inertial { record["imu"] = try JSONSerialization.jsonObject(with:JSONEncoder().encode(imu)) }
+            try JSONSerialization.data(withJSONObject: record, options: [.prettyPrinted, .sortedKeys])
+                .write(to: directory.appendingPathComponent(name+".json"), options: .atomic)
+            count += 1
+        }
+        try check(); try checkRequestedPose()
+        return candidates.values.filter { confirmations[$0.targetID, default: 0] >= 2 }
+    }
+
+    /// One local, neck-only survey. The base and both arms remain stationary.
+    func calibrateAllFourTargets() { runTargetSurvey(requestedIDs:ROBNeckQRMeasurement.supportedTargetIDs) }
+    func measureSelectedTarget() { runTargetSurvey(requestedIDs:[selectedTargetID]) }
+
+    @nonobjc private func runTargetSurvey(requestedIDs: [String]) {
+        do {
+            try begin()
+            task = Task { [weak self] in
+                guard let self else { return }
+                defer { self.finish() }
+                let session = UUID().uuidString
+                let root = FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent("Library/Application Support/Cerebro/NeckQRCalibration/SurveySessions/\(session)", isDirectory: true)
+                var manifest: [String: Any] = ["schemaVersion": 1, "captureKind": "multi_target_neck_survey",
+                    "sessionID": session, "sceneContextID": session, "robotBaseStationary": true,
+                    "registrationVerified": false, "status": "discovering", "captures": [[String: Any]](),
+                    "targetIDs": requestedIDs,
+                    "trainingPolicy": "stable_actual_pose_hash_mod3",
+                    "layoutSource": "operator reported ROB repositioned; all four fixed QR sheets placed; bucket beside left floor marker; two cans on table",
+                    "oldWorldCoordinatesReused": false, "armCommands": false]
+                var discoveryIndex = 0, captures: [[String: Any]] = [], seeds: [String: SurveySeed] = [:]
+                do {
+                    let hints = self.cachedSurveySeeds(requestedIDs)
+                    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true,
+                        attributes: [.posixPermissions: 0o700])
+                    self.surveySessionID = session
+                    self.captureDisplayCorrection = ROBWorkspaceDepthAlignment.snapshot()
+                    self.folder = nil; self.views = []
+                    UserDefaults.standard.removeObject(forKey:"ROBNeckQRLastCapturePath")
+                    self.lastCapturePath = root.path
+                    try self.writeSurvey(manifest, to: root)
+                    let model = try self.model()
+                    for hint in hints {
+                        self.update("Reconfirming \(hint.targetID) in two fresh frames; saved commands are search hints only.")
+                        if let verified = try await self.verifySeed(hint,directory:root,index:&discoveryIndex) {
+                            seeds[verified.targetID] = verified
+                        }
+                    }
+                    // Every search view is accepted and settled through the
+                    // existing bounded neck path, then read in two fresh frames.
+                    for pass in 0..<2 {
+                        let pans: [Double] = pass == 0 ? [0,-20,-40,-55,20,40,55] : [0,-10,-30,-50,-65,10,30,50,65]
+                        for upper in [6306,5700,5300,6906,7300] {
+                            for requestedPan in pans {
+                                try self.check()
+                                if seeds.count == requestedIDs.count { break }
+                                let pan = self.boundedPan?(requestedPan) ?? requestedPan
+                                self.stepContext = ["requestedPanDegrees": pan, "requestedLowerTarget": 6011, "requestedUpperTarget": upper]
+                                self.update("Finding requested QR targets: \(seeds.count)/\(requestedIDs.count) confirmed. Scan \(discoveryIndex+1), P \(Int(pan))°, U \(upper).")
+                                try await self.settleCalibration(pan: pan, lower: 6011, upper: upper)
+                                if pass > 0 { try await Task.sleep(nanoseconds: 1_000_000_000) }
+                                for seed in try await self.discoverTargets(directory: root, index: discoveryIndex) {
+                                    guard requestedIDs.contains(seed.targetID) else { continue }
+                                    if seed.score > (seeds[seed.targetID]?.score ?? -1) { seeds[seed.targetID] = seed }
+                                }
+                                discoveryIndex += 1
+                                manifest["discoveryViews"] = discoveryIndex
+                                manifest["foundTargetIDs"] = seeds.keys.sorted()
+                                manifest["seeds"] = seeds.values.map {
+                                    ["targetID":$0.targetID,"panDegrees":$0.pan,"lowerTarget":$0.lower,
+                                     "upperTarget":$0.upper,"score":$0.score,"evidence":$0.evidence] as [String:Any]
+                                }
+                                try self.writeSurvey(manifest, to: root)
+                            }
+                            if seeds.count == requestedIDs.count { break }
+                        }
+                        if seeds.count == requestedIDs.count { break }
+                    }
+                    manifest["status"] = "capturing"
+                    manifest["seeds"] = seeds.values.map {
+                        ["targetID":$0.targetID,"panDegrees":$0.pan,"lowerTarget":$0.lower,
+                         "upperTarget":$0.upper,"score":$0.score,"evidence":$0.evidence] as [String:Any]
+                    }
+                    for id in requestedIDs {
+                        try self.check()
+                        guard var seed = seeds[id] else { continue }
+                        self.selectedTargetID = id
+                        // Keep the last measured seed distinct from a proposed
+                        // endpoint. Never start a metric sweep from an unchecked
+                        // final prediction or a failed recentering attempt.
+                        let originalSeed = seed
+                        var proposed = seed, lastVerified: SurveySeed?
+                        for attempt in 0..<3 {
+                            guard let measured = try await self.verifySeed(proposed,directory:root,index:&discoveryIndex) else { break }
+                            lastVerified = measured
+                            let yaw = atan((measured.center.x-0.5)*640/measured.intrinsics[0])*180 / .pi
+                            let pitch = atan((0.5-measured.center.y)*400/measured.intrinsics[1])*180 / .pi
+                            if attempt == 2 || (abs(yaw) < 2 && abs(pitch) < 2) { break }
+                            proposed = SurveySeed(targetID:id,
+                                pan:self.boundedPan?(measured.pan-max(-8,min(8,yaw))) ?? measured.pan,
+                                lower:measured.lower,
+                                upper:max(5300,min(7350,measured.upper-max(-150,min(150,Int((pitch*16.6666667).rounded()))))),
+                                score:measured.score,center:measured.center,intrinsics:measured.intrinsics,evidence:measured.evidence)
+                        }
+                        var verifiedStart: SurveySeed?
+                        if let lastVerified { verifiedStart = try await self.verifySeed(lastVerified,directory:root,index:&discoveryIndex) }
+                        if verifiedStart == nil { verifiedStart = try await self.verifySeed(originalSeed,directory:root,index:&discoveryIndex) }
+                        guard let verifiedStart else {
+                            captures.append(["targetID":id,"status":"not_readable_at_verified_seed","samples":0])
+                            manifest["captures"] = captures; try self.writeSurvey(manifest,to:root)
+                            continue
+                        }
+                        seed = verifiedStart
+                        try self.newCapture(model: model, kind: "survey_upper_and_lower_postures")
+                        let markerFolder = self.folder!
+                        let captureIndex = captures.count
+                        captures.append(["targetID":id,"capturePath":markerFolder.appendingPathComponent("capture.json").path,
+                                         "status":"capturing","samples":0])
+                        manifest["captures"] = captures
+                        try self.writeSurvey(manifest,to:root)
+                        var complete = true, failure = "", retryCount = 0
+                        let floorTarget = id.hasPrefix("ROB:FLOOR:")
+                        let panSpan: Double = floorTarget ? 4 : 8
+                        let lowerTargets = floorTarget ? [6011,5911,6111,6011] : [6011,5811,6211,6011]
+                        let upperOffset = floorTarget ? 50 : 75
+                        var holds: [(Double,Int,Int)] = [0,-75,-150,-75,0,75,150,75,0]
+                            .map { (seed.pan,6011,max(5300,min(7500,seed.upper+$0))) }
+                        for lower in lowerTargets {
+                            let left = self.boundedPan?(seed.pan-panSpan) ?? seed.pan-panSpan
+                            let right = self.boundedPan?(seed.pan+panSpan) ?? seed.pan+panSpan
+                            // Opposing pitch directions give a bounded
+                            // visibility prior; each endpoint still needs QR.
+                            let center = max(5300,min(7500,seed.upper+max(-150,min(150,lower-6011))))
+                            holds += [(seed.pan,lower,center),(left,lower,center),(left,lower,max(5300,center-upperOffset)),
+                                      (seed.pan,lower,max(5300,center-upperOffset)),(right,lower,max(5300,center-upperOffset)),
+                                      (right,lower,center),(seed.pan,lower,center)]
+                        }
+                        for index in holds.indices {
+                            let (pan,lower,upper) = holds[index]
+                            self.stepContext = ["stepIndex": index, "requestedPanDegrees": pan,
+                                "requestedLowerTarget": lower, "requestedUpperTarget": upper]
+                            self.update("\(id): hold \(index+1)/37, \(self.views.count)/111 samples. P \(String(format:"%.2f",pan))°, L \(lower), U \(upper).")
+                            do {
+                                try await self.settleCalibration(pan: pan, lower: lower, upper: upper)
+                                try await self.observe(model: model, poseID: "step-\(index)", training: true,
+                                    after: Date().timeIntervalSince1970*1000)
+                                if index >= 9, (index-9)%7 == 0, lower != 6011,
+                                   let baseline = self.views.first?["centerPixel"] as? [Double],
+                                   let observed = self.views.last?["centerPixel"] as? [Double],
+                                   let k = self.views.last?["cameraMatrix"] as? [Double],
+                                   baseline.count == 2, observed.count == 2, k.count == 4 {
+                                    let bearing = atan((observed[1]-baseline[1])/k[1])*180 / .pi
+                                    let correction = max(-150,min(150,-Int((bearing*16.6666667).rounded())))
+                                    for next in (index+1)...min(index+6,holds.count-1) {
+                                        holds[next].2 = max(5300,min(7500,holds[next].2+correction))
+                                    }
+                                }
+                            } catch {
+                                try self.check()
+                                let originalFailure = error.localizedDescription
+                                var recovered = false, localAttempt = 0
+                                while retryCount < 3, self.views.count+3 <= 128 {
+                                    retryCount += 1; localAttempt += 1
+                                    guard let reacquired = try await self.verifySeed(seed,directory:root,index:&discoveryIndex) else { break }
+                                    seed = reacquired
+                                    let fraction = pow(0.5,Double(localAttempt))
+                                    let retryPan = self.boundedPan?(seed.pan+(pan-seed.pan)*fraction) ?? seed.pan
+                                    let retryLower = seed.lower+Int((Double(lower-seed.lower)*fraction).rounded())
+                                    let retryUpper = seed.upper+Int((Double(upper-seed.upper)*fraction).rounded())
+                                    self.stepContext = ["stepIndex":index,"requestedPanDegrees":retryPan,
+                                        "requestedLowerTarget":retryLower,"requestedUpperTarget":retryUpper,
+                                        "originalPlannedPanDegrees":pan,"originalPlannedLowerTarget":lower,
+                                        "originalPlannedUpperTarget":upper,"visibilityReduced":true,
+                                        "retryOrdinal":retryCount,"visibilityDeltaFraction":fraction]
+                                    do {
+                                        try await self.settleCalibration(pan:retryPan,lower:retryLower,upper:retryUpper)
+                                        try await self.observe(model:model,poseID:"step-\(index)-retry-\(retryCount)",training:true,
+                                            after:Date().timeIntervalSince1970*1000)
+                                        recovered = true; break
+                                    } catch { try self.check() }
+                                }
+                                if !recovered { complete = false; failure = originalFailure; break }
+                            }
+                            captures[captureIndex]["samples"] = self.views.count
+                            manifest["captures"] = captures
+                            try self.writeSurvey(manifest,to:root)
+                        }
+                        captures[captureIndex] = ["targetID":id,"capturePath":markerFolder.appendingPathComponent("capture.json").path,
+                            "status":complete ? "complete" : "partial","samples":self.views.count,
+                            "failure":failure,"seedPanDegrees":seed.pan,"seedUpperTarget":seed.upper,
+                            "seedEvidence":seed.evidence,"retryCount":retryCount,
+                            "visibilityProfile":floorTarget ? "floor_reduced_pan_lower_upper" : "standard"]
+                        manifest["captures"] = captures
+                        try self.writeSurvey(manifest,to:root)
+                    }
+                    manifest["status"] = "capture_complete_unverified"
+                    manifest["missingTargetIDs"] = requestedIDs.filter { seeds[$0] == nil }
+                    try self.writeSurvey(manifest,to:root)
+                    self.lastCapturePath = root.path
+                    self.update("Target survey saved: \(captures.filter { $0["status"] as? String == "complete" }.count)/\(requestedIDs.count) complete, \(seeds.count)/\(requestedIDs.count) found. No calibration applied.\n\(root.path)")
+                } catch {
+                    if let marker = self.folder,
+                       let i = captures.firstIndex(where: { $0["capturePath"] as? String == marker.appendingPathComponent("capture.json").path }) {
+                        captures[i]["status"] = "partial"
+                        captures[i]["samples"] = self.views.count
+                    }
+                    manifest["captures"] = captures; manifest["status"] = "stopped_or_failed"
+                    manifest["failure"] = error.localizedDescription
+                    try? self.writeSurvey(manifest,to:root)
+                    self.lastCapturePath = root.path
+                    self.report(error)
+                }
+            }
+        } catch { report(error) }
+    }
+
+    func advanceProtractor(_ pitchDegrees: NSNumber?) {
+        guard isRunning, awaitingProtractor else { return }
+        do { try checkRequestedPose() } catch { task?.cancel(); update(error.localizedDescription); return }
+        if let pitchDegrees {
+            let angle = pitchDegrees.doubleValue
+            guard angle.isFinite, (-180...180).contains(angle) else {
+                update("Enter a finite protractor pitch from −180° to 180°, positive nose-up."); return
+            }
+            var reading = stepContext
+            reading["pitchDegrees"] = angle
+            reading["reference"] = "operator protractor, camera housing relative to the same level reference; positive nose-up"
+            protractorReadings.append(reading)
+        }
+        advanceRequested = true; awaitingProtractor = false
+    }
+
+    private func settleCalibration(pan: Double, lower: Int, upper: Int) async throws {
+        guard prepareCalibrationView != nil, calibrationViewReady != nil else {
+            throw ROBGhostMotionError.blocked("The neck calibration command path is unavailable.")
+        }
+        let deadline = ProcessInfo.processInfo.systemUptime + 18
+        // Establish exclusive inspection context even when the first target
+        // already matches: stop following/base heartbeat and disable tracking.
+        _ = prepareCalibrationView?(pan, lower, upper)
+        while calibrationViewReady?(pan, lower, upper) != true {
+            try check()
+            guard ProcessInfo.processInfo.systemUptime < deadline else {
+                throw ROBGhostMotionError.blocked("The calibration neck target was not accepted and settled. Captured steps were saved.")
+            }
+            _ = prepareCalibrationView?(pan, lower, upper)
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        try await Task.sleep(nanoseconds: 2_000_000_000)
+        try check()
+        guard calibrationViewReady?(pan, lower, upper) == true else {
+            throw ROBGhostMotionError.blocked("The neck changed during calibration settling.")
+        }
+    }
+
+    private func runMeasuredSweep(protractor: Bool, postures: Bool) {
+        do {
+            try begin()
+            task = Task { [weak self] in
+                guard let self else { return }
+                defer { self.finish() }
+                do {
+                    let model = try self.model(), initial = try self.neck()
+                    guard initial.lower == 6011 else {
+                        throw ROBGhostMotionError.blocked("Start this calibration from the upright lower-neck target 6011; no automatic reposition was performed.")
+                    }
+                    let kind = postures ? "multiple_lower_postures" : "upper_neck_forward_reverse"
+                    try self.newCapture(model: model, kind: kind)
+                    let center = initial.upper
+                    guard (5450...7350).contains(center), abs(initial.pan) <= 70 else {
+                        throw ROBGhostMotionError.blocked("Center the selected target in a normal inspection view before this sweep.")
+                    }
+                    let offsets = [0, -75, -150, -75, 0, 75, 150, 75, 0]
+                    let lowerTargets = postures ? [6011, 5811, 6211, 6011] : [6011]
+                    let count = lowerTargets.count * (postures ? 7 : offsets.count)
+                    var index = 0
+                    for lower in lowerTargets {
+                        let left = self.boundedPan?(initial.pan-8) ?? initial.pan-8
+                        let right = self.boundedPan?(initial.pan+8) ?? initial.pan+8
+                        var poses: [(Double, Int)] = postures
+                            ? [(initial.pan,center), (left,center), (left,center-75),
+                               (initial.pan,center-75), (right,center-75), (right,center), (initial.pan,center)]
+                            : offsets.map { (initial.pan, center+$0) }
+                        for position in poses.indices {
+                            let (pan, upper) = poses[position]
+                            try self.check()
+                            self.stepContext = ["stepIndex": index, "requestedPanDegrees": pan,
+                                "requestedLowerTarget": lower, "requestedUpperTarget": upper]
+                            self.update("Neck check \(index+1)/\(count): P \(String(format: "%.2f", pan))°, L \(lower), U \(upper). Settling, then checking QR.")
+                            try await self.settleCalibration(pan: pan, lower: lower, upper: upper)
+                            try await self.observe(model: model, poseID: "step-\(index)", training: index % 3 != 2,
+                                after: Date().timeIntervalSince1970*1000)
+                            if postures, position == 0, lower != 6011,
+                               let baseline = self.views.first?["centerPixel"] as? [Double],
+                               let observed = self.views.last?["centerPixel"] as? [Double],
+                               let k = self.views.last?["cameraMatrix"] as? [Double],
+                               baseline.count == 2, observed.count == 2, k.count == 4 {
+                                // A bounded visibility prior only. Each new
+                                // endpoint still needs its own QR measurement;
+                                // this does not change the calibrated mapping.
+                                let bearing = atan((observed[1]-baseline[1])/k[1])*180 / .pi
+                                let adjustment = max(-150, min(150, -Int((bearing*33.3333333333).rounded())))
+                                for next in 1..<poses.count {
+                                    poses[next].1 = max(5300, min(7500, poses[next].1+adjustment))
+                                }
+                            }
+                            if protractor {
+                                self.advanceRequested = false; self.awaitingProtractor = true
+                                self.update("Holding \(index+1)/\(count): P \(String(format: "%.2f", pan))°, L \(lower), U \(upper). QR captured. Read the camera-housing protractor, then Record angle / next position. Blank skips the reading.")
+                                while !self.advanceRequested {
+                                    try self.check(); try self.checkRequestedPose()
+                                    try await Task.sleep(nanoseconds: 100_000_000)
+                                }
+                                try self.save(model: model)
+                            }
+                            index += 1
+                        }
+                    }
+                    self.update("Neck check complete: \(count) measured holds, \(self.views.count) QR samples. Raw targets and protractor readings saved; no calibration applied.\n\(self.lastCapturePath)")
+                } catch { self.report(error) }
+            }
+        } catch { update(error.localizedDescription) }
+    }
+
+    func fitLastCapture() { fitRecordedCapture(jointMapping: false) }
+    func fitNeckMapping() { fitRecordedCapture(jointMapping: true) }
+
+    private func restoreLastCaptureIfNeeded() {
+        guard folder == nil, let path = UserDefaults.standard.string(forKey: "ROBNeckQRLastCapturePath") else { return }
+        let root = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Cerebro/NeckQRCalibration").resolvingSymlinksInPath()
+        let candidate = URL(fileURLWithPath:path,isDirectory:true).resolvingSymlinksInPath()
+        guard candidate.path.hasPrefix(root.path+"/"),
+              let bytes = try? Data(contentsOf:candidate.appendingPathComponent("capture.json")), bytes.count < 2_000_000,
+              let payload = try? JSONSerialization.jsonObject(with:bytes) as? [String:Any],
+              let target = payload["targetID"] as? String, ROBNeckQRMeasurement.supportedTargetIDs.contains(target),
+              let records = payload["views"] as? [[String:Any]], records.count <= 128 else { return }
+        folder = candidate; lastCapturePath = candidate.path; selectedTargetID = target; views = records
+    }
+
+    private func fitRecordedCapture(jointMapping: Bool) {
+        restoreLastCaptureIfNeeded()
         guard !isRunning, let folder else { update("Capture the fixed QR before fitting."); return }
-        isRunning = true; update("Fitting the recorded neck/camera transform offline.")
+        let runFolder = folder.appendingPathComponent("Fits/\(UUID().uuidString)",isDirectory:true)
+        do { try FileManager.default.createDirectory(at:runFolder,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700]) }
+        catch { report(error); return }
+        isRunning = true
+        update(jointMapping ? "Refining the printed QR corners and fitting the neck mapping offline." : "Fitting the recorded neck/camera transform offline.")
         task = Task { [weak self] in
             guard let self else { return }
             defer { self.isRunning = false; self.task = nil; self.fitTask = nil; self.update(self.status) }
             do {
-                let worker = Task.detached(priority: .userInitiated) { () throws -> Data in
+                let worker = Task.detached(priority: .userInitiated) { () async throws -> Data in
                     guard let resources = Bundle.main.url(forResource: "ShadowPlanner", withExtension: nil) else {
                         throw ROBGhostMotionError.blocked("The calibration worker is missing.")
                     }
-                    let args = [resources.appendingPathComponent("qr_neck_calibration.py").path,
-                        folder.appendingPathComponent("capture.json").path, folder.appendingPathComponent("fit.json").path]
-                    let process = try ROBPythonRuntime.shared.newTask(withArguments: args)
-                    let logURL = folder.appendingPathComponent("fit.log")
-                    FileManager.default.createFile(atPath: logURL.path, contents: nil)
-                    let log = try FileHandle(forWritingTo: logURL)
-                    defer { try? log.close() }
-                    process.standardOutput = log; process.standardError = log
-                    let completed = DispatchSemaphore(value: 0)
-                    process.terminationHandler = { _ in completed.signal() }
-                    try process.run()
-                    let deadline = ProcessInfo.processInfo.systemUptime+25
-                    while completed.wait(timeout: .now()+0.1) == .timedOut {
-                        if Task.isCancelled || ProcessInfo.processInfo.systemUptime >= deadline {
-                            if process.isRunning { process.terminate() }
-                            throw ROBGhostMotionError.blocked("QR fitting stopped or exceeded its 25 second limit.")
+                    let jobs = jointMapping
+                        ? [("qr_corner_refinement.py", "capture.json", "refined-capture.json"),
+                           ("qr_neck_joint_calibration.py", "refined-capture.json", "joint-fit.json")]
+                        : [("qr_neck_calibration.py", "capture.json", "fit.json")]
+                    for (script, input, output) in jobs {
+                        try Task.checkCancellation()
+                        let inputFolder = input == "capture.json" ? folder : runFolder
+                        let args = [resources.appendingPathComponent(script).path,
+                            inputFolder.appendingPathComponent(input).path, runFolder.appendingPathComponent(output).path]
+                        let process = try ROBPythonRuntime.shared.newTask(withArguments: args)
+                        let logURL = runFolder.appendingPathComponent(output+".log")
+                        FileManager.default.createFile(atPath: logURL.path, contents: nil)
+                        let log = try FileHandle(forWritingTo: logURL)
+                        defer { if process.isRunning { process.terminate() }; try? log.close() }
+                        process.standardOutput = log; process.standardError = log
+                        try process.run()
+                        let deadline = ProcessInfo.processInfo.systemUptime+(script == "qr_corner_refinement.py" ? 120 : 45)
+                        while process.isRunning {
+                            try Task.checkCancellation()
+                            guard ProcessInfo.processInfo.systemUptime < deadline else {
+                                throw ROBGhostMotionError.blocked("The offline calibration worker exceeded its time limit. Captures remain saved.")
+                            }
+                            try await Task.sleep(nanoseconds: 100_000_000)
+                        }
+                        guard process.terminationStatus == 0 else {
+                            let bytes = try Data(contentsOf: logURL)
+                            throw ROBGhostMotionError.blocked(String(data: bytes, encoding: .utf8) ?? "QR fit failed.")
                         }
                     }
-                    guard process.terminationStatus == 0 else {
-                        let bytes = try Data(contentsOf: logURL)
-                        throw ROBGhostMotionError.blocked(String(data: bytes, encoding: .utf8) ?? "QR fit failed.")
-                    }
-                    return try Data(contentsOf: folder.appendingPathComponent("fit.json"))
+                    return try Data(contentsOf: runFolder.appendingPathComponent(jointMapping ? "joint-fit.json" : "fit.json"))
                 }
                 self.fitTask = worker
                 let result = try await worker.value
                 try Task.checkCancellation()
                 let report = try JSONSerialization.jsonObject(with: result) as? [String: Any] ?? [:]
-                let training = (report["trainingTranslationRMSEMeters"] as? Double ?? .nan)*1000
-                let validation = (report["heldOutTranslationRMSEMeters"] as? Double ?? .nan)*1000
-                self.update(String(format: "QR fit saved. Training drift %.1f mm; held-out drift %.1f mm. Registration remains unverified.\n%@", training, validation, folder.path))
-            } catch { self.update(error.localizedDescription) }
+                if jointMapping {
+                    let training = report["trainingReprojectionRMSEPixels"] as? Double ?? .nan
+                    let validation = report["heldOutReprojectionRMSEPixels"] as? Double ?? .nan
+                    let refined = (try? Data(contentsOf:runFolder.appendingPathComponent("refined-capture.json")))
+                        .flatMap { try? JSONSerialization.jsonObject(with:$0) as? [String:Any] }
+                    let quality = refined?["cornerRefinement"] as? [String:Any]
+                    let accepted = quality?["acceptedViews"] as? Int ?? 0
+                    let rejected = quality?["rejectedViews"] as? Int ?? 0
+                    self.update(String(format: "Offline neck mapping saved. Training %.3f px; held-out %.3f px. Refinement: %d accepted, %d raw-retained/rejected. Candidate remains unverified; no URDF change applied.\n%@", training, validation, accepted, rejected, runFolder.path))
+                } else {
+                    let training = (report["trainingTranslationRMSEMeters"] as? Double ?? .nan)*1000
+                    let validation = (report["heldOutTranslationRMSEMeters"] as? Double ?? .nan)*1000
+                    self.update(String(format: "QR fit saved. Training drift %.1f mm; held-out drift %.1f mm. Registration remains unverified.\n%@", training, validation, runFolder.path))
+                }
+            } catch { self.report(error) }
         }
     }
     func openLastCapture() {
+        restoreLastCaptureIfNeeded()
         if !lastCapturePath.isEmpty { NSWorkspace.shared.open(URL(fileURLWithPath: lastCapturePath, isDirectory: true)) }
     }
     func stop() {

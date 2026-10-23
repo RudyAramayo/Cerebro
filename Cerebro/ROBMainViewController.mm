@@ -5705,6 +5705,48 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     qrCalibration.viewReady = workspace.viewReady;
     qrCalibration.canUseView = workspace.canUseView;
     qrCalibration.boundedPan = workspace.boundedPan;
+    qrCalibration.calibrationViewReady = ^BOOL(double pan, NSInteger lower, NSInteger upper) {
+        ROBSerialBox *serial = weakSelf.serialBox;
+        if (serial == nil) { return NO; }
+        ROBNeckSafetyConfig config = [serial neckSafetyConfiguration];
+        int32_t target = 0;
+        return serial != nil && serial.neckCommandStateKnown &&
+            ![ROBTorsoControlCenter shared].isArmed && fabs([ROBTorsoControlCenter shared].commandedVelocity) < 0.001 &&
+            ROBNeckSafetyPanDegreesToTarget(&config, pan, &target) &&
+            serial.commandedNeckPanTarget == target && serial.commandedLowerNeckTiltTarget == lower &&
+            serial.commandedUpperNeckTiltTarget == upper &&
+            NSProcessInfo.processInfo.systemUptime >= serial.neckCommandReadyAtUptime;
+    };
+    qrCalibration.prepareCalibrationView = ^BOOL(double pan, NSInteger lower, NSInteger upper) {
+        ROBMainViewController *owner = weakSelf;
+        ROBSerialBox *serial = owner.serialBox;
+        if (owner == nil || serial == nil || ![ROBNeckQRCalibration shared].isRunning ||
+            owner.stageShowCoordinator.isRunning || owner.pendingRobotActionRequests.count > 0 ||
+            [ROBAmberStackMaintenanceController shared].isRunning || [ROBTorsoControlCenter shared].isArmed ||
+            fabs([ROBTorsoControlCenter shared].commandedVelocity) >= 0.001 || !serial.neckCommandStateKnown) { return NO; }
+        if (!armViewPreparationStarted) {
+            armViewPreparationStarted = YES;
+            [serial stopBaseMotionAndDropHeartbeat];
+            if (owner.autonomyCoordinator.active) { [owner.autonomyCoordinator stopWithReason:@"Neck calibration"]; }
+            if (owner.followPersonCoordinator.active) { [owner.followPersonCoordinator stopWithReason:@"Neck calibration"]; }
+            owner.torsoControlsViewController.headTracking_enabled.state = NSControlStateValueOff;
+        }
+        ROBNeckSafetyConfig config = [serial neckSafetyConfiguration];
+        int32_t target = 0;
+        if (!ROBNeckSafetyPanDegreesToTarget(&config, pan, &target) ||
+            lower < 5811 || lower > 6211 || upper < 5300 || upper > 7500 || fabs(pan) > 70) { return NO; }
+        if ([ROBNeckQRCalibration shared].calibrationViewReady(pan, lower, upper)) { return YES; }
+        if (NSProcessInfo.processInfo.systemUptime < serial.neckCommandReadyAtUptime) { return NO; }
+        // Servo Control requests exact raw targets; that gateway intentionally
+        // disables automatic leveling while retaining staged mechanical limits.
+        config.cameraLevelingEnabled = false;
+        int32_t desired = (int32_t)upper;
+        ROBNeckSafetyResult checked;
+        if (!ROBNeckSafetyApply(&config, target, (int32_t)lower, desired, &checked) ||
+            checked.panTarget != target || checked.lowerTarget != lower || checked.upperTarget != upper) { return NO; }
+        (void)[serial requestOperatorNeckPosePanTarget:target lowerTarget:lower upperTarget:desired];
+        return [ROBNeckQRCalibration shared].calibrationViewReady(pan, lower, upper);
+    };
     qrCalibration.readNeck = ^NSDictionary * {
         ROBSerialBox *serial = weakSelf.serialBox;
         if (serial == nil) { return @{@"known": @NO}; }

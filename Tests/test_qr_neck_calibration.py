@@ -60,6 +60,20 @@ class QRNeckCalibrationTests(unittest.TestCase):
         self.assertIsNone(result["uncertaintyMeters"])
         self.assertEqual(result["status"], "fitted_unverified")
 
+    def test_distinct_fixed_targets_and_mixed_target_rejection(self):
+        source, _, _ = dataset()
+        for target in QR.SUPPORTED_TARGET_IDS:
+            sample = copy.deepcopy(source)
+            sample["targetID"] = target
+            for view in sample["views"]:
+                view["targetID"] = target
+            result = QR.fit(sample)
+            self.assertEqual(result["targetID"], target)
+            self.assertFalse(result["registrationVerified"])
+        source["views"][0]["targetID"] = "ROB:FLOOR:L01"
+        with self.assertRaisesRegex(ValueError, "cannot mix"):
+            QR.fit(source)
+
     def test_held_out_data_does_not_train_the_transform(self):
         source, actual, _ = dataset()
         source["views"][-1]["baseToNeck"][3] += .03

@@ -5,6 +5,7 @@ import simd
 /// It contains no actuator authority and never declares camera registration.
 struct ROBNeckQRMeasurement: Codable, Equatable {
     static let targetID = "ROB:TABLE:001"
+    static let supportedTargetIDs = [targetID, "ROB:FLOOR:L01", "ROB:FLOOR:R01", "ROB:WALL:R01"]
     static let symbolSideMeters = 0.12
 
     let targetID: String
@@ -17,7 +18,7 @@ struct ROBNeckQRMeasurement: Codable, Equatable {
     let cornersPixels: [[Double]]
     let centerPixel: [Double]
     /// Row-major transforms supplied by the raw articulated model. The
-    /// provisional 7-inch/15-degree display correction must not be applied.
+    /// provisional display correction must not be applied.
     let rawCameraToBase: [Double]
     let baseToNeck: [Double]
     /// Optional diagnostic using raw model geometry, not measured registration.
@@ -32,7 +33,7 @@ struct ROBNeckQRMeasurement: Codable, Equatable {
         case invalidCapture, invalidView, invalidDepth
         var errorDescription: String? {
             switch self {
-            case .wrongTarget: return "The observed QR is not ROB's table calibration target."
+            case .wrongTarget: return "The observed QR is not a supported ROB calibration target."
             case .invalidCorners: return "The QR corners are missing, reversed, outside the image or degenerate."
             case .invalidIntrinsics: return "Aligned depth dimensions or factory camera intrinsics are invalid."
             case .invalidTransform: return "A raw neck/camera transform is not a finite rigid transform."
@@ -49,7 +50,7 @@ struct ROBNeckQRMeasurement: Codable, Equatable {
                      capturedAtMilliseconds: Double, sequence: UInt64,
                      neckPanDegrees: Double, neckUpperTarget: Int,
                      centerDepthMeters: Double? = nil) throws -> Self {
-        guard payload == targetID else { throw MeasurementError.wrongTarget }
+        guard supportedTargetIDs.contains(payload) else { throw MeasurementError.wrongTarget }
         let center = try centerNormalized(of: corners)
         guard (1...32_768).contains(depthWidth), (1...32_768).contains(depthHeight),
               intrinsics.count == 4, intrinsics.allSatisfy(\.isFinite),

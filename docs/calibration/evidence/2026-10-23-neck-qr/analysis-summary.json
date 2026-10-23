@@ -1,0 +1,901 @@
+{
+  "schemaVersion": 1,
+  "status": "diagnostic_unverified",
+  "registrationVerified": false,
+  "calibrationApplied": false,
+  "sources": [
+    {
+      "role": "pixel_geometry_comparison",
+      "filename": "physical-boundary-comparison.json",
+      "sha256": "dc66e034a4a25c34505b2ed04bc348eaf161256b9f1979e0af72638a97d0970c"
+    },
+    {
+      "role": "camera_pipeline_comparison",
+      "filename": "camera_ab_results.json",
+      "sha256": "93597cf022ff454a1fccc59a7b9a8c0bdaa5f96def8fcf4a67b01d7928a4e1f2"
+    },
+    {
+      "role": "shared_neck_fit: Frame K / Vision",
+      "filename": "joint-fit-raw-accepted-subset-recorded-k.json",
+      "sha256": "102f02b40899730cb0d124d0936937684b264db3e27716462d144784c0398406"
+    },
+    {
+      "role": "shared_neck_fit: Frame K / Template",
+      "filename": "joint-fit-refined-accepted-subset-recorded-k.json",
+      "sha256": "d4fe92febd954b2912ea5ec60a16e9c28061ef8c8b216df3ac8413bec7a9a85b"
+    },
+    {
+      "role": "shared_neck_fit: 4K-crop K / Template",
+      "filename": "joint-fit-refined-accepted-subset-legacy-k.json",
+      "sha256": "a2a732e2a708b88aba5a6b03a24d09516df2fcd28296087ffc39d512a7c5e1eb"
+    },
+    {
+      "role": "upper_neck_report: rawVision",
+      "filename": "upper-neck-report-v2.json",
+      "sha256": "b2016068f1194987d2d391caed358efdd1cba0d33895c6cfadbf6bd5221c34cb"
+    },
+    {
+      "role": "upper_neck_report: templateECC",
+      "filename": "6F87-refined-upper-report.json",
+      "sha256": "56c7c64545837cf97235ffc5e07a4ff1d8ae004ed296eb932ffd509f84977a8d"
+    }
+  ],
+  "focusCapture": "B064",
+  "captures": {
+    "6F87": {
+      "label": "Upper-only",
+      "acceptedFrames": 27,
+      "rejectedFrames": 0,
+      "sourceCaptureSHA256": "936f88b0e3e839b2d52e18c508c7ed62a14a36609472d95a6d058a69943f1f74",
+      "refinedCaptureSHA256": "f23a0b1e5f36f9792d4e580d0214360a7e8672d954b6fb269f1a22777e61084f",
+      "repeatability": {
+        "rawVision": {
+          "withinHoldCornerRMSEPixels": 0.313318141393556,
+          "withinHoldCornerP95Pixels": 0.6386458839541966,
+          "repeatPostureVsFirstHoldCornerRMSEPixels": 2.8922854714738175
+        },
+        "templateECC": {
+          "withinHoldCornerRMSEPixels": 0.03348033690988667,
+          "withinHoldCornerP95Pixels": 0.07210365043159704,
+          "repeatPostureVsFirstHoldCornerRMSEPixels": 2.7378464915848144
+        }
+      },
+      "recordedFrameK": [
+        488.8262939453125,
+        488.8262939453125,
+        319.6580810546875,
+        204.7308349609375
+      ],
+      "imageOnlyKAndDepthComparisons": {
+        "freePrincipal": {
+          "K": [
+            427.9486284682069,
+            432.3676228612315,
+            310.93196220697274,
+            252.59475841695385
+          ],
+          "trainRMSPixels": 0.04673359692501556,
+          "heldOutRMSPixels": 0.05024224344466528,
+          "heldOutPnPDepthRangeMeters": [
+            0.5186058733838914,
+            0.576547772759426
+          ],
+          "PnPDepthComparisonCount": 27,
+          "PnPMinusOriginalCenterDepthRMSEMeters": 0.13180551844179242,
+          "PnPMinusOriginalCenterDepthMedianMeters": -0.1352662698775159
+        },
+        "fixedPrincipal": {
+          "K": [
+            454.8802348427732,
+            437.78041890868315,
+            319.6580810546875,
+            204.7308349609375
+          ],
+          "trainRMSPixels": 0.06999081722612226,
+          "heldOutRMSPixels": 0.07761818205940844,
+          "heldOutPnPDepthRangeMeters": [
+            0.5508837544575006,
+            0.6124005430624385
+          ],
+          "PnPDepthComparisonCount": 27,
+          "PnPMinusOriginalCenterDepthRMSEMeters": 0.09745929290619144,
+          "PnPMinusOriginalCenterDepthMedianMeters": -0.10068243026411805
+        },
+        "fixedAspect": {
+          "K": [
+            434.21973424220585,
+            434.21973424220585,
+            310.9663079792655,
+            241.81208353186935
+          ],
+          "trainRMSPixels": 0.04711426930117054,
+          "heldOutRMSPixels": 0.05111707330946663,
+          "heldOutPnPDepthRangeMeters": [
+            0.5261902545537904,
+            0.5849707604157903
+          ],
+          "PnPDepthComparisonCount": 27,
+          "PnPMinusOriginalCenterDepthRMSEMeters": 0.1237326928340901,
+          "PnPMinusOriginalCenterDepthMedianMeters": -0.1271397958470074
+        },
+        "metadataK": {
+          "K": [
+            488.8262939453125,
+            488.8262939453125,
+            319.6580810546875,
+            204.7308349609375
+          ],
+          "trainingPnPReprojectionRMSPixels": 0.1144603470275688,
+          "heldOutPnPReprojectionRMSPixels": 0.09675080945372924,
+          "PnPDepthComparisonCount": 27,
+          "PnPMinusOriginalCenterDepthRMSEMeters": 0.053921161205767634,
+          "PnPMinusOriginalCenterDepthMedianMeters": -0.05673382540044136
+        }
+      },
+      "intrinsicSensitivity": {
+        "parameterOrder": [
+          "fx",
+          "fy",
+          "cx",
+          "cy"
+        ],
+        "median": [
+          441.7268722866014,
+          431.3765812026377,
+          309.92032550101254,
+          224.6689414555904
+        ],
+        "p05": [
+          420.31231138050185,
+          419.71135548797224,
+          302.8983227382901,
+          182.02565450972048
+        ],
+        "p95": [
+          461.37172998571384,
+          453.1334204276825,
+          316.40515108895926,
+          270.80527664840844
+        ],
+        "scope": "Sample one observed image per posture then add independent0.1px corner perturbation; diagnostic sensitivity, not a confidence interval."
+      }
+    },
+    "B064": {
+      "label": "Mixed-neck",
+      "acceptedFrames": 82,
+      "rejectedFrames": 2,
+      "sourceCaptureSHA256": "9f8ee5c36d492f405fba9bdc6bf3636babdc988011b02053d15853306743b8da",
+      "refinedCaptureSHA256": "26ca283607c8fe4d9dc5182be02b6f9b1c1675b15490da8ca858fb0f30458dd8",
+      "repeatability": {
+        "rawVision": {
+          "withinHoldCornerRMSEPixels": 0.42427241671161947,
+          "withinHoldCornerP95Pixels": 0.9637516104020881,
+          "repeatPostureVsFirstHoldCornerRMSEPixels": 2.169557741199041
+        },
+        "templateECC": {
+          "withinHoldCornerRMSEPixels": 0.032546556200627186,
+          "withinHoldCornerP95Pixels": 0.06598435954820206,
+          "repeatPostureVsFirstHoldCornerRMSEPixels": 1.7663544619928027
+        }
+      },
+      "recordedFrameK": [
+        488.8262939453125,
+        488.8262939453125,
+        319.6580810546875,
+        204.7308349609375
+      ],
+      "imageOnlyKAndDepthComparisons": {
+        "freePrincipal": {
+          "K": [
+            458.5460507249246,
+            436.80772543710805,
+            313.6845412379827,
+            200.07280152617747
+          ],
+          "trainRMSPixels": 0.06629067662196647,
+          "heldOutRMSPixels": 0.06655633367021828,
+          "heldOutPnPDepthRangeMeters": [
+            0.531255551508565,
+            0.6449210581410001
+          ],
+          "PnPDepthComparisonCount": 81,
+          "PnPMinusOriginalCenterDepthRMSEMeters": 0.0888995679240004,
+          "PnPMinusOriginalCenterDepthMedianMeters": -0.08717220115399293
+        },
+        "fixedPrincipal": {
+          "K": [
+            450.5223287629644,
+            427.79303944838585,
+            319.6580810546875,
+            204.7308349609375
+          ],
+          "trainRMSPixels": 0.07579489011065212,
+          "heldOutRMSPixels": 0.0771002978665869,
+          "heldOutPnPDepthRangeMeters": [
+            0.5217661386797225,
+            0.6334804362316494
+          ],
+          "PnPDepthComparisonCount": 81,
+          "PnPMinusOriginalCenterDepthRMSEMeters": 0.09918368241017297,
+          "PnPMinusOriginalCenterDepthMedianMeters": -0.09868169741289123
+        },
+        "fixedAspect": {
+          "K": [
+            426.34443517525193,
+            426.34443517525193,
+            313.48322508654246,
+            252.17068963644488
+          ],
+          "trainRMSPixels": 0.0669046401698271,
+          "heldOutRMSPixels": 0.06731603093697787,
+          "heldOutPnPDepthRangeMeters": [
+            0.49402776355361655,
+            0.5997825298010562
+          ],
+          "PnPDepthComparisonCount": 81,
+          "PnPMinusOriginalCenterDepthRMSEMeters": 0.1294016907489178,
+          "PnPMinusOriginalCenterDepthMedianMeters": -0.1275679685112886
+        },
+        "metadataK": {
+          "K": [
+            488.8262939453125,
+            488.8262939453125,
+            319.6580810546875,
+            204.7308349609375
+          ],
+          "trainingPnPReprojectionRMSPixels": 0.10004902339442732,
+          "heldOutPnPReprojectionRMSPixels": 0.0967518779678716,
+          "PnPDepthComparisonCount": 81,
+          "PnPMinusOriginalCenterDepthRMSEMeters": 0.05139864018349711,
+          "PnPMinusOriginalCenterDepthMedianMeters": -0.05107405401787224
+        }
+      },
+      "intrinsicSensitivity": {
+        "parameterOrder": [
+          "fx",
+          "fy",
+          "cx",
+          "cy"
+        ],
+        "median": [
+          456.0464098866193,
+          436.8332993959941,
+          313.85874091078415,
+          208.91497740785408
+        ],
+        "p05": [
+          431.3316220993971,
+          427.38721874112866,
+          310.58780120157707,
+          149.2314155004434
+        ],
+        "p95": [
+          493.5752731450594,
+          451.6334265777803,
+          316.72188836087173,
+          252.98355205001835
+        ],
+        "scope": "Sample one observed image per posture then add independent0.1px corner perturbation; diagnostic sensitivity, not a confidence interval."
+      }
+    },
+    "C04": {
+      "label": "Earlier-pan/tilt",
+      "acceptedFrames": 35,
+      "rejectedFrames": 1,
+      "sourceCaptureSHA256": "0a1531e2fdd444fbb7ba3921939a4a821635ac4eeb568fe140d812a5e29ec9f2",
+      "refinedCaptureSHA256": "f2e554d0e5c64cbd1c727872c887de9fcc5c013463776616119e5c90b1d79fa4",
+      "repeatability": {
+        "rawVision": {
+          "withinHoldCornerRMSEPixels": 0.36616513859130134,
+          "withinHoldCornerP95Pixels": 0.9445703112306875,
+          "repeatPostureVsFirstHoldCornerRMSEPixels": null
+        },
+        "templateECC": {
+          "withinHoldCornerRMSEPixels": 0.05369050638243614,
+          "withinHoldCornerP95Pixels": 0.17113188971453225,
+          "repeatPostureVsFirstHoldCornerRMSEPixels": null
+        }
+      },
+      "recordedFrameK": [
+        488.8262939453125,
+        488.8262939453125,
+        319.6580810546875,
+        204.7308349609375
+      ],
+      "imageOnlyKAndDepthComparisons": {
+        "freePrincipal": {
+          "K": [
+            455.0400488328197,
+            448.5747938243879,
+            314.97564813396366,
+            217.95888756293718
+          ],
+          "trainRMSPixels": 0.08111988570672982,
+          "heldOutRMSPixels": 0.08254510069578182,
+          "heldOutPnPDepthRangeMeters": [
+            0.5312912872384118,
+            0.6188264326653444
+          ],
+          "PnPDepthComparisonCount": 35,
+          "PnPMinusOriginalCenterDepthRMSEMeters": 0.09935181214472388,
+          "PnPMinusOriginalCenterDepthMedianMeters": -0.09797618113715734
+        },
+        "fixedPrincipal": {
+          "K": [
+            460.831365909486,
+            447.1020230259498,
+            319.6580810546875,
+            204.7308349609375
+          ],
+          "trainRMSPixels": 0.08764269006675546,
+          "heldOutRMSPixels": 0.09058281318432213,
+          "heldOutPnPDepthRangeMeters": [
+            0.5368540565665066,
+            0.6269988277995298
+          ],
+          "PnPDepthComparisonCount": 35,
+          "PnPMinusOriginalCenterDepthRMSEMeters": 0.09211615525491712,
+          "PnPMinusOriginalCenterDepthMedianMeters": -0.09158459745036673
+        },
+        "fixedAspect": {
+          "K": [
+            445.143599489149,
+            445.143599489149,
+            315.0897962343548,
+            234.490632308845
+          ],
+          "trainRMSPixels": 0.08033294950515099,
+          "heldOutRMSPixels": 0.0818188554041571,
+          "heldOutPnPDepthRangeMeters": [
+            0.5196561856294153,
+            0.6054000323161357
+          ],
+          "PnPDepthComparisonCount": 35,
+          "PnPMinusOriginalCenterDepthRMSEMeters": 0.11185113710606201,
+          "PnPMinusOriginalCenterDepthMedianMeters": -0.11054630888178874
+        },
+        "metadataK": {
+          "K": [
+            488.8262939453125,
+            488.8262939453125,
+            319.6580810546875,
+            204.7308349609375
+          ],
+          "trainingPnPReprojectionRMSPixels": 0.1267950877269892,
+          "heldOutPnPReprojectionRMSPixels": 0.12995772274047945,
+          "PnPDepthComparisonCount": 35,
+          "PnPMinusOriginalCenterDepthRMSEMeters": 0.05755418944272033,
+          "PnPMinusOriginalCenterDepthMedianMeters": -0.058081861049281036
+        }
+      },
+      "intrinsicSensitivity": {
+        "parameterOrder": [
+          "fx",
+          "fy",
+          "cx",
+          "cy"
+        ],
+        "median": [
+          451.06498739550614,
+          444.85823451429275,
+          315.82017571562113,
+          227.0625033920075
+        ],
+        "p05": [
+          435.17740177696845,
+          434.3439516267045,
+          310.4513206018739,
+          193.80639698506835
+        ],
+        "p95": [
+          467.96449441055137,
+          463.3582674039439,
+          317.8738796612289,
+          242.8388237751134
+        ],
+        "scope": "Sample one observed image per posture then add independent0.1px corner perturbation; diagnostic sensitivity, not a confidence interval."
+      }
+    }
+  },
+  "jointFits": [
+    {
+      "label": "Frame K / Vision",
+      "trainingReprojectionRMSEPixels": 3.6393636611664553,
+      "heldOutReprojectionRMSEPixels": 3.556609078436537,
+      "gains": {
+        "pan": 1.6623777507766881,
+        "lower": 1.9077803232024946,
+        "upper": 2.037403240052394
+      },
+      "gauge": {
+        "fixedLowerZeroTarget": 6011,
+        "fixedUpperZeroTarget": 6906,
+        "fixedPanZeroDegrees": 0.0,
+        "zerosAreMeasured": false,
+        "note": "Command zeros are fixed conventions. Camera mounting and target pose absorb zero offsets; no unique hardware zeros are inferred."
+      },
+      "analysisInput": {
+        "cornerVariant": "raw-accepted-subset",
+        "intrinsicsVariant": "recorded",
+        "samples": 82,
+        "rawCaptureSHA256": "9f8ee5c36d492f405fba9bdc6bf3636babdc988011b02053d15853306743b8da",
+        "refinedCaptureSHA256": "26ca283607c8fe4d9dc5182be02b6f9b1c1675b15490da8ca858fb0f30458dd8",
+        "rawCaptureUnmodified": true
+      },
+      "registrationVerified": false
+    },
+    {
+      "label": "Frame K / Template",
+      "trainingReprojectionRMSEPixels": 3.4763538613339753,
+      "heldOutReprojectionRMSEPixels": 3.4553041900085066,
+      "gains": {
+        "pan": 1.6608415893237707,
+        "lower": 1.9125915881576558,
+        "upper": 2.037228815623262
+      },
+      "gauge": {
+        "fixedLowerZeroTarget": 6011,
+        "fixedUpperZeroTarget": 6906,
+        "fixedPanZeroDegrees": 0.0,
+        "zerosAreMeasured": false,
+        "note": "Command zeros are fixed conventions. Camera mounting and target pose absorb zero offsets; no unique hardware zeros are inferred."
+      },
+      "analysisInput": {
+        "cornerVariant": "refined-accepted-subset",
+        "intrinsicsVariant": "recorded",
+        "samples": 82,
+        "rawCaptureSHA256": "9f8ee5c36d492f405fba9bdc6bf3636babdc988011b02053d15853306743b8da",
+        "refinedCaptureSHA256": "26ca283607c8fe4d9dc5182be02b6f9b1c1675b15490da8ca858fb0f30458dd8",
+        "rawCaptureUnmodified": true
+      },
+      "registrationVerified": false
+    },
+    {
+      "label": "4K-crop K / Template",
+      "trainingReprojectionRMSEPixels": 3.054573992777408,
+      "heldOutReprojectionRMSEPixels": 3.167965365922847,
+      "gains": {
+        "pan": 1.5251469016620618,
+        "lower": 1.8115925115105809,
+        "upper": 1.8967832708306256
+      },
+      "gauge": {
+        "fixedLowerZeroTarget": 6011,
+        "fixedUpperZeroTarget": 6906,
+        "fixedPanZeroDegrees": 0.0,
+        "zerosAreMeasured": false,
+        "note": "Command zeros are fixed conventions. Camera mounting and target pose absorb zero offsets; no unique hardware zeros are inferred."
+      },
+      "analysisInput": {
+        "cornerVariant": "refined-accepted-subset",
+        "intrinsicsVariant": "legacy",
+        "samples": 82,
+        "rawCaptureSHA256": "9f8ee5c36d492f405fba9bdc6bf3636babdc988011b02053d15853306743b8da",
+        "refinedCaptureSHA256": "26ca283607c8fe4d9dc5182be02b6f9b1c1675b15490da8ca858fb0f30458dd8",
+        "rawCaptureUnmodified": true
+      },
+      "registrationVerified": false
+    }
+  ],
+  "cameraModes": {
+    "imagealign-undistorted": {
+      "frames": 10,
+      "RGBPnPMeanZMeters": 0.6326359617934545,
+      "RGBPnPFrameStdZMeters": 2.6259617803148694e-05,
+      "alignedDepthPlaneMeanZMeters": 0.6831794448605174,
+      "alignedDepthPlaneFrameStdZMeters": 0.000528619921040652,
+      "RGBMinusDepthMeanMeters": -0.050543483067062855,
+      "RGBMinusDepthRMSEMeters": 0.05054629301292385
+    },
+    "stereo-calibrated-baseline": {
+      "frames": 10,
+      "RGBPnPMeanZMeters": 0.6326179535941683,
+      "RGBPnPFrameStdZMeters": 9.198523478415372e-05,
+      "alignedDepthPlaneMeanZMeters": 0.6745480872031135,
+      "alignedDepthPlaneFrameStdZMeters": 0.0004034059300445844,
+      "RGBMinusDepthMeanMeters": -0.0419301336089453,
+      "RGBMinusDepthRMSEMeters": 0.04193141494103491
+    },
+    "stereo-robotics-fullmono": {
+      "frames": 10,
+      "RGBPnPMeanZMeters": 0.6327780147080833,
+      "RGBPnPFrameStdZMeters": 0.00012621009439943353,
+      "alignedDepthPlaneMeanZMeters": 0.6757176059941772,
+      "alignedDepthPlaneFrameStdZMeters": 0.00021072067067255432,
+      "RGBMinusDepthMeanMeters": -0.04293959128609394,
+      "RGBMinusDepthRMSEMeters": 0.04293975260503458
+    },
+    "stereo-fastaccuracy-fullmono": {
+      "frames": 10,
+      "RGBPnPMeanZMeters": 0.6328465634919432,
+      "RGBPnPFrameStdZMeters": 0.0001232291369873229,
+      "alignedDepthPlaneMeanZMeters": 0.6752739798331466,
+      "alignedDepthPlaneFrameStdZMeters": 0.00018867894287932758,
+      "RGBMinusDepthMeanMeters": -0.04242741634120335,
+      "RGBMinusDepthRMSEMeters": 0.04242760424351647
+    },
+    "stereo-undistorted": {
+      "frames": 10,
+      "RGBPnPMeanZMeters": 0.6326419765170684,
+      "RGBPnPFrameStdZMeters": 2.538409468690589e-05,
+      "alignedDepthPlaneMeanZMeters": 0.6742752644581088,
+      "alignedDepthPlaneFrameStdZMeters": 0.00040872131512594077,
+      "RGBMinusDepthMeanMeters": -0.041633287941040376,
+      "RGBMinusDepthRMSEMeters": 0.04163510498697825
+    },
+    "stereo-native": {
+      "frames": 10,
+      "RGBPnPMeanZMeters": 0.6327009420791347,
+      "RGBPnPFrameStdZMeters": 2.758904213755432e-05,
+      "alignedDepthPlaneMeanZMeters": 0.6743651009881492,
+      "alignedDepthPlaneFrameStdZMeters": 0.00036278678048761267,
+      "RGBMinusDepthMeanMeters": -0.04166415890901448,
+      "RGBMinusDepthRMSEMeters": 0.041665574601091826
+    },
+    "imagealign-native": {
+      "frames": 10,
+      "RGBPnPMeanZMeters": 0.6326959622677009,
+      "RGBPnPFrameStdZMeters": 1.7261433627357708e-05,
+      "alignedDepthPlaneMeanZMeters": 0.6833009291625722,
+      "alignedDepthPlaneFrameStdZMeters": 0.0004254112737083147,
+      "RGBMinusDepthMeanMeters": -0.05060496689487134,
+      "RGBMinusDepthRMSEMeters": 0.0506067676511443
+    },
+    "stereo-fastaccuracy": {
+      "frames": 10,
+      "RGBPnPMeanZMeters": 0.6327676007913906,
+      "RGBPnPFrameStdZMeters": 0.0001277071178137181,
+      "alignedDepthPlaneMeanZMeters": 0.6705553695265256,
+      "alignedDepthPlaneFrameStdZMeters": 0.0007930645972509542,
+      "RGBMinusDepthMeanMeters": -0.03778776873513501,
+      "RGBMinusDepthRMSEMeters": 0.037797485103296356
+    }
+  },
+  "plotSoftware": {
+    "matplotlib": "3.9.4",
+    "numpy": "2.0.2"
+  },
+  "cameraModePlotOrder": [
+    "imagealign-native",
+    "imagealign-undistorted",
+    "stereo-native",
+    "stereo-undistorted"
+  ],
+  "upperNeck": {
+    "rawVision": {
+      "holdCount": 9,
+      "sampleCount": 27,
+      "panDegrees": 2.34000000000234,
+      "lowerTarget": 6011,
+      "angleScaleCandidates": {
+        "status": "diagnostic_only",
+        "candidateURDFReady": false,
+        "zeroAndMountOffsetIdentifiable": false,
+        "qrPitch": {
+          "status": "candidate_unverified",
+          "candidateURDFReady": false,
+          "uniqueTrainingTargetCount": 5,
+          "targetSpanUnits": 300,
+          "minimumUniqueTrainingTargets": 3,
+          "minimumReturnHolds": 2,
+          "minimumSpanTargetUnits": 100,
+          "trainingHoldIndices": [
+            0,
+            1,
+            2,
+            5,
+            6
+          ],
+          "heldOutReturnHoldIndices": [
+            3,
+            4,
+            7,
+            8
+          ],
+          "nominalDegreesPerTargetUnitPrior": 0.03,
+          "nominalPriorIsMeasured": false,
+          "zeroAndMountOffsetIdentifiable": false,
+          "referenceUpperTarget": 6033,
+          "diagnosticAngleAtReferenceDegrees": 0.020549323131001235,
+          "degreesPerTargetUnit": 0.05670380413091744,
+          "gainRelativeToNominalPrior": 1.8901268043639148,
+          "trainingRMSEDegrees": 0.2059162438928717,
+          "heldOutReturnRMSEDegrees": 0.5152862565758362,
+          "heldOutReturnResidualsDegrees": [
+            -0.7587066545563337,
+            0.05258727669196367,
+            0.03053219502913951,
+            -0.6947994535062008
+          ],
+          "heldOutValidationAvailable": true
+        },
+        "depthPlanePitch": {
+          "status": "candidate_unverified",
+          "candidateURDFReady": false,
+          "uniqueTrainingTargetCount": 5,
+          "targetSpanUnits": 300,
+          "minimumUniqueTrainingTargets": 3,
+          "minimumReturnHolds": 2,
+          "minimumSpanTargetUnits": 100,
+          "trainingHoldIndices": [
+            0,
+            1,
+            2,
+            5,
+            6
+          ],
+          "heldOutReturnHoldIndices": [
+            3,
+            4,
+            7,
+            8
+          ],
+          "nominalDegreesPerTargetUnitPrior": 0.03,
+          "nominalPriorIsMeasured": false,
+          "zeroAndMountOffsetIdentifiable": false,
+          "referenceUpperTarget": 6033,
+          "diagnosticAngleAtReferenceDegrees": 42.96671072102076,
+          "degreesPerTargetUnit": 0.056489857593389904,
+          "gainRelativeToNominalPrior": 1.882995253112997,
+          "trainingRMSEDegrees": 0.8465682435121515,
+          "heldOutReturnRMSEDegrees": 0.5328821890557673,
+          "heldOutReturnResidualsDegrees": [
+            -0.6233242506547612,
+            -0.8024185197369746,
+            -0.2955350292205736,
+            -0.12690214294433133
+          ],
+          "heldOutValidationAvailable": true
+        },
+        "limitations": [
+          "Only first visits train the line; return visits are held out.",
+          "The 0.03 degree/target value is a nominal comparison prior, not measured calibration.",
+          "QR and depth angles share intrinsics; agreement is not independent validation.",
+          "A single upper-neck sweep cannot identify camera mount offset separately from servo zero.",
+          "No gain, zero offset, URDF or registration change is applied."
+        ],
+        "protractorPitch": {
+          "status": "unavailable",
+          "candidateURDFReady": false,
+          "reason": "Need at least three measured first-visit targets using one stated protractor reference."
+        }
+      },
+      "holds": [
+        {
+          "stepIndex": 0,
+          "upperTarget": 6033,
+          "sampleCount": 3,
+          "qrInferredCameraPitchChangeDegrees": -0.0
+        },
+        {
+          "stepIndex": 1,
+          "upperTarget": 5958,
+          "sampleCount": 3,
+          "qrInferredCameraPitchChangeDegrees": -3.8573575517390712
+        },
+        {
+          "stepIndex": 2,
+          "upperTarget": 5883,
+          "sampleCount": 3,
+          "qrInferredCameraPitchChangeDegrees": -8.742534910390221
+        },
+        {
+          "stepIndex": 3,
+          "upperTarget": 5958,
+          "sampleCount": 3,
+          "qrInferredCameraPitchChangeDegrees": -4.990942641244141
+        },
+        {
+          "stepIndex": 4,
+          "upperTarget": 6033,
+          "sampleCount": 3,
+          "qrInferredCameraPitchChangeDegrees": 0.0731365998229649
+        },
+        {
+          "stepIndex": 5,
+          "upperTarget": 6108,
+          "sampleCount": 3,
+          "qrInferredCameraPitchChangeDegrees": 4.2198524299000235
+        },
+        {
+          "stepIndex": 6,
+          "upperTarget": 6183,
+          "sampleCount": 3,
+          "qrInferredCameraPitchChangeDegrees": 8.482786647884275
+        },
+        {
+          "stepIndex": 7,
+          "upperTarget": 6108,
+          "sampleCount": 3,
+          "qrInferredCameraPitchChangeDegrees": 4.303866827978949
+        },
+        {
+          "stepIndex": 8,
+          "upperTarget": 6033,
+          "sampleCount": 3,
+          "qrInferredCameraPitchChangeDegrees": -0.6742501303751995
+        }
+      ],
+      "warnings": [
+        "QR-derived angles depend on RGB intrinsics, corner correspondence and fixed target placement.",
+        "Inferred pitch assumes the upper-neck rotation is about optical X; camera pitch is positive nose-up. Protractor changes require the same reference as the first hold.",
+        "Accepted servo targets are not measured shaft feedback; no servo gain or registration was applied.",
+        "Plane inclination uses the raw model/base or explicitly recorded display correction, not measured gravity.",
+        "Depth is fitted only within the QR interior; this does not flatten or certify the full table or floor."
+      ]
+    },
+    "templateECC": {
+      "holdCount": 9,
+      "sampleCount": 27,
+      "panDegrees": 2.34000000000234,
+      "lowerTarget": 6011,
+      "angleScaleCandidates": {
+        "status": "diagnostic_only",
+        "candidateURDFReady": false,
+        "zeroAndMountOffsetIdentifiable": false,
+        "qrPitch": {
+          "status": "candidate_unverified",
+          "candidateURDFReady": false,
+          "uniqueTrainingTargetCount": 5,
+          "targetSpanUnits": 300,
+          "minimumUniqueTrainingTargets": 3,
+          "minimumReturnHolds": 2,
+          "minimumSpanTargetUnits": 100,
+          "trainingHoldIndices": [
+            0,
+            1,
+            2,
+            5,
+            6
+          ],
+          "heldOutReturnHoldIndices": [
+            3,
+            4,
+            7,
+            8
+          ],
+          "nominalDegreesPerTargetUnitPrior": 0.03,
+          "nominalPriorIsMeasured": false,
+          "zeroAndMountOffsetIdentifiable": false,
+          "referenceUpperTarget": 6033,
+          "diagnosticAngleAtReferenceDegrees": -0.3054931003923494,
+          "degreesPerTargetUnit": 0.05544062054441616,
+          "gainRelativeToNominalPrior": 1.848020684813872,
+          "trainingRMSEDegrees": 0.20788506767191642,
+          "heldOutReturnRMSEDegrees": 0.2915996513720912,
+          "heldOutReturnResidualsDegrees": [
+            -0.1934540340916424,
+            0.07508519591278653,
+            0.3571528947861977,
+            0.41170497509205284
+          ],
+          "heldOutValidationAvailable": true
+        },
+        "depthPlanePitch": {
+          "status": "candidate_unverified",
+          "candidateURDFReady": false,
+          "uniqueTrainingTargetCount": 5,
+          "targetSpanUnits": 300,
+          "minimumUniqueTrainingTargets": 3,
+          "minimumReturnHolds": 2,
+          "minimumSpanTargetUnits": 100,
+          "trainingHoldIndices": [
+            0,
+            1,
+            2,
+            5,
+            6
+          ],
+          "heldOutReturnHoldIndices": [
+            3,
+            4,
+            7,
+            8
+          ],
+          "nominalDegreesPerTargetUnitPrior": 0.03,
+          "nominalPriorIsMeasured": false,
+          "zeroAndMountOffsetIdentifiable": false,
+          "referenceUpperTarget": 6033,
+          "diagnosticAngleAtReferenceDegrees": 42.9352936908719,
+          "degreesPerTargetUnit": 0.05623716430753558,
+          "gainRelativeToNominalPrior": 1.8745721435845193,
+          "trainingRMSEDegrees": 0.8721859716626176,
+          "heldOutReturnRMSEDegrees": 0.494865183601396,
+          "heldOutReturnResidualsDegrees": [
+            -0.5631926914145495,
+            -0.7671438982042744,
+            -0.2489545705448677,
+            0.10905069166850723
+          ],
+          "heldOutValidationAvailable": true
+        },
+        "limitations": [
+          "Only first visits train the line; return visits are held out.",
+          "The 0.03 degree/target value is a nominal comparison prior, not measured calibration.",
+          "QR and depth angles share intrinsics; agreement is not independent validation.",
+          "A single upper-neck sweep cannot identify camera mount offset separately from servo zero.",
+          "No gain, zero offset, URDF or registration change is applied."
+        ],
+        "protractorPitch": {
+          "status": "unavailable",
+          "candidateURDFReady": false,
+          "reason": "Need at least three measured first-visit targets using one stated protractor reference."
+        }
+      },
+      "holds": [
+        {
+          "stepIndex": 0,
+          "upperTarget": 6033,
+          "sampleCount": 3,
+          "qrInferredCameraPitchChangeDegrees": -0.0
+        },
+        {
+          "stepIndex": 1,
+          "upperTarget": 5958,
+          "sampleCount": 3,
+          "qrInferredCameraPitchChangeDegrees": -4.305801997315946
+        },
+        {
+          "stepIndex": 2,
+          "upperTarget": 5883,
+          "sampleCount": 3,
+          "qrInferredCameraPitchChangeDegrees": -8.884138260562326
+        },
+        {
+          "stepIndex": 3,
+          "upperTarget": 5958,
+          "sampleCount": 3,
+          "qrInferredCameraPitchChangeDegrees": -4.656993675315205
+        },
+        {
+          "stepIndex": 4,
+          "upperTarget": 6033,
+          "sampleCount": 3,
+          "qrInferredCameraPitchChangeDegrees": -0.23040790447956286
+        },
+        {
+          "stepIndex": 5,
+          "upperTarget": 6108,
+          "sampleCount": 3,
+          "qrInferredCameraPitchChangeDegrees": 3.81856262196153
+        },
+        {
+          "stepIndex": 6,
+          "upperTarget": 6183,
+          "sampleCount": 3,
+          "qrInferredCameraPitchChangeDegrees": 7.843912133954995
+        },
+        {
+          "stepIndex": 7,
+          "upperTarget": 6108,
+          "sampleCount": 3,
+          "qrInferredCameraPitchChangeDegrees": 4.209706335225061
+        },
+        {
+          "stepIndex": 8,
+          "upperTarget": 6033,
+          "sampleCount": 3,
+          "qrInferredCameraPitchChangeDegrees": 0.10621187469970345
+        }
+      ],
+      "warnings": [
+        "QR-derived angles depend on RGB intrinsics, corner correspondence and fixed target placement.",
+        "Inferred pitch assumes the upper-neck rotation is about optical X; camera pitch is positive nose-up. Protractor changes require the same reference as the first hold.",
+        "Accepted servo targets are not measured shaft feedback; no servo gain or registration was applied.",
+        "Plane inclination uses the raw model/base or explicitly recorded display correction, not measured gravity.",
+        "Depth is fitted only within the QR interior; this does not flatten or certify the full table or floor."
+      ]
+    }
+  },
+  "limitations": [
+    "No parameter, URDF, camera-to-arm registration or servo calibration is applied by this analysis.",
+    "Raw observations are accepted neck command estimates, not measured shaft angles.",
+    "A per-image PnP fit estimates a separate pose for each image. A shared neck fit must explain all command poses. These residuals are different quantities.",
+    "Within-hold scatter and repeated commanded-pose differences measure repeatability, not absolute accuracy. Some held-out frames repeat previously observed postures.",
+    "Intrinsic perturbation spans are a sensitivity experiment, not confidence intervals or a replacement camera calibration.",
+    "Frame-to-frame distance standard deviations do not bound systematic distance error.",
+    "The alternative 4K-crop intrinsic hypothesis is a sensitivity comparison; a smaller model residual does not make its framing correct.",
+    "Upper servo zero and camera mounting rotation are exactly coupled without an independent mechanical reference. Lower zero also couples to an unknown world/base target pose.",
+    "All source images, raw depth and corner coordinates remain private; only aggregate metrics and input hashes are published."
+  ]
+}

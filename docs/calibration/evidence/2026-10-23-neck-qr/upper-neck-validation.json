@@ -1,0 +1,243 @@
+{
+  "schemaVersion": 1,
+  "updatedUTC": "2026-10-23T17:59:26.971758+00:00",
+  "sourceParentCommit": "b7078a3",
+  "isolatedBuildArchiveBase": "6d45d08",
+  "physicalCaptureBinarySHA256": "be12f036a1ebb62d5476823349a9d6bff28a16810386b6363b160f037d7d4d41",
+  "operatorReferences": {
+    "torsoEdgeToBlueTapeEdgeMeters": 0.19,
+    "source": "Operator corrected 19 mm to 190 mm; distance starts at torso edge, not camera or modeled base origin.",
+    "measuredReferencePoseKnown": false,
+    "depthTowardRobotMeters": 0.1016,
+    "cameraDownwardPitchDegrees": 15,
+    "displayCorrectionWasChangedByOperator": true,
+    "protractorReadingsReceived": false
+  },
+  "upperNeckCapture": {
+    "captureID": "6F87B679-371C-42F6-8047-10D85931B260",
+    "captureSHA256": "936f88b0e3e839b2d52e18c508c7ed62a14a36609472d95a6d058a69943f1f74",
+    "reportSHA256": "b2016068f1194987d2d391caed358efdd1cba0d33895c6cfadbf6bd5221c34cb",
+    "holdCount": 9,
+    "sampleCount": 27,
+    "panDegrees": 2.34000000000234,
+    "lowerTarget": 6011,
+    "upperTargetsInOrder": [
+      6033,
+      5958,
+      5883,
+      5958,
+      6033,
+      6108,
+      6183,
+      6108,
+      6033
+    ],
+    "repeatedTargets": [
+      {
+        "upperTarget": 5958,
+        "holdIndices": [
+          1,
+          3
+        ],
+        "maximumCenterDifferencePixels": 3.1005178112544223,
+        "maximumQRRotationDifferenceDegrees": 1.870224168874322,
+        "maximumDepthDifferenceMeters": 0.0010000000000000009
+      },
+      {
+        "upperTarget": 6033,
+        "holdIndices": [
+          0,
+          4,
+          8
+        ],
+        "maximumCenterDifferencePixels": 2.7449839798996405,
+        "maximumQRRotationDifferenceDegrees": 0.8022169396092365,
+        "maximumDepthDifferenceMeters": 0.006999999999999895
+      },
+      {
+        "upperTarget": 6108,
+        "holdIndices": [
+          5,
+          7
+        ],
+        "maximumCenterDifferencePixels": 4.008308034297573,
+        "maximumQRRotationDifferenceDegrees": 0.10350034369346314,
+        "maximumDepthDifferenceMeters": 0.0020000000000000018
+      }
+    ],
+    "relativeQRCameraPitchChangesDegrees": [
+      -0.0,
+      -3.8573575517390712,
+      -8.742534910390221,
+      -4.990942641244141,
+      0.0731365998229649,
+      4.2198524299000235,
+      8.482786647884275,
+      4.303866827978949,
+      -0.6742501303751995
+    ],
+    "registrationVerified": false,
+    "angleScaleCandidates": {
+      "status": "diagnostic_only",
+      "candidateURDFReady": false,
+      "zeroAndMountOffsetIdentifiable": false,
+      "qrPitch": {
+        "status": "candidate_unverified",
+        "candidateURDFReady": false,
+        "uniqueTrainingTargetCount": 5,
+        "targetSpanUnits": 300,
+        "minimumUniqueTrainingTargets": 3,
+        "minimumReturnHolds": 2,
+        "minimumSpanTargetUnits": 100,
+        "trainingHoldIndices": [
+          0,
+          1,
+          2,
+          5,
+          6
+        ],
+        "heldOutReturnHoldIndices": [
+          3,
+          4,
+          7,
+          8
+        ],
+        "nominalDegreesPerTargetUnitPrior": 0.03,
+        "nominalPriorIsMeasured": false,
+        "zeroAndMountOffsetIdentifiable": false,
+        "referenceUpperTarget": 6033,
+        "diagnosticAngleAtReferenceDegrees": 0.020549323131001235,
+        "degreesPerTargetUnit": 0.05670380413091744,
+        "gainRelativeToNominalPrior": 1.8901268043639148,
+        "trainingRMSEDegrees": 0.2059162438928717,
+        "heldOutReturnRMSEDegrees": 0.5152862565758362,
+        "heldOutReturnResidualsDegrees": [
+          -0.7587066545563337,
+          0.05258727669196367,
+          0.03053219502913951,
+          -0.6947994535062008
+        ],
+        "heldOutValidationAvailable": true
+      },
+      "depthPlanePitch": {
+        "status": "candidate_unverified",
+        "candidateURDFReady": false,
+        "uniqueTrainingTargetCount": 5,
+        "targetSpanUnits": 300,
+        "minimumUniqueTrainingTargets": 3,
+        "minimumReturnHolds": 2,
+        "minimumSpanTargetUnits": 100,
+        "trainingHoldIndices": [
+          0,
+          1,
+          2,
+          5,
+          6
+        ],
+        "heldOutReturnHoldIndices": [
+          3,
+          4,
+          7,
+          8
+        ],
+        "nominalDegreesPerTargetUnitPrior": 0.03,
+        "nominalPriorIsMeasured": false,
+        "zeroAndMountOffsetIdentifiable": false,
+        "referenceUpperTarget": 6033,
+        "diagnosticAngleAtReferenceDegrees": 42.96671072102076,
+        "degreesPerTargetUnit": 0.056489857593389904,
+        "gainRelativeToNominalPrior": 1.882995253112997,
+        "trainingRMSEDegrees": 0.8465682435121515,
+        "heldOutReturnRMSEDegrees": 0.5328821890557673,
+        "heldOutReturnResidualsDegrees": [
+          -0.6233242506547612,
+          -0.8024185197369746,
+          -0.2955350292205736,
+          -0.12690214294433133
+        ],
+        "heldOutValidationAvailable": true
+      },
+      "limitations": [
+        "Only first visits train the line; return visits are held out.",
+        "The 0.03 degree/target value is a nominal comparison prior, not measured calibration.",
+        "QR and depth angles share intrinsics; agreement is not independent validation.",
+        "A single upper-neck sweep cannot identify camera mount offset separately from servo zero.",
+        "No gain, zero offset, URDF or registration change is applied."
+      ],
+      "protractorPitch": {
+        "status": "unavailable",
+        "candidateURDFReady": false,
+        "reason": "Need at least three measured first-visit targets using one stated protractor reference."
+      }
+    }
+  },
+  "printTargets": [
+    {
+      "payload": "ROB:FLOOR:L01",
+      "pdf": "output/pdf/rob-floor-left-calibration-qr.pdf",
+      "sha256": "23babcc6738e353dfa379260cb95d73c9e224537c2adb20173b554881f818863",
+      "symbolSideMeters": 0.12,
+      "referencePoseMeasured": false,
+      "renderedDecodeAndGeometryValidation": "PASS"
+    },
+    {
+      "payload": "ROB:FLOOR:R01",
+      "pdf": "output/pdf/rob-floor-right-calibration-qr.pdf",
+      "sha256": "56e91647e549e73698561020484ffb6a456aac649a8f0a5f3a4a58ce1601632a",
+      "symbolSideMeters": 0.12,
+      "referencePoseMeasured": false,
+      "renderedDecodeAndGeometryValidation": "PASS"
+    },
+    {
+      "payload": "ROB:WALL:R01",
+      "pdf": "output/pdf/rob-wall-right-calibration-qr.pdf",
+      "sha256": "3873f1bda89c3513065974494fdedf4e3f57dbf0e128808ed71d3b95566505d8",
+      "symbolSideMeters": 0.12,
+      "referencePoseMeasured": false,
+      "renderedDecodeAndGeometryValidation": "PASS"
+    }
+  ],
+  "validation": {
+    "swiftMeasurementFixtures": "PASS: all supported IDs retain identity; invalid geometry rejected",
+    "poseFitFixtures": "PASS: ten tests including fixed-target ID preservation and mixed-ID rejection",
+    "upperDiagnosticFixtures": "PASS: eight tests including first-visit training / held-out returns, insufficient coverage, known synthetic scale recovery and independent protractor comparison.",
+    "depthCameraIPCFixtures": "PASS",
+    "sandboxStaticChecks": "PASS",
+    "signedIsolatedDebugBuild": "PASS: seven unrelated dirty user files excluded"
+  },
+  "runtimeScope": {
+    "armCommandsByQRCalibration": false,
+    "jawCommandsByQRCalibration": false,
+    "newArmGrantRequested": false,
+    "URDFChanged": false,
+    "calibrationApplied": false,
+    "protractorMode": "installed; no operator measurements received yet"
+  },
+  "privacy": {
+    "cameraImagesCommitted": false,
+    "rawDepthCommitted": false,
+    "grantMaterialCommitted": false
+  },
+  "firstPostureAttempt": {
+    "captureID": "4C3BC401-D405-45CA-886A-0F5D3EA39EE9",
+    "captureSHA256": "a53e35ffac3d34e8433e30f265eac0dde48cedf8881279a8fce7e0e334d07321",
+    "acceptedHolds": 16,
+    "acceptedSamples": 48,
+    "lastAcceptedStep": 15,
+    "completed": false,
+    "stopReason": "Selected QR was not readable at hold17, lower6211 upper5958; partial data retained. No unmeasured next step was issued.",
+    "remediation": "Posture sweep now uses each initial QR observation to recenter following upper endpoints by at most150 targetunits; every endpoint must still be captured."
+  },
+  "installedBinarySHA256": "1537b1966b71501d5e6c93857ea786bc02aae40c3cc763e21a4dff559e474bc6",
+  "productionSourceSHA256": {
+    "Cerebro.xcodeproj/project.pbxproj": "5b3abd5d9805e9cdfe49d4049e61395dc43a167a387ecce35721bc8395952430",
+    "Cerebro/ROBNeckQRCalibration.swift": "82a268c73818f1e5b89bb72000b0b08de4fd29087c382c1821676ffaa5aa2ef2",
+    "Cerebro/ROBNeckQRMeasurement.swift": "8b23ad6d016815180816f0149133c8ef83302482a8883ed44b18168213ed53a5",
+    "Cerebro/ROBTestingSandboxWindowController.swift": "6f8dcffa76e5f8da46afa03de4d360d2dcd96594eba94624b55bd1d7c63576ff",
+    "Cerebro/ROBMainViewController.mm": "0fa530b17e4e45001ed00673d361fc5c950a592b547cdc12b13d255b0acc96f4",
+    "Cerebro/Resources/ShadowPlanner/qr_neck_calibration.py": "d44e9f58fe59602859425962d6f94c9f836429bfb713f74f4bd2738af381835d",
+    "Cerebro/Webcam_color.py": "412f043d546b402932a7b1d80acf043da64816c800293a407458d30b6364ecb9",
+    "Cerebro/CameraManager.swift": "a7b45b2463ae81ca762c4ea0e7d458081fdf95b73a3fa196208ab2d925e815e7",
+    "Cerebro/Resources/ShadowPlanner/qr_upper_neck_report.py": "a9d751d2f4379ed8076119b8791d8574f349e487c0f27f52345dcbd245616c74"
+  }
+}

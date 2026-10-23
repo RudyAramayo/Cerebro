@@ -1,0 +1,1324 @@
+{
+  "schemaVersion": 1,
+  "updatedUTC": "2026-10-23T19:32:10.932463+00:00",
+  "sourceParentCommit": "b7078a3",
+  "surveySessionID": "35BC194C-5CA9-4A66-9C7C-674CEBE94387",
+  "sceneContextID": "35BC194C-5CA9-4A66-9C7C-674CEBE94387",
+  "sourceManifestSHA256": "40314a31ae9fb102292f5cee6490efa29218606acd67ab0c191670feba5fd0b1",
+  "runtimeBinarySHA256": "9c8be73d1e59a2f0ec36ab899da868a2e9d9fa7a59c3364107d2961397a32f00",
+  "installedRetryBinarySHA256": "ffe9dd461482e3d5efaafb1dc40ee54bb26a956484ab8439196abd267bee9624",
+  "productionSourceSHA256": {
+    "Cerebro.xcodeproj/project.pbxproj": "5b3abd5d9805e9cdfe49d4049e61395dc43a167a387ecce35721bc8395952430",
+    "Cerebro/ROBNeckQRCalibration.swift": "d0094a83b38a185d6ce1f61b908c21e169cb11d873e8d14b0b59194428e55bd1",
+    "Cerebro/ROBNeckQRMeasurement.swift": "8b23ad6d016815180816f0149133c8ef83302482a8883ed44b18168213ed53a5",
+    "Cerebro/ROBTestingSandboxWindowController.swift": "d07ba41dc2b0b408a761e94ef68bbfd6cdf07ac2c88d8cde7d25ef8ca1ec0560",
+    "Cerebro/ROBMainViewController.mm": "0fa530b17e4e45001ed00673d361fc5c950a592b547cdc12b13d255b0acc96f4",
+    "Cerebro/Resources/ShadowPlanner/qr_neck_calibration.py": "d44e9f58fe59602859425962d6f94c9f836429bfb713f74f4bd2738af381835d",
+    "Cerebro/Webcam_color.py": "47f11c65e0f356b157feae8526fd0df4fb2ea87d80ba8d6d93811bb8bcae0098",
+    "Cerebro/CameraManager.swift": "7d28e16c757a5621703dbec3ec65ab066acb72747d8a2e73b49bd5c9a0cc4427",
+    "Cerebro/Resources/ShadowPlanner/qr_upper_neck_report.py": "a9d751d2f4379ed8076119b8791d8574f349e487c0f27f52345dcbd245616c74",
+    "Cerebro/Resources/ShadowPlanner/qr_corner_refinement.py": "6cb2afff066f145a4a5cf614d0ebb6ab99f96bb6b4d51f7f689ebf078a33c9e3",
+    "Cerebro/Resources/ShadowPlanner/qr_neck_joint_calibration.py": "d07582dd845ddb489fa821f116529d29f5784dcae2199e1db6814e47f106a1f1",
+    "Cerebro/Resources/ShadowPlanner/qr_neck_multi_calibration.py": "aa7e6f2baf95576dbb49297ee411df77d1fdccc52feca9c7d6997a27e1ef1020",
+    "Cerebro/Resources/ShadowPlanner/qr_neck_imu_report.py": "4911e0103d32117b7181f7c860e942b83bed633042004fa87498e8fd0f6ae7d7"
+  },
+  "newLayout": {
+    "source": "Operator reported ROB repositioned after earlier one-target captures",
+    "pickupArmCandidate": "right",
+    "bucketLocation": "beside the left-floor marker, directly to ROB left",
+    "cans": "two on table, equidistant from table QR",
+    "oldWorldCoordinatesReused": false,
+    "physicalRobotBaseMotionCommanded": false
+  },
+  "references": {
+    "tableSymbolSideMeters": 0.12,
+    "operatorMeasuredTableSize": true,
+    "floorAndWallSymbolsNominalMeters": 0.12,
+    "operatorMeasuredNewPrintSizes": false,
+    "torsoEdgeToBlueTapeMeters": 0.19,
+    "manualHeadDepthTowardRobotMeters": 0.1016,
+    "manualCameraDownwardPitchDegrees": 15
+  },
+  "foundTargetIDs": [
+    "ROB:FLOOR:L01",
+    "ROB:FLOOR:R01",
+    "ROB:TABLE:001",
+    "ROB:WALL:R01"
+  ],
+  "discoveryFrameCount": 112,
+  "captures": [
+    {
+      "targetID": "ROB:TABLE:001",
+      "status": "complete",
+      "samples": 111,
+      "failure": "",
+      "captureID": "B6266691-7B81-4B8D-BA5E-2E4DD5DE65E3",
+      "captureSHA256": "3bfb6cc99f236108380256a6d9f301e8f5c4dcdf44e21c9cc52333010c2206ca",
+      "acceptedHolds": 37,
+      "imuSamples": 111,
+      "stationaryIMUSamples": 110,
+      "panRangeDegrees": [
+        -4.650000000004651,
+        11.370000000011371
+      ],
+      "lowerTargets": [
+        5811,
+        6011,
+        6211
+      ],
+      "upperRangeTargets": [
+        5895,
+        6318
+      ],
+      "alignmentMethods": [
+        "stereo_input_align_to"
+      ]
+    },
+    {
+      "targetID": "ROB:FLOOR:L01",
+      "status": "partial",
+      "samples": 39,
+      "failure": "The 120 mm QR target was not readable in this settled view. Captured views were saved.",
+      "captureID": "6F501460-E380-494A-83EF-3C5B04A7E62E",
+      "captureSHA256": "dbbdd5098645028e329449117492bb3f9fabec108f5c4abef2f8d9fc45c54413",
+      "acceptedHolds": 13,
+      "imuSamples": 39,
+      "stationaryIMUSamples": 37,
+      "panRangeDegrees": [
+        30.57000000003057,
+        38.58000000003858
+      ],
+      "lowerTargets": [
+        6011
+      ],
+      "upperRangeTargets": [
+        5495,
+        5795
+      ],
+      "alignmentMethods": [
+        "stereo_input_align_to"
+      ]
+    },
+    {
+      "targetID": "ROB:FLOOR:R01",
+      "status": "partial",
+      "samples": 0,
+      "failure": "The 120 mm QR target was not readable in this settled view. Captured views were saved.",
+      "captureID": "6A844E03-E47C-4093-A900-449DD2776A90",
+      "captureSHA256": "91a728db0c97701b2d842d7ec8574d6ebb0776226f0ea376f9778d433dd2fdc3",
+      "acceptedHolds": 0,
+      "imuSamples": 0,
+      "stationaryIMUSamples": 0
+    },
+    {
+      "targetID": "ROB:WALL:R01",
+      "status": "complete",
+      "samples": 111,
+      "failure": "",
+      "captureID": "6C0B2032-3D50-4719-8BF8-470DEB483A37",
+      "captureSHA256": "5e7c477bda8994801c8f22cf09f0c39d09db9e8126e57f7d234d307f0e517554",
+      "acceptedHolds": 37,
+      "imuSamples": 111,
+      "stationaryIMUSamples": 111,
+      "panRangeDegrees": [
+        -60.000000000060005,
+        -45.18000000004518
+      ],
+      "lowerTargets": [
+        5811,
+        6011,
+        6211
+      ],
+      "upperRangeTargets": [
+        6507,
+        6950
+      ],
+      "alignmentMethods": [
+        "stereo_input_align_to"
+      ]
+    }
+  ],
+  "limits": {
+    "registrationVerified": false,
+    "URDFApplied": false,
+    "armOrJawCommandsByCalibration": false,
+    "newArmGrantRequested": false,
+    "calibrationComplete": false
+  },
+  "blockers": {
+    "floorLeft": "Partial QR occlusion by ROB arm; full-template refinement rejected the observations.",
+    "floorRight": "Found in two discovery frames, but formal target capture lost readability.",
+    "targetedRetake": "Installed with verified-seed fallback and smaller floor steps; not yet executed because native window access returns cgWindowNotFound for Cerebro and other apps."
+  },
+  "startupPreferences": {
+    "emptyGripperCalibrationRestored": true,
+    "wakeSessionOfferRestored": true,
+    "automaticArmStartupRouteEnabled": false,
+    "restoreMethod": "Existing CFPreferences/defaults configuration API; no arm grant or actuator command."
+  },
+  "validation": {
+    "isolatedDebugBuild": "PASS",
+    "codesignDeepStrict": "PASS",
+    "depthCameraIPC": "PASS",
+    "poseFitTests": 10,
+    "upperDiagnosticTests": 8,
+    "jointFitTests": 6,
+    "multiTargetFitTests": 6,
+    "inertialProfileTests": 5,
+    "cornerRefinementTests": 13,
+    "pureSwiftMeasurementFixtures": "PASS",
+    "sandboxStaticTests": "PASS"
+  },
+  "privacy": {
+    "rawImagesCommitted": false,
+    "rawDepthCommitted": false,
+    "deviceIdentifiersCommitted": false,
+    "grantMaterialCommitted": false
+  },
+  "independentIMUUpperProfile": {
+    "fileSHA256": "13e59decde0f9e7afdba1ea161057121a5db617114e2c63ef5b799b940d099b0",
+    "privateFile": "imu-upper-profile.json",
+    "summary": {
+      "schemaVersion": 1,
+      "status": "imu_upper_profile_unverified",
+      "registrationVerified": false,
+      "candidateURDFReady": false,
+      "acceptedRecordCount": 254,
+      "rejectedRecordCount": 8,
+      "rejectedRecords": [
+        {
+          "recordIndex": 8,
+          "reason": "No stationary native accelerometer mean"
+        },
+        {
+          "recordIndex": 23,
+          "reason": "No stationary native accelerometer mean"
+        },
+        {
+          "recordIndex": 40,
+          "reason": "No stationary native accelerometer mean"
+        },
+        {
+          "recordIndex": 41,
+          "reason": "No stationary native accelerometer mean"
+        },
+        {
+          "recordIndex": 82,
+          "reason": "No stationary native accelerometer mean"
+        },
+        {
+          "recordIndex": 139,
+          "reason": "No stationary native accelerometer mean"
+        },
+        {
+          "recordIndex": 229,
+          "reason": "No stationary native accelerometer mean"
+        },
+        {
+          "recordIndex": 230,
+          "reason": "No stationary native accelerometer mean"
+        }
+      ],
+      "coverage": [
+        {
+          "panDegrees": -60.0,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 1,
+          "upperSpanTargetUnits": 0,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": -54.99,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 5,
+          "upperSpanTargetUnits": 2000,
+          "sourceSelection": "wide_discovery_only",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "usable",
+          "trainingUpperLevels": [
+            5300,
+            5700,
+            6906,
+            7300
+          ],
+          "heldOutUpperLevels": [
+            6306
+          ],
+          "primaryHeldOutUpperLevel": 6306,
+          "referenceUpper": 5300
+        },
+        {
+          "panDegrees": -50.01,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 1,
+          "upperSpanTargetUnits": 0,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": -48.0,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 1,
+          "upperSpanTargetUnits": 0,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": -39.99,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 5,
+          "upperSpanTargetUnits": 2000,
+          "sourceSelection": "wide_discovery_only",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "usable",
+          "trainingUpperLevels": [
+            5300,
+            5700,
+            6906,
+            7300
+          ],
+          "heldOutUpperLevels": [
+            6306
+          ],
+          "primaryHeldOutUpperLevel": 6306,
+          "referenceUpper": 5300
+        },
+        {
+          "panDegrees": -30.0,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 2,
+          "upperSpanTargetUnits": 606,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": -20.01,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 5,
+          "upperSpanTargetUnits": 2000,
+          "sourceSelection": "wide_discovery_only",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "usable",
+          "trainingUpperLevels": [
+            5300,
+            5700,
+            6906,
+            7300
+          ],
+          "heldOutUpperLevels": [
+            6306
+          ],
+          "primaryHeldOutUpperLevel": 6306,
+          "referenceUpper": 5300
+        },
+        {
+          "panDegrees": -9.99,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 2,
+          "upperSpanTargetUnits": 606,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": -4.65,
+          "lowerTarget": 5811,
+          "uniqueUpperLevels": 2,
+          "upperSpanTargetUnits": 75,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": -4.65,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 2,
+          "upperSpanTargetUnits": 75,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": -4.65,
+          "lowerTarget": 6211,
+          "uniqueUpperLevels": 2,
+          "upperSpanTargetUnits": 75,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": -1.98,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 1,
+          "upperSpanTargetUnits": 0,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": 0.0,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 5,
+          "upperSpanTargetUnits": 2000,
+          "sourceSelection": "wide_discovery_only",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "usable",
+          "trainingUpperLevels": [
+            5300,
+            5700,
+            6906,
+            7300
+          ],
+          "heldOutUpperLevels": [
+            6306
+          ],
+          "primaryHeldOutUpperLevel": 6306,
+          "referenceUpper": 5300
+        },
+        {
+          "panDegrees": 3.36,
+          "lowerTarget": 5811,
+          "uniqueUpperLevels": 3,
+          "upperSpanTargetUnits": 95,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": 3.36,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 5,
+          "upperSpanTargetUnits": 300,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": 3.36,
+          "lowerTarget": 6211,
+          "uniqueUpperLevels": 3,
+          "upperSpanTargetUnits": 75,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": 9.99,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 1,
+          "upperSpanTargetUnits": 0,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": 11.37,
+          "lowerTarget": 5811,
+          "uniqueUpperLevels": 2,
+          "upperSpanTargetUnits": 75,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": 11.37,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 2,
+          "upperSpanTargetUnits": 75,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": 11.37,
+          "lowerTarget": 6211,
+          "uniqueUpperLevels": 2,
+          "upperSpanTargetUnits": 75,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": 20.01,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 5,
+          "upperSpanTargetUnits": 2000,
+          "sourceSelection": "wide_discovery_only",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "usable",
+          "trainingUpperLevels": [
+            5300,
+            5700,
+            6906,
+            7300
+          ],
+          "heldOutUpperLevels": [
+            6306
+          ],
+          "primaryHeldOutUpperLevel": 6306,
+          "referenceUpper": 5300
+        },
+        {
+          "panDegrees": 30.0,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 1,
+          "upperSpanTargetUnits": 0,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": 30.57,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 2,
+          "upperSpanTargetUnits": 75,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": 38.58,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 5,
+          "upperSpanTargetUnits": 300,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": 39.99,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 5,
+          "upperSpanTargetUnits": 2000,
+          "sourceSelection": "wide_discovery_only",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "usable",
+          "trainingUpperLevels": [
+            5300,
+            5700,
+            6906,
+            7300
+          ],
+          "heldOutUpperLevels": [
+            6306
+          ],
+          "primaryHeldOutUpperLevel": 6306,
+          "referenceUpper": 5300
+        },
+        {
+          "panDegrees": 50.01,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 1,
+          "upperSpanTargetUnits": 0,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": 54.99,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 4,
+          "upperSpanTargetUnits": 2000,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        },
+        {
+          "panDegrees": 60.0,
+          "lowerTarget": 6011,
+          "uniqueUpperLevels": 1,
+          "upperSpanTargetUnits": 0,
+          "sourceSelection": "all_available_records",
+          "minimumUniqueLevels": 5,
+          "minimumSpanTargetUnits": 1000,
+          "status": "unavailable",
+          "reason": "Need five distinct upper levels spanning at least 1000 raw target units"
+        }
+      ],
+      "usableGroupCount": 6,
+      "mechanicalComparisonPriorDegreesPerTargetBounds": [
+        0.01,
+        0.12
+      ],
+      "assumedGravityMagnitude": null,
+      "factoryRotationUsed": false,
+      "cameraIntrinsicsUsed": false,
+      "model": "a(U) = b + u cos[s(U-Uref)] + v sin[s(U-Uref)] in raw native sensor axes; vectors b/u/v fitted separately for each fixed pan/lower group.",
+      "limitations": [
+        "The constant term b includes sensor offset and gravity parallel to the rotation axis; it is not an identified pure accelerometer bias.",
+        "Fixed linear anisotropy is absorbed by the ellipse basis; changing bias, servo hysteresis or nonlinear motion can still invalidate the model.",
+        "Median acceleration per commanded upper level is used; overlapping IMU windows and repeated video frames are not counted as independent angle evidence.",
+        "Conditional uncertainty assumes the sinusoidal mapping and independent isotropic level residuals; it is not hardware calibration uncertainty.",
+        "No gain, zero, factory transform, gravity magnitude, URDF or world registration is applied."
+      ],
+      "upperDegreesPerTargetUnit": 0.05683909229427901,
+      "gainRelativeToNominalPoint03Prior": 1.8946364098093005,
+      "nominalPoint03PriorIsMeasured": false,
+      "trainingSumSquaredAccelerationResiduals": 0.03216502696812638,
+      "trainingResidualDegreesOfFreedom": 17,
+      "conditionalResidualVariancePerCoordinate": 0.001892060409889787,
+      "conditionalOneSigmaDegreesPerTargetUnit": 0.0006958109927758885,
+      "conditionalLocal95PercentIntervalDegreesPerTargetUnit": [
+        0.055475302748438274,
+        0.05820288184011975
+      ],
+      "profile95PercentIntervalsOnGrid": [
+        [
+          0.0555,
+          0.058100000000000006
+        ]
+      ],
+      "profileMinimumAtBound": false,
+      "frequencyIdentifiableConditionally": true,
+      "identificationLimitations": [],
+      "alternativeProfileMinima": [
+        {
+          "upperDegreesPerTargetUnit": 0.05683909229427901,
+          "trainingSumSquaredResiduals": 0.03216502696812638
+        },
+        {
+          "upperDegreesPerTargetUnit": 0.01,
+          "trainingSumSquaredResiduals": 2.616311554959243
+        },
+        {
+          "upperDegreesPerTargetUnit": 0.12,
+          "trainingSumSquaredResiduals": 63.64949781591332
+        }
+      ],
+      "heldOutVectorRMSEMetersPerSecondSquared": 0.08957528140551901,
+      "maximumEllipsePlaneNormalDisagreementDegrees": 0.590864115818538,
+      "provenance": {
+        "inputSHA256": "d7d6126b6fd62c8818445e5b3830a2113fe0d2782336417c96b88d2647fa651f",
+        "inputPath": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/survey.json",
+        "sessionID": "35BC194C-5CA9-4A66-9C7C-674CEBE94387",
+        "sceneContextID": "35BC194C-5CA9-4A66-9C7C-674CEBE94387",
+        "surveyStatusAtRead": "capturing",
+        "sources": [
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-0-0.json",
+            "sha256": "c366be291f6577c376f63c3d98c83ee3406c69f214b710ffe647f273eac7cb2b"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-0-1.json",
+            "sha256": "d7fcaee58b6e57de1c905bac5327854e2f37379ba6eb0865cbf81facdeb49a5d"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-1-0.json",
+            "sha256": "41d7da099650032d14526808226c014d5f9280925fc1f1bc3a97adb08acbbd56"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-1-1.json",
+            "sha256": "d962a709f206f9c1c154335ac0120dae127f5421afa16391f1fedec426123195"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-10-0.json",
+            "sha256": "92ff94c21b5b9279deea27d6fcb5d49a51c8497409c12d0bb7459e1629642485"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-10-1.json",
+            "sha256": "153d98c95fefc38f7684fac561b001463a32cf86ed0ea2f54ce25f20d6afb75d"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-11-0.json",
+            "sha256": "d1496376948f2c9127401cca1a001852b39dd74c7905ebe894cd0843a8d78629"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-11-1.json",
+            "sha256": "dd6f438fb25d8098b00afecf9833a95d7b8edb6f12acae6bee676ab618e2a1fd"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-12-0.json",
+            "sha256": "8ddafe401bf54fe3e9575e5a1b540b0fbfa962e73a087e69a4518bef998b29bd"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-12-1.json",
+            "sha256": "af4465757abb24fff28aa1f27ec0ceb54380224524bfbe35ad27949007b13886"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-13-0.json",
+            "sha256": "1479c0263fb40232c8e475afa3bf1b85c9982449cc15e15aa3b1c080fd593f91"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-13-1.json",
+            "sha256": "fa482985009664d415dd23ab1868b595dbab07e83fa10c4ae789c280ea221a15"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-14-0.json",
+            "sha256": "86ad78b97751aed339bd650e82a02c465fe4961a8e3c31604ac4c39e537a9778"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-14-1.json",
+            "sha256": "13d4288a26d4ef9dc70439b727fbdaccd61a961dd22e9e4557262ee885f0ac7b"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-15-0.json",
+            "sha256": "c65b46c4c1d5464f1505144633c9858f7c242dd14bc384049053b8ff3aa6fb7f"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-15-1.json",
+            "sha256": "c64d3b4cc8c17af778a1b8e0dac3030c25e04966cd40c09fec2aa6b96ce29a7a"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-16-0.json",
+            "sha256": "9d2480a2b18a48a7862805aafd65666291ea57ba22b9421e3d0c23ad23a5e737"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-16-1.json",
+            "sha256": "ce928071d868e8091b0d6f4fea845d55b3243eb670b992a76e5b22a27301bbcc"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-17-0.json",
+            "sha256": "94c4eb4a77fc2a46875b211c0d3505754dbd7873ab0ed54cb293dadf6f6af7d6"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-17-1.json",
+            "sha256": "6a293bda68265bba1c504fb9e65872b5bc295db2711a0d3ea11c79aa478bb01c"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-18-0.json",
+            "sha256": "436d10b5575b446cfe588f93c06582c2c2a478160086e2793a401dd8495e8d22"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-18-1.json",
+            "sha256": "324c68f4fe375604793075197120c30e2134e723cb4cba61ada882b074b9d3d7"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-19-0.json",
+            "sha256": "a9c07219e03b063978d95f28a9d1b5c31f9693724d94db562a047dc694900cf5"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-19-1.json",
+            "sha256": "77d55322e20219bcf1015f78cee91804f47d53cfff5b1f17bddbc86fb8bb2d27"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-2-0.json",
+            "sha256": "e3147ff079d0a33baccd8be42bb2b16cfc30916d6c00eb5a2a46d5ac8551d418"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-2-1.json",
+            "sha256": "02fe95931f4094532327420b136ac1168b6b61095305629213cc152c176d19d4"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-20-0.json",
+            "sha256": "40daede1662452fbf8139175ec9df7046b6bbcb2465d8288c7f164017b80d165"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-20-1.json",
+            "sha256": "96aa2475fc7be1469968ec5f2c4cf8839dc3a1c3f8804a5b4bd3f2e92e446671"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-21-0.json",
+            "sha256": "0580da7122a00a3d038356754828b6fc3deab57d152e1fd514e89905f8c1d93c"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-21-1.json",
+            "sha256": "dc9d4b1cb390f0e10c96d65fc24ec8440b3c01753a470e22368d659a57857e91"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-22-0.json",
+            "sha256": "34220ac89b9f802f5d7e495a35d802747cb82022256067211caab27256449a3c"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-22-1.json",
+            "sha256": "1c1bae9b2e6995979cb9eddf2af43c507edf33adf459297c2b0a800296e28815"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-23-0.json",
+            "sha256": "b74ed97a232bc465f9a1e24d93eb59dc6861601616b319faabb1df1ecf2c4d99"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-23-1.json",
+            "sha256": "12b2d848744b547bce40dabb050ad504a834b156aac037c81e7a9b9c52ed4c64"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-24-0.json",
+            "sha256": "929b05ed6c50d2fd7315d292bbebf9ce542d98ea2812924857c3e1d2e9de6f1b"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-24-1.json",
+            "sha256": "4b0f0e0cb889f005f1e52fad736f6c11993f2831b98b869f1a4d2e7c9c4b3595"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-25-0.json",
+            "sha256": "b9e11b493162078e4fd6abb6c2ca904d2c95094f622533c93d4a51bc40b75667"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-25-1.json",
+            "sha256": "7aaa7bbdb8a2c4ba76e6249628e8db665bd6e0e5c9cacce7bd217d54265ae376"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-26-0.json",
+            "sha256": "d910883051bd7dae9d2f8575dffc58eccaf18b6c58796d4de98901c0faf01562"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-26-1.json",
+            "sha256": "5b563d482eb9b7872e3a933ab2de99b6da902119077a8db5d0a77a7abf7ef274"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-27-0.json",
+            "sha256": "3f16c4fea7dbfb63d875ee0d69087c075a7d94932602933ffbac0ec8218a290d"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-27-1.json",
+            "sha256": "cc665ede24081f9301c3c2fac7101931669b8a72c29f03e67c5e1195205bcf61"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-28-0.json",
+            "sha256": "9727ba6de0925092e7448ab7d9f9651a5901e6cfa6de12d7deb97cd28d9ee10f"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-28-1.json",
+            "sha256": "b97a674b8476222faa15f82945d6adfcf27aca6d73f3beea9ff4ada9e78bddfa"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-29-0.json",
+            "sha256": "4088240f849ad5cfdb4945bc5d9c72be27973874e61ede0deedd0ae26d759bad"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-29-1.json",
+            "sha256": "647b1ef4144dadd897848b753d6eb6c5023497d3cb92cd77f07a1cae6fbac26e"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-3-0.json",
+            "sha256": "15fc5e1da64c129e70d133b82b81557cad134f5bf0a1d53f5413915b2118af8c"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-3-1.json",
+            "sha256": "0799b2c25f6b2456e951faff26ce6d425ef6246bc7ed5eb64c167cbe60f33c8d"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-30-0.json",
+            "sha256": "d947e3bc3228f4d0b95ad99301d388f0aba26fcc5e2b121490c0833f02cc526d"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-30-1.json",
+            "sha256": "524218531fdd6152ffc39253f5ad671d74653b24fa3050ca8e61184c799b73bc"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-31-0.json",
+            "sha256": "f5ed545bf51d133175fb5c8e566fc49e312ebd47d93e6d2e0003e86f8590a986"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-31-1.json",
+            "sha256": "bd7970db905ff56532b32b8bb9669fe6a6c0c671cb029b0bf25c7bbcc1810c3b"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-32-0.json",
+            "sha256": "1d49f0642f1343c3397e11b4fcd0895fd5f9f64bafaf960c74c7d5a283b08432"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-32-1.json",
+            "sha256": "4c4c7d26565b441d642274cd3c127c5b0b9409ab146767bcfb0f54e40e6f2c18"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-33-0.json",
+            "sha256": "8575d9384d2ad65d19e388ca85ea5360fd0f2b0d3ea4dd7810a150983ba17989"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-33-1.json",
+            "sha256": "af8034140bf532a48660d5cc3bb37c124594df6063144fd241be36524d212021"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-34-0.json",
+            "sha256": "ce0be2443c76f9d2929d6908028714e3e2e52ca1bdd2bd516535d408eac51032"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-34-1.json",
+            "sha256": "0050fef22aac2d49197655ff32f0ba4cf9df8f0f6046de062f0f778e9fad1e1e"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-35-0.json",
+            "sha256": "1a8e9b09047344a3ebb51206d52da311a36fc2fb0c96f8cc3a04cd94e1ed0af3"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-35-1.json",
+            "sha256": "24264e4c743348b1dbff1de739bcf2fdc5ff90f077eade40970db558269c475d"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-36-0.json",
+            "sha256": "bb1c451313a94f4da34b0c27d278fe137dc0de0855d094a48c9b70093dcdce83"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-36-1.json",
+            "sha256": "ac8b6d5cc4507ebca2ccc068fae3aa6110de12c6e5cd682e1993f3eb44a5f59b"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-37-0.json",
+            "sha256": "13237f29c55cdf7981c771749ddd9a6c11a90bc6e1f3c1d1ac8d21f856dee11f"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-37-1.json",
+            "sha256": "b58fafc2fdd0e0890c0ce0de3874ffcc27819c6ef3be22c6a66335cae8606bc5"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-38-0.json",
+            "sha256": "115c3cfd052b376fa2e5803be61c070d60c245b3b10218d7ad81f73ba5c81498"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-38-1.json",
+            "sha256": "7318042a04c5ae14a2fe1b6f21ce734555c36b16ce63521ec43703a1298c5914"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-39-0.json",
+            "sha256": "053698fd652eca38c243496ddbe6dbed914ce46da3969458bd21d047c71a8001"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-39-1.json",
+            "sha256": "d0f64fa76a5d2448e21f3a23615d0b88d30b0267f84b669bb59d1117b92bd5d3"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-4-0.json",
+            "sha256": "cb14ac35259f658da019e3f982a617494e476e0d04c6a8590b5378a6dbc07fde"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-4-1.json",
+            "sha256": "18f39aa02831774f5e93b7f15c5b4dbdcd3a6faf13890c4a0bfa92fa33db61cf"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-40-0.json",
+            "sha256": "60fd1499d2905461859366282d1d1f86b2404b6830e5ab5ef6323e69572d9ef8"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-40-1.json",
+            "sha256": "96d736bf19672d750583cdbeff23ca69ae2310f6d4c9e2cc5feab008612ba03b"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-41-0.json",
+            "sha256": "2649791a73a30ec959c31425e32d46961859b9b5b786635747ee4d98a0a75cd5"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-41-1.json",
+            "sha256": "ec0c9492c4c47f0016cedd59674941d9be88ba7258e2c2cb571e736d7df84872"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-42-0.json",
+            "sha256": "27868691596ce8dcff2d094077474360d95e5540745ca280f5d028e5c93cabea"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-42-1.json",
+            "sha256": "4a9ceecf626f06072b186c9608f89434d09dd08ec3220d827b1bf4c347b6c549"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-43-0.json",
+            "sha256": "cdadd8eafbb7665164996de872fd23a140d36967e83ed248f9478281bc89a681"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-43-1.json",
+            "sha256": "ee0e6d56602a81d2dbbedebcc60421d145b82b14af7ea9305b4de661a5fa438a"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-44-0.json",
+            "sha256": "e2b67d7b6d09da104cd399ad23b85fe054a0b3253ec363fb300289dde1deaf57"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-44-1.json",
+            "sha256": "4194d2d10cf98d8d621f115ad08e56f48cd35371e56d98f3f9b1cdf24325963e"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-45-0.json",
+            "sha256": "134cbaf05002356f5d1b91643b569de8c33fa7c7419e1ebb2a28eb35db13b06a"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-45-1.json",
+            "sha256": "8e6ac2a708872919ed528a2b6a094e37f0980b1d9344eebce94907bb862a0679"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-46-0.json",
+            "sha256": "d31441c887268538005764e463c8d47bc6258f0c92b4fb6a738a310c18606ed5"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-46-1.json",
+            "sha256": "0d1b91ebd84993b59d9f6246fc6fe570d14d9b1ae7b50d56d520d4d4603168fe"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-47-0.json",
+            "sha256": "63292cde5757ea0fbd4fd2a3fd61d9503b9aef04b9963663ab25d04051dcc643"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-47-1.json",
+            "sha256": "0b5180cecec8609eb2a2670ea67f7909a80014e58661026a877cb3619fad7342"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-48-0.json",
+            "sha256": "574313368f2ca8f694501ec12bdf4e278f4ed35d84eee86046c64c9f38048275"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-48-1.json",
+            "sha256": "4fd5c0eb4e3b36b5fe68e9091b9901afd4e07fa8354db3650ca505ad8977dab1"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-49-0.json",
+            "sha256": "b11a0db982cd706ceee5d31f385f89ba858f6fe9b2c76108194ebd043e6c0dbc"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-49-1.json",
+            "sha256": "365e97640503c1b29c0f4b6faae261663012cbeb3bb29047ff6124275ec068c9"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-5-0.json",
+            "sha256": "2b8748524c1bf0e2a7326b55b5ebd208cf4dd1813b52f29b2e5577aa5c5c02ea"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-5-1.json",
+            "sha256": "e5dac91a07aa45c02e0195c543a3655a2c7236e9e184a8e222dd1f894ddba769"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-50-0.json",
+            "sha256": "c7179302123297ea72d9ca69d2d7a516910a52b062aeec7100e3576b617c818c"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-50-1.json",
+            "sha256": "a616ce108ac4c6444543aecc37964f13d3f264541ba58c8f9a8e2f4ae31a5a3c"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-51-0.json",
+            "sha256": "00d44afcf075625acb5be0009f0e363a453dd9c6ef6d251e2f84ea070bb90f56"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-51-1.json",
+            "sha256": "0e50bac580c8d9d312a144c260ebee68c49cf445b081ee402cc2779be5e821ab"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-52-0.json",
+            "sha256": "1ddc54526d5c2cc4dae3e43e4fe73bbe80c27883caaacd822816abef9a3b674b"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-52-1.json",
+            "sha256": "8cbc1535d9b85bb365b2857aec198710f0adf463e851083c5ab5986be4583f05"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-53-0.json",
+            "sha256": "76325f421a77d71f393c5c509523ee45edf9f5a985684df0b3ed3a531ab5eed8"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-53-1.json",
+            "sha256": "ade85ab69baee97dbeb8b2eff1b95a4b9bfbdde6cddac146858fb6af62dbdb6b"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-54-0.json",
+            "sha256": "17a75d5cc0709f5a0538cd862e1f0a39ad5ea3a309f67c35d0762402a16139f9"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-54-1.json",
+            "sha256": "00834abdfa445497fb5a6a8281bebfabc4a012bbdba7585758a73001c779e1fb"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-55-0.json",
+            "sha256": "f722b5e9c9df2b499494aacaca2197b5c2b5abe181abf20aea22a810e0d2ce44"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-55-1.json",
+            "sha256": "ccbd2bb5c0fe22cce32c1df1231f87f640c7c5f8968c733013aa4c61680cc9bc"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-6-0.json",
+            "sha256": "fa59e98b2278e3936b55da1b42428bc09dd457768fd64404132957a5469a6fa4"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-6-1.json",
+            "sha256": "da3250c8ab9f38cbe9aaad6b070510572cde6e3695b9f90f6a22f404389fef4b"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-7-0.json",
+            "sha256": "56140a6ecc6488aa79c491fd1ea461ad01181390239dced2fc38bd494bc8249b"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-7-1.json",
+            "sha256": "f59f02ba924281090ced1c98a407f81d9e03c39a3ae7607b8d3d2ea6e200e3ad"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-8-0.json",
+            "sha256": "6e55812834667f803876f49431ae5cf2bf47c7a1e24321d79e2dcb8c66cdcdbd"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-8-1.json",
+            "sha256": "40221843a3a655e62e302fa75550af6e3bf930232c7a9ecf46a8a28938807592"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-9-0.json",
+            "sha256": "c36fb00143f2c7a35be45bbdfc47f2100c95565be319342aaad80fdf15452666"
+          },
+          {
+            "path": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/discovery-9-1.json",
+            "sha256": "e671c6d9920a5ed2634adffe9eb4686321f2cddcf986d0d4f00f5434aa5b39b8"
+          },
+          {
+            "path": "privateCapture/B6266691-7B81-4B8D-BA5E-2E4DD5DE65E3/capture.json",
+            "sha256": "3bfb6cc99f236108380256a6d9f301e8f5c4dcdf44e21c9cc52333010c2206ca"
+          },
+          {
+            "path": "privateCapture/6F501460-E380-494A-83EF-3C5B04A7E62E/capture.json",
+            "sha256": "dbbdd5098645028e329449117492bb3f9fabec108f5c4abef2f8d9fc45c54413"
+          },
+          {
+            "path": "privateCapture/6A844E03-E47C-4093-A900-449DD2776A90/capture.json",
+            "sha256": "91a728db0c97701b2d842d7ec8574d6ebb0776226f0ea376f9778d433dd2fdc3"
+          },
+          {
+            "path": "privateCapture/6C0B2032-3D50-4719-8BF8-470DEB483A37/capture.json",
+            "sha256": "9e7137da0e99f1ab84f41e491165ed70829ab49f213e8e342edd9eba8af842c9"
+          }
+        ]
+      }
+    }
+  },
+  "sharedModelOrderComparison": {
+    "fileSHA256": "c61e5879eafde7f84b4b286eb8b454cbfd7f3f1d0ebc329791fb4fa92d43a59a",
+    "privateFile": "rgb-multi-order-comparison.json",
+    "summary": {
+      "status": "private_fresh_scene_shared_model_order_comparison_not_applied",
+      "manifestSHA256": "5fb491fe285fd5354fb5e1ce8b0b6cb4d89895f1fb3e3caa4e20e6aa3cbd539e",
+      "excludedTargets": [
+        {
+          "targetID": "ROB:FLOOR:L01",
+          "reason": "No exact-template refinement views passed quality"
+        },
+        {
+          "targetID": "ROB:FLOOR:R01",
+          "reason": "No confirmed QR views in the current scene"
+        }
+      ],
+      "registrationVerified": false,
+      "candidateURDFReady": false,
+      "models": {
+        "canonical": {
+          "scales": {
+            "pan": 1.192998794340207,
+            "lower": 1.2261414117184095,
+            "upper": 1.1704640097861256
+          },
+          "trainingReprojectionRMSEPixels": 13.870500309577885,
+          "heldOutReprojectionRMSEPixels": 17.804429673539133,
+          "parametersAtBounds": [
+            "cameraX"
+          ],
+          "surfaceValidation": {
+            "status": "diagnostic_only",
+            "constraintsAppliedToFit": false,
+            "baseZIsMeasuredGravity": false,
+            "targetNormalsBase": {
+              "ROB:TABLE:001": [
+                -0.04484054783650589,
+                -0.06549146543525042,
+                0.9968451199784576
+              ],
+              "ROB:WALL:R01": [
+                -0.9715936341001861,
+                0.2310739663668847,
+                -0.05109434649224909
+              ]
+            },
+            "inclinationFromBaseHorizontalDegrees": {
+              "ROB:TABLE:001": 4.552430236618436,
+              "ROB:WALL:R01": 87.07123432347419
+            },
+            "wallToFloorAnglesDegrees": {},
+            "limitations": [
+              "Floor flatness and wall verticality are not forced into this fit.",
+              "Coplanarity can diagnose consistency but cannot establish measured robot-to-world or camera-to-arm registration.",
+              "A printed marker pose samples its local supporting surface, not the entire room plane."
+            ]
+          },
+          "cameraMountRadiusMeters": 0.37183060750976665,
+          "markerMetrics": [
+            {
+              "targetID": "ROB:TABLE:001",
+              "sampleCount": 109,
+              "trainingReprojectionRMSEPixels": 9.671323144738228,
+              "heldOutReprojectionRMSEPixels": 8.848901494360458,
+              "trainingPnPTranslationRMSEMeters": 0.027916844633849643,
+              "heldOutPnPTranslationRMSEMeters": 0.025353572205475478
+            },
+            {
+              "targetID": "ROB:WALL:R01",
+              "sampleCount": 111,
+              "trainingReprojectionRMSEPixels": 16.82287259508257,
+              "heldOutReprojectionRMSEPixels": 24.492755844353027,
+              "trainingPnPTranslationRMSEMeters": 0.12933024041643176,
+              "heldOutPnPTranslationRMSEMeters": 0.12362177576425724
+            }
+          ],
+          "outputPath": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/multi-order-canonical.json"
+        },
+        "pan_before_lower": {
+          "scales": {
+            "pan": 1.9241719710176368,
+            "lower": 1.8100040604644583,
+            "upper": 1.8066701521695
+          },
+          "trainingReprojectionRMSEPixels": 3.6737475478794543,
+          "heldOutReprojectionRMSEPixels": 4.377204079771828,
+          "parametersAtBounds": [],
+          "surfaceValidation": {
+            "status": "diagnostic_only",
+            "constraintsAppliedToFit": false,
+            "baseZIsMeasuredGravity": false,
+            "targetNormalsBase": {
+              "ROB:TABLE:001": [
+                6.809306039115234e-05,
+                0.002554362859052353,
+                0.9999967352915303
+              ],
+              "ROB:WALL:R01": [
+                0.14150818017196934,
+                0.9898881182314131,
+                0.009846234238994778
+              ]
+            },
+            "inclinationFromBaseHorizontalDegrees": {
+              "ROB:TABLE:001": 0.146406362749194,
+              "ROB:WALL:R01": 89.4358432180818
+            },
+            "wallToFloorAnglesDegrees": {},
+            "limitations": [
+              "Floor flatness and wall verticality are not forced into this fit.",
+              "Coplanarity can diagnose consistency but cannot establish measured robot-to-world or camera-to-arm registration.",
+              "A printed marker pose samples its local supporting surface, not the entire room plane."
+            ]
+          },
+          "cameraMountRadiusMeters": 0.020144799560780663,
+          "markerMetrics": [
+            {
+              "targetID": "ROB:TABLE:001",
+              "sampleCount": 109,
+              "trainingReprojectionRMSEPixels": 2.964030658670015,
+              "heldOutReprojectionRMSEPixels": 3.4955111259760043,
+              "trainingPnPTranslationRMSEMeters": 0.00910794095996949,
+              "heldOutPnPTranslationRMSEMeters": 0.007641687679212726
+            },
+            {
+              "targetID": "ROB:WALL:R01",
+              "sampleCount": 111,
+              "trainingReprojectionRMSEPixels": 4.22075653612362,
+              "heldOutReprojectionRMSEPixels": 5.233226753281283,
+              "trainingPnPTranslationRMSEMeters": 0.014133041454492033,
+              "heldOutPnPTranslationRMSEMeters": 0.014341675991933561
+            }
+          ],
+          "outputPath": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/multi-order-pan_before_lower.json"
+        },
+        "counterrotated_pan_frame": {
+          "scales": {
+            "pan": 1.723907125659909,
+            "lower": 1.4286453400264811,
+            "upper": 1.479527957104209
+          },
+          "trainingReprojectionRMSEPixels": 7.159789739941199,
+          "heldOutReprojectionRMSEPixels": 8.58112646013195,
+          "parametersAtBounds": [],
+          "surfaceValidation": {
+            "status": "diagnostic_only",
+            "constraintsAppliedToFit": false,
+            "baseZIsMeasuredGravity": false,
+            "targetNormalsBase": {
+              "ROB:TABLE:001": [
+                -0.02685044700362121,
+                0.055896996438496514,
+                0.998075437672354
+              ],
+              "ROB:WALL:R01": [
+                0.023341168549986066,
+                0.9813667194197344,
+                0.19072113639046184
+              ]
+            },
+            "inclinationFromBaseHorizontalDegrees": {
+              "ROB:TABLE:001": 3.555275804754597,
+              "ROB:WALL:R01": 79.00512812338293
+            },
+            "wallToFloorAnglesDegrees": {},
+            "limitations": [
+              "Floor flatness and wall verticality are not forced into this fit.",
+              "Coplanarity can diagnose consistency but cannot establish measured robot-to-world or camera-to-arm registration.",
+              "A printed marker pose samples its local supporting surface, not the entire room plane."
+            ]
+          },
+          "cameraMountRadiusMeters": 0.194174582515684,
+          "markerMetrics": [
+            {
+              "targetID": "ROB:TABLE:001",
+              "sampleCount": 109,
+              "trainingReprojectionRMSEPixels": 4.084776715820474,
+              "heldOutReprojectionRMSEPixels": 4.646548459119916,
+              "trainingPnPTranslationRMSEMeters": 0.01601671426043056,
+              "heldOutPnPTranslationRMSEMeters": 0.01420711025455623
+            },
+            {
+              "targetID": "ROB:WALL:R01",
+              "sampleCount": 111,
+              "trainingReprojectionRMSEPixels": 9.108147180613658,
+              "heldOutReprojectionRMSEPixels": 11.63267261018855,
+              "trainingPnPTranslationRMSEMeters": 0.028970130453843085,
+              "heldOutPnPTranslationRMSEMeters": 0.040741668259261274
+            }
+          ],
+          "outputPath": "privateCapture/SurveySessions/35BC194C-5CA9-4A66-9C7C-674CEBE94387/multi-order-counterrotated_pan_frame.json"
+        }
+      }
+    }
+  },
+  "privateOcclusionPrototype": {
+    "status": "diagnostic_only_not_admitted",
+    "images": 39,
+    "strictVisiblePatternPasses": 5,
+    "hiddenCornersInferred": true,
+    "productionRefinementGateUnchanged": true,
+    "noDepthPointsRemoved": true,
+    "notes": "Two-finder synthetic control has up to 1.24px hidden-corner error. Real sensitivity is conditional, not a physical uncertainty bound. Both right-floor discovery frames still fail."
+  },
+  "completionState": "Software and analyses validated; physical floor calibration remains incomplete pending visibility and native desktop access."
+}

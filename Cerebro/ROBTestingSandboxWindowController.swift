@@ -22,8 +22,8 @@ import AppKit
               actions: [Action(title: "Run recycle test", command: "left_recycle_can"), Action(title: "Search only", command: "left_search_workspace"), Action(title: "Scan workspace geometry", command: "left_scan_clearance"), Action(title: "Preview grasp…", command: "ghost:can"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision")]),
         Trial(id: "depth-alignment", title: "Depth alignment", detail: "Adjust the face camera's modeled downward mounting angle and move head-camera depth points horizontally toward ROB. The camera model, live depth view, new workspace scans and object measurements share the pitch correction. Previous scans and previews are cleared when the values change.", parameters: .depthAlignment,
               actions: [Action(title: "Show corrected live depth…", command: "ghost:collision"), Action(title: "Capture corrected workspace", command: "left_scan_clearance")]),
-        Trial(id: "neck-qr-calibration", title: "Neck / QR calibration", detail: "Use the fixed ROB:TABLE:001 target, measured at 120 mm square. Capture its four corners, aligned depth, camera intrinsics and settled neck poses locally, then compare the marker's position across views. The sweep moves only the neck. Keep ROB's base, table and target fixed. A fitted result remains a diagnostic estimate until independent views and world measurements validate it.", parameters: .none,
-              actions: [Action(title: "Capture current QR view", command: "qr:capture"), Action(title: "Run neck-only calibration sweep", command: "qr:sweep"), Action(title: "Fit recorded views", command: "qr:fit"), Action(title: "Show calibration folder", command: "qr:folder"), Action(title: "Stop calibration", command: "qr:stop")]),
+        Trial(id: "neck-qr-calibration", title: "Neck / QR calibration", detail: "Select a fixed 120 mm table, floor or wall target. Upper-neck checks start from the current view with lower target 6011 and hold pan fixed. Each selected upper target is checked against the QR, including reverse visits. Protractor mode holds each position until you advance. Posture sweeps repeat pan/upper checks at upright, back and forward lower-neck targets. Keep ROB's base and the target fixed. Results remain unverified until independent measurements validate them.", parameters: .none,
+              actions: [Action(title: "Capture current QR view", command: "qr:capture"), Action(title: "Run neck-only calibration sweep", command: "qr:sweep"), Action(title: "Fit recorded views", command: "qr:fit"), Action(title: "Show calibration folder", command: "qr:folder"), Action(title: "Stop calibration", command: "qr:stop"), Action(title: "Check upper neck forward / reverse", command: "qr:upper"), Action(title: "Start protractor measurements", command: "qr:protractor"), Action(title: "Record angle / next position", command: "qr:next"), Action(title: "Sweep upright / back / forward postures", command: "qr:postures"), Action(title: "Refine QR / fit neck mapping", command: "qr:joint-fit"), Action(title: "Calibrate all four targets", command: "qr:all-targets"), Action(title: "Measure selected target", command: "qr:selected-target")]),
         Trial(id: "estimated-calibration", title: "Estimated calibration trial", detail: "Review one estimated EMPTY-left-arm retreat away from the table, then hold for observation. Registration remains unmeasured. One fresh approval covers one slow, 4-second retreat with about 3 cm maximum modeled arm travel. Existing nearby depth-margin overlaps may only improve; new intrusions block motion. Confirm the complete arm's local working space is clear and report the actual direction. No jaw commands, grasp, recycling or automatic return. Open the ghost view before building if needed; restarting the camera requires a new preview.", parameters: .none,
               actions: [Action(title: "Scan / build estimated ghost", command: "estimate:preview"), Action(title: "Inspect estimated ghost / depth map…", command: "ghost:collision"), Action(title: "Run reviewed empty-arm trial", command: "estimate:run")]),
         Trial(id: "object-cycle", title: "Grip and return", detail: "Present the left arm, grip a supported object gently, release into a supporting hand, then return the empty arm. Readiness confirmations remain within the same task authorization. Keep fingers clear of the jaws.", parameters: .current,
@@ -56,6 +56,8 @@ import AppKit
     private var hasCalibrationFields = false
     private var startSessionButton: NSButton!
     private var endSessionButton: NSButton!
+    private let qrTarget = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let protractorPitch = NSTextField(string: "")
     private var selectedTrial: Trial { Self.trials[max(0, min(table.selectedRow, Self.trials.count - 1))] }
     private var canEdit: Bool {
         !ROBLeftArmTrial.shared.isRunning && !ROBArmRoutineCoordinator.shared.isRunning &&
@@ -176,6 +178,18 @@ import AppKit
         let title = NSTextField(labelWithString: trial.title); title.font = .boldSystemFont(ofSize: 18)
         detailStack.addArrangedSubview(title)
         addHelp(trial.detail)
+        if trial.id == "neck-qr-calibration" {
+            qrTarget.removeAllItems()
+            qrTarget.addItems(withTitles: ROBNeckQRMeasurement.supportedTargetIDs)
+            qrTarget.selectItem(withTitle: ROBNeckQRCalibration.shared.selectedTargetID)
+            qrTarget.target = self; qrTarget.action = #selector(changeQRTarget)
+            qrTarget.setAccessibilityLabel("Calibration QR target")
+            detailStack.addArrangedSubview(qrTarget)
+            protractorPitch.placeholderString = "Optional pitch degrees; positive nose-up"
+            protractorPitch.setAccessibilityLabel("Measured camera pitch degrees")
+            protractorPitch.widthAnchor.constraint(greaterThanOrEqualToConstant: 300).isActive = true
+            detailStack.addArrangedSubview(protractorPitch)
+        }
         if ["recycling", "depth-alignment", "estimated-calibration", "preparation", "ghost"].contains(trial.id) {
             collisionInfo.identifier = NSUserInterfaceItemIdentifier("sandbox-collision-status")
             collisionInfo.isSelectable = true
@@ -190,7 +204,7 @@ import AppKit
                 note: "0–11.8 · horizontal only")
             addField("cameraDownwardPitchDegrees", "Camera downward angle (°)", current?.downwardPitchDegrees ?? 0,
                 note: "0–30 · extra mounting pitch")
-            addHelp("Use 7 inches toward ROB and 15° down as the current manual estimate. The angle tilts the camera model and depth rays without commanding the neck. Horizontal reach correction is rebased separately; pitch changes require fresh object measurements and reach calibration against the reference scan.")
+            addHelp("The values above are the current manual estimate. The angle tilts the camera model and depth rays without commanding the neck. Horizontal reach correction is rebased separately; pitch changes require fresh object measurements and reach calibration against the reference scan.")
         }
         if trial.parameters == .recycling {
             do {
@@ -319,11 +333,23 @@ import AppKit
         } catch { parameterMessage = error.localizedDescription; refresh(); return false }
     }
     @objc private func saveParameters() { _ = storeParameters() }
+    @objc private func changeQRTarget() {
+        guard canEdit, let identifier = qrTarget.titleOfSelectedItem else { return }
+        ROBNeckQRCalibration.shared.selectTarget(identifier); refresh()
+    }
     @objc private func performTrialAction(_ sender: NSButton) {
         guard selectedTrial.actions.indices.contains(sender.tag) else { return }
         let command = selectedTrial.actions[sender.tag].command
         // Stop remains available while the calibration owns the neck/camera.
         if command == "qr:stop" { ROBNeckQRCalibration.shared.stop(); refresh(); return }
+        if command == "qr:next" {
+            let text = protractorPitch.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard text.isEmpty || Double(text)?.isFinite == true else {
+                status.stringValue = "Enter an angle in degrees or leave the reading blank."; return
+            }
+            ROBNeckQRCalibration.shared.advanceProtractor(Double(text).map { NSNumber(value: $0) })
+            protractorPitch.stringValue = ""; refresh(); return
+        }
         guard canEdit else { return }
         if selectedTrial.parameters != .none && selectedTrial.parameters != .depthAlignment && !["left_search_workspace", "left_scan_clearance"].contains(command) && !storeParameters() { return }
         if command.hasPrefix("qr:") {
@@ -333,6 +359,12 @@ import AppKit
             case "qr:sweep": ROBNeckQRCalibration.shared.runSweep()
             case "qr:fit": ROBNeckQRCalibration.shared.fitLastCapture()
             case "qr:folder": ROBNeckQRCalibration.shared.openLastCapture()
+            case "qr:upper": ROBNeckQRCalibration.shared.runUpperNeckCheck()
+            case "qr:protractor": ROBNeckQRCalibration.shared.startProtractorCheck()
+            case "qr:postures": ROBNeckQRCalibration.shared.runPostureSweep()
+            case "qr:joint-fit": ROBNeckQRCalibration.shared.fitNeckMapping()
+            case "qr:all-targets": ROBNeckQRCalibration.shared.calibrateAllFourTargets()
+            case "qr:selected-target": ROBNeckQRCalibration.shared.measureSelectedTarget()
             default: break
             }
             refresh()
@@ -423,8 +455,12 @@ import AppKit
         for button in actionButtons {
             let isQRStop = selectedTrial.actions.indices.contains(button.tag)
                 && selectedTrial.actions[button.tag].command == "qr:stop"
-            button.isEnabled = isQRStop || canEdit
+            let isQRNext = selectedTrial.actions.indices.contains(button.tag)
+                && selectedTrial.actions[button.tag].command == "qr:next"
+            button.isEnabled = isQRStop || (isQRNext ? ROBNeckQRCalibration.shared.awaitingProtractor : canEdit)
         }
+        qrTarget.isEnabled = canEdit
+        protractorPitch.isEnabled = ROBNeckQRCalibration.shared.awaitingProtractor
         startSessionButton.isEnabled = canEdit && !ROBControllerArmApproval.shared.armSessionActive
         endSessionButton.isEnabled = ROBControllerArmApproval.shared.armSessionActive
     }

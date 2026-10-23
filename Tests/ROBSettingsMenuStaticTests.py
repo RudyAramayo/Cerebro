@@ -344,24 +344,27 @@ def main() -> None:
             and "No jaw commands, grasp, recycling or automatic return." in sandbox,
             "Estimated calibration must explain its provenance and limited empty-arm scope")
     require('id: "neck-qr-calibration", title: "Neck / QR calibration"' in sandbox
-            and all(f'command: "qr:{command}"' in sandbox for command in ("capture", "sweep", "fit", "folder", "stop")),
+            and all(f'command: "qr:{command}"' in sandbox for command in ("capture", "sweep", "fit", "folder", "stop", "all-targets", "selected-target")),
             "Sandbox lost its dedicated measured-size QR calibration actions")
-    require("ROB:TABLE:001" in sandbox and "120 mm square" in sandbox
-            and "independent views and world measurements" in sandbox,
-            "QR calibration must name its measured target and retain independent validation")
+    require("ROBNeckQRMeasurement.supportedTargetIDs" in sandbox and "120 mm" in sandbox
+            and "independent measurements validate them" in sandbox,
+            "QR calibration must select a measured target and retain independent validation")
     require("!ROBNeckQRCalibration.shared.isRunning" in sandbox
             and "ROBNeckQRCalibrationDidChange" in sandbox,
             "QR ownership must disable other operations and publish current status")
     qr_stop = trial_action.index('command == "qr:stop"')
     require(qr_stop < trial_action.index("guard canEdit"),
             "QR Stop must remain available while calibration owns the camera/neck")
-    for method in ("captureCurrentView", "runSweep", "fitLastCapture", "openLastCapture", "stop"):
+    for method in ("captureCurrentView", "runSweep", "fitLastCapture", "openLastCapture", "stop", "calibrateAllFourTargets", "measureSelectedTarget"):
         require(f"ROBNeckQRCalibration.shared.{method}()" in trial_action,
                 f"QR calibration action lost its dedicated coordinator API: {method}")
     sandbox_stop = braced_declaration(sandbox, "@objc private func stop()")
     require("ROBNeckQRCalibration.shared.stop()" in sandbox_stop
-            and "button.isEnabled = isQRStop || canEdit" in sandbox,
+            and "button.isEnabled = isQRStop || (isQRNext ?" in sandbox,
             "Both global and calibration Stop must work while the test runs")
+    require(trial_action.index('command == "qr:next"') < trial_action.index("guard canEdit")
+            and "awaitingProtractor" in sandbox and "protractorPitch.isEnabled" in sandbox,
+            "Protractor readings must advance the held test without a new arm authorization")
     store_parameters = braced_declaration(sandbox, "private func storeParameters()")
     require("guard canEdit" in store_parameters and "options: .atomic" in store_parameters,
             "Sandbox parameters must be saved atomically outside physical operations")
