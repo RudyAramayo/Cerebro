@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "updatedUTC": "2026-10-23T17:08:22.075419+00:00",
+  "sourceBaseCommit": "6d45d08",
+  "installedBinarySHA256": "75c0bae2eccfb957278fd4e587852b1dedd0509f5dfb2c8783fd0ea19f13fee6",
+  "initialQRBuildSHA256": "5f622d44bf9273ba8154ecaed7c269a2c9b420f7cbbea3c3b22372b7ae0a5d78",
+  "signatureVerification": "codesign --verify --deep --strict passed before and after each local Debug install",
+  "productionSourceSHA256": {
+    "Cerebro.xcodeproj/project.pbxproj": "5b3abd5d9805e9cdfe49d4049e61395dc43a167a387ecce35721bc8395952430",
+    "Cerebro/ROBNeckQRCalibration.swift": "8b0f5bbff1c388dbad87878dd0e047e431912faf815fe78d8783777c7dbb1a92",
+    "Cerebro/ROBNeckQRMeasurement.swift": "7d386978fd251629c3f8de8fe7436ec01d5b94e98f3eb65cec7c32a93ac4bcae",
+    "Cerebro/ROBTestingSandboxWindowController.swift": "3e044f5be4ec2b61c8fef21b827fde0e444c552847f8db6e4695ddcf69c1ad3b",
+    "Cerebro/ROBMainViewController.mm": "48f06ade78a6d38e657373840850f65069357465a9ab410eb86d80c764d43114",
+    "Cerebro/Resources/ShadowPlanner/qr_neck_calibration.py": "d29317825249fa13d3f731a4503c8931c70a628aa5baec1b914e70cb952a92ce",
+    "Cerebro/Webcam_color.py": "412f043d546b402932a7b1d80acf043da64816c800293a407458d30b6364ecb9",
+    "Cerebro/CameraManager.swift": "a7b45b2463ae81ca762c4ea0e7d458081fdf95b73a3fa196208ab2d925e815e7"
+  },
+  "target": {
+    "payload": "ROB:TABLE:001",
+    "symbolSideMeters": 0.12,
+    "operatorConfirmedPrintedSize": true,
+    "operatorConfirmedTapedDown": true
+  },
+  "nativeActions": {
+    "sweepsCompleted": 3,
+    "viewsPerSweep": 12,
+    "samplesPerView": 3,
+    "armTravelCommandedByQRCalibration": false,
+    "jawCommandsSentByQRCalibration": false,
+    "newArmAuthorizationRequired": false,
+    "baseMotionCommanded": false,
+    "fitsAppliedToRobotRegistration": false,
+    "wakeSessionOfferRestored": true,
+    "emptyGripperStartupPreferenceRestored": true,
+    "startupPreferencesTemporarilyDisabledForFinalCameraOnlyReload": true
+  },
+  "captures": [
+    {
+      "captureID": "B24D5517-263D-45A1-BF05-5AFA085F9460",
+      "captureSHA256": "cfcd89127bdf0dc7a3f01a640883f59ca718ac9dc70fc856d35128f0c3a71dfa",
+      "fitSHA256": "4bf3bd668809756e0f099d18f1400dfbbd15bea3498cd2096f656ae130168957",
+      "samples": 36,
+      "neckViewCount": 12,
+      "trainingSamples": 24,
+      "heldOutSamples": 12,
+      "cameraMatrix": [
+        573.69189453125,
+        573.69189453125,
+        319.5987243652344,
+        205.55215454101562
+      ],
+      "trainingTranslationRMSEMeters": 0.05362632406812428,
+      "heldOutTranslationRMSEMeters": 0.04665238595696784,
+      "depthCenterResidualRMSEMeters": 0.05399830951287071,
+      "poseAmbiguities": 0,
+      "registrationVerified": false
+    },
+    {
+      "captureID": "BAACF3DD-CE31-4D14-BEB7-A2921CAEDF4F",
+      "captureSHA256": "e10016756b2e9ee6e4df7f0aad11676c53130d44a26b0554ee54716d431632e7",
+      "fitSHA256": "5566c4057546e23e8672fd2ea411efd0aa0ef3b19bb11af80a08c17d8b61d4d7",
+      "samples": 36,
+      "neckViewCount": 12,
+      "trainingSamples": 24,
+      "heldOutSamples": 12,
+      "cameraMatrix": [
+        488.8262939453125,
+        488.8262939453125,
+        319.6580810546875,
+        204.7308349609375
+      ],
+      "trainingTranslationRMSEMeters": 0.0652738983509783,
+      "heldOutTranslationRMSEMeters": 0.0564366140759389,
+      "depthCenterResidualRMSEMeters": 0.05485054310800844,
+      "poseAmbiguities": 0,
+      "registrationVerified": false
+    },
+    {
+      "captureID": "C04C72E6-DB20-4CF6-8D62-1A7058B6081F",
+      "captureSHA256": "0a1531e2fdd444fbb7ba3921939a4a821635ac4eeb568fe140d812a5e29ec9f2",
+      "fitSHA256": "38035115ee441f9e2d63b97079446ed8479ac855ee2da1d799b0cdcad0615658",
+      "samples": 36,
+      "neckViewCount": 12,
+      "trainingSamples": 24,
+      "heldOutSamples": 12,
+      "cameraMatrix": [
+        488.8262939453125,
+        488.8262939453125,
+        319.6580810546875,
+        204.7308349609375
+      ],
+      "intrinsicsSource": "transformed_frame",
+      "calibratedLensPosition": 124,
+      "frameLensPositions": [
+        124
+      ],
+      "matchingCalibratedFocusSamples": 36,
+      "poseAmbiguities": 0,
+      "trainingTranslationRMSEMeters": 0.06616184062498665,
+      "heldOutTranslationRMSEMeters": 0.05629888033851252,
+      "depthCenterResidualRMSEMeters": 0.0525044707339405,
+      "registrationVerified": false
+    }
+  ],
+  "validation": {
+    "swiftMeasurementFixtures": "PASS: valid/perspective/rotated corners, metric raw projection, serialization and invalid-input rejection; no actuator transport.",
+    "offlinePoseFitFixtures": "PASS: nine tests, synthetic metric recovery, held-out separation, ambiguity, invalid data and optional center-depth diagnostics.",
+    "depthCameraIPCFixtures": "PASS: transformed frame intrinsics, labeled legacy fallback, malformed geometry rejection, factory-focus boundary/missing/malformed cases, observable frame-focus mismatch.",
+    "sandboxStatic": "PASS",
+    "appBuild": "PASS: isolated CerebroQRValidation / Debug / macOS arm64; seven unrelated user files excluded.",
+    "sourceImageEncoding": "Sample acceptance requires successfully encoded and saved RGB source image as well as aligned depth."
+  },
+  "interpretation": "The fixed 120 mm QR and three complete neck sweeps work. Final focus readback matched EEPROM position 124 in all 36 samples. Held-out marker drift remains 56.3 mm; focus locking did not resolve the residual. RGB/depth framing and command-to-angle scaling remain unresolved. No measured camera-to-arm registration, successful world calibration or can removal is claimed. No correction or gain was applied.",
+  "privacy": {
+    "cameraImagesCommitted": false,
+    "rawDepthCommitted": false,
+    "grantMaterialCommitted": false,
+    "localCaptureDirectory": "~/Library/Application Support/Cerebro/NeckQRCalibration/"
+  },
+  "preExistingUserChanges": "Seven unrelated working-tree files preserved and excluded from build/commit.",
+  "frameIntrinsicsBuildSHA256": "913e0e60ec1ad92c9052fd6131bae8155a646648bdd33e44c2338b09fb9f70b2",
+  "diagnosticEstimatesNotApplied": {
+    "firstCaptureTrainingOnlyPanGain": 1.5335,
+    "firstCaptureTrainingOnlyUpperTiltGain": 1.589825,
+    "heldOutTranslationRMSEMeters": 0.01487,
+    "limitations": "Apparent gains are confounded by intrinsic/depth disagreement of about 54 mm. Known-square plane fitting did not identify stable replacement intrinsics. Estimates are not measured servo calibration."
+  },
+  "nextPhysicalReference": "Rigid measured target board with depth-visible edges across multiple distances/image positions, or independently measured board/base coordinates in the planned scaled room scan."
+}

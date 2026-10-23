@@ -7,6 +7,9 @@ steps and verified shutdown preparation.
 The [printable table target](targets/README.md) supplies a measured QR reference
 and scale check for that neck/camera capture.
 
+The [fixed-target neck calibration test](neck-qr-calibration.md) records settled
+views, fits the moving camera chain and reports separate validation errors.
+
 The September 13, 2026 workbench is a simulation and measurement tool. It does
 not command arms, servos, treads, grippers, or the LACT. The numerical body and
 mount estimates are not a commissioned robot model.

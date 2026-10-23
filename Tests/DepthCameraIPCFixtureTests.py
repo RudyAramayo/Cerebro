@@ -3,6 +3,8 @@
 
 from datetime import timedelta
 import importlib.util
+import contextlib
+import io
 import json
 from pathlib import Path
 import socket
@@ -55,6 +57,31 @@ class FakeDepthArray:
     def tobytes(self, order="C"):
         assert order == "C"
         return bytes((0x34, 0x12, 0xCD, 0xAB))
+
+
+class FakeTransformation:
+    def __init__(self, matrix):
+        self.matrix = matrix
+
+    def getIntrinsicMatrix(self):
+        return self.matrix
+
+
+class FakeTransformedRGBFrame(FakeRGBFrame):
+    def __init__(self, matrix):
+        self.transformation = FakeTransformation(matrix)
+
+    def getTransformation(self):
+        return self.transformation
+
+
+class FakeFocusedRGBFrame(FakeTransformedRGBFrame):
+    def __init__(self, matrix, lens_position):
+        super().__init__(matrix)
+        self.lens_position = lens_position
+
+    def getLensPosition(self):
+        return self.lens_position
 
 
 class FakeDepthFrame:
@@ -127,7 +154,7 @@ def main():
     try:
         left_source = FakeMonoFrame((7, 8))
         right_source = FakeMonoFrame((9, 10))
-        intrinsics = {"fx": 100.0, "fy": 101.0, "cx": 1.0, "cy": 0.5}
+        intrinsics = [100.0, 0.0, 1.0, 0.0, 101.0, 0.5, 0.0, 0.0, 1.0]
         service.send_frame(
             sender,
             FakeRGBFrame(),
@@ -166,6 +193,9 @@ def main():
             "left_length": 2,
             "right_length": 2,
             "rgb_intrinsics": intrinsics,
+            "rgb_intrinsics_source": "legacy_eeprom",
+            "rgb_calibrated_lens_position": None,
+            "rgb_frame_lens_position": None,
             "sidewalk_center_deviation": None,
             "sidewalk_confidence": None,
             "chess_pieces": [],
@@ -177,6 +207,130 @@ def main():
     finally:
         sender.close()
         receiver.close()
+
+    # The Camera node's CROP/undistortion output need not have EEPROM K scaled
+    # only to width/height. Publish its actual per-frame pixel transformation.
+    cropped_matrix = [[125.0, 0.0, 0.75], [0.0, 126.0, 0.25], [0.0, 0.0, 1.0]]
+    transformed_frame = FakeTransformedRGBFrame(cropped_matrix)
+    cropped_intrinsics = [value for row in cropped_matrix for value in row]
+    packet, rgb, depth, left, right = service.frame_payload(
+        transformed_frame, FakeDepthFrame(), left_source, right_source, intrinsics
+    )
+    header = json.loads(packet)
+    assert header["rgb_intrinsics"] == cropped_intrinsics != intrinsics
+    assert header["rgb_intrinsics_source"] == "transformed_frame"
+    assert rgb == FakeRGBFrame.bytes and depth == bytes((0x34, 0x12, 0xCD, 0xAB))
+    assert left == bytes((7, 8)) and right == bytes((9, 10))
+    next_matrix = [[130.0, 0.0, 0.8], [0.0, 131.0, 0.3], [0.0, 0.0, 1.0]]
+    transformed_frame.transformation = FakeTransformation(next_matrix)
+    next_values, source = service.rgb_frame_intrinsics(transformed_frame, [], 2, 1)
+    assert next_values == [value for row in next_matrix for value in row]
+    assert source == "transformed_frame", "K must be selected per frame, not cached"
+
+    class FakeFocusControl:
+        def __init__(self): self.positions = []
+        def setManualFocus(self, value): self.positions.append(value)
+    class FakeCamera:
+        def __init__(self): self.initialControl = FakeFocusControl()
+    class FakeCalibration:
+        def __init__(self, value): self.value = value; self.read_sockets = []
+        def getLensPosition(self, rgb_socket):
+            self.read_sockets.append(rgb_socket)
+            return self.value
+    # Only the surveyed RGB socket value is applied, without editing EEPROM.
+    # Boundaries are valid values; do not treat position zero as missing.
+    for position in (0, 147, 255, 147.0):
+        camera = FakeCamera(); calibration = FakeCalibration(position)
+        selected = service.configure_rgb_calibrated_focus(camera, calibration, "rgb-socket")
+        assert selected == int(position)
+        assert camera.initialControl.positions == [int(position)]
+        assert calibration.read_sockets == ["rgb-socket"]
+    for calibration in (object(), FakeCalibration(None)):
+        camera = FakeCamera()
+        assert service.configure_rgb_calibrated_focus(camera, calibration, "rgb-socket") is None
+        assert camera.initialControl.positions == [], "Missing focus must never be guessed"
+    class MissingFocusCalibration:
+        def getLensPosition(self, rgb_socket): raise RuntimeError("no lens calibration")
+    camera = FakeCamera()
+    with contextlib.redirect_stdout(io.StringIO()) as diagnostics:
+        assert service.configure_rgb_calibrated_focus(camera, MissingFocusCalibration(), "rgb-socket") is None
+    assert camera.initialControl.positions == [] and "focus calibration unavailable" in diagnostics.getvalue()
+
+    for frame_position in (None, 0, 146, 255, 146.0):
+        focused_frame = FakeFocusedRGBFrame(cropped_matrix, frame_position)
+        packet, *_ = service.frame_payload(focused_frame, FakeDepthFrame(), left_source,
+                                          right_source, intrinsics,
+                                          rgb_calibrated_lens_position=147)
+        focus_header = json.loads(packet)
+        assert focus_header["rgb_calibrated_lens_position"] == 147
+        assert focus_header["rgb_frame_lens_position"] == frame_position
+        assert focus_header["rgb_intrinsics_source"] == "transformed_frame"
+    # The actual frame position remains observable even when it differs from
+    # the requested calibrated position; command acceptance is not proof.
+    assert focus_header["rgb_frame_lens_position"] == 146
+    for invalid_position in (-1, 256, 2.5, float("nan"), float("inf"), True, "147", []):
+        try:
+            service.configure_rgb_calibrated_focus(FakeCamera(), FakeCalibration(invalid_position), "rgb-socket")
+        except RuntimeError as error:
+            assert "invalid RGB calibrated lens position" in str(error)
+        else:
+            raise AssertionError("Invalid calibrated focus was applied")
+        try:
+            service.frame_payload(FakeFocusedRGBFrame(cropped_matrix, invalid_position),
+                                  FakeDepthFrame(), left_source, right_source, intrinsics,
+                                  rgb_calibrated_lens_position=147)
+        except RuntimeError as error:
+            assert "invalid RGB frame lens position" in str(error)
+        else:
+            raise AssertionError("Invalid frame focus metadata was published")
+    try:
+        service.frame_payload(FakeFocusedRGBFrame(cropped_matrix, 147), FakeDepthFrame(),
+                              left_source, right_source, intrinsics,
+                              rgb_calibrated_lens_position=256)
+    except RuntimeError as error:
+        assert "invalid RGB calibrated lens position" in str(error)
+    else:
+        raise AssertionError("Invalid calibrated focus metadata was published")
+
+    # Missing metadata is a visible compatibility fallback; supplied invalid
+    # metadata must never be replaced with the otherwise-valid nominal K.
+    for unavailable in (None, object()):
+        transformed_frame.transformation = unavailable
+        values, source = service.rgb_frame_intrinsics(transformed_frame, intrinsics, 2, 1)
+        assert values == intrinsics and source == "legacy_eeprom"
+    malformed = [
+        [[0.0] * 3 for _ in range(3)],
+        [[1.0, 0.0, 0.5], [0.0, 1.0, 0.5]],
+        [[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]],
+        [125.0, 0.0, 0.75, 0.0, 126.0, 0.25, 0.0, 0.0, 1.0],
+        [[float("nan"), 0.0, 0.75], [0.0, 126.0, 0.25], [0.0, 0.0, 1.0]],
+        [[125.0, 0.0, 0.75], [0.0, float("inf"), 0.25], [0.0, 0.0, 1.0]],
+        [[-125.0, 0.0, 0.75], [0.0, 126.0, 0.25], [0.0, 0.0, 1.0]],
+        [[125.0, 0.0, 2.0], [0.0, 126.0, 0.25], [0.0, 0.0, 1.0]],
+        [[125.0, 0.0, 0.75], [0.0, 126.0, 1.0], [0.0, 0.0, 1.0]],
+        [[125.0, 0.1, 0.75], [0.0, 126.0, 0.25], [0.0, 0.0, 1.0]],
+        [[125.0, 0.0, 0.75], [0.1, 126.0, 0.25], [0.0, 0.0, 1.0]],
+        [[125.0, 0.0, 0.75], [0.0, 126.0, 0.25], [0.1, 0.0, 1.0]],
+        [[125.0, 0.0, 0.75], [0.0, 126.0, 0.25], [0.0, 0.0, 2.0]],
+        [[True, 0.0, 0.75], [0.0, 126.0, 0.25], [0.0, 0.0, 1.0]],
+        [["125", 0.0, 0.75], [0.0, 126.0, 0.25], [0.0, 0.0, 1.0]],
+        None,
+    ]
+    for matrix in malformed:
+        transformed_frame.transformation = FakeTransformation(matrix)
+        try:
+            service.frame_payload(transformed_frame, FakeDepthFrame(), left_source,
+                                  right_source, intrinsics)
+        except RuntimeError as error:
+            assert "invalid RGB camera intrinsics" in str(error)
+        else:
+            raise AssertionError("Malformed transformed K was silently accepted")
+    try:
+        service.rgb_frame_intrinsics(FakeRGBFrame(), [0.0] * 9, 2, 1)
+    except RuntimeError as error:
+        assert "invalid RGB camera intrinsics" in str(error)
+    else:
+        raise AssertionError("Invalid legacy K was accepted")
 
     print("Depth camera IPC v2 fixture passed")
 

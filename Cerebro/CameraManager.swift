@@ -76,6 +76,9 @@ struct CameraIntrinsics: Sendable {
     let fy: Double
     let cx: Double
     let cy: Double
+    var calibrationSource: String? = nil
+    var calibratedLensPosition: Int? = nil
+    var frameLensPosition: Int? = nil
 
     func isValid(forWidth width: Int, height: Int) -> Bool {
         fx.isFinite && fy.isFinite && cx.isFinite && cy.isFinite
@@ -1501,7 +1504,10 @@ private final class DepthCameraServiceClient {
                 intrinsics: header.rgbIntrinsics.flatMap { values in
                     guard values.count == 9 else { return nil }
                     let result = CameraIntrinsics(
-                        fx: values[0], fy: values[4], cx: values[2], cy: values[5]
+                        fx: values[0], fy: values[4], cx: values[2], cy: values[5],
+                        calibrationSource: header.rgbIntrinsicsSource,
+                        calibratedLensPosition: header.rgbCalibratedLensPosition,
+                        frameLensPosition: header.rgbFrameLensPosition
                     )
                     return result.isValid(forWidth: header.rgbWidth, height: header.rgbHeight)
                         ? result : nil
@@ -1681,6 +1687,9 @@ private struct DepthCameraPacketHeader: Decodable {
     let leftLength: Int
     let rightLength: Int
     let rgbIntrinsics: [Double]?
+    let rgbIntrinsicsSource: String?
+    let rgbCalibratedLensPosition: Int?
+    let rgbFrameLensPosition: Int?
     let sidewalkCenterDeviation: Double?
     let sidewalkConfidence: Double?
     let chessPieces: [ROBChessPieceDetection]?
@@ -1705,6 +1714,9 @@ private struct DepthCameraPacketHeader: Decodable {
         case leftLength = "left_length"
         case rightLength = "right_length"
         case rgbIntrinsics = "rgb_intrinsics"
+        case rgbIntrinsicsSource = "rgb_intrinsics_source"
+        case rgbCalibratedLensPosition = "rgb_calibrated_lens_position"
+        case rgbFrameLensPosition = "rgb_frame_lens_position"
         case sidewalkCenterDeviation = "sidewalk_center_deviation"
         case sidewalkConfidence = "sidewalk_confidence"
         case chessPieces = "chess_pieces"

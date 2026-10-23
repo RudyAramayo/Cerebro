@@ -230,15 +230,122 @@ def frame_timing(rgb, depth, clock_now):
     }
 
 
+def validated_pinhole_intrinsics(matrix, width, height, flattened=False):
+    """Validate K for the exact pixels being published, then flatten row-major."""
+    try:
+        if width <= 0 or height <= 0:
+            raise ValueError("nonpositive frame dimensions")
+        if flattened:
+            if len(matrix) != 9:
+                raise ValueError("expected nine intrinsic values")
+            values = list(matrix)
+        else:
+            if len(matrix) != 3 or any(len(row) != 3 for row in matrix):
+                raise ValueError("expected a 3x3 intrinsic matrix")
+            values = [value for row in matrix for value in row]
+        if any(isinstance(value, (bool, str, bytes)) for value in values):
+            raise ValueError("intrinsics must be numeric")
+        values = [float(value) for value in values]
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("intrinsics must be finite")
+        if not (values[0] > 0 and values[4] > 0
+                and 0 <= values[2] < width and 0 <= values[5] < height):
+            raise ValueError("invalid focal lengths or principal point")
+        if (any(abs(values[index]) > 1e-6 for index in (1, 3, 6, 7))
+                or abs(values[8] - 1) > 1e-6):
+            raise ValueError("intrinsics are not a pinhole camera matrix")
+    except (TypeError, ValueError, OverflowError) as error:
+        raise RuntimeError("invalid RGB camera intrinsics: " + str(error)) from error
+    return values
+
+
+def rgb_frame_intrinsics(rgb_frame, nominal_intrinsics, width, height):
+    """Prefer per-frame K, which includes the Camera node's crop/resize transform.
+
+    Older frames without transformation metadata may use EEPROM-derived K, but
+    that fallback is explicitly identified on the wire. Present-but-invalid
+    metadata is an error, never a reason to publish the nominal calibration.
+    """
+    get_transform = getattr(rgb_frame, "getTransformation", None)
+    if get_transform is not None:
+        if not callable(get_transform):
+            raise RuntimeError("invalid RGB frame transformation accessor")
+        transform = get_transform()
+        if transform is not None:
+            get_matrix = getattr(transform, "getIntrinsicMatrix", None)
+            if get_matrix is not None:
+                if not callable(get_matrix):
+                    raise RuntimeError("invalid RGB frame intrinsic accessor")
+                matrix = get_matrix()
+                return (validated_pinhole_intrinsics(matrix, width, height),
+                        "transformed_frame")
+    return (validated_pinhole_intrinsics(nominal_intrinsics, width, height,
+                                         flattened=True),
+            "legacy_eeprom")
+
+
+def validated_lens_position(value, name):
+    """Return an optional integer lens position without rounding or guessing."""
+    if value is None:
+        return None
+    try:
+        if isinstance(value, (bool, str, bytes)):
+            raise ValueError("lens position must be numeric")
+        numeric = float(value)
+        if not math.isfinite(numeric) or not numeric.is_integer() or not 0 <= numeric <= 255:
+            raise ValueError("lens position must be an integer from 0 to 255")
+        return int(numeric)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise RuntimeError("invalid " + name + " lens position: " + str(error)) from error
+
+
+def configure_rgb_calibrated_focus(rgb_camera, calibration, rgb_socket):
+    """Match RGB focus to the EEPROM calibration used for depth alignment.
+
+    Luxonis's aligned RGB/depth example fixes focus to this surveyed setting.
+    Missing calibration remains explicitly unavailable; EEPROM is never edited.
+    """
+    get_position = getattr(calibration, "getLensPosition", None)
+    if get_position is None:
+        return None
+    if not callable(get_position):
+        raise RuntimeError("invalid RGB calibrated lens-position accessor")
+    try:
+        value = get_position(rgb_socket)
+    except Exception as error:
+        emit_error("RGB focus calibration unavailable; leaving focus unchanged: " + str(error))
+        return None
+    position = validated_lens_position(value, "RGB calibrated")
+    if position is not None:
+        rgb_camera.initialControl.setManualFocus(position)
+    return position
+
+
+def rgb_frame_lens_position(rgb_frame):
+    get_position = getattr(rgb_frame, "getLensPosition", None)
+    if get_position is None:
+        return None
+    if not callable(get_position):
+        raise RuntimeError("invalid RGB frame lens-position accessor")
+    return validated_lens_position(get_position(), "RGB frame")
+
+
 def frame_payload(
     rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
     sidewalk_deviation=None, sidewalk_confidence=None, chess_pieces=None,
-    captured_at_milliseconds=None
+    captured_at_milliseconds=None, rgb_calibrated_lens_position=None
 ):
     rgb_width = int(rgb_frame.getWidth())
     rgb_height = int(rgb_frame.getHeight())
     depth_width = int(depth_frame.getWidth())
     depth_height = int(depth_frame.getHeight())
+    frame_intrinsics, intrinsics_source = rgb_frame_intrinsics(
+        rgb_frame, rgb_intrinsics, rgb_width, rgb_height
+    )
+    calibrated_lens_position = validated_lens_position(
+        rgb_calibrated_lens_position, "RGB calibrated"
+    )
+    frame_lens_position = rgb_frame_lens_position(rgb_frame)
 
     rgb_bytes = memoryview(rgb_frame.getData()).tobytes()
     expected_rgb_length = rgb_width * rgb_height * 3
@@ -290,7 +397,10 @@ def frame_payload(
         "stereo_format": "GRAY8",
         "left_length": len(left_bytes),
         "right_length": len(right_bytes),
-        "rgb_intrinsics": rgb_intrinsics,
+        "rgb_intrinsics": frame_intrinsics,
+        "rgb_intrinsics_source": intrinsics_source,
+        "rgb_calibrated_lens_position": calibrated_lens_position,
+        "rgb_frame_lens_position": frame_lens_position,
         "sidewalk_center_deviation": sidewalk_deviation,
         "sidewalk_confidence": sidewalk_confidence,
         "chess_pieces": chess_pieces or [],
@@ -304,11 +414,12 @@ def frame_payload(
 def send_frame(
     client, rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
     sidewalk_deviation=None, sidewalk_confidence=None, chess_pieces=None,
-    captured_at_milliseconds=None
+    captured_at_milliseconds=None, rgb_calibrated_lens_position=None
 ):
     header, rgb_bytes, depth_bytes, left_bytes, right_bytes = frame_payload(
         rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
-        sidewalk_deviation, sidewalk_confidence, chess_pieces, captured_at_milliseconds
+        sidewalk_deviation, sidewalk_confidence, chess_pieces, captured_at_milliseconds,
+        rgb_calibrated_lens_position
     )
     client.sendall(PROTOCOL_MAGIC + struct.pack(">I", len(header)) + header)
     client.sendall(rgb_bytes)
@@ -409,10 +520,18 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
         # throughput at 640x400/30. Reduce capture rate before queues accumulate;
         # USB 3 retains 30 fps. Keep depth and original capture timestamps.
         frame_rate = 10.0 if usb_speed == dai.UsbSpeed.HIGH else FRAME_RATE
+        calibration = device.readCalibration2()
 
         with dai.Pipeline(device) as pipeline:
             rgb_socket = color_camera_socket(device, dai)
             rgb_camera = pipeline.create(dai.node.Camera).build(rgb_socket)
+            calibrated_lens_position = configure_rgb_calibrated_focus(
+                rgb_camera, calibration, rgb_socket
+            )
+            emit("CEREBRO_DEPTHCAM_RGB_FOCUS source={} lens_position={}".format(
+                "eeprom" if calibrated_lens_position is not None else "unavailable",
+                calibrated_lens_position,
+            ))
             rgb_output = rgb_camera.requestOutput(
                 frame_size,
                 type=dai.ImgFrame.Type.RGB888i,
@@ -512,7 +631,6 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                 nn_queue = nn_model.out.createOutputQueue(maxSize=1, blocking=False)
 
             pipeline.start()
-            calibration = device.readCalibration2()
             intrinsic_matrix = calibration.getCameraIntrinsics(
                 rgb_socket, frame_size[0], frame_size[1]
             )
@@ -600,7 +718,8 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                     rgb_intrinsics, latest_sidewalk_deviation, latest_sidewalk_confidence,
                     latest_chess_pieces,
                     captured_at_milliseconds=capture_time_milliseconds(
-                        [rgb_frame, depth_frame], clock_now, time.time())
+                        [rgb_frame, depth_frame], clock_now, time.time()),
+                    rgb_calibrated_lens_position=calibrated_lens_position,
                 )
                 send_finished = time.monotonic()
                 if send_finished - last_timing_at >= 5:

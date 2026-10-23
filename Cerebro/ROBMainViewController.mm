@@ -5672,7 +5672,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     [ROBControllerArmApproval shared].announceApproval = ^(NSString *text) { [weakSelf.speechBox sayArmAuthorizationPrompt:text]; };
     workspace.prepareView = ^BOOL(double pan, NSInteger upper) {
         ROBMainViewController *owner = weakSelf;
-        if (owner == nil || ![ROBLeftArmTrial shared].isRunning || owner.stageShowCoordinator.isRunning ||
+        if (owner == nil || (! [ROBLeftArmTrial shared].isRunning && ![ROBNeckQRCalibration shared].isRunning) || owner.stageShowCoordinator.isRunning ||
             owner.pendingRobotActionRequests.count > 0 || [ROBAmberStackMaintenanceController shared].isRunning ||
             [ROBTorsoControlCenter shared].isArmed) { return NO; }
         if (!armViewPreparationStarted) {
@@ -5698,6 +5698,23 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
     workspace.boundedPan = ^double(double pan) {
         ROBSerialBox *serial = weakSelf.serialBox;
         return serial == nil ? 0 : MAX(serial.currentNeckPanMinimumDegrees, MIN(serial.currentNeckPanMaximumDegrees, pan));
+    };
+    ROBNeckQRCalibration *qrCalibration = [ROBNeckQRCalibration shared];
+    qrCalibration.cameraDemand = routine.cameraDemand;
+    qrCalibration.prepareView = workspace.prepareView;
+    qrCalibration.viewReady = workspace.viewReady;
+    qrCalibration.canUseView = workspace.canUseView;
+    qrCalibration.boundedPan = workspace.boundedPan;
+    qrCalibration.readNeck = ^NSDictionary * {
+        ROBSerialBox *serial = weakSelf.serialBox;
+        if (serial == nil) { return @{@"known": @NO}; }
+        ROBNeckSafetyConfig config = [serial neckSafetyConfiguration];
+        double pan = 0;
+        BOOL known = serial.neckCommandStateKnown &&
+            ROBNeckSafetyPanTargetToDegrees(&config, (int32_t)serial.commandedNeckPanTarget, &pan);
+        return @{@"known": @(known), @"pan_degrees": @(pan),
+            @"lower": @(serial.commandedLowerNeckTiltTarget), @"upper": @(serial.commandedUpperNeckTiltTarget),
+            @"ready_at": @(serial.neckCommandReadyAtUptime)};
     };
     workspace.announce = ^(NSString *text) { [weakSelf.speechBox sayIt:text]; };
     ROBShowMotionCoordinator *rehearsal = [ROBShowMotionCoordinator shared];

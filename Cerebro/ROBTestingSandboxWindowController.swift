@@ -22,6 +22,8 @@ import AppKit
               actions: [Action(title: "Run recycle test", command: "left_recycle_can"), Action(title: "Search only", command: "left_search_workspace"), Action(title: "Scan workspace geometry", command: "left_scan_clearance"), Action(title: "Preview grasp…", command: "ghost:can"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision")]),
         Trial(id: "depth-alignment", title: "Depth alignment", detail: "Adjust the face camera's modeled downward mounting angle and move head-camera depth points horizontally toward ROB. The camera model, live depth view, new workspace scans and object measurements share the pitch correction. Previous scans and previews are cleared when the values change.", parameters: .depthAlignment,
               actions: [Action(title: "Show corrected live depth…", command: "ghost:collision"), Action(title: "Capture corrected workspace", command: "left_scan_clearance")]),
+        Trial(id: "neck-qr-calibration", title: "Neck / QR calibration", detail: "Use the fixed ROB:TABLE:001 target, measured at 120 mm square. Capture its four corners, aligned depth, camera intrinsics and settled neck poses locally, then compare the marker's position across views. The sweep moves only the neck. Keep ROB's base, table and target fixed. A fitted result remains a diagnostic estimate until independent views and world measurements validate it.", parameters: .none,
+              actions: [Action(title: "Capture current QR view", command: "qr:capture"), Action(title: "Run neck-only calibration sweep", command: "qr:sweep"), Action(title: "Fit recorded views", command: "qr:fit"), Action(title: "Show calibration folder", command: "qr:folder"), Action(title: "Stop calibration", command: "qr:stop")]),
         Trial(id: "estimated-calibration", title: "Estimated calibration trial", detail: "Review one estimated EMPTY-left-arm retreat away from the table, then hold for observation. Registration remains unmeasured. One fresh approval covers one slow, 4-second retreat with about 3 cm maximum modeled arm travel. Existing nearby depth-margin overlaps may only improve; new intrusions block motion. Confirm the complete arm's local working space is clear and report the actual direction. No jaw commands, grasp, recycling or automatic return. Open the ghost view before building if needed; restarting the camera requires a new preview.", parameters: .none,
               actions: [Action(title: "Scan / build estimated ghost", command: "estimate:preview"), Action(title: "Inspect estimated ghost / depth map…", command: "ghost:collision"), Action(title: "Run reviewed empty-arm trial", command: "estimate:run")]),
         Trial(id: "object-cycle", title: "Grip and return", detail: "Present the left arm, grip a supported object gently, release into a supporting hand, then return the empty arm. Readiness confirmations remain within the same task authorization. Keep fingers clear of the jaws.", parameters: .current,
@@ -59,7 +61,7 @@ import AppKit
         !ROBLeftArmTrial.shared.isRunning && !ROBArmRoutineCoordinator.shared.isRunning &&
             !ROBArmRoutineCoordinator.shared.ownsPhysicalMotion && !ROBControllerArmApproval.shared.isPending &&
             !ROBGripperStartupCalibration.shared.isRunning && !ROBShowMotionCoordinator.shared.isRunning &&
-            !ROBAmberGestureExecutor.shared.isExecuting
+            !ROBAmberGestureExecutor.shared.isExecuting && !ROBNeckQRCalibration.shared.isRunning
     }
 
     private init() {
@@ -74,6 +76,7 @@ import AppKit
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: Notification.Name("ROBArmRoutineDidChange"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: Notification.Name("ROBControllerArmApprovalDidChange"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: .ROBGripperStartupCalibrationDidChange, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: Notification.Name("ROBNeckQRCalibrationDidChange"), object: nil)
         table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
         collisionRefreshTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             guard let self, self.window?.isVisible == true else { return }
@@ -317,10 +320,23 @@ import AppKit
     }
     @objc private func saveParameters() { _ = storeParameters() }
     @objc private func performTrialAction(_ sender: NSButton) {
-        guard canEdit, selectedTrial.actions.indices.contains(sender.tag) else { return }
+        guard selectedTrial.actions.indices.contains(sender.tag) else { return }
         let command = selectedTrial.actions[sender.tag].command
+        // Stop remains available while the calibration owns the neck/camera.
+        if command == "qr:stop" { ROBNeckQRCalibration.shared.stop(); refresh(); return }
+        guard canEdit else { return }
         if selectedTrial.parameters != .none && selectedTrial.parameters != .depthAlignment && !["left_search_workspace", "left_scan_clearance"].contains(command) && !storeParameters() { return }
-        if command.hasPrefix("ghost:") {
+        if command.hasPrefix("qr:") {
+            observingLeftOperation = false; parameterMessage = ""
+            switch command {
+            case "qr:capture": ROBNeckQRCalibration.shared.captureCurrentView()
+            case "qr:sweep": ROBNeckQRCalibration.shared.runSweep()
+            case "qr:fit": ROBNeckQRCalibration.shared.fitLastCapture()
+            case "qr:folder": ROBNeckQRCalibration.shared.openLastCapture()
+            default: break
+            }
+            refresh()
+        } else if command.hasPrefix("ghost:") {
             NotificationCenter.default.post(name: Notification.Name("ROBShowControllerInputDiagnostics"), object: self,
                                             userInfo: ["ghostPreset": String(command.dropFirst(6))])
         } else if command == "estimate:preview" {
@@ -354,10 +370,14 @@ import AppKit
         _ = ROBLeftArmTrial.shared.continueOperation(stage: displayedCycleStage); refresh()
     }
     @objc private func showRecording() {
+        if selectedTrial.id == "neck-qr-calibration" {
+            ROBNeckQRCalibration.shared.openLastCapture(); return
+        }
         let path = ROBLeftArmTrial.shared.lastRecordingPath
         if !path.isEmpty { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
     }
     @objc private func stop() {
+        ROBNeckQRCalibration.shared.stop()
         ROBArmRoutineCoordinator.shared.cancel(reason: "Stop requested in Testing Sandbox")
         _ = ROBAmberGestureExecutor.shared.cancelCurrentGesture(reason: "Stop requested in Testing Sandbox")
         _ = ROBAmberGestureExecutor.shared.requestPriorityHold()
@@ -378,6 +398,8 @@ import AppKit
         if ROBControllerArmApproval.shared.isPending {
             // Keep the complete operation scope visible while approval is pending.
             status.stringValue = ROBControllerArmApproval.shared.status
+        } else if ROBNeckQRCalibration.shared.isRunning || selectedTrial.id == "neck-qr-calibration" {
+            status.stringValue = ROBNeckQRCalibration.shared.status
         } else if left.isRunning || observingLeftOperation {
             status.stringValue = left.status
         } else if ROBGripperStartupCalibration.shared.isRunning {
@@ -398,7 +420,11 @@ import AppKit
         continueCycle.isEnabled = left.isRunning && !displayedCycleStage.isEmpty
         for field in fields.values { field.isEnabled = canEdit }
         save.isEnabled = canEdit
-        for button in actionButtons { button.isEnabled = canEdit }
+        for button in actionButtons {
+            let isQRStop = selectedTrial.actions.indices.contains(button.tag)
+                && selectedTrial.actions[button.tag].command == "qr:stop"
+            button.isEnabled = isQRStop || canEdit
+        }
         startSessionButton.isEnabled = canEdit && !ROBControllerArmApproval.shared.armSessionActive
         endSessionButton.isEnabled = ROBControllerArmApproval.shared.armSessionActive
     }
