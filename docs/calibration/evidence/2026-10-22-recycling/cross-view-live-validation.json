@@ -1,0 +1,309 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-23T00:56:32.284089+00:00",
+  "codeCommit": "db85df3",
+  "binarySHA256": "330e13c83853da6c1c5e92c6d7d19985fad515e1c988f5e633a1fa4156a5c41d",
+  "physicalArm": "LEFT/R11/gateway right/UDP26002",
+  "authorization": "One final on-device microphone authorization covered search and all39 steps. No per-waypoint approval; no saved grant.",
+  "recording": "left_recycle_can-A67CEAAA-9833-410A-A457-29ED82D2F3CE.csv",
+  "archive": "cross-view-live-complete-path-missed-grasp.csv.gz",
+  "recordingSHA256": "6f9f3cdf99277e0bf69cb8c8ed49d5d8ea5b4710a098e92829dcd3a350cfd6b6",
+  "archiveSHA256": "97785ae06795f2f3c8dca083553899a63a652be261e8d31cc91c5a40b69056d9",
+  "proposal": "cross-view-live-complete-path-missed-grasp.proposal.json",
+  "proposalSHA256": "256f0be1d5bb74e7acc40785db4b1dcaa67a595804e4acf332a03cd20ea182da",
+  "elapsedSeconds": 128.16231808333396,
+  "jointSamples": 1424,
+  "maxRecordedFeedbackAgeMS": 53.53721033288459,
+  "phases": [
+    {
+      "phase": "preflight",
+      "seconds": 0.04104520833789138
+    },
+    {
+      "phase": "camera preparation",
+      "seconds": 55.745692958334985
+    },
+    {
+      "phase": "gesture step 0",
+      "seconds": 60.97965416666557
+    },
+    {
+      "phase": "gesture step 1",
+      "seconds": 62.87119841666572
+    },
+    {
+      "phase": "gesture step 2",
+      "seconds": 65.20502433333604
+    },
+    {
+      "phase": "gesture step 3",
+      "seconds": 67.90351987499889
+    },
+    {
+      "phase": "gesture step 4",
+      "seconds": 69.9915181250035
+    },
+    {
+      "phase": "empty gripper calibration",
+      "seconds": 72.48695912500261
+    },
+    {
+      "phase": "tabletop prepare",
+      "seconds": 82.55570770833583
+    },
+    {
+      "phase": "gesture step 5",
+      "seconds": 84.13021520833718
+    },
+    {
+      "phase": "gesture step 6",
+      "seconds": 85.52344625000114
+    },
+    {
+      "phase": "gesture step 7",
+      "seconds": 87.28338433333556
+    },
+    {
+      "phase": "gesture step 8",
+      "seconds": 88.70751120833302
+    },
+    {
+      "phase": "gesture step 9",
+      "seconds": 90.23705645833252
+    },
+    {
+      "phase": "gesture step 10",
+      "seconds": 91.61141966666764
+    },
+    {
+      "phase": "gesture step 11",
+      "seconds": 92.93365408333193
+    },
+    {
+      "phase": "gesture step 12",
+      "seconds": 94.30949862499983
+    },
+    {
+      "phase": "gesture step 13",
+      "seconds": 95.68629908333241
+    },
+    {
+      "phase": "gesture step 14",
+      "seconds": 96.85772449999786
+    },
+    {
+      "phase": "gesture step 15",
+      "seconds": 98.05100949999905
+    },
+    {
+      "phase": "gesture step 16",
+      "seconds": 99.1999763749991
+    },
+    {
+      "phase": "gesture step 17",
+      "seconds": 100.36898062500404
+    },
+    {
+      "phase": "tabletop grip",
+      "seconds": 101.49129029166943
+    },
+    {
+      "phase": "gesture step 18",
+      "seconds": 103.06609433333506
+    },
+    {
+      "phase": "gesture step 19",
+      "seconds": 104.64436241666408
+    },
+    {
+      "phase": "gesture step 20",
+      "seconds": 105.71180541667127
+    },
+    {
+      "phase": "gesture step 21",
+      "seconds": 106.9242425416669
+    },
+    {
+      "phase": "gesture step 22",
+      "seconds": 107.95471374999761
+    },
+    {
+      "phase": "gesture step 23",
+      "seconds": 109.07228091666911
+    },
+    {
+      "phase": "gesture step 24",
+      "seconds": 110.19106433333218
+    },
+    {
+      "phase": "gesture step 25",
+      "seconds": 111.56458866666799
+    },
+    {
+      "phase": "gesture step 26",
+      "seconds": 112.93872354166524
+    },
+    {
+      "phase": "gesture step 27",
+      "seconds": 113.95764466666878
+    },
+    {
+      "phase": "gesture step 28",
+      "seconds": 114.9255837916644
+    },
+    {
+      "phase": "gesture step 29",
+      "seconds": 115.94412341666612
+    },
+    {
+      "phase": "gesture step 30",
+      "seconds": 116.91136299999926
+    },
+    {
+      "phase": "gesture step 31",
+      "seconds": 117.77721091666899
+    },
+    {
+      "phase": "gesture step 32",
+      "seconds": 118.6940583750038
+    },
+    {
+      "phase": "gesture step 33",
+      "seconds": 119.45749200000137
+    },
+    {
+      "phase": "gesture step 34",
+      "seconds": 120.42445641666563
+    },
+    {
+      "phase": "gesture step 35",
+      "seconds": 121.34116754166462
+    },
+    {
+      "phase": "tabletop release",
+      "seconds": 122.66496133333567
+    },
+    {
+      "phase": "gesture step 36",
+      "seconds": 124.25440808333224
+    },
+    {
+      "phase": "gesture step 37",
+      "seconds": 125.56654608333338
+    },
+    {
+      "phase": "gesture step 38",
+      "seconds": 126.73679608333623
+    }
+  ],
+  "inactiveSearchRecordingGap": "Intentional: motor recording is suspended only during measured hanging/inactive neck-only search. Full fresh admission resumes before activation; this initial gap is not a lease failure.",
+  "positionsReached": 39,
+  "jawActions": [
+    {
+      "step": 4,
+      "action": "prepare"
+    },
+    {
+      "step": 17,
+      "action": "grip"
+    },
+    {
+      "step": 35,
+      "action": "release"
+    }
+  ],
+  "openingIntensity": 10,
+  "closingIntensity": 2,
+  "reachCorrectionMeters": [
+    -0.127,
+    0,
+    0
+  ],
+  "search": {
+    "status": "found",
+    "detail": "I found the Coke can and orange bucket.",
+    "objects": {
+      "can": {
+        "captured_at_ms": 1792716751947.337,
+        "position": [
+          0.5412589493450545,
+          -0.06995468495720288,
+          0.9256385025454502
+        ]
+      },
+      "orangeBucket": {
+        "captured_at_ms": 1792716765447.505,
+        "position": [
+          0.4236980407326436,
+          0.31194032301987196,
+          0.2782329251217005
+        ]
+      }
+    },
+    "decoded_observations": 10,
+    "recall_views": [
+      {
+        "pan": 0,
+        "upper": 6306
+      },
+      {
+        "pan": -10.222128939628604,
+        "upper": 6053
+      },
+      {
+        "pan": 45,
+        "upper": 5650
+      },
+      {
+        "pan": 35.30473358631134,
+        "upper": 5700
+      }
+    ],
+    "announcements": [
+      {
+        "at": "2026-10-23T00:52:19Z",
+        "message": "I see the can. I'm still looking for the bucket.",
+        "visually_confirmed": [
+          "can"
+        ]
+      },
+      {
+        "at": "2026-10-23T00:52:47Z",
+        "message": "I see the bucket.",
+        "visually_confirmed": [
+          "can",
+          "orangeBucket"
+        ]
+      }
+    ]
+  },
+  "finalPositionsRadians": [
+    -0.4779202365812598,
+    1.99526585503383,
+    -0.5792311455056182,
+    0.5894576840915224,
+    -1.182051506682722,
+    -0.7041312701014624,
+    -1.63133743522345
+  ],
+  "nativeOutcome": "All recycling positions reached; closing at2 and opening at10 accepted; holding at final retreat. Jaw travel, retention and placement remain unmeasured.",
+  "cameraObservation": "The Coke can remained on the table after the grip/lift. Empty transfer/release/retreat completed; no can was recycled. Exact lowest-grasp error was not captured in the post-lift screenshot.",
+  "canPickedUp": false,
+  "canPlacedInBucket": false,
+  "longerCalibrationWait": "Ten-second post-calibration interval did not establish actual opening before approach; Rob confirmed the jaws were not open. Separate stationary opening must be observed before the next reach.",
+  "currentState": "Arm held at retreat; no active rehearsal session. No further reach sent pending observed hand-to-can alignment.",
+  "cameraImagesIncluded": false,
+  "grantsPersisted": false,
+  "operatorFeedback": "Gripper was not open before approach; gripper passed4-5 inches above can; final release worked, but arm needed20 degrees farther to robot left to be above bucket.",
+  "initialJawOpeningVerified": false,
+  "finalReleaseOpeningObservedByOperator": true,
+  "nextAlignmentCorrection": {
+    "canTranslationMeters": [
+      -0.127,
+      0,
+      -0.1143
+    ],
+    "bucketYawDegrees": 20,
+    "source": "Operator observations from this physical run; 4.5inches is midpoint of4-5inches."
+  }
+}

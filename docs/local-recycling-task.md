@@ -316,6 +316,23 @@ It shifts the can approach/grasp/lift, leaving the raw detection and bucket
 position unchanged. The ghost shows the raw can marker and a separate corrected
 reach marker. This does not establish camera-to-arm or tool-center calibration.
 
+After the complete 39-step physical run, Rob observed closed jaws during approach,
+a grasp 4–5 inches above the can, and a release needing 20° farther toward ROB's
+left. The local experimental correction therefore adds −11.43 cm in Z (the
+4½-inch midpoint), retaining the earlier −12.7 cm X correction. Optional
+`bucketYawDegrees` rotates the model release center about the left shoulder's
+vertical axis, keeping measured rim height/radius and raw bucket observations
+unchanged; it is bounded to ±30°. The next commissioning sequence verifies a
+separate stationary opening with already accepted calibration before reaching.
+Stationary release10 and release20 were subsequently acknowledged but stayed
+closed. Rob manually recovered it with additional close/open commands and
+confirmed the jaws open. Confirmed-EMPTY preparation now primes the jaws with
+a stationary gentle close at2, waits1.5seconds, then issues the caller's fixed
+opening command. This runs before reaching and never during payload release;
+command directions and grip force are unchanged. The one complete operation
+scope includes this initialization. No successful pickup is inferred from
+accepted jaw commands.
+
 ## Validation
 
 The plan, approval/session, executor, camera/model rendering and tunnel fixtures

@@ -15,6 +15,37 @@ private extension ROBLeftCanReachCalibration {
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
         let model = try ROBGhostRobotModel(directory: root.appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
         precondition(model.modelID.count == 64 && model.joints.count == 44 && model.hulls.count >= 40)
+        if CommandLine.arguments.last == "operator-alignment" {
+            let now = Date().timeIntervalSince1970 * 1000, baseline = model.positions(vendorLeft:Array(repeating:0,count:7))
+            let view = ROBWorkspaceView(panDegrees:0,upperTarget:6306)
+            let can = ROBWorkspaceLocatedObject(target:.can,position:[0.5412589493,-0.0699546850,0.9256385025],
+                confidence:0.8,capturedAt:now,sequence:10,view:view)
+            let bucket = ROBWorkspaceLocatedObject(target:.orangeBucket,position:[0.4236980407,0.3119403230,0.2782329251],
+                confidence:0.6,capturedAt:now,sequence:11,view:view,openingRadius:0.1)
+            let offset = SIMD3<Double>(-0.127,0,-0.1143)
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("rob-alignment-"+UUID().uuidString+".json")
+            defer { try? FileManager.default.removeItem(at:file) }
+            let calibration = ROBLeftCanReachCalibration(modelID:model.modelID,referenceID:model.referenceID,mappingID:ROBGhostRobotModel.mappingID,
+                translationMeters:[offset.x,offset.y,offset.z],source:"Isolated operator alignment fixture",bucketYawDegrees:20)
+            try calibration.saveFixture(to:file)
+            let loadedYaw = try ROBLeftCanReachCalibration.loadBucketYaw(model:model,file:file)
+            precondition(loadedYaw == 20)
+            let oldYaw = try ROBCanGrabPreview.make(can:can,model:model,baseline:baseline,now:now,bucket:bucket,reachOffset:offset)
+            let corrected = try ROBCanGrabPreview.make(can:can,model:model,baseline:baseline,now:now,bucket:bucket,reachOffset:offset,bucketYawDegrees:20)
+            precondition(corrected.reachesCan && corrected.can.position == can.position)
+            precondition(abs(corrected.calibratedGraspPoint.z-0.8113385025) < 0.000001)
+            let actions = Dictionary(uniqueKeysWithValues:corrected.steps.enumerated().compactMap { i,s in s.jawAction.map { (i,$0) } })
+            let frozen = try ROBLeftGestureCompiler.compile(kind:"recycling",name:"Operator alignment regression",poses:corrected.steps.map(\.pose),
+                model:model,baseline:Array(repeating:0,count:7),generation:77,recyclingActions:actions)
+            try ROBLeftGestureCompiler.validate(frozen,model:model)
+            func release(_ plan:ROBCanGrabPreview) -> SIMD3<Double> { model.toolPosition(plan.steps.first { $0.jawAction == .release }!.pose)! }
+            let pivot = model.frames(baseline)["left_one_Link"]!.columns.3
+            let a = release(oldYaw), b = release(corrected)
+            let turn = (atan2(b.y-pivot.y,b.x-pivot.x)-atan2(a.y-pivot.y,a.x-pivot.x))*180 / .pi
+            precondition((15...25).contains(turn),"Bucket release correction turned away from robot left")
+            print("Operator alignment: grasp lowered11.43cm, raw sightings unchanged, release turns\(turn) degrees LEFT; \(frozen.steps.count) validated physical steps, grasp error\(corrected.graspError)m")
+            return
+        }
         func head(_ pan: Double, _ lower: Double, _ upper: Double) -> [String: simd_double4x4] {
             var positions = model.reference
             positions.merge(model.headPositions(pan: pan, lowerPitch: lower, upperPitch: upper)!) { _, command in command }

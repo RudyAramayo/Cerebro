@@ -64,6 +64,8 @@ final class ROBAmberGatewayClient: NSObject {
     var calibrated: Set<String> = []
     var calibrationReadyAt = 0.0
     var jawsOpened = false
+    var emptyJawInitialized = false
+    var afterEmptyInitialization: (() -> Void)?
     var expectedGripperIntensity = 10
     var expectedOpeningIntensity: Int?
     var gripperIntensities: [Int] = []
@@ -158,6 +160,7 @@ final class ROBAmberGatewayClient: NSObject {
         guard !activeLeases.contains(arm) else { return ack("calibrate", arm, accepted: false) }
         calibrated.insert(arm)
         calibrationReadyAt = ProcessInfo.processInfo.systemUptime + 8
+        emptyJawInitialized = false
         jawsOpened = false
         return ack("calibrate", arm)
     }
@@ -166,16 +169,21 @@ final class ROBAmberGatewayClient: NSObject {
             precondition(!ROBLeftArmTrial.shared.authorizesTaughtWaypoint(arm: arm,
                 expectedSessionGeneration: generation), "Stationary gripper approval authorized arm travel")
         }
-        precondition(force == (action == "release" ? expectedOpeningIntensity ?? expectedGripperIntensity : expectedGripperIntensity))
+        let initializing = ROBLeftArmTrial.shared.status.hasPrefix("Initializing empty left jaws")
+        precondition(force == (initializing ? 2 : action == "release" ? expectedOpeningIntensity ?? expectedGripperIntensity : expectedGripperIntensity))
         gripperIntensities.append(force)
         // Firmware may accept an opening while calibration still owns the
         // motor, without physically executing it. Reproduce the live miss.
-        if action == "release" { jawsOpened = ProcessInfo.processInfo.systemUptime >= calibrationReadyAt }
-        else { jawsOpened = false }
+        if action == "release" { jawsOpened = emptyJawInitialized && ProcessInfo.processInfo.systemUptime >= calibrationReadyAt }
+        else {
+            jawsOpened = false
+            if initializing && ProcessInfo.processInfo.systemUptime >= calibrationReadyAt { emptyJawInitialized = true }
+        }
         precondition(calibrated.contains(arm), "Uncalibrated jaw command")
         let id = ack("gripper_\(action)", arm, accepted: action != "release" || !rejectRelease)
         if action == "release" { afterRelease?() }
-        if action == "hold" { afterGrip?() }
+        if initializing { afterEmptyInitialization?() }
+        else if action == "hold" { afterGrip?() }
         return id
     }
 }
@@ -375,8 +383,8 @@ final class ROBArmRoutineCoordinator {
             precondition(recovery["status"] as? String == "accepted_unverified",recovery.description)
             precondition(approvals == 1 && g.q["right"]! == plan.target(index:plan.frontIndex)!)
             precondition(g.commands.filter { $0.hasPrefix("ghost_step_") }.count == 25)
-            precondition(!g.commands.contains("deactivate:right") && !g.commands.contains("gripper_hold:right"))
-            precondition(g.gripperIntensities == [10] && g.activeLeases.isEmpty)
+            precondition(!g.commands.contains("deactivate:right") && g.commands.filter { $0 == "gripper_hold:right" }.count == 1)
+            precondition(g.gripperIntensities == [2,10] && g.activeLeases.isEmpty)
             g.commands = []; g.q["right"] = [Double](repeating:2.8,count:7)
             let outside = await run("left_prepare")
             precondition(outside["status"] as? String == "blocked" && !g.commands.contains { $0.hasPrefix("ghost_step") || $0.hasPrefix("gripper_") },outside.description)
@@ -423,12 +431,12 @@ final class ROBArmRoutineCoordinator {
             let outcome = await run("left_recycle_can")
             precondition(outcome["motion_completed"] as? Bool == true, outcome.description)
             precondition(outcome["placement_verified"] as? Bool == false, "Command acknowledgements falsely verified placement")
-            precondition(outcome["gripper_opening_intensity"] as? Int == 10 && g.gripperIntensities == [10,2,10], "Opening must use its fixed setting while closing remains gentle")
+            precondition(outcome["gripper_opening_intensity"] as? Int == 10 && g.gripperIntensities == [2,10,2,10], "Opening must use its fixed setting while closing remains gentle")
             precondition(approvals == 1 && ROBWorkspaceSearch.shared.requiredDepth)
-            precondition(g.commands.filter { $0 == "gripper_release:right" || $0 == "gripper_hold:right" } == ["gripper_release:right","gripper_hold:right","gripper_release:right"])
+            precondition(g.commands.filter { $0 == "gripper_release:right" || $0 == "gripper_hold:right" } == ["gripper_hold:right","gripper_release:right","gripper_hold:right","gripper_release:right"])
             precondition(g.commands.allSatisfy { $0.hasSuffix(":right") } && !g.commands.contains("deactivate:right"))
             precondition(g.activeLeases.isEmpty && ROBAmberArmMotionArbiter.shared.owners.isEmpty)
-            print("Horizontal recycling executor: one real-protocol fixture grant, fresh grounded targets, frozen steps, opening/release 10 and closing 2, measured hold, no right-arm motion or automatic torque-off")
+            print("Horizontal recycling executor: one real-protocol fixture grant, fresh grounded targets, frozen steps, EMPTY-jaw close2/open10 initialization, release10 and closing2, measured hold, no right-arm motion or automatic torque-off")
             return
         }
         if CommandLine.arguments.last == "telemetry" { try await delayedTelemetryTests(); return }
@@ -473,7 +481,8 @@ final class ROBArmRoutineCoordinator {
         precondition(!g.commands.contains("deactivate:right"), "Preparation required a manual-style torque-off/on cycle")
         precondition(g.commands.filter { $0.hasPrefix("calibrate") } == ["calibrate:right"])
         precondition(g.commands.contains("gripper_release:right"))
-        precondition(g.jawsOpened, "Opening was acknowledged before physical calibration completed")
+        precondition(g.jawsOpened, "Opening requires calibration to settle and an EMPTY-jaw initialization close")
+        precondition(g.commands.filter { $0.hasPrefix("gripper_") && !$0.hasPrefix("gripper_state") } == ["gripper_hold:right","gripper_release:right"])
         let heldForPrepare = g.commands.firstIndex(of: "priority_hold:right")!
         precondition(heldForPrepare > g.commands.lastIndex(of: "waypoint_\(plan.frontIndex):right")!)
         precondition(heldForPrepare < g.commands.firstIndex(of: "calibrate:right")!)
@@ -539,9 +548,9 @@ final class ROBArmRoutineCoordinator {
         precondition(transferred["status"] as? String == "accepted_unverified", transferred.description)
         precondition(transferred["motion_completed"] as? Bool == true && transferred["placement_verified"] as? Bool == false)
         precondition(approvals == taskApprovalCount + 1 && trial.interactionStage.isEmpty)
-        precondition(g.gripperIntensities == [2,2,2])
+        precondition(g.gripperIntensities == [2,2,2,2])
         precondition(g.commands.filter { $0.hasPrefix("gripper_") && !$0.hasPrefix("gripper_state") } ==
-            ["gripper_release:right", "gripper_hold:right", "gripper_release:right"])
+            ["gripper_hold:right", "gripper_release:right", "gripper_hold:right", "gripper_release:right"])
         precondition(g.q["right"] == tabletop.steps.last!.positions && g.mode["right"] == 2)
         precondition(!g.commands.contains { $0.hasPrefix("deactivate") || $0.hasSuffix(":left") })
         precondition(g.commands.filter { $0.hasPrefix("ghost_step") }.count == tabletop.steps.count)
@@ -667,9 +676,9 @@ final class ROBArmRoutineCoordinator {
         precondition(cycle["gripper_measured"] as? Bool == false)
         precondition(approvals == beforeCycle + 1 && preparedViews == 1)
         precondition(readyStages == ["object_placed", "receiver_supporting", "object_clear"])
-        precondition(g.gripperIntensities == [2, 2, 2])
+        precondition(g.gripperIntensities == [2, 2, 2, 2])
         precondition(g.commands.filter { $0.hasPrefix("gripper_") && $0 != "gripper_state:right" } ==
-            ["gripper_release:right", "gripper_hold:right", "gripper_release:right"])
+            ["gripper_hold:right", "gripper_release:right", "gripper_hold:right", "gripper_release:right"])
         precondition(g.commands.filter { $0.hasPrefix("calibrate") }.count == 1, "Cycle recalibrated around an object")
         precondition(g.commands.filter { $0.hasPrefix("waypoint") } ==
             [1,4,6,18,28,18,6,4,1,0].map { "waypoint_\($0):right" })
@@ -714,7 +723,7 @@ final class ROBArmRoutineCoordinator {
             precondition(commandCountAtFault > 0)
             precondition(g.commands.dropFirst(commandCountAtFault).allSatisfy { $0 == "priority_hold:right" },
                 "Faulted object cycle sent a later jaw or lowering command")
-            let expected = failedStage == "object_placed" ? 1 : failedStage == "receiver_supporting" ? 2 : 3
+            let expected = failedStage == "object_placed" ? 2 : failedStage == "receiver_supporting" ? 3 : 4
             precondition(g.gripperIntensities == Array(repeating: 2, count: expected))
             precondition(g.commands.filter { $0.hasPrefix("waypoint") }.count == 5)
             precondition(!g.commands.contains("deactivate:right") && g.mode["right"] == 2)

@@ -8,4 +8,4 @@ xcrun swiftc -swift-version 5 -parse-as-library \
   "$repo_dir/Cerebro/ROBArmRoutinePlan.swift" \
   "$repo_dir/Cerebro/ROBGhostMotionPlan.swift" "$repo_dir/Cerebro/ROBWorkspaceSearchPlan.swift" \
   "$repo_dir/Tests/ROBGhostMotionPlanFixtureTests.swift" -o "$fixture_dir/ghost"
-"$fixture_dir/ghost" "$repo_dir"
+"$fixture_dir/ghost" "$repo_dir" "$@"

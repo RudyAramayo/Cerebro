@@ -87,7 +87,7 @@ import AppKit
             let current = limit == 0 ? "Record currents only; automatic cutoff is not configured."
                 : "Hold on a sample-to-sample current jump above \(limit) raw units; not a calibrated force limit."
             let scope = ["tabletop", "recycling"].contains(proposal.kind)
-                ? "Complete a fixed-station can-to-bucket attempt: present EMPTY arm, calibrate empty jaws only if needed, open at intensity \(proposal.kind == "recycling" ? 10 : 2), approach, grip at intensity 2, small lift, carry above the bucket, release at the same opening intensity and retreat held. No per-step Continue or approval. Supervise actual jaw opening and pickup; retention and placement remain unmeasured."
+                ? "Complete a fixed-station can-to-bucket attempt: present EMPTY arm, calibrate empty jaws only if needed, initialize EMPTY jaws with a gentle close at intensity 2, open at intensity \(proposal.kind == "recycling" ? 10 : 2), approach, grip at intensity 2, small lift, carry above the bucket, release at the same opening intensity and retreat held. No per-step Continue or approval. Supervise actual jaw opening and pickup; retention and placement remain unmeasured."
                 : "Move only the empty physical LEFT arm; jaws unchanged."
             let text = "Reviewed ghost gesture ‘\(proposal.name)’: \(proposal.steps.count) steps, \(Int(ceil(proposal.seconds))) seconds scheduled, maximum 180 seconds including settling. \(range). Proposal \(proposal.id.uuidString), SHA256 \(proposal.fingerprint). \(scope) Camera centers at upright lower 6011 / upper 6306. Confirm physically hanging at encoder zero for the first movement of this session. Model/encoder mapping uses the recorded upright prior; watch actual arm, tread and cable clearance. This is a supervised trial, not certified collision or force protection. Keep Stop + hold ready; keep the controller open when using controller approval. \(current)"
             update("Awaiting controller approval for reviewed ghost: \(proposal.name)")
@@ -207,12 +207,12 @@ import AppKit
         switch command {
         case "left_search_workspace": action = "Search locally for a Coke can and an orange bucket by panning/tilting the neck camera. Confirm detections in two fresh RGB-D observations using the offline object detector. If missing, ask the nearest visible person to point and search in the estimated pointing direction. Report found/not found. No arm activation, gripper commands or arm travel."
         case "left_check_hanging": action = "Inspect both robot arms by panning/tilting the neck camera using on-device MLX; report whether each is visibly hanging. This observation never resets encoders or activates/moves either arm."
-        case "left_recycle_can": action = "One experimental recycling task: scan locally for the EMPTY Coke can and open bucket, confirm twice with depth, and apply only the explicit operator-measured left-can reach calibration if installed. Present the empty LEFT arm, calibrate empty jaws if needed, OPEN at fixed intensity 10, approach with horizontal jaws, close gently at intensity 2, lift, carry ABOVE the opening, release at intensity 10 for a gravity drop and retreat held. Supervise the actual jaw opening and reach. One authorization covers all waypoints. No automatic force escalation, blind retries, driving or torque-off with a payload. Grip and placement remain unmeasured."
+        case "left_recycle_can": action = "One experimental recycling task: scan locally for the EMPTY Coke can and open bucket, confirm twice with depth, and apply only the explicit operator-measured can/release alignment calibration if installed. Present the empty LEFT arm, calibrate empty jaws if needed, gently close the confirmed-EMPTY jaws at intensity 2 to initialize them, then OPEN at fixed intensity 10, approach with horizontal jaws, close gently at intensity 2, lift, carry ABOVE the opening, release at intensity 10 for a gravity drop and retreat held. Supervise the actual jaw opening and reach. One authorization covers all waypoints. No automatic force escalation, blind retries, driving or torque-off with a payload. Grip and placement remain unmeasured."
         case "left_wave": action = "Raise the empty LEFT arm along the initial tread-clearance approach, then coordinate J3/J5 together to -0.60 and J2/J6 together to +1.00/-0.60. Continue to J2 +1.30/J4 -0.60 and raised J5 -1.40. Seven approach segments from hanging plus four wave strokes; watch the newly coordinated front sweeps. Wave J1 -0.90/-1.05 twice with J6 -0.90/-0.60, and leave raised. Jaws unchanged."
-        case "left_prepare": action = "Present the confirmed-EMPTY physical LEFT arm. If held after a failed recycling attempt, first retrace only its actually executed frozen route to front; no unvisited or arbitrary recovery targets. Otherwise use the registered hanging/front corridor. Calibrate EMPTY jaws only if needed, then OPEN at fixed intensity 10. Confirm no object is held, clear fingers, and supervise the recorded return and actual jaw opening. No torque-off or new encoder zero."
+        case "left_prepare": action = "Present the confirmed-EMPTY physical LEFT arm. If held after a failed recycling attempt, first retrace only its actually executed frozen route to front; no unvisited or arbitrary recovery targets. Otherwise use the registered hanging/front corridor. Calibrate EMPTY jaws only if needed, initialize the EMPTY jaws with a gentle close at intensity 2, then OPEN at fixed intensity 10. Confirm no object is held, clear fingers, and supervise the recorded return and actual jaw opening. No torque-off or new encoder zero."
         case "left_grip": action = "Keep the LEFT arm stationary in front and close its already-calibrated gripper at intensity \(intensity) around the presented OBJECT. Confirm the object is between the open jaws and all fingers are clear. Never grip a person's hand. No reopening, calibration or arm travel."
         case "left_release": action = "Keep the LEFT arm stationary in front and open its already-calibrated gripper to return the object. Confirm the receiver supports the object before approving. No calibration or arm travel."
-        case "left_object_cycle": action = "Complete one LEFT object handoff: raise the EMPTY arm along the five-segment registered corridor, calibrate its EMPTY jaws only if needed, and open. Pause for the local Object placed / fingers clear signal before closing at vendor intensity 2. Keep the arm stationary while holding; pause for Receiver supporting before opening at intensity 2. Pause for Object clear / jaws empty before reversing the empty arm to hanging and deactivating. These three readiness buttons continue this single approval, not new approvals. Never close on a person's hand. Opening, retention and force are unmeasured; confirm the physical state. No timed automatic close, release or lower."
+        case "left_object_cycle": action = "Complete one LEFT object handoff: raise the EMPTY arm along the five-segment registered corridor, calibrate its EMPTY jaws only if needed, gently close the EMPTY jaws at intensity 2 to initialize them, and open. Pause for the local Object placed / fingers clear signal before closing at vendor intensity 2. Keep the arm stationary while holding; pause for Receiver supporting before opening at intensity 2. Pause for Object clear / jaws empty before reversing the empty arm to hanging and deactivating. These three readiness buttons continue this single approval, not new approvals. Never close on a person's hand. Opening, retention and force are unmeasured; confirm the physical state. No timed automatic close, release or lower."
         default: action = "Return the empty LEFT arm along its registered corridor: reverse the raised section, coordinate the J2/J6 and J3/J5 front sweeps, then reverse the original tread-clearance approach to hanging and deactivate it. Earlier stopped poses use the older corridor when needed. Remove any object first. Watch actual clearance."
         }
         let notice = " Camera centers at the upright neck pose and tilts about 18 degrees below level. New J6/J2/J4 angles are a supervised trial, not a verified collision-free route; watch their direction and tread/cable clearance. Right arm receives no commands. Confirm LEFT arm physically hangs at encoder zero for the first movement of a new session. Watch the live camera and direct view; Stop + hold remains available. Camera object estimates do not veto this supervised trial."
@@ -503,7 +503,8 @@ import AppKit
                 let baseline = model.positions(vendorLeft: q)
                 let compiled = try await Task.detached(priority: .userInitiated) { [generation] in
                     let plan = try ROBCanGrabPreview.make(can: can, model: model, baseline: baseline, bucket: bucket,
-                        reachOffset:ROBLeftCanReachCalibration.load(model:model,file:calibrationFile))
+                        reachOffset:ROBLeftCanReachCalibration.load(model:model,file:calibrationFile),
+                        bucketYawDegrees:ROBLeftCanReachCalibration.loadBucketYaw(model:model,file:calibrationFile))
                     let actions = Dictionary(uniqueKeysWithValues: plan.steps.enumerated().compactMap { index, step in
                         step.jawAction.map { (index, $0) }
                     })
@@ -728,6 +729,17 @@ import AppKit
             update("Waiting for empty gripper calibration before opening")
             let end = ProcessInfo.processInfo.systemUptime + 10
             try await wait(11) { ProcessInfo.processInfo.systemUptime >= end }
+        }
+        if allowEmptyCalibration {
+            // Rob commissioned this stationary EMPTY-jaw close/open cycle:
+            // opening alone after calibration left the fingers closed. The
+            // caller follows this gentle close with its fixed opening command.
+            // Never prime while gripping or releasing a potentially held can.
+            phase = "initializing empty jaws"
+            update("Initializing empty left jaws: gentle close before opening")
+            try await accepted { gateway.controlGripper(forArm: arm, action: "hold", force: 2) }
+            let end = ProcessInfo.processInfo.systemUptime + 1.5
+            try await wait(3) { ProcessInfo.processInfo.systemUptime >= end }
         }
     }
 

@@ -329,7 +329,7 @@ import simd
         outline.opacity = 0.45; marker.addChildNode(outline)
         let text = SCNText(string: "COKE CAN · RGB-D\n" + String(format: "X %.3f  Y %.3f  Z %.3f m", point.x, point.y, point.z) +
             "\n\(preview.side.capitalized) ghost · simulation only" +
-            (simd_distance(preview.calibratedGraspPoint,point) > 0.001 ? String(format:"\nReach correction: %+.1f cm forward",preview.reachOffset[0]*100) : ""), extrusionDepth: 0)
+            (simd_distance(preview.calibratedGraspPoint,point) > 0.001 ? String(format:"\nReach correction: X %+.1f  Y %+.1f  Z %+.1f cm",preview.reachOffset[0]*100,preview.reachOffset[1]*100,preview.reachOffset[2]*100) : ""), extrusionDepth: 0)
         text.font = .boldSystemFont(ofSize: 6); text.flatness = 0.2; text.materials = [white]
         let label = SCNNode(geometry: text); label.name = "Coke can label"
         label.position = SCNVector3(0, 0, 0.11); label.scale = SCNVector3(0.005, 0.005, 0.005)

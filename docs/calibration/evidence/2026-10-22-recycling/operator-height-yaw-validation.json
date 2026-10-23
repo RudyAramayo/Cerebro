@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "binarySHA256": "c0633a0213525feeba37fa8bd3006d5bbfe64e69cdd823f9fb5bafb074bdbcdf",
+  "build": "Signed Debug arm64; codesign --deep --strict verified; installed",
+  "sourceSHA256": {
+    "Cerebro/ROBArmRoutineVision.swift": "667537a79eb6b5599a4957f7f494b0c643838a85dc080a3b1ace413687fe530c",
+    "Cerebro/ROBControllerArmApproval.swift": "f36ea5f8590c222c28b589130646878bd891f97b1e02b1daeb159ee5c3bf2324",
+    "Cerebro/ROBGhostGestureEditor.swift": "af4f3aa48ca6756951e1d0e92707a98ddd460b66c6437f755e05e419e1d2061d",
+    "Cerebro/ROBGhostMotionPlan.swift": "71fc0fcff95b92f922738ab928a67b4cd44009586b219247e93ccd63dd76c72e",
+    "Cerebro/ROBLeftArmTrial.swift": "6ca5d7bbac8b22a91a7f633ee3bbd80efb72fbecdc1b8a73abab01382a2ef7f6",
+    "Cerebro/ROBMainViewController.mm": "bbc1cd21007714dc4f00904c8f8c208e9da5a4e5159853dbcf2d2515bae120e3",
+    "Cerebro/ROBSpeechBox.h": "815a73a87ad86c72d849e8b4c3204677f64328d77ba8f79c9b18c35bd57d888b",
+    "Cerebro/ROBSpeechBox.m": "ac5912eb78a19f5c8236fb1492e6457cba8615f8dad88a9d975824a350d15afb",
+    "Cerebro/ROBWorkspaceSearchPlan.swift": "33c1b045b5686497608fd0849676a9954a9069ab5ad7811b703d01f208cfe6a6"
+  },
+  "calibration": {
+    "modelID": "c4a5c1bee9a9a0a6cca6ecdba9433f98ab647eea3084fb462ff592a0a0ea1e03",
+    "referenceID": "ba63a659f10085da3fa7f7c5002f17b4af27596408bc447e0ac64cdb4198c2d7",
+    "mappingID": "f63859164f5c72f3d68eef621bd737cfeadcbc1856141faafe0f2e4e2aee7882",
+    "translationMeters": [
+      -0.127,
+      0,
+      -0.1143
+    ],
+    "source": "Rob, 2026-10-22: the can was approximately 5 inches closer than the physical reach in trial 11149C94-29C3-4AA5-BC99-659F68C5E346. Experimental forward reach correction; raw vision sightings remain unchanged. Operator feedback after trial A67CEAAA, 2026-10-22: gripper4-5 inches above can at lowest reach; use midpoint4.5 inches downward. Release needed20 degrees farther to robot left. Experimental alignment corrections, raw sightings unchanged.",
+    "bucketYawDegrees": 20
+  },
+  "calibrationSHA256": "68f6a5e5212bb040f8a2f7f7c0a8268e42e5d76bd5b0156c0dd1d64daae5e0e9",
+  "softwareValidation": {
+    "operator alignment": {
+      "result": "passed",
+      "sha256": "af96b59cd32ad757054548a8f27053375a04cf77333d2c88a20c2d6e77923ed9"
+    },
+    "recycling executor": {
+      "result": "passed",
+      "sha256": "69385c1d4aa49992c278d9a788b746f97c23f70f7612cf317251e38bc04aaef3"
+    },
+    "empty-jaw recycling executor": {
+      "result": "passed",
+      "sha256": "9eb7ce999dc4b52342abea5086eb8c97eb18372e4b02c632855555727e79cc15"
+    },
+    "empty-jaw full executor": {
+      "result": "passed",
+      "sha256": "4c92d8d8f05313d48c4790506e82bf8b8b86a62e7455170130c7cce89e71d5d2"
+    },
+    "approval": {
+      "result": "93 checks passed",
+      "sha256": "fc51510dba5011843ebcf86306c8f1e0f20f3f2d14f42ec264b22a4d1cd7f767"
+    }
+  },
+  "plannerResult": "Actual last measured can/bucket with operator corrections compiles43 bounded physical steps; release moves20.344 degrees LEFT, modeled grasp error0.307mm. These are model checks, not physical accuracy.",
+  "livePreparation": "Recorded EMPTY return to front completed in60.42seconds after one new microphone-approved15-minute session; no manual mode toggles. Subsequent stationary release10 and diagnostic release20 were accepted but Rob observed jaws still closed. No corrected can reach sent.",
+  "pickupAndDropVerified": false,
+  "cameraImagesIncluded": false,
+  "grantsPersisted": false,
+  "gripperCommissioning": {
+    "opening10": "User observed closed/too narrow after a separate stationary release10.",
+    "opening20": {
+      "nativeControl": "LEFT/R11 Release at20, command120, vendor acknowledgment1 at18:14:28.240 local",
+      "observation": "User: its not open at all... are you sure you clicked release"
+    },
+    "operatorRecovery": [
+      "i found the issue, the gripper needed to press close and then it opened",
+      "without closing it just kept the gripper closed so calibration needed some additional open and close commands to fully get to work",
+      "the gripper is currently open"
+    ],
+    "interpretation": "Empty-gripper initialization needs a close/open cycle; command polarity is unchanged. Physical jaw opening still is not measured by Amber."
+  },
+  "preparationRecordings": [
+    "recorded-empty-return-to-front.csv.gz",
+    "stationary-release10-closed-jaws.csv.gz"
+  ],
+  "initialHeightYawBinarySHA256": "dd4ec0b397239b17973aa1d2c16ce541d6d75d7e7f77fce0cd8df0aa9ebb822e",
+  "automaticInitialization": {
+    "recording": "automatic-empty-jaw-close-open.csv.gz",
+    "sourceRecording": "left_prepare-E5E12026-5506-44FF-805A-1485947F1524.csv",
+    "seconds": 30.793237666672212,
+    "phases": [
+      "preflight",
+      "camera preparation",
+      "waypoint 1",
+      "waypoint 4",
+      "waypoint 6",
+      "waypoint 18",
+      "waypoint 28",
+      "holding front for gripper",
+      "empty gripper calibration",
+      "initializing empty jaws",
+      "release object"
+    ],
+    "nativeResult": "Left open command accepted; arm stays in front.",
+    "cameraObservation": "Gap visible between jaws after new automatic close2/open10 initialization; no physical can pickup inferred.",
+    "grantsReplayed": false
+  },
+  "currentAttempt": {
+    "recording": "left_recycle_can-71623360-BA14-4D42-8228-25889143E316.csv",
+    "status": "in progress; can and bucket visually found; bucket depth pending",
+    "authorization": "One new final spoken complete-task approval after runtime reported rehearsal session ended; no waypoint approvals."
+  }
+}
