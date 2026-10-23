@@ -1,6 +1,78 @@
 import Foundation
 import simd
 
+/// Operator-adjusted head-depth placement for visual commissioning. This is a
+/// base_link translation of the complete observed cloud, not camera-to-arm
+/// registration, a sensor-depth edit, or a change to a saved reach correction.
+enum ROBWorkspaceDepthAlignment {
+    static let preferenceKey = "ROBWorkspaceHeadDepthAlignment.v1"
+    private static let lock = NSLock()
+
+    struct Snapshot: Equatable {
+        let towardRobotMeters: Double
+        /// Bind captured scenes to this identity, including edits made without
+        /// restarting the camera. Saving even the same value invalidates them.
+        let identity: String
+
+        fileprivate init(towardRobotMeters: Double, revision: String) {
+            self.towardRobotMeters = towardRobotMeters
+            identity = "provisional-head-depth-base-x-v1:\(towardRobotMeters.bitPattern):\(revision)"
+        }
+
+        /// ROB's +X axis points forward. Left multiplication translates in the
+        /// robot frame, so a neck pan/tilt cannot rotate this correction and the
+        /// original point heights and relative object geometry remain intact.
+        func applying(to cameraFrame: simd_double4x4) -> simd_double4x4 {
+            var translation = matrix_identity_double4x4
+            translation.columns.3.x = -towardRobotMeters
+            return translation * cameraFrame
+        }
+    }
+
+    private struct Parameters: Codable {
+        let version: Int
+        let towardRobotMeters: Double
+        let revision: UUID
+    }
+
+    enum ConfigurationError: LocalizedError {
+        case invalidTranslation
+        var errorDescription: String? { "Head depth adjustment must be a finite distance from 0 to 30 cm toward ROB." }
+    }
+
+    /// Read the single persisted blob while holding the same lock as writers.
+    /// A missing setting means raw placement; damaged settings fail closed so
+    /// callers cannot unknowingly use a different transform for collision work.
+    static func snapshot(defaults: UserDefaults = .standard) -> Snapshot? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let stored = defaults.object(forKey: preferenceKey) else {
+            return Snapshot(towardRobotMeters: 0, revision: "raw")
+        }
+        guard let data = stored as? Data, data.count <= 1_024,
+              let parameters = try? JSONDecoder().decode(Parameters.self, from: data),
+              parameters.version == 1, valid(parameters.towardRobotMeters) else { return nil }
+        return Snapshot(towardRobotMeters: parameters.towardRobotMeters,
+            revision: parameters.revision.uuidString)
+    }
+
+    /// Persist an explicit commissioning adjustment. No default is applied
+    /// silently on launch, and this never supplies registration or an arm grant.
+    @discardableResult static func setTowardRobotMeters(_ meters: Double,
+                                                       defaults: UserDefaults = .standard) throws -> Snapshot {
+        guard valid(meters) else { throw ConfigurationError.invalidTranslation }
+        let normalized = meters == 0 ? 0 : meters
+        let parameters = Parameters(version: 1, towardRobotMeters: normalized, revision: UUID())
+        let data = try JSONEncoder().encode(parameters)
+        lock.lock()
+        defer { lock.unlock() }
+        defaults.set(data, forKey: preferenceKey)
+        return Snapshot(towardRobotMeters: normalized, revision: parameters.revision.uuidString)
+    }
+
+    private static func valid(_ meters: Double) -> Bool { meters.isFinite && (0...0.30).contains(meters) }
+}
+
 enum ROBWorkspaceTarget: String, Codable, CaseIterable {
     case can, orangeBucket
     var spokenName: String { self == .can ? "Coke can" : "orange bucket" }
@@ -49,6 +121,11 @@ struct ROBWorkspaceView: Codable, Equatable {
         return views
     }()
     func cameraFrame(model: ROBGhostRobotModel) -> simd_double4x4? {
+        guard let alignment = ROBWorkspaceDepthAlignment.snapshot(),
+              let frame = rawCameraFrame(model: model) else { return nil }
+        return alignment.applying(to: frame)
+    }
+    func rawCameraFrame(model: ROBGhostRobotModel) -> simd_double4x4? {
         guard let pose = ROBHeadCameraPoseEstimator.estimateDisplay(panRadians: panDegrees * .pi / 180,
             lowerTarget: 6011, upperTarget: upperTarget, known: true),
               let head = model.headPositions(pan: pose.panRadians, lowerPitch: pose.lowerPitch, upperPitch: pose.upperPitch) else { return nil }
@@ -385,17 +462,44 @@ struct ROBLeftCanReachCalibration: Codable {
     var canOutwardMeters: Double? = nil
     var tabletopGraspHeightMeters: Double? = nil
     var tabletopCanBaseHeightMeters: Double? = nil
+    /// Head-depth placement in effect when translationMeters was calibrated.
+    /// Older files predate that adjustment and therefore use the raw frame.
+    var depthTowardRobotMetersAtCalibration: Double? = nil
     static var file: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Cerebro/LeftArmCalibration/can-reach.json") }
-    static func load(model: ROBGhostRobotModel, can: ROBWorkspaceLocatedObject? = nil, file: URL = file) throws -> SIMD3<Double> {
+    func effectiveTranslation(depthAlignment: ROBWorkspaceDepthAlignment.Snapshot? = ROBWorkspaceDepthAlignment.snapshot()) throws -> SIMD3<Double> {
+        guard let depthAlignment, translationMeters.count == 3,
+              translationMeters.allSatisfy({ $0.isFinite && abs($0) <= 0.15 }),
+              (depthTowardRobotMetersAtCalibration ?? 0).isFinite,
+              (0...0.30).contains(depthTowardRobotMetersAtCalibration ?? 0) else {
+            throw ROBGhostMotionError.blocked("The can reach calibration or current head depth adjustment is invalid.")
+        }
+        // The camera observation moved toward ROB by this delta. Rebase its
+        // residual reach offset in the opposite direction, preserving the
+        // successful robot-frame target instead of shifting it a second time.
+        let delta = depthAlignment.towardRobotMeters - (depthTowardRobotMetersAtCalibration ?? 0)
+        let result = SIMD3(translationMeters[0]+delta,translationMeters[1],translationMeters[2])
+        guard [result.x,result.y,result.z].allSatisfy({ $0.isFinite && abs($0) <= 0.15 }) else {
+            throw ROBGhostMotionError.blocked("The rebased can reach correction exceeds its bounded translation.")
+        }
+        return result
+    }
+    static func load(model: ROBGhostRobotModel, can: ROBWorkspaceLocatedObject? = nil, file: URL = file,
+                     depthAlignment: ROBWorkspaceDepthAlignment.Snapshot? = ROBWorkspaceDepthAlignment.snapshot()) throws -> SIMD3<Double> {
         guard let value = try configuration(model:model,file:file) else { return .zero }
-        var correction = SIMD3(value.translationMeters[0],value.translationMeters[1],value.translationMeters[2])
+        guard let depthAlignment else {
+            throw ROBGhostMotionError.blocked("The current head depth adjustment is invalid.")
+        }
+        var correction = try value.effectiveTranslation(depthAlignment:depthAlignment)
         let outward = value.canOutwardMeters ?? 0
         if outward > 0 || value.tabletopGraspHeightMeters != nil || value.tabletopCanBaseHeightMeters != nil {
             guard let can, can.target == .can, can.position.count == 3, can.position.allSatisfy(\.isFinite) else {
                 throw ROBGhostMotionError.blocked("Find the can again before applying its measured reach calibration.")
             }
             if outward > 0 {
-                let direction = SIMD2(can.position[0],can.position[1]), distance = simd_length(direction)
+                // The legacy outward nudge was taught in raw head placement.
+                // Keep that direction when the cloud shifts or its residual
+                // translation is resaved with a newer depth baseline.
+                let direction = SIMD2(can.position[0]+depthAlignment.towardRobotMeters,can.position[1]), distance = simd_length(direction)
                 guard distance.isFinite, distance >= 0.1 else {
                     throw ROBGhostMotionError.blocked("The can direction is too close to the robot origin for its outward reach calibration.")
                 }
@@ -443,6 +547,7 @@ struct ROBLeftCanReachCalibration: Codable {
               (value.canOutwardMeters ?? 0).isFinite, (0...0.03).contains(value.canOutwardMeters ?? 0),
               value.tabletopGraspHeightMeters.map({ $0.isFinite && (0.30...1.40).contains($0) }) ?? true,
               value.tabletopCanBaseHeightMeters.map({ $0.isFinite && (0.30...1.40).contains($0) }) ?? true,
+              value.depthTowardRobotMetersAtCalibration.map({ $0.isFinite && (0...0.30).contains($0) }) ?? true,
               value.tabletopGraspHeightMeters == nil || value.tabletopCanBaseHeightMeters == nil else {
             throw ROBGhostMotionError.blocked("The local left-can reach calibration is invalid or belongs to a different robot model.")
         }

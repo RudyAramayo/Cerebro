@@ -71,6 +71,8 @@ import simd
     init(sceneView: SCNView, originalRobot: SCNNode) {
         scene = sceneView.scene!; capturedRobot = originalRobot; self.sceneView = sceneView
         super.init()
+        NotificationCenter.default.addObserver(self, selector: #selector(depthAlignmentDidChange),
+            name: Notification.Name("ROBWorkspaceDepthAlignmentDidChange"), object: nil)
         buildPanel()
         do {
             guard let directory = Bundle.main.url(forResource: "ShadowPlanner", withExtension: nil) else {
@@ -174,6 +176,17 @@ import simd
         let frozen = previewFrozen ? " · live view; reviewed edits locked" : ""
         headInfo.stringValue = String(format: "Head command estimate: %@optical tilt %+.1f°%@\nNeck reference: L6011/U6906 · Insta mount ≈20° back", targets,
             pitch.doubleValue * 180 / .pi, frozen)
+        if let alignment = ROBWorkspaceDepthAlignment.snapshot() {
+            headInfo.stringValue += String(format: "\nHead depth: %.2f in toward ROB · height unchanged · provisional", alignment.towardRobotMeters / 0.0254)
+        }
+    }
+
+    @objc private func depthAlignmentDidChange() {
+        invalidateReview(); displayedCan = nil
+        canOverlay.childNodes.forEach { $0.removeFromParentNode() }
+        collisionMapOverlay.childNodes.forEach { $0.removeFromParentNode() }
+        collisionMapRenderKey = nil
+        refreshCanInfo(); refreshCollisionScene(force: true); updateHeadInfo()
     }
 
     /// Row-major optical-to-scene affine transform, including the shared mesh
@@ -184,7 +197,13 @@ import simd
                 belly ? "belly_oak_optical_frame" : "oak_optical_frame"] else { return [] }
         let basis = simd_double4x4(columns: (SIMD4<Double>(modelBasis.columns.0), SIMD4<Double>(modelBasis.columns.1),
             SIMD4<Double>(modelBasis.columns.2), SIMD4<Double>(modelBasis.columns.3)))
-        let transform = basis * frame
+        let alignedFrame: simd_double4x4
+        if belly { alignedFrame = frame }
+        else {
+            guard let alignment = ROBWorkspaceDepthAlignment.snapshot() else { return [] }
+            alignedFrame = alignment.applying(to: frame)
+        }
+        let transform = basis * alignedFrame
         return (0..<3).flatMap { row in (0..<4).map { NSNumber(value: transform[$0][row]) } }
     }
 

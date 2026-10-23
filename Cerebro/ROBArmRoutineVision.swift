@@ -85,6 +85,16 @@ final class ROBArmRoutineVision {
 
     var cameraGeneration: UUID { lock.lock(); defer { lock.unlock() }; return captureIdentity.generation }
 
+    /// A user-applied head-depth correction changes every projected coordinate.
+    /// Drop in-flight inference and enroll fresh frames in a new generation.
+    func depthAlignmentDidChange() {
+        lock.lock(); defer { lock.unlock() }
+        captureIdentity = ROBVisionCaptureIdentity()
+        epoch = UUID(); frames = [:]; busy = []; lastOffer = [:]
+        lastInspection = [:]; inputNotes = [:]
+        lastIncomingCapture = nil; lastIncomingSequence = 0; processingMilliseconds = 0
+    }
+
     struct Frame {
         let image: CIImage
         let capturedAt: Double
@@ -582,6 +592,12 @@ final class ROBArmRoutineVision {
               (ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == value.sessionGeneration,
               (0...60_000).contains(Date().timeIntervalSince1970 * 1000 - value.oldestCapturedAtMilliseconds) else { return nil }
         return value
+    }
+
+    @MainActor @nonobjc func depthAlignmentDidChange() {
+        collisionSnapshotValue = nil
+        locatedObjects = [:]
+        lastReport = ["status":"depth_alignment_changed", "detail":"Head depth alignment changed; capture a fresh scene."]
     }
 
     /// Start every scene from current pixels while the arms remain held. A

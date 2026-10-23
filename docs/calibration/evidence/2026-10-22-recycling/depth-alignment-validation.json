@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "updatedUTC": "2026-10-23T06:12:41.940288+00:00",
+  "sourceBaseCommit": "a3f4146",
+  "deployment": "Signed Debug local commissioning; installed at /Applications/Cerebro.app; no production/store release.",
+  "installedBinarySHA256": "2f7ca314041cb7135fc65df0d619a593604b5987ac4558a1a166f2c0b8afe20a",
+  "signatureVerification": "codesign --verify --deep --strict passed before and after install",
+  "productionSourceSHA256": {
+    "Cerebro/ROBWorkspaceSearchPlan.swift": "3b4116fc6cbaf1cb337e22986abb58ed60dcd18d13217d7c74a45f2df449a15f",
+    "Cerebro/ROBArmRoutineVision.swift": "e43ca86a156e8ab084b64f4b428580e293c1c9b058e218847f2fb07c3d253287",
+    "Cerebro/ROBLeftArmTrial.swift": "eaedc8a5b4f8b6f24c5aa18651b36553e7bfaccb3dbb9a6bc93b79be2f0b13c7",
+    "Cerebro/ROBGhostGestureEditor.swift": "ac067dc16f470bf4c75b4b549df92b66aafe22a5963750a199515c98895999ad",
+    "Cerebro/ROBTestingSandboxWindowController.swift": "5131ec5884607fd4de2401d002ccc82f2e9f0001d583e245a3651116b2863c9c"
+  },
+  "alignment": {
+    "towardRobotMeters": 0.1778,
+    "towardRobotInches": 7,
+    "baseFrameTranslationMeters": [
+      -0.1778,
+      0,
+      0
+    ],
+    "heightChanged": false,
+    "objectShapeChanged": false,
+    "bellyCameraChanged": false,
+    "appliedThroughNativeSandbox": true,
+    "operatorReportedTableAndTapeLineUp": true,
+    "measuredCameraRegistrationPromoted": false,
+    "tabletopLevelingApplied": false
+  },
+  "canReachRebase": {
+    "oldResidualXMeters": -0.127,
+    "newResidualXMeters": 0.0508,
+    "savedDepthBaselineMeters": 0.1778,
+    "successfulRobotFrameCanTargetPreserved": true,
+    "heightAndWristSettingsPreserved": true
+  },
+  "fixtures": {
+    "sharedAlignment": "PASS: explicit7-inch base-X translation, unchanged height and relative object distances, persisted identity changes, invalid/nonfinite settings and concurrent access.",
+    "canReachRebase": "PASS: legacy translation rebases, final target and outward nudge survive apply/resave/reverse; invalid baselines reject.",
+    "fullGhostMotion": "PASS exit0: default complete ghost/head/grounding/recall/recycling fixture suite.",
+    "settingsSandboxStatic": "PASS",
+    "visionCaptureGeneration": "PASS",
+    "appBuild": "PASS exit0: CerebroRecyclingValidation / Debug / macOS arm64; isolated HEAD plus intended sources."
+  },
+  "nativeAttempt": {
+    "recording": "left_recycle_can-49689BD2-517C-46E1-9D76-912F57463599.csv",
+    "sha256": "dcbfe7e9c94e5d7bccdf613512f2dfddfeff7cf8c6def92207470b8988227846",
+    "recordedJointRows": 21,
+    "recordedPhaseCounts": {
+      "preflight": 21
+    },
+    "stationarySearchTelemetryRecorded": false,
+    "searchReport": "8BD34EF9-127B-4505-A3DB-A3C38C19EBEF.json",
+    "searchReportSHA256": "3f5d5430fda751e0c34b04851870c987002049b852526d3dd0dd645de248659e",
+    "searchStatus": "interrupted",
+    "observations": 12,
+    "canConfirmed": true,
+    "bucketConfirmed": false,
+    "actualNativeSessionGranted": true,
+    "armTravelSent": false,
+    "jawCommandsSent": false,
+    "cansRemoved": 0,
+    "requestedCans": 2,
+    "failure": "An arm changed pose, mode or feedback freshness during the stationary neck scan.",
+    "failureClassification": "Combined guard does not retain the failing sample, so age, mode/status change and aggregate joint drift cannot be distinguished. No age-only automatic retry was inferred.",
+    "csvInterpretation": "Stationary scanning intentionally skips joint-row recording. The preflight-only CSV does not mean the search was stuck: the search report contains twelve observations."
+  },
+  "currentState": {
+    "activeSession": false,
+    "pendingApproval": false,
+    "wakeSessionOfferRestored": true
+  },
+  "preExistingUserChanges": "Seven unrelated working-tree files excluded from isolated build and commit.",
+  "privacy": {
+    "cameraImagesIncluded": false,
+    "speechTranscriptsIncluded": false,
+    "grantMaterialIncluded": false,
+    "grantsPersisted": false
+  }
+}

@@ -15,6 +15,60 @@ private extension ROBLeftCanReachCalibration {
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
         let model = try ROBGhostRobotModel(directory: root.appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
         precondition(model.modelID.count == 64 && model.joints.count == 44 && model.hulls.count >= 40)
+        if CommandLine.arguments.last == "depth-reach-rebase" {
+            let suite = "ROBDepthReachFixture."+UUID().uuidString
+            let defaults = UserDefaults(suiteName:suite)!
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("rob-depth-reach-"+UUID().uuidString+".json")
+            defer {
+                defaults.removePersistentDomain(forName:suite)
+                try? FileManager.default.removeItem(at:file)
+            }
+            let rawAlignment = ROBWorkspaceDepthAlignment.snapshot(defaults:defaults)!
+            let shiftedAlignment = try ROBWorkspaceDepthAlignment.setTowardRobotMeters(0.1778,defaults:defaults)
+            var calibration = ROBLeftCanReachCalibration(modelID:model.modelID,referenceID:model.referenceID,
+                mappingID:ROBGhostRobotModel.mappingID,translationMeters:[-0.127,0,-0.0508],
+                source:"Legacy successful reach fixture")
+            try calibration.saveFixture(to:file)
+            let legacy = try JSONDecoder().decode(ROBLeftCanReachCalibration.self,from:Data(contentsOf:file))
+            precondition(legacy.depthTowardRobotMetersAtCalibration == nil,"Legacy files must retain their raw-frame baseline")
+            let before = try ROBLeftCanReachCalibration.load(model:model,file:file,depthAlignment:rawAlignment)
+            let after = try ROBLeftCanReachCalibration.load(model:model,file:file,depthAlignment:shiftedAlignment)
+            precondition(abs(before.x + 0.127) < 1e-12 && abs(after.x - 0.0508) < 1e-12)
+            precondition(before.y == after.y && before.z == after.z,"Horizontal rebasing cannot alter grasp height")
+            let oldPoint = SIMD3<Double>(0.55,-0.06,0.87), shiftedPoint = oldPoint-SIMD3(0.1778,0,0)
+            precondition(simd_distance(oldPoint+before,shiftedPoint+after) < 1e-12,
+                "Moving the cloud must not apply the existing can reach offset twice")
+            calibration = ROBLeftCanReachCalibration(modelID:model.modelID,referenceID:model.referenceID,
+                mappingID:ROBGhostRobotModel.mappingID,translationMeters:[after.x,after.y,after.z],
+                source:"Resaved residual fixture",depthTowardRobotMetersAtCalibration:0.1778)
+            try calibration.saveFixture(to:file)
+            let resaved = try ROBLeftCanReachCalibration.load(model:model,file:file,depthAlignment:shiftedAlignment)
+            let restoredRaw = try ROBLeftCanReachCalibration.load(model:model,file:file,depthAlignment:rawAlignment)
+            precondition(simd_distance(resaved,after) < 1e-12 && simd_distance(restoredRaw,before) < 1e-12,
+                "Saving the current residual and its baseline must remain reversible")
+            let view = ROBWorkspaceView(panDegrees:0,upperTarget:6306)
+            let oldCan = ROBWorkspaceLocatedObject(target:.can,position:[oldPoint.x,oldPoint.y,oldPoint.z],
+                confidence:0.9,capturedAt:1_000,sequence:1,view:view)
+            let shiftedCan = ROBWorkspaceLocatedObject(target:.can,position:[shiftedPoint.x,shiftedPoint.y,shiftedPoint.z],
+                confidence:0.9,capturedAt:1_000,sequence:2,view:view)
+            calibration.canOutwardMeters = 0.01
+            try calibration.saveFixture(to:file)
+            let shiftedNudge = try ROBLeftCanReachCalibration.load(model:model,can:shiftedCan,file:file,depthAlignment:shiftedAlignment)
+            let rawNudge = try ROBLeftCanReachCalibration.load(model:model,can:oldCan,file:file,depthAlignment:rawAlignment)
+            precondition(simd_distance(oldPoint+rawNudge,shiftedPoint+shiftedNudge) < 1e-12,
+                "Rebasing and resaving cannot rotate the legacy radial outward nudge")
+            for invalid in [-0.001,0.301] {
+                calibration.depthTowardRobotMetersAtCalibration = invalid
+                try calibration.saveFixture(to:file)
+                expectBlocked { _ = try ROBLeftCanReachCalibration.load(model:model,file:file,depthAlignment:shiftedAlignment) }
+            }
+            calibration.depthTowardRobotMetersAtCalibration = .nan
+            expectBlocked { _ = try calibration.effectiveTranslation(depthAlignment:shiftedAlignment) }
+            calibration.depthTowardRobotMetersAtCalibration = 0.1778
+            expectBlocked { _ = try calibration.effectiveTranslation(depthAlignment:nil) }
+            print("Depth reach rebase: legacy -127mm becomes +50.8mm at a 177.8mm cloud shift; final target and height preserved, save/reverse stable, invalid baselines and missing alignment rejected")
+            return
+        }
         if CommandLine.arguments.last == "recycling-pace" {
             let evidence = root.appendingPathComponent("docs/calibration/evidence/2026-10-22-recycling/first-confirmed-recycle.proposal.json")
             let legacy = try JSONDecoder().decode(ROBLeftGestureProposal.self,from:Data(contentsOf:evidence))

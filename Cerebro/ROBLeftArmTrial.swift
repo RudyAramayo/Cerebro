@@ -470,6 +470,14 @@ struct ROBReviewedArmDispatchStart {
 
     func cancel(reason: String) { abort(reason) }
 
+    func depthAlignmentDidChange() {
+        precondition(Thread.isMainThread)
+        abort("Head depth alignment changed; review a fresh scene.")
+        collisionMap = nil; collisionModel = nil; collisionReviewProposal = nil
+        collisionReviewStatus = ["status":"not_scanned", "detail":"Head depth alignment changed; capture a fresh scene."]
+        recoveryPath = []; recoveryGeneration = 0; offeredRecovery = nil
+    }
+
     /// Readiness is not fresh motion authority: the original authenticated
     /// controller approval, session and every live guard must remain valid.
     @discardableResult func continueOperation(stage: String) -> Bool {

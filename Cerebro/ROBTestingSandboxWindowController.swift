@@ -5,7 +5,7 @@ import AppKit
 @objcMembers public final class ROBTestingSandboxWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
     public static let shared = ROBTestingSandboxWindowController()
 
-    private enum ParameterSet: Equatable { case recycling, current, none }
+    private enum ParameterSet: Equatable { case recycling, depthAlignment, current, none }
     private struct Action {
         let title: String
         let command: String
@@ -20,6 +20,8 @@ import AppKit
     private static let trials: [Trial] = [
         Trial(id: "recycling", title: "Recycle can", detail: "Find an upright empty can and an open orange bucket using the neck camera. Grasp the can at its middle, lift, carry and release above the opening. Search and preview do not move the arms. A run uses one complete-task authorization or an active supervised session.", parameters: .recycling,
               actions: [Action(title: "Run recycle test", command: "left_recycle_can"), Action(title: "Search only", command: "left_search_workspace"), Action(title: "Scan workspace geometry", command: "left_scan_clearance"), Action(title: "Preview grasp…", command: "ghost:can"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision")]),
+        Trial(id: "depth-alignment", title: "Depth alignment", detail: "Move head-camera depth points horizontally toward ROB, keeping their height and shape unchanged. The live scene, new workspace scans and object measurements share this adjustment. Apply it, compare the table and blue tape against the real scene, then adjust again if needed. Previous scans and previews are cleared when the value changes.", parameters: .depthAlignment,
+              actions: [Action(title: "Show corrected live depth…", command: "ghost:collision"), Action(title: "Capture corrected workspace", command: "left_scan_clearance")]),
         Trial(id: "estimated-calibration", title: "Estimated calibration trial", detail: "Review one estimated EMPTY-left-arm retreat away from the table, then hold for observation. Registration remains unmeasured. One fresh approval covers one slow, 4-second retreat with about 3 cm maximum modeled arm travel. Existing nearby depth-margin overlaps may only improve; new intrusions block motion. Confirm the complete arm's local working space is clear and report the actual direction. No jaw commands, grasp, recycling or automatic return. Open the ghost view before building if needed; restarting the camera requires a new preview.", parameters: .none,
               actions: [Action(title: "Scan / build estimated ghost", command: "estimate:preview"), Action(title: "Inspect estimated ghost / depth map…", command: "ghost:collision"), Action(title: "Run reviewed empty-arm trial", command: "estimate:run")]),
         Trial(id: "object-cycle", title: "Grip and return", detail: "Present the left arm, grip a supported object gently, release into a supporting hand, then return the empty arm. Readiness confirmations remain within the same task authorization. Keep fingers clear of the jaws.", parameters: .current,
@@ -56,7 +58,8 @@ import AppKit
     private var canEdit: Bool {
         !ROBLeftArmTrial.shared.isRunning && !ROBArmRoutineCoordinator.shared.isRunning &&
             !ROBArmRoutineCoordinator.shared.ownsPhysicalMotion && !ROBControllerArmApproval.shared.isPending &&
-            !ROBGripperStartupCalibration.shared.isRunning
+            !ROBGripperStartupCalibration.shared.isRunning && !ROBShowMotionCoordinator.shared.isRunning &&
+            !ROBAmberGestureExecutor.shared.isExecuting
     }
 
     private init() {
@@ -170,13 +173,19 @@ import AppKit
         let title = NSTextField(labelWithString: trial.title); title.font = .boldSystemFont(ofSize: 18)
         detailStack.addArrangedSubview(title)
         addHelp(trial.detail)
-        if ["recycling", "estimated-calibration", "preparation", "ghost"].contains(trial.id) {
+        if ["recycling", "depth-alignment", "estimated-calibration", "preparation", "ghost"].contains(trial.id) {
             collisionInfo.identifier = NSUserInterfaceItemIdentifier("sandbox-collision-status")
             collisionInfo.isSelectable = true
             collisionInfo.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
             detailStack.addArrangedSubview(collisionInfo)
             collisionInfo.widthAnchor.constraint(equalTo: detailStack.widthAnchor).isActive = true
             refreshCollisionInfo()
+        }
+        if trial.parameters == .depthAlignment {
+            let current = ROBWorkspaceDepthAlignment.snapshot()
+            addField("depthTowardRobotInches", "Depth points toward ROB (in)", (current?.towardRobotMeters ?? 0) / 0.0254,
+                note: "0–11.8 · horizontal only")
+            addHelp("Start at 7 inches for the reported 6–8 inch offset. This is a provisional manual alignment. The previous successful can-reach correction is rebased to avoid shifting the grasp twice.")
         }
         if trial.parameters == .recycling {
             do {
@@ -188,8 +197,11 @@ import AppKit
                 let translation = calibration["translationMeters"] as? [Double] ?? []
                 guard translation.count == 3 else { throw ROBGhostMotionError.blocked("The reach calibration needs three translation values.") }
                 hasCalibrationFields = true
+                let typed = try JSONDecoder().decode(ROBLeftCanReachCalibration.self,
+                    from: JSONSerialization.data(withJSONObject: calibration))
+                let effectiveTranslation = try typed.effectiveTranslation()
                 for (index, axis) in ["X", "Y", "Z"].enumerated() {
-                    addField("translation\(index)", "Reach \(axis) correction (cm)", translation[index] * 100, note: "−15–15")
+                    addField("translation\(index)", "Reach \(axis) correction (cm)", effectiveTranslation[index] * 100, note: "−15–15")
                 }
                 addField("canOutwardMeters", "Additional reach toward can (cm)", (calibration["canOutwardMeters"] as? Double ?? 0) * 100, note: "0–3")
                 if let base = calibration["tabletopCanBaseHeightMeters"] as? Double {
@@ -201,9 +213,12 @@ import AppKit
             } catch { parameterMessage = error.localizedDescription; addHelp("Parameters unavailable: \(error.localizedDescription)") }
         }
         if trial.parameters != .none {
-            addField("currentLimit", "Current jump stop (raw units)", UserDefaults.standard.double(forKey: ROBLeftArmTrial.currentLimitKey), note: "0 = record only")
-            addHelp("Current is recorded automatically. This sample-to-sample threshold is not a measured force limit.")
+            if trial.parameters != .depthAlignment {
+                addField("currentLimit", "Current jump stop (raw units)", UserDefaults.standard.double(forKey: ROBLeftArmTrial.currentLimitKey), note: "0 = record only")
+                addHelp("Current is recorded automatically. This sample-to-sample threshold is not a measured force limit.")
+            }
             save.target = self; save.action = #selector(saveParameters)
+            save.title = trial.parameters == .depthAlignment ? "Apply depth alignment" : "Save test parameters"
             save.identifier = NSUserInterfaceItemIdentifier("sandbox-save-parameters")
             detailStack.addArrangedSubview(save)
         }
@@ -255,6 +270,16 @@ import AppKit
         window?.makeFirstResponder(nil)
         guard selectedTrial.parameters != .none else { return true }
         do {
+            if selectedTrial.parameters == .depthAlignment {
+                let meters = try value("depthTowardRobotInches", within: 0...(0.30 / 0.0254)) * 0.0254
+                _ = try ROBWorkspaceDepthAlignment.setTowardRobotMeters(meters)
+                ROBLeftArmTrial.shared.depthAlignmentDidChange()
+                ROBArmRoutineVision.shared.depthAlignmentDidChange()
+                ROBWorkspaceSearch.shared.depthAlignmentDidChange()
+                NotificationCenter.default.post(name: Notification.Name("ROBWorkspaceDepthAlignmentDidChange"), object: self)
+                parameterMessage = String(format: "Depth points moved %.2f inches toward ROB. Height unchanged; capture a fresh scene.", meters / 0.0254)
+                refresh(); return true
+            }
             let current = try value("currentLimit", within: 0...Double.greatestFiniteMagnitude)
             if selectedTrial.parameters == .recycling {
                 let parameters = ROBRecyclingTestParameters(motionPace: try value("motionPace", within: 1...1.25),
@@ -264,6 +289,10 @@ import AppKit
                 if hasCalibrationFields {
                     var calibration = try readCalibration()
                     calibration["translationMeters"] = try (0..<3).map { try value("translation\($0)", within: -15...15) / 100 }
+                    guard let alignment = ROBWorkspaceDepthAlignment.snapshot() else {
+                        throw ROBGhostMotionError.blocked("The head-depth alignment is invalid.")
+                    }
+                    calibration["depthTowardRobotMetersAtCalibration"] = alignment.towardRobotMeters
                     calibration["canOutwardMeters"] = try value("canOutwardMeters", within: 0...3) / 100
                     calibration["bucketYawDegrees"] = try value("bucketYawDegrees", within: -30...30)
                     calibration["bucketInwardMeters"] = try value("bucketInwardMeters", within: 0...8) / 100
@@ -287,7 +316,7 @@ import AppKit
     @objc private func performTrialAction(_ sender: NSButton) {
         guard canEdit, selectedTrial.actions.indices.contains(sender.tag) else { return }
         let command = selectedTrial.actions[sender.tag].command
-        if selectedTrial.parameters != .none && !["left_search_workspace", "left_scan_clearance"].contains(command) && !storeParameters() { return }
+        if selectedTrial.parameters != .none && selectedTrial.parameters != .depthAlignment && !["left_search_workspace", "left_scan_clearance"].contains(command) && !storeParameters() { return }
         if command.hasPrefix("ghost:") {
             NotificationCenter.default.post(name: Notification.Name("ROBShowControllerInputDiagnostics"), object: self,
                                             userInfo: ["ghostPreset": String(command.dropFirst(6))])
