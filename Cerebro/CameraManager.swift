@@ -106,6 +106,8 @@ struct CameraFrameSet {
     var sidewalkConfidence: Double? = nil
     var chessPieces: [ROBChessPieceDetection]? = nil
     var capturedAtMilliseconds: Double? = nil
+    /// Changes on a real CameraManager/source run, not perception activation.
+    var captureStreamID: String? = nil
 }
 
 protocol CameraManagerDelegate: AnyObject {
@@ -682,10 +684,14 @@ final class CameraManager: NSObject, CameraManagerProtocol {
         }
         deliveryLock.unlock()
 
+        var identified = frameSet
+        identified.captureStreamID = "\(markerlessStreamID.uuidString)-\(generation)"
+        let identifiedFrame = identified
+
         // Network video owns its own newest-frame gate and must not inherit the
         // latency of the synchronous Vision work performed by the UI delegate.
         videoSampleHandler?(frameSet.rgbSampleBuffer)
-        recordingFrameHandler?(frameSet)
+        recordingFrameHandler?(identifiedFrame)
         ROBMarkerlessVisionService.shared.offer(frameSet, role: role, streamID: "\(markerlessStreamID)-\(generation)")
         ROBTorsoControlCenter.shared.vision.offer(frameSet, role: role, streamID: "\(markerlessStreamID)-\(generation)")
         guard shouldDeliverToPerception else { return }
@@ -696,7 +702,7 @@ final class CameraManager: NSObject, CameraManagerProtocol {
             let shouldDeliver = generation == self.acceptedDeliveryGeneration
             self.deliveryLock.unlock()
             if shouldDeliver {
-                self.delegate?.cameraManager(self, didOutput: frameSet)
+                self.delegate?.cameraManager(self, didOutput: identifiedFrame)
             }
             self.deliveryLock.lock()
             self.deliveryInFlight = false

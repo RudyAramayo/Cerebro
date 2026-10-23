@@ -34,6 +34,10 @@ final class ROBWorkspaceSearch {
     static let shared = ROBWorkspaceSearch()
     var announce: ((String) -> Void)?
     var locatedObjects: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
+    private(set) var collisionPreviewSnapshot: ROBWorkspaceCollisionSnapshot?
+    var collisionSnapshot: ROBWorkspaceCollisionSnapshot? {
+        didSet { if let collisionSnapshot { collisionPreviewSnapshot = collisionSnapshot } }
+    }
 }
 final class ROBAmberGestureExecutor {
     static let shared = ROBAmberGestureExecutor()
@@ -47,6 +51,8 @@ final class ROBLeftArmTrial {
     let status = "Fixture only", lastRecordingPath = ""
     var interactionStage = ""
     var continuedStages: [String] = []
+    var collisionReviewProposal: ROBLeftGestureProposal?
+    var collisionReviewStatus: NSDictionary = [:]
     func continueOperation(stage: String) -> Bool {
         guard isRunning, !stage.isEmpty, interactionStage == stage else { return false }
         continuedStages.append(stage); interactionStage = ""; return true
@@ -365,6 +371,84 @@ final class GhostFixtureSnapshotView: NSView {
         precondition(timeline.doubleValue < timeline.maxValue / 2, "Replay must restart a completed ghost rehearsal")
         timeline.doubleValue = timeline.maxValue; NSApp.sendAction(timeline.action!, to: timeline.target, from: timeline)
         print(String(format: "Can overlay: robot-frame label, selected left cross-body ghost, unchanged original, disabled hardware; grasp gap %.1f mm, horizontal tilt %.2f degrees", canPreview.graspError * 1000, canPreview.gripperTiltDegrees))
+
+        // A real provisional depth map is visible without being promoted to
+        // measured registration. There is no gateway, driver or grant here.
+        let captured = Date().timeIntervalSince1970 * 1000, cameraGeneration = UUID()
+        var depthMap = ROBWorkspaceDepthMap(modelID: model.modelID, geometryID: model.geometryID,
+            mappingID: ROBGhostRobotModel.mappingID, sessionGeneration: 1, cameraGeneration: cameraGeneration,
+            nowMilliseconds: captured - 200)
+        let cameraFrame = ROBWorkspaceView(panDegrees: 0, upperTarget: 6306).cameraFrame(model: model)!
+        for (sequence, age) in [(UInt64(1), 100.0), (UInt64(2), 50.0)] {
+            try depthMap.append(width: 96, height: 96, fx: 80, fy: 80, cx: 48, cy: 48,
+                depth: { _, _ in 900 }, cameraToRobot: cameraFrame, capturedAtMilliseconds: captured-age,
+                sequence: sequence, cameraGeneration: cameraGeneration, nowMilliseconds: captured)
+        }
+        let collisionMap = depthMap.snapshot(nowMilliseconds: captured)!
+        precondition(collisionMap.registrationID == nil && collisionMap.occupiedVoxelCount > 2500)
+        ROBWorkspaceSearch.shared.collisionSnapshot = collisionMap
+        trial.collisionReviewStatus = ["status": "blocked", "blocked_reason": "Fixture registration unavailable",
+            "registration_verified": true] // A summary flag cannot certify a provisional map.
+        editor.reviewPresetNamed("collision")
+        let mapOverlay = scene.rootNode.childNode(withName: "Observed depth obstacles · provisional registration", recursively: true)!
+        let depthNode = mapOverlay.childNodes.first!
+        let source = depthNode.geometry!.sources(for: .vertex).first!
+        precondition(source.vectorCount > 0 && source.vectorCount <= 2500,
+            "Depth overlay exceeded its bounded render sample")
+        let collisionStatus = controls.first { $0.identifier?.rawValue == "ghost-collision-status" } as! NSTextField
+        precondition(collisionStatus.stringValue.contains("\(collisionMap.occupiedVoxelCount) occupied cells") &&
+            collisionStatus.stringValue.contains("Registration: unverified") &&
+            collisionStatus.stringValue.contains("Fixture registration unavailable") &&
+            collisionStatus.stringValue.contains("no validated route"))
+        precondition(!execute.isEnabled && !view.isHidden && view.rendersContinuously && view.isPlaying)
+        let mapToggle = controls.first { $0.identifier?.rawValue == "ghost-depth-obstacles-visible" } as! NSButton
+        mapToggle.state = .off; NSApp.sendAction(mapToggle.action!, to: mapToggle.target, from: mapToggle)
+        precondition(mapOverlay.isHidden && mapOverlay.childNodes.isEmpty)
+        mapToggle.state = .on; NSApp.sendAction(mapToggle.action!, to: mapToggle.target, from: mapToggle)
+        precondition(!mapOverlay.isHidden && mapOverlay.childNodes.count == 1)
+        let cachedDepthNode = mapOverlay.childNodes[0]
+        RunLoop.main.run(until: Date().addingTimeInterval(1.1))
+        precondition(mapOverlay.childNodes[0] === cachedDepthNode,
+            "An unchanged capture rebuilt the depth cloud on the render timer")
+        precondition(!view.isHidden && view.rendersContinuously && view.isPlaying)
+        precondition(!collisionStatus.stringValue.contains("Stored scan preview"))
+        // Opening the live camera may invalidate admission while the last
+        // capture remains useful for inspection. Its pixels never become fresh.
+        ROBWorkspaceSearch.shared.collisionSnapshot = nil
+        RunLoop.main.run(until: Date().addingTimeInterval(1.1))
+        precondition(ROBWorkspaceSearch.shared.collisionPreviewSnapshot?.fingerprint == collisionMap.fingerprint)
+        precondition(mapOverlay.childNodes.count == 1 && mapOverlay.childNodes[0] === cachedDepthNode,
+            "Camera/session expiry removed or rebuilt the stored preview cloud")
+        precondition(collisionStatus.stringValue.contains("Stored scan preview; rescan before motion.") &&
+            collisionStatus.stringValue.contains("Registration: unverified") && !execute.isEnabled)
+        precondition(!view.isHidden && view.rendersContinuously && view.isPlaying)
+
+        // Display an offline model artifact as a historical/read-only path.
+        // It supplies no measured scene proof and must never enable execution.
+        let historical = try ROBLeftGestureCompiler.compile(kind: "center", name: "Read-only render fixture",
+            model: model, baseline: Array(repeating: 0, count: 7), generation: 1)
+        trial.collisionReviewProposal = historical
+        let originalBeforePath = headNode("Original URDF", "left_two_Link").simdTransform
+        editor.reviewPresetNamed("collision")
+        let pathOverlay = scene.rootNode.childNode(withName: "Read-only collision route", recursively: true)!
+        precondition(pathOverlay.childNode(withName: "Checked complete tool trajectory", recursively: false) != nil)
+        timeline.doubleValue = timeline.maxValue; NSApp.sendAction(timeline.action!, to: timeline.target, from: timeline)
+        let expectedEnd = model.frames(model.positions(vendorLeft: historical.steps.last!.positions))["left_two_Link"]!
+        let renderedEnd = headNode("Blue ghost", "left_two_Link").simdTransform
+        for column in 0..<4 {
+            precondition(simd_distance(renderedEnd[column], SIMD4<Float>(expectedEnd[column])) < 1e-6)
+        }
+        precondition(headNode("Original URDF", "left_two_Link").simdTransform == originalBeforePath && !execute.isEnabled)
+        NSApp.sendAction(execute.action!, to: execute.target, from: execute)
+        let pathToggle = controls.first { $0.identifier?.rawValue == "ghost-collision-path-visible" } as! NSButton
+        pathToggle.state = .off; NSApp.sendAction(pathToggle.action!, to: pathToggle.target, from: pathToggle)
+        precondition(pathOverlay.isHidden)
+        pathToggle.state = .on; NSApp.sendAction(pathToggle.action!, to: pathToggle.target, from: pathToggle)
+        precondition(!pathOverlay.isHidden && !execute.isEnabled && view.rendersContinuously && view.isPlaying)
+        precondition(collisionStatus.stringValue.contains("Stored scan preview; rescan before motion.") &&
+            ROBWorkspaceSearch.shared.collisionSnapshot == nil)
+        print("Collision overlay: real provisional RGB-D cloud capped at 2500 points, unchanged-capture caching, retained stale-camera preview with rescan label, obstacle/path visibility, unverified registration, read-only path FK and continuous rendering passed; execution unavailable")
+        trial.collisionReviewProposal = nil; trial.collisionReviewStatus = [:]
         if CommandLine.arguments.last != "can" {
             presets.selectItem(at: selection); NSApp.sendAction(presets.action!, to: presets.target, from: presets)
             timeline.doubleValue = timeline.maxValue; NSApp.sendAction(timeline.action!, to: timeline.target, from: timeline)

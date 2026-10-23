@@ -194,6 +194,7 @@ Run the standalone Cerebro fixture:
 fixture_dir="$(mktemp -d /private/tmp/rob-arm-fixture.XXXXXX)"
 xcrun swiftc -swift-version 5 -warnings-as-errors \
   -module-cache-path "$fixture_dir/module-cache" \
+  Cerebro/ROBArmJointLimits.swift \
   Cerebro/ROBArmControlProtocol.swift \
   Tests/ROBArmControlProtocolFixtureTests.swift \
   -o "$fixture_dir/fixture"

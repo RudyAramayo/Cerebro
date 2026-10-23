@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "updatedUTC": "2026-10-23T04:12:47.514589+00:00",
+  "sourceBaseCommit": "c8a2b75f12594c627ae1150ae170550b5e4d918f",
+  "deployment": "Signed Debug local commissioning; not a store or production website release.",
+  "nativeDiagnosticScans": [
+    {
+      "recording": "left_scan_clearance-FAC162F2-0465-408F-BEEF-18EA67E6F14B.csv",
+      "binarySHA256": "54705ac806aa1be996fbf24996062e32f0aeb0d1fe13e9d3bc7419625ac1f91d",
+      "recordingSHA256": "1ec37ec7c683da3a31d5d59afacf607bced908bba5e5eea33ba0959bf7204ac1",
+      "recordedJointRows": 0,
+      "result": "Stopped with a generic invalid-frame diagnostic; no map was produced.",
+      "operationScope": "Neck-only scan; no arm travel, activation or gripper commands in the scan path. Startup gripper setup is separate."
+    },
+    {
+      "recording": "left_scan_clearance-84F179FA-7EE3-4E2A-B000-850775531596.csv",
+      "binarySHA256": "2bd55ddda57c105c8676c3e534a31b428fb80dc451de0905e27341051a88af77",
+      "recordingSHA256": "1ec37ec7c683da3a31d5d59afacf607bced908bba5e5eea33ba0959bf7204ac1",
+      "recordedJointRows": 0,
+      "result": "Native UI identified a camera capture-generation change before the first projected frame at pan -15 degrees / upper target 5650.",
+      "operationScope": "Neck-only scan; no arm travel, activation or gripper commands in the scan path. Startup gripper setup is separate."
+    }
+  ],
+  "fixtureResults": {
+    "depthMap": "PASS: occupied/free/unknown evidence, fresh advancing frames, holes/occlusion and provisional registration rejected.",
+    "actualModelCameraViews": "PASS: 14 actual bundled model camera transforms.",
+    "dynamicConnector": "PASS: old table-crossing parking route rejected; alternative has 11 steps and 1484 checked full-arm poses in a simulated registered map.",
+    "rawJointLimits": "PASS: shared unchanged gateway limits intersect model limits; huge/nonfinite coordinates rejected before integer conversion.",
+    "payload": "PASS: measured grasp/carry/release accepted in simulated free registered space; missing payload rejected before motion or imported-proposal approval.",
+    "dispatchAndSettling": "PASS: fresh one-use pose/map/session token; frozen feedback from either arm and gradual drift rejected before capture.",
+    "gateway": "PASS: actual production gateway startup calibration, connection recovery and compatibility fixtures with mocked transport.",
+    "captureStartup": "PASS: retained idle camera generation can enroll the first settled live frame; stale-generation frames cannot anchor; any later generation change invalidates both scan paths.",
+    "legacyGhostCompatibility": "PASS: existing model/IK/search/recycling preview fixtures; archived compatibility is separate from physical admission.",
+    "renderer": "PASS: actual SceneKit cloud/route render, 2500-cell display cap/cache, overlay toggles, retained stale-camera preview and rescan label, strict snapshot remains invalid, disabled direct execution and continuous viewport."
+  },
+  "physicalRecycling": {
+    "requestedCanCount": 2,
+    "cansRemoved": 0,
+    "newPlannerArmTravelSent": false,
+    "result": "Pending measured camera-to-arm registration and model/contact commissioning; no recycling success claimed."
+  },
+  "commissioningLimits": [
+    "Concrete captured maps are deliberately unregistered. Candidate surface-fit RMS does not provide independent validation and bounded uncertainty.",
+    "Hanging-tool proxy enters the existing 3 cm tread margin; camera registration alone does not resolve this model-relative discrepancy.",
+    "Measured finger geometry, self-volume visibility and intentional target contact remain commissioning work.",
+    "New depth admission applies to LEFT-arm trials; paired legacy coordinator routes are not globally collision-certified."
+  ],
+  "privacy": {
+    "cameraImagesIncluded": false,
+    "speechTranscriptsIncluded": false,
+    "grantMaterialIncluded": false,
+    "grantsPersisted": false
+  },
+  "validatedBuild": {
+    "binarySHA256": "09826836df76041bc019f1a7ff0dcf0b35a7d6bde5a2e22ea05529cd97890f33",
+    "codeSignatureVerification": "codesign --verify --deep --strict PASS before and after install",
+    "productionSourceSHA256": {
+      "Cerebro.xcodeproj/project.pbxproj": "5e82723edb97f8e5b21348841c4ef86f78535b1620cfbbc1ae5808a35a9f064f",
+      "Cerebro/CameraManager.swift": "346ee795fcfeeeddb71db144c20bd262cc00f0ee53cf1a495459ee47f121c53f",
+      "Cerebro/ROBAmberGatewayClient.swift": "b9b51589cc66bde7da8a399ce07c93ce83e231fc57e1c339398b4ad1a7728c58",
+      "Cerebro/ROBArmControlProtocol.swift": "550c2e0f826602522debacf69b2737508b2aeac6bb73b83b76b56349e6ed3cfe",
+      "Cerebro/ROBArmJointLimits.swift": "62006d188ecbbcf7cc1cd1e3d6b813d79a3000029ad473179e41ac9b338ac72e",
+      "Cerebro/ROBArmRoutineSettingsViewController.swift": "a18fd5fb5c72b58c31f56c639e8e02c87026862dabaee7352c94533a22246b21",
+      "Cerebro/ROBArmRoutineVision.swift": "40d072be6e11fb3d0e30dd1cc29bc380ab211a5a920be9e08b8bf29646075b5c",
+      "Cerebro/ROBGhostGestureEditor.swift": "3f7846d65889bd28a5df262d3fe174ec86a5d52b528efacd08601fa8f83b47be",
+      "Cerebro/ROBGhostMotionPlan.swift": "3b14b0801467505ef845684ec530e48c2d7e1574cd266fb2caf43ce79d2bec09",
+      "Cerebro/ROBLeftArmTrial.swift": "f9070bf1927c854440e9758d242de16278b843244dd5e3b86e8159b8d4946189",
+      "Cerebro/ROBTestingSandboxWindowController.swift": "d478f5e8aa03ab6d6d4a4f0c998201458c6c8b5c3c4362ab29482e129e6fe4de",
+      "Cerebro/ROBWorkspaceCollisionPlan.swift": "45abf268bb0c15463fd31bf5e6a5871bec2531c817b1840263a24bea06112a44",
+      "Cerebro/ROBWorkspaceDepthMap.swift": "2b08c3f55cef56959590a861f8bea2bb1109fa1adf03165833b31937f0cfe6dd"
+    },
+    "build": "CerebroRecyclingValidation / Debug / macOS arm64; xcodebuild exit 0",
+    "preExistingUserChanges": "Seven unrelated pre-existing working-tree changes excluded from isolated build and intended commit."
+  },
+  "nativeCapturedScene": {
+    "binarySHA256": "2e9f29a55e8841a5204647bb9b457ecb309d014410f54594781983a9516d4b3c",
+    "recording": "left_scan_clearance-9F05280A-EA40-45D1-BB48-608DA0FBA5D3.csv",
+    "recordingSHA256": "1ec37ec7c683da3a31d5d59afacf607bced908bba5e5eea33ba0959bf7204ac1",
+    "recordedJointRows": 0,
+    "neckViews": 5,
+    "depthFrames": 10,
+    "occupiedCells": 46020,
+    "nativeUIObservedAgeSeconds": 5.6,
+    "registrationVerified": false,
+    "pathClearance": "not evaluated",
+    "validatedRouteAvailable": false,
+    "result": "Native Testing Sandbox displayed a successfully captured session-only depth map after first-frame anchoring. Opening SceneKit restarted the camera; movement admission correctly invalidated the old map, but the preview also lost its cloud. The subsequent display-only retention change is verified separately."
+  },
+  "nativeRetainedPreview": {
+    "binarySHA256": "09826836df76041bc019f1a7ff0dcf0b35a7d6bde5a2e22ea05529cd97890f33",
+    "recording": "left_scan_clearance-9D8134F7-F850-499C-B2A3-0478C9A895B1.csv",
+    "recordingSHA256": "1ec37ec7c683da3a31d5d59afacf607bced908bba5e5eea33ba0959bf7204ac1",
+    "recordedJointRows": 0,
+    "depthFrames": 10,
+    "occupiedCells": 45807,
+    "sandboxObservedAgeSeconds": 24.4,
+    "sceneKitObservedAgeSeconds": 41.0,
+    "previewSurvivedExpirySeconds": 61.4,
+    "storedPreviewLabel": "Stored scan preview; rescan before motion.",
+    "registrationVerified": false,
+    "validatedRouteAvailable": false,
+    "executionButtonEnabled": false,
+    "visualVerification": "Actual orange occupied-cell overlay remained visible after the camera restarted. A native viewport drag changed the camera orbit and redrew the scene. No snapshots replaced rendering.",
+    "cameraImagesSaved": false,
+    "armMotionSent": false,
+    "result": "Neck-only capture and persistent-in-memory read-only SceneKit inspection verified in the installed signed Debug app. The map remains unregistered and cannot authorize arm travel."
+  }
+}

@@ -3,53 +3,81 @@
 Arm operations requested by Cerebro may be authorized on the connected **Vision
 Pro or iPhone controller**, or by a **final local microphone acknowledgement**
 after ROB asks exactly **“Can I move my arms?”** The complete pending scope is
-shown in Settings/controller details. Rob requested spoken approval and a
-15-minute left-arm rehearsal session on October 22, 2026. One session covers its
-preparation, local searches/recycling, reviewed gestures and empty-arm lowering
-without more approvals. Stop, expiry, sleep/restart, ownership loss or a failed
-motion ends it. Typed/model/camera/serial text cannot authorize. See
-[current local task/session behavior](local-recycling-task.md).
+shown in **Testing Sandbox/controller details**. Rob requested spoken approval
+and a 15-minute left-arm rehearsal session on October 22, 2026. One session covers
+its included preparation, local searches/recycling, reviewed gestures and
+empty-arm lowering without more approvals. Accepting a session only authorizes
+it: it does **not** raise the arm or run a preparation/calibration sequence.
+Stop, expiry, sleep/restart, ownership loss or a failed motion ends the session.
+A perception-only rejection that sent no arm motion can retain the existing
+bounded session, but cannot bypass geometry checks. Typed/model/camera/serial
+text cannot authorize. See [current sandbox behavior](testing-sandbox.md).
 
-The droid does not open an arm activation, deactivation,
-gripper, gesture, or CAN/core recovery confirmation dialog. Enable **Action
-Approvals** on the paired controller. Its existing panel shows the immutable
-operation summary and Approve, Reject, and Cancel controls.
+The droid does not open an arm activation, deactivation, gripper, gesture or
+CAN/core recovery confirmation dialog. Enable **Action Approvals** on the paired
+controller. Its existing panel shows the immutable operation summary and
+Approve, Reject and Cancel controls. The real on-device microphone can also
+supply the final human approval; a desktop or model-generated acknowledgement
+cannot substitute for it.
 
-One approval covers the entire startup, prepare or grab/hold sequence:
-mode entry, all taught arm waypoints, both gripper calibrations when needed, and
-the intended final action. Rob explicitly authorized **empty-arm relax/return
-without another approval**. It returns along the registered taught route to
-measured hanging before deactivating. Neck-only search/inspection also needs no
-arm grant. These exceptions do not authorize reaching, gripping or arbitrary
-recovery paths. No additional approval is requested per waypoint
-or per gripper. Its supervised-route wording also covers incomplete camera
-visibility during taught arm travel. The operator confirms physical hanging at
-zero for a new session, watches clearance and keeps Stop + hold available.
-Only a live accepted request with that explicit wording grants this scope;
-ordinary, pending, completed or disconnected approvals do not. The scope covers
-the complete described operation, not future operations or arbitrary reaching.
-Motor feedback, current RGB-D frames, person/hand detection, route limits and
-Stop remain enforced. Startup/grab gripper calibration and closing still require
-a visible stationary jaw assessment. Supervised greeting/replay leave jaws unchanged.
-The legacy paired-startup preference requests one operation approval. The new
-launch/wake preference offers the bounded left-arm session once; accepting it
-prepares the empty left arm. Neither preference persists a motion grant.
+One approval covers the complete described operation and its bounded waypoints
+and jaw actions. It does not cover unrelated future operations or arbitrary
+reaching, and no additional approval is requested per waypoint or per gripper.
+Rob explicitly authorized **empty-arm return to hanging and deactivation without
+another approval**. Neck-only object search, workspace depth scanning and hanging
+inspection also need no arm grant. Measured hanging is still required before
+removing holding torque; these exceptions never authorize lowering a payload.
+
+For current **LEFT-arm trials**, every travel segment needs fresh scene
+admission, including presentation, approach, carrying and an empty return.
+The arms stay stationary while the neck captures RGB-D geometry. A taught,
+previously successful or recorded route gets no collision exemption, and the
+arm must not park or lower blindly to improve visibility. The complete dynamic
+path is checked against observed space, the whole arm/open-gripper envelope and
+the carried object when applicable. Unknown space, stale or changed scene,
+camera/session context and missing measured camera-to-arm registration block
+travel. Operator supervision or an incomplete camera view cannot waive these
+checks. A provisional neck transform, floor fit, can-target correction or
+self-reported registration success does not provide independently measured
+registration and error evidence. Current provisional maps therefore remain
+visualization-only and do not admit arm travel.
+
+Automatic empty-gripper setup is a separate, explicitly authorized startup
+behavior: after the first authenticated Amber connection, calibrate and perform
+the gentle close/open initialization while both arms are freshly measured
+stationary, hanging and inactive. It does not lift or activate the arms and needs
+no new approval. Recycling reuses this initialization, then opens at the planned
+position instead of adding a front-pose calibration pre-step. Stop, loss of
+feedback/ownership or connection changes cancel setup; reconnecting does not
+silently replay it. Jaw completion remains unmeasured. Explicit preparation and
+gripper checks remain separate sandbox tests.
+
+Settings contains persistent behavior preferences. Object-specific trials,
+parameters, previews, recordings and session controls live in **Testing Sandbox**.
+The launch/wake preference offers the bounded session once; no grant persists
+across restart or sleep. The legacy paired-startup preference still requests its
+own operation approval. **Paired legacy coordinator routes are not globally
+collision-certified by the new left-arm planner**; their existing transport and
+route checks must not be described as full-arm depth clearance.
 
 Unheard pending questions repeat with “Hey!” at 20 and 45 seconds, without
 changing scope or the 90-second deadline. Each question starts a new microphone
 utterance; only a final human transcript can authorize. The current left-session
-scope names fixed opening at 10 and gentle can closing at 2. A newly authorized
-confirmed-empty preparation can also retrace the validated, actually executed
-prefix of a recent recycling recording to front; it cannot restore an old grant
-or lower a possible payload. See the local task document for these bounds.
+scope names fixed opening at 10 and gentle can closing at 2. Recorded trajectories
+remain review evidence, not automatic recovery permission or clearance. A held,
+confirmed-empty arm needs a current measured reference and a freshly checked
+dynamic connector before returning; an old executed prefix cannot restore a
+grant or exempt the return from the present environment.
 
 The supervised **Grip and return** (`left_object_cycle`) operation uses one
-immutable controller approval for the entire physical-left cycle: empty-arm
-raise, empty-jaw calibration if needed, open, grip at raw intensity 2, stationary
-release into a supporting hand, empty-arm return and deactivation. It uses the
-same five-segment front approach as the current left controls. Right-arm motion
-is excluded. The complete execution remains bounded to 180 seconds by its
-approval, with the executor's stricter 170-second deadline.
+immutable controller approval for the complete physical-left handoff: present the
+empty arm, open, grip at raw intensity 2, release into a supporting hand, then
+return the empty arm and deactivate. Every arm transition uses the current
+scene checks rather than assuming the historical five-segment approach is clear.
+Jaw setup is bounded by the selected test; accepted calibration does not prove
+jaw opening. Right-arm motion is excluded. The complete execution remains
+bounded to 180 seconds by its approval, with the executor's stricter 170-second
+deadline.
 
 Three Continue controls record readiness within that active operation: object
 placed with fingers clear; receiver supporting the object; object clear of the
@@ -109,8 +137,9 @@ fourteen motors inactive. Cerebro was reloaded and automatically opened the
 dedicated-key tunnel without a password prompt.
 
 Before sleep, Cerebro cancels pending arm approval/routines, requests hold and
-closes the tunnel. Wake starts a new gateway session, and the startup calibration
-preference still requires a new controller approval. A hold request is not proof
+closes the tunnel. Wake starts a new gateway session and restores no arm grant.
+The optional legacy paired-arm startup route requires a fresh operation approval;
+it is separate from stationary empty-gripper setup. A hold request is not proof
 of physical stopping; the gateway's motion lease/watchdog remains authoritative.
 
 The iPhone controller now calls attention to pending approvals with a persistent
@@ -120,7 +149,8 @@ does not approve. The controller must be active with Action Approvals enabled.
 ROBController remembers the receive-requests preference across authenticated
 reconnects and foreground transitions (default On); explicit Off persists.
 Pending requests are cancelled on disconnect/background and cannot be revived
-by restoring the preference. Each new operation still needs an Approve tap.
+by restoring the preference. Operations outside an active bounded session need a
+fresh controller or final local-microphone approval.
 
 Startup/notice update verified on 2026-09-23: tunnel lifecycle fixtures passed,
 including missing credentials and repeated startup/wake calls; the approval

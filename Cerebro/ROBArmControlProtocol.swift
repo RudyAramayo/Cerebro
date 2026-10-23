@@ -8,15 +8,7 @@ enum ROBArmControlProtocol {
     /// Calibrated B1 limits shared with `ROBAmberB1Kinematics` and enforced
     /// again by the authenticated Amber gateway. Keep the joint ordering
     /// J1...J7; a single symmetric maximum is unsafe for J1...J6.
-    static let targetJointBoundsRadians: [ClosedRange<Double>] = [
-        -2.4435 ... 2.4435,
-        -2.3213 ... 2.3213,
-        -2.2863 ... 2.2863,
-        -2.2863 ... 2.2863,
-        -2.2863 ... 2.2863,
-        -2.2863 ... 2.2863,
-        -3.05 ... 3.05,
-    ]
+    static let targetJointBoundsRadians = ROBArmJointLimits.radians
 
     static func containsTargetPositions(_ positionsRadians: [Double]) -> Bool {
         positionsRadians.count == targetJointBoundsRadians.count

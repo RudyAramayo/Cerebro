@@ -1,4 +1,5 @@
 import AppKit
+import simd
 
 final class ROBShowMotionCoordinator {
     static let shared = ROBShowMotionCoordinator()
@@ -92,6 +93,9 @@ final class ROBAmberGatewayClient: NSObject {
     var afterGrip: (() -> Void)?
     var afterStateQuery: (() -> Void)?
     var sequence: UInt64 = 1, nextID: UInt64 = 1
+    var freezeSequenceForArms: Set<String> = [] { didSet { frozenSequences = [:] } }
+    private var frozenSequences: [String:UInt64] = [:]
+    var onTelemetry: ((String) -> Void)?
     var feedbackReadyAt = 0.0
     var modeFeedbackDelay = 0.0
     var modeFeedbackReadyAt: [String: Double] = [:]
@@ -103,8 +107,14 @@ final class ROBAmberGatewayClient: NSObject {
     func telemetry(forArm arm: String) -> ROBAmberGatewayTelemetry? {
         guard ProcessInfo.processInfo.systemUptime >= feedbackReadyAt else { return nil }
         sequence += 1
+        onTelemetry?(arm)
+        let deliveredSequence: UInt64
+        if freezeSequenceForArms.contains(arm) {
+            if frozenSequences[arm] == nil { frozenSequences[arm] = sequence }
+            deliveredSequence = frozenSequences[arm]!
+        } else { deliveredSequence = sequence }
         let status = ProcessInfo.processInfo.systemUptime < (modeFeedbackReadyAt[arm] ?? 0) ? 1 : mode[arm]!
-        let sample = ROBAmberGatewayTelemetry(sequence: sequence, positions: q[arm]!, stale: stale, status: status)
+        let sample = ROBAmberGatewayTelemetry(sequence: deliveredSequence, positions: q[arm]!, stale: stale, status: status)
         sample.currents = Array(repeating: NSNumber(value: current), count: 7)
         return sample
     }
@@ -207,6 +217,46 @@ final class ROBWorkspaceSearch {
     static let shared = ROBWorkspaceSearch()
     var announce: ((String) -> Void)?
     var lastReport: NSDictionary = ["detail": "Fixture search only"]
+    private var collisionSnapshotValue: ROBWorkspaceCollisionSnapshot?
+    var collisionScanCalls = 0
+    var failCollisionScan = false
+    var onCollisionScan: (() -> Void)?
+    var collisionSnapshot: ROBWorkspaceCollisionSnapshot? {
+        guard let value = collisionSnapshotValue,
+              value.cameraGeneration == ROBArmRoutineVision.shared.cameraGeneration,
+              value.sessionGeneration == ROBAmberGatewayClient.shared.generation,
+              (0...60_000).contains(Date().timeIntervalSince1970 * 1000 - value.oldestCapturedAtMilliseconds) else { return nil }
+        return value
+    }
+    func clearCollisionScene() { collisionSnapshotValue = nil }
+    @MainActor func scanCollisionScene(model: ROBGhostRobotModel, generation: UInt64,
+        check: () throws -> Void, progress: (String) -> Void) async throws -> ROBWorkspaceCollisionSnapshot {
+        collisionScanCalls += 1; collisionSnapshotValue = nil
+        try check(); onCollisionScan?()
+        if failCollisionScan { throw ROBArmRoutineError.blocked("Fixture RGB-D scene unavailable") }
+        let now = Date().timeIntervalSince1970 * 1000
+        let camera = ROBArmRoutineVision.shared.cameraGeneration
+        var map = ROBWorkspaceDepthMap(modelID: model.modelID, geometryID: model.geometryID,
+            mappingID: ROBGhostRobotModel.mappingID, sessionGeneration: generation,
+            cameraGeneration: camera, nowMilliseconds: now - 200)
+        let transform = ROBWorkspaceView(panDegrees: 0, upperTarget: 6306).cameraFrame(model: model)!
+        for (sequence, age) in [(UInt64(1), 100.0), (UInt64(2), 50.0)] {
+            try map.append(width: 24, height: 24, fx: 24, fy: 24, cx: 12, cy: 12,
+                depth: { _, _ in 900 }, cameraToRobot: transform, capturedAtMilliseconds: now-age,
+                sequence: sequence, cameraGeneration: camera, nowMilliseconds: now,
+                recordedPanDegrees: 0, recordedUpperTarget: 6306)
+        }
+        let snapshot = map.snapshot(nowMilliseconds: now)!
+        precondition(snapshot.observedFrameCount == 2 && snapshot.occupiedVoxelCount > 0 && snapshot.freeVoxelCount > 0)
+        precondition(snapshot.registrationID == nil && snapshot.registrationUncertaintyMeters == nil,
+            "Synthetic RGB-D must never manufacture measured camera-to-arm registration")
+        try check()
+        collisionSnapshotValue = snapshot
+        lastReport = ["status": "depth_scene_captured", "detail": snapshot.registrationDetail,
+            "collision_map_frames": snapshot.observedFrameCount, "arm_motion_sent": false]
+        return snapshot
+    }
+
     var fail = false
     var requiredDepth = true
     var objects: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
@@ -216,6 +266,10 @@ final class ROBWorkspaceSearch {
         requiredDepth = requireDepth
         onInspect?()
         if fail { throw ROBArmRoutineError.blocked("Fixture observation unavailable") }
+        if requireDepth {
+            _ = try await scanCollisionScene(model: model, generation: ROBAmberGatewayClient.shared.generation,
+                check: check, progress: progress)
+        }
         try check(); afterInspect?(); return objects
     }
 }
@@ -223,6 +277,7 @@ final class ROBWorkspaceSearch {
 final class ROBArmRoutineVision {
     static let shared = ROBArmRoutineVision()
     var fresh = true, handsClear = true, blocked = false, objectInRight = false
+    var cameraGeneration = UUID()
     var observationCount = 0
     var readinessDescription: String { "Simulated camera unavailable" }
     func healthSnapshot() -> NSDictionary { ["fixture": true] }
@@ -307,6 +362,25 @@ final class ROBArmRoutineCoordinator {
         print("Delayed telemetry: 700 ms queued history retained only with newer live feedback; stale source, true feedback loss, malformed currents and historical current jumps still stop; stationary jaws only after valid live feedback; no travel or grant recovery")
     }
     @MainActor static func tests() async throws {
+        let dispatchID = UUID(), dispatchMap = String(repeating:"a",count:64)
+        let reviewed = ROBReviewedArmDispatchStart(proposalID:dispatchID,index:3,generation:42,mapFingerprint:dispatchMap,
+            positions:Array(repeating:0,count:7),sequence:100,reviewCompletedAtUptime:10)
+        func admits(_ positions:[Double] = Array(repeating:0,count:7), id:UUID = dispatchID, index:Int = 3,
+                    generation:UInt64 = 42, map:String = dispatchMap, sequence:UInt64 = 101, now:Double = 10.1) -> Bool {
+            reviewed.matches(proposalID:id,index:index,generation:generation,mapFingerprint:map,
+                positions:positions,sequence:sequence,nowUptime:now)
+        }
+        precondition(admits() && admits(Array(repeating:0.0001,count:7)))
+        var singleDrift = Array(repeating:0.0,count:7); singleDrift[0] = 0.0012
+        precondition(admits(singleDrift))
+        singleDrift[0] = 0.0014
+        precondition(!admits(singleDrift),"A >2mm bounded point drift was admitted")
+        precondition(!admits(Array(repeating:0.0003,count:7)),"Small simultaneous joint drifts escaped the aggregate swept bound")
+        precondition(!admits([0.001,-0.001,0,0,0,0,0]),"Opposing joint drift signs cancelled each other")
+        precondition(!admits(id:UUID()) && !admits(index:4) && !admits(generation:43) && !admits(map:String(repeating:"b",count:64)))
+        precondition(!admits(sequence:99) && !admits(now:10.251) && !admits(now:9.999) && !admits(now:Double.nan))
+        precondition(!admits([Double.nan,0,0,0,0,0,0]) && !admits([0,0]))
+        print("Reviewed-start admission: fresh matching proposal/step/session/map accepted; aggregate >2mm point drift, reordered feedback, expired/future time and mismatched identities blocked; no hardware or approval bypass")
         let plan = ROBLeftArmInteractionPlan.self
         for index in 0...6 {
             precondition(plan.target(index: index)! == ROBArmRoutinePlan.target(index: index, physicalLeft: true)!)
@@ -383,6 +457,145 @@ final class ROBArmRoutineCoordinator {
         precondition(approvals == 0 && g.commands.isEmpty && ROBAmberGatewayTunnel.shared.connections == 0)
         ROBWorkspaceSearch.shared.fail = false; ROBWorkspaceSearch.shared.onInspect = nil; g.ready = true
         print("Neck-only search and hanging checks: no arm approval, gateway connection, motor or hold commands, including failure")
+        let legacyExecutor = CommandLine.arguments.contains("legacy-executor")
+        if !legacyExecutor && CommandLine.arguments.last != "telemetry" {
+            let search = ROBWorkspaceSearch.shared
+            let front = plan.target(index: plan.frontIndex)!, zero = Array(repeating: 0.0, count: 7)
+            let model = try ROBGhostRobotModel(directory: URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
+            let legacyURL = URL(fileURLWithPath:CommandLine.arguments[1]).appendingPathComponent("docs/calibration/evidence/2026-10-22-recycling/first-confirmed-recycle.proposal.json")
+            let legacyCarry = try JSONDecoder().decode(ROBLeftGestureProposal.self,from:Data(contentsOf:legacyURL))
+            try ROBLeftGestureCompiler.validate(legacyCarry,model:model)
+            precondition(legacyCarry.workspaceCollisionPlan?.payload == nil && legacyCarry.steps.contains(where:{ $0.jawAction == .grip }))
+            g.commands = []; let beforeLegacyApproval = approvals, beforeLegacyScan = search.collisionScanCalls
+            let missingPayload = await run(legacyCarry,model:model)
+            precondition(missingPayload["status"] as? String == "blocked",missingPayload.description)
+            precondition((missingPayload["detail"] as? String)?.contains("Measure the carried object") == true,missingPayload.description)
+            precondition(approvals == beforeLegacyApproval && search.collisionScanCalls == beforeLegacyScan && g.commands.isEmpty,
+                "A legacy carry without measured payload requested authority or attempted capture/actuation")
+            print("Imported carrying proposal: archive still compiles for preview, but missing measured payload rejects before approval, scene capture or actuator commands")
+            let hand = model.toolPosition(model.positions(vendorLeft: front))!
+            let now = Date().timeIntervalSince1970 * 1000, view = ROBWorkspaceView(panDegrees: 0, upperTarget: 6306)
+            search.objects = [
+                .can: .init(target: .can, position: [hand.x,hand.y,hand.z], confidence: 0.9, capturedAt: now, sequence: 10, view: view),
+                .orangeBucket: .init(target: .orangeBucket, position: [hand.x,hand.y+0.08,hand.z-0.10], confidence: 0.9,
+                    capturedAt: now, sequence: 11, view: view, openingRadius: 0.14)]
+            func noActuation(_ detail: String) {
+                precondition(g.commands.allSatisfy { $0.hasPrefix("mode_query:") || $0.hasPrefix("priority_hold:") },
+                    "\(detail): map admission sent arm mode/travel/gripper commands: \(g.commands)")
+                precondition(g.activeLeases.isEmpty && ROBAmberArmMotionArbiter.shared.owners.isEmpty,
+                    "\(detail): map admission retained an actuator reservation or lease")
+            }
+            // Use the real production depth-map builder, including two fresh
+            // RGB-D frames. Its provisional transform MUST stay unregistered.
+            g.commands = []; g.q["right"] = front; g.mode["right"] = 2
+            let scanApprovals = approvals, scansBefore = search.collisionScanCalls
+            let neckScan = await run("left_scan_clearance")
+            precondition(neckScan["status"] as? String == "accepted_unverified", neckScan.description)
+            precondition(neckScan["arm_motion_sent"] as? Bool == false && approvals == scanApprovals && g.commands.isEmpty)
+            precondition(search.collisionScanCalls == scansBefore + 1 && search.collisionSnapshot != nil)
+            precondition(g.q["right"] == front && g.mode["right"] == 2)
+            precondition(trial.collisionReviewProposal == nil && trial.collisionReviewStatus["registration_verified"] as? Bool != true)
+            noActuation("Neck-only depth scan")
+            search.failCollisionScan = true; g.commands = []
+            let unavailable = await run("left_scan_clearance")
+            precondition(unavailable["status"] as? String == "blocked", unavailable.description)
+            precondition(approvals == scanApprovals && g.commands.isEmpty && search.collisionSnapshot == nil)
+            search.failCollisionScan = false
+            print("Workspace scan: two advancing RGB-D frames produce a provisional map; scan/failure need no arm approval, activation, jaw or travel commands")
+
+            // Fresh timestamps and unchanged position mode do not substitute
+            // for distinct feedback from EACH arm. The other arm continues
+            // advancing in both cases, so a shared packet counter cannot pass.
+            for frozenArm in ["left","right"] {
+                g.commands = []; g.freezeSequenceForArms = [frozenArm]
+                g.q = ["left":zero,"right":front]; g.mode = ["left":0,"right":2]
+                search.clearCollisionScene()
+                let before = search.collisionScanCalls
+                let result = await run("left_scan_clearance")
+                g.freezeSequenceForArms = []
+                precondition(result["status"] as? String == "blocked",result.description)
+                precondition((result["detail"] as? String)?.contains("settle with advancing feedback") == true,result.description)
+                precondition(search.collisionScanCalls == before && g.commands.isEmpty,
+                    "Frozen \(frozenArm) feedback allowed a scene frame or actuator command")
+                precondition(g.q["left"] == zero && g.q["right"] == front && g.mode == ["left":0,"right":2])
+                precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty)
+            }
+            g.commands = []; g.q = ["left":zero,"right":front]; g.mode = ["left":0,"right":2]
+            search.clearCollisionScene()
+            let beforeDrift = search.collisionScanCalls
+            g.onTelemetry = { side in if side == "left" { g.q[side]![0] += 0.0003 } }
+            let moving = await run("left_scan_clearance")
+            g.onTelemetry = nil
+            precondition(moving["status"] as? String == "blocked",moving.description)
+            precondition((moving["detail"] as? String)?.contains("still moving") == true,moving.description)
+            precondition(search.collisionScanCalls == beforeDrift && g.commands.isEmpty,
+                "A gradually moving arm entered static mapping or dispatched actuation")
+            precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty)
+            g.q = ["left":zero,"right":front]
+            print("Held-scene settling: frozen left OR right sequence and gradual arm drift reject before the first depth capture, with no actuator commands; unchanged mode alone never proves a static scene")
+
+            // A held arm is intentional here: recycling previously parked it
+            // before looking at the table. No parking may precede map admission.
+            for (command, start, mode) in [("left_recycle_can",front,2), ("left_prepare",zero,0),
+                                           ("left_wave",zero,0), ("left_object_cycle",zero,0),
+                                           ("left_relax",front,2)] {
+                g.commands = []; g.q["right"] = start; g.mode["right"] = mode; g.activeLeases = []
+                search.clearCollisionScene()
+                let before = approvals, beforeScan = search.collisionScanCalls
+                let beforeSetup = ROBGripperStartupCalibration.shared.setupCalls
+                let result = await run(command)
+                precondition(["blocked", "not_localized", "not_reachable"].contains(result["status"] as? String ?? ""), "\(command): \(result)")
+                precondition((result["detail"] as? String)?.lowercased().contains("registration") == true,
+                    "The real provisional map must explain its calibration requirement: \(result)")
+                precondition(search.collisionScanCalls == beforeScan + 1)
+                precondition(approvals == before + (command == "left_relax" ? 0 : 1))
+                precondition(g.q["right"] == start && g.mode["right"] == mode,
+                    "\(command) changed the arm before unregistered-map rejection")
+                precondition(ROBGripperStartupCalibration.shared.setupCalls == beforeSetup,
+                    "Recycling initialized jaws before scene registration was admitted")
+                precondition(trial.collisionReviewProposal == nil && !broker.isPending)
+                noActuation(command)
+            }
+            print("Workspace gate: recycle/present/wave/handoff/empty return reject unregistered RGB-D before parking, mode changes, waypoints or gripper work; held pose and torque stay unchanged")
+
+            // Declining the complete task cannot even start a neck depth scan.
+            g.commands = []; approve = false
+            let scansBeforeDecline = search.collisionScanCalls
+            let declined = await run("left_prepare")
+            precondition(declined["status"] as? String == "rejected", declined.description)
+            precondition(g.commands.isEmpty && search.collisionScanCalls == scansBeforeDecline)
+            approve = true
+            // A session is an authorization, never a calibration certificate.
+            let beforeSession = approvals
+            let grant: NSDictionary = await withCheckedContinuation { continuation in
+                broker.beginArmSession { continuation.resume(returning: $0) }
+            }
+            precondition(grant["status"] as? String == "completed" && broker.armSessionActive && approvals == beforeSession + 1)
+            g.commands = []; search.clearCollisionScene()
+            let underSession = await run("left_recycle_can")
+            precondition(["blocked", "not_localized", "not_reachable"].contains(underSession["status"] as? String ?? ""), underSession.description)
+            precondition((underSession["detail"] as? String)?.lowercased().contains("registration") == true)
+            precondition(approvals == beforeSession + 1 && broker.armSessionActive,
+                "A perception-only rejection must stay inside the bounded grant while never admitting motion")
+            noActuation("Session cannot replace registration")
+            broker.cancel(reason: "Fixture ended the bounded session")
+            precondition(!broker.armSessionActive)
+            // Already inactive hanging is a genuine no-op, rather than an
+            // excuse to certify the hanging model or replay a return route.
+            g.commands = []; g.q["right"] = zero; g.mode["right"] = 0
+            let beforeNoop = approvals, scansBeforeNoop = search.collisionScanCalls
+            let inactive = await run("left_relax")
+            precondition(inactive["status"] as? String == "completed", inactive.description)
+            precondition(approvals == beforeNoop && search.collisionScanCalls == scansBeforeNoop)
+            noActuation("Already inactive hanging no-op")
+            print("Authorization boundaries: decline starts no scan; a bounded session survives a no-motion perception rejection but cannot bypass registration; explicit Stop ends it; inactive hanging remains a no-op")
+            try await delayedTelemetryTests()
+            print("Legacy travel-positive cases remain behind explicit legacy-executor. They are not admitted by the current unregistered scene or hanging model/tread geometry; no fixture registration or clearance bypass was added.")
+            return
+        }
+        if legacyExecutor {
+            print("LEGACY EXECUTOR CASES: historical travel-positive assumptions are not admitted by the current registered-scene/hanging-clearance requirements; failures here are not a certified physical route.")
+        }
         if CommandLine.arguments.last == "recorded-recovery" {
             try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
             let original = URL(fileURLWithPath:CommandLine.arguments[1]).appendingPathComponent("docs/calibration/evidence/2026-10-22-recycling/recall-gravity-live-missed-grasp.proposal.json")

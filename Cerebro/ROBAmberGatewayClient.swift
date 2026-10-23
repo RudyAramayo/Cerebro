@@ -707,15 +707,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         "gripper_state", "gripper_calibrate", "gripper_control",
     ]
     private var gripperCommandsAvailable = false
-    private static let jointBoundsRadians: [ClosedRange<Double>] = [
-        -2.4435 ... 2.4435,
-        -2.3213 ... 2.3213,
-        -2.2863 ... 2.2863,
-        -2.2863 ... 2.2863,
-        -2.2863 ... 2.2863,
-        -2.2863 ... 2.2863,
-        -3.05 ... 3.05,
-    ]
+    private static let jointBoundsRadians = ROBArmJointLimits.radians
     private let queue = DispatchQueue(label: "com.orbitusrobotics.amber-gateway")
     private var connection: NWConnection?
     private var receiveBuffer = Data()

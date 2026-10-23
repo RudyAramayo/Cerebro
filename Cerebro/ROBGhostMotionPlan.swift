@@ -193,8 +193,24 @@ final class ROBGhostRobotModel {
     /// Conservative rigid-model AABB separation. This does not account for
     /// unmeasured cables, mounting errors, payloads or people.
     func treadSeparation(vendorLeft: [Double]) -> Double {
-        let transforms = frames(positions(vendorLeft: vendorLeft))
-        var bounds: [String: (SIMD3<Double>, SIMD3<Double>)] = [:]
+        let bounds = worldCollisionBounds(positions:positions(vendorLeft:vendorLeft))
+        let arms = bounds.keys.filter { $0.hasPrefix("left_") && ($0.hasSuffix("_Link") || $0 == "left_tool") }
+        let treads = bounds.keys.filter { $0.contains("track") || $0.contains("flipper") || $0.contains("sprocket") }
+        var minimum = Double.infinity
+        for arm in arms {
+            for tread in treads {
+                let a = bounds[arm]!, b = bounds[tread]!
+                minimum = min(minimum, simd_length(simd_max(.zero, simd_max(a.low - b.high, b.low - a.high))))
+            }
+        }
+        return minimum
+    }
+    /// Exact world AABBs of the verified model's local collision boxes. Used
+    /// by depth self filtering and full-arm workspace checking, never as a
+    /// claim that a model prior is a measured camera/arm registration.
+    func worldCollisionBounds(positions: [String:Double]) -> [String:(low:SIMD3<Double>,high:SIMD3<Double>)] {
+        let transforms = frames(positions)
+        var bounds: [String:(low:SIMD3<Double>,high:SIMD3<Double>)] = [:]
         for (link, corners) in hullBoxes {
             guard let frame = transforms[link] else { continue }
             let points = corners.map { point -> SIMD3<Double> in
@@ -202,16 +218,7 @@ final class ROBGhostRobotModel {
             }
             bounds[link] = (points.reduce(points[0]) { simd_min($0, $1) }, points.reduce(points[0]) { simd_max($0, $1) })
         }
-        let arms = bounds.keys.filter { $0.hasPrefix("left_") && ($0.hasSuffix("_Link") || $0 == "left_tool") }
-        let treads = bounds.keys.filter { $0.contains("track") || $0.contains("flipper") || $0.contains("sprocket") }
-        var minimum = Double.infinity
-        for arm in arms {
-            for tread in treads {
-                let a = bounds[arm]!, b = bounds[tread]!
-                minimum = min(minimum, simd_length(simd_max(.zero, simd_max(a.0 - b.1, b.0 - a.1))))
-            }
-        }
-        return minimum
+        return bounds
     }
     /// Bounded position-only numerical IK for preview. No motor command is
     /// generated here; the separate proposal compiler enforces execution scope.
@@ -286,6 +293,8 @@ struct ROBLeftGestureProposal: Codable, Equatable {
     let steps: [Step]
     var recyclingActions: [Int: JawAction]? = nil
     var recyclingParameters: ROBRecyclingTestParameters? = nil
+    var workspaceCollisionPlan: ROBWorkspaceCollisionPlan? = nil
+    var workspaceApproachPlan: ROBWorkspaceCollisionPlan? = nil
     var seconds: Double { steps.reduce(0) { $0 + $1.seconds } }
     func encoded() throws -> Data { let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]; return try encoder.encode(self) }
     var fingerprint: String { (try? encoded()).map(ROBGhostRobotModel.hash) ?? "invalid" }
@@ -309,15 +318,62 @@ enum ROBLeftGestureCompiler {
     static func compile(kind: String, name: String, poses: [[String: Double]] = [], model: ROBGhostRobotModel,
                         baseline: [Double], generation: UInt64, id: UUID = UUID(),
                         recyclingActions: [Int: ROBLeftGestureProposal.JawAction]? = nil,
-                        recyclingParameters: ROBRecyclingTestParameters? = nil) throws -> ROBLeftGestureProposal {
+                        recyclingParameters: ROBRecyclingTestParameters? = nil,
+                        workspaceCollisionPlan: ROBWorkspaceCollisionPlan? = nil,
+                        workspaceApproachPlan: ROBWorkspaceCollisionPlan? = nil,
+                        collisionMap: (any ROBWorkspaceCollisionMap)? = nil,
+                        collisionSceneID: UUID? = nil, collisionCameraGeneration: UUID? = nil,
+                        nowMilliseconds: Double = Date().timeIntervalSince1970*1000) throws -> ROBLeftGestureProposal {
+        func checked(_ proposal: ROBLeftGestureProposal) throws -> ROBLeftGestureProposal {
+            guard let path = workspaceCollisionPlan else { return proposal }
+            guard let map = collisionMap, let sceneID = collisionSceneID, let camera = collisionCameraGeneration,
+                  path.baseline == proposal.baseline, path.steps == proposal.steps else {
+                throw ROBGhostMotionError.blocked("The complete arm path needs its matching live workspace map before review.")
+            }
+            try path.validate(map:map,model:model,generation:generation,sceneID:sceneID,cameraGeneration:camera,nowMilliseconds:nowMilliseconds)
+            var result = proposal; result.workspaceCollisionPlan = path; return result
+        }
+        guard kind == "recycling" || workspaceApproachPlan == nil else {
+            throw ROBGhostMotionError.blocked("A recycling approach cannot alter another gesture type.")
+        }
+        if kind == "workspace_collision" {
+            guard let path = workspaceCollisionPlan, path.baseline == baseline,
+                  path.steps.allSatisfy({ $0.jawAction == nil }), recyclingParameters == nil, recyclingActions == nil,
+                  !name.isEmpty, name.count <= 100 else {
+                throw ROBGhostMotionError.blocked("A workspace connector needs a complete frozen collision plan and cannot contain gripper actions.")
+            }
+            return try checked(.init(id:id,name:name,kind:kind,modelID:model.modelID,referenceID:model.referenceID,
+                geometryID:model.geometryID,mappingID:ROBGhostRobotModel.mappingID,sessionGeneration:generation,
+                baseline:baseline,poses:path.steps.map { model.positions(vendorLeft:$0.positions) },steps:path.steps))
+        }
         if kind == "recycling" {
-            return try ROBHorizontalCanRecycle.compile(name: name, poses: poses, actions: recyclingActions ?? [:],
-                model: model, baseline: baseline, generation: generation, id: id, parameters: recyclingParameters)
+            var bodyBaseline = baseline
+            if let entry = workspaceApproachPlan {
+                let front = ROBLeftArmInteractionPlan.target(index:ROBLeftArmInteractionPlan.frontIndex)!
+                guard entry.baseline == baseline, entry.goal == front, !entry.steps.isEmpty,
+                      entry.steps.allSatisfy({ $0.jawAction == nil }),
+                      let map = collisionMap, let sceneID = collisionSceneID, let camera = collisionCameraGeneration else {
+                    throw ROBGhostMotionError.blocked("The complete recycling approach needs a matching live map and an exact front endpoint before any arm movement.")
+                }
+                try entry.validate(map:map,model:model,generation:generation,sceneID:sceneID,cameraGeneration:camera,nowMilliseconds:nowMilliseconds)
+                bodyBaseline = entry.goal
+            }
+            let body = try ROBHorizontalCanRecycle.compile(name:name,poses:poses,actions:recyclingActions ?? [:],
+                model:model,baseline:bodyBaseline,generation:generation,id:id,parameters:recyclingParameters)
+            guard let entry = workspaceApproachPlan else { return try checked(body) }
+            let combined = entry.steps+body.steps
+            guard combined.count <= 80, combined.reduce(0,{ $0+$1.seconds }) <= maximumScheduledSeconds else {
+                throw ROBGhostMotionError.blocked("The complete approach and recycling path exceed one bounded operation.")
+            }
+            return try checked(.init(id:body.id,name:body.name,kind:body.kind,modelID:body.modelID,referenceID:body.referenceID,
+                geometryID:body.geometryID,mappingID:body.mappingID,sessionGeneration:body.sessionGeneration,baseline:baseline,
+                poses:body.poses,steps:combined,recyclingActions:body.recyclingActions,recyclingParameters:body.recyclingParameters,
+                workspaceApproachPlan:entry))
         }
         guard recyclingParameters == nil else { throw ROBGhostMotionError.blocked("Recycling sandbox parameters cannot alter another gesture type.") }
         if kind == "tabletop" {
-            return try ROBTabletopPickPlace.compile(name: name, poses: poses, model: model,
-                baseline: baseline, generation: generation, id: id)
+            return try checked(ROBTabletopPickPlace.compile(name: name, poses: poses, model: model,
+                baseline: baseline, generation: generation, id: id))
         }
         guard baseline.count == 7, baseline.allSatisfy(\.isFinite), generation > 0,
               !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, name.count <= 100,
@@ -389,19 +445,24 @@ enum ROBLeftGestureCompiler {
         guard !steps.isEmpty, steps.count <= 80, steps.reduce(0, { $0 + $1.seconds }) <= maximumScheduledSeconds else {
             throw ROBGhostMotionError.blocked("Gesture is too long for one supervised operation. Center the hand first or use fewer poses.")
         }
-        return ROBLeftGestureProposal(id: id, name: name, kind: kind, modelID: model.modelID, referenceID: model.referenceID,
+        return try checked(ROBLeftGestureProposal(id: id, name: name, kind: kind, modelID: model.modelID, referenceID: model.referenceID,
             geometryID: model.geometryID, mappingID: ROBGhostRobotModel.mappingID,
-            sessionGeneration: generation, baseline: baseline, poses: poses, steps: steps)
+            sessionGeneration: generation, baseline: baseline, poses: poses, steps: steps))
     }
 
-    static func validate(_ proposal: ROBLeftGestureProposal, model: ROBGhostRobotModel) throws {
+    static func validate(_ proposal: ROBLeftGestureProposal, model: ROBGhostRobotModel,
+                         collisionMap: (any ROBWorkspaceCollisionMap)? = nil,
+                         collisionSceneID: UUID? = nil, collisionCameraGeneration: UUID? = nil,
+                         nowMilliseconds: Double = Date().timeIntervalSince1970*1000) throws {
         guard proposal.modelID == model.modelID, proposal.referenceID == model.referenceID,
               proposal.geometryID == model.geometryID, proposal.mappingID == ROBGhostRobotModel.mappingID else {
             throw ROBGhostMotionError.blocked("The robot model changed; rebuild and review this proposal.")
         }
         let expected = try compile(kind: proposal.kind, name: proposal.name, poses: proposal.poses, model: model,
             baseline: proposal.baseline, generation: proposal.sessionGeneration, id: proposal.id,
-            recyclingActions: proposal.recyclingActions, recyclingParameters: proposal.recyclingParameters)
+            recyclingActions: proposal.recyclingActions, recyclingParameters: proposal.recyclingParameters,
+            workspaceCollisionPlan:proposal.workspaceCollisionPlan,workspaceApproachPlan:proposal.workspaceApproachPlan,collisionMap:collisionMap,
+            collisionSceneID:collisionSceneID,collisionCameraGeneration:collisionCameraGeneration,nowMilliseconds:nowMilliseconds)
         guard proposal == expected else { throw ROBGhostMotionError.blocked("The reviewed path or timing changed; review a new proposal.") }
     }
 

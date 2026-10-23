@@ -197,7 +197,8 @@ def main():
         directory = Path(folder)
         source = directory / "StartupFixture.swift"
         binary = directory / "startup-fixture"
-        source.write_text(client + (ROOT / "Cerebro/ROBArmRoutinePlan.swift").read_text()
+        source.write_text((ROOT / "Cerebro/ROBArmJointLimits.swift").read_text()
+                          + client + (ROOT / "Cerebro/ROBArmRoutinePlan.swift").read_text()
                           + support + (ROOT / "Cerebro/ROBGripperStartupCalibration.swift").read_text() + FIXTURE)
         subprocess.run(["xcrun", "swiftc", "-swift-version", "5", "-parse-as-library",
                         "-module-cache-path", "/private/tmp/cerebro-swift-module-cache",

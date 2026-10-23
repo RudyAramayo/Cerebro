@@ -338,6 +338,27 @@ def main() -> None:
     require('initWithTitle:@"Testing Sandbox…"' in app_delegate and "@selector(showTestingSandbox:)" in app_delegate,
             "Development menu lost the Testing Sandbox entry point")
 
+    ghost = (ROOT / "Cerebro" / "ROBGhostGestureEditor.swift").read_text()
+    collision_review = braced_declaration(ghost, "private func showLatestCollisionReview()")
+    require("collisionReviewProposal" in collision_review and "collisionPreview = candidate" in collision_review,
+            "Collision review must use a separate read-only path artifact")
+    require("liveBaseline = false" in collision_review and "executeButton.isEnabled = false" in collision_review
+            and "performCommand" not in collision_review and "requestLeft" not in collision_review,
+            "Inspecting a depth map or collision route must never request physical execution")
+    require('command: "left_scan_clearance"' in sandbox and '"left_scan_clearance"].contains(command)' in sandbox,
+            "Neck-only geometry scan must be available without saving task parameters")
+    require("snapshot.isTruncated" in sandbox and "Coverage incomplete" in sandbox,
+            "Sandbox must identify incomplete depth coverage")
+    require('name == "collision"' in ghost and 'command: "ghost:collision"' in sandbox,
+            "Sandbox lost its depth-map and full-path preview entry point")
+    require("collisionPreviewSnapshot" in sandbox and "collisionPreviewSnapshot" in ghost
+            and "admissionCurrent" in sandbox and "Stored scan preview; rescan before motion." in sandbox,
+            "Read-only stored scans must remain visible and clearly separate from current motion admission")
+    require("collisionSnapshot" in sandbox and "minimum_clearance_m" in sandbox and "blocked_reason" in sandbox,
+            "Sandbox must report current map evidence, clearance and planning blocks")
+    require("rendersContinuously = true" in ghost and "isPlaying = true" in ghost,
+            "The collision preview must keep the SceneKit viewport rendering")
+
     print("Settings, Gemini, Perception and Testing Sandbox static checks passed")
 
 

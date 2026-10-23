@@ -1,0 +1,335 @@
+import Foundation
+import simd
+
+enum ROBWorkspaceVoxelState: UInt8, Codable { case unknown, free, occupied }
+
+/// A map is evidence from this camera/robot scene, never arm authority. Free
+/// space must have been observed; absence of an obstacle is not free space.
+protocol ROBWorkspaceCollisionMap {
+    var sceneID: UUID { get }
+    var cameraGeneration: UUID { get }
+    var sessionGeneration: UInt64 { get }
+    var modelID: String { get }
+    var geometryID: String { get }
+    var mappingID: String { get }
+    var createdAtMilliseconds: Double { get }
+    var oldestCapturedAtMilliseconds: Double { get }
+    var lastCapturedAtMilliseconds: Double { get }
+    var voxelSizeMeters: Double { get }
+    var registrationID: String? { get }
+    var registrationUncertaintyMeters: Double? { get }
+    var fingerprint: String { get }
+    func state(at point: SIMD3<Double>) -> ROBWorkspaceVoxelState
+    func state(inBoundsLow low: SIMD3<Double>, high: SIMD3<Double>) -> ROBWorkspaceVoxelState
+}
+
+extension ROBWorkspaceCollisionMap {
+    /// An implementation may accelerate this with an octree/bitset, but must
+    /// preserve the requirement that every intersecting voxel is known free.
+    func state(inBoundsLow low: SIMD3<Double>, high: SIMD3<Double>) -> ROBWorkspaceVoxelState {
+        let size = voxelSizeMeters
+        guard size.isFinite, size > 0,
+              (0..<3).allSatisfy({ low[$0].isFinite && high[$0].isFinite && abs(low[$0]) <= 20 && abs(high[$0]) <= 20 && low[$0] <= high[$0] }) else { return .unknown }
+        let lo = (0..<3).map { Int(floor(low[$0]/size)) }, hi = (0..<3).map { Int(floor(high[$0]/size)) }
+        guard zip(lo,hi).allSatisfy({ $1 >= $0 && $1-$0 <= 200 }),
+              zip(lo,hi).reduce(1,{ $0*($1.1-$1.0+1) }) <= 250_000 else { return .unknown }
+        for x in lo[0]...hi[0] { for y in lo[1]...hi[1] { for z in lo[2]...hi[2] {
+            let point = SIMD3((Double(x)+0.5)*size,(Double(y)+0.5)*size,(Double(z)+0.5)*size)
+            switch state(at:point) { case .free: continue; case .occupied: return .occupied; case .unknown: return .unknown }
+        } } }
+        return .free
+    }
+}
+
+/// A measured object envelope, expressed in the tool frame. No object name,
+/// remembered world position, gripper command or permission is encoded here.
+struct ROBWorkspaceCarriedObject: Codable, Equatable {
+    let measurementID: String
+    let centerInToolMeters: [Double]
+    let halfExtentsMeters: [Double]
+    var valid: Bool {
+        !measurementID.isEmpty && measurementID.count <= 128 && centerInToolMeters.count == 3 && halfExtentsMeters.count == 3 &&
+        centerInToolMeters.allSatisfy({ $0.isFinite && abs($0) <= 0.5 }) &&
+        halfExtentsMeters.allSatisfy({ $0.isFinite && (0.005...0.30).contains($0) })
+    }
+}
+
+struct ROBWorkspaceCollisionContext: Codable, Equatable {
+    let sceneID: UUID
+    let cameraGeneration: UUID
+    let sessionGeneration: UInt64
+    let modelID: String
+    let geometryID: String
+    let mappingID: String
+    let mapFingerprint: String
+    let registrationID: String
+    let registrationUncertaintyMeters: Double
+    let oldestCapturedAtMilliseconds: Double
+    let lastCapturedAtMilliseconds: Double
+    let checkedAtMilliseconds: Double
+}
+
+/// Full-arm planning/checking against a fresh, registered RGB-D map. The
+/// registered hanging/front corridor gets exactly the same checks as a new
+/// connector. All output remains a proposal until the normal runtime grant.
+struct ROBWorkspaceCollisionPlan: Codable, Equatable {
+    let context: ROBWorkspaceCollisionContext
+    let baseline: [Double]
+    let goal: [Double]
+    let steps: [ROBLeftGestureProposal.Step]
+    let payload: ROBWorkspaceCarriedObject?
+    let checkedPoseCount: Int
+    static let maximumMapAgeMilliseconds = 60_000.0
+    static let maximumRegistrationUncertaintyMeters = 0.05
+    static let sweptPointTravelMeters = 0.005
+    static let mechanicalClearanceMeters = 0.02
+    // The model has one rigid gripper proxy, not measured moving finger meshes.
+    // Cover the open jaws on every connector; never pretend closed proxy mesh
+    // bounds establish open-jaw clearance beside the table.
+    static let openJawAdditionalMarginMeters = 0.04
+    static let maximumPoseChecks = 12_000
+    static let maximumPlanningSeconds = 10.0
+
+    /// Planning takes the intersection of converted model limits and the
+    /// exact raw-coordinate ranges the existing gateway accepts.
+    static func jointBounds(model: ROBGhostRobotModel) -> [ClosedRange<Double>] {
+        (0..<7).map { index in
+            let joint = model.joints.first { $0.name == "left_joint\(index+1)" }!
+            let raw = ROBArmJointLimits.radians[index]
+            return max(raw.lowerBound,joint.lower+ROBGhostRobotModel.uprightPrior[index])...min(raw.upperBound,joint.upper+ROBGhostRobotModel.uprightPrior[index])
+        }
+    }
+
+    static func validateMap(_ map: any ROBWorkspaceCollisionMap, model: ROBGhostRobotModel, generation: UInt64,
+                            sceneID: UUID, cameraGeneration: UUID, nowMilliseconds: Double) throws -> ROBWorkspaceCollisionContext {
+        guard generation > 0, map.sessionGeneration == generation, map.sceneID == sceneID,
+              map.cameraGeneration == cameraGeneration, map.modelID == model.modelID,
+              map.geometryID == model.geometryID, map.mappingID == ROBGhostRobotModel.mappingID,
+              map.fingerprint.count == 64 else {
+            throw ROBGhostMotionError.blocked("The workspace map belongs to another robot, scene, camera or arm connection. Scan again before moving.")
+        }
+        guard let registrationID = map.registrationID, !registrationID.isEmpty,
+              let uncertainty = map.registrationUncertaintyMeters, uncertainty.isFinite,
+              (0...maximumRegistrationUncertaintyMeters).contains(uncertainty) else {
+            throw ROBGhostMotionError.blocked("Measure camera-to-arm registration and its error before using the depth map for arm clearance. The current neck-camera prior is not a calibrated collision map.")
+        }
+        let times = [nowMilliseconds,map.createdAtMilliseconds,map.oldestCapturedAtMilliseconds,map.lastCapturedAtMilliseconds]
+        guard times.allSatisfy(\.isFinite), map.oldestCapturedAtMilliseconds <= map.lastCapturedAtMilliseconds,
+              map.lastCapturedAtMilliseconds <= map.createdAtMilliseconds+5,
+              (0...maximumMapAgeMilliseconds).contains(nowMilliseconds-map.oldestCapturedAtMilliseconds),
+              (0...maximumMapAgeMilliseconds).contains(nowMilliseconds-map.lastCapturedAtMilliseconds),
+              map.voxelSizeMeters.isFinite, (0.01...0.04).contains(map.voxelSizeMeters) else {
+            throw ROBGhostMotionError.blocked("Workspace free-space evidence is stale or invalid. Hold the arm and scan the entire route again.")
+        }
+        return .init(sceneID:sceneID,cameraGeneration:cameraGeneration,sessionGeneration:generation,modelID:model.modelID,
+            geometryID:model.geometryID,mappingID:ROBGhostRobotModel.mappingID,mapFingerprint:map.fingerprint,
+            registrationID:registrationID,registrationUncertaintyMeters:uncertainty,
+            oldestCapturedAtMilliseconds:map.oldestCapturedAtMilliseconds,lastCapturedAtMilliseconds:map.lastCapturedAtMilliseconds,
+            checkedAtMilliseconds:nowMilliseconds)
+    }
+
+    /// Check a complete fixed proposal, including presentation, recovery,
+    /// approach, carrying and retreat. No saved-route or TCP-only exemption.
+    static func review(baseline: [Double], steps: [ROBLeftGestureProposal.Step], map: any ROBWorkspaceCollisionMap,
+                       model: ROBGhostRobotModel, generation: UInt64, sceneID: UUID, cameraGeneration: UUID,
+                       nowMilliseconds: Double, payload: ROBWorkspaceCarriedObject? = nil) throws -> Self {
+        let context = try validateMap(map,model:model,generation:generation,sceneID:sceneID,
+            cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds)
+        guard !steps.isEmpty, steps.count <= 80, payload?.valid ?? true,
+              steps.allSatisfy({ $0.seconds.isFinite && (0.7...5).contains($0.seconds) }),
+              steps.reduce(0,{ $0+$1.seconds }) <= 135 else {
+            throw ROBGhostMotionError.blocked("The workspace path or measured payload envelope is invalid or exceeds one bounded operation.")
+        }
+        guard !steps.contains(where:{ $0.jawAction == .grip || $0.jawAction == .release }) || payload != nil else {
+            throw ROBGhostMotionError.blocked("A grasp or release route needs a measured payload envelope before any arm travel.")
+        }
+        var checker = Checker(map:map,model:model,context:context), previous = baseline
+        var carrying = !steps.contains { $0.jawAction == .grip }
+        for step in steps {
+            if let reason = checker.segment(from:previous,to:step.positions,payload:carrying ? payload : nil) {
+                throw ROBGhostMotionError.blocked(reason)
+            }
+            guard let minimum = ROBLeftArmInteractionPlan.duration(from:previous,to:step.positions), step.seconds >= minimum-1e-9 else {
+                throw ROBGhostMotionError.blocked("The collision-checked path exceeds the unchanged trajectory speed bound.")
+            }
+            if step.jawAction == .grip { carrying = true }
+            if step.jawAction == .release { carrying = false }
+            previous = step.positions
+        }
+        return .init(context:context,baseline:baseline,goal:previous,steps:steps,payload:payload,checkedPoseCount:checker.checked)
+    }
+
+    func validate(map: any ROBWorkspaceCollisionMap, model: ROBGhostRobotModel, generation: UInt64,
+                  sceneID: UUID, cameraGeneration: UUID, nowMilliseconds: Double) throws {
+        let current = try Self.validateMap(map,model:model,generation:generation,sceneID:sceneID,
+            cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds)
+        guard current.mapFingerprint == context.mapFingerprint, current.registrationID == context.registrationID,
+              current.registrationUncertaintyMeters == context.registrationUncertaintyMeters,
+              context.sessionGeneration == generation, context.sceneID == sceneID, context.cameraGeneration == cameraGeneration,
+              context.modelID == current.modelID, context.geometryID == current.geometryID, context.mappingID == current.mappingID,
+              context.oldestCapturedAtMilliseconds == current.oldestCapturedAtMilliseconds,
+              context.lastCapturedAtMilliseconds == current.lastCapturedAtMilliseconds,
+              context.checkedAtMilliseconds.isFinite, (0...Self.maximumMapAgeMilliseconds).contains(nowMilliseconds-context.checkedAtMilliseconds),
+              goal == steps.last?.positions else {
+            throw ROBGhostMotionError.blocked("The reviewed workspace map or path changed. Build a new proposal before moving.")
+        }
+        _ = try Self.review(baseline:baseline,steps:steps,map:map,model:model,generation:generation,sceneID:sceneID,
+            cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,payload:payload)
+    }
+
+    /// Deterministic bounded joint-space search. Current/goal poses, every
+    /// connecting segment and every shortcut are checked against the map.
+    static func make(from start: [Double], to goal: [Double], map: any ROBWorkspaceCollisionMap,
+                     model: ROBGhostRobotModel, generation: UInt64, sceneID: UUID, cameraGeneration: UUID,
+                     nowMilliseconds: Double, payload: ROBWorkspaceCarriedObject? = nil) throws -> Self {
+        let context = try validateMap(map,model:model,generation:generation,sceneID:sceneID,
+            cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds)
+        guard payload?.valid ?? true else { throw ROBGhostMotionError.blocked("Measure the carried object's complete envelope before planning.") }
+        var checker = Checker(map:map,model:model,context:context)
+        if let reason = checker.pose(start,payload:payload) { throw ROBGhostMotionError.blocked("Current arm clearance is unconfirmed. "+reason) }
+        if let reason = checker.pose(goal,payload:payload) { throw ROBGhostMotionError.blocked("Requested arm endpoint is blocked. "+reason) }
+        var path: [[Double]]?
+        if checker.segment(from:start,to:goal,payload:payload) == nil { path = [start,goal] }
+        if path == nil {
+            // These are generated joint-space search seeds, not registered
+            // routes. Table/unknown clearance is checked for both connectors.
+            for joint in [0,1,3,5,2,4,6] {
+                for delta in [0.35,-0.35,0.70,-0.70] {
+                    var a = start, b = goal; a[joint] += delta; b[joint] += delta
+                    if checker.segment(from:start,to:a,payload:payload) == nil,
+                       checker.segment(from:a,to:b,payload:payload) == nil,
+                       checker.segment(from:b,to:goal,payload:payload) == nil { path = [start,a,b,goal]; break }
+                }
+                if path != nil { break }
+            }
+        }
+        if path == nil { path = search(from:start,to:goal,checker:&checker,payload:payload) }
+        guard var route = path else {
+            throw ROBGhostMotionError.blocked("No fully observed, collision-free arm connector was found within the bounded search. Hold position and improve the workspace view or move the obstruction.")
+        }
+        // Only shortcut when the replacement's entire swept arm is clear.
+        var compact: [[Double]] = [route.removeFirst()], index = 0
+        while index < route.count {
+            var last = route.count-1
+            while last > index && checker.segment(from:compact.last!,to:route[last],payload:payload) != nil { last -= 1 }
+            compact.append(route[last]); index = last+1
+        }
+        var steps: [ROBLeftGestureProposal.Step] = [], previous = start
+        for target in compact.dropFirst() {
+            let origin = previous, delta = zip(origin,target).map { abs($0-$1) }.max() ?? 0
+            let count = max(1,Int(ceil(delta/0.30)))
+            for part in 1...count {
+                let t = Double(part)/Double(count), q = zip(origin,target).map { $0+($1-$0)*t }
+                guard let seconds = ROBLeftArmInteractionPlan.duration(from:previous,to:q,padding:ROBArmRoutinePlan.tolerance), seconds <= 5 else {
+                    throw ROBGhostMotionError.blocked("The workspace connector exceeds the existing motion timing bound.")
+                }
+                steps.append(.init(positions:q,seconds:seconds,stage:"Follow observed collision-free arm connector")); previous = q
+            }
+        }
+        return try review(baseline:start,steps:steps,map:map,model:model,generation:generation,sceneID:sceneID,
+            cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,payload:payload)
+    }
+
+    private struct Node { let q: [Double]; let parent: Int? }
+    private static func search(from start: [Double], to goal: [Double], checker: inout Checker,
+                               payload: ROBWorkspaceCarriedObject?) -> [[Double]]? {
+        var a = [Node(q:start,parent:nil)], b = [Node(q:goal,parent:nil)]
+        let primes = [2,3,5,7,11,13,17]
+        func halton(_ value: Int,_ base: Int) -> Double {
+            var n = value, f = 1.0, result = 0.0
+            while n > 0 { f /= Double(base); result += f*Double(n%base); n /= base }
+            return result
+        }
+        func distance(_ a:[Double],_ b:[Double]) -> Double { zip(a,b).reduce(0) { $0+pow($1.0-$1.1,2) } }
+        func extend(_ tree:inout [Node],toward target:[Double],checker:inout Checker) -> Int? {
+            let nearest = tree.indices.min { distance(tree[$0].q,target) < distance(tree[$1].q,target) }!
+            let origin = tree[nearest].q, delta = zip(origin,target).map { $1-$0 }, largest = delta.map(abs).max() ?? 0
+            let scale = min(1,0.25/max(1e-12,largest)), q = zip(origin,delta).map { $0+$1*scale }
+            guard checker.segment(from:origin,to:q,payload:payload) == nil else { return nil }
+            tree.append(.init(q:q,parent:nearest)); return tree.count-1
+        }
+        func trace(_ tree:[Node],_ index:Int) -> [[Double]] {
+            var result:[[Double]] = [], cursor:Int? = index
+            while let i = cursor { result.append(tree[i].q); cursor = tree[i].parent }
+            return result.reversed()
+        }
+        for iteration in 1...192 {
+            guard !checker.exhausted else { return nil }
+            let target = iteration%5 == 0 ? goal : checker.limits.enumerated().map { index,limit in
+                limit.lowerBound+(limit.upperBound-limit.lowerBound)*halton(iteration,primes[index])
+            }
+            guard let ai = extend(&a,toward:target,checker:&checker) else { continue }
+            for _ in 0..<24 {
+                guard let bi = extend(&b,toward:a[ai].q,checker:&checker) else { break }
+                if distance(b[bi].q,a[ai].q) < 1e-12 { return trace(a,ai)+Array(trace(b,bi).reversed().dropFirst()) }
+            }
+        }
+        return nil
+    }
+
+    private struct Checker {
+        let map: any ROBWorkspaceCollisionMap
+        let model: ROBGhostRobotModel
+        let context: ROBWorkspaceCollisionContext
+        let started = ProcessInfo.processInfo.systemUptime
+        var checked = 0
+        var limits: [ClosedRange<Double>] { ROBWorkspaceCollisionPlan.jointBounds(model:model) }
+        var exhausted: Bool { checked >= maximumPoseChecks || ProcessInfo.processInfo.systemUptime-started > maximumPlanningSeconds }
+        mutating func segment(from start:[Double],to end:[Double],payload:ROBWorkspaceCarriedObject?) -> String? {
+            guard start.count == 7, end.count == 7 else { return "Arm coordinates are incomplete." }
+            let bounds = limits
+            guard zip(start,bounds).allSatisfy({ $0.isFinite && $1.contains($0) }),
+                  zip(end,bounds).allSatisfy({ $0.isFinite && $1.contains($0) }) else {
+                return "Arm pose exceeds the model or transport joint bounds."
+            }
+            let travel = 1.5*zip(start,end).reduce(0.0) { $0+abs($1.0-$1.1) }
+            guard travel.isFinite else { return "Arm coordinates are not finite." }
+            let requestedSamples = ceil(travel/sweptPointTravelMeters)
+            guard requestedSamples.isFinite, requestedSamples <= Double(maximumPoseChecks) else {
+                return "The proposed swept path exceeds the bounded sampling budget."
+            }
+            let count = max(1,Int(requestedSamples))
+            for sample in 0...count {
+                let t = Double(sample)/Double(count), q = zip(start,end).map { $0+($1-$0)*t }
+                if let reason = pose(q,payload:payload) { return reason }
+            }
+            return nil
+        }
+        mutating func pose(_ q:[Double],payload:ROBWorkspaceCarriedObject?) -> String? {
+            guard !exhausted else { return "Workspace collision search reached its time or sampling bound." }
+            checked += 1
+            guard q.count == 7, zip(q,limits).allSatisfy({ $0.isFinite && $1.contains($0) }) else { return "Arm pose exceeds the model or transport joint bounds." }
+            let positions = model.positions(vendorLeft:q), bounds = model.worldCollisionBounds(positions:positions)
+            let arms = bounds.keys.filter { $0.hasPrefix("left_") && ($0.hasSuffix("_Link") || $0 == "left_tool" || $0 == "left_base_link") }.sorted()
+            guard arms.count >= 8, model.treadSeparation(vendorLeft:q) >= 0.030 else { return "The complete arm model is missing or enters its tread clearance margin." }
+            // Sweep sampling is bounded by a conservative 1.5m lever; inflate
+            // by one full sample travel as well as registration/voxel error.
+            let margin = mechanicalClearanceMeters+context.registrationUncertaintyMeters+sweptPointTravelMeters+sqrt(3)*map.voxelSizeMeters/2
+            for link in arms {
+                let box = bounds[link]!, extra = margin+(link == "left_tool" ? openJawAdditionalMarginMeters : 0)
+                if let reason = volume(low:box.low-SIMD3(repeating:extra),high:box.high+SIMD3(repeating:extra),label:link) { return reason }
+            }
+            if let payload {
+                guard payload.valid, let tool = model.frames(positions)["left_tool"] else { return "The carried-object envelope or tool transform is invalid." }
+                let center = payload.centerInToolMeters, half = payload.halfExtentsMeters
+                var points: [SIMD3<Double>] = []
+                for x in [-1.0,1] { for y in [-1.0,1] { for z in [-1.0,1] {
+                    let local = SIMD4<Double>(center[0]+x*half[0],center[1]+y*half[1],center[2]+z*half[2],1)
+                    let point = tool*local
+                    points.append(SIMD3(point.x,point.y,point.z))
+                } } }
+                let low = points.reduce(points[0]) { simd_min($0,$1) }-SIMD3<Double>(repeating:margin)
+                let high = points.reduce(points[0]) { simd_max($0,$1) }+SIMD3<Double>(repeating:margin)
+                if let reason = volume(low:low,high:high,label:"carried object") { return reason }
+            }
+            return nil
+        }
+        func volume(low:SIMD3<Double>,high:SIMD3<Double>,label:String) -> String? {
+            switch map.state(inBoundsLow:low,high:high) {
+            case .free: return nil
+            case .occupied: return "\(label) would intersect an observed workspace obstacle. No arm movement was authorized by this check."
+            case .unknown: return "\(label) enters unobserved space. Scan the whole arm route before moving."
+            }
+        }
+    }
+}

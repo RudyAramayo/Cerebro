@@ -30,7 +30,7 @@ import AppKit
         let gripperHelp = NSTextField(wrappingLabelWithString:
             "Calibrate stationary, empty grippers after Amber connects, without raising the arms. Keep the jaws clear at startup. Stop, sleep or connection loss cancels calibration.")
         let behaviorHelp = NSTextField(wrappingLabelWithString:
-            "Task motion uses one spoken or controller authorization for the complete operation. A supervised session covers its included routines. Returning empty arms to hanging needs no new approval. Say ‘relax’ to return along the registered route and turn off holding torque.")
+            "Task motion uses one spoken or controller authorization for the complete operation. A supervised session covers its included routines. Returning empty arms to hanging needs no new approval. Say ‘relax’ to request an empty-arm return and turn off holding torque. Left-arm trial returns use fresh workspace geometry and a dynamically checked path; paired-arm routes retain their existing checks.")
         let sandboxHelp = NSTextField(wrappingLabelWithString:
             "Open Testing Sandbox for individual trials, custom parameters, motion previews and recordings.")
         for label in [gripperHelp, behaviorHelp, sandboxHelp] { label.textColor = .secondaryLabelColor }

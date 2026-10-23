@@ -19,15 +19,15 @@ import AppKit
     }
     private static let trials: [Trial] = [
         Trial(id: "recycling", title: "Recycle can", detail: "Find an upright empty can and an open orange bucket using the neck camera. Grasp the can at its middle, lift, carry and release above the opening. Search and preview do not move the arms. A run uses one complete-task authorization or an active supervised session.", parameters: .recycling,
-              actions: [Action(title: "Run recycle test", command: "left_recycle_can"), Action(title: "Search only", command: "left_search_workspace"), Action(title: "Preview grasp…", command: "ghost:can")]),
+              actions: [Action(title: "Run recycle test", command: "left_recycle_can"), Action(title: "Search only", command: "left_search_workspace"), Action(title: "Scan workspace geometry", command: "left_scan_clearance"), Action(title: "Preview grasp…", command: "ghost:can"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision")]),
         Trial(id: "object-cycle", title: "Grip and return", detail: "Present the left arm, grip a supported object gently, release into a supporting hand, then return the empty arm. Readiness confirmations remain within the same task authorization. Keep fingers clear of the jaws.", parameters: .current,
               actions: [Action(title: "Run grip and return", command: "left_object_cycle")]),
         Trial(id: "stationary-grippers", title: "Stationary gripper setup", detail: "Calibrate empty grippers while both arms are hanging and inactive. This does not lift or activate the arms. Keep both jaws clear; Amber acknowledges commands but jaw completion is not measured.", parameters: .none,
               actions: [Action(title: "Set up stationary empty grippers", command: "gripper-setup")]),
         Trial(id: "preparation", title: "Arm preparation and return", detail: "Exercise individual registered routes and stationary jaw commands. These are optional commissioning checks; recycling does not require a separate preparation test. Support any held object before preparation or return.", parameters: .current,
-              actions: [Action(title: "Present / open left", command: "left_prepare"), Action(title: "Grip object", command: "left_grip"), Action(title: "Release to hand", command: "left_release"), Action(title: "Lower empty left arm", command: "left_relax"), Action(title: "Check hanging", command: "left_check_hanging"), Action(title: "Run both-arm startup route", command: "startup"), Action(title: "Relax empty arms", command: "relax")]),
+              actions: [Action(title: "Present / open left", command: "left_prepare"), Action(title: "Grip object", command: "left_grip"), Action(title: "Release to hand", command: "left_release"), Action(title: "Lower empty left arm", command: "left_relax"), Action(title: "Check hanging", command: "left_check_hanging"), Action(title: "Scan workspace geometry", command: "left_scan_clearance"), Action(title: "Run both-arm startup route", command: "startup"), Action(title: "Relax empty arms", command: "relax")]),
         Trial(id: "ghost", title: "Ghost motion rehearsal", detail: "Inspect and review a simulated arm path before requesting its execution. Open the controller input scene to edit a gesture or inspect the wave preset.", parameters: .none,
-              actions: [Action(title: "Open ghost editor…", command: "ghost:center"), Action(title: "Preview left wave…", command: "ghost:wave"), Action(title: "Motion rehearsal…", command: "show-rehearsal")]),
+              actions: [Action(title: "Inspect depth map / planned route…", command: "ghost:collision"), Action(title: "Open ghost editor…", command: "ghost:center"), Action(title: "Preview left wave…", command: "ghost:wave"), Action(title: "Motion rehearsal…", command: "show-rehearsal")]),
         Trial(id: "demonstration", title: "Body demonstration", detail: "Record a short camera demonstration, then replay the taught arm route or test the front-arm greeting.", parameters: .none,
               actions: [Action(title: "Record body demonstration", command: "teach"), Action(title: "Replay last", command: "replay"), Action(title: "Front-arm greeting", command: "wave")]),
         Trial(id: "feedback", title: "Spoken feedback", detail: "Check the spoken arm warning without starting an arm movement.", parameters: .none,
@@ -38,6 +38,8 @@ import AppKit
     private let detailStack = NSStackView()
     private let status = NSTextField(wrappingLabelWithString: "")
     private let session = NSTextField(wrappingLabelWithString: "")
+    private let collisionInfo = NSTextField(wrappingLabelWithString: "")
+    private var collisionRefreshTimer: Timer?
     private let continueCycle = NSButton(title: "Continue", target: nil, action: nil)
     private let save = NSButton(title: "Save test parameters", target: nil, action: nil)
     private var fields: [String: NSTextField] = [:]
@@ -68,6 +70,10 @@ import AppKit
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: Notification.Name("ROBControllerArmApprovalDidChange"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: .ROBGripperStartupCalibrationDidChange, object: nil)
         table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        collisionRefreshTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            guard let self, self.window?.isVisible == true else { return }
+            self.refreshCollisionInfo()
+        }
         refresh()
     }
     required init?(coder: NSCoder) { fatalError("Use shared") }
@@ -162,6 +168,14 @@ import AppKit
         let title = NSTextField(labelWithString: trial.title); title.font = .boldSystemFont(ofSize: 18)
         detailStack.addArrangedSubview(title)
         addHelp(trial.detail)
+        if ["recycling", "preparation", "ghost"].contains(trial.id) {
+            collisionInfo.identifier = NSUserInterfaceItemIdentifier("sandbox-collision-status")
+            collisionInfo.isSelectable = true
+            collisionInfo.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+            detailStack.addArrangedSubview(collisionInfo)
+            collisionInfo.widthAnchor.constraint(equalTo: detailStack.widthAnchor).isActive = true
+            refreshCollisionInfo()
+        }
         if trial.parameters == .recycling {
             do {
                 let parameters = try ROBRecyclingTestParameters.load()
@@ -271,7 +285,7 @@ import AppKit
     @objc private func performTrialAction(_ sender: NSButton) {
         guard canEdit, selectedTrial.actions.indices.contains(sender.tag) else { return }
         let command = selectedTrial.actions[sender.tag].command
-        if selectedTrial.parameters != .none && command != "left_search_workspace" && !storeParameters() { return }
+        if selectedTrial.parameters != .none && !["left_search_workspace", "left_scan_clearance"].contains(command) && !storeParameters() { return }
         if command.hasPrefix("ghost:") {
             NotificationCenter.default.post(name: Notification.Name("ROBShowControllerInputDiagnostics"), object: self,
                                             userInfo: ["ghostPreset": String(command.dropFirst(6))])
@@ -307,7 +321,17 @@ import AppKit
         _ = ROBAmberGestureExecutor.shared.requestPriorityHold()
         refresh()
     }
+    private func refreshCollisionInfo() {
+        let search = ROBWorkspaceSearch.shared, snapshot = search.collisionPreviewSnapshot
+        let admissionCurrent = snapshot != nil && snapshot?.fingerprint == search.collisionSnapshot?.fingerprint
+        collisionInfo.stringValue = ROBWorkspaceCollisionPresentation.summary(
+            snapshot: snapshot,
+            review: ROBLeftArmTrial.shared.collisionReviewStatus,
+            proposal: ROBLeftArmTrial.shared.collisionReviewProposal,
+            admissionCurrent: admissionCurrent)
+    }
     @objc private func refresh() {
+        refreshCollisionInfo()
         let left = ROBLeftArmTrial.shared
         if ROBControllerArmApproval.shared.isPending {
             // Keep the complete operation scope visible while approval is pending.
@@ -340,4 +364,34 @@ import AppKit
 
 private final class ROBTestingSandboxDocumentView: NSView {
     override var isFlipped: Bool { true }
+}
+
+/// Read-only presentation shared by the sandbox and SceneKit preview. A model
+/// prior is never promoted to measured registration by a status label.
+enum ROBWorkspaceCollisionPresentation {
+    static func summary(snapshot: ROBWorkspaceCollisionSnapshot?, review: NSDictionary,
+                        proposal: ROBLeftGestureProposal?, admissionCurrent: Bool = true,
+                        nowMilliseconds: Double = Date().timeIntervalSince1970 * 1000) -> String {
+        var lines: [String] = []
+        if let snapshot {
+            let age = nowMilliseconds - snapshot.lastCapturedAtMilliseconds
+            let ageText = age.isFinite && age >= 0 ? String(format: "%.1f s old", age / 1000) : "capture time invalid"
+            lines.append("Depth map: \(snapshot.occupiedVoxelCount) occupied cells · \(snapshot.observedFrameCount) frames · " + ageText)
+            if !admissionCurrent { lines.append("Stored scan preview; rescan before motion.") }
+            if snapshot.isTruncated { lines.append("Coverage incomplete: map capacity reached; free space remains unverified.") }
+        } else { lines.append("Depth map: no current captured scene") }
+        let registrationVerified = admissionCurrent && review["registration_verified"] as? Bool == true
+            && snapshot?.registrationID?.isEmpty == false
+            && snapshot?.registrationUncertaintyMeters.map({ $0.isFinite && $0 >= 0 }) == true
+        lines.append(registrationVerified ? "Registration: measured for this scene" : "Registration: unverified · visualization only")
+        if let clearance = review["minimum_clearance_m"] as? Double, clearance.isFinite {
+            lines.append(String(format: "Last reviewed model clearance: %.1f cm", clearance * 100))
+        } else { lines.append("Path clearance: not evaluated") }
+        if let proposal { lines.append("Path preview: \(proposal.steps.count) steps · \(Int(ceil(proposal.seconds))) s scheduled") }
+        else { lines.append("Path preview: no validated route available") }
+        if let blocked = review["blocked_reason"] as? String, !blocked.isEmpty { lines.append("Blocked: " + blocked) }
+        else if let detail = review["detail"] as? String, !detail.isEmpty { lines.append(detail) }
+        lines.append("Observed surfaces only; unseen space remains unknown.")
+        return lines.joined(separator: "\n")
+    }
 }

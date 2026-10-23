@@ -3,6 +3,52 @@ import AVFoundation
 import Vision
 import simd
 
+/// Capture provenance is independent of whether a perception consumer is on.
+/// Restarting an inspection must not erase a completed scene preview, while a
+/// real stream/source/calibration restart must invalidate its coordinate frame.
+struct ROBVisionCaptureIdentity {
+    enum Update { case unchanged, changed, reordered }
+    private(set) var generation = UUID()
+    private var signature: String?
+    private var sequence: UInt64 = 0
+    private var timestampNanoseconds: UInt64 = 0
+    private var capturedAtMilliseconds: Double?
+
+    mutating func observe(streamID: String?, source: String, width: Int?, height: Int?,
+        intrinsics: [Double]?, sequence: UInt64, timestampNanoseconds: UInt64,
+        capturedAtMilliseconds: Double?) -> Update {
+        let nextSignature = "\(streamID ?? "unknown")|\(source)|\(width ?? 0)x\(height ?? 0)|"
+            + (intrinsics?.map { String($0.bitPattern) }.joined(separator:",") ?? "no-intrinsics")
+        // The initial UUID already identifies this first stream. Enrolling
+        // its first metadata must not cancel an inspection waiting for startup.
+        let changedIdentity = signature != nil && signature != nextSignature
+        let previousCapture = self.capturedAtMilliseconds
+        let olderCapture = capturedAtMilliseconds.flatMap { value in previousCapture.map { value <= $0 } } ?? false
+        if !changedIdentity, sequence <= self.sequence,
+           timestampNanoseconds <= self.timestampNanoseconds, olderCapture { return .reordered }
+        let restarted = !changedIdentity && (sequence < self.sequence
+            || timestampNanoseconds < self.timestampNanoseconds
+            || (capturedAtMilliseconds.flatMap { value in previousCapture.map { value < $0 } } ?? false))
+        if changedIdentity || restarted { generation = UUID() }
+        signature = nextSignature; self.sequence = sequence
+        self.timestampNanoseconds = timestampNanoseconds
+        self.capturedAtMilliseconds = capturedAtMilliseconds.flatMap { $0.isFinite ? $0 : nil }
+        return changedIdentity || restarted ? .changed : .unchanged
+    }
+}
+
+/// A scene has no camera identity until its first real settled RGB-D sample.
+/// Startup may replace an idle stream; established scenes never re-enroll.
+struct ROBWorkspaceCaptureAnchor {
+    private(set) var cameraGeneration: UUID?
+    func permitsCurrent(_ current:UUID) -> Bool { cameraGeneration.map { $0 == current } ?? true }
+    mutating func accept(frameGeneration:UUID,currentGeneration:UUID) -> Bool {
+        guard frameGeneration == currentGeneration, permitsCurrent(currentGeneration) else { return false }
+        cameraGeneration = currentGeneration
+        return true
+    }
+}
+
 /// A separate camera consumer, independent of preview/detector preferences.
 /// Inference observes the scene; the fixed local routine owns all actuation.
 final class ROBArmRoutineVision {
@@ -13,6 +59,7 @@ final class ROBArmRoutineVision {
     private var active = false
     private var teaching = false
     private var epoch = UUID()
+    private var captureIdentity = ROBVisionCaptureIdentity()
     private var busy: Set<String> = []
     private var lastOffer: [String: TimeInterval] = [:]
     private var inputNotes: [String: String] = [:]
@@ -21,6 +68,11 @@ final class ROBArmRoutineVision {
     private var processingMilliseconds: Double = 0
     private var frames: [String: Frame] = [:]
     private var lastInspection: [String: Any] = [:]
+    private let collisionRegistrationProbe = ROBMarkerlessVisionService()
+    private var collisionProbeActive = false
+    private var collisionProbeObservation: [String: Any] = [:]
+
+    var cameraGeneration: UUID { lock.lock(); defer { lock.unlock() }; return captureIdentity.generation }
 
     struct Frame {
         let image: CIImage
@@ -34,6 +86,7 @@ final class ROBArmRoutineVision {
         var intrinsics: CameraIntrinsics? = nil
         var pointing: ROBWorkspacePointingHint? = nil
         var nearestPerson: (x: Double, y: Double, distance: Double)? = nil
+        var cameraGeneration: UUID = UUID()
     }
 
     func setActive(_ value: Bool, teaching: Bool = false) {
@@ -49,6 +102,15 @@ final class ROBArmRoutineVision {
         guard role == .face else { return }
         let key = role.rawValue, now = ProcessInfo.processInfo.systemUptime
         lock.lock()
+        let identityUpdate = captureIdentity.observe(streamID:frame.captureStreamID,source:frame.source.rawValue,
+            width:frame.alignedDepth?.width,height:frame.alignedDepth?.height,
+            intrinsics:frame.intrinsics.map { [$0.fx,$0.fy,$0.cx,$0.cy] },sequence:frame.sequence,
+            timestampNanoseconds:frame.timestampNanoseconds,capturedAtMilliseconds:frame.capturedAtMilliseconds)
+        if identityUpdate == .reordered { lock.unlock(); return }
+        if identityUpdate == .changed {
+            // Capture identity changes also cancel any pending analysis answer.
+            epoch = UUID(); frames = [:]; busy = []; lastOffer = [:]
+        }
         if active {
             lastIncomingCapture = frame.capturedAtMilliseconds.flatMap { $0.isFinite ? $0 : nil }
             lastIncomingSequence = frame.sequence
@@ -71,9 +133,14 @@ final class ROBArmRoutineVision {
         }
         inputNotes[key] = "processing RGB-D frame"
         let token = epoch
+        let captureGeneration = captureIdentity.generation
+        let probeActive = collisionProbeActive
         let needsBody = teaching && key == "face"
         busy.insert(key); lastOffer[key] = now
         lock.unlock()
+        if probeActive {
+            collisionRegistrationProbe.offer(frame, role: role, streamID: "collision-\(captureGeneration.uuidString)")
+        }
         queue.async { [weak self] in
             guard let self else { return }
             let image = CIImage(cvPixelBuffer: pixels)
@@ -177,7 +244,7 @@ final class ROBArmRoutineVision {
                                      sequence: frame.sequence, handsClear: clear,
                                      depthCoverage: Double(valid) / Double(max(1, total)), thumbnail: thumbnail,
                                      demonstration: demonstration, depth: depth, intrinsics: frame.intrinsics,
-                                     pointing: pointing, nearestPerson: nearestPerson)
+                                     pointing: pointing, nearestPerson: nearestPerson, cameraGeneration: captureGeneration)
         }
     }
 
@@ -230,6 +297,39 @@ final class ROBArmRoutineVision {
         lock.lock(); defer { lock.unlock() }
         guard active else { throw CancellationError() }
         return epoch
+    }
+
+    /// Depth-only settled capture: no LLM/object inference and no arm command.
+    func settledDepthFrame() async throws -> Frame {
+        try await settledInspectionFrame(epoch: inspectionEpoch(), requireStaticScene: true)
+    }
+
+    @MainActor func beginCollisionRegistrationProbe() {
+        collisionRegistrationProbe.onObservation = { [weak self] observation in
+            guard let self else { return }
+            self.lock.lock(); self.collisionProbeObservation = observation; self.lock.unlock()
+        }
+        collisionRegistrationProbe.onFailure = { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            self.collisionProbeObservation = ["status": "unavailable", "detail": "Existing markerless registration runtime is unavailable"]
+            self.lock.unlock()
+        }
+        let started = collisionRegistrationProbe.start() != nil
+        lock.lock(); collisionProbeActive = started
+        collisionProbeObservation = ["status": started ? "waiting" : "unavailable",
+            "detail": started ? "Fitting visible base and torso with the existing markerless registrar" : "Existing markerless registration runtime is unavailable"]
+        lock.unlock()
+    }
+
+    @MainActor func endCollisionRegistrationProbe() {
+        lock.lock(); collisionProbeActive = false; lock.unlock()
+        collisionRegistrationProbe.stop()
+    }
+
+    func collisionRegistrationDiagnostics() -> NSDictionary {
+        lock.lock(); defer { lock.unlock() }
+        return collisionProbeObservation as NSDictionary
     }
 
     private func inspectionFrame(epoch token: UUID) throws -> Frame? {
@@ -456,6 +556,166 @@ final class ROBArmRoutineVision {
     var announce: ((String) -> Void)?
     private(set) var lastReport: NSDictionary = [:]
     @nonobjc private(set) var locatedObjects: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
+    private var collisionSnapshotValue: ROBWorkspaceCollisionSnapshot?
+    /// Display-only history survives a camera restart or expiry. Motion
+    /// admission must exclusively use the fresh collisionSnapshot below.
+    @nonobjc var collisionPreviewSnapshot: ROBWorkspaceCollisionSnapshot? { collisionSnapshotValue }
+    @nonobjc var collisionSnapshot: ROBWorkspaceCollisionSnapshot? {
+        guard let value = collisionSnapshotValue,
+              value.cameraGeneration == ROBArmRoutineVision.shared.cameraGeneration,
+              (ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == value.sessionGeneration,
+              (0...60_000).contains(Date().timeIntervalSince1970 * 1000 - value.oldestCapturedAtMilliseconds) else { return nil }
+        return value
+    }
+
+    /// Start every scene from current pixels while the arms remain held. A
+    /// previous route, object location or map never authorizes parking first.
+    @MainActor @nonobjc func scanCollisionScene(model: ROBGhostRobotModel, generation: UInt64,
+        check: () throws -> Void, progress: (String) -> Void) async throws -> ROBWorkspaceCollisionSnapshot {
+        collisionSnapshotValue = nil
+        let vision = ROBArmRoutineVision.shared
+        var captureAnchor = ROBWorkspaceCaptureAnchor()
+        var map:ROBWorkspaceDepthMap?
+        let requestedViews = [-45.0,-15,15,45].map { ROBWorkspaceView(panDegrees:$0,upperTarget:5650) }
+            + [30.0,0,-30].map { ROBWorkspaceView(panDegrees:$0,upperTarget:6306) }
+        let views = requestedViews.map { ROBWorkspaceView(panDegrees:boundedPan?($0.panDegrees) ?? $0.panDegrees,upperTarget:$0.upperTarget) }
+            .reduce(into:[ROBWorkspaceView]()) { if !$0.contains($1) { $0.append($1) } }
+        let scanStarted = Date().timeIntervalSince1970*1000
+        var scanPhase = "initializing", currentView:ROBWorkspaceView?, failureDetail:String?
+        var framesProjected = 0, frameSequence:UInt64 = 0, frameCapturedAt:Double?
+        var lastPrepareAccepted = false, lastViewReady = false, completed = false
+        func acquisitionFailure(_ reason:String) -> ROBWorkspaceDepthMapError {
+            let view = currentView.map { String(format:"pan %+.1f, upper %d",$0.panDegrees,$0.upperTarget) } ?? "no selected view"
+            let text = "\(scanPhase), \(view): \(reason)"
+            failureDetail = text
+            return .acquisition(text)
+        }
+        vision.beginCollisionRegistrationProbe()
+        defer {
+            if !completed {
+                let failureReport:[String:Any] = ["status":"collision_scan_failed","detail":failureDetail ?? "Scan interrupted during \(scanPhase)",
+                    "phase":scanPhase,"pan":currentView?.panDegrees ?? 0,"upper":currentView?.upperTarget ?? 0,
+                    "frames_projected":framesProjected,"sequence":NSNumber(value:frameSequence),
+                    "frame_age_ms":frameCapturedAt.map { Date().timeIntervalSince1970*1000-$0 } ?? -1,
+                    "elapsed_ms":Date().timeIntervalSince1970*1000-scanStarted,
+                    "prepare_accepted":lastPrepareAccepted,"view_ready":lastViewReady,
+                    "expected_camera_generation":captureAnchor.cameraGeneration?.uuidString ?? "waiting_for_first_settled_frame","actual_camera_generation":vision.cameraGeneration.uuidString,
+                    "expected_gateway_generation":NSNumber(value:generation),"gateway":ROBAmberGatewayClient.shared.connectionSnapshot(),
+                    "camera_health":vision.healthSnapshot(),"markerless_registration_probe":vision.collisionRegistrationDiagnostics()]
+                lastReport = failureReport as NSDictionary
+            }
+            vision.endCollisionRegistrationProbe(); finishView?()
+        }
+        for (index,view) in views.enumerated() {
+            currentView = view; scanPhase = "checking scene identity"
+            try check()
+            guard captureAnchor.permitsCurrent(vision.cameraGeneration) else {
+                throw acquisitionFailure("capture generation changed after the first projected frame (actual \(vision.cameraGeneration))")
+            }
+            guard (ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == generation else {
+                throw acquisitionFailure("authenticated Amber session changed before the view")
+            }
+            if canUseView?(view.panDegrees,view.upperTarget) == false { continue }
+            progress("Scanning held-arm clearance: view \(index + 1) of \(views.count)")
+            scanPhase = "settling neck view"
+            let deadline = ProcessInfo.processInfo.systemUptime + 8
+            var settledSince: TimeInterval?
+            while true {
+                try check()
+                lastPrepareAccepted = prepareView?(view.panDegrees,view.upperTarget) == true
+                lastViewReady = viewReady?(view.panDegrees,view.upperTarget) == true
+                if lastPrepareAccepted && lastViewReady {
+                    settledSince = settledSince ?? ProcessInfo.processInfo.systemUptime
+                    if ProcessInfo.processInfo.systemUptime - settledSince! >= 1.5 { break }
+                } else { settledSince = nil }
+                guard ProcessInfo.processInfo.systemUptime < deadline else {
+                    throw acquisitionFailure("neck did not maintain its 1.5 s settled interval within 8 s (prepareAccepted=\(lastPrepareAccepted), viewReady=\(lastViewReady), settledFor=\(settledSince.map { ProcessInfo.processInfo.systemUptime-$0 } ?? 0) s)")
+                }
+                try await Task.sleep(nanoseconds: 100_000_000)
+            }
+            for _ in 0..<2 {
+                scanPhase = "waiting for fresh settled RGB-D"
+                let startupDeadline = ProcessInfo.processInfo.systemUptime+8
+                var acceptedFrame:ROBArmRoutineVision.Frame?
+                while acceptedFrame == nil {
+                    try check(); try Task.checkCancellation()
+                    let beforeCapture = vision.cameraGeneration
+                    do {
+                        let candidate = try await vision.settledDepthFrame()
+                        if captureAnchor.accept(frameGeneration:candidate.cameraGeneration,currentGeneration:vision.cameraGeneration) {
+                            acceptedFrame = candidate
+                        } else if map != nil {
+                            throw acquisitionFailure("capture generation changed after the first projected frame")
+                        }
+                    } catch {
+                        try Task.checkCancellation(); try check()
+                        guard captureAnchor.cameraGeneration == nil,
+                              error is CancellationError || vision.cameraGeneration != beforeCapture else { throw acquisitionFailure(error.localizedDescription) }
+                    }
+                    guard acceptedFrame != nil || ProcessInfo.processInfo.systemUptime < startupDeadline else {
+                        throw acquisitionFailure("camera startup did not provide one stable settled RGB-D generation within 8 s")
+                    }
+                }
+                let frame = acceptedFrame!
+                frameSequence = frame.sequence; frameCapturedAt = frame.capturedAt
+                try check()
+                guard captureAnchor.permitsCurrent(vision.cameraGeneration) else {
+                    throw acquisitionFailure("captured frame belongs to a camera generation that changed before projection")
+                }
+                guard viewReady?(view.panDegrees,view.upperTarget) == true else { throw acquisitionFailure("neck left its settled view before projection") }
+                guard let transform = view.cameraFrame(model:model) else { throw acquisitionFailure("recorded neck view has no valid model camera transform") }
+                guard let depth = frame.depth else { throw acquisitionFailure("settled frame has no aligned depth") }
+                guard let k = frame.intrinsics else { throw acquisitionFailure("settled frame has no camera intrinsics") }
+                guard k.isValid(forWidth:depth.width,height:depth.height) else { throw acquisitionFailure("intrinsics are invalid for aligned depth \(depth.width)x\(depth.height)") }
+                // Preserve actual measured arm FK for self geometry. An
+                // unregistered camera never erases overlapping obstacles.
+                let selfBounds = measuredSelfBounds(model:model)
+                let currentMap = map ?? ROBWorkspaceDepthMap(modelID:model.modelID,geometryID:model.geometryID,
+                    mappingID:ROBGhostRobotModel.mappingID,sessionGeneration:generation,cameraGeneration:frame.cameraGeneration)
+                let captured = frame.capturedAt, sequence = frame.sequence, cameraEpoch = frame.cameraGeneration
+                scanPhase = "projecting depth frame \(sequence)"
+                do {
+                    map = try await Task.detached(priority:.userInitiated) {
+                        var next = currentMap
+                        try next.append(width:depth.width,height:depth.height,fx:k.fx,fy:k.fy,cx:k.cx,cy:k.cy,
+                            depth:{depth.distanceMillimeters(x:$0,y:$1)},cameraToRobot:transform,
+                            capturedAtMilliseconds:captured,sequence:sequence,cameraGeneration:cameraEpoch,
+                            measuredSelfBounds:selfBounds,cameraRegistrationVerified:false,
+                            recordedPanDegrees:view.panDegrees,recordedUpperTarget:view.upperTarget)
+                        return next
+                    }.value
+                } catch { throw acquisitionFailure(error.localizedDescription) }
+                framesProjected += 1
+                try check()
+                guard viewReady?(view.panDegrees,view.upperTarget) == true else { throw acquisitionFailure("neck left its settled view while the depth frame was projected") }
+            }
+        }
+        try check()
+        scanPhase = "freezing scene snapshot"
+        guard let finishedMap = map else { throw acquisitionFailure("no fresh settled depth frame enrolled a scene camera") }
+        let frozen = await Task.detached(priority:.userInitiated) { finishedMap.snapshot() }.value
+        guard captureAnchor.permitsCurrent(vision.cameraGeneration) else { throw acquisitionFailure("capture generation changed before the completed scene snapshot") }
+        guard let snapshot = frozen else { throw acquisitionFailure("only \(framesProjected) fresh depth frames were projected; at least two are required") }
+        collisionSnapshotValue = snapshot
+        lastReport = ["status":"collision_scene_captured", "detail":snapshot.registrationDetail,
+            "scene_id":snapshot.sceneID.uuidString,"depth_frames":snapshot.observedFrameCount,
+            "occupied_voxels":snapshot.occupiedVoxelCount,"free_voxels":snapshot.freeVoxelCount,
+            "registration_verified":false,"markerless_registration_probe":vision.collisionRegistrationDiagnostics()]
+        completed = true
+        return snapshot
+    }
+
+    @MainActor @nonobjc private func measuredSelfBounds(model: ROBGhostRobotModel) -> [(low:SIMD3<Double>,high:SIMD3<Double>)] {
+        let gateway = ROBAmberGatewayClient.shared
+        let reference = ROBAmberArmReferenceStore.shared
+        guard let left = gateway.telemetry(forArm:"right"), let right = gateway.telemetry(forArm:"left"),
+              left.effectiveSampleAgeMilliseconds <= 250, right.effectiveSampleAgeMilliseconds <= 250,
+              reference.readiness(forArm:"right").isReady, reference.readiness(forArm:"left").isReady,
+              let rightModel = reference.modelPositions(fromVendor:right.positionsRadians.map(\.doubleValue),forArm:"left") else { return [] }
+        var positions = model.positions(vendorLeft:left.positionsRadians.map(\.doubleValue))
+        for (index,value) in rightModel.enumerated() { positions["right_joint\(index+1)"] = value }
+        return Array(model.worldCollisionBounds(positions:positions).values)
+    }
 
     /// Small value-only diagnostics can cross the worker boundary without
     /// retaining images, capture buffers or untyped report dictionaries.
@@ -565,6 +825,13 @@ final class ROBArmRoutineVision {
         check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
         let vision = ROBArmRoutineVision.shared
         locatedObjects = [:]
+        collisionSnapshotValue = nil
+        var sceneCaptureAnchor = ROBWorkspaceCaptureAnchor()
+        let sceneGatewayGeneration = (ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value ?? 0
+        let collectCollisionDepth = sceneGatewayGeneration > 0
+        var collisionMap:ROBWorkspaceDepthMap?
+        var collisionSequence: UInt64 = 0
+        if collectCollisionDepth { vision.beginCollisionRegistrationProbe() }
         var found: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
         var locationConfirmation = ROBWorkspaceLocationConfirmation()
         var visuallyFound = Set<ROBWorkspaceTarget>()
@@ -605,6 +872,9 @@ final class ROBArmRoutineVision {
                 "depth_required": requireDepth,
                 "recall_views": recalledViews.map { ["pan": $0.panDegrees, "upper": $0.upperTarget] },
                 "historical_positions_used_for_motion": false,
+                "collision_map_frames": collisionSnapshotValue?.observedFrameCount ?? 0,
+                "collision_registration_verified": false,
+                "markerless_registration_probe": vision.collisionRegistrationDiagnostics(),
                 "views": evidence, "objects": found.reduce(into: [String: Any]()) {
                     $0[$1.key.rawValue] = ["position": $1.value.position, "captured_at_ms": $1.value.capturedAt]
                 }]
@@ -621,6 +891,46 @@ final class ROBArmRoutineVision {
         defer {
             if !finished { persist("interrupted", "Search interrupted; completed observations are retained. Object absence is unconfirmed.") }
             finishView?()
+            if collectCollisionDepth { vision.endCollisionRegistrationProbe() }
+        }
+        func accumulateCollisionDepth(_ view: ROBWorkspaceView) async throws {
+            guard collectCollisionDepth else { return }
+            guard sceneCaptureAnchor.permitsCurrent(vision.cameraGeneration),
+                  (ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == sceneGatewayGeneration else {
+                throw ROBWorkspaceDepthMapError.invalidFrame
+            }
+            // The neck has already settled for >=1.5s. Use the newest
+            // advancing depth frame, not the older image held during ML.
+            guard let frame = vision.snapshot()["face"], frame.sequence > collisionSequence,
+                  (0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
+                  let depth = frame.depth, let k = frame.intrinsics,
+                  k.isValid(forWidth:depth.width,height:depth.height),
+                  let transform = view.cameraFrame(model:model) else { return }
+            guard sceneCaptureAnchor.accept(frameGeneration:frame.cameraGeneration,currentGeneration:vision.cameraGeneration) else {
+                if collisionMap == nil { return }
+                throw ROBWorkspaceDepthMapError.acquisition("Capture generation changed after the first object-search depth frame")
+            }
+            var currentMap = collisionMap ?? ROBWorkspaceDepthMap(modelID:model.modelID,geometryID:model.geometryID,
+                mappingID:ROBGhostRobotModel.mappingID,sessionGeneration:sceneGatewayGeneration,cameraGeneration:frame.cameraGeneration)
+            if Date().timeIntervalSince1970*1000-currentMap.createdAtMilliseconds > 55_000 {
+                currentMap = ROBWorkspaceDepthMap(modelID:model.modelID,geometryID:model.geometryID,mappingID:ROBGhostRobotModel.mappingID,
+                    sessionGeneration:sceneGatewayGeneration,cameraGeneration:frame.cameraGeneration)
+            }
+            let selfBounds = measuredSelfBounds(model:model)
+            let captured = frame.capturedAt, sequence = frame.sequence, cameraEpoch = frame.cameraGeneration
+            let inputMap = currentMap
+            collisionMap = try await Task.detached(priority:.userInitiated) {
+                var next = inputMap
+                try next.append(width:depth.width,height:depth.height,fx:k.fx,fy:k.fy,cx:k.cx,cy:k.cy,
+                    depth:{depth.distanceMillimeters(x:$0,y:$1)},cameraToRobot:transform,
+                    capturedAtMilliseconds:captured,sequence:sequence,cameraGeneration:cameraEpoch,
+                    measuredSelfBounds:selfBounds,cameraRegistrationVerified:false,
+                    recordedPanDegrees:view.panDegrees,recordedUpperTarget:view.upperTarget)
+                return next
+            }.value
+            collisionSequence = sequence
+            try check()
+            guard viewReady?(view.panDegrees,view.upperTarget) == true else { throw ROBWorkspaceDepthMapError.invalidFrame }
         }
         func moveView(_ view: ROBWorkspaceView) async throws -> Bool {
             if canUseView?(view.panDegrees, view.upperTarget) == false {
@@ -662,6 +972,7 @@ final class ROBArmRoutineVision {
                 guard viewReady?(view.panDegrees, view.upperTarget) == true else {
                     throw ROBArmRoutineError.blocked("Search camera changed before depth projection.")
                 }
+                try await accumulateCollisionDepth(view)
                 if let person = frame.nearestPerson, nearest == nil || person.distance < nearest!.distance {
                     nearest = (view, person.distance)
                 }
@@ -891,6 +1202,12 @@ final class ROBArmRoutineVision {
                     : (seen.isEmpty ? "" : "I can see the \(seen.joined(separator: " and ")). ") +
                         "I still couldn't confirm the \(unseen.joined(separator: " and "))."
         announce?(message); progress(message)
+        if let collisionMap {
+            let frozen = await Task.detached(priority:.userInitiated) { collisionMap.snapshot() }.value
+            try check()
+            guard sceneCaptureAnchor.permitsCurrent(vision.cameraGeneration) else { throw ROBWorkspaceDepthMapError.invalidFrame }
+            collisionSnapshotValue = frozen
+        }
         finished = true
         locatedObjects = found
         persist(status, message)

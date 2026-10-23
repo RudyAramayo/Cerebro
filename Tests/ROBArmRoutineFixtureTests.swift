@@ -1,4 +1,5 @@
 import AppKit
+import simd
 
 final class ROBShowMotionCoordinator {
     static let shared = ROBShowMotionCoordinator()
@@ -138,6 +139,46 @@ final class ROBAmberGatewayClient: NSObject {
 final class ROBWorkspaceSearch {
     static let shared = ROBWorkspaceSearch()
     var lastReport: NSDictionary = ["detail": "Fixture search only"]
+    private var collisionSnapshotValue: ROBWorkspaceCollisionSnapshot?
+    var collisionScanCalls = 0
+    var failCollisionScan = false
+    var onCollisionScan: (() -> Void)?
+    var collisionSnapshot: ROBWorkspaceCollisionSnapshot? {
+        guard let value = collisionSnapshotValue,
+              value.cameraGeneration == ROBArmRoutineVision.shared.cameraGeneration,
+              value.sessionGeneration == ROBAmberGatewayClient.shared.generation,
+              (0...60_000).contains(Date().timeIntervalSince1970 * 1000 - value.oldestCapturedAtMilliseconds) else { return nil }
+        return value
+    }
+    func clearCollisionScene() { collisionSnapshotValue = nil }
+    @MainActor func scanCollisionScene(model: ROBGhostRobotModel, generation: UInt64,
+        check: () throws -> Void, progress: (String) -> Void) async throws -> ROBWorkspaceCollisionSnapshot {
+        collisionScanCalls += 1; collisionSnapshotValue = nil
+        try check(); onCollisionScan?()
+        if failCollisionScan { throw ROBArmRoutineError.blocked("Fixture RGB-D scene unavailable") }
+        let now = Date().timeIntervalSince1970 * 1000
+        let camera = ROBArmRoutineVision.shared.cameraGeneration
+        var map = ROBWorkspaceDepthMap(modelID: model.modelID, geometryID: model.geometryID,
+            mappingID: ROBGhostRobotModel.mappingID, sessionGeneration: generation,
+            cameraGeneration: camera, nowMilliseconds: now - 200)
+        let transform = ROBWorkspaceView(panDegrees: 0, upperTarget: 6306).cameraFrame(model: model)!
+        for (sequence, age) in [(UInt64(1), 100.0), (UInt64(2), 50.0)] {
+            try map.append(width: 24, height: 24, fx: 24, fy: 24, cx: 12, cy: 12,
+                depth: { _, _ in 900 }, cameraToRobot: transform, capturedAtMilliseconds: now-age,
+                sequence: sequence, cameraGeneration: camera, nowMilliseconds: now,
+                recordedPanDegrees: 0, recordedUpperTarget: 6306)
+        }
+        let snapshot = map.snapshot(nowMilliseconds: now)!
+        precondition(snapshot.observedFrameCount == 2 && snapshot.occupiedVoxelCount > 0 && snapshot.freeVoxelCount > 0)
+        precondition(snapshot.registrationID == nil && snapshot.registrationUncertaintyMeters == nil,
+            "Synthetic RGB-D must never manufacture measured camera-to-arm registration")
+        try check()
+        collisionSnapshotValue = snapshot
+        lastReport = ["status": "depth_scene_captured", "detail": snapshot.registrationDetail,
+            "collision_map_frames": snapshot.observedFrameCount, "arm_motion_sent": false]
+        return snapshot
+    }
+
     var announce: ((String) -> Void)?
     @MainActor func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true, check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
         try check(); return [:]
@@ -147,6 +188,7 @@ final class ROBWorkspaceSearch {
 final class ROBArmRoutineVision {
     static let shared = ROBArmRoutineVision()
     var fresh = true, handsClear = true, blocked = false, objectInRight = false
+    var cameraGeneration = UUID()
     var observationCount = 0
     var readinessDescription: String { "Simulated camera unavailable" }
     func healthSnapshot() -> NSDictionary { ["fixture": true] }

@@ -4,6 +4,21 @@ Rob requested this experimental empty-Coke-can cleanup task on October 22, 2026.
 It is implemented for the physical left arm (R11 / gateway `right`), with the
 base stationary. Software validation is separate from live commissioning.
 
+> **Current runtime behavior:** use [Testing Sandbox](testing-sandbox.md) for
+> test/session controls and custom parameters; Settings contains robot behavior
+> preferences. Session acceptance does not prepare or raise the arm. Empty
+> grippers initialize automatically while hanging and inactive after the first
+> authenticated Amber startup connection, and recycling reuses that setup.
+> Before any left-arm travel, hold both arms still and capture fresh geometry;
+> dynamically check the entire arm/open-jaw/payload path, including any empty
+> return. No blind parking, taught-route or recorded-prefix exemption remains.
+> The current provisional, unregistered camera map blocks travel; a model prior,
+> floor fit, target correction or self-assessed fit is not measured registration.
+> Empty lowering still needs no additional approval. Paired legacy routes are
+> not globally certified by the left-arm collision planner. Earlier flow
+> descriptions and dated evidence below document commissioning history; current
+> admission and validation scope are detailed in the linked sandbox document.
+
 ## Authorization and startup
 
 Cerebro automatically prepares the saved Amber tunnel at launch and wake. A
@@ -12,19 +27,24 @@ late robot startup or transient network failure now retries telemetry with
 visible and do not loop. Disconnect and sleep cancel retries. Reconnection never
 replays motion, preserves an old gateway generation, or restores jaw calibration.
 
-Settings → Arms offers a 15-minute supervised left-arm rehearsal session.
+Testing Sandbox offers a 15-minute supervised left-arm rehearsal session.
 Launch/wake offers this session once by default (the preference can be disabled).
 ROB asks exactly “Can I move my arms?” and accepts one final local microphone
 acknowledgement such as “yes, proceed,” or an authenticated iPhone/Vision Pro
-approval. The complete pending scope remains in Settings/controller details. Accepting
-the session prepares the empty left arm. Covered preparation, local searches,
-reviewed gestures, empty-can recycling (closing at intensity 2; opening at 10) and empty-arm lowering
-then execute without additional approvals or Continue buttons. Standalone task
-motions also accept one spoken or controller approval for the complete operation.
+approval. The complete pending scope remains in Testing Sandbox/controller
+details. Accepting the session only grants its bounded scope; it does not prepare
+or raise the empty left arm. Covered preparation, local searches, reviewed
+gestures, empty-can recycling (closing at intensity 2; opening at 10) and empty-arm
+lowering need no additional approvals. Readiness buttons in an explicit handoff
+test remain inside its one approval. Standalone task motions also accept one
+spoken or controller approval for the complete operation.
 Rob additionally authorized empty-arm return to hanging without any new approval,
-for both `left_relax` and paired `relax`. The registered reverse route, fresh
-feedback, ownership, camera, deadline, Stop and measured hanging before torque-off
-still apply. Already hanging inactive arms are not energized for a left return.
+for both `left_relax` and paired `relax`. Current left-arm returns require fresh
+full-arm scene clearance, feedback, ownership, deadline, Stop and measured hanging
+before torque-off; the historical registered reverse route has no clearance
+exemption. Paired legacy routes retain their existing checks and are not certified
+by the new left-arm planner. Already hanging inactive arms are not energized for
+a left return.
 
 Spoken authorization is accepted only by SpeechBox's final on-device recognition
 delegate while ROB is not speaking. A stable candidate endpoints the current
@@ -44,7 +64,8 @@ cannot remain prefixed to “yes, proceed.” If unheard, ROB repeats “Hey! Ca
 my arms?” at 20 and 45 seconds. These reminders neither grant authorization nor
 extend the original 90-second deadline, and stop once authorization is accepted.
 
-Preparation can recover a confirmed-empty arm from a recent failed recycling
+**Earlier commissioning recovery, superseded by current dynamic scene admission:**
+preparation could recover a confirmed-empty arm from a recent failed recycling
 attempt by reversing only its recorded, actually executed proposal prefix to the
 front pose. The old proposal is revalidated against the same model/mapping, the
 fresh measured pose must lie on that executed prefix, and a new authorized
@@ -196,7 +217,7 @@ The last bucket RGB image, aligned depth and calibration are retained locally as
 
 ### Detected-can ghost rehearsal
 
-Settings → Arms → **Preview can grab** opens the controller-input SceneKit view,
+Testing Sandbox → **Recycle can → Preview grasp…** opens the controller-input SceneKit view,
 runs a new RGB-D search and labels the measured can center in the same robot
 coordinate frame as the mesh. The panel shows X forward / Y left / Z up, capture
 sequence and age. The marker remains while editing the ghost; observations older
@@ -253,6 +274,8 @@ plan, live-render and depth-publication fixture results. The fixture checks
 horizontal jaw orientation between the final approach waypoints, not just at
 the last pose. No camera images, grants or physical grip claims are included.
 
+**Earlier commissioned execution flow (the parking and inline-calibration stages
+below are superseded by current [scene admission](testing-sandbox.md#depth-map-and-complete-path-review)):**
 `left_recycle_can` covers search, pointing assistance if needed, planning and
 execution under the original authorization, bounded to ten minutes to allow the
 deliberate search and settling intervals (the executor stops at 590 seconds).
@@ -390,7 +413,8 @@ the full raster, uses confirmed recall on subsequent searches, and skips
 attention hints for targets already found. Camera settling and fresh depth
 checks are unchanged. Two cans can be recycled as successive complete routines
 within one live 15-minute left-arm session; confirm the first release/empty hand
-before starting its registered recovery. This does not infer success from a
+before requesting its freshly checked empty return. The earlier registered
+recovery has no exemption from current geometry. This does not infer success from a
 completed motor sequence.
 
 ## Validation

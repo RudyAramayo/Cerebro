@@ -10,10 +10,10 @@ The sandbox catalog contains these independent test items:
 
 | Test | Actions |
 | --- | --- |
-| Recycle can | Run the physical test, search with the neck camera, preview the grasp |
+| Recycle can | Run the physical test, search with the neck camera, scan workspace geometry, preview the grasp |
 | Grip and return | Complete the supervised left-arm object handoff |
 | Stationary gripper setup | Explicitly set up empty grippers while hanging and inactive |
-| Arm preparation and return | Present/open, grip, release, inspect hanging, startup route, empty-arm return |
+| Arm preparation and return | Present/open, grip, release, inspect hanging, scan workspace geometry, startup route, empty-arm return |
 | Ghost motion rehearsal | Open the ghost editor, preview a wave, open motion rehearsal |
 | Body demonstration | Record, replay and front-arm greeting |
 | Spoken feedback | Test the spoken warning without arm movement |
@@ -26,7 +26,7 @@ Status is shared across the sandbox. The scrollable status area shows the comple
 
 Keep both jaws empty and clear during startup. Amber acknowledges command dispatch; Cerebro does not have measured jaw opening or calibration completion. Stop prevents subsequent setup commands, but an already accepted vendor calibration may finish. Sleep, connection loss, ownership loss or invalid feedback cancels setup. A reconnect does not silently replay the startup sequence or restore a motion authorization.
 
-If startup setup was deferred because the arms were not hanging, recycling can complete the same stationary setup after parking the empty arm, within the selected task. The sandbox's separate stationary setup item supports explicit inspection and testing. It is not a mandatory arm-raising preparation step.
+If startup setup was deferred because the arms were not hanging, the selected task may complete the same stationary setup only after an empty-arm return has passed current scene admission and reached inactive hanging. It must map the workspace before that return, rather than parking blindly to improve the view. An unregistered map blocks the return. The sandbox's separate stationary setup item also supports inspection and testing when the arms are already hanging. It is not a mandatory arm-raising preparation step.
 
 ## A supervised test session
 
@@ -36,7 +36,7 @@ If startup setup was deferred because the arms were not hanging, recycling can c
 
 Starting a session only requests the bounded authorization. It does **not** automatically run Present/open, raise the arm or repeat gripper calibration. Recycling owns its own necessary presentation and grasp path. Present/open remains available as an explicit preparation test.
 
-One active session covers its included routines and waypoints; there are no extra approvals for each arm segment. Neck-only search and hanging inspection need no arm authorization. Returning an empty arm along its registered route to hanging also needs no new approval. Stop, expiry, sleep/restart, ownership loss or failed motion ends the session. A typed sandbox command never supplies spoken approval.
+One active session covers its included routines and waypoints; there are no extra approvals for each arm segment. Neck-only search, workspace depth scanning and hanging inspection need no arm authorization. Returning an empty arm to hanging also needs no new approval, while still requiring current collision clearance. Stop, expiry, sleep/restart, ownership loss or failed motion ends the session. A perception-only rejection that sent no arm motion can remain inside the existing bounded session; that grant never substitutes for scene registration. A typed sandbox command never supplies spoken approval.
 
 ## Recycling parameters
 
@@ -48,9 +48,9 @@ Test timing parameters are saved in `~/Library/Application Support/Cerebro/Testi
 | Jaw settling time | 1.5 seconds | 1.0–2.0 seconds |
 | Maximum path adjustment | 3 mm | 0–5 mm |
 
-Pace reduces extra timing padding while retaining the existing motion-duration minimum. Path adjustment can join nearby travel segments after checking the resulting route against the original path, robot model, tread clearance and horizontal-jaw limits. It preserves the registered presentation route, jaw action boundaries and their neighboring targets. Zero path adjustment disables segment joining.
+Pace reduces extra timing padding while retaining the existing motion-duration minimum. Path adjustment can join nearby travel segments after checking the resulting route against the original path, robot model, tread clearance and horizontal-jaw limits. It preserves jaw action boundaries and their neighboring targets. These timing controls do not exempt presentation, return or any other segment from full-arm scene checks. Zero path adjustment disables segment joining.
 
-On the regression fixture, the default parameters produced **33 motion steps instead of 48**, with **26.869 seconds instead of 37.369 seconds of scheduled motion**. These are compiled-plan measurements. They are not measured physical execution times, and exclude camera search, planning, jaw settling, calibration and feedback waits.
+On the existing motion-compaction regression fixture, the default parameters produced **33 motion steps instead of 48**, with **26.869 seconds instead of 37.369 seconds of scheduled motion**. These are compiled-plan measurements. They are not measured physical execution times, and exclude camera search, planning, jaw settling, calibration and feedback waits.
 
 When a valid local reach calibration exists, the recycling form also exposes its bounded reach and release parameters:
 
@@ -67,6 +67,40 @@ The detected can height places the grasp at its middle above the calibrated base
 Reach settings remain in `~/Library/Application Support/Cerebro/LeftArmCalibration/can-reach.json`. Saving preserves the existing model/reference/mapping identity, source and unknown optional metadata. The sandbox does not manufacture model identities, infer a replacement calibration or change raw visual sightings. The current-jump threshold is recorded separately; zero means record only, and its raw units are not a calibrated force limit.
 
 Recycling still requires fresh confirmed can geometry and bucket-opening depth. A visible bucket can remain unlocalized when depth is invalid; faster arm timing does not remove that search limitation, and no reach should begin without the required target evidence.
+
+## Depth map and complete-path review
+
+Choose **Scan workspace geometry** to collect current neck-camera RGB-D evidence while the arms stay still. This neck-only operation needs no arm approval or arm preparation. Then choose **Inspect depth map / planned route…** in the recycling or ghost-motion test. The SceneKit view can show the current occupied depth cells and animate the last validated path artifact across all seven left-arm joints. **Show depth obstacles** and **Show planned route** control the overlays. The viewport continues rendering during review; no frozen screenshot replaces it.
+
+The sandbox and ghost panel report map capture age, observed frame count, occupied-cell count, model-path clearance when evaluated and the planner's blocked reason. Unknown or unobserved space remains unknown. If no validated route is available, the preview displays the scene and the reason instead of inventing a path.
+
+The last captured scan remains available in memory for read-only inspection when opening a camera window changes the camera stream or the original scene/session expires. The panel then says **“Stored scan preview; rescan before motion.”** Its age remains tied to the original capture; retaining the cloud does not freshen it. Motion continues to use the separate strict current-scene snapshot, with unchanged camera/session/age checks. A stored preview neither restores authorization nor supplies current registration or clearance, and is not persisted across app restarts.
+
+Map visualization alone does not establish a physical camera-to-arm registration. A cloud transformed only by the provisional neck/model prior is labeled **unverified · visualization only** and currently blocks left-arm travel. The planner checks the complete dynamic path from the measured starting pose, including presentation, approach, grasp, carrying and an empty return when requested. It checks the whole arm and open-gripper envelope, plus the carried-object envelope when applicable, rather than checking only the tool near the can. Unknown space remains blocked.
+
+The arms stay stationary while the neck camera collects geometry. Even an empty lowering or a previously successful hanging/front route may now meet a newly positioned table, so it must pass the same checks before moving. There is no blind-parking exemption. A saved route, floor fit or corrected can point does not supply measured camera-to-arm registration or establish that the intervening arm volume is clear.
+
+This admission currently protects the left-arm trial executor. **Paired legacy coordinator paths are not globally certified by this work**; their existing transport checks and tests do not establish full-arm clearance against the new depth map.
+
+This preview is read-only. It never assigns the executable proposal, restores an arm grant or enables execution. Any physical task still goes through the coordinator and the live admission checks against the current scene.
+
+### Current commissioning limits
+
+The concrete depth producer deliberately emits an unregistered map. The existing markerless base/torso fitter can report candidate extrinsics and fit RMS, but it does not yet export the uncertainty and independent validation needed here, or bind each result to the recorded neck pose. Commissioning needs measured base/torso correspondences with separate validation points, per-view neck/camera identities, uncertainty export and repeated-view validation. A small fit residual alone is insufficient.
+
+The current hanging-tool collision proxy also enters the model's 3 cm tread margin. This requires checking the measured mounting geometry, tool/reference alignment and conservative proxy shapes; it is not proof that the real hanging arm touches a tread. Camera registration will not fix that model-relative discrepancy. The planner currently uses conservative link boxes and an expanded open-jaw envelope. Measured finger geometry, robot self-volume visibility and intentional contact with the grasped target still need commissioning before a live grasp can be admitted. No physical recycling success is claimed for this planner.
+
+## Fixture coverage
+
+`Scripts/test-left-arm-trial.sh` now checks the current admission boundary by default: real synthetic RGB-D samples produce a fresh provisional map, neck-only scanning requests no arm approval or movement, and an unregistered map blocks travel before parking, mode changes, waypoints or jaw setup. It also retains stationary-jaw telemetry, fault and authorization checks. The `workspace-gate`, `recycling` and `parked-search` branches exercise this same fail-closed boundary.
+
+The new focused checks are:
+
+- `Scripts/test-workspace-depth-map.sh`: fresh frame/session identity, occupied/free/unknown space, depth holes and occlusion, transform provenance and no promotion of a provisional transform to measured registration.
+- `Scripts/test-workspace-collision.sh`: complete-arm and carried-object route checks, rejection of an obstructed historical parking route, a supported dynamic alternative in a simulated registered scene, and invalidation when the map, camera, scene or session changes.
+- `Scripts/test-left-arm-trial.sh workspace-gate`: actual provisional depth-map construction, approval-free neck scanning and rejection before arm mode, parking, waypoint or gripper commands; stationary feedback faults and bounded-session behavior remain covered.
+
+Historical travel-positive executor cases remain available behind the explicit `legacy-executor` flag. Their old assumptions are currently unadmitted: the concrete captured map has no measured camera-to-arm registration, and the current hanging model does not satisfy the collision planner's existing 3 cm tread clearance. These are commissioning/model limitations, not proof of physical contact. Those historical cases must not be reported as passing motion coverage or made to pass by inventing registration or relaxing clearance. Pure collision-planner fixtures exercise positive planning from supported front poses with explicit simulated map evidence; the paired-arm coordinator fixtures continue to cover their existing transport behavior.
 
 ## Adding a test
 

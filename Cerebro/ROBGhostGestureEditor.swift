@@ -26,12 +26,19 @@ import simd
     @nonobjc private var saved: [ROBGhostGesture] = []
     @nonobjc private var proposal: ROBLeftGestureProposal?
     @nonobjc private var canPreview: ROBCanGrabPreview?
+    @nonobjc private var collisionPreview: ROBLeftGestureProposal?
     @nonobjc private var displayedCan: ROBWorkspaceLocatedObject?
     private var lastCanInfoUpdate = 0.0
     private var canRequestID: UUID?
     @nonobjc private var canPlanTask: Task<Void, Never>?
     @nonobjc private let canOverlay = SCNNode()
     @nonobjc private let carriedCan = SCNNode()
+    @nonobjc private let collisionMapOverlay = SCNNode()
+    @nonobjc private let collisionPathOverlay = SCNNode()
+    private let collisionMapVisible = NSButton(checkboxWithTitle: "Show depth obstacles", target: nil, action: nil)
+    private let collisionPathVisible = NSButton(checkboxWithTitle: "Show planned route", target: nil, action: nil)
+    private let collisionInfo = NSTextField(wrappingLabelWithString: "Depth map: no current captured scene")
+    private var collisionMapRenderKey: String?
     private let canInfo = NSTextField(wrappingLabelWithString: "Can target: not measured")
     private let canArm = NSPopUpButton()
     private var liveBaseline = false
@@ -79,6 +86,9 @@ import simd
             scene.rootNode.addChildNode(renderRoot)
             canOverlay.name = "Workspace can overlay"
             renderRoot.addChildNode(canOverlay)
+            collisionMapOverlay.name = "Observed depth obstacles · provisional registration"
+            collisionPathOverlay.name = "Read-only collision route"
+            renderRoot.addChildNode(collisionMapOverlay); renderRoot.addChildNode(collisionPathOverlay)
             for (link, geometry, ghostGeometry) in try capturedGeometry(model) {
                 let originalMaterial = SCNMaterial()
                 originalMaterial.diffuse.contents = headLinks.contains(link) ? NSColor.lightGray : NSColor.white
@@ -195,6 +205,7 @@ import simd
 
     func reviewPresetNamed(_ name: String) {
         if name == "can" { findAndPreviewCan(); return }
+        if name == "collision" { showLatestCollisionReview(); return }
         presets.selectItem(at: name == "wave" ? 1 : 0)
         selectPreset()
         timeline.doubleValue = 0; play()
@@ -233,11 +244,23 @@ import simd
         executeButton.identifier = NSUserInterfaceItemIdentifier("ghost-execute")
         let preview = row([button("Review path", #selector(review)), button("Play ×4", #selector(play)), clock])
         let stop = button("Stop + hold", #selector(stop)); stop.bezelColor = .systemRed
+        collisionMapVisible.state = .on; collisionPathVisible.state = .on
+        for toggle in [collisionMapVisible, collisionPathVisible] {
+            toggle.target = self; toggle.action = #selector(changeCollisionVisibility)
+        }
+        collisionMapVisible.identifier = NSUserInterfaceItemIdentifier("ghost-depth-obstacles-visible")
+        collisionPathVisible.identifier = NSUserInterfaceItemIdentifier("ghost-collision-path-visible")
+        collisionInfo.identifier = NSUserInterfaceItemIdentifier("ghost-collision-status")
+        collisionInfo.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+        collisionInfo.isSelectable = true
+        let collisionControls = row([collisionMapVisible, collisionPathVisible])
+        let inspectCollision = button("Inspect depth map / planned route", #selector(showLatestCollisionReview))
         let currentHelp = NSTextField(wrappingLabelWithString: "Replay: original measured arm, blue approved target. Orange shows the largest joint current jump per sample; scrub to inspect all seven currents. Current units are not calibrated force.")
         currentHelp.textColor = .secondaryLabelColor
         currentPlot.heightAnchor.constraint(equalToConstant: 75).isActive = true
         let stack = NSStackView(views: [title, help, referenceInfo, headInfo, continueButton, presets, name, joints, angle, angleText, xyzLabels, targets, nudgeRow,
             row([canArm, button("Find Coke can + ghost grab", #selector(findAndPreviewCan))]), canInfo,
+            collisionControls, inspectCollision, collisionInfo,
             button("Teach can → bucket task", #selector(newTabletopTask)), posesRow, poseCount, preview, timeline, identity, executeButton,
             row([stop, button("Review stopped return", #selector(recover))]),
             button("Replay current recording…", #selector(loadRecording)), currentPlot, currentHelp, status])
@@ -252,7 +275,7 @@ import simd
             scroll.bottomAnchor.constraint(equalTo: panelView.bottomAnchor), document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
             stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 14), stack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -14),
             stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 16), stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -16)])
-        for value in [help, referenceInfo, headInfo, canInfo, continueButton, presets, name, joints, angle, timeline, identity, executeButton, currentPlot, currentHelp, status] {
+        for value in [help, referenceInfo, headInfo, canInfo, collisionInfo, continueButton, presets, name, joints, angle, timeline, identity, executeButton, currentPlot, currentHelp, status] {
             value.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         status.isSelectable = true; identity.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
@@ -369,6 +392,7 @@ import simd
             let path = SCNGeometry(sources: [source], elements: [SCNGeometryElement(indices: indices, primitiveType: .line)])
             path.materials = [blue]
             let node = SCNNode(geometry: path); node.name = "Can grab ghost trajectory"; node.renderingOrder = 20
+            node.isHidden = collisionPathVisible.state != .on
             canOverlay.addChildNode(node)
         }
         let carried = SCNCylinder(radius: 0.033, height: 0.115); carried.materials = [blue]
@@ -382,6 +406,114 @@ import simd
         poseCount.stringValue = "\(preview.steps.count) ghost stages · " +
             (preview.reachesCan ? "approach / grasp / close / lift" : "closest reach only")
         executeButton.isEnabled = false; renderTime(0)
+        refreshCollisionScene(force: true)
+    }
+
+    @objc private func changeCollisionVisibility() {
+        collisionMapOverlay.isHidden = collisionMapVisible.state != .on
+        collisionPathOverlay.isHidden = collisionPathVisible.state != .on
+        canOverlay.childNode(withName: "Can grab ghost trajectory", recursively: false)?.isHidden = collisionPathVisible.state != .on
+        refreshCollisionScene(force: true)
+    }
+
+    /// This is a value-only review of the last checked artifact. It deliberately
+    /// never assigns the executable proposal or binds a live execution baseline.
+    @objc private func showLatestCollisionReview() {
+        guard let model, !ROBLeftArmTrial.shared.isRunning, !ROBArmRoutineCoordinator.shared.isRunning else { return }
+        invalidateReview(); liveBaseline = false; poses = []; tabletopEditing = false
+        refreshCollisionScene(force: true)
+        guard let candidate = ROBLeftArmTrial.shared.collisionReviewProposal else {
+            identity.stringValue = "Depth scene · visualization only · no actuator authority"
+            status.stringValue = collisionInfo.stringValue
+            return
+        }
+        guard candidate.validForReplay(model: model) else {
+            identity.stringValue = "Path preview unavailable for this robot model"
+            status.stringValue = "The stored preview does not match the current model or route format. Capture and plan again."
+            return
+        }
+        collisionPreview = candidate
+        presets.selectItem(at: 2); name.stringValue = "Collision route · read-only"
+        ghost = model.positions(vendorLeft: candidate.baseline)
+        timeline.minValue = 0; timeline.maxValue = candidate.seconds; timeline.doubleValue = 0
+        identity.stringValue = "READ-ONLY PATH · no actuator authority\nProposal \(candidate.id.uuidString)\nModel \(candidate.modelID.prefix(12))… · \(candidate.steps.count) steps"
+        poseCount.stringValue = "All seven left-arm joints · checked route preview"
+        status.stringValue = collisionInfo.stringValue
+        var points: [SCNVector3] = [], previous = candidate.baseline
+        for step in candidate.steps {
+            for sample in 0...8 {
+                let fraction = Double(sample) / 8
+                let q = zip(previous, step.positions).map { $0 + ($1-$0)*fraction }
+                if let tip = model.toolPosition(model.positions(vendorLeft: q)) {
+                    points.append(SCNVector3(tip.x, tip.y, tip.z))
+                }
+            }
+            previous = step.positions
+        }
+        if points.count > 1 {
+            let source = SCNGeometrySource(vertices: points)
+            let indices = (0..<(points.count-1)).flatMap { [UInt32($0), UInt32($0+1)] }
+            let geometry = SCNGeometry(sources: [source], elements: [SCNGeometryElement(indices: indices, primitiveType: .line)])
+            let material = SCNMaterial(); material.diffuse.contents = NSColor.systemCyan; material.lightingModel = .constant
+            material.readsFromDepthBuffer = false; material.writesToDepthBuffer = false; geometry.materials = [material]
+            let node = SCNNode(geometry: geometry); node.name = "Checked complete tool trajectory"; node.renderingOrder = 24
+            collisionPathOverlay.addChildNode(node)
+        }
+        collisionPathOverlay.isHidden = collisionPathVisible.state != .on
+        executeButton.isEnabled = false; renderTime(0); play()
+    }
+
+    private func refreshCollisionScene(force: Bool) {
+        let search = ROBWorkspaceSearch.shared, snapshot = search.collisionPreviewSnapshot
+        let admissionCurrent = snapshot != nil && snapshot?.fingerprint == search.collisionSnapshot?.fingerprint
+        collisionInfo.stringValue = ROBWorkspaceCollisionPresentation.summary(snapshot: snapshot,
+            review: ROBLeftArmTrial.shared.collisionReviewStatus,
+            proposal: ROBLeftArmTrial.shared.collisionReviewProposal,
+            admissionCurrent: admissionCurrent)
+        collisionMapOverlay.isHidden = collisionMapVisible.state != .on
+        guard let snapshot, let model, snapshot.modelID == model.modelID,
+              snapshot.geometryID == model.geometryID, snapshot.mappingID == ROBGhostRobotModel.mappingID else {
+            if collisionMapRenderKey != nil { collisionMapOverlay.childNodes.forEach { $0.removeFromParentNode() }; collisionMapRenderKey = nil }
+            return
+        }
+        let key = "\(snapshot.sceneID.uuidString):\(snapshot.lastCapturedAtMilliseconds):\(snapshot.occupiedVoxelCount)"
+        guard force || key != collisionMapRenderKey else { return }
+        collisionMapRenderKey = key
+        collisionMapOverlay.childNodes.forEach { $0.removeFromParentNode() }
+        guard collisionMapVisible.state == .on, snapshot.occupiedVoxelCount > 0 else { return }
+        let occupiedVoxels = snapshot.occupiedVoxels
+        // Render a bounded sample, once per changed capture. This overlay never
+        // participates in feedback/lease timers or declares unseen space clear.
+        let strideSize = max(1, Int(ceil(Double(occupiedVoxels.count) / 2500)))
+        let vertices = stride(from: 0, to: occupiedVoxels.count, by: strideSize).prefix(2500).compactMap { index -> SCNVector3? in
+            let point = occupiedVoxels[index].center(voxelSizeMeters: snapshot.voxelSizeMeters)
+            guard point.x.isFinite, point.y.isFinite, point.z.isFinite else { return nil }
+            return SCNVector3(point.x, point.y, point.z)
+        }
+        guard !vertices.isEmpty else { return }
+        let element = SCNGeometryElement(indices: vertices.indices.map { UInt32($0) }, primitiveType: .point)
+        element.pointSize = 4; element.minimumPointScreenSpaceRadius = 2; element.maximumPointScreenSpaceRadius = 5
+        let geometry = SCNGeometry(sources: [SCNGeometrySource(vertices: vertices)], elements: [element])
+        let material = SCNMaterial(); material.diffuse.contents = NSColor.systemOrange.withAlphaComponent(0.7)
+        material.lightingModel = .constant; material.isDoubleSided = true
+        geometry.materials = [material]
+        let node = SCNNode(geometry: geometry); node.name = "Observed occupied depth cells · registration provisional"
+        node.renderingOrder = 3; collisionMapOverlay.addChildNode(node)
+    }
+
+    private func renderCollisionTime(_ time: Double, proposal: ROBLeftGestureProposal) {
+        guard let model else { return }
+        var previous = proposal.baseline, elapsed = 0.0
+        for step in proposal.steps {
+            if time <= elapsed + step.seconds {
+                let fraction = max(0, min(1, (time-elapsed)/step.seconds))
+                let q = zip(previous, step.positions).map { $0 + ($1-$0)*fraction }
+                updateGhost(model.positions(vendorLeft: q), updateFields: false)
+                return
+            }
+            previous = step.positions; elapsed += step.seconds
+        }
+        updateGhost(model.positions(vendorLeft: previous), updateFields: false)
     }
 
     private func renderCanTime(_ time: Double, preview: ROBCanGrabPreview) {
@@ -528,7 +660,8 @@ import simd
         return (sample.positionsRadians.map(\.doubleValue), generation)
     }
     private func invalidateReview() {
-        canRequestID = nil; canPlanTask?.cancel(); canPlanTask = nil; canPreview = nil
+        canRequestID = nil; canPlanTask?.cancel(); canPlanTask = nil; canPreview = nil; collisionPreview = nil
+        collisionPathOverlay.childNodes.forEach { $0.removeFromParentNode() }
         canOverlay.childNodes.filter { $0.name != "Detected Coke can RGB-D center" }.forEach { $0.removeFromParentNode() }
         refreshCanInfo()
         if ownsPendingRequest, !ROBLeftArmTrial.shared.isRunning, ROBControllerArmApproval.shared.isPending {
@@ -692,7 +825,7 @@ import simd
         status.stringValue = "Stop + hold requested. A stopped custom path needs a newly reviewed return."
     }
     @objc private func play() {
-        guard canPreview != nil || proposal != nil || !record.isEmpty else { return }
+        guard canPreview != nil || collisionPreview != nil || proposal != nil || !record.isEmpty else { return }
         if timeline.doubleValue >= timeline.maxValue - 0.001 { timeline.doubleValue = 0 }
         playing = true; animationStarted = ProcessInfo.processInfo.systemUptime - timeline.doubleValue / 4
     }
@@ -700,6 +833,7 @@ import simd
     private func renderTime(_ time: Double) {
         guard let model else { return }
         clock.stringValue = String(format: "%.1f s", time)
+        if let collisionPreview { renderCollisionTime(time, proposal: collisionPreview); return }
         if let canPreview { renderCanTime(time, preview: canPreview); return }
         if replayingRecording, !record.isEmpty {
             let sample = record.last(where: { $0.time <= time }) ?? record[0]
@@ -768,7 +902,9 @@ import simd
         let base = capturedRobot.presentation.simdWorldTransform * modelBasis
         if renderRoot.simdTransform != base { renderRoot.simdTransform = base }
         let now = ProcessInfo.processInfo.systemUptime
-        if now - lastCanInfoUpdate >= 1 { lastCanInfoUpdate = now; refreshCanInfo() }
+        if now - lastCanInfoUpdate >= 1 {
+            lastCanInfoUpdate = now; refreshCanInfo(); refreshCollisionScene(force: false)
+        }
         if !replayingRecording, now - lastOriginalUpdate > 0.2 {
             lastOriginalUpdate = now
             let baseline = freshBaseline()

@@ -22,6 +22,9 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
+		AC221026000000000000000A /* ROBArmJointLimits.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2210260000000000000009 /* ROBArmJointLimits.swift */; };
+		AC2210260000000000000008 /* ROBWorkspaceCollisionPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2210260000000000000007 /* ROBWorkspaceCollisionPlan.swift */; };
+		AC2210260000000000000006 /* ROBWorkspaceDepthMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2210260000000000000005 /* ROBWorkspaceDepthMap.swift */; };
 		AC2210260000000000000004 /* ROBGripperStartupCalibration.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2210260000000000000003 /* ROBGripperStartupCalibration.swift */; };
 		AC2210260000000000000002 /* ROBTestingSandboxWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2210260000000000000001 /* ROBTestingSandboxWindowController.swift */; };
 		AE2610222000000000000002 /* ROBWorkspaceObjectDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE2610222000000000000001; };
@@ -271,6 +274,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		AC2210260000000000000009 /* ROBArmJointLimits.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBArmJointLimits.swift; sourceTree = "<group>"; };
+		AC2210260000000000000007 /* ROBWorkspaceCollisionPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBWorkspaceCollisionPlan.swift; sourceTree = "<group>"; };
+		AC2210260000000000000005 /* ROBWorkspaceDepthMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBWorkspaceDepthMap.swift; sourceTree = "<group>"; };
 		AC2210260000000000000003 /* ROBGripperStartupCalibration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBGripperStartupCalibration.swift; sourceTree = "<group>"; };
 		AC2210260000000000000001 /* ROBTestingSandboxWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBTestingSandboxWindowController.swift; sourceTree = "<group>"; };
 		AE2610222000000000000001 /* ROBWorkspaceObjectDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBWorkspaceObjectDetector.swift; sourceTree = "<group>"; };
@@ -720,6 +726,9 @@
 				AC2309260000000000000005 /* ROBArmRoutineCoordinator.swift */,
 				AC2509230000000000000001 /* ROBShowMotionCoordinator.swift */,
 				AC2309260000000000000007 /* ROBArmRoutineSettingsViewController.swift */,
+				AC2210260000000000000009 /* ROBArmJointLimits.swift */,
+				AC2210260000000000000007 /* ROBWorkspaceCollisionPlan.swift */,
+				AC2210260000000000000005 /* ROBWorkspaceDepthMap.swift */,
 				AC2210260000000000000003 /* ROBGripperStartupCalibration.swift */,
 				AC2210260000000000000001 /* ROBTestingSandboxWindowController.swift */,
 				ABC9036F889D40C79B5BC101 /* ROBAmberArmBinding.swift */,
@@ -1155,6 +1164,9 @@
 				AC2309260000000000000006 /* ROBArmRoutineCoordinator.swift in Sources */,
 				AC2509230000000000000002 /* ROBShowMotionCoordinator.swift in Sources */,
 				AC2309260000000000000008 /* ROBArmRoutineSettingsViewController.swift in Sources */,
+				AC221026000000000000000A /* ROBArmJointLimits.swift in Sources */,
+				AC2210260000000000000008 /* ROBWorkspaceCollisionPlan.swift in Sources */,
+				AC2210260000000000000006 /* ROBWorkspaceDepthMap.swift in Sources */,
 				AC2210260000000000000004 /* ROBGripperStartupCalibration.swift in Sources */,
 				AC2210260000000000000002 /* ROBTestingSandboxWindowController.swift in Sources */,
 				ABC9036F889D40C79B5BC102 /* ROBAmberArmBinding.swift in Sources */,

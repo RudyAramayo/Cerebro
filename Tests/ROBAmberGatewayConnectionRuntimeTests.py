@@ -146,7 +146,8 @@ def main():
             # the committed client without editing or checking out user files.
             client_source = subprocess.check_output(
                 ["git", "show", "HEAD:Cerebro/ROBAmberGatewayClient.swift"], cwd=ROOT, text=True)
-        source.write_text(client_source
+        source.write_text((ROOT / "Cerebro/ROBArmJointLimits.swift").read_text()
+            + client_source
             + (ROOT / "Cerebro/ROBArmRoutinePlan.swift").read_text()
             + (ROOT / "Tests/ROBArmRoutineGatewayFixtureSupport.swift").read_text() + FIXTURE)
         subprocess.run([
