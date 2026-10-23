@@ -8,7 +8,7 @@ import Dispatch
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let raw = ROBWorkspaceDepthAlignment.snapshot(defaults: defaults)!
-        precondition(raw.towardRobotMeters == 0)
+        precondition(raw.towardRobotMeters == 0 && raw.downwardPitchDegrees == 0)
 
         // A depth optical frame can face anywhere after neck pan and tilt.
         // The provisional shift must still be along ROB's base X, not the
@@ -51,12 +51,62 @@ import Dispatch
             precondition(ROBWorkspaceDepthAlignment.snapshot(defaults: defaults) == reset)
         }
 
+        // Older persisted revisions contain only the translation. They must
+        // load with zero added pitch, preserving the previously applied shift.
+        defaults.set(try JSONSerialization.data(withJSONObject: ["version": 1,
+            "towardRobotMeters": 0.1778, "revision": UUID().uuidString]), forKey: ROBWorkspaceDepthAlignment.preferenceKey)
+        let legacy = ROBWorkspaceDepthAlignment.snapshot(defaults: defaults)!
+        precondition(legacy.towardRobotMeters == 0.1778 && legacy.downwardPitchDegrees == 0)
+        let pitched = try ROBWorkspaceDepthAlignment.setAlignment(towardRobotMeters: 0.1778,
+            downwardPitchDegrees: 15, defaults: defaults)
+        precondition(pitched.identity != legacy.identity && pitched.downwardPitchDegrees == 15)
+        precondition(ROBWorkspaceDepthAlignment.snapshot(defaults: defaults) == pitched)
+
+        // Calibrated optical convention: camera X is right, Y is down, and Z
+        // is forward. Adding downward pitch must lower the sightline even
+        // after neck pan and existing neck tilt, rotating about the lens.
+        let optical = simd_double4x4(columns: (SIMD4(0, -1, 0, 0), SIMD4(0, 0, -1, 0),
+            SIMD4(1, 0, 0, 0), SIMD4(0.13, -0.04, 1.12, 1)))
+        for pan in [-45.0, 0, 45] {
+            let yaw = simd_double4x4(simd_quatd(angle: pan * .pi / 180, axis: SIMD3(0, 0, 1)))
+            let neckTilt = simd_double4x4(simd_quatd(angle: 12 * .pi / 180, axis: SIMD3(0, 1, 0)))
+            let rawCamera = yaw * neckTilt * optical
+            let pitchOnly = pitched.applyingPitch(to: rawCamera)
+            precondition(pitchOnly.columns.3 == rawCamera.columns.3, "Pitch moved the camera lens")
+            precondition(abs(pitchOnly.columns.2.z + sin(27 * .pi / 180)) < 1e-12,
+                "Added camera pitch points the wrong way")
+            let direction = pitchOnly.columns.2
+            precondition(abs(atan2(direction.y, direction.x) - pan * .pi / 180) < 1e-12,
+                "Pitch changed neck pan")
+            let placed = pitched.applying(to: rawCamera)
+            precondition(abs(placed.columns.3.x - rawCamera.columns.3.x + 0.1778) < 1e-12)
+            precondition(placed.columns.3.y == rawCamera.columns.3.y && placed.columns.3.z == rawCamera.columns.3.z)
+            let beforeDistance = simd_length(rawCamera * points[1] - rawCamera * points[0])
+            let afterDistance = simd_length(placed * points[1] - placed * points[0])
+            precondition(abs(beforeDistance-afterDistance) < 1e-12, "Pitch distorted observed object geometry")
+        }
+        let shiftedPitched = try ROBWorkspaceDepthAlignment.setTowardRobotMeters(0.15, defaults: defaults)
+        precondition(shiftedPitched.downwardPitchDegrees == 15 && shiftedPitched.towardRobotMeters == 0.15)
+        let repitched = try ROBWorkspaceDepthAlignment.setDownwardPitchDegrees(10, defaults: defaults)
+        precondition(repitched.downwardPitchDegrees == 10 && repitched.towardRobotMeters == 0.15)
+        for invalid in [Double.nan, .infinity, -.infinity, -0.001, 30.001] {
+            do {
+                try ROBWorkspaceDepthAlignment.setDownwardPitchDegrees(invalid, defaults: defaults)
+                preconditionFailure("Invalid camera pitch was accepted")
+            } catch ROBWorkspaceDepthAlignment.ConfigurationError.invalidPitch { }
+            precondition(ROBWorkspaceDepthAlignment.snapshot(defaults: defaults) == repitched)
+        }
+        _ = try ROBWorkspaceDepthAlignment.setAlignment(towardRobotMeters: 0, downwardPitchDegrees: 0, defaults: defaults)
+
         // Every read is a complete validated parameter revision, including
         // while another thread writes; no partially updated XYZ is exposed.
         DispatchQueue.concurrentPerform(iterations: 48) { index in
-            _ = try! ROBWorkspaceDepthAlignment.setTowardRobotMeters(Double(index % 4) / 10, defaults: defaults)
+            _ = try! ROBWorkspaceDepthAlignment.setAlignment(towardRobotMeters: Double(index % 4) / 10,
+                downwardPitchDegrees: Double(index % 4) * 10, defaults: defaults)
             let value = ROBWorkspaceDepthAlignment.snapshot(defaults: defaults)!
             precondition((0...0.30).contains(value.towardRobotMeters) && !value.identity.isEmpty)
+            precondition(abs(value.downwardPitchDegrees-value.towardRobotMeters * 100) < 1e-12,
+                "A read combined parameters from different revisions")
         }
         for malformed: Any in ["wrong type", Data("not JSON".utf8), Data(repeating: 0, count: 1_025)] {
             defaults.set(malformed, forKey: ROBWorkspaceDepthAlignment.preferenceKey)
@@ -65,7 +115,9 @@ import Dispatch
         for object: [String: Any] in [
             ["version": 2, "towardRobotMeters": 0.1778, "revision": UUID().uuidString],
             ["version": 1, "towardRobotMeters": 0.5, "revision": UUID().uuidString],
-            ["version": 1, "towardRobotMeters": 0.1778, "revision": "invalid"]
+            ["version": 1, "towardRobotMeters": 0.1778, "revision": "invalid"],
+            ["version": 1, "towardRobotMeters": 0.1778, "downwardPitchDegrees": 31, "revision": UUID().uuidString],
+            ["version": 1, "towardRobotMeters": 0.1778, "downwardPitchDegrees": -1, "revision": UUID().uuidString]
         ] {
             defaults.set(try JSONSerialization.data(withJSONObject: object), forKey: ROBWorkspaceDepthAlignment.preferenceKey)
             precondition(ROBWorkspaceDepthAlignment.snapshot(defaults: defaults) == nil)

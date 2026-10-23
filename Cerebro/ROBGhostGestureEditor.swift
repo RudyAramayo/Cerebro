@@ -163,7 +163,9 @@ import simd
 
     var headOpticalPitchRadians: NSNumber? {
         guard headEstimate != nil, let model,
-              let camera = model.frames(renderPositions(model.reference, preview: false))["oak_optical_frame"] else { return nil }
+              let rawCamera = model.frames(renderPositions(model.reference, preview: false))["oak_optical_frame"],
+              let alignment = ROBWorkspaceDepthAlignment.snapshot() else { return nil }
+        let camera = alignment.applyingPitch(to: rawCamera)
         let direction = camera.columns.2
         return NSNumber(value: atan2(direction.z, hypot(direction.x, direction.y)))
     }
@@ -177,7 +179,8 @@ import simd
         headInfo.stringValue = String(format: "Head command estimate: %@optical tilt %+.1f°%@\nNeck reference: L6011/U6906 · Insta mount ≈20° back", targets,
             pitch.doubleValue * 180 / .pi, frozen)
         if let alignment = ROBWorkspaceDepthAlignment.snapshot() {
-            headInfo.stringValue += String(format: "\nHead depth: %.2f in toward ROB · height unchanged · provisional", alignment.towardRobotMeters / 0.0254)
+            headInfo.stringValue += String(format: "\nHead depth: %.2f in toward ROB · camera %.1f° down · provisional",
+                alignment.towardRobotMeters / 0.0254, alignment.downwardPitchDegrees)
         }
     }
 
@@ -186,6 +189,8 @@ import simd
         canOverlay.childNodes.forEach { $0.removeFromParentNode() }
         collisionMapOverlay.childNodes.forEach { $0.removeFromParentNode() }
         collisionMapRenderKey = nil
+        updateNodes(originalNodes, positions: renderPositions(originalPositions, preview: false))
+        updateNodes(ghostNodes, positions: renderPositions(ghostDisplayPositions, preview: true))
         refreshCanInfo(); refreshCollisionScene(force: true); updateHeadInfo()
     }
 
@@ -884,9 +889,17 @@ import simd
     private func updateNodes(_ nodes: [String: SCNNode], positions: [String: Double]) {
         guard let model else { return }
         let frames = model.frames(positions)
+        let optical = frames["oak_optical_frame"]
+        let alignment = ROBWorkspaceDepthAlignment.snapshot()
         var changes: [(SCNNode, simd_float4x4)] = []
         for (link, node) in nodes {
-            if let transform = frames[link] {
+            if var transform = frames[link] {
+                // Rotate the face-camera housing about its optical origin.
+                // Cloud translation is not a physical camera-mount movement;
+                // the neck and panoramic camera keep their original frames.
+                if link == "oak_link", let optical, let alignment {
+                    transform = alignment.applyingPitch(to: optical) * simd_inverse(optical) * transform
+                }
                 let value = simd_float4x4(columns: (SIMD4<Float>(transform.columns.0), SIMD4<Float>(transform.columns.1),
                     SIMD4<Float>(transform.columns.2), SIMD4<Float>(transform.columns.3)))
                 if node.simdTransform != value { changes.append((node, value)) }

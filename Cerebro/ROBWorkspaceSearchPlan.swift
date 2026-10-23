@@ -2,7 +2,7 @@ import Foundation
 import simd
 
 /// Operator-adjusted head-depth placement for visual commissioning. This is a
-/// base_link translation of the complete observed cloud, not camera-to-arm
+/// base_link translation and local optical-camera pitch, not camera-to-arm
 /// registration, a sensor-depth edit, or a change to a saved reach correction.
 enum ROBWorkspaceDepthAlignment {
     static let preferenceKey = "ROBWorkspaceHeadDepthAlignment.v1"
@@ -10,34 +10,56 @@ enum ROBWorkspaceDepthAlignment {
 
     struct Snapshot: Equatable {
         let towardRobotMeters: Double
+        let downwardPitchDegrees: Double
         /// Bind captured scenes to this identity, including edits made without
         /// restarting the camera. Saving even the same value invalidates them.
         let identity: String
 
-        fileprivate init(towardRobotMeters: Double, revision: String) {
+        fileprivate init(towardRobotMeters: Double, downwardPitchDegrees: Double = 0, revision: String) {
             self.towardRobotMeters = towardRobotMeters
-            identity = "provisional-head-depth-base-x-v1:\(towardRobotMeters.bitPattern):\(revision)"
+            self.downwardPitchDegrees = downwardPitchDegrees
+            identity = "provisional-head-depth-placement-v2:\(towardRobotMeters.bitPattern):\(downwardPitchDegrees.bitPattern):\(revision)"
         }
 
         /// ROB's +X axis points forward. Left multiplication translates in the
-        /// robot frame, so a neck pan/tilt cannot rotate this correction and the
-        /// original point heights and relative object geometry remain intact.
+        /// robot frame. The optical axes are X-right/Y-down/Z-forward, so a
+        /// negative local-X rotation points the camera farther down, including
+        /// after neck pan. Rotate about the lens, without moving its origin or
+        /// altering the distances between observed points.
         func applying(to cameraFrame: simd_double4x4) -> simd_double4x4 {
             var translation = matrix_identity_double4x4
             translation.columns.3.x = -towardRobotMeters
-            return translation * cameraFrame
+            return translation * applyingPitch(to: cameraFrame)
+        }
+
+        /// Camera-model orientation only; the display mesh must not inherit
+        /// the independent provisional translation of observed depth points.
+        func applyingPitch(to cameraFrame: simd_double4x4) -> simd_double4x4 {
+            guard downwardPitchDegrees != 0 else { return cameraFrame }
+            let pitch = simd_double4x4(simd_quatd(angle: -downwardPitchDegrees * .pi / 180,
+                axis: SIMD3<Double>(1, 0, 0)))
+            return cameraFrame * pitch
         }
     }
 
     private struct Parameters: Codable {
         let version: Int
         let towardRobotMeters: Double
+        var downwardPitchDegrees: Double? = nil
         let revision: UUID
     }
 
     enum ConfigurationError: LocalizedError {
         case invalidTranslation
-        var errorDescription: String? { "Head depth adjustment must be a finite distance from 0 to 30 cm toward ROB." }
+        case invalidPitch
+        case invalidStoredConfiguration
+        var errorDescription: String? {
+            switch self {
+            case .invalidTranslation: return "Head depth adjustment must be a finite distance from 0 to 30 cm toward ROB."
+            case .invalidPitch: return "Face-camera downward pitch must be a finite angle from 0 to 30 degrees."
+            case .invalidStoredConfiguration: return "The saved head-depth placement is invalid; apply valid distance and pitch values together."
+            }
+        }
     }
 
     /// Read the single persisted blob while holding the same lock as writers.
@@ -46,13 +68,19 @@ enum ROBWorkspaceDepthAlignment {
     static func snapshot(defaults: UserDefaults = .standard) -> Snapshot? {
         lock.lock()
         defer { lock.unlock() }
+        return readSnapshot(defaults: defaults)
+    }
+
+    private static func readSnapshot(defaults: UserDefaults) -> Snapshot? {
         guard let stored = defaults.object(forKey: preferenceKey) else {
             return Snapshot(towardRobotMeters: 0, revision: "raw")
         }
         guard let data = stored as? Data, data.count <= 1_024,
               let parameters = try? JSONDecoder().decode(Parameters.self, from: data),
-              parameters.version == 1, valid(parameters.towardRobotMeters) else { return nil }
+              parameters.version == 1, valid(parameters.towardRobotMeters),
+              validPitch(parameters.downwardPitchDegrees ?? 0) else { return nil }
         return Snapshot(towardRobotMeters: parameters.towardRobotMeters,
+            downwardPitchDegrees: parameters.downwardPitchDegrees ?? 0,
             revision: parameters.revision.uuidString)
     }
 
@@ -61,16 +89,43 @@ enum ROBWorkspaceDepthAlignment {
     @discardableResult static func setTowardRobotMeters(_ meters: Double,
                                                        defaults: UserDefaults = .standard) throws -> Snapshot {
         guard valid(meters) else { throw ConfigurationError.invalidTranslation }
-        let normalized = meters == 0 ? 0 : meters
-        let parameters = Parameters(version: 1, towardRobotMeters: normalized, revision: UUID())
-        let data = try JSONEncoder().encode(parameters)
         lock.lock()
         defer { lock.unlock() }
+        guard let current = readSnapshot(defaults: defaults) else { throw ConfigurationError.invalidStoredConfiguration }
+        return try persist(towardRobotMeters: meters, downwardPitchDegrees: current.downwardPitchDegrees, defaults: defaults)
+    }
+
+    @discardableResult static func setDownwardPitchDegrees(_ degrees: Double,
+                                                         defaults: UserDefaults = .standard) throws -> Snapshot {
+        guard validPitch(degrees) else { throw ConfigurationError.invalidPitch }
+        lock.lock()
+        defer { lock.unlock() }
+        guard let current = readSnapshot(defaults: defaults) else { throw ConfigurationError.invalidStoredConfiguration }
+        return try persist(towardRobotMeters: current.towardRobotMeters, downwardPitchDegrees: degrees, defaults: defaults)
+    }
+
+    /// Both placement parameters form one persisted revision. This can also
+    /// replace a malformed setting without guessing an omitted parameter.
+    @discardableResult static func setAlignment(towardRobotMeters: Double, downwardPitchDegrees: Double,
+                                              defaults: UserDefaults = .standard) throws -> Snapshot {
+        guard valid(towardRobotMeters) else { throw ConfigurationError.invalidTranslation }
+        guard validPitch(downwardPitchDegrees) else { throw ConfigurationError.invalidPitch }
+        lock.lock()
+        defer { lock.unlock() }
+        return try persist(towardRobotMeters: towardRobotMeters, downwardPitchDegrees: downwardPitchDegrees, defaults: defaults)
+    }
+
+    private static func persist(towardRobotMeters: Double, downwardPitchDegrees: Double, defaults: UserDefaults) throws -> Snapshot {
+        let normalized = towardRobotMeters == 0 ? 0 : towardRobotMeters
+        let pitch = downwardPitchDegrees == 0 ? 0 : downwardPitchDegrees
+        let parameters = Parameters(version: 1, towardRobotMeters: normalized, downwardPitchDegrees: pitch, revision: UUID())
+        let data = try JSONEncoder().encode(parameters)
         defaults.set(data, forKey: preferenceKey)
-        return Snapshot(towardRobotMeters: normalized, revision: parameters.revision.uuidString)
+        return Snapshot(towardRobotMeters: normalized, downwardPitchDegrees: pitch, revision: parameters.revision.uuidString)
     }
 
     private static func valid(_ meters: Double) -> Bool { meters.isFinite && (0...0.30).contains(meters) }
+    private static func validPitch(_ degrees: Double) -> Bool { degrees.isFinite && (0...30).contains(degrees) }
 }
 
 enum ROBWorkspaceTarget: String, Codable, CaseIterable {

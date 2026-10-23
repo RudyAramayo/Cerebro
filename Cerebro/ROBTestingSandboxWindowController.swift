@@ -20,7 +20,7 @@ import AppKit
     private static let trials: [Trial] = [
         Trial(id: "recycling", title: "Recycle can", detail: "Find an upright empty can and an open orange bucket using the neck camera. Grasp the can at its middle, lift, carry and release above the opening. Search and preview do not move the arms. A run uses one complete-task authorization or an active supervised session.", parameters: .recycling,
               actions: [Action(title: "Run recycle test", command: "left_recycle_can"), Action(title: "Search only", command: "left_search_workspace"), Action(title: "Scan workspace geometry", command: "left_scan_clearance"), Action(title: "Preview grasp…", command: "ghost:can"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision")]),
-        Trial(id: "depth-alignment", title: "Depth alignment", detail: "Move head-camera depth points horizontally toward ROB, keeping their height and shape unchanged. The live scene, new workspace scans and object measurements share this adjustment. Apply it, compare the table and blue tape against the real scene, then adjust again if needed. Previous scans and previews are cleared when the value changes.", parameters: .depthAlignment,
+        Trial(id: "depth-alignment", title: "Depth alignment", detail: "Adjust the face camera's modeled downward mounting angle and move head-camera depth points horizontally toward ROB. The camera model, live depth view, new workspace scans and object measurements share the pitch correction. Previous scans and previews are cleared when the values change.", parameters: .depthAlignment,
               actions: [Action(title: "Show corrected live depth…", command: "ghost:collision"), Action(title: "Capture corrected workspace", command: "left_scan_clearance")]),
         Trial(id: "estimated-calibration", title: "Estimated calibration trial", detail: "Review one estimated EMPTY-left-arm retreat away from the table, then hold for observation. Registration remains unmeasured. One fresh approval covers one slow, 4-second retreat with about 3 cm maximum modeled arm travel. Existing nearby depth-margin overlaps may only improve; new intrusions block motion. Confirm the complete arm's local working space is clear and report the actual direction. No jaw commands, grasp, recycling or automatic return. Open the ghost view before building if needed; restarting the camera requires a new preview.", parameters: .none,
               actions: [Action(title: "Scan / build estimated ghost", command: "estimate:preview"), Action(title: "Inspect estimated ghost / depth map…", command: "ghost:collision"), Action(title: "Run reviewed empty-arm trial", command: "estimate:run")]),
@@ -185,7 +185,9 @@ import AppKit
             let current = ROBWorkspaceDepthAlignment.snapshot()
             addField("depthTowardRobotInches", "Depth points toward ROB (in)", (current?.towardRobotMeters ?? 0) / 0.0254,
                 note: "0–11.8 · horizontal only")
-            addHelp("Start at 7 inches for the reported 6–8 inch offset. This is a provisional manual alignment. The previous successful can-reach correction is rebased to avoid shifting the grasp twice.")
+            addField("cameraDownwardPitchDegrees", "Camera downward angle (°)", current?.downwardPitchDegrees ?? 0,
+                note: "0–30 · extra mounting pitch")
+            addHelp("Use 7 inches toward ROB and 15° down as the current manual estimate. The angle tilts the camera model and depth rays without commanding the neck. Horizontal reach correction is rebased separately; pitch changes require fresh object measurements and reach calibration against the reference scan.")
         }
         if trial.parameters == .recycling {
             do {
@@ -272,12 +274,13 @@ import AppKit
         do {
             if selectedTrial.parameters == .depthAlignment {
                 let meters = try value("depthTowardRobotInches", within: 0...(0.30 / 0.0254)) * 0.0254
-                _ = try ROBWorkspaceDepthAlignment.setTowardRobotMeters(meters)
+                let pitch = try value("cameraDownwardPitchDegrees", within: 0...30)
+                _ = try ROBWorkspaceDepthAlignment.setAlignment(towardRobotMeters: meters, downwardPitchDegrees: pitch)
                 ROBLeftArmTrial.shared.depthAlignmentDidChange()
                 ROBArmRoutineVision.shared.depthAlignmentDidChange()
                 ROBWorkspaceSearch.shared.depthAlignmentDidChange()
                 NotificationCenter.default.post(name: Notification.Name("ROBWorkspaceDepthAlignmentDidChange"), object: self)
-                parameterMessage = String(format: "Depth points moved %.2f inches toward ROB. Height unchanged; capture a fresh scene.", meters / 0.0254)
+                parameterMessage = String(format: "Head depth: %.2f inches toward ROB; face camera %.1f° lower. Capture a fresh scene.", meters / 0.0254, pitch)
                 refresh(); return true
             }
             let current = try value("currentLimit", within: 0...Double.greatestFiniteMagnitude)

@@ -75,6 +75,13 @@ final class GhostFixtureSnapshotView: NSView {
         setbuf(stdout, nil)
         _ = NSApplication.shared
         NSApp.appearance = NSAppearance(named: .darkAqua)
+        let defaults = UserDefaults.standard
+        let previousDepthAlignment = defaults.object(forKey: ROBWorkspaceDepthAlignment.preferenceKey)
+        defaults.removeObject(forKey: ROBWorkspaceDepthAlignment.preferenceKey)
+        defer {
+            if let previousDepthAlignment { defaults.set(previousDepthAlignment, forKey: ROBWorkspaceDepthAlignment.preferenceKey) }
+            else { defaults.removeObject(forKey: ROBWorkspaceDepthAlignment.preferenceKey) }
+        }
         let scene = SCNScene(); scene.background.contents = NSColor(calibratedWhite: 0.025, alpha: 1)
         let camera = SCNNode(); camera.camera = SCNCamera(); camera.camera!.fieldOfView = 52
         camera.position = SCNVector3(1.6, 1.45, -3.1); camera.look(at: SCNVector3(0, 0.85, 0))
@@ -242,6 +249,61 @@ final class GhostFixtureSnapshotView: NSView {
         for row in 0..<3 { precondition(abs(compensatedRay[row*4+2].doubleValue-uprightRay[row*4+2].doubleValue) < 1e-8) }
         precondition(abs(compensatedRay[11].doubleValue-uprightRay[11].doubleValue) > 0.02,
             "Compensated head direction incorrectly suppressed the lower pivot/camera-origin update")
+
+        // A provisional face-camera mounting correction rotates only the OAK
+        // body/lenses about the optical origin. Its independent cloud offset
+        // must not translate the rendered camera or alter the neck/Insta mount.
+        assertAcceptedHead(6011, 6906)
+        let unaffectedLinks = headLinks.filter { $0 != "oak_link" }
+        let unchangedHeadFrames = ["Original URDF", "Blue ghost"].flatMap { prefix in
+            unaffectedLinks.map { headNode(prefix, $0).simdTransform }
+        }
+        let lensBeforePitch = originalHead.childNode(withName: "reference-oak-lens-0", recursively: true)!.simdWorldTransform
+        let bellyBeforePitch = editor.depthCloudCameraTransform(true)
+        let alignment = try ROBWorkspaceDepthAlignment.setAlignment(towardRobotMeters: 0.1778, downwardPitchDegrees: 15)
+        NotificationCenter.default.post(name: Notification.Name("ROBWorkspaceDepthAlignmentDidChange"), object: nil)
+        precondition(["Original URDF", "Blue ghost"].flatMap { prefix in
+            unaffectedLinks.map { headNode(prefix, $0).simdTransform }
+        } == unchangedHeadFrames, "Face-camera pitch changed the neck or Insta360 model")
+        precondition(editor.depthCloudCameraTransform(true) == bellyBeforePitch,
+            "Face-camera pitch or cloud translation changed the belly camera")
+        precondition(abs(editor.headOpticalPitchRadians!.doubleValue + .pi/12) < 1e-8,
+            "Neutral face-camera model does not point exactly15degrees lower")
+        let shiftedCloud = editor.depthCloudCameraTransform(false)
+        let shiftedOrigin = SIMD3(shiftedCloud[3].floatValue, shiftedCloud[7].floatValue, shiftedCloud[11].floatValue)
+        let cloudForward = simd_normalize(SIMD3(shiftedCloud[2].floatValue, shiftedCloud[6].floatValue, shiftedCloud[10].floatValue))
+        let lensOrigin = SIMD3(lensBeforePitch.columns.3.x, lensBeforePitch.columns.3.y, lensBeforePitch.columns.3.z)
+        let worldShift = originalHead.parent!.simdWorldTransform * SIMD4<Float>(-0.1778, 0, 0, 0)
+        precondition(simd_distance(shiftedOrigin-lensOrigin, SIMD3(worldShift.x, worldShift.y, worldShift.z)) < 1e-6,
+            "Seven-inch cloud shift was lost, rotated into camera axes or applied to the camera mesh")
+        for head in [originalHead, headGhost] {
+            let lens = head.childNode(withName: "reference-oak-lens-0", recursively: true)!.simdWorldTransform
+            let origin = SIMD3(lens.columns.3.x, lens.columns.3.y, lens.columns.3.z)
+            let forward = simd_normalize(SIMD3(lens.columns.1.x, lens.columns.1.y, lens.columns.1.z))
+            let previousForward = simd_normalize(SIMD3(lensBeforePitch.columns.1.x, lensBeforePitch.columns.1.y, lensBeforePitch.columns.1.z))
+            precondition(simd_distance(origin, lensOrigin) < 1e-6, "Face-camera pitch moved its optical origin")
+            precondition(simd_distance(forward, cloudForward) < 1e-6,
+                "Normal/blue OAK lens does not agree with the corrected cloud ray")
+            precondition(abs(acos(min(1, max(-1, simd_dot(previousForward, forward)))) - Float.pi/12) < 1e-6 && forward.y < previousForward.y,
+                "Face-camera model tilted in the wrong direction or by the wrong angle")
+        }
+        for pan in [-45.0, 0, 45] {
+            editor.setHeadCommandEstimate(estimate(6011, 6906, pan: pan * .pi/180))
+            precondition(abs(editor.headOpticalPitchRadians!.doubleValue + .pi/12) < 1e-8,
+                "Downward camera mount correction changed with neck pan")
+            let corrected = alignment.applying(to: ROBWorkspaceView(panDegrees: pan, upperTarget: 6906).rawCameraFrame(model: model)!)
+            let expected = originalHead.parent!.simdWorldTransform * simd_float4x4(columns:
+                (SIMD4<Float>(corrected.columns.0), SIMD4<Float>(corrected.columns.1), SIMD4<Float>(corrected.columns.2), SIMD4<Float>(corrected.columns.3)))
+            let actual = editor.depthCloudCameraTransform(false)
+            for row in 0..<3 { for column in 0..<4 {
+                precondition(abs(expected[column][row] - actual[row*4+column].floatValue) < 1e-6,
+                    "Panned ghost camera and shared workspace projection disagree")
+            } }
+        }
+        _ = try ROBWorkspaceDepthAlignment.setAlignment(towardRobotMeters: 0, downwardPitchDegrees: 0)
+        NotificationCenter.default.post(name: Notification.Name("ROBWorkspaceDepthAlignmentDidChange"), object: nil)
+        assertAcceptedHead(6011, 6906)
+        print("Face-camera mounting:15degree downward OAK model/lens/cloud agreement, fixed optical origin, independent7inch cloud offset, unchanged neck/Insta/belly and pan consistency passed")
         assertAcceptedHead(6011, 6306, pan: .pi / 12)
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
         let controls = descendants(editor.panelView)

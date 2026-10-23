@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "updatedUTC": "2026-10-23T06:23:10.542035+00:00",
+  "sourceBaseCommit": "8d227f9",
+  "purpose": "Provisional downward face-camera mount correction of 15 degrees requested by the operator; room-scan matrix calibration deferred until tomorrow.",
+  "installedBinarySHA256": "247fe469fcb320064f240309dce63c7f1ea5d9bfd0f80f604a79b77177d72c0b",
+  "signatureVerification": "codesign --verify --deep --strict passed before and after local Debug install",
+  "productionSourceSHA256": {
+    "Cerebro/ROBWorkspaceSearchPlan.swift": "0d07e9b028e3a31dc19832a0a08b1a0dfb9e4569f493827d8dbdd8a557dc5f28",
+    "Cerebro/ROBGhostGestureEditor.swift": "55e44fab6d06351ffcb31d1f00fb891be3a8bb72c6af9edc2b062f2491062c4b",
+    "Cerebro/ROBTestingSandboxWindowController.swift": "cbf5e511cc6cadf8836dfab3c5da934997f84f169731a4a6d30b78ec41f289cd"
+  },
+  "appliedSettings": {
+    "towardRobotMeters": 0.1778,
+    "downwardPitchDegrees": 15,
+    "appliedThroughNativeSandbox": true,
+    "nativeStatus": "Head depth: 7.00 inches toward ROB; face camera 15.0 degrees lower. Capture a fresh scene.",
+    "scope": "Runtime face-camera mount correction shared by model display and head-depth projections. Canonical URDF prior and measured registration unchanged."
+  },
+  "geometry": {
+    "opticalLocalRotationAxis": "X",
+    "opticalLocalRotationDegrees": -15,
+    "opticalAxes": "X right, Y down, Z forward",
+    "rotationPivot": "Optical lens origin",
+    "modelCameraReceivesCloudTranslation": false,
+    "neckChanged": false,
+    "insta360Changed": false,
+    "bellyCameraChanged": false,
+    "relativeObjectGeometryPreserved": true,
+    "surfacesIndividuallyFlattened": false
+  },
+  "validation": {
+    "sharedDepthAlignmentFixtures": "PASS exit0: lowered optical axis across neck pans, fixed optical origin, rigid geometry, atomic parameter updates, legacy horizontal settings load with zero pitch and invalid settings reject.",
+    "ghostEditorRenderFixtures": "PASS exit0: face-camera lens and blue ghost agree with corrected depth rays; fixed lens origin; independent 7 inch cloud shift; neck, Insta360 and belly camera unchanged; pan plus/minus 45 degrees consistent.",
+    "settingsSandboxStatic": "PASS",
+    "appBuild": "PASS exit0: CerebroRecyclingValidation / Debug / macOS arm64",
+    "nativeDisplay": "Confirmed 15.0 degree down setting and retained 7.00 inch offset in live ghost view."
+  },
+  "commissioning": {
+    "cameraRegistrationMeasured": false,
+    "roomScanMatrixFitCompleted": false,
+    "additionalArmTrialRun": false,
+    "previousCanReachPreservationAppliesTo": "Horizontal translation changes only; pitch changes measured XYZ and requires fresh reach commissioning."
+  },
+  "preExistingUserChanges": "Seven unrelated working-tree files excluded from build and commit."
+}
