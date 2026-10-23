@@ -30,5 +30,20 @@ enum ROBArmSide {
 }
 final class ROBAmberArmMotionArbiter {
     static let shared = ROBAmberArmMotionArbiter()
-    func isReserved(_ arm: ROBArmSide) -> Bool { false }
+    private var owners: [ROBArmSide: UUID] = [:]
+    func reserve(_ arm: ROBArmSide, owner: UUID) -> Bool {
+        guard owners[arm] == nil || owners[arm] == owner else { return false }
+        owners[arm] = owner; return true
+    }
+    func release(_ arm: ROBArmSide, owner: UUID) {
+        if owners[arm] == owner { owners.removeValue(forKey: arm) }
+    }
+    func isReserved(_ arm: ROBArmSide) -> Bool { owners[arm] != nil }
+    func isReserved(_ arm: ROBArmSide, owner: UUID) -> Bool { owners[arm] == owner }
+}
+
+// Gateway-only fixtures never instantiate the startup policy or move jaws.
+final class ROBGripperStartupCalibration {
+    static let shared = ROBGripperStartupCalibration()
+    func gatewayBecameReady() {}
 }

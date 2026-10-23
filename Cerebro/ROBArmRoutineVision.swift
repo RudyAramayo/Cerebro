@@ -457,36 +457,108 @@ final class ROBArmRoutineVision {
     private(set) var lastReport: NSDictionary = [:]
     @nonobjc private(set) var locatedObjects: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
 
+    /// Small value-only diagnostics can cross the worker boundary without
+    /// retaining images, capture buffers or untyped report dictionaries.
+    private struct BucketGeometryDiagnostics: Sendable {
+        var reason = "detection_unusable"
+        var box: [Double] = []
+        var confidence: Double?
+        var depthWidth = 0, depthHeight = 0
+        var rgbWidth = 0, rgbHeight = 0
+        var intrinsicsValid: Bool?
+        var floorSampleCount = 0, floorMissingDepthCount = 0, floorOutOfRangeCount = 0
+        var floorPointCount = 0, floorFinitePointCount = 0
+        var floorCorrectionDegrees: Double?, floorSupportFraction: Double?
+        var sceneSampleCount = 0, sceneMissingDepthCount = 0, sceneOutOfRangeCount = 0
+        var scenePointCount = 0, rgbSampleCount = 0, orangePointCount = 0, rimTopBandPointCount = 0
+        var rimRadiusMeters: Double?
+        var report: [String: Any] {
+            var value: [String: Any] = ["schema_version": 1,
+                "status": reason == "grounded" ? "grounded" : "not_grounded", "reason": reason,
+                "detection_box": box, "depth_width": depthWidth, "depth_height": depthHeight,
+                "rgb_width": rgbWidth, "rgb_height": rgbHeight,
+                "floor_sample_count": floorSampleCount, "floor_missing_depth_count": floorMissingDepthCount,
+                "floor_out_of_range_count": floorOutOfRangeCount, "floor_point_count": floorPointCount,
+                "floor_finite_point_count": floorFinitePointCount,
+                "scene_sample_count": sceneSampleCount, "scene_missing_depth_count": sceneMissingDepthCount,
+                "scene_out_of_range_count": sceneOutOfRangeCount, "scene_point_count": scenePointCount,
+                "rgb_sample_count": rgbSampleCount, "orange_point_count": orangePointCount,
+                "rim_top_band_point_count": rimTopBandPointCount]
+            if let confidence, confidence.isFinite { value["detection_confidence"] = confidence }
+            if let intrinsicsValid { value["intrinsics_valid"] = intrinsicsValid }
+            if let floorCorrectionDegrees, floorCorrectionDegrees.isFinite { value["floor_camera_correction_degrees"] = floorCorrectionDegrees }
+            if let floorSupportFraction, floorSupportFraction.isFinite { value["floor_support_fraction"] = floorSupportFraction }
+            if let rimRadiusMeters, rimRadiusMeters.isFinite { value["rim_radius_m"] = rimRadiusMeters }
+            return value
+        }
+    }
+
     @nonobjc private func bucketLocation(_ detection: ROBWorkspaceDetection, frame: ROBArmRoutineVision.Frame,
-                                         view: ROBWorkspaceView, model: ROBGhostRobotModel) -> ROBWorkspaceLocatedObject? {
-        guard detection.visuallyUsable, detection.box[0] > 0.005, detection.box[2] < 0.995,
-              detection.box[1] > 0.015, detection.box[3] < 0.985,
-              let depth = frame.depth, let k = frame.intrinsics,
-              let transform = view.cameraFrame(model: model),
-              let cg = CIContext(options: [.useSoftwareRenderer: true]).createCGImage(frame.image, from: frame.image.extent) else { return nil }
+                                         view: ROBWorkspaceView, model: ROBGhostRobotModel)
+        -> (object: ROBWorkspaceLocatedObject?, diagnostics: BucketGeometryDiagnostics) {
+        var diagnostics = BucketGeometryDiagnostics()
+        diagnostics.confidence = detection.confidence
+        if detection.box.allSatisfy(\.isFinite) { diagnostics.box = detection.box }
+        guard detection.visuallyUsable else { return (nil, diagnostics) }
+        guard detection.box[0] > 0.005, detection.box[2] < 0.995,
+              detection.box[1] > 0.015, detection.box[3] < 0.985 else {
+            diagnostics.reason = "clipped_box"; return (nil, diagnostics)
+        }
+        guard let depth = frame.depth else { diagnostics.reason = "missing_depth"; return (nil, diagnostics) }
+        diagnostics.depthWidth = depth.width; diagnostics.depthHeight = depth.height
+        guard let k = frame.intrinsics else { diagnostics.reason = "missing_intrinsics"; return (nil, diagnostics) }
+        diagnostics.intrinsicsValid = k.isValid(forWidth: depth.width, height: depth.height)
+        guard let transform = view.cameraFrame(model: model) else {
+            diagnostics.reason = "camera_transform_unavailable"; return (nil, diagnostics)
+        }
+        guard let cg = CIContext(options: [.useSoftwareRenderer: true]).createCGImage(frame.image, from: frame.image.extent) else {
+            diagnostics.reason = "rgb_unavailable"; return (nil, diagnostics)
+        }
+        diagnostics.rgbWidth = cg.width; diagnostics.rgbHeight = cg.height
         let pixels = NSBitmapImageRep(cgImage: cg)
         var floorPoints: [SIMD3<Double>] = []
         for y in stride(from: 0, to: depth.height, by: 6) { for x in stride(from: 0, to: depth.width, by: 6) {
-            guard let mm = depth.distanceMillimeters(x: x,y: y), (200...3000).contains(mm) else { continue }
+            diagnostics.floorSampleCount += 1
+            guard let mm = depth.distanceMillimeters(x: x,y: y) else { diagnostics.floorMissingDepthCount += 1; continue }
+            guard (200...3000).contains(mm) else { diagnostics.floorOutOfRangeCount += 1; continue }
             let z = Double(mm)/1000, p = transform * SIMD4((Double(x)-k.cx)*z/k.fx,(Double(y)-k.cy)*z/k.fy,z,1)
             floorPoints.append(SIMD3(p.x,p.y,p.z))
         } }
-        guard let floor = ROBWorkspaceFloorAlignment.fit(points: floorPoints,cameraFrame: transform) else { return nil }
+        diagnostics.floorPointCount = floorPoints.count
+        diagnostics.floorFinitePointCount = floorPoints.filter { $0.x.isFinite && $0.y.isFinite && $0.z.isFinite }.count
+        guard let floor = ROBWorkspaceFloorAlignment.fit(points: floorPoints,cameraFrame: transform) else {
+            diagnostics.reason = "floor_fit_failed"; return (nil, diagnostics)
+        }
+        diagnostics.floorCorrectionDegrees = floor.correctionDegrees; diagnostics.floorSupportFraction = floor.supportFraction
         var orange: [SIMD3<Double>] = [], scene: [SIMD3<Double>] = []
         let left = Int(detection.box[0] * Double(cg.width-1)), right = Int(detection.box[2] * Double(cg.width-1))
         let top = Int(detection.box[1] * Double(cg.height-1)), bottom = Int(detection.box[3] * Double(cg.height-1))
         for y in stride(from: top, through: bottom, by: 2) { for x in stride(from: left, through: right, by: 2) {
+            diagnostics.sceneSampleCount += 1
             let u = Double(x)/Double(cg.width-1) * Double(depth.width-1), v = Double(y)/Double(cg.height-1) * Double(depth.height-1)
-            guard let mm = depth.distanceMillimeters(x: Int(u), y: Int(v)), (150...3000).contains(mm) else { continue }
+            guard let mm = depth.distanceMillimeters(x: Int(u), y: Int(v)) else { diagnostics.sceneMissingDepthCount += 1; continue }
+            guard (150...3000).contains(mm) else { diagnostics.sceneOutOfRangeCount += 1; continue }
             let z = Double(mm)/1000, p = floor.cameraFrame * SIMD4((u-k.cx)*z/k.fx, (v-k.cy)*z/k.fy, z, 1)
             let point = SIMD3(p.x,p.y,p.z); scene.append(point)
-            if let color = pixels.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB), color.redComponent >= 0.20,
-               color.redComponent > color.greenComponent * 2, color.redComponent > color.blueComponent * 2 { orange.append(point) }
+            if let color = pixels.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) {
+                diagnostics.rgbSampleCount += 1
+                if color.redComponent >= 0.20, color.redComponent > color.greenComponent * 2,
+                   color.redComponent > color.blueComponent * 2 { orange.append(point) }
+            }
         } }
-        guard let rim = ROBWorkspaceBucketRim.fit(orange: orange, scene: scene) else { return nil }
-        return .init(target: .orangeBucket, position: [rim.center.x,rim.center.y,rim.center.z], confidence: detection.confidence,
+        diagnostics.scenePointCount = scene.count; diagnostics.orangePointCount = orange.count
+        let finiteOrange = orange.filter { $0.x.isFinite && $0.y.isFinite && $0.z.isFinite }
+        if !finiteOrange.isEmpty {
+            let heights = finiteOrange.map(\.z).sorted(), topHeight = heights[heights.count * 98 / 100]
+            diagnostics.rimTopBandPointCount = finiteOrange.filter { abs($0.z-topHeight) <= 0.018 }.count
+        }
+        guard let rim = ROBWorkspaceBucketRim.fit(orange: orange, scene: scene) else {
+            diagnostics.reason = "rim_fit_failed"; return (nil, diagnostics)
+        }
+        diagnostics.reason = "grounded"; diagnostics.rimRadiusMeters = rim.radius
+        return (.init(target: .orangeBucket, position: [rim.center.x,rim.center.y,rim.center.z], confidence: detection.confidence,
             capturedAt: frame.capturedAt, sequence: frame.sequence, view: view, openingRadius: rim.radius,
-            floorCorrectionDegrees: floor.correctionDegrees)
+            floorCorrectionDegrees: floor.correctionDegrees), diagnostics)
     }
 
     @MainActor @nonobjc func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true,
@@ -665,9 +737,11 @@ final class ROBArmRoutineVision {
                     if detection.visuallyUsable { priorVisual[target] = (detection, frame.sequence) }
                     else { priorVisual.removeValue(forKey: target) }
                     if target == .orangeBucket {
-                        measurement = await Task.detached(priority: .userInitiated) {
+                        let bucket = await Task.detached(priority: .userInitiated) {
                             self.bucketLocation(detection, frame: frame, view: view, model: model)
                         }.value
+                        measurement = bucket.object
+                        entry["bucket_geometry"] = bucket.diagnostics.report
                         try check()
                     }
                     else if tabletopCanBaseHeight == nil, let depth = frame.depth, let k = frame.intrinsics {

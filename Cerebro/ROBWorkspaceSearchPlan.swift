@@ -338,6 +338,38 @@ struct ROBWorkspaceLocationConfirmation {
     mutating func invalidate(_ target:ROBWorkspaceTarget) { prior.removeValue(forKey:target) }
 }
 
+/// Local preferences for one sandbox experiment. These are copied into the
+/// immutable proposal; editing the file never changes an active operation.
+/// Pace removes optional timing padding only. The existing trajectory minimum,
+/// telemetry, lease and joint limits continue to apply to every dispatched step.
+struct ROBRecyclingTestParameters: Codable, Equatable {
+    var motionPace: Double = 1.25
+    var jawSettleSeconds: Double = 1.5
+    var maximumPathDeviationMeters: Double = 0.003
+    static var file: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Cerebro/TestingSandbox/recycling.json")
+    }
+    var isValid: Bool {
+        motionPace.isFinite && (1...1.25).contains(motionPace) &&
+        jawSettleSeconds.isFinite && (1...2).contains(jawSettleSeconds) &&
+        maximumPathDeviationMeters.isFinite && (0...0.005).contains(maximumPathDeviationMeters)
+    }
+    static func load(file: URL = file) throws -> Self {
+        guard FileManager.default.fileExists(atPath:file.path) else { return .init() }
+        let data = try Data(contentsOf:file)
+        guard data.count <= 4_096, let value = try? JSONDecoder().decode(Self.self,from:data), value.isValid else {
+            throw ROBGhostMotionError.blocked("The recycling sandbox parameters are invalid; check pace, jaw settling and path adjustment.")
+        }
+        return value
+    }
+    func save(file: URL = Self.file) throws {
+        guard isValid else { throw ROBGhostMotionError.blocked("The recycling sandbox parameters exceed their supported bounds.") }
+        try FileManager.default.createDirectory(at:file.deletingLastPathComponent(),withIntermediateDirectories:true)
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted,.sortedKeys]
+        try encoder.encode(self).write(to:file,options:.atomic)
+    }
+}
+
 /// Operator-measured reach correction, bound to this robot's model/reference.
 /// Raw sightings remain unchanged and never become permission. No default
 /// offset is inferred when this local calibration file is absent.

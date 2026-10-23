@@ -142,18 +142,18 @@ enum ROBArmRoutineError: LocalizedError {
             }
             ROBControllerArmApproval.shared.beginArmSession { [weak self] result in
                 self?.setStatus(result["detail"] as? String ?? "Arm-session request ended")
-                guard result["status"] as? String == "completed" else { completion(result); return }
-                ROBLeftArmTrial.shared.statusChanged = { [weak self] in self?.setStatus($0) }
-                ROBLeftArmTrial.shared.perform("left_prepare") { prepared in
-                    self?.setStatus(prepared["detail"] as? String ?? "Left-arm preparation ended")
-                    completion(prepared)
-                }
+                // Authorization alone must not raise the arm or repeat jaw
+                // calibration. Each selected sandbox test owns its motion.
+                completion(result)
             }
             return
         }
         if command == "end_arm_session" {
             ROBControllerArmApproval.shared.cancel(reason: "Arm rehearsal session ended by operator")
             completion(["status": "completed", "detail": "Arm rehearsal authorization ended; hold requested for an active operation."]); return
+        }
+        if ROBGripperStartupCalibration.shared.isRunning {
+            completion(["status": "busy", "detail": ROBGripperStartupCalibration.shared.status]); return
         }
         if ROBLeftArmTrial.commands.contains(command) {
             ROBLeftArmTrial.shared.statusChanged = { [weak self] in self?.setStatus($0) }
@@ -325,6 +325,7 @@ enum ROBArmRoutineError: LocalizedError {
     }
 
     func cancel(reason: String) {
+        ROBGripperStartupCalibration.shared.stop(reason: reason)
         ROBControllerArmApproval.shared.cancel(reason: reason)
         ROBLeftArmTrial.shared.cancel(reason: reason)
         cancelAuthorized(reason: reason)

@@ -29,6 +29,16 @@ final class ROBAmberGestureExecutor {
     static let shared = ROBAmberGestureExecutor()
     var isExecuting = false
 }
+final class ROBGripperStartupCalibration {
+    static let shared = ROBGripperStartupCalibration()
+    var isRunning = false
+    var status = "Fixture startup setup"
+    func stop(reason: String) {}
+    func calibrationReady(forArm arm: String) -> Bool { ROBAmberGatewayClient.shared.calibrated.contains(arm) }
+    @MainActor func ensureReady(whileParkedBy owner: UUID) async throws {
+        ROBAmberGatewayClient.shared.calibrated = ["left","right"]
+    }
+}
 final class ROBAmberGatewayTunnel {
     static let shared = ROBAmberGatewayTunnel()
     var failureDetail: String?
@@ -41,6 +51,7 @@ final class ROBAmberGatewayTelemetry {
     let positionsRadians: [NSNumber]
     let statuses: [NSNumber]
     let effectiveSampleAgeMilliseconds: Double
+    var sampleAgeAtReceiptMilliseconds: Double { effectiveSampleAgeMilliseconds }
     let effectiveGripperFeedbackAgeMilliseconds = 1.0
     init(sequence: UInt64, positions: [Double], stale: Bool, status: Int) {
         self.sequence = sequence; positionsRadians = positions.map(NSNumber.init(value:))
@@ -127,7 +138,8 @@ final class ROBAmberGatewayClient: NSObject {
 final class ROBWorkspaceSearch {
     static let shared = ROBWorkspaceSearch()
     var lastReport: NSDictionary = ["detail": "Fixture search only"]
-    @MainActor func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
+    var announce: ((String) -> Void)?
+    @MainActor func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true, check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
         try check(); return [:]
     }
 }

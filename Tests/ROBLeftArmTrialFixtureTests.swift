@@ -29,6 +29,21 @@ final class ROBAmberGestureExecutor {
     static let shared = ROBAmberGestureExecutor()
     var isExecuting = false
 }
+final class ROBGripperStartupCalibration {
+    static let shared = ROBGripperStartupCalibration()
+    var setupCalls = 0
+    func stop(reason: String) {}
+    func calibrationReady(forArm arm: String) -> Bool { ROBAmberGatewayClient.shared.calibrated.contains(arm) }
+    @MainActor func ensureReady(whileParkedBy owner: UUID) async throws {
+        let gateway = ROBAmberGatewayClient.shared
+        precondition(gateway.mode.values.allSatisfy { $0 == 0 })
+        precondition(gateway.q.values.allSatisfy { ROBArmRoutinePlan.near($0,Array(repeating:0,count:7)) })
+        precondition(ROBAmberArmMotionArbiter.shared.owners.values.allSatisfy { $0 == owner })
+        setupCalls += 1
+        gateway.calibrated = ["left","right"]
+        gateway.calibrationReadyAt = 0; gateway.emptyJawInitialized = true
+    }
+}
 final class ROBAmberGatewayTunnel {
     static let shared = ROBAmberGatewayTunnel()
     var failureDetail: String?
@@ -320,6 +335,7 @@ final class ROBArmRoutineCoordinator {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("left-arm-fixture-" + UUID().uuidString)
         trial.recordingDirectory = folder
         trial.canReachCalibrationFile = folder.appendingPathComponent("isolated-can-calibration.json")
+        trial.recyclingTestParametersFile = folder.appendingPathComponent("isolated-recycling-parameters.json")
         let savedLimit = UserDefaults.standard.object(forKey: ROBLeftArmTrial.currentLimitKey)
         defer {
             if let savedLimit { UserDefaults.standard.set(savedLimit, forKey: ROBLeftArmTrial.currentLimitKey) }
@@ -431,12 +447,13 @@ final class ROBArmRoutineCoordinator {
             let outcome = await run("left_recycle_can")
             precondition(outcome["motion_completed"] as? Bool == true, outcome.description)
             precondition(outcome["placement_verified"] as? Bool == false, "Command acknowledgements falsely verified placement")
-            precondition(outcome["gripper_opening_intensity"] as? Int == 10 && g.gripperIntensities == [2,10,2,10], "Opening must use its fixed setting while closing remains gentle")
+            precondition(outcome["gripper_opening_intensity"] as? Int == 10 && g.gripperIntensities == [10,2,10], "Reuse startup setup; open before reaching and release at fixed10, grip gently at2")
             precondition(approvals == 1 && ROBWorkspaceSearch.shared.requiredDepth)
-            precondition(g.commands.filter { $0 == "gripper_release:right" || $0 == "gripper_hold:right" } == ["gripper_hold:right","gripper_release:right","gripper_hold:right","gripper_release:right"])
+            precondition(g.commands.filter { $0 == "gripper_release:right" || $0 == "gripper_hold:right" } == ["gripper_release:right","gripper_hold:right","gripper_release:right"])
+            precondition(ROBGripperStartupCalibration.shared.setupCalls == 1 && !g.commands.contains("calibrate:right"), "Recycling repeated calibration instead of reusing stationary setup")
             precondition(g.commands.allSatisfy { $0.hasSuffix(":right") } && !g.commands.contains("deactivate:right"))
             precondition(g.activeLeases.isEmpty && ROBAmberArmMotionArbiter.shared.owners.isEmpty)
-            print("Horizontal recycling executor: one real-protocol fixture grant, fresh grounded targets, frozen steps, EMPTY-jaw close2/open10 initialization, release10 and closing2, measured hold, no right-arm motion or automatic torque-off")
+            print("Horizontal recycling executor: one grant, stationary startup setup reused without inline calibration/prime, fresh grounded targets, frozen faster path, open/release10 and grip2, measured hold, no right-arm motion or automatic torque-off")
             return
         }
         if CommandLine.arguments.last == "telemetry" { try await delayedTelemetryTests(); return }

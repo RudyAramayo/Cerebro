@@ -209,6 +209,13 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
     [submenu addItem:self.developmentModeMenuItem];
     [submenu addItem:NSMenuItem.separatorItem];
 
+    NSMenuItem *sandboxItem = [[NSMenuItem alloc]
+        initWithTitle:@"Testing Sandbox…"
+               action:@selector(showTestingSandbox:)
+        keyEquivalent:@""];
+    sandboxItem.target = self;
+    [submenu addItem:sandboxItem];
+
     NSMenuItem *latencyItem = [[NSMenuItem alloc]
         initWithTitle:@"Control Latency…"
                action:@selector(showControlLatency:)
@@ -319,6 +326,11 @@ static NSString * const ROBDevelopmentModeDidChangeNotification = @"ROBDevelopme
         return;
     }
     [[ROBWakeUpCalibrationWindowController shared] showWindow:sender];
+}
+
+- (IBAction)showTestingSandbox:(id)sender
+{
+    [[ROBTestingSandboxWindowController shared] showWindow:sender];
 }
 
 - (IBAction)showRobotGeometryLab:(id)sender

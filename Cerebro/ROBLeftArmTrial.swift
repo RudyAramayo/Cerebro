@@ -19,6 +19,7 @@ import AppKit
     var statusChanged: ((String) -> Void)?
     @nonobjc var recordingDirectory: URL?
     @nonobjc var canReachCalibrationFile = ROBLeftCanReachCalibration.file
+    @nonobjc var recyclingTestParametersFile = ROBRecyclingTestParameters.file
 
     private let arm = "right"
     private let gateway = ROBAmberGatewayClient.shared
@@ -207,7 +208,7 @@ import AppKit
         switch command {
         case "left_search_workspace": action = "Search locally for a Coke can and an orange bucket by panning/tilting the neck camera. Confirm detections in two fresh RGB-D observations using the offline object detector. If missing, ask the nearest visible person to point and search in the estimated pointing direction. Report found/not found. No arm activation, gripper commands or arm travel."
         case "left_check_hanging": action = "Inspect both robot arms by panning/tilting the neck camera using on-device MLX; report whether each is visibly hanging. This observation never resets encoders or activates/moves either arm."
-        case "left_recycle_can": action = "One experimental recycling task: scan locally for the EMPTY Coke can and open bucket, confirm twice with depth, and apply only the explicit operator-measured can/release alignment calibration if installed. Present the empty LEFT arm, calibrate empty jaws if needed, gently close the confirmed-EMPTY jaws at intensity 2 to initialize them, then OPEN at fixed intensity 10, approach with horizontal jaws, close gently at intensity 2, lift, carry ABOVE the opening, release at intensity 10 for a gravity drop and retreat held. Supervise the actual jaw opening and reach. One authorization covers all waypoints. No automatic force escalation, blind retries, driving or torque-off with a payload. Grip and placement remain unmeasured."
+        case "left_recycle_can": action = "One experimental recycling test: park the EMPTY arm hanging and inactive, reuse initialized startup grippers or finish deferred stationary setup without lifting either arm, then find the EMPTY Coke can and open bucket in two fresh depth observations. Use the saved bounded test parameters and operator can/release calibration. Present the LEFT hand as part of the grasp path, OPEN at fixed intensity 10, approach the can's middle with horizontal jaws, close gently at intensity 2, lift, carry ABOVE the opening, release at intensity 10 for a gravity drop and retreat held. No separate lift/calibrate preparation. One authorization covers all waypoints. Supervise actual jaw opening, reach and pickup. No automatic force escalation, blind retries, driving or torque-off with a payload. Grip and placement remain unmeasured."
         case "left_wave": action = "Raise the empty LEFT arm along the initial tread-clearance approach, then coordinate J3/J5 together to -0.60 and J2/J6 together to +1.00/-0.60. Continue to J2 +1.30/J4 -0.60 and raised J5 -1.40. Seven approach segments from hanging plus four wave strokes; watch the newly coordinated front sweeps. Wave J1 -0.90/-1.05 twice with J6 -0.90/-0.60, and leave raised. Jaws unchanged."
         case "left_prepare": action = "Present the confirmed-EMPTY physical LEFT arm. If held after a failed recycling attempt, first return through its recorded visited targets to front. If an explicit local grasp-clearance calibration is installed, skip low recorded targets and validate each connecting segment above that height; no unvisited or arbitrary recovery targets. Otherwise use the registered hanging/front corridor. Calibrate EMPTY jaws only if needed, initialize the EMPTY jaws with a gentle close at intensity 2, then OPEN at fixed intensity 10. Confirm no object is held, clear fingers, and supervise the recorded return and actual jaw opening. No torque-off or new encoder zero."
         case "left_grip": action = "Keep the LEFT arm stationary in front and close its already-calibrated gripper at intensity \(intensity) around the presented OBJECT. Confirm the object is between the open jaws and all fingers are clear. Never grip a person's hand. No reopening, calibration or arm travel."
@@ -451,8 +452,12 @@ import AppKit
             return ["status": "completed", "measured": true, "detail": "Left arm is already hanging and inactive."]
         }
         if command == "left_recycle_can" {
+            let recyclingParameters = try ROBRecyclingTestParameters.load(file: recyclingTestParametersFile)
             let parkedArm = try await parkEmptyArmForSearch(q)
             inactiveWorkspaceSearch = true; cameraReady = false; phase = "inactive neck-only search"
+            guard let owner else { throw ROBArmRoutineError.blocked("The recycling test lost arm ownership.") }
+            try await ROBGripperStartupCalibration.shared.ensureReady(whileParkedBy: owner)
+            try check()
             update("Empty left arm parked; checking remembered object views")
             let model = try workspaceModel()
             let calibrationFile = canReachCalibrationFile
@@ -478,7 +483,7 @@ import AppKit
                 try check()
                 if let message = reach.helpRequest {
                     ROBWorkspaceSearch.shared.announce?(message)
-                    return ["status": "needs_help", "arm_motion_sent": parkedArm, "reach_sent": false, "measured": false,
+                    return ["status": "needs_help", "arm_motion_sent": parkedArm, "reach_sent": false, "empty_arm_parked": true, "measured": false,
                         "detail": message + " I'll check its new position before reaching.",
                         "workspace_search": ROBWorkspaceSearch.shared.lastReport]
                 }
@@ -490,7 +495,7 @@ import AppKit
                     ? "I see the bucket, but I can't measure its opening yet."
                     : report["detail"] as? String ?? "Can or orange bucket was not confirmed."
                 if visible.contains("orangeBucket") { ROBWorkspaceSearch.shared.announce?(detail) }
-                return ["status": ["depth_unconfirmed", "vision_unavailable", "visually_found"].contains(report["status"] as? String ?? "") ? "not_localized" : "not_found", "measured": false, "arm_motion_sent": parkedArm, "reach_sent": false,
+                return ["status": ["depth_unconfirmed", "vision_unavailable", "visually_found"].contains(report["status"] as? String ?? "") ? "not_localized" : "not_found", "measured": false, "arm_motion_sent": parkedArm, "reach_sent": false, "empty_arm_parked": true,
                     "detail": detail,
                     "workspace_search": ROBWorkspaceSearch.shared.lastReport]
             }
@@ -511,7 +516,8 @@ import AppKit
                         step.jawAction.map { (index, $0) }
                     })
                     let result = try ROBLeftGestureCompiler.compile(kind: "recycling", name: "Recycle can with horizontal jaws", poses: plan.steps.map(\.pose),
-                        model: model, baseline: q, generation: generation, recyclingActions: actions)
+                        model: model, baseline: q, generation: generation, recyclingActions: actions,
+                        recyclingParameters: recyclingParameters)
                     try ROBLeftGestureCompiler.validate(result, model: model)
                     return result
                 }.value
@@ -519,10 +525,10 @@ import AppKit
                 proposal = compiled
             } catch let error as ROBWorkspaceReachError {
                 ROBWorkspaceSearch.shared.announce?(error.helpRequest)
-                return ["status": "needs_help", "arm_motion_sent": parkedArm, "reach_sent": false, "measured": false,
+                return ["status": "needs_help", "arm_motion_sent": parkedArm, "reach_sent": false, "empty_arm_parked": true, "measured": false,
                     "detail": error.localizedDescription, "workspace_search": ROBWorkspaceSearch.shared.lastReport]
             } catch {
-                return ["status": "not_reachable", "arm_motion_sent": parkedArm, "reach_sent": false, "measured": false,
+                return ["status": "not_reachable", "arm_motion_sent": parkedArm, "reach_sent": false, "empty_arm_parked": true, "measured": false,
                     "detail": error.localizedDescription, "workspace_search": ROBWorkspaceSearch.shared.lastReport]
             }
             try proposal!.encoded().write(to: URL(fileURLWithPath: lastRecordingPath).deletingPathExtension()
@@ -660,14 +666,20 @@ import AppKit
     @MainActor private func taskJaw(_ action: ROBLeftGestureProposal.JawAction, at target: [Double]) async throws {
         try await holdTaskPosition(target)
         defer { taskJawTarget = nil }
-        try await requireGripperCalibration(allowEmptyCalibration: action == .prepare)
+        if proposal?.kind == "recycling" {
+            guard ROBGripperStartupCalibration.shared.calibrationReady(forArm: arm) else {
+                throw ROBArmRoutineError.blocked("Stationary startup gripper setup is unavailable; no grasp was sent.")
+            }
+            try await requireGripperCalibration(allowEmptyCalibration: false)
+        } else { try await requireGripperCalibration(allowEmptyCalibration: action == .prepare) }
         phase = "tabletop \(action.rawValue)"
         update(action == .grip ? "Local task: gripping empty can at intensity 2" : "Local task: opening gripper at the planned position")
         ROBWorkspaceSearch.shared.announce?(action == .prepare ? "Preparing my left hand." : action == .grip ? "Grabbing the can." : "Releasing over the bucket.")
         let intensity = action != .grip && proposal?.kind == "recycling" ? 10 : ROBTabletopPickPlace.intensity
         try await accepted { gateway.controlGripper(forArm: arm, action: action == .grip ? "hold" : "release", force:intensity) }
-        let end = ProcessInfo.processInfo.systemUptime + 1.5
-        try await wait(3) { ProcessInfo.processInfo.systemUptime >= end }
+        let settle = proposal?.recyclingParameters?.jawSettleSeconds ?? 1.5
+        let end = ProcessInfo.processInfo.systemUptime + settle
+        try await wait(settle + 1.5) { ProcessInfo.processInfo.systemUptime >= end }
     }
 
     @MainActor private func objectCycleAtFront() async throws -> NSDictionary {

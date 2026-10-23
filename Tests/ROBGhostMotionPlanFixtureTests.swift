@@ -15,6 +15,90 @@ private extension ROBLeftCanReachCalibration {
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
         let model = try ROBGhostRobotModel(directory: root.appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
         precondition(model.modelID.count == 64 && model.joints.count == 44 && model.hulls.count >= 40)
+        if CommandLine.arguments.last == "recycling-pace" {
+            let evidence = root.appendingPathComponent("docs/calibration/evidence/2026-10-22-recycling/first-confirmed-recycle.proposal.json")
+            let legacy = try JSONDecoder().decode(ROBLeftGestureProposal.self,from:Data(contentsOf:evidence))
+            precondition(legacy.recyclingParameters == nil)
+            for q in [legacy.baseline,legacy.steps[16].positions,legacy.steps[44].positions] {
+                let positions = model.positions(vendorLeft:q), current = model.frames(positions)
+                var complete = ["base_link":matrix_identity_double4x4]
+                for _ in 0..<model.joints.count {
+                    for joint in model.joints where complete[joint.child] == nil {
+                        guard let parent = complete[joint.parent] else { continue }
+                        let value = positions[joint.name] ?? model.reference[joint.name] ?? 0
+                        var motion = matrix_identity_double4x4
+                        if joint.kind == "revolute" || joint.kind == "continuous" { motion = simd_double4x4(simd_quatd(angle:value,axis:joint.axis)) }
+                        else if joint.kind == "prismatic" { motion.columns.3 = SIMD4(joint.axis*value,1) }
+                        complete[joint.child] = parent*joint.origin*motion
+                    }
+                }
+                precondition(current.count == complete.count)
+                for (link,frame) in complete { for column in 0..<4 {
+                    precondition(current[link]![column] == frame[column],"Completed-tree early exit changed a forward-kinematics transform")
+                } }
+            }
+            try ROBLeftGestureCompiler.validate(legacy,model:model)
+            let parameters = ROBRecyclingTestParameters()
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("rob-recycling-pace-"+UUID().uuidString+".json")
+            defer { try? FileManager.default.removeItem(at:file) }
+            let defaults = try ROBRecyclingTestParameters.load(file:file)
+            precondition(defaults == parameters)
+            try parameters.save(file:file)
+            let loaded = try ROBRecyclingTestParameters.load(file:file)
+            precondition(loaded == parameters)
+            func compile(_ parameters:ROBRecyclingTestParameters) throws -> ROBLeftGestureProposal {
+                try ROBLeftGestureCompiler.compile(kind:legacy.kind,name:legacy.name,poses:legacy.poses,model:model,
+                    baseline:legacy.baseline,generation:legacy.sessionGeneration,id:legacy.id,
+                    recyclingActions:legacy.recyclingActions,recyclingParameters:parameters)
+            }
+            let started = ProcessInfo.processInfo.systemUptime
+            let revised = try compile(parameters)
+            let compileSeconds = ProcessInfo.processInfo.systemUptime-started
+            try ROBLeftGestureCompiler.validate(revised,model:model)
+            precondition(revised.steps.count < legacy.steps.count && revised.seconds < legacy.seconds*0.9,
+                "Dense waypoint removal must produce a meaningful measured schedule improvement")
+            precondition(revised.steps.compactMap(\.jawAction) == [.prepare,.grip,.release])
+            var sourceIndex = 0
+            for step in revised.steps {
+                guard let index = legacy.steps.indices.dropFirst(sourceIndex).first(where:{ legacy.steps[$0].positions == step.positions }) else {
+                    preconditionFailure("Compaction invented a waypoint or reordered the original path")
+                }
+                sourceIndex = index+1
+            }
+            for action in [ROBLeftGestureProposal.JawAction.prepare,.grip,.release] {
+                let a = legacy.steps.firstIndex { $0.jawAction == action }!, b = revised.steps.firstIndex { $0.jawAction == action }!
+                precondition(legacy.steps[a].positions == revised.steps[b].positions,"Jaw boundaries moved")
+                if a > 0 { precondition(legacy.steps[a-1].positions == revised.steps[b-1].positions,"The stationary jaw approach stop was removed") }
+                precondition(legacy.steps[a+1].positions == revised.steps[b+1].positions,"The immediate jaw retreat or lift was removed")
+            }
+            var previous = revised.baseline
+            for step in revised.steps {
+                let minimum = ROBLeftArmInteractionPlan.duration(from:previous,to:step.positions)!
+                precondition(step.seconds+1e-10 >= minimum && (0.7...5).contains(step.seconds),"Pace bypassed the unchanged gateway duration minimum")
+                if step.stage != "Present empty left arm" {
+                    precondition((zip(previous,step.positions).map { abs($0-$1) }.max() ?? 0) <= 0.30+1e-9)
+                }
+                previous = step.positions
+            }
+            let unchanged = try compile(.init(motionPace:1,jawSettleSeconds:1.5,maximumPathDeviationMeters:0))
+            precondition(unchanged.steps == legacy.steps,"Zero adjustment at original pace must preserve the entire old path and timing")
+            let decoded = try JSONDecoder().decode(ROBLeftGestureProposal.self,from:revised.encoded())
+            precondition(decoded == revised && revised.fingerprint != legacy.fingerprint)
+            var invalid = parameters
+            for value in [0.99,1.251,Double.nan] {
+                invalid.motionPace = value
+                expectBlocked { _ = try compile(invalid) }
+                expectBlocked { try invalid.save(file:file) }
+            }
+            invalid = parameters; invalid.maximumPathDeviationMeters = 0.0051
+            expectBlocked { _ = try compile(invalid) }
+            invalid = parameters; invalid.jawSettleSeconds = 0.99
+            expectBlocked { _ = try compile(invalid) }
+            try Data("{\"motionPace\":20}".utf8).write(to:file)
+            expectBlocked { _ = try ROBRecyclingTestParameters.load(file:file) }
+            print("Recycling pace: archived successful path \(legacy.steps.count) -> \(revised.steps.count) steps, \(legacy.seconds) -> \(revised.seconds)s scheduled, \(compileSeconds)s compile; 3mm tool/0.01rad joint chord bounds and lower-envelope clearance checked, jaw transitions and existing gateway timing unchanged; completed-tree FK matches the full dependency pass exactly")
+            return
+        }
         if CommandLine.arguments.last == "can-sections" {
             let view = ROBWorkspaceView(panDegrees:0,upperTarget:6306)
             let frame = view.cameraFrame(model:model)!, inverse = simd_inverse(frame)

@@ -312,7 +312,33 @@ def main() -> None:
         "Diagnostics gained an Insta360 analysis-geometry setter",
     )
 
-    print("Settings, Gemini, and Perception preference static checks passed")
+    # Preferences stay stable as the commissioning catalog grows. All test
+    # actions must retain the coordinator's normal runtime authorization path.
+    arms = (ROOT / "Cerebro" / "ROBArmRoutineSettingsViewController.swift").read_text()
+    sandbox = (ROOT / "Cerebro" / "ROBTestingSandboxWindowController.swift").read_text()
+    app_delegate = (ROOT / "Cerebro" / "AppDelegate.m").read_text()
+    require("ROBTestingSandboxWindowController.shared.showWindow" in arms,
+            "Arms preferences lost their Testing Sandbox entry point")
+    for command in ("left_recycle_can", "left_search_workspace", "left_object_cycle", "ghostPreset"):
+        require(command not in arms, f"Arms preferences regained a test-specific action: {command}")
+    require("ROBGripperStartupCalibration.enabled" in arms and "inspectionPanDefaultsKey" in arms,
+            "Arms preferences lost persistent robot behavior controls")
+    require("NSTableViewDataSource" in sandbox and "tableViewSelectionDidChange" in sandbox,
+            "Testing Sandbox must present selectable test line items")
+    run_trial = braced_declaration(sandbox, "private func run(_ command: String)")
+    require("ROBArmRoutineCoordinator.shared.performCommand" in run_trial,
+            "Sandbox tests bypassed the coordinator authorization path")
+    require('run("arm_session")' in sandbox and 'run("left_prepare")' not in sandbox,
+            "Starting a supervised sandbox session must not raise the arm as a separate preparation step")
+    store_parameters = braced_declaration(sandbox, "private func storeParameters()")
+    require("guard canEdit" in store_parameters and "options: .atomic" in store_parameters,
+            "Sandbox parameters must be saved atomically outside physical operations")
+    require("ROBControllerArmApproval.shared.status" in sandbox and "statusScroll" in sandbox,
+            "Sandbox must show the complete pending authorization scope in a scrollable status area")
+    require('initWithTitle:@"Testing Sandbox…"' in app_delegate and "@selector(showTestingSandbox:)" in app_delegate,
+            "Development menu lost the Testing Sandbox entry point")
+
+    print("Settings, Gemini, Perception and Testing Sandbox static checks passed")
 
 
 if __name__ == "__main__":

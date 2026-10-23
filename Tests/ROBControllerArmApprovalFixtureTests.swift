@@ -290,6 +290,10 @@ final class ROBAmberGatewayClient: NSObject {
                 done(["status": "not_found", "arm_motion_sent": false])
             }, cancel: {}, completion: { _ in })
             check(b.armSessionActive && prompts == 1, "A missing object must not demand another authorization to retry search")
+            b.requestLeftWorkspaceTask(summary: "Empty arm parked; opening depth still missing", execute: { done in
+                done(["status":"not_localized","arm_motion_sent":true,"reach_sent":false,"empty_arm_parked":true])
+            }, cancel: {}, completion: { _ in })
+            check(b.armSessionActive && prompts == 1, "A completed empty-arm park followed by a perception miss must preserve the live session")
             for title in ["Present empty left arm", "Recycle empty can", "Lower empty left arm"] {
                 b.requestLeftGesture(summary: title, execute: { done in
                     executions += 1
@@ -305,6 +309,15 @@ final class ROBAmberGatewayClient: NSObject {
             check(executions == 3 && prompts == 2, "Expired session cannot silently authorize another operation")
             check(b.receiveSpokenAuthorization("no"), "Spoken rejection cancels a pending request")
             check(!b.isPending && !b.armSessionActive, "Rejected request leaves no grant")
+        }
+        do {
+            let b = broker()
+            b.beginArmSession { _ in }
+            check(b.receiveSpokenAuthorization("yes proceed"), "Authorize failure fixture session")
+            b.requestLeftWorkspaceTask(summary: "Reached before failure", execute: { done in
+                done(["status":"not_localized","arm_motion_sent":true,"reach_sent":true,"empty_arm_parked":true])
+            }, cancel: {}, completion: { _ in })
+            check(!b.armSessionActive,"A prior parked flag cannot preserve authorization after a failed reach")
         }
         do {
             let b = broker()

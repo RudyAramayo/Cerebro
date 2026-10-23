@@ -34,6 +34,12 @@ final class ROBAmberArmMotionArbiter {
         defer { lock.unlock() }
         return owners[arm] != nil
     }
+
+    func isReserved(_ arm: ROBArmSide, owner: UUID) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return owners[arm] == owner
+    }
 }
 
 /// Bridges authenticated ROBControl v2 application data to the leased Amber

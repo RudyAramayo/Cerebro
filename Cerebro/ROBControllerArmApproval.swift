@@ -155,8 +155,10 @@ import Foundation
             precondition(Thread.isMainThread)
             let outcome = result["status"] as? String ?? "failed"
             let succeeded = ["completed", "accepted_unverified", "ready_for_object", "grip_attempted"].contains(outcome)
-            let observationOnly = ["not_found", "not_localized", "not_reachable"].contains(outcome)
-                && result["arm_motion_sent"] as? Bool == false
+            let noReach = result["reach_sent"] as? Bool == false
+            let safelyParked = noReach && result["empty_arm_parked"] as? Bool == true
+            let observationOnly = ["not_found", "not_localized", "not_reachable", "needs_help"].contains(outcome)
+                && (result["arm_motion_sent"] as? Bool == false || safelyParked)
             if !succeeded, !observationOnly, p.armSessionID != nil { self.armSession = nil }
             self.finish(result, state: succeeded ? .completed : .failed)
         }

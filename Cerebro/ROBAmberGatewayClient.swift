@@ -727,6 +727,8 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         "right": ROBAmberGatewayGripperStateSnapshot(),
     ]
     private var pendingGripperCommands: [UInt64: ROBAmberGatewayPendingGripperCommand] = [:]
+    // Narrow empty-jaw setup, independent of arm motion grants and leases.
+    private var startupGripperOwner: UUID?
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private var initialConnectionRetryCount = 0
@@ -857,6 +859,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         queue.sync {
             guard state == .ready, ["left", "right"].contains(arm),
                   expectedSessionGeneration > 0,
+                  startupGripperOwner == nil,
                   authenticatedSessionGeneration == expectedSessionGeneration,
                   positionsRadians.count == 7,
                   zip(positionsRadians, Self.jointBoundsRadians).allSatisfy({ value, bounds in
@@ -984,6 +987,51 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         sendGripperCommand(type: "gripper_calibrate", arm: arm)
     }
 
+    /// Admission for the explicitly enabled stationary empty-jaw policy. The
+    /// coordinator additionally owns both physical-arm arbiters.
+    @nonobjc func beginStartupGripperCalibration(expectedGeneration: UInt64) -> UUID? {
+        queue.sync {
+            guard startupGripperOwner == nil, pendingGripperCommands.isEmpty,
+                  state == .ready, exclusiveControllerSession,
+                  gripperCommandsAvailable, expectedGeneration > 0,
+                  authenticatedSessionGeneration == expectedGeneration,
+                  startupGrippersAreParkedOnQueue() else { return nil }
+            let owner = UUID()
+            startupGripperOwner = owner
+            return owner
+        }
+    }
+
+    @nonobjc func endStartupGripperCalibration(owner: UUID) {
+        queue.sync {
+            if startupGripperOwner == owner { startupGripperOwner = nil }
+        }
+    }
+
+    /// Only the commissioned fixed sequence is available to startup; no
+    /// arbitrary force, trajectory, activation or torque-mode request.
+    @nonobjc func sendStartupGripperCommand(forArm arm: String, operation: String,
+                                           owner: UUID, expectedGeneration: UInt64) -> UInt64 {
+        guard ["gripper_calibrate", "initialize_close", "initialize_open"].contains(operation) else { return 0 }
+        return sendGripperCommand(type: operation == "gripper_calibrate" ? operation : "gripper_control",
+            arm: arm, action: operation == "initialize_close" ? "hold" : operation == "initialize_open" ? "release" : nil,
+            force: operation == "initialize_close" ? 2 : operation == "initialize_open" ? 10 : nil,
+            startupOwner: owner, expectedGeneration: expectedGeneration)
+    }
+
+    private func startupGrippersAreParkedOnQueue() -> Bool {
+        ["left", "right"].allSatisfy { arm in
+            guard let sample = arm == "left" ? leftTelemetry : rightTelemetry else { return false }
+            let modes = arm == "left" ? leftModes : rightModes
+            return sample.effectiveSampleAgeMilliseconds <= 250
+                && sample.effectiveGripperFeedbackAgeMilliseconds <= 250
+                && sample.positionsRadians.count == 7
+                && sample.positionsRadians.allSatisfy { $0.doubleValue.isFinite && abs($0.doubleValue) <= ROBArmRoutinePlan.tolerance }
+                && sample.statuses.count == 7 && sample.statuses.allSatisfy { $0.intValue == 0 }
+                && modes.count == 7 && modes.allSatisfy { $0.intValue == 0 }
+        }
+    }
+
     /// Sends the two evidence-backed Amber actions using opaque vendor
     /// intensity units. No jaw position, force, or completion is inferred.
     @discardableResult public func controlGripper(
@@ -1083,6 +1131,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
     private func sendArmCommand(type: String, arm: String) -> UInt64 {
         queue.sync {
             guard state == .ready, ["left", "right"].contains(arm),
+                  startupGripperOwner == nil || ["mode_query", "priority_hold"].contains(type),
                   nextCommandID <= UInt64(UInt32.max) else { return 0 }
             let commandID = nextCommandID
             nextCommandID &+= 1
@@ -1252,7 +1301,9 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         type: String,
         arm: String,
         action: String? = nil,
-        force: Int? = nil
+        force: Int? = nil,
+        startupOwner: UUID? = nil,
+        expectedGeneration: UInt64? = nil
     ) -> UInt64 {
         queue.sync {
             guard state == .ready,
@@ -1261,6 +1312,14 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                   let current = gripperStates[arm],
                   !current.commandInFlight,
                   nextCommandID <= UInt64(UInt32.max) else { return 0 }
+
+            if let startupOwner {
+                guard startupGripperOwner == startupOwner,
+                      expectedGeneration == authenticatedSessionGeneration,
+                      startupGrippersAreParkedOnQueue() else { return 0 }
+            } else if startupGripperOwner != nil && type != "gripper_state" {
+                return 0
+            }
 
             // Calibration can sweep a jaw through its full travel. Serialize
             // it against every other gripper request across both arms so a
@@ -1442,6 +1501,11 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
                 ? "Amber gateway ready"
                 : "Amber gateway ready — gripper commands unavailable; gateway update required")
             startHeartbeat()
+            if self === Self.shared {
+                DispatchQueue.main.async {
+                    ROBGripperStartupCalibration.shared.gatewayBecameReady()
+                }
+            }
         case "telemetry":
             // Missing/unverified velocity must not become a zero-speed claim.
             // Keep positions available for diagnostics; the empty velocity
@@ -1634,6 +1698,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
         leftTargetPositionsRadians = []
         rightTargetPositionsRadians = []
         gripperCommandsAvailable = false
+        startupGripperOwner = nil
         resetGripperStates(
             detail: "Gateway session unavailable; calibration acceptance reset (\(detail))"
         )

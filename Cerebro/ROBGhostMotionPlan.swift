@@ -155,6 +155,10 @@ final class ROBGhostRobotModel {
                 } else if joint.kind == "prismatic" { motion.columns.3 = SIMD4(joint.axis * value, 1) }
                 result[joint.child] = parent * joint.origin * motion
             }
+            // Once every child frame exists, further dependency passes cannot
+            // add or alter a transform. IK and swept-path checks call this
+            // thousands of times, so avoid walking the completed tree again.
+            if result.count == joints.count+1 { break }
         }
         return result
     }
@@ -281,6 +285,7 @@ struct ROBLeftGestureProposal: Codable, Equatable {
     let poses: [[String: Double]]
     let steps: [Step]
     var recyclingActions: [Int: JawAction]? = nil
+    var recyclingParameters: ROBRecyclingTestParameters? = nil
     var seconds: Double { steps.reduce(0) { $0 + $1.seconds } }
     func encoded() throws -> Data { let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]; return try encoder.encode(self) }
     var fingerprint: String { (try? encoded()).map(ROBGhostRobotModel.hash) ?? "invalid" }
@@ -303,11 +308,13 @@ enum ROBLeftGestureCompiler {
 
     static func compile(kind: String, name: String, poses: [[String: Double]] = [], model: ROBGhostRobotModel,
                         baseline: [Double], generation: UInt64, id: UUID = UUID(),
-                        recyclingActions: [Int: ROBLeftGestureProposal.JawAction]? = nil) throws -> ROBLeftGestureProposal {
+                        recyclingActions: [Int: ROBLeftGestureProposal.JawAction]? = nil,
+                        recyclingParameters: ROBRecyclingTestParameters? = nil) throws -> ROBLeftGestureProposal {
         if kind == "recycling" {
             return try ROBHorizontalCanRecycle.compile(name: name, poses: poses, actions: recyclingActions ?? [:],
-                model: model, baseline: baseline, generation: generation, id: id)
+                model: model, baseline: baseline, generation: generation, id: id, parameters: recyclingParameters)
         }
+        guard recyclingParameters == nil else { throw ROBGhostMotionError.blocked("Recycling sandbox parameters cannot alter another gesture type.") }
         if kind == "tabletop" {
             return try ROBTabletopPickPlace.compile(name: name, poses: poses, model: model,
                 baseline: baseline, generation: generation, id: id)
@@ -394,7 +401,7 @@ enum ROBLeftGestureCompiler {
         }
         let expected = try compile(kind: proposal.kind, name: proposal.name, poses: proposal.poses, model: model,
             baseline: proposal.baseline, generation: proposal.sessionGeneration, id: proposal.id,
-            recyclingActions: proposal.recyclingActions)
+            recyclingActions: proposal.recyclingActions, recyclingParameters: proposal.recyclingParameters)
         guard proposal == expected else { throw ROBGhostMotionError.blocked("The reviewed path or timing changed; review a new proposal.") }
     }
 
@@ -411,7 +418,9 @@ enum ROBLeftGestureCompiler {
 /// wrist roll and binds the two payload transitions into the frozen proposal.
 enum ROBHorizontalCanRecycle {
     static func compile(name: String, poses: [[String: Double]], actions: [Int: ROBLeftGestureProposal.JawAction],
-                        model: ROBGhostRobotModel, baseline: [Double], generation: UInt64, id: UUID) throws -> ROBLeftGestureProposal {
+                        model: ROBGhostRobotModel, baseline: [Double], generation: UInt64, id: UUID,
+                        parameters: ROBRecyclingTestParameters? = nil) throws -> ROBLeftGestureProposal {
+        guard parameters?.isValid ?? true else { throw ROBGhostMotionError.blocked("The recycling sandbox parameters exceed their supported bounds.") }
         guard (10...65).contains(poses.count), baseline.count == 7, baseline.allSatisfy(\.isFinite), generation > 0,
               !name.isEmpty, name.count <= 100, actions.count == 2,
               let grip = actions.first(where: { $0.value == .grip })?.key,
@@ -483,12 +492,82 @@ enum ROBHorizontalCanRecycle {
                     action: part == count ? actions[index] : nil)
             }
         }
+        if let parameters { steps = compactSteps(steps,baseline:baseline,model:model,parameters:parameters) }
         guard steps.count <= 80, steps.reduce(0, { $0+$1.seconds }) <= 135 else {
             throw ROBGhostMotionError.blocked("The recycling path exceeds one bounded operation; bring the objects closer.")
         }
         return .init(id: id, name: name, kind: "recycling", modelID: model.modelID, referenceID: model.referenceID,
             geometryID: model.geometryID, mappingID: ROBGhostRobotModel.mappingID, sessionGeneration: generation,
-            baseline: baseline, poses: poses, steps: steps, recyclingActions: actions)
+            baseline: baseline, poses: poses, steps: steps, recyclingActions: actions,recyclingParameters:parameters)
+    }
+
+    /// Dense IK samples describe a continuous path, not a requirement to stop
+    /// every 3 cm. Join only near-straight portions whose replacement chord is
+    /// checked against the original joint/tool path and all motion constraints.
+    /// Jaw boundaries and their adjacent poses remain independent stops.
+    private static func compactSteps(_ steps: [ROBLeftGestureProposal.Step], baseline: [Double], model: ROBGhostRobotModel,
+                                parameters: ROBRecyclingTestParameters) -> [ROBLeftGestureProposal.Step] {
+        guard !steps.isEmpty else { return steps }
+        let protected = Set(steps.indices.filter { index in
+            steps[index].jawAction != nil || (index > 0 && steps[index-1].jawAction != nil) ||
+            (index+1 < steps.count && steps[index+1].jawAction != nil) || steps[index].stage == "Present empty left arm"
+        })
+        func timed(_ target: [Double], from start: [Double], stage: String?, action: ROBLeftGestureProposal.JawAction?) -> ROBLeftGestureProposal.Step? {
+            guard let minimum = ROBLeftArmInteractionPlan.duration(from:start,to:target),
+                  let padded = ROBLeftArmInteractionPlan.duration(from:start,to:target,padding:ROBArmRoutinePlan.tolerance) else { return nil }
+            let seconds = max(minimum,padded/parameters.motionPace)
+            guard seconds <= 5 else { return nil }
+            return .init(positions:target,seconds:seconds,jawAction:action,stage:stage)
+        }
+        func accepts(from start: [Double], first: Int, last: Int) -> Bool {
+            let target = steps[last].positions
+            // Keep the existing compiler's maximum single joint increment.
+            guard (zip(start,target).map { abs($0-$1) }.max() ?? 0) <= 0.30+1e-9 else { return false }
+            let route = [start]+steps[first...last].map(\.positions)
+            let lengths = zip(route,route.dropFirst()).map { a,b in zip(a,b).map { abs($0-$1) }.max() ?? 0 }
+            let total = lengths.reduce(0,+)
+            guard total > 1e-12 else { return true }
+            let travel = 1.5*zip(start,target).reduce(0.0) { $0+abs($1.0-$1.1) }
+            let checks = max(1,Int(ceil(travel/0.005)))
+            var originalIndex = 0, traversed = 0.0
+            for sample in 0...checks {
+                let t = Double(sample)/Double(checks), distance = total*t
+                while originalIndex+1 < lengths.count && traversed+lengths[originalIndex] < distance {
+                    traversed += lengths[originalIndex]; originalIndex += 1
+                }
+                let fraction = lengths[originalIndex] > 1e-12 ? min(1,max(0,(distance-traversed)/lengths[originalIndex])) : 0
+                let original = zip(route[originalIndex],route[originalIndex+1]).map { $0+($1-$0)*fraction }
+                let q = zip(start,target).map { $0+($1-$0)*t }
+                guard zip(original,q).allSatisfy({ abs($0-$1) <= 0.01 }),
+                      model.treadSeparation(vendorLeft:q) >= 0.030,
+                      let actualFrame = model.frames(model.positions(vendorLeft:q))["left_tool"],
+                      let originalTip = model.toolPosition(model.positions(vendorLeft:original)) else { return false }
+                let actualTip = SIMD3(actualFrame.columns.3.x,actualFrame.columns.3.y,actualFrame.columns.3.z)
+                guard simd_distance(actualTip,originalTip) <= parameters.maximumPathDeviationMeters+1e-10,
+                      // Do not spend the path tolerance by lowering the hand
+                      // toward the table along the corresponding original path.
+                      actualTip.z >= originalTip.z-0.0005,
+                      max(abs(actualFrame.columns.1.z),abs(actualFrame.columns.2.z)) <= sin(8 * .pi/180) else { return false }
+            }
+            return true
+        }
+        var result: [ROBLeftGestureProposal.Step] = [], start = baseline, index = 0
+        while index < steps.count {
+            var end = index
+            if !protected.contains(index), parameters.maximumPathDeviationMeters > 0 {
+                while end+1 < steps.count, !protected.contains(end+1), steps[end+1].stage == steps[index].stage,
+                      accepts(from:start,first:index,last:end+1),
+                      timed(steps[end+1].positions,from:start,stage:steps[end+1].stage,action:nil) != nil {
+                    end += 1
+                }
+            }
+            let step = steps[end]
+            // Registered presentation retains its physically exercised timing.
+            let next = step.stage == "Present empty left arm" ? step :
+                timed(step.positions,from:start,stage:step.stage,action:step.jawAction) ?? step
+            result.append(next); start = step.positions; index = end+1
+        }
+        return result
     }
 }
 
