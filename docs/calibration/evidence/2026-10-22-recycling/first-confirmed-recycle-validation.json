@@ -1,0 +1,424 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-23T02:11:36.460048+00:00",
+  "sourceCommit": "34c620048091e1f8be580d68be4e5f11ee903847",
+  "binarySHA256": "2000743ea64486e51703e7f02544d5b61ad8baa411a6e7667dcf5bb4d2cb8816",
+  "physicalArm": "LEFT/R11/gateway right/UDP26002",
+  "authorization": {
+    "source": "Root agent observed the fresh native whole-task runtime authorization before this retry from hanging.",
+    "scope": "One complete recycling operation; no per-waypoint approvals and no replayed session.",
+    "transcriptIncluded": false,
+    "limitation": "Runtime authorization is not inferred from motor telemetry."
+  },
+  "recording": "left_recycle_can-DA779E5C-6A6B-4D63-91AF-B4220A7B17A3.csv",
+  "archive": "first-confirmed-recycle.csv.gz",
+  "recordingSHA256": "83ef7f6f519fcefa4f9a047340035a5a965e2a586b6982caa79c06dfd5d5be0e",
+  "archiveSHA256": "85e87bac858a8840d77e442a0818b6d370f280aa9977e025846b9842201565fb",
+  "proposal": "first-confirmed-recycle.proposal.json",
+  "proposalSHA256": "59d7cd37e2836a36a9213f92a02a03dfe11fc86179e05382359be64f9f2660f9",
+  "proposalID": "9999B28E-C3C3-46DE-993C-296C5CCE8B7D",
+  "elapsedSeconds": 264.6566356250041,
+  "jointRows": 11424,
+  "completeSevenJointSamples": 1632,
+  "incompleteSevenJointSamples": 0,
+  "maxRecordedFeedbackAgeMS": 55.798298668015065,
+  "lastRecordedFeedbackAgeMS": 5.6248950033071266,
+  "plannedPhysicalSteps": 48,
+  "recordedGestureStepIndices": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37,
+    38,
+    39,
+    40,
+    41,
+    42,
+    43,
+    44,
+    45,
+    46,
+    47
+  ],
+  "phases": [
+    {
+      "phase": "preflight",
+      "seconds": 0.009815500001423061
+    },
+    {
+      "phase": "camera preparation",
+      "seconds": 181.5546168333385
+    },
+    {
+      "phase": "gesture step 0",
+      "seconds": 186.44091024999943
+    },
+    {
+      "phase": "gesture step 1",
+      "seconds": 188.32740541666863
+    },
+    {
+      "phase": "gesture step 2",
+      "seconds": 190.51749066666525
+    },
+    {
+      "phase": "gesture step 3",
+      "seconds": 193.4170774166705
+    },
+    {
+      "phase": "gesture step 4",
+      "seconds": 195.50141070833342
+    },
+    {
+      "phase": "empty gripper calibration",
+      "seconds": 198.09812816666818
+    },
+    {
+      "phase": "initializing empty jaws",
+      "seconds": 208.15897529166978
+    },
+    {
+      "phase": "tabletop prepare",
+      "seconds": 209.738757791667
+    },
+    {
+      "phase": "gesture step 5",
+      "seconds": 211.31196583333804
+    },
+    {
+      "phase": "gesture step 6",
+      "seconds": 212.68704729167075
+    },
+    {
+      "phase": "gesture step 7",
+      "seconds": 213.95887787500396
+    },
+    {
+      "phase": "gesture step 8",
+      "seconds": 215.3329952083368
+    },
+    {
+      "phase": "gesture step 9",
+      "seconds": 216.80848137500288
+    },
+    {
+      "phase": "gesture step 10",
+      "seconds": 217.77645425000082
+    },
+    {
+      "phase": "gesture step 11",
+      "seconds": 219.09821500000544
+    },
+    {
+      "phase": "gesture step 12",
+      "seconds": 220.62385050000012
+    },
+    {
+      "phase": "gesture step 13",
+      "seconds": 221.74346925000282
+    },
+    {
+      "phase": "gesture step 14",
+      "seconds": 222.91750650000176
+    },
+    {
+      "phase": "gesture step 15",
+      "seconds": 224.13389295833622
+    },
+    {
+      "phase": "gesture step 16",
+      "seconds": 225.302703500005
+    },
+    {
+      "phase": "tabletop grip",
+      "seconds": 226.37433350000356
+    },
+    {
+      "phase": "gesture step 17",
+      "seconds": 227.94934583333816
+    },
+    {
+      "phase": "gesture step 18",
+      "seconds": 229.21814958333562
+    },
+    {
+      "phase": "gesture step 19",
+      "seconds": 230.28655208333657
+    },
+    {
+      "phase": "gesture step 20",
+      "seconds": 231.25512000000163
+    },
+    {
+      "phase": "gesture step 21",
+      "seconds": 232.42743712499941
+    },
+    {
+      "phase": "gesture step 22",
+      "seconds": 233.40028937500028
+    },
+    {
+      "phase": "gesture step 23",
+      "seconds": 234.5139252916706
+    },
+    {
+      "phase": "gesture step 24",
+      "seconds": 235.7369945833343
+    },
+    {
+      "phase": "gesture step 25",
+      "seconds": 236.85650945833186
+    },
+    {
+      "phase": "gesture step 26",
+      "seconds": 238.0769602500004
+    },
+    {
+      "phase": "gesture step 27",
+      "seconds": 239.19777962499938
+    },
+    {
+      "phase": "gesture step 28",
+      "seconds": 240.26626791666786
+    },
+    {
+      "phase": "gesture step 29",
+      "seconds": 241.48831658333802
+    },
+    {
+      "phase": "gesture step 30",
+      "seconds": 242.80339074999938
+    },
+    {
+      "phase": "gesture step 31",
+      "seconds": 243.83144404166524
+    },
+    {
+      "phase": "gesture step 32",
+      "seconds": 245.00361620833428
+    },
+    {
+      "phase": "gesture step 33",
+      "seconds": 246.22939625000436
+    },
+    {
+      "phase": "gesture step 34",
+      "seconds": 247.2951484166697
+    },
+    {
+      "phase": "gesture step 35",
+      "seconds": 248.36265454167005
+    },
+    {
+      "phase": "gesture step 36",
+      "seconds": 249.37984820833663
+    },
+    {
+      "phase": "gesture step 37",
+      "seconds": 250.54870116667007
+    },
+    {
+      "phase": "gesture step 38",
+      "seconds": 251.6685635416652
+    },
+    {
+      "phase": "gesture step 39",
+      "seconds": 252.89132133333624
+    },
+    {
+      "phase": "gesture step 40",
+      "seconds": 253.70427058333735
+    },
+    {
+      "phase": "gesture step 41",
+      "seconds": 254.67351875000168
+    },
+    {
+      "phase": "gesture step 42",
+      "seconds": 255.7951160833327
+    },
+    {
+      "phase": "gesture step 43",
+      "seconds": 256.91655712500506
+    },
+    {
+      "phase": "gesture step 44",
+      "seconds": 258.03616733333183
+    },
+    {
+      "phase": "tabletop release",
+      "seconds": 259.2089430000051
+    },
+    {
+      "phase": "gesture step 45",
+      "seconds": 260.7851178333367
+    },
+    {
+      "phase": "gesture step 46",
+      "seconds": 261.9580405000015
+    },
+    {
+      "phase": "gesture step 47",
+      "seconds": 262.9758887916687
+    }
+  ],
+  "jawActions": [
+    {
+      "step": 4,
+      "action": "prepare"
+    },
+    {
+      "step": 16,
+      "action": "grip"
+    },
+    {
+      "step": 44,
+      "action": "release"
+    }
+  ],
+  "jawActionIndexing": "Zero-based physical proposal step indices; distinct from pose indices in proposal recyclingActions.",
+  "openingIntensity": 10,
+  "closingIntensity": 2,
+  "calibrationUsed": {
+    "canTranslationMeters": [
+      -0.127,
+      0,
+      -0.0508
+    ],
+    "bucketYawDegrees": 20,
+    "bucketInwardMeters": 0.0381,
+    "recoveryGraspClearanceMeters": 0.0889,
+    "additionalReachMeters": 0,
+    "description": "The extra 1 cm reach suggested after this success was not applied to this trial. Raw visual sightings remain unchanged."
+  },
+  "search": {
+    "reportID": "9F800A14-CF19-4632-B4EF-35495CB70FCD",
+    "status": "found",
+    "detail": "I found the Coke can and orange bucket.",
+    "objects": {
+      "can": {
+        "captured_at_ms": 1792721089149.094,
+        "position": [
+          0.5605785988799937,
+          -0.0675199690598014,
+          0.8488352035511078
+        ]
+      },
+      "orangeBucket": {
+        "captured_at_ms": 1792721080515.9922,
+        "position": [
+          0.3250211405991942,
+          0.5030734963057429,
+          0.29545913071545227
+        ]
+      }
+    },
+    "decodedObservations": 44,
+    "settleSecondsPerView": 1.5,
+    "searchStartedAt": "2026-10-23T02:02:01Z",
+    "reportCreatedAt": "2026-10-23T02:04:50Z",
+    "historicalPositionsUsedForMotion": false,
+    "cameraArmMapping": "provisional URDF/neck command prior, not measured hand-eye calibration",
+    "recallViews": [
+      {
+        "pan": -3.6958422660827637,
+        "upper": 6000
+      },
+      {
+        "pan": -8.14226560592651,
+        "upper": 6319
+      },
+      {
+        "pan": 30,
+        "upper": 5650
+      },
+      {
+        "pan": 33.97968385219574,
+        "upper": 5688
+      }
+    ],
+    "announcements": [
+      {
+        "at": "2026-10-23T02:02:18Z",
+        "message": "I see the can. I'm still looking for the bucket.",
+        "visually_confirmed": [
+          "can"
+        ]
+      },
+      {
+        "at": "2026-10-23T02:02:53Z",
+        "message": "I see the bucket.",
+        "visually_confirmed": [
+          "can",
+          "orangeBucket"
+        ]
+      }
+    ]
+  },
+  "finalPositionsRadians": [
+    0.4876013597759158,
+    1.542162018754365,
+    -0.4901920828843449,
+    0.3380211887260893,
+    -1.393672678487035,
+    -1.418080017245393,
+    -1.28336241560708
+  ],
+  "nativeOutcome": "The complete 48-step route finished and the CSV ends at gesture step 47. These motor records establish execution evidence; physical success is separately observed and confirmed below.",
+  "canPickedUp": true,
+  "pickupConfirmation": {
+    "source": "Root agent live camera observation",
+    "observation": "The can was visibly lifted and carried by the gripper.",
+    "imagesIncluded": false
+  },
+  "canPlacedInBucket": true,
+  "placementConfirmation": {
+    "source": "Explicit operator response to the root agent observation question",
+    "question": "Did Coke can land inside orange bucket on this run?",
+    "answer": "Yes, it landed inside",
+    "limitation": "The physical outcome is human-confirmed, not inferred from a gateway acknowledgment."
+  },
+  "additionalOperatorFeedback": "that was incredible! grab could have been 1cm deeper towards can vector from droid but gripper did its job",
+  "followUpRequested": {
+    "additionalCanApproachMeters": 0.01,
+    "direction": "Along the vector from the droid toward the can",
+    "status": "Requested after this successful trial; not used in this archived run."
+  },
+  "pickupAndDropVerified": true,
+  "cameraImagesIncluded": false,
+  "grantsPersisted": false
+}

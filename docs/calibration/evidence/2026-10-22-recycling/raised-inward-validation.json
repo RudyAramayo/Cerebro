@@ -40,8 +40,8 @@
       "lastLine": "Controller/spoken arm approval and session reuse: 93 checks passed; no hardware access"
     }
   },
-  "physicalResult": "Raised EMPTY return and stationary preparation completed in 64.86 seconds. The first corrected recycling task parked the arm to hanging and deactivated in 15.26 seconds, then found both objects. Planning rejected the initial front pose because its joint7 retained a hanging-pose residual; no corrected reach or new grip was sent. A retry with all seven front-pose joints seeded is pending.",
-  "pickupAndDropVerified": false,
+  "physicalResult": "Raised EMPTY return completed in 64.86 seconds. The first corrected task safely parked but was rejected before reaching because of the joint 7 preview seed mismatch. After seeding all seven front-pose joints, a fresh authorized retry completed all 48 physical steps in 264.66 seconds: the root agent saw the can lifted and carried, and the operator explicitly confirmed it landed inside the orange bucket.",
+  "pickupAndDropVerified": true,
   "cameraImagesIncluded": false,
   "grantsPersisted": false,
   "runtimeAuthorization": {
@@ -531,5 +531,38 @@
     "validation": "Operator alignment: grasp raised6.35cm, raw sightings unchanged, yaw remains20 degrees LEFT, release moves0.03625744010454962m inward; 47 validated physical steps, grasp error0.00024237549959629171m",
     "validationLogSHA256": "717fbf4b9b961fed740f7d5d55e2271c207bdd5c43c299f4919c0d7507d7d539",
     "retry": "Requested one native whole-task approval directly from hanging; not a replayed session."
+  },
+  "currentRetry": {
+    "status": "successful; pickup observed by root camera and placement explicitly confirmed by operator",
+    "recording": "left_recycle_can-DA779E5C-6A6B-4D63-91AF-B4220A7B17A3.csv",
+    "archive": "first-confirmed-recycle.csv.gz",
+    "proposal": "first-confirmed-recycle.proposal.json",
+    "validation": "first-confirmed-recycle-validation.json",
+    "sourceCommit": "34c620048091e1f8be580d68be4e5f11ee903847",
+    "binarySHA256": "2000743ea64486e51703e7f02544d5b61ad8baa411a6e7667dcf5bb4d2cb8816",
+    "plannedPhysicalSteps": 48,
+    "elapsedSeconds": 264.6566356250041,
+    "completeSevenJointSamples": 1632,
+    "maxRecordedFeedbackAgeMS": 55.798298668015065,
+    "canPickedUp": true,
+    "pickupBasis": {
+      "source": "Root agent live camera observation",
+      "observation": "The can was visibly lifted and carried by the gripper.",
+      "imagesIncluded": false
+    },
+    "canPlacedInBucket": true,
+    "placementBasis": {
+      "source": "Explicit operator response to the root agent observation question",
+      "question": "Did Coke can land inside orange bucket on this run?",
+      "answer": "Yes, it landed inside",
+      "limitation": "The physical outcome is human-confirmed, not inferred from a gateway acknowledgment."
+    },
+    "additionalOneCentimeterReachApplied": false,
+    "authorization": {
+      "source": "Root agent observed the fresh native whole-task runtime authorization before this retry from hanging.",
+      "scope": "One complete recycling operation; no per-waypoint approvals and no replayed session.",
+      "transcriptIncluded": false,
+      "limitation": "Runtime authorization is not inferred from motor telemetry."
+    }
   }
 }
