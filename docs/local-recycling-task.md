@@ -402,6 +402,16 @@ tampering, one authorization, loss of feedback after grip, session expiry,
 spoken rejection and late startup retry. These checks do not establish a live
 successful recycling task. Record the actual commissioning result separately.
 
+The installed middle-can detector completed a neck-only visual search in 54 seconds
+with 12 observations. It distinguished both table cans, kept the same selected
+instance, and measured its height consistently at 11.09–11.35 cm. The calibrated
+middle target includes the requested 1 cm outward correction. Both objects were
+visually confirmed, but bucket depth was unconfirmed; this visual-only timing is
+not directly comparable to the earlier 169-second depth-required search. The arm
+session request expired without authorization, so no new reach or recycling was
+attempted. Physical validation of the middle grasp and two-can sequence remains
+pending. See the [middle-can search validation](calibration/evidence/2026-10-22-recycling/middle-can-search-validation.json).
+
 The first live session prepared the left arm in 19.8 seconds, scanned, then
 returned the empty arm to inactive hanging in 15.6 seconds under the same grant.
 The VLM replies failed decoding, so no reach/grip/carry occurred. A later

@@ -1,0 +1,177 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-23T02:40:05.246960+00:00",
+  "sourceCommit": "3b9b90fa53e725d66887d31b908cd8e7ee461cd1",
+  "binarySHA256": "9611bce9fa7b5dcd5449aa8c826f4999a46a8006c9ae2d6b675dbfb9cd50d9d4",
+  "operation": "Neck-only Search only; no arm operation",
+  "sourceReport": "2AF51C85-70DC-4DA4-82D8-469E75B20CE5.json",
+  "sourceReportSHA256": "443d2f4a504914fe0009d7f7c007b0ea46eb08a78b075c39e7faa84eeba79331",
+  "searchStartedAt": "2026-10-23T02:36:09Z",
+  "searchFinishedAt": "2026-10-23T02:37:03Z",
+  "elapsedSeconds": 54.0,
+  "timingResolution": "Whole-second report timestamps",
+  "decodedObservations": 12,
+  "uniqueCameraViews": 5,
+  "settleSecondsPerView": 1.5,
+  "depthRequired": false,
+  "status": "visually_found",
+  "visuallyConfirmed": [
+    "can",
+    "orangeBucket"
+  ],
+  "timingComparison": "This 54-second visual-only search is not directly comparable to the approximately 169-second depth-required search in the first confirmed recycle. Bucket opening depth was not confirmed here.",
+  "historicalPositionsUsedForMotion": false,
+  "precisionFindings": {
+    "distinctTableCansInFinalView": 2,
+    "finalView": {
+      "panDegrees": 0,
+      "upperTarget": 6306,
+      "sequence": 1430,
+      "capturedAtMS": 1792723021752.695
+    },
+    "canMeasurements": [
+      {
+        "selected": false,
+        "confidence": 0.6395992636680603,
+        "top": [
+          0.48514809520137797,
+          -0.11452676611291206,
+          0.9205328138319313
+        ],
+        "middle": [
+          0.46927812070531927,
+          -0.11470725966096873,
+          0.8691618764817985
+        ],
+        "base": [
+          0.4534081462092606,
+          -0.11488775320902542,
+          0.8177909391316659
+        ],
+        "heightMeters": 0.10753347148972182,
+        "diameterMeters": 0.062019329375888596,
+        "calibratedMiddleHeightMeters": 0.8518019392959687
+      },
+      {
+        "selected": true,
+        "confidence": 0.616970956325531,
+        "top": [
+          0.5666698810337704,
+          -0.1831262320522998,
+          0.9275124482047504
+        ],
+        "middle": [
+          0.541588440321719,
+          -0.18037057055766878,
+          0.8781296702175039
+        ],
+        "base": [
+          0.5165069996096676,
+          -0.17761490906303776,
+          0.8287468922302572
+        ],
+        "heightMeters": 0.11091133576335349,
+        "diameterMeters": 0.06483000647207744,
+        "calibratedMiddleHeightMeters": 0.8534908714327846
+      }
+    ],
+    "selectedCanFreshObservations": [
+      {
+        "observationIndex": 0,
+        "sequence": 146,
+        "capturedAtMS": 1792722978941.023,
+        "position": [
+          0.5406524731402194,
+          -0.18015334600743002,
+          0.8752490594316245
+        ],
+        "heightMeters": 0.11133649268930769,
+        "diameterMeters": 0.0642111410014649,
+        "calibratedMiddleHeightMeters": 0.8537034498957616
+      },
+      {
+        "observationIndex": 1,
+        "sequence": 232,
+        "capturedAtMS": 1792722981808.9812,
+        "position": [
+          0.5433205371604931,
+          -0.18042055503901172,
+          0.8737523122104386
+        ],
+        "heightMeters": 0.1134503740938128,
+        "diameterMeters": 0.0647194040258544,
+        "calibratedMiddleHeightMeters": 0.8547603905980142
+      },
+      {
+        "observationIndex": 10,
+        "sequence": 1368,
+        "capturedAtMS": 1792723019685.914,
+        "position": [
+          0.5416443391582968,
+          -0.18066110951394315,
+          0.8783017091465849
+        ],
+        "heightMeters": 0.11153641581394783,
+        "diameterMeters": 0.06414919653582359,
+        "calibratedMiddleHeightMeters": 0.8538034114580817
+      },
+      {
+        "observationIndex": 11,
+        "sequence": 1430,
+        "capturedAtMS": 1792723021752.695,
+        "position": [
+          0.541588440321719,
+          -0.18037057055766878,
+          0.8781296702175039
+        ],
+        "heightMeters": 0.11091133576335349,
+        "diameterMeters": 0.06483000647207744,
+        "calibratedMiddleHeightMeters": 0.8534908714327846
+      }
+    ],
+    "selectedCanHeightRangeMeters": [
+      0.11091133576335349,
+      0.1134503740938128
+    ],
+    "selectedCanHeightSpreadMeters": 0.002539038330459306,
+    "instanceSelection": "The same spatial instance remained selected after another qualified can acquired higher detector confidence, including the final fresh refresh.",
+    "limitation": "These are live RGB-D measurements and local calibration calculations; they do not validate physical grasp accuracy."
+  },
+  "calibrationUsedForCalculatedTarget": {
+    "translationMeters": [
+      -0.127,
+      0,
+      -0.0508
+    ],
+    "canOutwardMeters": 0.01,
+    "outwardDirection": "Normalized fresh can XY vector from ROB",
+    "tabletopCanBaseHeightMeters": 0.7980352035511078,
+    "baseDatumSource": "Conservative local same-table datum from the earlier operator-confirmed low grasp; not a measured tabletop plane.",
+    "middleFormula": "Local base datum plus half the measured can height",
+    "finalCalculatedReachCorrectionMeters": [
+      -0.11751233220639036,
+      -0.0031597721180652073,
+      -0.024638798784719307
+    ],
+    "finalCalculatedGraspPointMeters": [
+      0.4240761081153287,
+      -0.18353034267573398,
+      0.8534908714327846
+    ],
+    "rawMeasurementsPreserved": true,
+    "motionExecuted": false
+  },
+  "bucketDepthConfirmed": false,
+  "runtimeAuthorization": {
+    "armSessionRequestResult": "Expired without final spoken/controller approval, observed by root agent in native UI.",
+    "neckOnlySearchRequiresArmGrant": false,
+    "armTrialStarted": false,
+    "grantsRestoredOrManufactured": false,
+    "transcriptIncluded": false
+  },
+  "physicalResult": "No new reach, grip, carry or release was attempted. The middle-body grasp, extra 1 cm reach and two-can recycling remain pending physical commissioning.",
+  "pickupAndDropVerified": false,
+  "recyclingAttempted": false,
+  "cameraImagesIncluded": false,
+  "grantsPersisted": false
+}
