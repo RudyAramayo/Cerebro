@@ -1,6 +1,10 @@
 import Foundation
 import simd
 
+private extension ROBLeftCanReachCalibration {
+    func saveFixture(to file:URL) throws { try JSONEncoder().encode(self).write(to:file) }
+}
+
 @main struct GhostMotionFixtures {
     static func expectBlocked(_ body: () throws -> Void) {
         do { try body(); preconditionFailure("Unsafe or changed proposal was admitted") }
@@ -263,7 +267,9 @@ import simd
             view: .init(panDegrees: 15, upperTarget: 5650), capturedAt: recallNow)
         try recall.save(to: recallDirectory.appendingPathComponent("recall-v1.json"))
         let restarted = ROBWorkspaceRecall.load(model: model, directory: recallDirectory, now: recallNow)
-        precondition(restarted.sightings.count == 1 && restarted.views(targets: [.orangeBucket], now: recallNow).first!.panDegrees > 35)
+        let recalledBucketViews = restarted.views(targets: [.orangeBucket], now: recallNow)
+        precondition(restarted.sightings.count == 1 && recalledBucketViews.first!.panDegrees == 15 && recalledBucketViews.first!.upperTarget == 5650)
+        precondition(recalledBucketViews.dropFirst().contains { $0.panDegrees > 35 })
         precondition(restarted.views(targets: [.can], now: recallNow).isEmpty)
         precondition(restarted.views(targets: [.orangeBucket], now: recallNow + 86_400_001).isEmpty)
         let mismatched = ROBWorkspaceRecall(modelID: "old-model", geometryID: model.geometryID, sightings: recall.sightings)
@@ -294,7 +300,7 @@ import simd
         precondition(floorAlignment!.supportFraction > 0.99)
         precondition(ROBWorkspaceFloorAlignment.fit(points: floorPoints.map { $0+SIMD3(0,0,0.8) },cameraFrame: camera) == nil,
             "A tabletop was accepted as the floor")
-        print("Recall: durable per-model sighting hints, centered first look, expiry and no object-position reuse. Rim: measured circle plus recessed interior; lids and partial arcs rejected")
+        print("Recall: durable per-model sighting hints, original successful camera view first then recentered view, expiry and no object-position reuse. Rim: measured circle plus recessed interior; lids and partial arcs rejected")
         precondition(ROBWorkspaceView.sweep.count == 32 && ROBWorkspaceView.sweep.contains { $0.upperTarget == 5300 })
         precondition(zip(ROBWorkspaceView.sweep, ROBWorkspaceView.sweep.dropFirst()).allSatisfy { abs($0.panDegrees - $1.panDegrees) <= 15 },
             "Search must inspect intermediate views rather than jumping between distant sides")
@@ -341,6 +347,37 @@ import simd
         var altered = physicalRecycle; altered.recyclingActions = [:]
         expectBlocked { try ROBLeftGestureCompiler.validate(altered, model: model) }
         precondition(physicalRecycle.steps.count <= 80 && physicalRecycle.seconds <= 135)
+        let stopIndex = physicalRecycle.steps.firstIndex { $0.jawAction == .grip }! + 3
+        let recorded = physicalRecycle.steps.enumerated().prefix(stopIndex+1).map { index, step in
+            ROBGhostRecordingSample(time:Double(index),positions:step.positions,currents:[Double](repeating:0.2,count:7),
+                deltas:[Double](repeating:0,count:7),step:index)
+        }
+        let stoppedQ = zip(physicalRecycle.steps[stopIndex-1].positions,physicalRecycle.steps[stopIndex].positions).map { ($0+$1)/2 }
+        let recovery = try ROBRecordedLeftRecovery.make(previous:physicalRecycle,samples:recorded,measured:stoppedQ,model:model,generation:43)
+        precondition(recovery.kind == "recover" && recovery.sessionGeneration == 43 && recovery.baseline == stoppedQ)
+        precondition(recovery.steps.first!.positions == physicalRecycle.steps[stopIndex-1].positions && recovery.steps.last!.positions == center)
+        precondition(recovery.steps.allSatisfy { $0.jawAction == nil }, "A recorded empty return must never replay gripper actions")
+        expectBlocked { _ = try ROBRecordedLeftRecovery.make(previous:physicalRecycle,samples:recorded,measured:[Double](repeating:2.8,count:7),model:model,generation:43) }
+        expectBlocked { _ = try ROBRecordedLeftRecovery.make(previous:physicalRecycle,samples:[],measured:stoppedQ,model:model,generation:43) }
+        let calibrationURL = recallDirectory.appendingPathComponent("can-calibration.json")
+        let missingCorrection = try ROBLeftCanReachCalibration.load(model:model,file:calibrationURL)
+        precondition(missingCorrection == .zero)
+        let calibration = ROBLeftCanReachCalibration(modelID:model.modelID,referenceID:model.referenceID,mappingID:ROBGhostRobotModel.mappingID,
+            translationMeters:[-0.127,0,0],source:"Isolated operator-measurement fixture")
+        try calibration.saveFixture(to:calibrationURL)
+        let correction = try ROBLeftCanReachCalibration.load(model:model,file:calibrationURL)
+        precondition(correction == SIMD3<Double>(-0.127,0,0))
+        let observedCan = ROBWorkspaceLocatedObject(target:.can,position:[0.5476,-0.0659,0.8759],confidence:0.7,
+            capturedAt:previewNow,sequence:81,view:view)
+        let correctedReach = try ROBCanGrabPreview.make(can:observedCan,model:model,baseline:model.positions(vendorLeft:zero),
+            now:previewNow,reachOffset:correction)
+        precondition(correctedReach.can.position == observedCan.position && correctedReach.reachesCan)
+        precondition(abs(correctedReach.calibratedGraspPoint.x-0.4206) < 0.00001)
+        let wrongCalibration = ROBLeftCanReachCalibration(modelID:"wrong",referenceID:model.referenceID,mappingID:ROBGhostRobotModel.mappingID,
+            translationMeters:[-0.127,0,0],source:"Invalid fixture")
+        try wrongCalibration.saveFixture(to:calibrationURL)
+        expectBlocked { _ = try ROBLeftCanReachCalibration.load(model:model,file:calibrationURL) }
+        print("Recorded recovery: exact executed prefix only, fresh baseline/new session, reverse to front with no jaw replay; operator reach correction leaves raw sightings intact and rejects mismatched models")
         let dropIndex = recycling.steps.firstIndex { $0.jawAction == .release }!
         let dropPoint = model.toolPosition(recycling.steps[dropIndex].pose)!
         precondition(dropPoint.z >= previewCan.point.z + 0.08 && dropPoint.z > recycleBucket.point.z + 0.12,

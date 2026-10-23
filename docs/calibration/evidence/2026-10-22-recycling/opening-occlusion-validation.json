@@ -1,0 +1,180 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-23T00:35:58.115976+00:00",
+  "installedTrialBinarySHA256": "06ad37ccf50920150eb001f9a873531dce11e543d562273056dcb7e5d430fb82",
+  "physicalArm": "LEFT / R11 / gateway right / UDP26002",
+  "otherArmCommands": "None by this test",
+  "trials": [
+    {
+      "name": "opening-after-calibration",
+      "recording": "left_prepare-EDB85283-1E45-45EE-B05D-203D43D7CE74.csv",
+      "archive": "opening-after-calibration.csv.gz",
+      "sha256": "32c93560679a353a9408e5b02f07e84a83abb22d1642aea23d77204aac3a2fe9",
+      "archiveSHA256": "7d85fe8c6322e1cc4bbc8b7f2921e0d7651706eed7086c677187be3132bbcc1a",
+      "samples": 381,
+      "elapsedSeconds": 19.853149458329426,
+      "lastPhase": "release object",
+      "finalPositionsRadians": [
+        -1.050060982000651,
+        0.9964739198105125,
+        -0.6014568226989834,
+        0.0,
+        -0.595866314938689,
+        -0.595866314938689,
+        0.0
+      ],
+      "maxFeedbackAgeMilliseconds": 56.87294833435841,
+      "largestRecordingGapSeconds": 0.5826924583307118
+    },
+    {
+      "name": "separate-stationary-opening",
+      "recording": "left_prepare-6F5E15FB-4FC7-4123-BD10-65ED50D984D2.csv",
+      "archive": "separate-stationary-opening.csv.gz",
+      "sha256": "a2d0b569795a5aef1ec988708c57807d23394d3fb39d046e981453f727dada7d",
+      "archiveSHA256": "2f92e75a58f4bdaa18dcefcba2d2d5ccad596fa0d4115332b213fab27a93363b",
+      "samples": 133,
+      "elapsedSeconds": 6.757549833331723,
+      "lastPhase": "release object",
+      "finalPositionsRadians": [
+        -1.049788274305027,
+        0.9956557967236401,
+        -0.6011841150033593,
+        0.0,
+        -0.5973662072646218,
+        -0.5946391303083806,
+        0.0
+      ],
+      "maxFeedbackAgeMilliseconds": 27.328515329441025,
+      "largestRecordingGapSeconds": 0.07650187500257744
+    },
+    {
+      "name": "occluded-search-feedback-stop",
+      "recording": "left_recycle_can-E3C48E3E-46F4-4AC4-83E0-1F355D021175.csv",
+      "archive": "occluded-search-feedback-stop.csv.gz",
+      "sha256": "1a8960649c5f42aa2fabc14726c99e02585d3c1b0bd5d5a7123a0296691be30e",
+      "archiveSHA256": "7684700278bcace86dad30cd3661f1efddb201d1716197d9b29de7d4e5563e8b",
+      "samples": 814,
+      "elapsedSeconds": 42.695262708337395,
+      "lastPhase": "preflight",
+      "finalPositionsRadians": [
+        -1.049788274305027,
+        0.9955194428758282,
+        -0.6010477611555473,
+        0.0,
+        -0.5972298534168097,
+        -0.5945027764605685,
+        0.0
+      ],
+      "maxFeedbackAgeMilliseconds": 152.70131567148937,
+      "largestRecordingGapSeconds": 1.3351645416696556
+    },
+    {
+      "name": "empty-return-after-occluded-search",
+      "recording": "left_relax-C938A6E1-352C-411F-B759-90F3359DCDA0.csv",
+      "archive": "empty-return-after-occluded-search.csv.gz",
+      "sha256": "fdcc2e09775d6c7cbd043cebed095a37fc64546963b633fe8b4c02bb67add322",
+      "archiveSHA256": "8f56931d4c503f4667f1223cbd0511ba5efa640972dba394a6db83e08db81bee",
+      "samples": 305,
+      "elapsedSeconds": 15.549107624996395,
+      "lastPhase": "deactivating",
+      "finalPositionsRadians": [
+        0.000136353847812057,
+        0.01036289243371633,
+        0.0,
+        -0.000545415391248228,
+        0.000818123086872342,
+        0.002863430804053197,
+        0.0
+      ],
+      "maxFeedbackAgeMilliseconds": 86.13909500057555,
+      "largestRecordingGapSeconds": 0.13194579166884068
+    }
+  ],
+  "operatorObservations": [
+    "First preparation release at intensity10 still left jaws closed or too narrow.",
+    "After separate stationary Present/open using already accepted calibration, Rob confirmed: ok its open.",
+    "Bucket remains in its original position; the presented left arm occludes it."
+  ],
+  "diagnosis": "First opening after newly dispatched calibration may occur too early. Later stationary opening worked at the same intensity10; firmware timing root cause is not established.",
+  "occludedSearchOutcome": "Fresh motor/gripper feedback stop at about42.7s, before any reach/grip/carry. Reported motor294ms/gripper293ms. Session ended; no bound was relaxed.",
+  "emptyReturn": "Registered empty return ran without another approval, reached hanging, and deactivated in15.55s.",
+  "canPickedUp": false,
+  "canPlacedInBucket": false,
+  "canReachCalibration": {
+    "modelID": "c4a5c1bee9a9a0a6cca6ecdba9433f98ab647eea3084fb462ff592a0a0ea1e03",
+    "referenceID": "ba63a659f10085da3fa7f7c5002f17b4af27596408bc447e0ac64cdb4198c2d7",
+    "mappingID": "f63859164f5c72f3d68eef621bd737cfeadcbc1856141faafe0f2e4e2aee7882",
+    "translationMeters": [
+      -0.127,
+      0,
+      0
+    ],
+    "source": "Rob, 2026-10-22: the can was approximately 5 inches closer than the physical reach in trial 11149C94-29C3-4AA5-BC99-659F68C5E346. Experimental forward reach correction; raw vision sightings remain unchanged."
+  },
+  "canReachCalibrationSHA256": "8e90616ad7fa01a3253b4edd23ea9f42aeac4c3d7db26f1b526e69b1b83cacbd",
+  "cameraImagesIncluded": false,
+  "grantsPersisted": false,
+  "remainingWork": [
+    "Verify longer post-calibration settling on hardware.",
+    "Search remembered bucket with arm down; require new RGB-D observations, not old XYZ, before physical reaching.",
+    "Verify corrected pickup and complete gravity drop."
+  ],
+  "sourceSHA256": {
+    "Cerebro/ROBControllerArmApproval.swift": "fafbdd903ccb715c4ae50d332efdbaf22cdbd3035bfb0c7e2a81157bc11941e9",
+    "Cerebro/ROBGhostGestureEditor.swift": "4443b7fa67ae838722bb1457430045921dfe1d9f59efa6768d853cce865a8c43",
+    "Cerebro/ROBGhostMotionPlan.swift": "71fc0fcff95b92f922738ab928a67b4cd44009586b219247e93ccd63dd76c72e",
+    "Cerebro/ROBLeftArmTrial.swift": "dd128aea62361993fc94b566191ea67e7605fbeab1d603207f64b037b4243d8d",
+    "Cerebro/ROBMainViewController.mm": "bbc1cd21007714dc4f00904c8f8c208e9da5a4e5159853dbcf2d2515bae120e3",
+    "Cerebro/ROBSpeechBox.h": "815a73a87ad86c72d849e8b4c3204677f64328d77ba8f79c9b18c35bd57d888b",
+    "Cerebro/ROBSpeechBox.m": "ac5912eb78a19f5c8236fb1492e6457cba8615f8dad88a9d975824a350d15afb",
+    "Cerebro/ROBWorkspaceSearchPlan.swift": "89eef09b7b3b065b876c1cd1b386c7a6fd5640e4876a63db546b0ccab01bd551"
+  },
+  "updatedBuild": {
+    "binarySHA256": "ff40bf2d5aa9bd26472bc0e68527ae5b43aeaf3352d42877ca9f0edd00734e22",
+    "build": "Signed Debug arm64",
+    "codesignVerification": "passed --deep --strict",
+    "installed": true,
+    "preexistingModifiedSourcesExcluded": true,
+    "openingAfterLongerCalibrationWaitPhysicallyVerified": false,
+    "pickupAndDropPhysicallyVerified": false
+  },
+  "softwareValidation": [
+    {
+      "check": "controller approval and attention reminders",
+      "result": "passed",
+      "logSHA256": "fc51510dba5011843ebcf86306c8f1e0f20f3f2d14f42ec264b22a4d1cd7f767",
+      "scope": "hardware-free"
+    },
+    {
+      "check": "active feedback regression",
+      "result": "passed",
+      "logSHA256": "5b80abbce36905de409a445c06af19ceb2bee5cb5e50702a2bde5083738599a8",
+      "scope": "hardware-free"
+    },
+    {
+      "check": "parked search and fresh readmission",
+      "result": "passed",
+      "logSHA256": "37ae204967bf891c5ff190c6d98a52f653002b12ee7af11c67b0494c55a82646",
+      "scope": "hardware-free"
+    },
+    {
+      "check": "complete recycling executor",
+      "result": "passed",
+      "logSHA256": "69385c1d4aa49992c278d9a788b746f97c23f70f7612cf317251e38bc04aaef3",
+      "scope": "hardware-free"
+    },
+    {
+      "check": "final ghost planner / recall / recovery / reach correction",
+      "result": "passed",
+      "logSHA256": "e164cae2297de6533a0de4aecdfd8433a8ed8365f9e8fb3b89296d364fd9d810",
+      "scope": "hardware-free"
+    },
+    {
+      "check": "speech voice routing",
+      "result": "passed",
+      "logSHA256": "823742a3227f7c44bdec8bbefc323eb00c6fa72ff44abbeea9a730003c794c85",
+      "scope": "hardware-free"
+    }
+  ],
+  "fullExecutorRegression": "The first full run reached all motion/handoff/fault checks but its old assistance assertion expected one read-only mode query; the new search phase correctly adds a second query. The fixture expectation was corrected; full rerun is in progress."
+}

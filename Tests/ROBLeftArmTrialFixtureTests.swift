@@ -62,7 +62,10 @@ final class ROBAmberGatewayClient: NSObject {
     var mode = ["left": 0, "right": 0]
     var commands: [String] = []
     var calibrated: Set<String> = []
+    var calibrationReadyAt = 0.0
+    var jawsOpened = false
     var expectedGripperIntensity = 10
+    var expectedOpeningIntensity: Int?
     var gripperIntensities: [Int] = []
     var activeLeases: Set<String> = []
     var rejectHold = false
@@ -154,6 +157,8 @@ final class ROBAmberGatewayClient: NSObject {
         calibrated.remove(arm)
         guard !activeLeases.contains(arm) else { return ack("calibrate", arm, accepted: false) }
         calibrated.insert(arm)
+        calibrationReadyAt = ProcessInfo.processInfo.systemUptime + 8
+        jawsOpened = false
         return ack("calibrate", arm)
     }
     func controlGripper(forArm arm: String, action: String, force: Int) -> UInt64 {
@@ -161,8 +166,12 @@ final class ROBAmberGatewayClient: NSObject {
             precondition(!ROBLeftArmTrial.shared.authorizesTaughtWaypoint(arm: arm,
                 expectedSessionGeneration: generation), "Stationary gripper approval authorized arm travel")
         }
-        precondition(force == expectedGripperIntensity)
+        precondition(force == (action == "release" ? expectedOpeningIntensity ?? expectedGripperIntensity : expectedGripperIntensity))
         gripperIntensities.append(force)
+        // Firmware may accept an opening while calibration still owns the
+        // motor, without physically executing it. Reproduce the live miss.
+        if action == "release" { jawsOpened = ProcessInfo.processInfo.systemUptime >= calibrationReadyAt }
+        else { jawsOpened = false }
         precondition(calibrated.contains(arm), "Uncalibrated jaw command")
         let id = ack("gripper_\(action)", arm, accepted: action != "release" || !rejectRelease)
         if action == "release" { afterRelease?() }
@@ -179,11 +188,12 @@ final class ROBWorkspaceSearch {
     var requiredDepth = true
     var objects: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
     var onInspect: (() -> Void)?
+    var afterInspect: (() -> Void)?
     @MainActor func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true, check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
         requiredDepth = requireDepth
         onInspect?()
         if fail { throw ROBArmRoutineError.blocked("Fixture observation unavailable") }
-        try check(); return objects
+        try check(); afterInspect?(); return objects
     }
 }
 
@@ -229,24 +239,22 @@ final class ROBArmRoutineCoordinator {
         }
     }
     @MainActor static func delayedTelemetryTests() async throws {
-        let trial = ROBLeftArmTrial.shared, g = ROBAmberGatewayClient.shared
-        let search = ROBWorkspaceSearch.shared
+        let g = ROBAmberGatewayClient.shared
         for scenario in ["delivery", "source", "live_loss", "malformed", "current_jump"] {
-            g.q["right"] = Array(repeating: 0, count: 7); g.mode["right"] = 1
+            g.q["right"] = ROBLeftArmInteractionPlan.target(index:ROBLeftArmInteractionPlan.frontIndex)!; g.mode["right"] = 2
+            g.calibrated = ["right"]
             g.stale = false; g.commands = []; g.activeLeases = []
             ROBArmRoutineVision.shared.fresh = true
             UserDefaults.standard.set(scenario == "current_jump" ? 0.5 : 0, forKey: ROBLeftArmTrial.currentLimitKey)
-            search.objects = [.can: .init(target: .can, position: [10,0,1], confidence: 0.9,
-                capturedAt: Date().timeIntervalSince1970 * 1000, sequence: 444,
-                view: .init(panDegrees: 0, upperTarget: 6306))]
-            search.onInspect = {
+            g.afterStateQuery = {
+                g.afterStateQuery = nil
                 let initial = g.sequence
                 if scenario == "current_jump" {
-                    let fresh = ROBAmberGatewayTelemetry(sequence: initial + 1, positions: g.q["right"]!, stale: false, status: 1)
+                    let fresh = ROBAmberGatewayTelemetry(sequence: initial + 1, positions: g.q["right"]!, stale: false, status: 2)
                     NotificationCenter.default.post(name: .ROBAmberGatewayTelemetryDidUpdate, object: g, userInfo: ["telemetry": fresh])
                 }
                 let queued = ROBAmberGatewayTelemetry(sequence: initial + 2, positions: g.q["right"]!,
-                    stale: scenario == "source", status: 1, queuedMilliseconds: 700)
+                    stale: scenario == "source", status: 2, queuedMilliseconds: 700)
                 if scenario == "malformed" { queued.currents[3] = NSNumber(value: Double.nan) }
                 if scenario == "current_jump" { queued.currents = Array(repeating: NSNumber(value: 5), count: 7) }
                 g.sequence = initial + 3 // a strictly newer cache exists while the UI drains its older notification
@@ -254,27 +262,26 @@ final class ROBArmRoutineCoordinator {
                 NotificationCenter.default.post(name: .ROBAmberGatewayTelemetryDidUpdate, object: g,
                     userInfo: ["telemetry": queued])
             }
-            let result = await run("left_recycle_can")
-            search.onInspect = nil; g.stale = false
+            let result = await run("left_grip")
+            g.afterStateQuery = nil; g.stale = false
             if scenario == "delivery" {
-                precondition(result["status"] as? String == "needs_help", result.description)
+                precondition(result["status"] as? String == "accepted_unverified", result.description)
                 precondition(result["delayed_telemetry_samples"] as? Int == 1)
                 precondition((result["max_delayed_telemetry_age_ms"] as? Double ?? 0) >= 700)
                 let csv = try String(contentsOfFile: result["current_recording"] as! String)
-                precondition(csv.contains(",701.0,preflight"), "Queued history must retain its actual delivery age")
+                precondition(csv.contains(",701.0,"), "Queued history must retain its actual delivery age")
             } else {
                 precondition(result["status"] as? String == "blocked", "\(scenario): \(result)")
                 precondition(g.commands.contains("priority_hold:right"), "A genuine feedback/current fault did not request hold")
             }
-            precondition(g.commands.allSatisfy { ["mode_query:right", "priority_hold:right"].contains($0) },
-                "A recording/recovery check activated, moved, deactivated or gripped an arm")
-            precondition(g.q["right"] == Array(repeating: 0, count: 7))
+            precondition(g.commands.allSatisfy { ["mode_query:right", "priority_hold:right", "gripper_state:right", "gripper_hold:right"].contains($0) },
+                "A stationary recording check activated, moved or deactivated an arm")
+            precondition(g.q["right"] == ROBLeftArmInteractionPlan.target(index:ROBLeftArmInteractionPlan.frontIndex)!)
             precondition(!ROBControllerArmApproval.shared.authorizesLeftArmTrial("invented"),
                 "Recovered feedback restored an old motion grant")
         }
-        search.objects = [:]; search.onInspect = nil
         UserDefaults.standard.set(0, forKey: ROBLeftArmTrial.currentLimitKey)
-        print("Delayed telemetry: 700 ms queued history retained only with newer live feedback; stale source, true feedback loss, malformed currents and historical current jumps still stop; no motion or grant recovery")
+        print("Delayed telemetry: 700 ms queued history retained only with newer live feedback; stale source, true feedback loss, malformed currents and historical current jumps still stop; stationary jaws only after valid live feedback; no travel or grant recovery")
     }
     @MainActor static func tests() async throws {
         let plan = ROBLeftArmInteractionPlan.self
@@ -304,6 +311,7 @@ final class ROBArmRoutineCoordinator {
         let broker = ROBControllerArmApproval.shared
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("left-arm-fixture-" + UUID().uuidString)
         trial.recordingDirectory = folder
+        trial.canReachCalibrationFile = folder.appendingPathComponent("isolated-can-calibration.json")
         let savedLimit = UserDefaults.standard.object(forKey: ROBLeftArmTrial.currentLimitKey)
         defer {
             if let savedLimit { UserDefaults.standard.set(savedLimit, forKey: ROBLeftArmTrial.currentLimitKey) }
@@ -351,6 +359,57 @@ final class ROBArmRoutineCoordinator {
         precondition(approvals == 0 && g.commands.isEmpty && ROBAmberGatewayTunnel.shared.connections == 0)
         ROBWorkspaceSearch.shared.fail = false; ROBWorkspaceSearch.shared.onInspect = nil; g.ready = true
         print("Neck-only search and hanging checks: no arm approval, gateway connection, motor or hold commands, including failure")
+        if CommandLine.arguments.last == "recorded-recovery" {
+            try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
+            let original = URL(fileURLWithPath:CommandLine.arguments[1]).appendingPathComponent("docs/calibration/evidence/2026-10-22-recycling/recall-gravity-live-missed-grasp.proposal.json")
+            let old = try JSONDecoder().decode(ROBLeftGestureProposal.self,from:Data(contentsOf:original))
+            let saved = folder.appendingPathComponent("left_recycle_can-recorded-fixture.proposal.json")
+            try old.encoded().write(to:saved)
+            var csv = "elapsed_s,sequence,robot_arm,gateway_arm,joint,position_rad,current_raw,current_delta_raw,feedback_age_ms,phase\n"
+            for index in 0...29 { for joint in 0..<7 {
+                csv += "\(index),\(index+1),left,right,\(joint+1),\(old.steps[index].positions[joint]),0.2,0,1,gesture step \(index)\n"
+            } }
+            try csv.write(to:folder.appendingPathComponent("left_recycle_can-recorded-fixture.csv"),atomically:true,encoding:.utf8)
+            g.generation += 1; g.q["right"] = old.steps[29].positions; g.mode["right"] = 2; g.commands = []
+            let recovery = await run("left_prepare")
+            precondition(recovery["status"] as? String == "accepted_unverified",recovery.description)
+            precondition(approvals == 1 && g.q["right"]! == plan.target(index:plan.frontIndex)!)
+            precondition(g.commands.filter { $0.hasPrefix("ghost_step_") }.count == 25)
+            precondition(!g.commands.contains("deactivate:right") && !g.commands.contains("gripper_hold:right"))
+            precondition(g.gripperIntensities == [10] && g.activeLeases.isEmpty)
+            g.commands = []; g.q["right"] = [Double](repeating:2.8,count:7)
+            let outside = await run("left_prepare")
+            precondition(outside["status"] as? String == "blocked" && !g.commands.contains { $0.hasPrefix("ghost_step") || $0.hasPrefix("gripper_") },outside.description)
+            print("Recorded empty recovery: NEW real-protocol fixture approval after a new gateway generation, exact 25-step executed reverse to front, open at 10, no close/deactivate; off-path baseline rejected")
+            return
+        }
+        if CommandLine.arguments.last == "parked-search" {
+            let prepared = await run("left_prepare")
+            precondition(prepared["status"] as? String == "accepted_unverified" && g.jawsOpened,prepared.description)
+            let search = ROBWorkspaceSearch.shared
+            search.objects = [:]; g.commands = []
+            search.onInspect = {
+                precondition(g.mode["right"] == 0 && ROBArmRoutinePlan.near(g.q["right"]!,Array(repeating:0,count:7)))
+                precondition(g.commands.contains("deactivate:right") && g.activeLeases.isEmpty)
+                g.stale = true // A neck-only parked search has no arm actuator to authorize.
+            }
+            search.afterInspect = { g.stale = false }
+            let noObjects = await run("left_recycle_can")
+            precondition(noObjects["status"] as? String == "not_found" && noObjects["arm_motion_sent"] as? Bool == true && noObjects["reach_sent"] as? Bool == false,noObjects.description)
+            precondition(!g.commands.contains { $0.hasPrefix("gripper_") || $0.hasPrefix("ghost_step_") })
+            search.afterInspect = nil
+            for changed in [false,true] {
+                g.commands = []
+                search.onInspect = { if changed { g.q["right"]![0] = 0.5 } else { g.stale = true } }
+                let failed = await run("left_recycle_can")
+                precondition(failed["status"] as? String == "blocked",failed.description)
+                precondition(!g.commands.contains { $0.hasPrefix("position_mode") || $0.hasPrefix("waypoint_") || $0.hasPrefix("gripper_") || $0.hasPrefix("ghost_step_") })
+                g.stale = false; g.q["right"] = Array(repeating:0,count:7)
+            }
+            search.onInspect = nil
+            print("Parked search: registered EMPTY return/deactivation before looking; delayed inactive feedback cannot authorize travel; fresh readmission and unchanged hanging baseline required, no jaw commands")
+            return
+        }
         if CommandLine.arguments.last == "recycling" {
             let model = try ROBGhostRobotModel(directory: URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
             let front = model.toolPosition(model.positions(vendorLeft: plan.target(index: plan.frontIndex)!))!
@@ -360,14 +419,16 @@ final class ROBArmRoutineCoordinator {
                 .orangeBucket: .init(target: .orangeBucket, position: [front.x,front.y+0.08,front.z-0.10], confidence: 0.8,
                     capturedAt: now, sequence: 11, view: view, openingRadius: 0.14)]
             g.expectedGripperIntensity = 2
+            g.expectedOpeningIntensity = 10
             let outcome = await run("left_recycle_can")
             precondition(outcome["motion_completed"] as? Bool == true, outcome.description)
             precondition(outcome["placement_verified"] as? Bool == false, "Command acknowledgements falsely verified placement")
+            precondition(outcome["gripper_opening_intensity"] as? Int == 10 && g.gripperIntensities == [10,2,10], "Opening must use its fixed setting while closing remains gentle")
             precondition(approvals == 1 && ROBWorkspaceSearch.shared.requiredDepth)
             precondition(g.commands.filter { $0 == "gripper_release:right" || $0 == "gripper_hold:right" } == ["gripper_release:right","gripper_hold:right","gripper_release:right"])
             precondition(g.commands.allSatisfy { $0.hasSuffix(":right") } && !g.commands.contains("deactivate:right"))
             precondition(g.activeLeases.isEmpty && ROBAmberArmMotionArbiter.shared.owners.isEmpty)
-            print("Horizontal recycling executor: one real-protocol fixture grant, fresh grounded targets, seven-joint frozen steps, prepare/grip/release at intensity 2, measured hold, no right-arm motion or automatic torque-off")
+            print("Horizontal recycling executor: one real-protocol fixture grant, fresh grounded targets, frozen steps, opening/release 10 and closing 2, measured hold, no right-arm motion or automatic torque-off")
             return
         }
         if CommandLine.arguments.last == "telemetry" { try await delayedTelemetryTests(); return }
@@ -412,6 +473,7 @@ final class ROBArmRoutineCoordinator {
         precondition(!g.commands.contains("deactivate:right"), "Preparation required a manual-style torque-off/on cycle")
         precondition(g.commands.filter { $0.hasPrefix("calibrate") } == ["calibrate:right"])
         precondition(g.commands.contains("gripper_release:right"))
+        precondition(g.jawsOpened, "Opening was acknowledged before physical calibration completed")
         let heldForPrepare = g.commands.firstIndex(of: "priority_hold:right")!
         precondition(heldForPrepare > g.commands.lastIndex(of: "waypoint_\(plan.frontIndex):right")!)
         precondition(heldForPrepare < g.commands.firstIndex(of: "calibrate:right")!)
@@ -677,14 +739,14 @@ final class ROBArmRoutineCoordinator {
         precondition(assistance["status"] as? String == "needs_help", assistance.description)
         precondition(assistance["arm_motion_sent"] as? Bool == false && approvals == beforeHelp + 1)
         precondition(requests == ["Please bring the can closer."] && search.requiredDepth)
-        precondition(g.commands == ["mode_query:right"], "Help request issued arm/gripper commands")
+        precondition(g.commands == ["mode_query:right", "mode_query:right"], "Help request issued arm/gripper commands")
         g.commands = []; requests = []
         search.objects = [.can: .init(target: .can, position: [hand.x,hand.y,hand.z], confidence: 0.9,
             capturedAt: Date().timeIntervalSince1970 * 1000, sequence: 112, view: view)]
         let missingRim = await run("left_recycle_can")
         precondition(missingRim["status"] as? String == "not_localized", missingRim.description)
         precondition(requests == ["I see the bucket, but I can't measure its opening yet."])
-        precondition(g.commands == ["mode_query:right"], "Visual bucket detection admitted reaching without release geometry")
+        precondition(g.commands == ["mode_query:right", "mode_query:right"], "Visual bucket detection admitted reaching without release geometry")
         search.objects = [:]; search.announce = nil
         print("Recycling assistance: one short request before motion for a distant can, even without bucket depth; reachable can never substitutes for missing release geometry")
         try await delayedTelemetryTests()

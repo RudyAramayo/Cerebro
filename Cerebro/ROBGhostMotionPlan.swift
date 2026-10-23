@@ -632,3 +632,49 @@ struct ROBGhostRecordingSample {
         return result
     }
 }
+
+/// A newly authorized EMPTY-arm preparation may retrace the actually executed
+/// prefix of a frozen recycling proposal. No payload assumption or old grant
+/// survives a failure/restart, and no unvisited point becomes a return route.
+enum ROBRecordedLeftRecovery {
+    static func make(previous: ROBLeftGestureProposal, samples: [ROBGhostRecordingSample],
+                     measured: [Double], model: ROBGhostRobotModel, generation: UInt64) throws -> ROBLeftGestureProposal {
+        guard previous.kind == "recycling", previous.validForReplay(model: model), generation > 0,
+              measured.count == 7, measured.allSatisfy(\.isFinite),
+              let lastVisited = samples.last(where: { $0.step >= 0 })?.step,
+              previous.steps.indices.contains(lastVisited),
+              let frontIndex = previous.steps.firstIndex(where: { $0.jawAction == .prepare }), lastVisited > frontIndex else {
+            throw ROBGhostMotionError.blocked("No recorded recycling route is available for empty-arm recovery.")
+        }
+        try ROBLeftGestureCompiler.validate(previous,model:model)
+        var segment: Int?
+        for index in stride(from: lastVisited,through: frontIndex+1,by:-1) {
+            let a = previous.steps[index-1].positions, b = previous.steps[index].positions
+            let delta = zip(a,b).map { $1-$0 }, square = delta.reduce(0) { $0+$1*$1 }
+            let t = square > 0 ? max(0,min(1,zip(zip(measured,a),delta).reduce(0) { $0+($1.0.0-$1.0.1)*$1.1 }/square)) : 0
+            if ROBArmRoutinePlan.near(measured,zip(a,delta).map { $0+t*$1 }) { segment = index; break }
+        }
+        guard let segment else { throw ROBGhostMotionError.blocked("Measured left arm is outside the recorded route; no recovery movement was proposed.") }
+        var steps: [ROBLeftGestureProposal.Step] = [], previousQ = measured
+        for index in stride(from: segment-1,through: frontIndex,by:-1) {
+            let target = previous.steps[index].positions
+            let checks = max(1,Int(ceil(1.5*zip(previousQ,target).reduce(0.0) { $0+abs($1.0-$1.1) }/0.01)))
+            for sample in 0...checks {
+                let t = Double(sample)/Double(checks), q = zip(previousQ,target).map { $0+($1-$0)*t }
+                guard q.allSatisfy({ abs($0) <= 3.1 }), model.treadSeparation(vendorLeft:q) >= 0.030 else {
+                    throw ROBGhostMotionError.blocked("The measured recorded return enters the tread clearance margin.")
+                }
+            }
+            guard let seconds = ROBLeftArmInteractionPlan.duration(from:previousQ,to:target,padding:ROBArmRoutinePlan.tolerance), seconds <= 5 else {
+                throw ROBGhostMotionError.blocked("The recorded return exceeds the bounded step timing.")
+            }
+            steps.append(.init(positions:target,seconds:seconds,stage:"Return EMPTY arm on recorded path")); previousQ = target
+        }
+        guard !steps.isEmpty, steps.count <= 80, steps.reduce(0,{ $0+$1.seconds }) <= 100 else {
+            throw ROBGhostMotionError.blocked("The recorded empty return exceeds one preparation operation.")
+        }
+        return .init(id:UUID(),name:"Return confirmed-empty left arm to front",kind:"recover",modelID:model.modelID,
+            referenceID:model.referenceID,geometryID:model.geometryID,mappingID:ROBGhostRobotModel.mappingID,
+            sessionGeneration:generation,baseline:measured,poses:[],steps:steps)
+    }
+}

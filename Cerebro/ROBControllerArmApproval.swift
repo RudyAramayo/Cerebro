@@ -43,6 +43,7 @@ import Foundation
         let executionLimit: TimeInterval
         var voiceAuthorized = false
         var armSessionID: String? = nil
+        var attentionReminders = 0
     }
     private struct ArmSession {
         let id: String
@@ -92,7 +93,7 @@ import Foundation
     }
 
     func beginArmSession(completion: @escaping (NSDictionary) -> Void) {
-        let summary = "Authorize a 15-minute supervised LEFT-arm rehearsal: local neck-camera search and pointing assistance, empty-arm preparation/calibration/opening, bounded reviewed gestures, empty-can recycling at intensity 2, and lowering the empty left arm. One authorization covers these complete routines and all waypoints. No driving, right-arm motion, arbitrary raw joint commands or force escalation. The model/hand-eye geometry is provisional; watch clearance and keep Stop available. Stop, sleep/restart, expiry or controller loss ends this session."
+        let summary = "Authorize a 15-minute supervised LEFT-arm rehearsal: local search/pointing, preparation of the CONFIRMED-EMPTY arm, empty calibration and opening at fixed intensity 10, bounded reviewed gestures, empty-can recycling with gentle closing at intensity 2 and gravity release at intensity 10, and empty-arm lowering. A held EMPTY arm after a missed recycling attempt may first retrace only its recorded executed route to front. Confirm no object is held. One authorization covers these complete routines and all waypoints. No driving, right-arm motion, arbitrary raw targets, blind force escalation or torque-off with a payload. The model/hand-eye geometry is provisional; watch clearance and keep Stop available. Stop, sleep/restart, expiry or controller loss ends this session."
         request(action: "arm_operation", arguments: ["operation": "manual", "arm": "left", "summary": summary],
             summary: summary, execute: { [weak self] done in
                 guard let self, let p = self.pending else { return }
@@ -314,6 +315,14 @@ import Foundation
             update("Arm rehearsal authorization expired or its controller disconnected.")
         }
         guard let p = pending else { return }
+        if p.started == nil, p.attentionReminders < 2,
+           now().timeIntervalSince(p.created) >= (p.attentionReminders == 0 ? 20 : 45),
+           now().timeIntervalSince(p.created) < Self.operatorApprovalSeconds {
+            pending?.attentionReminders += 1
+            // Rob requested an audible attention cue when the first question
+            // is missed. Repeat the SAME scope without extending its deadline.
+            announceApproval?("Hey! Can I move my arms?")
+        }
         if p.started != nil, p.voiceAuthorized || p.armSessionID != nil {
             if !authorizationIsLive(p) { cancel(reason: "Authorized arm operation expired; hold requested.") }
             return

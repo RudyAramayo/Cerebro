@@ -283,7 +283,8 @@ import simd
             self.canPlanTask = Task { @MainActor [weak self] in
                 do {
                     let preview = try await Task.detached(priority: .userInitiated) {
-                        try ROBCanGrabPreview.make(can: can, model: model, baseline: baseline, side: side)
+                        try ROBCanGrabPreview.make(can: can, model: model, baseline: baseline, side: side,
+                            reachOffset:side == "left" ? ROBLeftCanReachCalibration.load(model:model) : .zero)
                     }.value
                     guard let self, !Task.isCancelled, self.canRequestID == request else { return }
                     self.showCanPreview(preview)
@@ -316,11 +317,19 @@ import simd
         marker.name = "Detected Coke can RGB-D center"
         marker.simdPosition = SIMD3<Float>(point); marker.renderingOrder = 25
         canOverlay.addChildNode(marker)
+        if simd_distance(preview.calibratedGraspPoint,point) > 0.001 {
+            let corrected = SCNNode(geometry:SCNSphere(radius:0.014))
+            corrected.geometry?.materials = [material(.systemYellow)]
+            corrected.name = "Operator-corrected physical reach"
+            corrected.simdPosition = SIMD3<Float>(preview.calibratedGraspPoint); corrected.renderingOrder = 26
+            canOverlay.addChildNode(corrected)
+        }
         let can = SCNCylinder(radius: 0.033, height: 0.115); can.materials = [red]
         let outline = SCNNode(geometry: can); outline.eulerAngles.x = .pi / 2
         outline.opacity = 0.45; marker.addChildNode(outline)
         let text = SCNText(string: "COKE CAN · RGB-D\n" + String(format: "X %.3f  Y %.3f  Z %.3f m", point.x, point.y, point.z) +
-            "\n\(preview.side.capitalized) ghost · simulation only", extrusionDepth: 0)
+            "\n\(preview.side.capitalized) ghost · simulation only" +
+            (simd_distance(preview.calibratedGraspPoint,point) > 0.001 ? String(format:"\nReach correction: %+.1f cm forward",preview.reachOffset[0]*100) : ""), extrusionDepth: 0)
         text.font = .boldSystemFont(ofSize: 6); text.flatness = 0.2; text.materials = [white]
         let label = SCNNode(geometry: text); label.name = "Coke can label"
         label.position = SCNVector3(0, 0, 0.11); label.scale = SCNVector3(0.005, 0.005, 0.005)

@@ -262,6 +262,24 @@ final class ROBAmberGatewayClient: NSObject {
         }
         do {
             let b = broker()
+            var clock = Date(), prompts: [String] = [], executions = 0
+            b.now = { clock }; b.announceApproval = { prompts.append($0) }
+            b.requestLeftWorkspaceTask(summary: "One unchanged complete task", execute: { _ in executions += 1 }, cancel: {}, completion: { _ in })
+            clock.addTimeInterval(20); b.tick(); b.tick()
+            clock.addTimeInterval(25); b.tick(); b.tick()
+            check(prompts == ["Can I move my arms?", "Hey! Can I move my arms?", "Hey! Can I move my arms?"], "Bounded attention reminders repeat one pending operation")
+            check(executions == 0 && !b.authorizesLeftArmTrial("One unchanged complete task"), "Reminders cannot grant motion")
+            check(b.receiveSpokenAuthorization("yes proceed"), "One final microphone approval accepts the original scope after reminders")
+            clock.addTimeInterval(20); b.tick()
+            check(prompts.count == 3 && executions == 1, "Executing operations never ask again")
+            b.cancel(reason: "Reminder fixture complete")
+            let expired = broker(); clock = Date(); expired.now = { clock }
+            expired.requestLeftGesture(summary: "Unheard request", execute: { _ in executions += 1 }, cancel: {}, completion: { _ in })
+            clock.addTimeInterval(91); expired.tick()
+            check(!expired.isPending && executions == 1, "Reminders do not extend the original approval deadline")
+        }
+        do {
+            let b = broker()
             var prompts = 0, executions = 0, result: NSDictionary = [:]
             var time = Date(); b.now = { time }
             b.announceApproval = { _ in prompts += 1 }

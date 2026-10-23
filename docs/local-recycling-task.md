@@ -18,7 +18,7 @@ ROB asks exactly “Can I move my arms?” and accepts one final local microphon
 acknowledgement such as “yes, proceed,” or an authenticated iPhone/Vision Pro
 approval. The complete pending scope remains in Settings/controller details. Accepting
 the session prepares the empty left arm. Covered preparation, local searches,
-reviewed gestures, empty-can recycling at intensity 2 and empty-arm lowering
+reviewed gestures, empty-can recycling (closing at intensity 2; opening at 10) and empty-arm lowering
 then execute without additional approvals or Continue buttons. Standalone task
 motions also accept one spoken or controller approval for the complete operation.
 Rob additionally authorized empty-arm return to hanging without any new approval,
@@ -38,6 +38,19 @@ loss or motion failure. A controller-authorized session retains controller
 freshness; a microphone-authorized session does not require a connected phone.
 There is no per-waypoint authorization. Diagnostics raw commands remain outside
 the reusable session.
+
+A pending question starts a fresh microphone utterance so an earlier conversation
+cannot remain prefixed to “yes, proceed.” If unheard, ROB repeats “Hey! Can I move
+my arms?” at 20 and 45 seconds. These reminders neither grant authorization nor
+extend the original 90-second deadline, and stop once authorization is accepted.
+
+Preparation can recover a confirmed-empty arm from a recent failed recycling
+attempt by reversing only its recorded, actually executed proposal prefix to the
+front pose. The old proposal is revalidated against the same model/mapping, the
+fresh measured pose must lie on that executed prefix, and a new authorized
+preparation supplies authority. Unvisited targets, old grants, jaw actions and
+arbitrary return paths are excluded. The return remains bounded to 80 steps /
+100 seconds, with transport and sampled tread-clearance limits.
 
 Local commands include “start an arm session,” “recycle the can,” “find the
 orange bucket,” “check your arms are hanging,” “lower your left arm,” and
@@ -84,7 +97,8 @@ Views outside the current calibrated neck envelope are skipped immediately.
 Search now starts with durable last-seen views for the requested objects. The
 per-model `WorkspaceSearch/recall-v1.json` records a twice-confirmed box, camera
 view, confidence and original capture time. Existing search reports seed the
-first recall file. Recalled views are centered before falling back to the raster;
+first recall file. Search checks the original successful camera view first, then
+its recentered view before falling back to the raster;
 partially visible objects get up to four additional centered looks. Hints expire
 after 24 hours and a changed robot model invalidates them. No remembered position,
 old detection, saved permission or confidence value satisfies a live confirmation.
@@ -232,6 +246,14 @@ the last pose. No camera images, grants or physical grip claims are included.
 `left_recycle_can` covers search, pointing assistance if needed, planning and
 execution under the original authorization, bounded to ten minutes to allow the
 deliberate search and settling intervals (the executor stops at 590 seconds).
+Before searching, it returns the confirmed-empty left arm along its registered
+route to measured hanging and deactivates, so the presented hand cannot occlude
+the floor bucket. This return stays inside the task's single authorization.
+The inactive neck-only phase retains ownership, gateway generation, unchanged
+hanging/inactive state, deadline and Stop. Delayed arm telemetry cannot authorize
+motion: fresh motor/gripper feedback, a new mode query and hanging baseline are
+required again before planning is admitted to physical execution. Feedback and
+lease limits for energized arms remain unchanged.
 A local seven-joint IK planner now compiles the horizontal-jaw ghost approach
 into physical steps: registered empty-arm presentation, leveling, raised
 cross-body approach, grasp, 6 cm test lift, high carry, gravity release and upward
@@ -252,8 +274,13 @@ depth fitting run off the main thread so they cannot block control monitoring.
 
 Before each jaw action the executor drains motion leases, requires a confirmed
 position hold and fresh settled joint feedback. Empty calibration occurs only at
-the initial front preparation, never around the can. Grip/release use vendor
-intensity 2. There are no manual readiness stages, automatic force escalation,
+the initial front preparation, never around the can. After newly dispatched
+empty calibration, the arm remains held and monitored for 10 seconds before
+opening. Two seconds proved insufficient in a live preparation; a later separate
+opening worked. The longer interval is a conservative timing change, not measured
+calibration completion or jaw-open feedback. Recycling and Present/open use fixed
+opening intensity 10; gentle recycling closing remains 2. Legacy taught tabletop
+and handoff actions retain their existing settings. There are no manual readiness stages, automatic force escalation,
 blind retries or automatic torque-off. Stop/faults request hold and cancel later
 steps. A task that may have gripped an object never offers the old empty-arm
 automatic recovery path.
@@ -269,6 +296,15 @@ orientation. The small lift is a supervised test, not a force/slip detector.
 Jaw position, grip force and retention are unmeasured. Completion therefore
 reports measured arm arrival and accepted jaw commands with
 `placement_verified=false`; it does not claim the can entered the bucket.
+
+An optional local `LeftArmCalibration/can-reach.json` stores an explicitly
+operator-measured XYZ translation bound to the robot's model/reference/mapping.
+Absent means zero correction; an invalid or mismatched existing file blocks.
+Each component is bounded to 15 cm. Rob's approximately 5-inch overshoot report
+on October 22 supplied the experimental can-only correction `[-0.127, 0, 0]` m.
+It shifts the can approach/grasp/lift, leaving the raw detection and bucket
+position unchanged. The ghost shows the raw can marker and a separate corrected
+reach marker. This does not establish camera-to-arm or tool-center calibration.
 
 ## Validation
 

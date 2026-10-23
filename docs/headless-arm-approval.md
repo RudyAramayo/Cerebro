@@ -35,6 +35,14 @@ The legacy paired-startup preference requests one operation approval. The new
 launch/wake preference offers the bounded left-arm session once; accepting it
 prepares the empty left arm. Neither preference persists a motion grant.
 
+Unheard pending questions repeat with “Hey!” at 20 and 45 seconds, without
+changing scope or the 90-second deadline. Each question starts a new microphone
+utterance; only a final human transcript can authorize. The current left-session
+scope names fixed opening at 10 and gentle can closing at 2. A newly authorized
+confirmed-empty preparation can also retrace the validated, actually executed
+prefix of a recent recycling recording to front; it cannot restore an old grant
+or lower a possible payload. See the local task document for these bounds.
+
 The supervised **Grip and return** (`left_object_cycle`) operation uses one
 immutable controller approval for the entire physical-left cycle: empty-arm
 raise, empty-jaw calibration if needed, open, grip at raw intensity 2, stationary

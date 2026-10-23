@@ -138,7 +138,7 @@ struct ROBWorkspaceRecall: Codable {
     }
     func views(targets: [ROBWorkspaceTarget], now: Double = Date().timeIntervalSince1970 * 1000) -> [ROBWorkspaceView] {
         targets.compactMap { target in sightings.first { $0.target == target && $0.valid && (0...86_400_000).contains(now - $0.capturedAt) } }
-            .flatMap { [$0.centeredView, $0.view] }
+            .flatMap { [$0.view, $0.centeredView] }
             .reduce(into: []) { result, view in
                 if !result.contains(where: { abs($0.panDegrees - view.panDegrees) < 3 && abs($0.upperTarget - view.upperTarget) < 100 }) { result.append(view) }
             }
@@ -255,6 +255,29 @@ struct ROBWorkspaceLocatedObject: Codable {
     }
 }
 
+/// Operator-measured reach correction, bound to this robot's model/reference.
+/// Raw sightings remain unchanged and never become permission. No default
+/// offset is inferred when this local calibration file is absent.
+struct ROBLeftCanReachCalibration: Codable {
+    let modelID: String
+    let referenceID: String
+    let mappingID: String
+    let translationMeters: [Double]
+    let source: String
+    static var file: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Cerebro/LeftArmCalibration/can-reach.json") }
+    static func load(model: ROBGhostRobotModel, file: URL = file) throws -> SIMD3<Double> {
+        guard FileManager.default.fileExists(atPath:file.path) else { return .zero }
+        let data = try Data(contentsOf:file)
+        guard data.count <= 16_384, let value = try? JSONDecoder().decode(Self.self,from:data),
+              value.modelID == model.modelID, value.referenceID == model.referenceID,
+              value.mappingID == ROBGhostRobotModel.mappingID, !value.source.isEmpty,
+              value.translationMeters.count == 3, value.translationMeters.allSatisfy({ $0.isFinite && abs($0) <= 0.15 }) else {
+            throw ROBGhostMotionError.blocked("The local left-can reach calibration is invalid or belongs to a different robot model.")
+        }
+        return SIMD3(value.translationMeters[0],value.translationMeters[1],value.translationMeters[2])
+    }
+}
+
 /// Measure vertical from a dominant floor plane before interpreting a low
 /// bucket through the provisional neck-angle prior. This is a per-frame
 /// camera correction, not a replacement for arm calibration or a saved grant.
@@ -338,6 +361,8 @@ struct ROBCanGrabPreview {
     let graspError: Double
     let gripperTiltDegrees: Double
     let reachesCan: Bool
+    var reachOffset: [Double] = [0,0,0]
+    var calibratedGraspPoint: SIMD3<Double> { can.point + SIMD3(reachOffset[0],reachOffset[1],reachOffset[2]) }
     var seconds: Double { steps.reduce(0) { $0 + $1.seconds } }
     var helpRequest: String? {
         // An orientation-only failure must not be described as too far away.
@@ -346,14 +371,16 @@ struct ROBCanGrabPreview {
 
     static func make(can: ROBWorkspaceLocatedObject, model: ROBGhostRobotModel,
                      baseline: [String: Double], side: String = "left", now: Double = Date().timeIntervalSince1970 * 1000,
-                     bucket: ROBWorkspaceLocatedObject? = nil) throws -> Self {
+                     bucket: ROBWorkspaceLocatedObject? = nil, reachOffset: SIMD3<Double> = .zero) throws -> Self {
         guard can.target == .can, can.position.count == 3, can.position.allSatisfy(\.isFinite),
               ["left", "right"].contains(side),
               can.confidence.isFinite, (0.35...1).contains(can.confidence), can.sequence > 0,
               can.capturedAt.isFinite, now.isFinite, (0...60_000).contains(now - can.capturedAt),
-              baseline.values.allSatisfy(\.isFinite) else {
+              baseline.values.allSatisfy(\.isFinite),
+              [reachOffset.x,reachOffset.y,reachOffset.z].allSatisfy({ $0.isFinite && abs($0) <= 0.15 }) else {
             throw ROBGhostMotionError.blocked("Find the can again; its measured position is missing or older than 60 seconds.")
         }
+        let graspPoint = can.point + reachOffset
         func tip(_ q: [String: Double]) -> SIMD3<Double> {
             let frame = model.frames(q)[side + "_tool"]!
             return SIMD3(frame.columns.3.x, frame.columns.3.y, frame.columns.3.z)
@@ -438,9 +465,9 @@ struct ROBCanGrabPreview {
         let frontTip = tip(seed)
         let level = closest(frontTip, seed)
         append(level, "Level gripper horizontally")
-        let raised = closest(SIMD3(frontTip.x, frontTip.y, max(frontTip.z, can.point.z + 0.15)), level)
+        let raised = closest(SIMD3(frontTip.x, frontTip.y, max(frontTip.z, graspPoint.z + 0.15)), level)
         append(raised, "Raise before crossing")
-        let approachTarget = can.point + SIMD3(0, 0, 0.12)
+        let approachTarget = graspPoint + SIMD3(0, 0, 0.12)
         var approach = closest(approachTarget, raised)
         // A cross-body target can trap the numerical solver in a local
         // minimum. Compare bounded shoulder seeds; never move the target.
@@ -452,16 +479,16 @@ struct ROBCanGrabPreview {
         append(approach, "Cross above can (table clearance unverified)")
         var grasp = approach
         for index in 1...4 {
-            grasp = closest(can.point + SIMD3(0, 0, 0.12 * (1 - Double(index)/4)), grasp)
+            grasp = closest(graspPoint + SIMD3(0, 0, 0.12 * (1 - Double(index)/4)), grasp)
             if index < 4 { append(grasp, "Final approach — horizontal jaws") }
         }
-        let error = simd_distance(tip(grasp), can.point)
+        let error = simd_distance(tip(grasp), graspPoint)
         let tilt = tiltDegrees(grasp)
         let ready = error <= 0.012 && tilt <= 5
         append(grasp, ready ? "Grasp pose" : "Closest horizontal reach — grasp unconfirmed")
         if ready {
             append(grasp, "Close jaws (simulation)", dwell: 1, action: .grip)
-            let liftTarget = can.point + SIMD3(0, 0, 0.06)
+            let liftTarget = graspPoint + SIMD3(0, 0, 0.06)
             let lift = closest(liftTarget, grasp)
             if simd_distance(tip(lift), liftTarget) <= 0.012 && tiltDegrees(lift) <= 5 { append(lift, "Lift 6 cm (simulation)", dwell: 1) }
             else if bucket != nil { throw ROBWorkspaceReachError.outOfReach(.can) }
@@ -487,24 +514,24 @@ struct ROBCanGrabPreview {
             // Release from above and let gravity do the drop. The hand never
             // has to descend to a floor-level bucket. An inward release point
             // still leaves 5.5 cm of opening radius for the can and fit error.
-            let towardHand = SIMD2(can.point.x-bucket.point.x,can.point.y-bucket.point.y)
+            let towardHand = SIMD2(graspPoint.x-bucket.point.x,graspPoint.y-bucket.point.y)
             let offset = simd_length(towardHand) > 0.001 ? simd_normalize(towardHand) * min(0.04,max(0,radius-0.055)) : .zero
             let dropXY = SIMD2(bucket.point.x,bucket.point.y) + offset
             var releaseTarget: SIMD3<Double>?
             for extra in [0.15,0.10,0.20,0.25] {
-                let point = SIMD3(dropXY.x,dropXY.y,max(can.point.z+extra,bucket.point.z+0.12))
+                let point = SIMD3(dropXY.x,dropXY.y,max(graspPoint.z+extra,bucket.point.z+0.12))
                 let candidate = closest(point,previous)
                 if simd_distance(tip(candidate),point) <= 0.012 && tiltDegrees(candidate) <= 5 { releaseTarget = point; break }
             }
             guard let releaseTarget else { throw ROBWorkspaceReachError.outOfReach(.orangeBucket) }
             let carryZ = releaseTarget.z
-            try travel(SIMD3(can.point.x, can.point.y, carryZ), stage: "Raise can for transfer")
+            try travel(SIMD3(graspPoint.x, graspPoint.y, carryZ), stage: "Raise can for transfer")
             try travel(releaseTarget, stage: "Carry above bucket for gravity drop")
             append(previous, "Release above bucket", action: .release)
             try travel(releaseTarget + SIMD3(0,0,0.08), stage: "Retreat above bucket")
         }
         return .init(can: can, side: side, baseline: baseline, steps: steps, graspError: error,
-            gripperTiltDegrees: tilt, reachesCan: ready)
+            gripperTiltDegrees: tilt, reachesCan: ready, reachOffset:[reachOffset.x,reachOffset.y,reachOffset.z])
     }
 }
 

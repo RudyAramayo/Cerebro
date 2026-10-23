@@ -18,6 +18,7 @@ import AppKit
     private(set) var interactionStage = ""
     var statusChanged: ((String) -> Void)?
     @nonobjc var recordingDirectory: URL?
+    @nonobjc var canReachCalibrationFile = ROBLeftCanReachCalibration.file
 
     private let arm = "right"
     private let gateway = ROBAmberGatewayClient.shared
@@ -52,6 +53,7 @@ import AppKit
     private var maxDelayedSampleAge = 0.0
     private var phase = "preflight"
     private var activeCommand = ""
+    private var inactiveWorkspaceSearch = false
     private var readinessConfirmed = false
     private var jawIntensity = 10
     @nonobjc private var taskJawTarget: [Double]?
@@ -85,7 +87,7 @@ import AppKit
             let current = limit == 0 ? "Record currents only; automatic cutoff is not configured."
                 : "Hold on a sample-to-sample current jump above \(limit) raw units; not a calibrated force limit."
             let scope = ["tabletop", "recycling"].contains(proposal.kind)
-                ? "Complete a fixed-station can-to-bucket attempt: present EMPTY arm, calibrate empty jaws only if needed, open, approach, grip at intensity 2, small lift, carry to bucket release, open and retreat to the final held pose. No per-step Continue or approval. The empty can and bucket must match the taught positions. Jaw opening, retention and placement are unmeasured; supervise the whole attempt."
+                ? "Complete a fixed-station can-to-bucket attempt: present EMPTY arm, calibrate empty jaws only if needed, open at intensity \(proposal.kind == "recycling" ? 10 : 2), approach, grip at intensity 2, small lift, carry above the bucket, release at the same opening intensity and retreat held. No per-step Continue or approval. Supervise actual jaw opening and pickup; retention and placement remain unmeasured."
                 : "Move only the empty physical LEFT arm; jaws unchanged."
             let text = "Reviewed ghost gesture ‘\(proposal.name)’: \(proposal.steps.count) steps, \(Int(ceil(proposal.seconds))) seconds scheduled, maximum 180 seconds including settling. \(range). Proposal \(proposal.id.uuidString), SHA256 \(proposal.fingerprint). \(scope) Camera centers at upright lower 6011 / upper 6306. Confirm physically hanging at encoder zero for the first movement of this session. Model/encoder mapping uses the recorded upright prior; watch actual arm, tread and cable clearance. This is a supervised trial, not certified collision or force protection. Keep Stop + hold ready; keep the controller open when using controller approval. \(current)"
             update("Awaiting controller approval for reviewed ghost: \(proposal.name)")
@@ -158,6 +160,7 @@ import AppKit
             object: gateway, queue: .main) { [weak self] note in
                 guard let self, self.isRunning, self.failure == nil,
                       !Self.neckOnlyCommands.contains(self.activeCommand),
+                      !self.inactiveWorkspaceSearch,
                       let sample = note.userInfo?["telemetry"] as? ROBAmberGatewayTelemetry,
                       sample.arm == self.arm else { return }
                 do { try self.record(sample) } catch { self.abort(error.localizedDescription) }
@@ -204,9 +207,9 @@ import AppKit
         switch command {
         case "left_search_workspace": action = "Search locally for a Coke can and an orange bucket by panning/tilting the neck camera. Confirm detections in two fresh RGB-D observations using the offline object detector. If missing, ask the nearest visible person to point and search in the estimated pointing direction. Report found/not found. No arm activation, gripper commands or arm travel."
         case "left_check_hanging": action = "Inspect both robot arms by panning/tilting the neck camera using on-device MLX; report whether each is visibly hanging. This observation never resets encoders or activates/moves either arm."
-        case "left_recycle_can": action = "One experimental recycling task: scan the neck camera locally for an EMPTY Coke can and open orange bucket, confirm each twice with aligned depth, and ask a nearby person to point if needed. Plan with the provisional articulated camera/arm model. If reachable, present the empty LEFT arm, calibrate empty jaws if needed, open, approach the can, close at intensity 2, lift, carry above the bucket rim, open and retreat to a held pose. No per-step permission or Continue. Only this bounded locally computed path may execute. Wrong geometry or a failed grip can cause a miss; supervise the complete attempt. No automatic force escalation, blind retries, driving or torque-off with an object. Retention and placement remain unmeasured."
+        case "left_recycle_can": action = "One experimental recycling task: scan locally for the EMPTY Coke can and open bucket, confirm twice with depth, and apply only the explicit operator-measured left-can reach calibration if installed. Present the empty LEFT arm, calibrate empty jaws if needed, OPEN at fixed intensity 10, approach with horizontal jaws, close gently at intensity 2, lift, carry ABOVE the opening, release at intensity 10 for a gravity drop and retreat held. Supervise the actual jaw opening and reach. One authorization covers all waypoints. No automatic force escalation, blind retries, driving or torque-off with a payload. Grip and placement remain unmeasured."
         case "left_wave": action = "Raise the empty LEFT arm along the initial tread-clearance approach, then coordinate J3/J5 together to -0.60 and J2/J6 together to +1.00/-0.60. Continue to J2 +1.30/J4 -0.60 and raised J5 -1.40. Seven approach segments from hanging plus four wave strokes; watch the newly coordinated front sweeps. Wave J1 -0.90/-1.05 twice with J6 -0.90/-0.60, and leave raised. Jaws unchanged."
-        case "left_prepare": action = "Raise the empty LEFT arm in five segments from hanging: retain the initial three tread-clearance moves, then coordinate J3/J5 together to -0.60 and J2/J6 together to +1.00/-0.60. The endpoints are unchanged; the two front sweeps are newly coordinated, model-checked supervised candidates. Watch actual arm/body/tread/cable clearance. Reverse any raised wave section first. Calibrate its EMPTY gripper only if needed, then open it. Keep fingers clear during calibration."
+        case "left_prepare": action = "Present the confirmed-EMPTY physical LEFT arm. If held after a failed recycling attempt, first retrace only its actually executed frozen route to front; no unvisited or arbitrary recovery targets. Otherwise use the registered hanging/front corridor. Calibrate EMPTY jaws only if needed, then OPEN at fixed intensity 10. Confirm no object is held, clear fingers, and supervise the recorded return and actual jaw opening. No torque-off or new encoder zero."
         case "left_grip": action = "Keep the LEFT arm stationary in front and close its already-calibrated gripper at intensity \(intensity) around the presented OBJECT. Confirm the object is between the open jaws and all fingers are clear. Never grip a person's hand. No reopening, calibration or arm travel."
         case "left_release": action = "Keep the LEFT arm stationary in front and open its already-calibrated gripper to return the object. Confirm the receiver supports the object before approving. No calibration or arm travel."
         case "left_object_cycle": action = "Complete one LEFT object handoff: raise the EMPTY arm along the five-segment registered corridor, calibrate its EMPTY jaws only if needed, and open. Pause for the local Object placed / fingers clear signal before closing at vendor intensity 2. Keep the arm stationary while holding; pause for Receiver supporting before opening at intensity 2. Pause for Object clear / jaws empty before reversing the empty arm to hanging and deactivating. These three readiness buttons continue this single approval, not new approvals. Never close on a person's hand. Opening, retention and force are unmeasured; confirm the physical state. No timed automatic close, release or lower."
@@ -286,7 +289,7 @@ import AppKit
             completion(["status": "blocked", "detail": "Another controller owns the right arm."]); return
         }
         owner = id; isRunning = true; self.summary = summary; currentLimit = limit
-        activeCommand = command; interactionStage = ""; readinessConfirmed = false; taskJawTarget = nil
+        activeCommand = command; inactiveWorkspaceSearch = false; interactionStage = ""; readinessConfirmed = false; taskJawTarget = nil
         lastRecordingPath = ""; sampleCount = 0; peakJump = 0
         failure = nil; generation = 0; cameraReady = false; positionReady = false; leased = false
         allowsArmTravel = ["left_wave", "left_prepare", "left_relax", "left_ghost", "left_object_cycle", "left_recycle_can"].contains(command)
@@ -321,7 +324,19 @@ import AppKit
             guard gateway.isReady(), (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == generation else {
                 throw ROBArmRoutineError.blocked("Arm gateway session changed.")
             }
-            _ = try measured()
+            if !inactiveWorkspaceSearch { _ = try measured() }
+            else {
+                // No arm is energized or leased during this neck-only phase.
+                // Full fresh feedback is required again before any arm action.
+                guard !leased, !positionReady, leaseRenewals.isEmpty,
+                      gateway.modes(forArm:arm).count == 7,
+                      gateway.modes(forArm:arm).allSatisfy({ $0.intValue == 0 }),
+                      let sample = gateway.telemetry(forArm:arm), sample.statuses.count == 7,
+                      sample.statuses.allSatisfy({ $0.intValue == 0 }),
+                      ROBArmRoutinePlan.near(sample.positionsRadians.map(\.doubleValue),Array(repeating:0,count:7)) else {
+                    throw ROBArmRoutineError.blocked("The parked left arm changed during neck-only search.")
+                }
+            }
         }
         if cameraReady {
             guard vision.fresh, ROBArmRoutineCoordinator.shared.viewIsStationary?() == true else {
@@ -400,27 +415,69 @@ import AppKit
             throw ROBArmRoutineError.blocked("Gateway session changed during left-arm preflight.")
         }
         generation = connectedGeneration
-        let q = try measured().positionsRadians.map(\.doubleValue)
+        var q = try measured().positionsRadians.map(\.doubleValue)
+        var entryRecovery: ROBLeftGestureProposal?
+        if command == "left_prepare", ROBLeftArmInteractionPlan.executionRoute(from:q,hanging:false) == nil {
+            let model = try workspaceModel()
+            let directory = URL(fileURLWithPath:lastRecordingPath).deletingLastPathComponent()
+            entryRecovery = try await Task.detached(priority:.userInitiated) { [generation] in
+                let files = try FileManager.default.contentsOfDirectory(at:directory,includingPropertiesForKeys:[.contentModificationDateKey])
+                    .filter { $0.lastPathComponent.hasPrefix("left_recycle_can-") && $0.lastPathComponent.hasSuffix(".proposal.json") }
+                    .sorted { ((try? $0.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate) ?? .distantPast) >
+                        ((try? $1.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate) ?? .distantPast) }
+                for file in files.prefix(8) {
+                    guard let date = try? file.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate,
+                          Date().timeIntervalSince(date) < 6*3600,
+                          let data = try? Data(contentsOf:file), data.count < 500_000,
+                          let old = try? JSONDecoder().decode(ROBLeftGestureProposal.self,from:data) else { continue }
+                    let csv = file.deletingPathExtension().deletingPathExtension().appendingPathExtension("csv")
+                    if let samples = try? ROBGhostRecordingSample.load(csv),
+                       let recovery = try? ROBRecordedLeftRecovery.make(previous:old,samples:samples,measured:q,model:model,generation:generation) { return recovery }
+                }
+                throw ROBGhostMotionError.blocked("The held arm is outside a recent recorded route. Keep it supported; no arbitrary return was sent.")
+            }.value
+            try check()
+            guard ROBArmRoutinePlan.near(try measured().positionsRadians.map(\.doubleValue),q,tolerance:0.015) else {
+                throw ROBGhostMotionError.blocked("The arm moved while preparing its recorded return.")
+            }
+            proposal = entryRecovery
+            try entryRecovery!.encoded().write(to:URL(fileURLWithPath:lastRecordingPath).deletingPathExtension().appendingPathExtension("proposal.json"),options:.atomic)
+            update("Returning the confirmed-empty left arm along its recorded path before preparation")
+        }
         if command == "left_relax", ROBArmRoutinePlan.near(q, Array(repeating: 0, count: 7)),
            gateway.modes(forArm: arm).count == 7, gateway.modes(forArm: arm).allSatisfy({ $0.intValue == 0 }),
            try measured().statuses.count == 7, try measured().statuses.allSatisfy({ $0.intValue == 0 }) {
             return ["status": "completed", "measured": true, "detail": "Left arm is already hanging and inactive."]
         }
         if command == "left_recycle_can" {
+            let parkedArm = try await parkEmptyArmForSearch(q)
+            inactiveWorkspaceSearch = true; cameraReady = false; phase = "inactive neck-only search"
+            update("Empty left arm parked; checking remembered object views")
             let model = try workspaceModel()
+            let calibrationFile = canReachCalibrationFile
             let objects = try await ROBWorkspaceSearch.shared.run(targets: ROBWorkspaceTarget.allCases,
                 model: model, requireDepth: true, check: { try self.check() }, progress: { self.update($0) })
+            try check()
+            try await wait(3) { (try? self.measured()) != nil }
+            try await accepted { gateway.queryMode(forArm:arm) }
+            q = try measured().positionsRadians.map(\.doubleValue)
+            guard ROBArmRoutinePlan.near(q,Array(repeating:0,count:7)),
+                  gateway.modes(forArm:arm).count == 7,
+                  gateway.modes(forArm:arm).allSatisfy({ $0.intValue == 0 }) else {
+                throw ROBArmRoutineError.blocked("Fresh hanging/inactive feedback is required after object search.")
+            }
             // Ask for a reachable can even when bucket release geometry is
             // still unavailable. This is a model check, never a motion path.
             if let can = objects[.can] {
                 let baseline = model.positions(vendorLeft: q)
                 let reach = try await Task.detached(priority: .userInitiated) {
-                    try ROBCanGrabPreview.make(can: can, model: model, baseline: baseline)
+                    try ROBCanGrabPreview.make(can: can, model: model, baseline: baseline,
+                        reachOffset:ROBLeftCanReachCalibration.load(model:model,file:calibrationFile))
                 }.value
                 try check()
                 if let message = reach.helpRequest {
                     ROBWorkspaceSearch.shared.announce?(message)
-                    return ["status": "needs_help", "arm_motion_sent": false, "measured": false,
+                    return ["status": "needs_help", "arm_motion_sent": parkedArm, "reach_sent": false, "measured": false,
                         "detail": message + " I'll check its new position before reaching.",
                         "workspace_search": ROBWorkspaceSearch.shared.lastReport]
                 }
@@ -432,12 +489,12 @@ import AppKit
                     ? "I see the bucket, but I can't measure its opening yet."
                     : report["detail"] as? String ?? "Can or orange bucket was not confirmed."
                 if visible.contains("orangeBucket") { ROBWorkspaceSearch.shared.announce?(detail) }
-                return ["status": ["depth_unconfirmed", "vision_unavailable", "visually_found"].contains(report["status"] as? String ?? "") ? "not_localized" : "not_found", "measured": false, "arm_motion_sent": false,
+                return ["status": ["depth_unconfirmed", "vision_unavailable", "visually_found"].contains(report["status"] as? String ?? "") ? "not_localized" : "not_found", "measured": false, "arm_motion_sent": parkedArm, "reach_sent": false,
                     "detail": detail,
                     "workspace_search": ROBWorkspaceSearch.shared.lastReport]
             }
             guard [can, bucket].allSatisfy({ Date().timeIntervalSince1970 * 1000 - $0.capturedAt < 60_000 }) else {
-                throw ROBGhostMotionError.blocked("Object observations expired during search; no arm travel was sent.")
+                throw ROBGhostMotionError.blocked("Object observations expired during search; no reach was sent.")
             }
             guard ROBArmRoutinePlan.near(try measured().positionsRadians.map(\.doubleValue), q, tolerance: 0.015) else {
                 throw ROBGhostMotionError.blocked("Arm start position changed during the scan; no reach was sent.")
@@ -445,7 +502,8 @@ import AppKit
             do {
                 let baseline = model.positions(vendorLeft: q)
                 let compiled = try await Task.detached(priority: .userInitiated) { [generation] in
-                    let plan = try ROBCanGrabPreview.make(can: can, model: model, baseline: baseline, bucket: bucket)
+                    let plan = try ROBCanGrabPreview.make(can: can, model: model, baseline: baseline, bucket: bucket,
+                        reachOffset:ROBLeftCanReachCalibration.load(model:model,file:calibrationFile))
                     let actions = Dictionary(uniqueKeysWithValues: plan.steps.enumerated().compactMap { index, step in
                         step.jawAction.map { (index, $0) }
                     })
@@ -458,10 +516,10 @@ import AppKit
                 proposal = compiled
             } catch let error as ROBWorkspaceReachError {
                 ROBWorkspaceSearch.shared.announce?(error.helpRequest)
-                return ["status": "needs_help", "arm_motion_sent": false, "measured": false,
+                return ["status": "needs_help", "arm_motion_sent": parkedArm, "reach_sent": false, "measured": false,
                     "detail": error.localizedDescription, "workspace_search": ROBWorkspaceSearch.shared.lastReport]
             } catch {
-                return ["status": "not_reachable", "arm_motion_sent": false, "measured": false,
+                return ["status": "not_reachable", "arm_motion_sent": parkedArm, "reach_sent": false, "measured": false,
                     "detail": error.localizedDescription, "workspace_search": ROBWorkspaceSearch.shared.lastReport]
             }
             try proposal!.encoded().write(to: URL(fileURLWithPath: lastRecordingPath).deletingPathExtension()
@@ -476,17 +534,81 @@ import AppKit
         }
         let stationaryJaw = command == "left_grip" || command == "left_release"
         guard let route = ROBLeftArmInteractionPlan.executionRoute(from: q, hanging: command == "left_relax", waving: command == "left_wave")
-            ?? (proposal?.kind == "recover" && referencedGeneration == generation ? [] : nil) else {
+            ?? (entryRecovery != nil || proposal?.kind == "recover" && referencedGeneration == generation ? [] : nil) else {
             throw ROBArmRoutineError.blocked("Left arm is outside the taught route; no movement sent.")
         }
         if stationaryJaw {
             try verifyFront()
         } else if referencedGeneration != generation {
-            guard ROBArmRoutinePlan.near(q, Array(repeating: 0, count: 7)) else {
+            guard entryRecovery != nil || ROBArmRoutinePlan.near(q, Array(repeating: 0, count: 7)) else {
                 throw ROBArmRoutineError.blocked("First left-arm movement in a new session must start physically hanging at encoder zero.")
             }
             referencedGeneration = generation
         }
+        if inactiveWorkspaceSearch {
+            try await wait(3) { (try? self.measured()) != nil }
+            inactiveWorkspaceSearch = false
+            try check()
+        }
+        try await prepareCameraAndMode(stationaryJaw:stationaryJaw)
+        if let entryRecovery {
+            try await move(entryRecovery)
+            proposal = nil; proposalStep = -1; sentPath = []
+            try verifyFront()
+        }
+        if stationaryJaw {
+            try await settleFront()
+        } else if let proposal {
+            try await move(proposal)
+            if ["tabletop", "recycling"].contains(proposal.kind) {
+                try await holdTaskPosition(proposal.steps.last!.positions)
+                return ["status": "accepted_unverified", "measured": false, "motion_completed": true,
+                    "gripper_measured": false, "placement_verified": false, "gripper_intensity": ROBTabletopPickPlace.intensity,
+                    "gripper_opening_intensity": proposal.kind == "recycling" ? 10 : 2,
+                    "workspace_search": command == "left_recycle_can" ? ROBWorkspaceSearch.shared.lastReport : [:],
+                    "detail": "The left arm reached all recycling-task positions; closing at intensity 2 and opening at intensity \(proposal.kind == "recycling" ? 10 : 2) were accepted. It is holding at the retreat pose. Object retention, jaw opening and placement in the bucket are unverified; inspect the result."]
+            }
+            return ["status": "completed", "measured": true, "motion_proposal_id": proposal.id.uuidString,
+                "motion_proposal_sha256": proposal.fingerprint,
+                "detail": "Ghost gesture ‘\(proposal.name)’ completed; left arm held at its final pose. Jaws unchanged."]
+        } else { try await move(route) }
+        switch command {
+        case "left_relax":
+            try await deactivateAtHanging()
+            return ["status": "completed", "measured": true, "detail": "Left arm reached hanging and is inactive."]
+        case "left_wave":
+            try await move([ROBLeftArmInteractionPlan.waveIndex, ROBLeftArmInteractionPlan.waveRestIndex,
+                ROBLeftArmInteractionPlan.waveIndex, ROBLeftArmInteractionPlan.waveRestIndex])
+            return ["status": "completed", "measured": true, "detail": "Left arm waved twice above the shoulder and is holding raised. Gripper unchanged."]
+        case "left_object_cycle":
+            return try await objectCycleAtFront()
+        default:
+            try await holdFrontForGripper()
+            try await requireGripperCalibration(allowEmptyCalibration: command == "left_prepare")
+            try await commandJaw(action: command == "left_grip" ? "hold" : "release", intensity: command == "left_prepare" ? 10 : jawIntensity)
+            return ["status": "accepted_unverified", "measured": false, "detail": command == "left_grip"
+                ? "Left grip command accepted; arm stays in front. Check object retention before releasing your support."
+                : "Left open command accepted; arm stays in front. Check the jaws and object before continuing."]
+        }
+    }
+
+    @MainActor private func parkEmptyArmForSearch(_ q:[Double]) async throws -> Bool {
+        if ROBArmRoutinePlan.near(q,Array(repeating:0,count:7)), gateway.modes(forArm:arm).count == 7, gateway.modes(forArm:arm).allSatisfy({ $0.intValue == 0 }) { return false }
+        guard let route = ROBLeftArmInteractionPlan.executionRoute(from:q,hanging:true),
+              referencedGeneration == generation || ROBArmRoutinePlan.near(q,Array(repeating:0,count:7)) else {
+            throw ROBArmRoutineError.blocked("Clear the confirmed-empty arm on its registered route before searching; no arbitrary return was sent.")
+        }
+        referencedGeneration = generation
+        ROBWorkspaceSearch.shared.announce?("Lowering my empty arm to see the bucket.")
+        try await prepareCameraAndMode(stationaryJaw:false)
+        try await move(route)
+        try await deactivateAtHanging()
+        try await wait(1) { self.leaseRenewals.isEmpty }
+        positionReady = false; cameraReady = false
+        return true
+    }
+
+    @MainActor private func prepareCameraAndMode(stationaryJaw:Bool) async throws {
         phase = "camera preparation"; update("Preparing live view for left-arm trial")
         try await wait(12) { ROBArmRoutineCoordinator.shared.prepareView?() == true }
         try await wait(10) { self.vision.fresh && ROBArmRoutineCoordinator.shared.viewIsStationary?() == true }
@@ -509,39 +631,6 @@ import AppKit
             }
         }
         positionReady = true
-        if stationaryJaw {
-            try await settleFront()
-        } else if let proposal {
-            try await move(proposal)
-            if ["tabletop", "recycling"].contains(proposal.kind) {
-                try await holdTaskPosition(proposal.steps.last!.positions)
-                return ["status": "accepted_unverified", "measured": false, "motion_completed": true,
-                    "gripper_measured": false, "placement_verified": false, "gripper_intensity": ROBTabletopPickPlace.intensity,
-                    "workspace_search": command == "left_recycle_can" ? ROBWorkspaceSearch.shared.lastReport : [:],
-                    "detail": "The left arm reached all recycling-task positions; grip and release at intensity 2 were accepted. It is holding at the taught retreat pose. Object retention, jaw opening and placement in the bucket are unverified; inspect the result."]
-            }
-            return ["status": "completed", "measured": true, "motion_proposal_id": proposal.id.uuidString,
-                "motion_proposal_sha256": proposal.fingerprint,
-                "detail": "Ghost gesture ‘\(proposal.name)’ completed; left arm held at its final pose. Jaws unchanged."]
-        } else { try await move(route) }
-        switch command {
-        case "left_relax":
-            try await deactivateAtHanging()
-            return ["status": "completed", "measured": true, "detail": "Left arm reached hanging and is inactive."]
-        case "left_wave":
-            try await move([ROBLeftArmInteractionPlan.waveIndex, ROBLeftArmInteractionPlan.waveRestIndex,
-                ROBLeftArmInteractionPlan.waveIndex, ROBLeftArmInteractionPlan.waveRestIndex])
-            return ["status": "completed", "measured": true, "detail": "Left arm waved twice above the shoulder and is holding raised. Gripper unchanged."]
-        case "left_object_cycle":
-            return try await objectCycleAtFront()
-        default:
-            try await holdFrontForGripper()
-            try await requireGripperCalibration(allowEmptyCalibration: command == "left_prepare")
-            try await commandJaw(action: command == "left_grip" ? "hold" : "release", intensity: jawIntensity)
-            return ["status": "accepted_unverified", "measured": false, "detail": command == "left_grip"
-                ? "Left grip command accepted; arm stays in front. Check object retention before releasing your support."
-                : "Left open command accepted; arm stays in front. Check the jaws and object before continuing."]
-        }
     }
 
     private func workspaceModel() throws -> ROBGhostRobotModel {
@@ -572,8 +661,8 @@ import AppKit
         phase = "tabletop \(action.rawValue)"
         update(action == .grip ? "Local task: gripping empty can at intensity 2" : "Local task: opening gripper at the planned position")
         ROBWorkspaceSearch.shared.announce?(action == .prepare ? "Preparing my left hand." : action == .grip ? "Grabbing the can." : "Releasing over the bucket.")
-        try await accepted { gateway.controlGripper(forArm: arm, action: action == .grip ? "hold" : "release",
-            force: ROBTabletopPickPlace.intensity) }
+        let intensity = action != .grip && proposal?.kind == "recycling" ? 10 : ROBTabletopPickPlace.intensity
+        try await accepted { gateway.controlGripper(forArm: arm, action: action == .grip ? "hold" : "release", force:intensity) }
         let end = ProcessInfo.processInfo.systemUptime + 1.5
         try await wait(3) { ProcessInfo.processInfo.systemUptime >= end }
     }
@@ -631,8 +720,14 @@ import AppKit
             guard allowEmptyCalibration else { throw ROBArmRoutineError.blocked("Use Present / open with empty jaws first. Grip/release never recalibrates.") }
             phase = "empty gripper calibration"; update("Calibrating empty left gripper")
             try await accepted { gateway.calibrateGripper(forArm: arm) }
-            let end = ProcessInfo.processInfo.systemUptime + 2
-            try await wait(3) { ProcessInfo.processInfo.systemUptime >= end }
+            // The controller acknowledges dispatch before the physical empty
+            // calibration finishes. On ROB, opening after two seconds left
+            // the jaws closed; a separate later opening succeeded. Keep the
+            // measured hold/freshness checks throughout this conservative
+            // interval. Elapsed time still does not verify jaw opening.
+            update("Waiting for empty gripper calibration before opening")
+            let end = ProcessInfo.processInfo.systemUptime + 10
+            try await wait(11) { ProcessInfo.processInfo.systemUptime >= end }
         }
     }
 
@@ -732,7 +827,7 @@ import AppKit
         guard isRunning, failure == nil else { return }
         do {
             try check()
-            if generation > 0 { try record(measured()) }
+            if generation > 0, !inactiveWorkspaceSearch { try record(measured()) }
             let now = ProcessInfo.processInfo.systemUptime
             guard !leaseRenewals.values.contains(where: { now - $0 > 1 }) else { throw ROBArmRoutineError.blocked("Left-arm lease acknowledgement timed out.") }
             if leased, now - lastRenewal >= 0.4 {
@@ -835,7 +930,7 @@ import AppKit
             ROBAmberArmMotionArbiter.shared.release(.right, owner: owner)
         }
         owner = nil; isRunning = false; task = nil; proposal = nil; proposalStep = -1
-        activeCommand = ""; interactionStage = ""; readinessConfirmed = false; taskJawTarget = nil
+        activeCommand = ""; inactiveWorkspaceSearch = false; interactionStage = ""; readinessConfirmed = false; taskJawTarget = nil
         update(output["detail"] as? String ?? "Left-arm trial ended")
         completion(output as NSDictionary)
     }

@@ -54,6 +54,7 @@ FOUNDATION_EXPORT NSString * _Nonnull ROBResolvedSpeechAcknowledgementPhrase(voi
 - (void) didSeeNewPerson:(NSString *)userID;
 - (void) lostSightOfPerson:(NSString*)userID;
 - (void) sayIt:(NSString *)stringToSpeak;
+- (void)sayArmAuthorizationPrompt:(NSString *)question;
 - (void) sayItIfNotQueued:(NSString *)stringToSpeak;
 - (void)sayIt:(NSString *)stringToSpeak completion:(void (^ _Nullable)(BOOL finished))completion;
 - (void)sayPersonalityText:(NSString *)text provider:(NSString *)provider completion:(void (^ _Nullable)(BOOL finished))completion;

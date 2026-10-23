@@ -467,6 +467,21 @@ matchesLanguagePrefixes:(NSArray<NSString *> *)languagePrefixes
     NSLog(@"Listening");
 }
 
+- (void)sayArmAuthorizationPrompt:(NSString *)question
+{
+    NSAssert(NSThread.isMainThread, @"Arm questions belong on the speech queue");
+    // A new question needs a new utterance. Otherwise an earlier conversation
+    // can remain prefixed to 'yes, proceed' in continuous Apple dictation.
+    [self.debounceSpeechInputTimer invalidate];
+    self.currentTextInput = @"";
+    [self teardownSpeechRecognition];
+    __weak typeof(self) weakSelf = self;
+    [self sayIt:question completion:^(BOOL finished) {
+        __strong typeof(weakSelf) self = weakSelf;
+        if (self != nil && !self.isShuttingDown) { [self startRecognizer]; }
+    }];
+}
+
 
 - (void) setupSpeechRecognition
 {

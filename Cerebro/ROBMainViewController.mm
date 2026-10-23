@@ -5669,7 +5669,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             serial.neckCommandSafetyStatus ?: @"unknown neck state"];
     };
     ROBWorkspaceSearch *workspace = [ROBWorkspaceSearch shared];
-    [ROBControllerArmApproval shared].announceApproval = ^(NSString *text) { [weakSelf.speechBox sayIt:text]; };
+    [ROBControllerArmApproval shared].announceApproval = ^(NSString *text) { [weakSelf.speechBox sayArmAuthorizationPrompt:text]; };
     workspace.prepareView = ^BOOL(double pan, NSInteger upper) {
         ROBMainViewController *owner = weakSelf;
         if (owner == nil || ![ROBLeftArmTrial shared].isRunning || owner.stageShowCoordinator.isRunning ||
