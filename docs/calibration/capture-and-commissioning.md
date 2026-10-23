@@ -4,6 +4,9 @@ The [October 22 session handoff](session-handoff-2026-10-22.md) records the
 current neck/camera estimates, fixed-QR drift test, next room-scan calibration
 steps and verified shutdown preparation.
 
+The [printable table target](targets/README.md) supplies a measured QR reference
+and scale check for that neck/camera capture.
+
 The September 13, 2026 workbench is a simulation and measurement tool. It does
 not command arms, servos, treads, grippers, or the LACT. The numerical body and
 mount estimates are not a commissioned robot model.

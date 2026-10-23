@@ -1,0 +1,2 @@
+# Preserve generated print assets as binary PDF files.
+output/pdf/*.pdf binary

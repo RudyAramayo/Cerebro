@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "targetID": "ROB:TABLE:001",
+  "payload": "ROB:TABLE:001",
+  "symbology": "QR Code Model 2",
+  "qrVersion": 1,
+  "errorCorrection": "Q",
+  "moduleCount": 21,
+  "symbolSideMeters": 0.12,
+  "moduleSideMeters": 0.005714285714285714,
+  "quietZoneModules": 4,
+  "quietZoneEachSideMeters": 0.022857142857142857,
+  "totalBlankFootprintSideMeters": 0.16571428571428573,
+  "physicalDimensionsExcludeQuietZone": true,
+  "frame": "Origin at symbol center; +X printed right, +Y printed up, +Z out of printed face.",
+  "cornerOrder": [
+    "topLeft",
+    "topRight",
+    "bottomRight",
+    "bottomLeft"
+  ],
+  "canonicalCornersMeters": [
+    [
+      -0.06,
+      0.06,
+      0
+    ],
+    [
+      0.06,
+      0.06,
+      0
+    ],
+    [
+      0.06,
+      -0.06,
+      0
+    ],
+    [
+      -0.06,
+      -0.06,
+      0
+    ]
+  ],
+  "cornerCorrespondence": "Canonical decoded QR orientation, not arbitrary image-top-left order after rotation.",
+  "pagePoints": [
+    612.0,
+    792.0
+  ],
+  "symbolBoundsPDFPoints": [
+    135.92125984251967,
+    232.84589426321708,
+    340.15748031496065,
+    340.15748031496065
+  ],
+  "scaleCheckLengthMeters": 0.1,
+  "scaleCheckPDFPoints": [
+    164.26771653543307,
+    79.37007874015748,
+    447.73228346456693,
+    79.37007874015748
+  ],
+  "printScaling": "Actual Size / 100%; verify the 100 mm line with a ruler.",
+  "quietZoneReference": "https://www.qrcode.com/en/howto/code.html/index.html",
+  "pdfSHA256": "9b25e1eef940e2cfde7a15c7b3ca4057b5757dd5e10332e3208c0552e561c11f"
+}
