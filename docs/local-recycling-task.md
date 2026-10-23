@@ -333,6 +333,25 @@ command directions and grip force are unchanged. The one complete operation
 scope includes this initialization. No successful pickup is inferred from
 accepted jaw commands.
 
+After trial `71623360`, Rob reported the can was knocked over and the jaws
+contacted the table. The release was above the bucket, with a requested
+1½-inch shift toward ROB. The next experimental calibration raises the
+can approach by 2½ inches (+6.35 cm), changing net Z from −11.43 cm to −5.08 cm,
+while keeping X −12.7 cm and bucket yaw 20°. Optional `bucketInwardMeters`
+shifts the calibrated bucket center 3.81 cm toward the left shoulder before
+the existing opening-fit offset. It is finite and bounded 0–8 cm; measured
+sightings, rim height and radius stay unchanged. This physical trial did
+not pick up or recycle the can.
+
+A return after this table-contact report must also avoid its old low section.
+Optional `recoveryGraspClearanceMeters` (finite 0–15 cm) sets a minimum tool
+height above the previous frozen grasp. The local 8.89 cm value combines
+the requested 6.35 cm raise with a 2.54 cm return margin. Low recorded targets
+are skipped, and every connecting segment is checked above this height and
+against tread, joint and timing limits. All retained targets must have been
+visited in the recorded operation. This reviewed return needs a new spoken
+or controller grant; it does not extend the approval-free hanging exception.
+
 ## Validation
 
 The plan, approval/session, executor, camera/model rendering and tunnel fixtures

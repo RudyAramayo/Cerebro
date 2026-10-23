@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "binarySHA256": "ff224fcf7534b635aa7ad24a2cad2b3f99325602659ed1d2bec3b5046bb40c5b",
+  "build": "Signed Debug arm64, installed; codesign --verify --deep --strict passed",
+  "calibration": {
+    "modelID": "c4a5c1bee9a9a0a6cca6ecdba9433f98ab647eea3084fb462ff592a0a0ea1e03",
+    "referenceID": "ba63a659f10085da3fa7f7c5002f17b4af27596408bc447e0ac64cdb4198c2d7",
+    "mappingID": "f63859164f5c72f3d68eef621bd737cfeadcbc1856141faafe0f2e4e2aee7882",
+    "translationMeters": [
+      -0.127,
+      0,
+      -0.0508
+    ],
+    "source": "Rob, 2026-10-22: the can was approximately 5 inches closer than the physical reach in trial 11149C94-29C3-4AA5-BC99-659F68C5E346. Experimental forward reach correction; raw vision sightings remain unchanged. Operator feedback after trial A67CEAAA, 2026-10-22: gripper4-5 inches above can at lowest reach; use midpoint4.5 inches downward. Release needed20 degrees farther to robot left. Experimental alignment corrections, raw sightings unchanged. Rob feedback after71623360: gripper knocked can over and contacted table; raise can approach2.5in (+.0635m), netZ\u2212.0508m. Release was abovebucket; pullrelease1.5in(.0381m) towarddroid. Retainyaw20degrees. Experimentaloperatoralignment, rawobservationsunchanged. Empty return must skip the reported table-contact section: keep modeled tool at least3.5in(.0889m) above previous frozen grasp, using only visited targets and fully validated connecting segments under a new runtime grant.",
+    "bucketYawDegrees": 20,
+    "bucketInwardMeters": 0.0381,
+    "recoveryGraspClearanceMeters": 0.0889
+  },
+  "calibrationSHA256": "271f1b6cef1c223f8cdd0b81daef52ddf6545c2ebfa6bd00873d744051c21b88",
+  "sourceSHA256": {
+    "Cerebro/ROBWorkspaceSearchPlan.swift": "94600e78ec56a424423900b8e550d064ad3ed34f3cdeb5c58b1bfbef98e2fa3a",
+    "Cerebro/ROBGhostMotionPlan.swift": "fa4ad7b0be69b5400d7488f97ff4e99893848adc0ac5e9bca4297617a741b38a",
+    "Cerebro/ROBLeftArmTrial.swift": "8fa8057d38be1aaae7952bb56a2d78eec344fdbf9bc3a51c16afbc4b94bab064",
+    "Cerebro/ROBControllerArmApproval.swift": "bc64d42d735aaf022138822bb58d3afc418e5e897aa9a7e41cafd513bcb9d194"
+  },
+  "softwareValidation": {
+    "operator-alignment": {
+      "result": "passed",
+      "logSHA256": "0f75d8d093fc2ecfa43467dfc44c987a34eb90beb75173758b5afcaaee913ba0",
+      "lastLine": "Operator alignment: grasp raised6.35cm, raw sightings unchanged, yaw remains20 degrees LEFT, release moves0.03575360876632655m inward; 47 validated physical steps, grasp error0.0002961334488454761m"
+    },
+    "raised-recovery": {
+      "result": "passed",
+      "logSHA256": "53c03e426952f07ebbaff21dbec8ff74343d31ec27bcf3dd5f747a30a1cec424",
+      "lastLine": "Raised recorded recovery: 37 visited targets in reverse order, 25.899999999999984s, minimum height above prior grasp 0.09001194764586495m; no jaw replay, front pose reached"
+    },
+    "approval": {
+      "result": "passed",
+      "logSHA256": "fc51510dba5011843ebcf86306c8f1e0f20f3f2d14f42ec264b22a4d1cd7f767",
+      "lastLine": "Controller/spoken arm approval and session reuse: 93 checks passed; no hardware access"
+    }
+  },
+  "physicalResult": "Awaiting fresh native microphone/controller authorization for reviewed raised empty return and repeat recycling. No new pickup claimed.",
+  "pickupAndDropVerified": false,
+  "cameraImagesIncluded": false,
+  "grantsPersisted": false
+}

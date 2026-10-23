@@ -1,0 +1,428 @@
+{
+  "schemaVersion": 1,
+  "createdUTC": "2026-10-23T01:34:08.994609+00:00",
+  "codeCommit": "7fb7d88792f36ea4d786d0a8643c984c0708c9fe",
+  "binarySHA256": "c0633a0213525feeba37fa8bd3006d5bbfe64e69cdd823f9fb5bafb074bdbcdf",
+  "physicalArm": "LEFT/R11/gateway right/UDP26002",
+  "authorization": {
+    "source": "Root agent observed the native final spoken complete-task approval before this trial.",
+    "scope": "One complete-task approval; no per-waypoint approval.",
+    "transcriptIncluded": false,
+    "limitation": "Approval is not inferred from motor telemetry; no microphone transcript is available in this evidence."
+  },
+  "recording": "left_recycle_can-71623360-BA14-4D42-8228-25889143E316.csv",
+  "archive": "height-yaw-live-missed-grasp.csv.gz",
+  "recordingSHA256": "9d70908a7383789262958f77c346b42eb188bfc1e00c73b4a032050bb9114c05",
+  "archiveSHA256": "170f86eea71232ed6c3268917491d178b432105a6297a390d12e8567801f4c14",
+  "proposal": "height-yaw-live-missed-grasp.proposal.json",
+  "proposalSHA256": "e82d8de13c50a40078c3f903a04732c509dbfa610e71f01b659a68666c5820e0",
+  "proposalID": "01C7FB80-FCCF-48AF-AFA1-BC90AB3D1B2F",
+  "elapsedSeconds": 288.9248032500036,
+  "jointRows": 12229,
+  "completeSevenJointSamples": 1747,
+  "incompleteSevenJointSamples": 0,
+  "maxRecordedFeedbackAgeMS": 51.89400100051549,
+  "lastRecordedFeedbackAgeMS": 4.3112010008931385,
+  "plannedPhysicalSteps": 48,
+  "recordedGestureStepIndices": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37,
+    38,
+    39,
+    40,
+    41,
+    42,
+    43,
+    44,
+    45,
+    46,
+    47
+  ],
+  "phases": [
+    {
+      "phase": "preflight",
+      "seconds": 0.022187499998835847
+    },
+    {
+      "phase": "camera preparation",
+      "seconds": 0.07294545833428856
+    },
+    {
+      "phase": "waypoint 18",
+      "seconds": 4.852208083335427
+    },
+    {
+      "phase": "waypoint 6",
+      "seconds": 6.989228333331994
+    },
+    {
+      "phase": "waypoint 4",
+      "seconds": 9.077361583338643
+    },
+    {
+      "phase": "waypoint 1",
+      "seconds": 12.0819207083332
+    },
+    {
+      "phase": "waypoint 0",
+      "seconds": 14.372851583335432
+    },
+    {
+      "phase": "deactivating",
+      "seconds": 15.74776866666798
+    },
+    {
+      "phase": "gesture step 0",
+      "seconds": 220.34001512500254
+    },
+    {
+      "phase": "gesture step 1",
+      "seconds": 222.42767191666644
+    },
+    {
+      "phase": "gesture step 2",
+      "seconds": 224.66943362500024
+    },
+    {
+      "phase": "gesture step 3",
+      "seconds": 227.41883800000505
+    },
+    {
+      "phase": "gesture step 4",
+      "seconds": 229.75999691666948
+    },
+    {
+      "phase": "initializing empty jaws",
+      "seconds": 232.35999837500276
+    },
+    {
+      "phase": "tabletop prepare",
+      "seconds": 233.93718679167068
+    },
+    {
+      "phase": "gesture step 5",
+      "seconds": 235.51331366667
+    },
+    {
+      "phase": "gesture step 6",
+      "seconds": 236.89080937499966
+    },
+    {
+      "phase": "gesture step 7",
+      "seconds": 238.17783658333792
+    },
+    {
+      "phase": "gesture step 8",
+      "seconds": 239.59474570833845
+    },
+    {
+      "phase": "gesture step 9",
+      "seconds": 241.0253715833387
+    },
+    {
+      "phase": "gesture step 10",
+      "seconds": 241.7349430000031
+    },
+    {
+      "phase": "gesture step 11",
+      "seconds": 243.1091437083378
+    },
+    {
+      "phase": "gesture step 12",
+      "seconds": 244.48436154166848
+    },
+    {
+      "phase": "gesture step 13",
+      "seconds": 245.65600241666834
+    },
+    {
+      "phase": "gesture step 14",
+      "seconds": 246.82718829166697
+    },
+    {
+      "phase": "gesture step 15",
+      "seconds": 248.04500708333217
+    },
+    {
+      "phase": "gesture step 16",
+      "seconds": 250.132034416667
+    },
+    {
+      "phase": "tabletop grip",
+      "seconds": 251.25312712500454
+    },
+    {
+      "phase": "gesture step 17",
+      "seconds": 252.82812191666744
+    },
+    {
+      "phase": "gesture step 18",
+      "seconds": 254.86432737500581
+    },
+    {
+      "phase": "gesture step 19",
+      "seconds": 256.0863164166658
+    },
+    {
+      "phase": "gesture step 20",
+      "seconds": 257.1569664999988
+    },
+    {
+      "phase": "gesture step 21",
+      "seconds": 258.1720976666693
+    },
+    {
+      "phase": "gesture step 22",
+      "seconds": 259.2925336666667
+    },
+    {
+      "phase": "gesture step 23",
+      "seconds": 260.35961591667
+    },
+    {
+      "phase": "gesture step 24",
+      "seconds": 261.5305424583348
+    },
+    {
+      "phase": "gesture step 25",
+      "seconds": 262.70171604166535
+    },
+    {
+      "phase": "gesture step 26",
+      "seconds": 263.77011654166563
+    },
+    {
+      "phase": "gesture step 27",
+      "seconds": 264.84010000000126
+    },
+    {
+      "phase": "gesture step 28",
+      "seconds": 266.0617400416668
+    },
+    {
+      "phase": "gesture step 29",
+      "seconds": 267.1312619583332
+    },
+    {
+      "phase": "gesture step 30",
+      "seconds": 268.4926157916707
+    },
+    {
+      "phase": "gesture step 31",
+      "seconds": 269.4209618333334
+    },
+    {
+      "phase": "gesture step 32",
+      "seconds": 270.49133691666793
+    },
+    {
+      "phase": "gesture step 33",
+      "seconds": 271.4586447916663
+    },
+    {
+      "phase": "gesture step 34",
+      "seconds": 272.5293815416662
+    },
+    {
+      "phase": "gesture step 35",
+      "seconds": 273.9055783333388
+    },
+    {
+      "phase": "gesture step 36",
+      "seconds": 274.82164550000016
+    },
+    {
+      "phase": "gesture step 37",
+      "seconds": 275.6865408333324
+    },
+    {
+      "phase": "gesture step 38",
+      "seconds": 276.55247708333627
+    },
+    {
+      "phase": "gesture step 39",
+      "seconds": 277.5201119166668
+    },
+    {
+      "phase": "gesture step 40",
+      "seconds": 278.6403737083383
+    },
+    {
+      "phase": "gesture step 41",
+      "seconds": 279.4114055833343
+    },
+    {
+      "phase": "gesture step 42",
+      "seconds": 280.5748963750011
+    },
+    {
+      "phase": "gesture step 43",
+      "seconds": 281.43916279167024
+    },
+    {
+      "phase": "gesture step 44",
+      "seconds": 282.61275737500546
+    },
+    {
+      "phase": "tabletop release",
+      "seconds": 283.78515550000157
+    },
+    {
+      "phase": "gesture step 45",
+      "seconds": 285.410506375003
+    },
+    {
+      "phase": "gesture step 46",
+      "seconds": 286.5346779166721
+    },
+    {
+      "phase": "gesture step 47",
+      "seconds": 287.6523300416666
+    }
+  ],
+  "jawActions": [
+    {
+      "step": 4,
+      "action": "prepare"
+    },
+    {
+      "step": 16,
+      "action": "grip"
+    },
+    {
+      "step": 44,
+      "action": "release"
+    }
+  ],
+  "jawActionIndexing": "Zero-based indices into the frozen physical proposal steps. The proposal recyclingActions dictionary uses separate pose indices, not physical step indices.",
+  "openingIntensity": 10,
+  "closingIntensity": 2,
+  "gripperPreparation": "Automatic empty-jaw close at intensity 2, then open at 10, is recorded before tabletop prepare. The motor CSV does not measure jaw aperture, retained objects, table contact or placement.",
+  "calibrationUsed": {
+    "canTranslationMeters": [
+      -0.127,
+      0,
+      -0.1143
+    ],
+    "bucketYawDegrees": 20,
+    "bucketInwardMeters": 0,
+    "description": "Operator-measured experimental offsets; raw visual sightings remain unchanged."
+  },
+  "search": {
+    "reportID": "8F64D1DC-8CA6-4B39-9E37-53677A5CA9DA",
+    "status": "found",
+    "detail": "I found the Coke can and orange bucket.",
+    "objects": {
+      "can": {
+        "captured_at_ms": 1792718884849.935,
+        "position": [
+          0.5324488846561272,
+          -0.06700092572478558,
+          0.8835158279604254
+        ]
+      },
+      "orangeBucket": {
+        "captured_at_ms": 1792718875716.4888,
+        "position": [
+          0.3386968846760923,
+          0.46298106639441516,
+          0.27549540863399613
+        ]
+      }
+    },
+    "decodedObservations": 47,
+    "settleSecondsPerView": 1.5,
+    "historicalPositionsUsedForMotion": false,
+    "cameraArmMapping": "provisional URDF/neck command prior, not measured hand-eye calibration",
+    "announcements": [
+      {
+        "at": "2026-10-23T01:25:13Z",
+        "message": "I see the can. I'm still looking for the bucket.",
+        "visually_confirmed": [
+          "can"
+        ]
+      },
+      {
+        "at": "2026-10-23T01:25:43Z",
+        "message": "I see the bucket.",
+        "visually_confirmed": [
+          "can",
+          "orangeBucket"
+        ]
+      }
+    ]
+  },
+  "finalPositionsRadians": [
+    0.3715642352878553,
+    1.45966794082807,
+    -0.51173599083865,
+    0.3321579732701708,
+    -1.332449800819421,
+    -1.324950339189758,
+    -1.208776860853885
+  ],
+  "nativeOutcome": "Root agent observed completion of the planned physical route. The CSV contains gesture phases 0 through 47 and a final retreat sample; motor arrival does not establish a grasp or drop.",
+  "operatorFeedback": "ohh wow. it was so close to working perfectly. the release was right above the bucket, i would pull the arm 1.5 inches closer to the droid before drop. The coke can was knocked over though so it wasn't gripped and the gripper was too low which caused the gripper to hit the table, so we need to lift the gripper commands about 2.5 inches taller. Please repeat the test",
+  "canPickedUp": false,
+  "canPlacedInBucket": false,
+  "tableContact": {
+    "reported": true,
+    "source": "operator",
+    "description": "Operator reported the gripper hit the table because the reach was too low."
+  },
+  "releaseAlignment": {
+    "improved": true,
+    "source": "operator",
+    "description": "Operator reported the release was right above the bucket and requested 1.5 inches closer to the droid before drop."
+  },
+  "nextRequestedCorrection": {
+    "canHeightIncreaseMeters": 0.0635,
+    "resultingCanTranslationMeters": [
+      -0.127,
+      0,
+      -0.0508
+    ],
+    "additionalBucketInwardMeters": 0.0381,
+    "retainBucketYawDegrees": 20,
+    "status": "Requested after this trial; not used by this archived proposal."
+  },
+  "pickupAndDropVerified": false,
+  "cameraImagesIncluded": false,
+  "grantsPersisted": false
+}

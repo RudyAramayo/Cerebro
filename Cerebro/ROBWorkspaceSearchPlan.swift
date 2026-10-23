@@ -282,6 +282,8 @@ struct ROBLeftCanReachCalibration: Codable {
     let translationMeters: [Double]
     let source: String
     var bucketYawDegrees: Double? = nil
+    var bucketInwardMeters: Double? = nil
+    var recoveryGraspClearanceMeters: Double? = nil
     static var file: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Cerebro/LeftArmCalibration/can-reach.json") }
     static func load(model: ROBGhostRobotModel, file: URL = file) throws -> SIMD3<Double> {
         guard let value = try configuration(model:model,file:file) else { return .zero }
@@ -290,6 +292,12 @@ struct ROBLeftCanReachCalibration: Codable {
     static func loadBucketYaw(model:ROBGhostRobotModel,file:URL = file) throws -> Double {
         try configuration(model:model,file:file)?.bucketYawDegrees ?? 0
     }
+    static func loadBucketInward(model:ROBGhostRobotModel,file:URL = file) throws -> Double {
+        try configuration(model:model,file:file)?.bucketInwardMeters ?? 0
+    }
+    static func loadRecoveryGraspClearance(model:ROBGhostRobotModel,file:URL = file) throws -> Double {
+        try configuration(model:model,file:file)?.recoveryGraspClearanceMeters ?? 0
+    }
     private static func configuration(model:ROBGhostRobotModel,file:URL) throws -> Self? {
         guard FileManager.default.fileExists(atPath:file.path) else { return nil }
         let data = try Data(contentsOf:file)
@@ -297,7 +305,9 @@ struct ROBLeftCanReachCalibration: Codable {
               value.modelID == model.modelID, value.referenceID == model.referenceID,
               value.mappingID == ROBGhostRobotModel.mappingID, !value.source.isEmpty,
               value.translationMeters.count == 3, value.translationMeters.allSatisfy({ $0.isFinite && abs($0) <= 0.15 }),
-              (value.bucketYawDegrees ?? 0).isFinite, abs(value.bucketYawDegrees ?? 0) <= 30 else {
+              (value.bucketYawDegrees ?? 0).isFinite, abs(value.bucketYawDegrees ?? 0) <= 30,
+              (value.bucketInwardMeters ?? 0).isFinite, (0...0.08).contains(value.bucketInwardMeters ?? 0),
+              (value.recoveryGraspClearanceMeters ?? 0).isFinite, (0...0.15).contains(value.recoveryGraspClearanceMeters ?? 0) else {
             throw ROBGhostMotionError.blocked("The local left-can reach calibration is invalid or belongs to a different robot model.")
         }
         return value
@@ -398,14 +408,15 @@ struct ROBCanGrabPreview {
     static func make(can: ROBWorkspaceLocatedObject, model: ROBGhostRobotModel,
                      baseline: [String: Double], side: String = "left", now: Double = Date().timeIntervalSince1970 * 1000,
                      bucket: ROBWorkspaceLocatedObject? = nil, reachOffset: SIMD3<Double> = .zero,
-                     bucketYawDegrees: Double = 0) throws -> Self {
+                     bucketYawDegrees: Double = 0, bucketInwardMeters: Double = 0) throws -> Self {
         guard can.target == .can, can.position.count == 3, can.position.allSatisfy(\.isFinite),
               ["left", "right"].contains(side),
               can.confidence.isFinite, (0.35...1).contains(can.confidence), can.sequence > 0,
               can.capturedAt.isFinite, now.isFinite, (0...60_000).contains(now - can.capturedAt),
               baseline.values.allSatisfy(\.isFinite),
               [reachOffset.x,reachOffset.y,reachOffset.z].allSatisfy({ $0.isFinite && abs($0) <= 0.15 }),
-              bucketYawDegrees.isFinite, abs(bucketYawDegrees) <= 30 else {
+              bucketYawDegrees.isFinite, abs(bucketYawDegrees) <= 30,
+              bucketInwardMeters.isFinite, (0...0.08).contains(bucketInwardMeters) else {
             throw ROBGhostMotionError.blocked("Find the can again; its measured position is missing or older than 60 seconds.")
         }
         let graspPoint = can.point + reachOffset
@@ -529,12 +540,21 @@ struct ROBCanGrabPreview {
                 throw ROBGhostMotionError.blocked("Measure the open bucket rim again before planning a release.")
             }
             // Explicit operator calibration: rotate the model's release target
-            // toward ROB's left around the shoulder, keeping its height. Raw
-            // sightings and measured opening radius remain unchanged.
+            // toward ROB's left around the shoulder, then shift it horizontally
+            // toward that shoulder. Raw sightings, height and measured opening
+            // radius remain unchanged.
             let pivotFrame = model.frames(baseline)["left_one_Link"]!
             let pivot = SIMD2(pivotFrame.columns.3.x,pivotFrame.columns.3.y)
             let delta = SIMD2(bucket.point.x,bucket.point.y)-pivot, yaw = bucketYawDegrees * .pi/180
-            let bucketXY = pivot + SIMD2(cos(yaw)*delta.x-sin(yaw)*delta.y,sin(yaw)*delta.x+cos(yaw)*delta.y)
+            let rotatedDelta = SIMD2(cos(yaw)*delta.x-sin(yaw)*delta.y,sin(yaw)*delta.x+cos(yaw)*delta.y)
+            var bucketXY = pivot + rotatedDelta
+            if bucketInwardMeters > 0 {
+                let distance = simd_length(rotatedDelta)
+                guard distance.isFinite, distance > bucketInwardMeters + 0.05 else {
+                    throw ROBGhostMotionError.blocked("The calibrated bucket release point is too close to the left shoulder.")
+                }
+                bucketXY -= rotatedDelta / distance * bucketInwardMeters
+            }
             let bucketPoint = SIMD3(bucketXY.x,bucketXY.y,bucket.point.z)
             func travel(_ target: SIMD3<Double>, stage: String) throws {
                 let origin = tip(previous), count = max(1, Int(ceil(simd_distance(origin, target)/0.03)))

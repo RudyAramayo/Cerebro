@@ -209,7 +209,7 @@ import AppKit
         case "left_check_hanging": action = "Inspect both robot arms by panning/tilting the neck camera using on-device MLX; report whether each is visibly hanging. This observation never resets encoders or activates/moves either arm."
         case "left_recycle_can": action = "One experimental recycling task: scan locally for the EMPTY Coke can and open bucket, confirm twice with depth, and apply only the explicit operator-measured can/release alignment calibration if installed. Present the empty LEFT arm, calibrate empty jaws if needed, gently close the confirmed-EMPTY jaws at intensity 2 to initialize them, then OPEN at fixed intensity 10, approach with horizontal jaws, close gently at intensity 2, lift, carry ABOVE the opening, release at intensity 10 for a gravity drop and retreat held. Supervise the actual jaw opening and reach. One authorization covers all waypoints. No automatic force escalation, blind retries, driving or torque-off with a payload. Grip and placement remain unmeasured."
         case "left_wave": action = "Raise the empty LEFT arm along the initial tread-clearance approach, then coordinate J3/J5 together to -0.60 and J2/J6 together to +1.00/-0.60. Continue to J2 +1.30/J4 -0.60 and raised J5 -1.40. Seven approach segments from hanging plus four wave strokes; watch the newly coordinated front sweeps. Wave J1 -0.90/-1.05 twice with J6 -0.90/-0.60, and leave raised. Jaws unchanged."
-        case "left_prepare": action = "Present the confirmed-EMPTY physical LEFT arm. If held after a failed recycling attempt, first retrace only its actually executed frozen route to front; no unvisited or arbitrary recovery targets. Otherwise use the registered hanging/front corridor. Calibrate EMPTY jaws only if needed, initialize the EMPTY jaws with a gentle close at intensity 2, then OPEN at fixed intensity 10. Confirm no object is held, clear fingers, and supervise the recorded return and actual jaw opening. No torque-off or new encoder zero."
+        case "left_prepare": action = "Present the confirmed-EMPTY physical LEFT arm. If held after a failed recycling attempt, first return through its recorded visited targets to front. If an explicit local grasp-clearance calibration is installed, skip low recorded targets and validate each connecting segment above that height; no unvisited or arbitrary recovery targets. Otherwise use the registered hanging/front corridor. Calibrate EMPTY jaws only if needed, initialize the EMPTY jaws with a gentle close at intensity 2, then OPEN at fixed intensity 10. Confirm no object is held, clear fingers, and supervise the recorded return and actual jaw opening. No torque-off or new encoder zero."
         case "left_grip": action = "Keep the LEFT arm stationary in front and close its already-calibrated gripper at intensity \(intensity) around the presented OBJECT. Confirm the object is between the open jaws and all fingers are clear. Never grip a person's hand. No reopening, calibration or arm travel."
         case "left_release": action = "Keep the LEFT arm stationary in front and open its already-calibrated gripper to return the object. Confirm the receiver supports the object before approving. No calibration or arm travel."
         case "left_object_cycle": action = "Complete one LEFT object handoff: raise the EMPTY arm along the five-segment registered corridor, calibrate its EMPTY jaws only if needed, gently close the EMPTY jaws at intensity 2 to initialize them, and open. Pause for the local Object placed / fingers clear signal before closing at vendor intensity 2. Keep the arm stationary while holding; pause for Receiver supporting before opening at intensity 2. Pause for Object clear / jaws empty before reversing the empty arm to hanging and deactivating. These three readiness buttons continue this single approval, not new approvals. Never close on a person's hand. Opening, retention and force are unmeasured; confirm the physical state. No timed automatic close, release or lower."
@@ -419,6 +419,7 @@ import AppKit
         var entryRecovery: ROBLeftGestureProposal?
         if command == "left_prepare", ROBLeftArmInteractionPlan.executionRoute(from:q,hanging:false) == nil {
             let model = try workspaceModel()
+            let recoveryClearance = try ROBLeftCanReachCalibration.loadRecoveryGraspClearance(model:model,file:canReachCalibrationFile)
             let directory = URL(fileURLWithPath:lastRecordingPath).deletingLastPathComponent()
             entryRecovery = try await Task.detached(priority:.userInitiated) { [generation] in
                 let files = try FileManager.default.contentsOfDirectory(at:directory,includingPropertiesForKeys:[.contentModificationDateKey])
@@ -432,7 +433,7 @@ import AppKit
                           let old = try? JSONDecoder().decode(ROBLeftGestureProposal.self,from:data) else { continue }
                     let csv = file.deletingPathExtension().deletingPathExtension().appendingPathExtension("csv")
                     if let samples = try? ROBGhostRecordingSample.load(csv),
-                       let recovery = try? ROBRecordedLeftRecovery.make(previous:old,samples:samples,measured:q,model:model,generation:generation) { return recovery }
+                       let recovery = try? ROBRecordedLeftRecovery.make(previous:old,samples:samples,measured:q,model:model,generation:generation,graspClearanceMeters:recoveryClearance) { return recovery }
                 }
                 throw ROBGhostMotionError.blocked("The held arm is outside a recent recorded route. Keep it supported; no arbitrary return was sent.")
             }.value
@@ -504,7 +505,8 @@ import AppKit
                 let compiled = try await Task.detached(priority: .userInitiated) { [generation] in
                     let plan = try ROBCanGrabPreview.make(can: can, model: model, baseline: baseline, bucket: bucket,
                         reachOffset:ROBLeftCanReachCalibration.load(model:model,file:calibrationFile),
-                        bucketYawDegrees:ROBLeftCanReachCalibration.loadBucketYaw(model:model,file:calibrationFile))
+                        bucketYawDegrees:ROBLeftCanReachCalibration.loadBucketYaw(model:model,file:calibrationFile),
+                        bucketInwardMeters:ROBLeftCanReachCalibration.loadBucketInward(model:model,file:calibrationFile))
                     let actions = Dictionary(uniqueKeysWithValues: plan.steps.enumerated().compactMap { index, step in
                         step.jawAction.map { (index, $0) }
                     })

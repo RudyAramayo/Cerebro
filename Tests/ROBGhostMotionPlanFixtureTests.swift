@@ -15,35 +15,112 @@ private extension ROBLeftCanReachCalibration {
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
         let model = try ROBGhostRobotModel(directory: root.appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
         precondition(model.modelID.count == 64 && model.joints.count == 44 && model.hulls.count >= 40)
+        if CommandLine.arguments.last == "raised-recovery" {
+            let evidence = root.appendingPathComponent("docs/calibration/evidence/2026-10-22-recycling/height-yaw-live-missed-grasp.proposal.json")
+            let previous = try JSONDecoder().decode(ROBLeftGestureProposal.self,from:Data(contentsOf:evidence))
+            precondition(previous.kind == "recycling" && previous.steps.count == 48)
+            try ROBLeftGestureCompiler.validate(previous,model:model)
+            // Isolated samples prove all 48 frozen waypoints were visited. The
+            // archived CSV remains the physical record; this fixture sends nothing.
+            let samples = previous.steps.enumerated().map { index,step in
+                ROBGhostRecordingSample(time:Double(index),positions:step.positions,currents:[Double](repeating:0.2,count:7),
+                    deltas:[Double](repeating:0,count:7),step:index)
+            }
+            let measured = previous.steps.last!.positions
+            let gripIndex = previous.steps.firstIndex { $0.jawAction == .grip }!
+            let frontIndex = previous.steps.firstIndex { $0.jawAction == .prepare }!
+            let clearance = 0.0889
+            let floor = model.toolPosition(model.positions(vendorLeft:previous.steps[gripIndex].positions))!.z + clearance
+            let original = try ROBRecordedLeftRecovery.make(previous:previous,samples:samples,measured:measured,model:model,generation:78)
+            let raised = try ROBRecordedLeftRecovery.make(previous:previous,samples:samples,measured:measured,model:model,
+                generation:78,graspClearanceMeters:clearance)
+            precondition(original.steps.contains { $0.positions == previous.steps[gripIndex].positions },
+                "Default recorded recovery must retain its existing route behavior")
+            precondition(!raised.steps.contains { $0.positions == previous.steps[gripIndex].positions },
+                "Raised recovery must skip the grasp that contacted the table")
+            precondition(raised.steps.count < original.steps.count && raised.steps.count <= 80 && raised.seconds <= 100)
+            precondition(raised.kind == "recover" && raised.sessionGeneration == 78 && raised.baseline == measured && raised.id != previous.id)
+            precondition(raised.validForReplay(model:model) && raised.steps.allSatisfy { $0.jawAction == nil })
+            precondition(raised.steps.last!.positions == previous.steps[frontIndex].positions,
+                "Raised recovery must finish at the previously visited front pose")
+            for invalidClearance in [-0.001,0.151,Double.nan] {
+                expectBlocked {
+                    _ = try ROBRecordedLeftRecovery.make(previous:previous,samples:samples,measured:measured,model:model,
+                        generation:78,graspClearanceMeters:invalidClearance)
+                }
+            }
+            expectBlocked {
+                _ = try ROBRecordedLeftRecovery.make(previous:previous,samples:samples,
+                    measured:previous.steps[gripIndex].positions,model:model,generation:78,graspClearanceMeters:clearance)
+            }
+            var lastVisited = previous.steps.count, previousQ = measured, minimumHeight = Double.infinity
+            for step in raised.steps {
+                let matching = stride(from:lastVisited-1,through:frontIndex,by:-1).first { previous.steps[$0].positions == step.positions }
+                precondition(matching != nil,"Recovery invented or reordered a previously unvisited target")
+                lastVisited = matching!
+                let duration = ROBLeftArmInteractionPlan.duration(from:previousQ,to:step.positions,padding:ROBArmRoutinePlan.tolerance)!
+                precondition(abs(step.seconds-duration) < 1e-9 && step.seconds <= 5)
+                let checks = max(1,Int(ceil(1.5*zip(previousQ,step.positions).reduce(0.0) { $0+abs($1.0-$1.1) }/0.01)))
+                for sample in 0...checks {
+                    let t = Double(sample)/Double(checks), q = zip(previousQ,step.positions).map { $0+($1-$0)*t }
+                    let positions = model.positions(vendorLeft:q), z = model.toolPosition(positions)!.z
+                    minimumHeight = min(minimumHeight,z)
+                    precondition(q.allSatisfy { $0.isFinite && abs($0) <= 3.1 })
+                    precondition(model.treadSeparation(vendorLeft:q) >= 0.030)
+                    precondition(model.joints.filter { $0.name.hasPrefix("left_joint") }.allSatisfy {
+                        ($0.lower...$0.upper).contains(positions[$0.name]!)
+                    })
+                    precondition(z >= floor-1e-9,"A return bridge descended into the table-contact clearance zone")
+                }
+                previousQ = step.positions
+            }
+            print("Raised recorded recovery: \(raised.steps.count) visited targets in reverse order, \(raised.seconds)s, minimum height above prior grasp \(minimumHeight-(floor-clearance))m; no jaw replay, front pose reached")
+            return
+        }
         if CommandLine.arguments.last == "operator-alignment" {
             let now = Date().timeIntervalSince1970 * 1000, baseline = model.positions(vendorLeft:Array(repeating:0,count:7))
             let view = ROBWorkspaceView(panDegrees:0,upperTarget:6306)
-            let can = ROBWorkspaceLocatedObject(target:.can,position:[0.5412589493,-0.0699546850,0.9256385025],
+            let can = ROBWorkspaceLocatedObject(target:.can,position:[0.5324488846561272,-0.06700092572478558,0.8835158279604254],
                 confidence:0.8,capturedAt:now,sequence:10,view:view)
-            let bucket = ROBWorkspaceLocatedObject(target:.orangeBucket,position:[0.4236980407,0.3119403230,0.2782329251],
-                confidence:0.6,capturedAt:now,sequence:11,view:view,openingRadius:0.1)
-            let offset = SIMD3<Double>(-0.127,0,-0.1143)
+            let bucket = ROBWorkspaceLocatedObject(target:.orangeBucket,position:[0.3386968846760923,0.46298106639441516,0.27549540863399613],
+                confidence:0.6,capturedAt:now,sequence:11,view:view,openingRadius:0.10133714336237384)
+            let rawCan = can.position, rawBucket = bucket.position, rawRadius = bucket.openingRadius
+            let previousOffset = SIMD3<Double>(-0.127,0,-0.1143), offset = SIMD3<Double>(-0.127,0,-0.0508)
+            let inward = 0.0381
             let file = FileManager.default.temporaryDirectory.appendingPathComponent("rob-alignment-"+UUID().uuidString+".json")
             defer { try? FileManager.default.removeItem(at:file) }
             let calibration = ROBLeftCanReachCalibration(modelID:model.modelID,referenceID:model.referenceID,mappingID:ROBGhostRobotModel.mappingID,
-                translationMeters:[offset.x,offset.y,offset.z],source:"Isolated operator alignment fixture",bucketYawDegrees:20)
+                translationMeters:[offset.x,offset.y,offset.z],source:"Isolated operator alignment fixture",
+                bucketYawDegrees:20,bucketInwardMeters:inward)
             try calibration.saveFixture(to:file)
+            let loadedOffset = try ROBLeftCanReachCalibration.load(model:model,file:file)
             let loadedYaw = try ROBLeftCanReachCalibration.loadBucketYaw(model:model,file:file)
-            precondition(loadedYaw == 20)
-            let oldYaw = try ROBCanGrabPreview.make(can:can,model:model,baseline:baseline,now:now,bucket:bucket,reachOffset:offset)
-            let corrected = try ROBCanGrabPreview.make(can:can,model:model,baseline:baseline,now:now,bucket:bucket,reachOffset:offset,bucketYawDegrees:20)
-            precondition(corrected.reachesCan && corrected.can.position == can.position)
-            precondition(abs(corrected.calibratedGraspPoint.z-0.8113385025) < 0.000001)
+            let loadedInward = try ROBLeftCanReachCalibration.loadBucketInward(model:model,file:file)
+            precondition(loadedOffset == offset && loadedYaw == 20 && loadedInward == inward)
+            let previousGrasp = try ROBCanGrabPreview.make(can:can,model:model,baseline:baseline,now:now,reachOffset:previousOffset)
+            let noInward = try ROBCanGrabPreview.make(can:can,model:model,baseline:baseline,now:now,bucket:bucket,
+                reachOffset:offset,bucketYawDegrees:20)
+            let corrected = try ROBCanGrabPreview.make(can:can,model:model,baseline:baseline,now:now,bucket:bucket,
+                reachOffset:loadedOffset,bucketYawDegrees:loadedYaw,bucketInwardMeters:loadedInward)
+            precondition(corrected.reachesCan && corrected.can.position == rawCan)
+            precondition(can.position == rawCan && bucket.position == rawBucket && bucket.openingRadius == rawRadius)
+            precondition(abs(corrected.calibratedGraspPoint.z-0.8327158279604254) < 0.000001)
+            precondition(abs(corrected.calibratedGraspPoint.z-previousGrasp.calibratedGraspPoint.z-0.0635) < 0.000001,
+                "The table-contact correction must raise the grasp by 2.5 inches")
+            precondition(corrected.calibratedGraspPoint.x == previousGrasp.calibratedGraspPoint.x &&
+                corrected.calibratedGraspPoint.y == previousGrasp.calibratedGraspPoint.y)
             let actions = Dictionary(uniqueKeysWithValues:corrected.steps.enumerated().compactMap { i,s in s.jawAction.map { (i,$0) } })
             let frozen = try ROBLeftGestureCompiler.compile(kind:"recycling",name:"Operator alignment regression",poses:corrected.steps.map(\.pose),
                 model:model,baseline:Array(repeating:0,count:7),generation:77,recyclingActions:actions)
             try ROBLeftGestureCompiler.validate(frozen,model:model)
             func release(_ plan:ROBCanGrabPreview) -> SIMD3<Double> { model.toolPosition(plan.steps.first { $0.jawAction == .release }!.pose)! }
             let pivot = model.frames(baseline)["left_one_Link"]!.columns.3
-            let a = release(oldYaw), b = release(corrected)
-            let turn = (atan2(b.y-pivot.y,b.x-pivot.x)-atan2(a.y-pivot.y,a.x-pivot.x))*180 / .pi
-            precondition((15...25).contains(turn),"Bucket release correction turned away from robot left")
-            print("Operator alignment: grasp lowered11.43cm, raw sightings unchanged, release turns\(turn) degrees LEFT; \(frozen.steps.count) validated physical steps, grasp error\(corrected.graspError)m")
+            let a = release(noInward), b = release(corrected)
+            let radialChange = hypot(a.x-pivot.x,a.y-pivot.y)-hypot(b.x-pivot.x,b.y-pivot.y)
+            precondition(abs(radialChange-inward) < 0.006,
+                "Bucket release must move 1.5 inches toward the left shoulder")
+            precondition(abs(a.z-b.z) < 0.003,"The inward release correction must preserve drop height")
+            print("Operator alignment: grasp raised6.35cm, raw sightings unchanged, yaw remains20 degrees LEFT, release moves\(radialChange)m inward; \(frozen.steps.count) validated physical steps, grasp error\(corrected.graspError)m")
             return
         }
         func head(_ pan: Double, _ lower: Double, _ upper: Double) -> [String: simd_double4x4] {

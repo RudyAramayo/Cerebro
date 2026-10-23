@@ -49,7 +49,7 @@
     }
   },
   "plannerResult": "Actual last measured can/bucket with operator corrections compiles43 bounded physical steps; release moves20.344 degrees LEFT, modeled grasp error0.307mm. These are model checks, not physical accuracy.",
-  "livePreparation": "Recorded EMPTY return to front completed in60.42seconds after one new microphone-approved15-minute session; no manual mode toggles. Subsequent stationary release10 and diagnostic release20 were accepted but Rob observed jaws still closed. No corrected can reach sent.",
+  "livePreparation": "Earlier commissioning: recorded EMPTY return to front completed in 60.42 seconds after one new microphone-approved 15-minute session; no manual mode toggles. Subsequent stationary release at 10 and diagnostic release at 20 were accepted but Rob observed jaws still closed. This preceded the close/open initialization and completed physical attempt recorded in currentAttempt.",
   "pickupAndDropVerified": false,
   "cameraImagesIncluded": false,
   "grantsPersisted": false,
@@ -94,7 +94,27 @@
   },
   "currentAttempt": {
     "recording": "left_recycle_can-71623360-BA14-4D42-8228-25889143E316.csv",
-    "status": "in progress; can and bucket visually found; bucket depth pending",
-    "authorization": "One new final spoken complete-task approval after runtime reported rehearsal session ended; no waypoint approvals."
+    "archive": "height-yaw-live-missed-grasp.csv.gz",
+    "proposal": "height-yaw-live-missed-grasp.proposal.json",
+    "validation": "height-yaw-live-validation.json",
+    "status": "Physical route completed; pickup failed. Operator reported the can was knocked over and the low gripper hit the table. Release alignment improved above the bucket; no can was placed in it.",
+    "authorization": "Root agent observed one native final spoken complete-task approval; no per-waypoint approvals. No microphone transcript is included or inferred from CSV.",
+    "plannedPhysicalSteps": 48,
+    "lastRecordedElapsedSeconds": 288.9248032500036,
+    "canPickedUp": false,
+    "canPlacedInBucket": false,
+    "tableContactReportedByOperator": true,
+    "operatorFeedback": "ohh wow. it was so close to working perfectly. the release was right above the bucket, i would pull the arm 1.5 inches closer to the droid before drop. The coke can was knocked over though so it wasn't gripped and the gripper was too low which caused the gripper to hit the table, so we need to lift the gripper commands about 2.5 inches taller. Please repeat the test",
+    "nextRequestedCorrection": {
+      "canHeightIncreaseMeters": 0.0635,
+      "resultingCanTranslationMeters": [
+        -0.127,
+        0,
+        -0.0508
+      ],
+      "additionalBucketInwardMeters": 0.0381,
+      "retainBucketYawDegrees": 20,
+      "status": "Requested after this trial; not used by this archived proposal."
+    }
   }
 }
