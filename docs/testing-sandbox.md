@@ -11,6 +11,7 @@ The sandbox catalog contains these independent test items:
 | Test | Actions |
 | --- | --- |
 | Recycle can | Run the physical test, search with the neck camera, scan workspace geometry, preview the grasp |
+| Estimated calibration trial | Build a small estimated empty-arm ghost movement, inspect it, run the reviewed test and hold for observation |
 | Grip and return | Complete the supervised left-arm object handoff |
 | Stationary gripper setup | Explicitly set up empty grippers while hanging and inactive |
 | Arm preparation and return | Present/open, grip, release, inspect hanging, scan workspace geometry, startup route, empty-arm return |
@@ -89,6 +90,18 @@ This preview is read-only. It never assigns the executable proposal, restores an
 The concrete depth producer deliberately emits an unregistered map. The existing markerless base/torso fitter can report candidate extrinsics and fit RMS, but it does not yet export the uncertainty and independent validation needed here, or bind each result to the recorded neck pose. Commissioning needs measured base/torso correspondences with separate validation points, per-view neck/camera identities, uncertainty export and repeated-view validation. A small fit residual alone is insufficient.
 
 The current hanging-tool collision proxy also enters the model's 3 cm tread margin. This requires checking the measured mounting geometry, tool/reference alignment and conservative proxy shapes; it is not proof that the real hanging arm touches a tread. Camera registration will not fix that model-relative discrepancy. The planner currently uses conservative link boxes and an expanded open-jaw envelope. Measured finger geometry, robot self-volume visibility and intentional contact with the grasped target still need commissioning before a live grasp can be admitted. No physical recycling success is claimed for this planner.
+
+On October 22, the operator reported that the level table appeared 6–8 inches too far from ROB in the depth display, with an upward slope as range increased, while the near table height looked correct. These are approximate observations, not a measured camera transform. No horizontal correction or tabletop leveling has been applied. A Scaniverse reference capture was deferred at the operator's request. The current producer still supplies unregistered snapshots, so normal two-can recycling remains blocked before arm travel. The [commissioning evidence](calibration/evidence/2026-10-22-recycling/estimated-calibration-validation.json) records the build and the zero-motion outcome.
+
+### Estimated calibration trial
+
+Rob explicitly authorized an estimated movement followed by observation and correction, then directed the initial movement away from the table. This separate sandbox test scans current depth, freezes one slow four-second empty-arm retreat, and holds at its endpoint. The selected joint deltas are `[+0.100, +0.025, −0.075, 0, 0, 0, 0]` radians; verified maximum hull travel is about 3.3 cm at the observed hanging pose. It keeps the estimate visibly distinct from measured registration. One native spoken or controller approval covers the bounded test; the spoken prompt remains **“Can I move my arms?”**
+
+The trial checks the occupied depth grid using an explicit estimated alignment margin. Unobserved space is confined to the reviewed local trial volume. Existing model self-proxy overlap must improve throughout the sampled retreat without creating or worsening another pair. Joint limits, live feedback, current scene identity, ownership, leases and Stop remain active. The trial does not grip, carry, recycle, update calibration automatically, or chain successive steps into a reach. The next correction uses the operator's observation and a new proposal.
+
+The fixed shoulder mounting plate is not swept against workspace depth: its fixed torso attachment and zero hull displacement are verified. Every articulated arm link retains the occupied-cell check, including links stationary in the planned step. The map is unchanged. A rejection reports the occupied voxel, sample and hull distance to help diagnose an estimated alignment error.
+
+Expanded link boxes bound the voxel lookup. Occupied candidates then use point-to-surface distance from the verified closed convex arm hulls, including triangle faces, edges and vertices; points inside a hull have zero distance. Newly approached occupancy must retain the full 150 mm estimate margin plus voxel, sweep and jaw allowances. A pre-existing margin overlap may retreat only when its exact hull-to-voxel baseline is at least 100 mm plus jaw allowance, clearance never decreases at any checked pose, and it strictly increases at the endpoint. These pairs and their distances are recorded in the proof. Open, nonmanifold, malformed or nonconvex queried hulls block the trial. Unknown-space checks retain their conservative local envelopes. This remains an operator-supervised experiment around unregistered depth, with no planned table contact.
 
 ## Fixture coverage
 

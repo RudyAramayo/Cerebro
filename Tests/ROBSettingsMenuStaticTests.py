@@ -330,6 +330,19 @@ def main() -> None:
             "Sandbox tests bypassed the coordinator authorization path")
     require('run("arm_session")' in sandbox and 'run("left_prepare")' not in sandbox,
             "Starting a supervised sandbox session must not raise the arm as a separate preparation step")
+    require('id: "estimated-calibration", title: "Estimated calibration trial"' in sandbox
+            and 'command: "estimate:preview"' in sandbox and 'command: "estimate:run"' in sandbox,
+            "Sandbox lost its separate estimated calibration trial")
+    trial_action = braced_declaration(sandbox, "@objc private func performTrialAction(_ sender: NSButton)")
+    require('command == "estimate:preview"' in trial_action
+            and "ROBLeftArmTrial.shared.prepareEstimatedCalibration" in trial_action
+            and 'command == "estimate:run"' in trial_action
+            and "ROBLeftArmTrial.shared.performEstimatedCalibration" in trial_action,
+            "Estimated preview and supervised execution must use their separate bounded trial APIs")
+    require("Registration remains unmeasured." in sandbox
+            and "Existing nearby depth-margin overlaps may only improve; new intrusions block motion." in sandbox
+            and "No jaw commands, grasp, recycling or automatic return." in sandbox,
+            "Estimated calibration must explain its provenance and limited empty-arm scope")
     store_parameters = braced_declaration(sandbox, "private func storeParameters()")
     require("guard canEdit" in store_parameters and "options: .atomic" in store_parameters,
             "Sandbox parameters must be saved atomically outside physical operations")

@@ -150,7 +150,9 @@ final class ROBAmberGatewayClient: NSObject {
         return id
     }
     var onGhostStep: (() -> Void)?
+    var beforeGhostAdmission: (() -> Void)?
     func sendApprovedLeftGestureStep(proposalID: UUID, index: Int, duration: Double, expectedSessionGeneration: UInt64) -> UInt64 {
+        beforeGhostAdmission?()
         guard let target = ROBLeftArmTrial.shared.approvedGestureTarget(id: proposalID, index: index,
             seconds: duration, generation: expectedSessionGeneration) else { return 0 }
         precondition(ROBLeftArmTrial.shared.approvedGestureTarget(id: UUID(), index: index, seconds: duration,
@@ -220,6 +222,7 @@ final class ROBWorkspaceSearch {
     private var collisionSnapshotValue: ROBWorkspaceCollisionSnapshot?
     var collisionScanCalls = 0
     var failCollisionScan = false
+    var syntheticDistantPlane = false
     var onCollisionScan: (() -> Void)?
     var collisionSnapshot: ROBWorkspaceCollisionSnapshot? {
         guard let value = collisionSnapshotValue,
@@ -239,7 +242,11 @@ final class ROBWorkspaceSearch {
         var map = ROBWorkspaceDepthMap(modelID: model.modelID, geometryID: model.geometryID,
             mappingID: ROBGhostRobotModel.mappingID, sessionGeneration: generation,
             cameraGeneration: camera, nowMilliseconds: now - 200)
-        let transform = ROBWorkspaceView(panDegrees: 0, upperTarget: 6306).cameraFrame(model: model)!
+        var transform = ROBWorkspaceView(panDegrees: 0, upperTarget: 6306).cameraFrame(model: model)!
+        // Explicit synthetic scene for the estimated-runtime fixture only:
+        // distant occupied returns leave the arm's local volume UNKNOWN. This
+        // never creates registration evidence or bypasses the real mapper.
+        if syntheticDistantPlane { transform = matrix_identity_double4x4; transform.columns.3 = SIMD4(1.3,1.3,0,1) }
         for (sequence, age) in [(UInt64(1), 100.0), (UInt64(2), 50.0)] {
             try map.append(width: 24, height: 24, fx: 24, fy: 24, cx: 12, cy: 12,
                 depth: { _, _ in 900 }, cameraToRobot: transform, capturedAtMilliseconds: now-age,
@@ -279,9 +286,10 @@ final class ROBArmRoutineVision {
     var fresh = true, handsClear = true, blocked = false, objectInRight = false
     var cameraGeneration = UUID()
     var observationCount = 0
+    var activationHistory: [Bool] = []
     var readinessDescription: String { "Simulated camera unavailable" }
     func healthSnapshot() -> NSDictionary { ["fixture": true] }
-    func setActive(_ active: Bool, teaching: Bool = false) {}
+    func setActive(_ active: Bool, teaching: Bool = false) { activationHistory.append(active) }
     func observe(target: String, grippers: Bool = true, progress: (@MainActor (String) -> Void)? = nil) async throws -> ROBArmRoutineObservation {
         observationCount += 1
         return ROBArmRoutineObservation(pathVisible: !blocked, pathClear: !blocked, hanging: true, armsInFront: !blocked,
@@ -316,6 +324,122 @@ final class ROBArmRoutineCoordinator {
             ROBLeftArmTrial.shared.perform(command) { continuation.resume(returning: $0) }
         }
     }
+    @MainActor static func estimatedCalibrationTests(model: ROBGhostRobotModel, folder: URL) async throws {
+        let trial = ROBLeftArmTrial.shared, gateway = ROBAmberGatewayClient.shared
+        let search = ROBWorkspaceSearch.shared, vision = ROBArmRoutineVision.shared
+        let broker = ROBControllerArmApproval.shared
+        let device = UUID(), session = UUID()
+        let hello = ROBRobotActionMessage.controllerHello(senderID:"estimated-fixture",acceptsActions:true,capabilities:["arm_operation"])
+        _ = broker.receive(hello,device:device,session:session)
+        var decision: Bool? = true, requests = 0
+        var pendingHook: (() -> Void)?
+        broker.send = { message, targetDevice, targetSession in
+            if message.kind == .actionRequest {
+                requests += 1
+                precondition(message.arguments["operation"] as? String == "manual")
+                precondition(message.arguments["arm"] as? String == "left")
+                precondition((message.arguments["summary"] as? String)?.contains("UNVERIFIED") == true)
+                if let decision {
+                    DispatchQueue.main.async {
+                        _ = broker.receive(.actionStatus(callID:message.callID!,state:decision ? .accepted : .rejected,
+                            detail:"Isolated estimated-step decision",result:[:],senderID:message.recipientID!,recipientID:message.senderID),
+                            device:targetDevice,session:targetSession)
+                    }
+                } else { DispatchQueue.main.async { pendingHook?() } }
+            }
+            return true
+        }
+        func physicalCommands() -> [String] {
+            gateway.commands.filter { !$0.hasPrefix("mode_query:") && !$0.hasPrefix("priority_hold:") }
+        }
+        func reset() {
+            trial.cancel(reason:"Isolated estimated fixture reset")
+            broker.cancel(reason:"Isolated estimated fixture reset")
+            gateway.ready = true; gateway.stale = false; gateway.rejectHold = false; gateway.confirmHold = true
+            gateway.rejectRenewal = false; gateway.q = ["left":Array(repeating:0,count:7),"right":Array(repeating:0,count:7)]
+            gateway.mode = ["left":0,"right":0]; gateway.commands = []; gateway.activeLeases = []
+            gateway.beforeGhostAdmission = nil; gateway.onGhostStep = nil; gateway.onTelemetry = nil
+            search.syntheticDistantPlane = true; search.failCollisionScan = false; search.clearCollisionScene()
+            vision.fresh = true; vision.activationHistory = []
+            ROBArmRoutineCoordinator.shared.prepareView = { true }
+            decision = true; pendingHook = nil
+        }
+        func preview() async -> NSDictionary {
+            await withCheckedContinuation { continuation in trial.prepareEstimatedCalibration { continuation.resume(returning:$0) } }
+        }
+        func execute() async -> NSDictionary {
+            await withCheckedContinuation { continuation in trial.performEstimatedCalibration { continuation.resume(returning:$0) } }
+        }
+        reset()
+        let absent = await execute()
+        precondition(absent["status"] as? String == "blocked" && gateway.commands.isEmpty && requests == 0)
+        let prepared = await preview()
+        precondition(prepared["status"] as? String == "accepted_unverified",prepared.description)
+        precondition(gateway.commands.isEmpty && requests == 0 && vision.activationHistory == [true])
+        let path = trial.collisionReviewProposal!
+        precondition(path.kind == "estimated_calibration" && path.steps.count == 1 && path.steps[0].jawAction == nil)
+        precondition(path.workspaceCollisionPlan == nil && path.validForReplay(model:model))
+        let previewRecording = URL(fileURLWithPath:prepared["current_recording"] as! String).deletingPathExtension()
+        let proof = try JSONDecoder().decode(ROBEstimatedArmCalibrationPlan.self,
+            from:Data(contentsOf:previewRecording.appendingPathExtension("estimated-calibration.json")))
+        precondition(path.id == proof.id && path.baseline == proof.baseline && path.steps == proof.steps)
+        let generic = await run(path,model:model)
+        precondition(generic["status"] as? String == "blocked" && requests == 0 && gateway.commands.isEmpty)
+        precondition((generic["detail"] as? String)?.contains("generic gesture lane") == true)
+        // The failed generic lane does not grant or consume the dedicated path.
+        let accepted = await execute()
+        precondition(accepted["status"] as? String == "completed",accepted.description)
+        precondition(accepted["estimated_calibration_unverified"] as? Bool == true)
+        precondition(requests == 1 && gateway.commands.filter { $0 == "ghost_step_0:right" }.count == 1)
+        precondition(gateway.commands.allSatisfy { ["mode_query:right","position_mode:right","ghost_step_0:right","renew_lease:right","priority_hold:right"].contains($0) })
+        precondition(gateway.q["right"] == proof.target && gateway.mode["right"] == 2 && gateway.activeLeases.isEmpty)
+        precondition(vision.activationHistory == [true,false],"Preview capture restarted before the one-step approval/execution")
+        precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty && !broker.isPending)
+        let physicalRecording = URL(fileURLWithPath:accepted["current_recording"] as! String).deletingPathExtension()
+        let performedProof = try JSONDecoder().decode(ROBEstimatedArmCalibrationPlan.self,
+            from:Data(contentsOf:physicalRecording.appendingPathExtension("estimated-calibration.json")))
+        precondition(performedProof == proof)
+        gateway.commands = []
+        let replay = await execute()
+        precondition(replay["status"] as? String == "blocked" && gateway.commands.isEmpty && requests == 1)
+        let chained = await preview()
+        precondition(chained["status"] as? String == "blocked" && gateway.commands.isEmpty)
+        print("Estimated step: real production proof/mapper, separate runtime approval, exactly one 4-second approved SDK step, tight measured endpoint and confirmed hold; same camera kept live; real-ID proposal/proof JSON; generic lane, consumed replay and blind chaining rejected")
+
+        for scenario in ["decline","pending_stop","map_change","camera_change","session_change","start_drift","dispatch_drift","stop_during_step"] {
+            reset()
+            let prepared = await preview()
+            precondition(prepared["status"] as? String == "accepted_unverified",prepared.description)
+            let beforeRequests = requests
+            switch scenario {
+            case "decline": decision = false
+            case "pending_stop": decision = nil; pendingHook = { trial.cancel(reason:"Explicit Stop while waiting for approval") }
+            case "map_change": search.clearCollisionScene()
+            case "camera_change": vision.cameraGeneration = UUID()
+            case "session_change": gateway.generation += 1
+            case "start_drift": gateway.q["right"]![0] = 0.002
+            case "dispatch_drift": gateway.beforeGhostAdmission = { gateway.q["right"]![0] = 0.002 }
+            case "stop_during_step": gateway.onGhostStep = { trial.cancel(reason:"Explicit Stop during estimated step") }
+            default: break
+            }
+            let result = await execute()
+            precondition(["rejected","cancelled","blocked"].contains(result["status"] as? String ?? ""),"\(scenario): \(result)")
+            let steps = gateway.commands.filter { $0.hasPrefix("ghost_step_") }
+            precondition(steps.count == (scenario == "stop_during_step" ? 1 : 0),"\(scenario): \(gateway.commands)")
+            precondition(!gateway.commands.contains(where:{ $0.hasPrefix("gripper_") || $0.hasPrefix("calibrate:") || $0.hasPrefix("deactivate:") || $0.hasPrefix("waypoint_") }))
+            if ["decline","pending_stop","map_change","camera_change","session_change","start_drift"].contains(scenario) {
+                precondition(physicalCommands().isEmpty,"\(scenario): \(gateway.commands)")
+            }
+            if ["map_change","camera_change","session_change","start_drift"].contains(scenario) { precondition(requests == beforeRequests) }
+            precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty && !broker.isPending)
+            gateway.commands = []
+            let retry = await execute()
+            precondition(retry["status"] as? String == "blocked" && gateway.commands.isEmpty)
+        }
+        reset(); search.syntheticDistantPlane = false
+        print("Estimated runtime rejection: decline, Stop before approval/during motion, lost/replaced map, camera/session change, >2mm start/dispatch drift and missing/consumed proof never admit another step or any jaw/encoder/deactivation command")
+    }
+
     @MainActor static func delayedTelemetryTests() async throws {
         let g = ROBAmberGatewayClient.shared
         for scenario in ["delivery", "source", "live_loss", "malformed", "current_jump"] {
@@ -437,6 +561,11 @@ final class ROBArmRoutineCoordinator {
                 }
             }
             return true
+        }
+        if CommandLine.arguments.last == "estimated-calibration" {
+            let model = try ROBGhostRobotModel(directory:URL(fileURLWithPath:CommandLine.arguments[1]).appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
+            try await estimatedCalibrationTests(model:model,folder:folder)
+            return
         }
         // Neck-only observations do not request arm authority, connect a
         // gateway, or issue a hold even when their camera inspection fails.

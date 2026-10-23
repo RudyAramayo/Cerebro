@@ -22,6 +22,7 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
+		AC221026000000000000000C /* ROBEstimatedArmCalibrationPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC221026000000000000000B /* ROBEstimatedArmCalibrationPlan.swift */; };
 		AC221026000000000000000A /* ROBArmJointLimits.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2210260000000000000009 /* ROBArmJointLimits.swift */; };
 		AC2210260000000000000008 /* ROBWorkspaceCollisionPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2210260000000000000007 /* ROBWorkspaceCollisionPlan.swift */; };
 		AC2210260000000000000006 /* ROBWorkspaceDepthMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2210260000000000000005 /* ROBWorkspaceDepthMap.swift */; };
@@ -274,6 +275,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		AC221026000000000000000B /* ROBEstimatedArmCalibrationPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBEstimatedArmCalibrationPlan.swift; sourceTree = "<group>"; };
 		AC2210260000000000000009 /* ROBArmJointLimits.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBArmJointLimits.swift; sourceTree = "<group>"; };
 		AC2210260000000000000007 /* ROBWorkspaceCollisionPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBWorkspaceCollisionPlan.swift; sourceTree = "<group>"; };
 		AC2210260000000000000005 /* ROBWorkspaceDepthMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBWorkspaceDepthMap.swift; sourceTree = "<group>"; };
@@ -726,6 +728,7 @@
 				AC2309260000000000000005 /* ROBArmRoutineCoordinator.swift */,
 				AC2509230000000000000001 /* ROBShowMotionCoordinator.swift */,
 				AC2309260000000000000007 /* ROBArmRoutineSettingsViewController.swift */,
+				AC221026000000000000000B /* ROBEstimatedArmCalibrationPlan.swift */,
 				AC2210260000000000000009 /* ROBArmJointLimits.swift */,
 				AC2210260000000000000007 /* ROBWorkspaceCollisionPlan.swift */,
 				AC2210260000000000000005 /* ROBWorkspaceDepthMap.swift */,
@@ -1164,6 +1167,7 @@
 				AC2309260000000000000006 /* ROBArmRoutineCoordinator.swift in Sources */,
 				AC2509230000000000000002 /* ROBShowMotionCoordinator.swift in Sources */,
 				AC2309260000000000000008 /* ROBArmRoutineSettingsViewController.swift in Sources */,
+				AC221026000000000000000C /* ROBEstimatedArmCalibrationPlan.swift in Sources */,
 				AC221026000000000000000A /* ROBArmJointLimits.swift in Sources */,
 				AC2210260000000000000008 /* ROBWorkspaceCollisionPlan.swift in Sources */,
 				AC2210260000000000000006 /* ROBWorkspaceDepthMap.swift in Sources */,

@@ -33,8 +33,9 @@ struct ROBReviewedArmDispatchStart {
 @objcMembers final class ROBLeftArmTrial: NSObject {
     static let shared = ROBLeftArmTrial()
     static let commands = ["left_wave", "left_prepare", "left_grip", "left_release", "left_relax", "left_object_cycle",
-        "left_pick_place", "left_recycle_can", "left_search_workspace", "left_check_hanging", "left_scan_clearance"]
-    private static let neckOnlyCommands = ["left_search_workspace", "left_check_hanging", "left_scan_clearance"]
+        "left_pick_place", "left_recycle_can", "left_search_workspace", "left_check_hanging", "left_scan_clearance",
+        "left_estimated_preview", "left_estimated_calibration"]
+    private static let neckOnlyCommands = ["left_search_workspace", "left_check_hanging", "left_scan_clearance", "left_estimated_preview"]
     static let currentLimitKey = "ROBLeftArmCurrentJumpLimitRaw"
     private(set) var isRunning = false
     var isNeckOnlyInspection: Bool { isRunning && Self.neckOnlyCommands.contains(activeCommand) }
@@ -100,12 +101,178 @@ struct ROBReviewedArmDispatchStart {
     private var recoveryGeneration: UInt64 = 0
     @nonobjc private var offeredRecovery: ROBLeftGestureProposal?
 
+    // These are session-local review evidence, never an actuator grant. The
+    // dedicated approval consumes the pending proof exactly once.
+    private struct EstimatedPreview {
+        let proof: ROBEstimatedArmCalibrationPlan
+        let map: ROBWorkspaceCollisionSnapshot
+        let model: ROBGhostRobotModel
+        let proposal: ROBLeftGestureProposal
+        let otherArmHold: (positions: [Double], modes: [Int])
+    }
+    @nonobjc private var pendingEstimated: EstimatedPreview?
+    @nonobjc private var activeEstimated: EstimatedPreview?
+    private var estimatedPreviewTimer: Timer?
+    private var estimatedCameraRetained = false
+    private var estimatedApprovalPending = false
+
+    @nonobjc func prepareEstimatedCalibration(completion: @escaping (NSDictionary) -> Void) {
+        perform("left_estimated_preview", completion: completion)
+    }
+
+    /// Deliberately uses the one-shot manual lane, never a remembered rehearsal
+    /// session. The operator confirms EMPTY jaws and visually clear local space.
+    @nonobjc func performEstimatedCalibration(completion: @escaping (NSDictionary) -> Void) {
+        precondition(Thread.isMainThread)
+        do {
+            guard !isRunning, !ROBArmRoutineCoordinator.shared.isRunning,
+                  !ROBShowMotionCoordinator.shared.isRunning, !ROBAmberGestureExecutor.shared.isExecuting,
+                  !ROBControllerArmApproval.shared.isPending, let pending = pendingEstimated else {
+                throw ROBArmRoutineError.blocked("Prepare and review a fresh estimated single-step preview first; finish other operations.")
+            }
+            try validateEstimatedContext(pending, generation: pending.proof.sessionGeneration)
+            guard estimatedStartMatches(try measured().positionsRadians.map(\.doubleValue), baseline: pending.proof.baseline) else {
+                throw ROBArmRoutineError.blocked("The arm moved from its frozen estimated start; prepare a new preview.")
+            }
+            let limit = UserDefaults.standard.double(forKey: Self.currentLimitKey)
+            guard limit.isFinite, limit >= 0 else { throw ROBArmRoutineError.blocked("Invalid current jump threshold.") }
+            let changes = zip(pending.proof.baseline,pending.proof.target).enumerated().map {
+                String(format:"J%d %+.4f rad",$0.offset+1,$0.element.1-$0.element.0)
+            }.joined(separator:"; ")
+            let text = "ONE estimated EMPTY physical LEFT-arm retreat away from the table over 4 seconds: \(changes), modeled vertex travel \(Int(ceil(pending.proof.maximumVertexDisplacementMeters*1000))) mm. Confirm empty jaws and visually clear the complete arm and its surrounding local working space. Camera registration remains UNVERIFIED. This supervised EMPTY retreat may start inside the estimated 150 mm depth margin: recorded existing nearby cells must have at least 100 mm plus jaw allowance of modeled starting separation and move farther from the arm at every checked pose, with strict final improvement. New margin intrusions still block. These are estimated geometry checks, not measured collision protection. No grasp, jaw command, encoder reset, torque-off, return or repeat. Hold at the measured finish and report physical direction. Proof \(pending.proof.id.uuidString); scene \(pending.map.sceneID.uuidString); map SHA256 \(pending.map.fingerprint). Keep Stop + hold ready."
+            estimatedApprovalPending = true
+            update("Awaiting approval for one estimated empty-arm calibration step")
+            ROBControllerArmApproval.shared.request(operation: "manual", arm: "left", summary: text,
+                execute: { [weak self] done in
+                    guard let self else { return }
+                    self.estimatedApprovalPending = false
+                    do {
+                        guard self.pendingEstimated?.proof == pending.proof else {
+                            throw ROBArmRoutineError.blocked("The estimated preview expired or was consumed; no motion sent.")
+                        }
+                        try self.validateEstimatedContext(pending, generation: pending.proof.sessionGeneration)
+                        guard self.estimatedStartMatches(try self.measured().positionsRadians.map(\.doubleValue),baseline:pending.proof.baseline) else {
+                            throw ROBArmRoutineError.blocked("The measured arm changed while awaiting approval; no motion sent.")
+                        }
+                        self.estimatedPreviewTimer?.invalidate(); self.estimatedPreviewTimer = nil
+                        self.pendingEstimated = nil
+                        self.activeEstimated = pending; self.proposal = pending.proposal
+                        self.start("left_estimated_calibration",summary:text,limit:limit,completion:done)
+                        if !self.isRunning { self.activeEstimated = nil; self.releaseEstimatedCamera() }
+                    } catch {
+                        self.invalidateEstimatedPreview(reason:error.localizedDescription)
+                        done(["status":"blocked","arm_motion_sent":false,"detail":error.localizedDescription])
+                    }
+                }, cancel: { [weak self] in self?.abort("Estimated calibration declined or stopped; no further motion authorized.") },
+                completion: { [weak self] result in
+                    self?.estimatedApprovalPending = false
+                    if self?.isRunning != true { self?.invalidateEstimatedPreview(reason:"Estimated calibration approval ended") }
+                    completion(result)
+                })
+        } catch {
+            invalidateEstimatedPreview(reason:error.localizedDescription)
+            completion(["status":"blocked","arm_motion_sent":false,"detail":error.localizedDescription])
+        }
+    }
+
+    private func estimatedStartMatches(_ actual: [Double], baseline: [Double]) -> Bool {
+        actual.count == 7 && baseline.count == 7 && actual.allSatisfy(\.isFinite) &&
+            1.5*zip(actual,baseline).reduce(0.0,{ $0+abs($1.0-$1.1) }) <= ROBReviewedArmDispatchStart.maximumStartPointDriftMeters
+    }
+
+    private func estimatedCorridorMatches(_ actual: [Double], proof: ROBEstimatedArmCalibrationPlan) -> Bool {
+        guard actual.count == 7, proof.baseline.count == 7, proof.target.count == 7,
+              (actual+proof.baseline+proof.target).allSatisfy(\.isFinite) else { return false }
+        let delta = zip(proof.baseline,proof.target).map { $1-$0 }
+        let squaredLength = delta.reduce(0.0) { $0+$1*$1 }
+        guard squaredLength.isFinite, squaredLength > 0 else { return false }
+        let projection = zip(zip(actual,proof.baseline),delta).reduce(0.0) { $0+($1.0.0-$1.0.1)*$1.1 } / squaredLength
+        let fraction = min(1,max(0,projection))
+        let nearest = zip(proof.baseline,delta).map { $0+fraction*$1 }
+        return 1.5*zip(actual,nearest).reduce(0.0,{ $0+abs($1.0-$1.1) }) <= 0.003
+    }
+
+    private func validateEstimatedContext(_ value: EstimatedPreview, generation: UInt64) throws {
+        let proof = value.proof, path = value.proposal
+        guard gateway.isReady(),
+              (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == generation,
+              let current = ROBWorkspaceSearch.shared.collisionSnapshot,
+              current.sceneID == value.map.sceneID, current.fingerprint == value.map.fingerprint,
+              path.kind == "estimated_calibration", path.id == proof.id,
+              path.modelID == proof.modelID, path.referenceID == proof.referenceID,
+              path.geometryID == proof.geometryID, path.mappingID == proof.mappingID,
+              path.sessionGeneration == proof.sessionGeneration, path.baseline == proof.baseline, path.steps == proof.steps,
+              path.poses.isEmpty, path.workspaceCollisionPlan == nil, path.workspaceApproachPlan == nil,
+              path.recyclingActions == nil, path.recyclingParameters == nil,
+              zip(proof.target,ROBArmJointLimits.radians).allSatisfy({ $1.contains($0) }) else {
+            throw ROBArmRoutineError.blocked("The single-step estimated proof, scene or arm connection changed; no motion admitted.")
+        }
+        try proof.validateContext(map:value.map,model:value.model,generation:generation,
+            cameraGeneration:vision.cameraGeneration,nowMilliseconds:Date().timeIntervalSince1970*1000)
+        if activeCommand == "left_estimated_calibration",
+           !estimatedCorridorMatches(try measured().positionsRadians.map(\.doubleValue),proof:proof) {
+            throw ROBArmRoutineError.blocked("Measured LEFT joints left the approved estimated retreat corridor; hold requested.")
+        }
+        let held = value.otherArmHold
+        guard let sample = gateway.telemetry(forArm:"left"), sample.effectiveSampleAgeMilliseconds <= 250,
+              sample.positionsRadians.count == 7, sample.positionsRadians.allSatisfy({ $0.doubleValue.isFinite }),
+              gateway.modes(forArm:"left").map(\.intValue) == held.modes,
+              sample.statuses.map(\.intValue) == held.modes,
+              1.5*zip(sample.positionsRadians.map(\.doubleValue),held.positions).reduce(0.0,{ $0+abs($1.0-$1.1) }) <= 0.003 else {
+            throw ROBArmRoutineError.blocked("The other arm moved, changed mode or lost fresh feedback; hold the estimated trial.")
+        }
+    }
+
+    private func releaseEstimatedCamera() {
+        if estimatedCameraRetained {
+            estimatedCameraRetained = false
+            // A different operation may already have acquired camera demand.
+            // Relinquish this preview without switching that owner's view off.
+            if !ROBArmRoutineCoordinator.shared.isRunning, !ROBShowMotionCoordinator.shared.isRunning,
+               !ROBAmberGestureExecutor.shared.isExecuting {
+                vision.setActive(false); ROBArmRoutineCoordinator.shared.cameraDemand?(false)
+            }
+        }
+    }
+
+    private func invalidateEstimatedPreview(reason: String, stopCamera: Bool = true) {
+        estimatedPreviewTimer?.invalidate(); estimatedPreviewTimer = nil
+        pendingEstimated = nil
+        if collisionReviewProposal?.kind == "estimated_calibration" { collisionReviewProposal = nil }
+        let cancelApproval = estimatedApprovalPending; estimatedApprovalPending = false
+        if stopCamera, !isRunning { releaseEstimatedCamera() }
+        if cancelApproval { ROBControllerArmApproval.shared.cancel(reason:reason) }
+    }
+
+    private func retainEstimatedPreviewCamera() {
+        estimatedCameraRetained = true
+        estimatedPreviewTimer?.invalidate()
+        let timer = Timer(timeInterval:0.25,repeats:true) { [weak self] _ in
+            guard let self, let pending = self.pendingEstimated else { return }
+            do {
+                guard !self.isRunning, !ROBArmRoutineCoordinator.shared.isRunning,
+                      !ROBShowMotionCoordinator.shared.isRunning, !ROBAmberGestureExecutor.shared.isExecuting else {
+                    throw ROBArmRoutineError.blocked("Another operation replaced the estimated preview.")
+                }
+                try self.validateEstimatedContext(pending,generation:pending.proof.sessionGeneration)
+                guard self.estimatedStartMatches(try self.measured().positionsRadians.map(\.doubleValue),baseline:pending.proof.baseline) else {
+                    throw ROBArmRoutineError.blocked("The estimated preview start changed; capture a new preview.")
+                }
+            } catch { self.invalidateEstimatedPreview(reason:error.localizedDescription); self.update(error.localizedDescription) }
+        }
+        estimatedPreviewTimer = timer; RunLoop.main.add(timer,forMode:.common)
+    }
+
     /// Local review is not actuator permission: execution still starts only
     /// after the authenticated phone/Vision controller accepts this exact hash.
     @nonobjc func perform(proposal: ROBLeftGestureProposal, model: ROBGhostRobotModel,
                           completion: @escaping (NSDictionary) -> Void) {
         precondition(Thread.isMainThread)
         do {
+            guard proposal.kind != "estimated_calibration" else {
+                throw ROBArmRoutineError.blocked("Estimated calibration cannot execute through the generic gesture lane. Use its fresh single-step approval.")
+            }
+            if !isRunning { invalidateEstimatedPreview(reason:"Another gesture replaced the estimated preview") }
             guard !isRunning, !ROBArmRoutineCoordinator.shared.isRunning,
                   !ROBShowMotionCoordinator.shared.isRunning, !ROBAmberGestureExecutor.shared.isExecuting,
                   !ROBControllerArmApproval.shared.isPending else { throw ROBGhostMotionError.blocked("Finish the active operation first.") }
@@ -220,6 +387,8 @@ struct ROBReviewedArmDispatchStart {
     func perform(_ command: String, completion: @escaping (NSDictionary) -> Void) {
         precondition(Thread.isMainThread)
         guard Self.commands.contains(command) else { completion(["status": "rejected"]); return }
+        if command == "left_estimated_calibration" { performEstimatedCalibration(completion:completion); return }
+        if !isRunning { invalidateEstimatedPreview(reason:"Another operation replaced the estimated preview") }
         if command == "left_pick_place" {
             do {
                 let model = try workspaceModel()
@@ -255,6 +424,7 @@ struct ROBReviewedArmDispatchStart {
         let action: String
         let intensity = ROBControllerArmApproval.shared.armSessionActive ? 2 : 10
         switch command {
+        case "left_estimated_preview": action = "Capture fresh neck-only depth while both arms remain still, then review one estimated EMPTY-left-arm retreat away from the table over 4 seconds. No arm motion or gripper command."
         case "left_scan_clearance": action = "Scan the current workspace with the neck RGB-D camera while both arms remain still. Retain occupied surfaces and observed free space for a full-arm collision review. A provisional camera transform does not authorize movement."
         case "left_search_workspace": action = "Search locally for a Coke can and an orange bucket by panning/tilting the neck camera. Confirm detections in two fresh RGB-D observations using the offline object detector. If missing, ask the nearest visible person to point and search in the estimated pointing direction. Report found/not found. No arm activation, gripper commands or arm travel."
         case "left_check_hanging": action = "Inspect both robot arms by panning/tilting the neck camera using on-device MLX; report whether each is visibly hanging. This observation never resets encoders or activates/moves either arm."
@@ -414,6 +584,15 @@ struct ROBReviewedArmDispatchStart {
     }
 
     private func checkCollisionContext() throws {
+        if activeCommand == "left_estimated_calibration" {
+            guard let active = activeEstimated, proposal == active.proposal,
+                  collisionMap?.fingerprint == active.map.fingerprint,
+                  collisionMap?.sceneID == active.map.sceneID else {
+                throw ROBArmRoutineError.blocked("Missing frozen estimated single-step proof; hold requested.")
+            }
+            try validateEstimatedContext(active,generation:generation)
+            return
+        }
         guard let map = collisionMap, let model = collisionModel,
               let current = ROBWorkspaceSearch.shared.collisionSnapshot,
               current.sceneID == map.sceneID, current.fingerprint == map.fingerprint else {
@@ -460,18 +639,24 @@ struct ROBReviewedArmDispatchStart {
             ROBAmberArmMotionArbiter.shared.release(.left, owner: id)
             completion(["status": "blocked", "detail": "Another controller owns the right arm."]); return
         }
+        if command != "left_estimated_calibration" {
+            invalidateEstimatedPreview(reason:"Another operation replaced the estimated preview",stopCamera:false)
+            activeEstimated = nil
+        }
         owner = id; isRunning = true; self.summary = summary; currentLimit = limit
-        collisionMap = nil; collisionModel = nil; sceneCapturedForThisTask = false; reviewedDispatchStart = nil
+        collisionMap = command == "left_estimated_calibration" ? activeEstimated?.map : nil
+        collisionModel = command == "left_estimated_calibration" ? activeEstimated?.model : nil
+        sceneCapturedForThisTask = command == "left_estimated_calibration"; reviewedDispatchStart = nil
         armTravelDispatched = false; sceneHold = [:]
         activeCommand = command; inactiveWorkspaceSearch = false; interactionStage = ""; readinessConfirmed = false; taskJawTarget = nil
         lastRecordingPath = ""; sampleCount = 0; peakJump = 0
         failure = nil; generation = 0; cameraReady = false; positionReady = false; leased = false
-        allowsArmTravel = ["left_wave", "left_prepare", "left_relax", "left_ghost", "left_object_cycle", "left_recycle_can"].contains(command)
+        allowsArmTravel = ["left_wave", "left_prepare", "left_relax", "left_ghost", "left_object_cycle", "left_recycle_can", "left_estimated_calibration"].contains(command)
         proposalStep = -1; sentPath = []
         waiting = []; acks = [:]; holdConfirmations = [:]; leaseRenewals = [:]; phase = "preflight"
-        let workspace = ["left_recycle_can", "left_search_workspace", "left_check_hanging", "left_scan_clearance"].contains(command)
+        let workspace = ["left_recycle_can", "left_search_workspace", "left_check_hanging", "left_scan_clearance", "left_estimated_preview"].contains(command)
         deadline = ProcessInfo.processInfo.systemUptime + (workspace ? 590 : allowsArmTravel ? 170 : 115)
-        vision.setActive(true); ROBArmRoutineCoordinator.shared.cameraDemand?(true)
+        if !estimatedCameraRetained { vision.setActive(true); ROBArmRoutineCoordinator.shared.cameraDemand?(true) }
         if !Self.neckOnlyCommands.contains(command), !gateway.isReady() { ROBAmberGatewayTunnel.shared.connect() }
         let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in self?.monitor() }
         self.timer = timer; RunLoop.main.add(timer, forMode: .common)
@@ -515,6 +700,7 @@ struct ROBReviewedArmDispatchStart {
                 }
             }
         }
+        if activeCommand == "left_estimated_calibration", generation > 0 { try checkCollisionContext() }
         if cameraReady {
             guard vision.fresh, ROBArmRoutineCoordinator.shared.viewIsStationary?() == true else {
                 throw ROBArmRoutineError.blocked("Live camera or stationary body view lost; left-arm hold requested.")
@@ -575,7 +761,7 @@ struct ROBReviewedArmDispatchStart {
     }
 
     @MainActor private func execute(_ command: String) async throws -> NSDictionary {
-        if command == "left_scan_clearance" {
+        if command == "left_scan_clearance" || command == "left_estimated_preview" {
             let model = try workspaceModel()
             let current = (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value ?? 0
             guard current > 0, gateway.isReady() else { throw ROBArmRoutineError.blocked("Connect Amber before scanning arm-clearance geometry.") }
@@ -586,6 +772,33 @@ struct ROBReviewedArmDispatchStart {
             collisionMap = map; collisionReviewProposal = nil
             collisionModel = model; sceneCapturedForThisTask = true
             publishCollisionReview(map:map,detail:map.registrationDetail)
+            if command == "left_estimated_preview" {
+                let baseline = try measured().positionsRadians.map(\.doubleValue)
+                let camera = vision.cameraGeneration, now = Date().timeIntervalSince1970*1000
+                let proof = try await Task.detached(priority:.userInitiated) {
+                    try ROBEstimatedArmCalibrationPlan.make(from:baseline,map:map,model:model,generation:current,
+                        cameraGeneration:camera,nowMilliseconds:now)
+                }.value
+                try check()
+                guard estimatedStartMatches(try measured().positionsRadians.map(\.doubleValue),baseline:baseline),
+                      let held = sceneHold["left"] else {
+                    throw ROBArmRoutineError.blocked("The arms changed during estimated calibration review; capture again.")
+                }
+                let path = ROBLeftGestureProposal(id:proof.id,name:"Estimated EMPTY-arm retreat away from the table",
+                    kind:"estimated_calibration",modelID:proof.modelID,referenceID:proof.referenceID,
+                    geometryID:proof.geometryID,mappingID:proof.mappingID,sessionGeneration:proof.sessionGeneration,
+                    baseline:proof.baseline,poses:[],steps:proof.steps)
+                let pending = EstimatedPreview(proof:proof,map:map,model:model,proposal:path,otherArmHold:held)
+                try validateEstimatedContext(pending,generation:current)
+                pendingEstimated = pending; collisionReviewProposal = path
+                try writeEstimatedRecording(proof:proof,proposal:path)
+                publishCollisionReview(map:map,detail:"Estimated single-step preview ready. Registration UNVERIFIED; visually confirm empty jaws and local clearance before one separate approval.")
+                return ["status":"accepted_unverified","arm_motion_sent":false,"measured":false,
+                    "estimated_calibration_preview":true,"estimated_proof_id":proof.id.uuidString,
+                    "map_fingerprint":map.fingerprint,"unknown_voxels":proof.unknownVoxelCount,
+                    "modeled_max_vertex_travel_m":proof.maximumVertexDisplacementMeters,
+                    "detail":"One estimated EMPTY-arm retreat away from the table over 4 seconds is ready. No motion sent. Confirm local clearance and approve separately; review expires with the fresh map."]
+            }
             return ["status":"accepted_unverified","arm_motion_sent":false,"measured":false,
                     "detail":map.registrationDetail,"workspace_search":ROBWorkspaceSearch.shared.lastReport]
         }
@@ -607,6 +820,7 @@ struct ROBReviewedArmDispatchStart {
         }
         generation = connectedGeneration
         var q = try measured().positionsRadians.map(\.doubleValue)
+        if command == "left_estimated_calibration" { return try await executeEstimatedCalibration() }
         var entryRecovery: ROBLeftGestureProposal?
         if command == "left_relax", ROBArmRoutinePlan.near(q, Array(repeating: 0, count: 7)),
            gateway.modes(forArm: arm).count == 7, gateway.modes(forArm: arm).allSatisfy({ $0.intValue == 0 }),
@@ -836,6 +1050,73 @@ struct ROBReviewedArmDispatchStart {
         try await wait(1) { self.leaseRenewals.isEmpty }
         positionReady = false; cameraReady = false
         return true
+    }
+
+    @MainActor private func executeEstimatedCalibration() async throws -> NSDictionary {
+        guard activeCommand == "left_estimated_calibration", let active = activeEstimated,
+              proposal == active.proposal else { throw ROBArmRoutineError.blocked("No frozen estimated proof is active.") }
+        try check(); try checkCollisionContext()
+        guard estimatedStartMatches(try measured().positionsRadians.map(\.doubleValue),baseline:active.proof.baseline) else {
+            throw ROBArmRoutineError.blocked("Estimated calibration start drift exceeded 2 mm; no step sent.")
+        }
+        // No encoder zero, jaw initialization or arm return is part of this
+        // lane. Enter position mode at the existing measured pose only.
+        inactiveWorkspaceSearch = false
+        try await prepareCameraAndMode(stationaryJaw:false)
+        try checkCollisionContext()
+        let sample = try measured(), q = sample.positionsRadians.map(\.doubleValue)
+        guard estimatedStartMatches(q,baseline:active.proof.baseline) else {
+            throw ROBArmRoutineError.blocked("The measured start changed during mode preparation; no calibration step sent.")
+        }
+        let session = generation, camera = vision.cameraGeneration, now = Date().timeIntervalSince1970*1000
+        try await Task.detached(priority:.userInitiated) {
+            try active.proof.validate(map:active.map,model:active.model,generation:session,
+                cameraGeneration:camera,nowMilliseconds:now)
+        }.value
+        let review = ROBReviewedArmDispatchStart(proposalID:active.proof.id,index:0,generation:session,
+            mapFingerprint:active.map.fingerprint,positions:q,sequence:sample.sequence,
+            reviewCompletedAtUptime:ProcessInfo.processInfo.systemUptime)
+        try check(); try checkCollisionContext()
+        let actual = try measured()
+        guard estimatedStartMatches(actual.positionsRadians.map(\.doubleValue),baseline:active.proof.baseline),
+              review.matches(proposalID:active.proof.id,index:0,generation:session,mapFingerprint:active.map.fingerprint,
+                positions:actual.positionsRadians.map(\.doubleValue),sequence:actual.sequence,
+                nowUptime:ProcessInfo.processInfo.systemUptime) else {
+            throw ROBArmRoutineError.blocked("Actual-start drift invalidated the estimated review; no calibration step sent.")
+        }
+        let started = ProcessInfo.processInfo.systemUptime
+        proposalStep = 0; phase = "estimated single empty-arm retreat"
+        update("Performing one slow estimated empty-arm retreat away from the table")
+        do {
+            reviewedDispatchStart = review
+            defer { reviewedDispatchStart = nil }
+            // A missing acknowledgement cannot prove that no motion started.
+            armTravelDispatched = true
+            try await accepted { gateway.sendApprovedLeftGestureStep(proposalID:active.proof.id,index:0,
+                duration:active.proof.seconds,expectedSessionGeneration:session) }
+        }
+        leased = true; lastRenewal = ProcessInfo.processInfo.systemUptime
+        var settler = ROBArmRoutineSettler()
+        try await wait(active.proof.seconds+3) {
+            guard let latest = try? self.measured() else { return false }
+            return settler.observe(sequence:latest.sequence,positions:latest.positionsRadians.map(\.doubleValue),
+                target:active.proof.target,now:ProcessInfo.processInfo.systemUptime)
+                && 1.5*zip(latest.positionsRadians.map(\.doubleValue),active.proof.target).reduce(0.0,{ $0+abs($1.0-$1.1) }) <= 0.003
+                && ProcessInfo.processInfo.systemUptime-started >= active.proof.seconds
+        }
+        proposalStep = -1
+        try await holdTaskPosition(active.proof.target)
+        let end = try measured().positionsRadians.map(\.doubleValue)
+        guard 1.5*zip(end,active.proof.target).reduce(0.0,{ $0+abs($1.0-$1.1) }) <= 0.003,
+              end.contains(where:{ abs($0) > ROBEstimatedArmCalibrationPlan.hangingToleranceRadians+0.002+1e-6 }) else {
+            throw ROBArmRoutineError.blocked("The estimated step did not hold its small measured target; observe the arm before any new action.")
+        }
+        return ["status":"completed","measured":true,"arm_motion_sent":true,"jaw_command_sent":false,
+            "estimated_calibration_unverified":true,"estimated_proof_id":active.proof.id.uuidString,
+            "map_fingerprint":active.map.fingerprint,"baseline_positions":active.proof.baseline,
+            "target_positions":active.proof.target,"measured_positions":end,
+            "measured_joint_delta":zip(active.proof.baseline,end).map { $1-$0 },
+            "detail":"One 4-second estimated EMPTY-left-arm retreat completed and is held. Joint feedback measured; physical calibration remains unverified. No jaw command or automatic return. Report the observed direction and clearance."]
     }
 
     @MainActor private func prepareCameraAndMode(stationaryJaw:Bool) async throws {
@@ -1121,6 +1402,14 @@ struct ROBReviewedArmDispatchStart {
         } catch { abort(error.localizedDescription) }
     }
 
+    private func writeEstimatedRecording(proof: ROBEstimatedArmCalibrationPlan, proposal: ROBLeftGestureProposal) throws {
+        guard !lastRecordingPath.isEmpty else { throw ROBArmRoutineError.blocked("No local calibration recording is open.") }
+        let base = URL(fileURLWithPath:lastRecordingPath).deletingPathExtension()
+        try proposal.encoded().write(to:base.appendingPathExtension("proposal.json"),options:.atomic)
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys,.prettyPrinted]
+        try encoder.encode(proof).write(to:base.appendingPathExtension("estimated-calibration.json"),options:.atomic)
+    }
+
     private func beginRecording(_ command: String) throws {
         let folder = try recordingDirectory ?? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
             appropriateFor: nil, create: true).appendingPathComponent("Cerebro/LeftArmTrials")
@@ -1130,6 +1419,7 @@ struct ROBReviewedArmDispatchStart {
         log = try FileHandle(forWritingTo: url); try log?.seekToEnd()
         lastRecordingPath = url.path; logStarted = ProcessInfo.processInfo.systemUptime
         if let proposal { try proposal.encoded().write(to: url.deletingPathExtension().appendingPathExtension("proposal.json"), options: .atomic) }
+        if let active = activeEstimated { try writeEstimatedRecording(proof:active.proof,proposal:active.proposal) }
         lastSequence = 0; previousCurrents = nil; peakJump = 0; sampleCount = 0
         delayedSampleCount = 0; maxDelayedSampleAge = 0
     }
@@ -1168,6 +1458,8 @@ struct ROBReviewedArmDispatchStart {
     }
 
     private func abort(_ message: String) {
+        invalidateEstimatedPreview(reason:message)
+        activeEstimated = nil
         guard isRunning, failure == nil else { return }
         failure = message; task?.cancel(); reviewedDispatchStart = nil
         interactionStage = ""; readinessConfirmed = false
@@ -1180,7 +1472,7 @@ struct ROBReviewedArmDispatchStart {
         timer?.invalidate(); timer = nil
         if !Self.neckOnlyCommands.contains(activeCommand), leased || result["status"] as? String == "blocked" { _ = gateway.priorityHold(forArm: arm) }
         leased = false
-        if ["tabletop", "recycling"].contains(proposal?.kind ?? "") {
+        if ["tabletop", "recycling", "estimated_calibration"].contains(proposal?.kind ?? "") {
             // A failed close/open may leave a payload. Never offer the old
             // empty-arm reverse/recovery automatically for a recycling task.
             recoveryPath = []; recoveryGeneration = 0; offeredRecovery = nil
@@ -1190,6 +1482,11 @@ struct ROBReviewedArmDispatchStart {
             recoveryPath = []; recoveryGeneration = 0; offeredRecovery = nil
         }
         var output = result as! [String: Any]
+        if activeCommand == "left_estimated_calibration" {
+            output["arm_motion_sent"] = armTravelDispatched
+            output["jaw_command_sent"] = false
+            output["estimated_calibration_unverified"] = true
+        }
         do { try log?.synchronize(); try log?.close() } catch {
             output["recording_error"] = error.localizedDescription
             output["status"] = "blocked"
@@ -1206,13 +1503,21 @@ struct ROBReviewedArmDispatchStart {
             output["motion_proposal_id"] = proposal.id.uuidString
             output["motion_proposal_sha256"] = proposal.fingerprint
         }
-        vision.setActive(false); ROBArmRoutineCoordinator.shared.cameraDemand?(false)
+        let keepEstimatedPreview = activeCommand == "left_estimated_preview" &&
+            output["status"] as? String == "accepted_unverified" && pendingEstimated != nil
+        if !keepEstimatedPreview {
+            estimatedCameraRetained = false
+            vision.setActive(false); ROBArmRoutineCoordinator.shared.cameraDemand?(false)
+            invalidateEstimatedPreview(reason:"Estimated trial ended",stopCamera:false)
+        }
+        activeEstimated = nil
         if let owner {
             ROBAmberArmMotionArbiter.shared.release(.left, owner: owner)
             ROBAmberArmMotionArbiter.shared.release(.right, owner: owner)
         }
         owner = nil; isRunning = false; task = nil; proposal = nil; proposalStep = -1; reviewedDispatchStart = nil
         activeCommand = ""; inactiveWorkspaceSearch = false; interactionStage = ""; readinessConfirmed = false; taskJawTarget = nil
+        if keepEstimatedPreview { retainEstimatedPreviewCamera() }
         update(output["detail"] as? String ?? "Left-arm trial ended")
         completion(output as NSDictionary)
     }

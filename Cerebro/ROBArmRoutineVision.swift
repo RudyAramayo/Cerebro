@@ -49,6 +49,17 @@ struct ROBWorkspaceCaptureAnchor {
     }
 }
 
+/// Only startup inspection invalidation is recoverable. An accepted scene or
+/// an actual Stop/cancel closes this window permanently for the current run.
+struct ROBWorkspaceObservationWarmup {
+    private var deadline:Double?
+    mutating func permitsRetry(acceptedObservation:Bool,anchoredMap:Bool,taskCancelled:Bool,nowUptime:Double) -> Bool {
+        guard !acceptedObservation, !anchoredMap, !taskCancelled, nowUptime.isFinite else { return false }
+        if deadline == nil { deadline = nowUptime+8 }
+        return nowUptime < deadline!
+    }
+}
+
 /// A separate camera consumer, independent of preview/detector preferences.
 /// Inference observes the scene; the fixed local routine owns all actuation.
 final class ROBArmRoutineVision {
@@ -453,9 +464,10 @@ final class ROBArmRoutineVision {
     /// holds a specific settled neck view throughout both inference and depth
     /// projection; a current callback never refreshes the capture timestamp.
     func observeWorkspace(objectDetection: Bool = true) async throws -> (ROBWorkspaceObservation, Frame) {
-        let token = try inspectionEpoch()
         if objectDetection {
             try await ROBWorkspaceObjectDetector.shared.warmUp()
+            try Task.checkCancellation()
+            let token = try inspectionEpoch()
             let frame = try await settledInspectionFrame(epoch: token, requireStaticScene: false)
             guard let cg = context.createCGImage(frame.image, from: frame.image.extent),
                   let jpeg = NSBitmapImageRep(cgImage: cg).representation(using: .jpeg, properties: [.compressionFactor: 0.9]) else {
@@ -512,7 +524,11 @@ final class ROBArmRoutineVision {
         }
         var diagnostics: [[String: Any]] = []
         for attempt in 0...1 {
+            var inspectedToken:UUID?
             let result = try await ROBMLXEngine.shared.observeWorkspaceSearch(formatRetry: attempt > 0) {
+                try Task.checkCancellation()
+                let token = try self.inspectionEpoch()
+                inspectedToken = token
                 let frame = try await self.settledInspectionFrame(epoch: token, requireStaticScene: false)
                 guard let cg = self.context.createCGImage(frame.image, from: frame.image.extent),
                       let jpeg = NSBitmapImageRep(cgImage: cg).representation(using: .jpeg, properties: [.compressionFactor: 0.85]) else {
@@ -521,7 +537,7 @@ final class ROBArmRoutineVision {
                 return (jpeg: jpeg, evidence: frame)
             }
             try Task.checkCancellation()
-            guard let current = try inspectionFrame(epoch: token), isFresh(current),
+            guard let token = inspectedToken, let current = try inspectionFrame(epoch: token), isFresh(current),
                   current.sequence > result.evidence.sequence,
                   Date().timeIntervalSince1970 * 1000 - result.evidence.capturedAt < 30_000 else {
                 throw ROBArmRoutineError.blocked("Local search lost the advancing live camera.")
@@ -840,6 +856,8 @@ final class ROBArmRoutineVision {
         var evidence: [[String: Any]] = []
         var leftHanging = false, rightHanging = false
         var validObservations = 0
+        var observationCaptureAnchor = ROBWorkspaceCaptureAnchor()
+        var observationWarmup = ROBWorkspaceObservationWarmup()
         var nearest: (view: ROBWorkspaceView, distance: Double)?
         var livePointing: (hint: ROBWorkspacePointingHint, view: ROBWorkspaceView, capturedAt: Double)?
         var followedLivePointing = false
@@ -966,7 +984,30 @@ final class ROBArmRoutineVision {
                 guard viewReady?(view.panDegrees, view.upperTarget) == true else {
                     throw ROBArmRoutineError.blocked("Search camera moved during inspection.")
                 }
-                let (observation, frame) = try await vision.observeWorkspace(objectDetection: !targets.isEmpty)
+                var acceptedWorkspace:(ROBWorkspaceObservation,ROBArmRoutineVision.Frame)?
+                while acceptedWorkspace == nil {
+                    try check(); try Task.checkCancellation()
+                    guard observationCaptureAnchor.permitsCurrent(vision.cameraGeneration) else { throw CancellationError() }
+                    guard viewReady?(view.panDegrees,view.upperTarget) == true else {
+                        throw ROBArmRoutineError.blocked("Search camera moved during startup inspection.")
+                    }
+                    do {
+                        let candidate = try await vision.observeWorkspace(objectDetection: !targets.isEmpty)
+                        guard observationCaptureAnchor.accept(frameGeneration:candidate.1.cameraGeneration,
+                            currentGeneration:vision.cameraGeneration) else { throw CancellationError() }
+                        acceptedWorkspace = candidate
+                    }
+                    catch is CancellationError {
+                        try Task.checkCancellation(); try check()
+                        guard observationWarmup.permitsRetry(acceptedObservation:validObservations > 0,
+                            anchoredMap:sceneCaptureAnchor.cameraGeneration != nil || observationCaptureAnchor.cameraGeneration != nil,
+                            taskCancelled:Task.isCancelled,
+                            nowUptime:ProcessInfo.processInfo.systemUptime) else { throw CancellationError() }
+                        progress("Waiting for camera startup.")
+                        try await Task.sleep(nanoseconds:100_000_000)
+                    }
+                }
+                let (observation,frame) = acceptedWorkspace!
                 validObservations += 1
                 try check()
                 guard viewReady?(view.panDegrees, view.upperTarget) == true else {

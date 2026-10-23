@@ -1,0 +1,156 @@
+{
+  "schemaVersion": 1,
+  "updatedUTC": "2026-10-23T05:50:08.196134+00:00",
+  "sourceBaseCommit": "44c02e14002640f7d1ada9ef2b780f694d771ff1",
+  "deployment": "Signed Debug local commissioning; no store or production download release.",
+  "purpose": "Explicitly estimated one-shot empty LEFT-arm calibration trial. Not full recycling or measured camera registration.",
+  "initialInstalledBinarySHA256": "73dc879c9de49ba7283e715ddd07abd5ff391f4b543cd9620f8442fdcfb548b2",
+  "codeSignature": "codesign --verify --deep --strict passed before and after install",
+  "nativeAttempts": [
+    {
+      "recording": "left_estimated_preview-9ECD4F29-E585-4524-8F68-2618F25EBFD4.csv",
+      "sha256": "1ec37ec7c683da3a31d5d59afacf607bced908bba5e5eea33ba0959bf7204ac1",
+      "jointRows": 0,
+      "result": "Neck failed to settle at the first view; no arm travel."
+    },
+    {
+      "recording": "left_estimated_preview-09454372-CAB9-49E7-9C56-EC31C7E53379.csv",
+      "sha256": "1ec37ec7c683da3a31d5d59afacf607bced908bba5e5eea33ba0959bf7204ac1",
+      "jointRows": 0,
+      "result": "Five neck views and ten depth frames captured 56614 occupied cells. Estimated proof rejected occupied intersection with fixed left_base_link including the 150mm estimate inflation; no arm travel."
+    },
+    {
+      "recording": "left_estimated_preview-47F04CA2-C0AD-4937-AFAC-AA03FD939EF8.csv",
+      "binarySHA256": "58623f2e3413af347b950c44044b7ebc14e148a8c2077bc4f8448bc5001f2165",
+      "sha256": "1ec37ec7c683da3a31d5d59afacf607bced908bba5e5eea33ba0959bf7204ac1",
+      "jointRows": 0,
+      "result": "Five views, ten frames, 50546 occupied cells. One-step preview and actual read-only SceneKit review passed. Native approval requested; map expired before accepted runtime approval. No arm travel."
+    },
+    {
+      "recording": "left_estimated_preview-CB0971CB-4C9F-4299-BD43-ABC85B866CED.csv",
+      "binarySHA256": "58623f2e3413af347b950c44044b7ebc14e148a8c2077bc4f8448bc5001f2165",
+      "sha256": "1ec37ec7c683da3a31d5d59afacf607bced908bba5e5eea33ba0959bf7204ac1",
+      "jointRows": 0,
+      "result": "Camera generation changed after first projected frame. Scan aborted without arm travel."
+    },
+    {
+      "recording": "left_estimated_preview-A108696B-52DE-46A0-BAE3-94B32C9A77E7.csv",
+      "binarySHA256": "58623f2e3413af347b950c44044b7ebc14e148a8c2077bc4f8448bc5001f2165",
+      "sha256": "1ec37ec7c683da3a31d5d59afacf607bced908bba5e5eea33ba0959bf7204ac1",
+      "jointRows": 0,
+      "result": "Seven views, fourteen frames, 98258 occupied cells. Axis-expanded box rejected a voxel 201.7mm from the nominal left_five_Link box; rounded-margin correction subsequently validated. No arm travel."
+    },
+    {
+      "recording": "left_estimated_preview-EA670AA4-4057-4948-B034-3D09945E2613.csv",
+      "binarySHA256": "4b4e5d9cda1be57d74e8550a53dd248872bd513bb12ad7689c6e9415373a9ea8",
+      "sha256": "1ec37ec7c683da3a31d5d59afacf607bced908bba5e5eea33ba0959bf7204ac1",
+      "jointRows": 0,
+      "result": "Five views, ten frames, 45465 occupied cells. Rounded-box test rejected left_two_Link at voxel center [0.2125,0.0125,0.7875]m: AABB distance168.460mm. Actual verified closed convex hull distance234.749mm, above176.651mm full margin. No arm travel."
+    },
+    {
+      "recording": "left_estimated_preview-9AEA5CA1-318D-4A3D-8CD9-55B759B4C836.csv",
+      "binarySHA256": "c232bba4a35dedf71764d13249aa6855b6619cfd82a12701ad4331fd41138edf",
+      "sha256": "1ec37ec7c683da3a31d5d59afacf607bced908bba5e5eea33ba0959bf7204ac1",
+      "jointRows": 0,
+      "result": "Seven views, fourteen frames, 96981 occupied cells. Exact convex-hull test rejected left_four_Link at voxel center [0.1625,0.2875,0.8125]m: baseline distance167.070mm decreases to163.502mm under the old J2-only step. No arm travel."
+    }
+  ],
+  "fixtures": {
+    "estimatedPureProof": "PASS exit0: final fixed-vector retreat with 62 sampled poses; full proof reconstruction; 51 adjacent baseline-close pairs; independent exact-hull recomputation of every recorded table-plane pair at every pose verifies >=100mm+jaw baseline, monotonic clearance, strict endpoint gain and metadata. Worsening/new deficits, inside/too-close occupancy, altered pairs, stale context and blind chaining reject. Test binary uses Swift -O with whole-module optimization; production remains the signed Debug build.",
+    "estimatedProductionRuntime": "PASS exit0: final fixed-vector production proof/mapper/broker with isolated hardware-free transport; exactly one approved four-second step and confirmed hold; decline, Stop, missing/replaced map, camera/session changes, measured start/dispatch drift, generic lane, consumed replay and blind chaining reject. No jaw, encoder reset or deactivation command.",
+    "normalLeftTrial": "PASS: strict unregistered-map boundary, telemetry, drift, grant and Stop coverage.",
+    "fullArmRoutines": "PASS with unchanged HEAD Coordinator and current task sources. Dirty-tree run fails startup visibility expectation because unrelated pre-existing Coordinator changes comment out that guard; those changes excluded from app build and commit.",
+    "visionCapture": "PASS: bounded initial camera warmup recovery; Stop or accepted observation/map prevents retry; later source changes invalidate.",
+    "sandboxStatic": "PASS",
+    "exactHullReview": "PASS: independent analytic inside, face, edge, vertex and rotated metric cases; malformed/open/nonconvex/nonfinite geometry rejected. Finite-result guard retained."
+  },
+  "physicalOutcome": {
+    "estimatedArmTravelSent": false,
+    "cansRemoved": 0,
+    "requestedCanCount": 2,
+    "registrationMeasured": false,
+    "blockingCondition": "Normal recycling requires measured camera-to-arm registration. Current scan producer emits only unregistered snapshots. Reported table depth offset and tilt remain unresolved; no full pickup route admitted."
+  },
+  "privacy": {
+    "cameraImagesIncluded": false,
+    "speechTranscriptsIncluded": false,
+    "grantMaterialIncluded": false,
+    "grantsPersisted": false
+  },
+  "geometryDiagnosis": {
+    "reportedPhysicalTableGapMinimumMeters": 0.2032,
+    "reportedPhysicalGapIsApproximate": true,
+    "voxelCenterMeters": [
+      0.2125,
+      0.0125,
+      0.7875
+    ],
+    "nominalBoxDistanceMeters": 0.168460411,
+    "verifiedClosedConvexHullDistanceMeters": 0.234749314,
+    "closestSurfacePointMeters": [
+      0.049831692,
+      0.163973901,
+      0.863011054
+    ],
+    "meshVertices": 128,
+    "meshTriangles": 252,
+    "nominalBoxClearanceImprovementOverStepMeters": 0.000446965,
+    "registrationPromoted": false,
+    "mapPointsErased": false,
+    "scope": "Estimated empty-arm trial only; ordinary registered-path admission unchanged."
+  },
+  "validatedBuild": {
+    "binarySHA256": "9821055d7201f7cb04c7d2758096660856d459183ed23518c0809fa1ed40a960",
+    "build": "CerebroRecyclingValidation / Debug / macOS arm64; xcodebuild exit0; codesign --verify --deep --strict passed",
+    "installed": false,
+    "productionSourceSHA256": {
+      "Cerebro.xcodeproj/project.pbxproj": "c7fde8986673bf9eeed53ab8f96c788802644a38d75ce8470231272a8c4bcacb",
+      "Cerebro/ROBArmRoutineVision.swift": "a48c200e252c582461c42a08a1172a78a5158ec80a003431e22d9b83ee680290",
+      "Cerebro/ROBEstimatedArmCalibrationPlan.swift": "b7df11149b078537dd85445f091b7efe0e169dbbc8163a4a506dc7ccd325ef06",
+      "Cerebro/ROBLeftArmTrial.swift": "96a360693756dec77ba82cc9b568c913b896061bea9fdc65eb2b0599198365d2",
+      "Cerebro/ROBTestingSandboxWindowController.swift": "ca3a676981abb9459024905736f07f81a4fd5d7f81aeeab226e27bafd4fc1923"
+    },
+    "preExistingUserChanges": "Seven unrelated pre-existing working-tree files excluded from isolated build and commit."
+  },
+  "installedBuild": {
+    "binarySHA256": "c232bba4a35dedf71764d13249aa6855b6619cfd82a12701ad4331fd41138edf",
+    "scope": "Older exact-hull J2-only trial; not the newly built retreat. No arm travel sent."
+  },
+  "estimatedRetreatReadOnlyAnalysis": {
+    "jointDeltaRadians": [
+      0.1,
+      0.025,
+      -0.075,
+      0,
+      0,
+      0,
+      0
+    ],
+    "durationSeconds": 4,
+    "verifiedMaximumHullTravelMeters": 0.03284629,
+    "fullHullTravelLimitMeters": 0.06,
+    "referenceVoxelMeters": [
+      0.1625,
+      0.2875,
+      0.8125
+    ],
+    "leftForearmClearanceStartMeters": 0.16707,
+    "leftForearmClearanceEndMeters": 0.178609,
+    "physicalExecution": false,
+    "registrationMeasured": false
+  },
+  "operatorGeometryObservations": {
+    "tableAppearsTooFarInDepthMeters": [
+      0.1524,
+      0.2032
+    ],
+    "torsoCenterToBlueTapeReferenceMeters": 0.1524,
+    "tableNearHeightReportedCorrect": true,
+    "physicalTableReportedLevel": true,
+    "depthPlaneRisesWithDistance": true,
+    "measurementsAreApproximate": true,
+    "horizontalCorrectionApplied": false,
+    "tableLevelingApplied": false,
+    "scaniverseCapture": "Deferred to tomorrow at operator request; no scan captured or imported."
+  }
+}

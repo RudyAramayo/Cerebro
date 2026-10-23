@@ -1,7 +1,7 @@
 import AppKit
 
 /// A catalog of changing commissioning trials, separate from robot preferences.
-/// Every physical action still enters the normal coordinator approval path.
+/// Every physical action still enters the runtime approval path.
 @objcMembers public final class ROBTestingSandboxWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
     public static let shared = ROBTestingSandboxWindowController()
 
@@ -20,6 +20,8 @@ import AppKit
     private static let trials: [Trial] = [
         Trial(id: "recycling", title: "Recycle can", detail: "Find an upright empty can and an open orange bucket using the neck camera. Grasp the can at its middle, lift, carry and release above the opening. Search and preview do not move the arms. A run uses one complete-task authorization or an active supervised session.", parameters: .recycling,
               actions: [Action(title: "Run recycle test", command: "left_recycle_can"), Action(title: "Search only", command: "left_search_workspace"), Action(title: "Scan workspace geometry", command: "left_scan_clearance"), Action(title: "Preview grasp…", command: "ghost:can"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision")]),
+        Trial(id: "estimated-calibration", title: "Estimated calibration trial", detail: "Review one estimated EMPTY-left-arm retreat away from the table, then hold for observation. Registration remains unmeasured. One fresh approval covers one slow, 4-second retreat with about 3 cm maximum modeled arm travel. Existing nearby depth-margin overlaps may only improve; new intrusions block motion. Confirm the complete arm's local working space is clear and report the actual direction. No jaw commands, grasp, recycling or automatic return. Open the ghost view before building if needed; restarting the camera requires a new preview.", parameters: .none,
+              actions: [Action(title: "Scan / build estimated ghost", command: "estimate:preview"), Action(title: "Inspect estimated ghost / depth map…", command: "ghost:collision"), Action(title: "Run reviewed empty-arm trial", command: "estimate:run")]),
         Trial(id: "object-cycle", title: "Grip and return", detail: "Present the left arm, grip a supported object gently, release into a supporting hand, then return the empty arm. Readiness confirmations remain within the same task authorization. Keep fingers clear of the jaws.", parameters: .current,
               actions: [Action(title: "Run grip and return", command: "left_object_cycle")]),
         Trial(id: "stationary-grippers", title: "Stationary gripper setup", detail: "Calibrate empty grippers while both arms are hanging and inactive. This does not lift or activate the arms. Keep both jaws clear; Amber acknowledges commands but jaw completion is not measured.", parameters: .none,
@@ -168,7 +170,7 @@ import AppKit
         let title = NSTextField(labelWithString: trial.title); title.font = .boldSystemFont(ofSize: 18)
         detailStack.addArrangedSubview(title)
         addHelp(trial.detail)
-        if ["recycling", "preparation", "ghost"].contains(trial.id) {
+        if ["recycling", "estimated-calibration", "preparation", "ghost"].contains(trial.id) {
             collisionInfo.identifier = NSUserInterfaceItemIdentifier("sandbox-collision-status")
             collisionInfo.isSelectable = true
             collisionInfo.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
@@ -289,6 +291,14 @@ import AppKit
         if command.hasPrefix("ghost:") {
             NotificationCenter.default.post(name: Notification.Name("ROBShowControllerInputDiagnostics"), object: self,
                                             userInfo: ["ghostPreset": String(command.dropFirst(6))])
+        } else if command == "estimate:preview" {
+            observingLeftOperation = true; parameterMessage = ""
+            ROBLeftArmTrial.shared.prepareEstimatedCalibration { [weak self] _ in self?.refresh() }
+            refresh()
+        } else if command == "estimate:run" {
+            observingLeftOperation = true; parameterMessage = ""
+            ROBLeftArmTrial.shared.performEstimatedCalibration { [weak self] _ in self?.refresh() }
+            refresh()
         } else if command == "gripper-setup" {
             observingLeftOperation = false; parameterMessage = ""
             Task { @MainActor [weak self] in

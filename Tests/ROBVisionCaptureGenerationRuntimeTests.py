@@ -8,6 +8,16 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = r'''
 @main struct CaptureIdentityFixtures {
     static func main() {
+        var warmup = ROBWorkspaceObservationWarmup()
+        precondition(warmup.permitsRetry(acceptedObservation:false,anchoredMap:false,taskCancelled:false,nowUptime:10))
+        precondition(warmup.permitsRetry(acceptedObservation:false,anchoredMap:false,taskCancelled:false,nowUptime:17.9))
+        precondition(!warmup.permitsRetry(acceptedObservation:false,anchoredMap:false,taskCancelled:false,nowUptime:18))
+        var afterObservation = ROBWorkspaceObservationWarmup()
+        precondition(!afterObservation.permitsRetry(acceptedObservation:true,anchoredMap:false,taskCancelled:false,nowUptime:10))
+        var afterMap = ROBWorkspaceObservationWarmup()
+        precondition(!afterMap.permitsRetry(acceptedObservation:false,anchoredMap:true,taskCancelled:false,nowUptime:10))
+        var stopped = ROBWorkspaceObservationWarmup()
+        precondition(!stopped.permitsRetry(acceptedObservation:false,anchoredMap:false,taskCancelled:true,nowUptime:10))
         // Reproduce native startup: a retained idle generation is replaced
         // before the first real settled sample. Neither collector may anchor
         // the idle generation, and an established scene must never re-enroll.
@@ -63,7 +73,7 @@ FIXTURE = r'''
                      "Changed depth dimensions retained prior transformed geometry")
         precondition(observe("face-manager-run-2","avFoundationRGB",width:1280,fx:401) == .changed,
                      "Source change retained RGB-D collision evidence")
-        print("Capture-generation fixtures passed: first fresh frame enrolls standalone/search scenes; startup replacement accepted before anchor and every later change rejected; stable consumer-independent identity; source/intrinsics/geometry/clock/sequence invalidation and reordered-frame rejection")
+        print("Capture-generation fixtures passed: bounded8s observation startup recovery; Stop/accepted observation/map prohibit retry; first fresh frame enrolls standalone/search scenes; every later source change rejected; stable consumer-independent identity; source/intrinsics/geometry/clock/sequence invalidation and reordered-frame rejection")
     }
 }
 '''
@@ -79,6 +89,11 @@ def main():
     assert "var captureAnchor = ROBWorkspaceCaptureAnchor()" in vision
     assert "var sceneCaptureAnchor = ROBWorkspaceCaptureAnchor()" in vision
     assert "let sceneCameraGeneration = vision.cameraGeneration" not in vision
+    workspace = vision[vision.index("    func observeWorkspace("):vision.index("/// Repeatable local search")]
+    assert workspace.index("ROBWorkspaceObjectDetector.shared.warmUp()") < workspace.index("let token = try inspectionEpoch()")
+    assert workspace.index("ROBMLXEngine.shared.observeWorkspaceSearch") < workspace.index("let token = try self.inspectionEpoch()")
+    assert "var observationCaptureAnchor = ROBWorkspaceCaptureAnchor()" in vision
+    assert "observationCaptureAnchor.permitsCurrent(vision.cameraGeneration)" in vision
     manager = (ROOT / "Cerebro/CameraManager.swift").read_text()
     assert 'identified.captureStreamID = "\\(markerlessStreamID.uuidString)-\\(generation)"' in manager
     assert "recordingFrameHandler?(identifiedFrame)" in manager
