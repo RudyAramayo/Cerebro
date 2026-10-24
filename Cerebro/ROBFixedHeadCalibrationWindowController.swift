@@ -226,11 +226,22 @@ import UniformTypeIdentifiers
                 try bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.95])?.write(to: destination.appendingPathComponent(name + ".jpg"), options: .atomic)
                 image.image = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
             }
-            records.append(["depthPath": name + ".depth-u16le", "width": depth.width, "height": depth.height,
+            var record: [String:Any] = ["depthPath": name + ".depth-u16le", "width": depth.width, "height": depth.height,
                 "intrinsics": [k.fx,k.fy,k.cx,k.cy], "sequence": NSNumber(value: frame.sequence),
                 "capturedAtMilliseconds": frame.capturedAt, "captureSHA256": ROBGhostRobotModel.hash(data),
                 "previewWidth":Int(frame.image.extent.width),"previewHeight":Int(frame.image.extent.height),
-                "depthCoverage":frame.depthCoverage])
+                "depthCoverage":frame.depthCoverage,
+                "intrinsicsSource":k.calibrationSource ?? "unspecified",
+                "depthAlignmentMethod":k.depthAlignmentMethod ?? "unspecified"]
+            if let imu = k.inertial {
+                record["imu"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(imu))
+            }
+            if let value = k.calibratedLensPosition { record["calibratedLensPosition"] = value }
+            if let value = k.frameLensPosition { record["frameLensPosition"] = value }
+            if let value = k.sourceSize { record["rgbSourceSize"] = value }
+            if let value = k.sourceIntrinsics { record["rgbSourceIntrinsics"] = value }
+            if let value = k.imageTransform { record["rgbImageTransform"] = value }
+            records.append(record)
             display("Captured \(records.count)/5 fixed-view frames. Head P\(scope.panTarget) L\(scope.lowerTarget) U\(scope.upperTarget). Arms unchanged.")
             try await Task.sleep(nanoseconds: 250_000_000)
         }

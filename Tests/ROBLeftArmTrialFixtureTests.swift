@@ -635,7 +635,7 @@ final class ROBArmRoutineCoordinator {
             print("Right estimated runtime: passive active-mode preview, one explicit physical-right approval, one4s immutable J2 step on gatewayleft, otherarmunchanged, nojaw/return/replay; actual pixel/depth acquisition is separately covered, never fabricated here.")
             return
         }
-        if CommandLine.arguments.last == "right-scope" {
+        if ["right-scope","right-three-scope"].contains(CommandLine.arguments.last ?? "") {
             var requestArms:[String]=[]
             broker.send = { message,_,_ in
                 if message.kind == .actionRequest {
@@ -653,7 +653,12 @@ final class ROBArmRoutineCoordinator {
             g.commands=[];g.ready=true;g.stale=false;g.mode=["left":1,"right":1];g.calibrated=["left","right"]
             ROBArmRoutineCoordinator.shared.prepareView={true}; ROBArmRoutineCoordinator.shared.viewIsStationary={true}
             ROBWorkspaceSearch.shared.clearCollisionScene()
-            let result=await run("right_recycle_can")
+            let three = CommandLine.arguments.last == "right-three-scope"
+            let result=await run(three ? "right_recycle_three_cans" : "right_recycle_can")
+            if three {
+                precondition(result["batch_requested"] as? Int == 3 && result["batch_completed"] as? Int == 0)
+                precondition((result["batch_results"] as? [[String:Any]])?.count == 1,"An unconfirmed first grasp must stop the three-can task")
+            }
             precondition(requestArms == ["left","both"],"A left-only rehearsal grant was incorrectly reused for the right task")
             precondition(trial.physicalSide=="right" && trial.executionGatewayArm=="left")
             precondition(!broker.authorizesRightArmTrial("invented"))

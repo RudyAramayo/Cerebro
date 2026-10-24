@@ -3,7 +3,8 @@
 The recycling executor now selects the physical arm explicitly. Physical right
 is **L10 / gateway `left`**; physical left remains R11 / gateway `right`.
 `right_recycle_can` attempts one can and `right_recycle_two_cans` attempts two
-successive transfers. Each can gets a fresh search, measured scene and complete
+successive transfers. `right_recycle_three_cans` covers the three-can tabletop
+trial under one task approval and stops immediately if a grasp is uncertain. Each can gets a fresh search, measured scene and complete
 path review. One spoken or controller approval covers the described task.
 A left-arm rehearsal session does not authorize the right task.
 

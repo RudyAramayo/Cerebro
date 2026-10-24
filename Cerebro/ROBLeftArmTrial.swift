@@ -38,7 +38,7 @@ struct ROBReviewedArmDispatchStart {
     static let commands = ["left_wave", "left_prepare", "left_grip", "left_release", "left_relax", "left_object_cycle",
         "left_pick_place", "left_recycle_can", "left_search_workspace", "left_check_hanging", "left_scan_clearance",
         "left_estimated_preview", "left_estimated_calibration",
-        "right_estimated_preview", "right_estimated_trial", "right_recycle_can", "right_recycle_two_cans", "left_recycle_two_cans", "right_search_workspace", "right_scan_clearance"]
+        "right_estimated_preview", "right_estimated_trial", "right_recycle_can", "right_recycle_two_cans", "right_recycle_three_cans", "left_recycle_two_cans", "right_search_workspace", "right_scan_clearance"]
     private static let neckOnlyCommands = ["left_search_workspace", "left_check_hanging", "left_scan_clearance", "left_estimated_preview"]
     static let currentLimitKey = "ROBLeftArmCurrentJumpLimitRaw"
     private(set) var isRunning = false
@@ -450,9 +450,9 @@ struct ROBReviewedArmDispatchStart {
             completion(["status":"busy","detail":"Finish the current operation or use Stop + hold."]);return
         }
         selectPhysicalSide(requestedCommand.hasPrefix("right_") ? "right" : "left")
-        requestedCanCount = requestedCommand.hasSuffix("_recycle_two_cans") ? 2 : 1
+        requestedCanCount = requestedCommand.hasSuffix("_recycle_three_cans") ? 3 : requestedCommand.hasSuffix("_recycle_two_cans") ? 2 : 1
         let canonical = requestedCommand.hasPrefix("right_") ? "left_" + requestedCommand.dropFirst(6) : requestedCommand
-        let command = canonical == "left_recycle_two_cans" ? "left_recycle_can" : canonical == "left_estimated_trial" ? "left_estimated_calibration" : canonical
+        let command = ["left_recycle_two_cans","left_recycle_three_cans"].contains(canonical) ? "left_recycle_can" : canonical == "left_estimated_trial" ? "left_estimated_calibration" : canonical
         if command == "left_estimated_calibration" { performEstimatedCalibration(completion:completion); return }
         if !isRunning { invalidateEstimatedPreview(reason:"Another operation replaced the estimated preview") }
         if command == "left_pick_place" {
@@ -509,8 +509,8 @@ struct ROBReviewedArmDispatchStart {
         let workspace = ["left_recycle_can", "left_search_workspace", "left_check_hanging", "left_scan_clearance"].contains(command)
         let bothHolds = physicalSide == "right" && command == "left_recycle_can"
             ? " Both arms may enter a measured stationary position hold without travel; only the physical RIGHT arm may execute the planned path. If both are already measured hanging and empty, stationary startup jaw initialization may finish there without raising them. The physical LEFT arm otherwise stays at its measured pose." : ""
-        let batch = requestedCanCount == 2 && command == "left_recycle_can"
-            ? " TWO empty cans, sequentially: fresh perception, collision review and visual grasp check for each. A failed or uncertain grasp stops the batch in a hold; no blind next-can retry. One approval covers both complete transfers." : ""
+        let batch = requestedCanCount > 1 && command == "left_recycle_can"
+            ? " \(requestedCanCount) empty cans, sequentially: fresh perception, collision review and visual grasp check for each. A failed or uncertain grasp stops the batch in a hold; no blind next-can retry. One approval covers all \(requestedCanCount) complete transfers." : ""
         let approvedSummary = action + batch + notice + bothHolds + current + (workspace ? " Maximum 600 seconds including search, planning and movement." : travel ? " Maximum 180 seconds including preparation and settling." : "")
         if Self.neckOnlyCommands.contains(command) || command == "left_relax" {
             update(command == "left_relax" ? "Returning the empty left arm to hanging" : "Starting local neck-camera inspection")
@@ -842,25 +842,26 @@ struct ROBReviewedArmDispatchStart {
     }
 
     @MainActor private func execute(_ command: String) async throws -> NSDictionary {
-        guard command == "left_recycle_can", requestedCanCount == 2 else { return try await executeSingle(command) }
+        guard command == "left_recycle_can", requestedCanCount > 1 else { return try await executeSingle(command) }
+        let count = requestedCanCount
         var results:[[String:Any]]=[]
-        for index in 0..<2 {
+        for index in 0..<count {
             try check()
-            update("Recycling can \(index+1) of 2; freshly checking this can and the bucket")
+            update("Recycling can \(index+1) of \(count); freshly checking this can and the bucket")
             recyclingCan=nil; lastVisualGraspEvidence=nil; movingTargetReplansRemaining=1; recyclingGripDispatched=false; sceneCapturedForThisTask=false;collisionMap=nil;collisionModel=nil;collisionReviewProposal=nil
             let result=try await executeSingle(command)
             results.append(result as! [String:Any])
             guard result["motion_completed"] as? Bool == true,
                   result["grasp_visually_supported"] as? Bool == true else {
                 var stopped=result as! [String:Any]
-                stopped["batch_requested"]=2;stopped["batch_completed"]=index;stopped["batch_results"]=results
-                stopped["detail"]="Two-can test stopped at can \(index+1): " + (result["detail"] as? String ?? "Unconfirmed result; held for observation.")
+                stopped["batch_requested"]=count;stopped["batch_completed"]=index;stopped["batch_results"]=results
+                stopped["detail"]="Recycling test stopped at can \(index+1) of \(count): " + (result["detail"] as? String ?? "Unconfirmed result; held for observation.")
                 return stopped as NSDictionary
             }
         }
         return ["status":"accepted_unverified","motion_completed":true,"grasp_visually_supported":true,
-            "placement_verified":false,"batch_requested":2,"batch_completed":2,"batch_results":results,
-            "physical_arm":physicalSide,"detail":"Both can-transfer paths completed with visual support for each grasp. Gravity releases were commanded over the measured opening; landing inside the bucket remains unmeasured."]
+            "placement_verified":false,"batch_requested":count,"batch_completed":count,"batch_results":results,
+            "physical_arm":physicalSide,"detail":"All \(count) can-transfer paths completed with visual support for each grasp. Gravity releases were commanded over the measured opening; landing inside the bucket remains unmeasured."]
     }
 
     @MainActor private func executeSingle(_ command: String) async throws -> NSDictionary {
