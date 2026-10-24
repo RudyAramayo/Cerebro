@@ -568,7 +568,12 @@ struct ROBLeftCanReachCalibration: Codable {
         return result
     }
     static func load(model: ROBGhostRobotModel, can: ROBWorkspaceLocatedObject? = nil, file: URL? = nil,
-                     depthAlignment: ROBWorkspaceDepthAlignment.Snapshot? = ROBWorkspaceDepthAlignment.snapshot()) throws -> SIMD3<Double> {
+                     depthAlignment: ROBWorkspaceDepthAlignment.Snapshot? = ROBWorkspaceDepthAlignment.snapshot(),
+                     estimatedCameraProjectionIdentity:String? = nil) throws -> SIMD3<Double> {
+        // A photo-origin estimate is a different coordinate model. Never read
+        // or rebase legacy camera-space tuning into it. Measured local
+        // registration residuals keep their existing independent precedence.
+        if can?.registrationID == nil,estimatedCameraProjectionIdentity != nil {return .zero}
         guard let value = try scopedConfiguration(model:model,file:file ?? Self.file(forPhysicalSide:model.physicalSide),registrationID:can?.registrationID) else { return .zero }
         if let registration=can?.registrationID {
             guard value.registrationID==registration,value.toolLink==model.toolLink,
@@ -616,19 +621,25 @@ struct ROBLeftCanReachCalibration: Codable {
         }
         return correction
     }
-    static func loadBucketYaw(model:ROBGhostRobotModel,file:URL? = nil,registrationID:String? = nil) throws -> Double {
+    static func loadBucketYaw(model:ROBGhostRobotModel,file:URL? = nil,registrationID:String? = nil,
+        estimatedCameraProjectionIdentity:String? = nil) throws -> Double {
+        if registrationID == nil,estimatedCameraProjectionIdentity != nil {return 0}
         guard let value=try scopedConfiguration(model:model,file:file ?? Self.file(forPhysicalSide:model.physicalSide),registrationID:registrationID) else{return 0}
         return value.bucketYawDegrees ?? 0
     }
-    static func loadBucketInward(model:ROBGhostRobotModel,file:URL? = nil,registrationID:String? = nil) throws -> Double {
+    static func loadBucketInward(model:ROBGhostRobotModel,file:URL? = nil,registrationID:String? = nil,
+        estimatedCameraProjectionIdentity:String? = nil) throws -> Double {
+        if registrationID == nil,estimatedCameraProjectionIdentity != nil {return 0}
         guard let value=try scopedConfiguration(model:model,file:file ?? Self.file(forPhysicalSide:model.physicalSide),registrationID:registrationID) else{return 0}
         return value.bucketInwardMeters ?? 0
     }
     static func loadRecoveryGraspClearance(model:ROBGhostRobotModel,file:URL? = nil) throws -> Double {
         try configuration(model:model,file:file ?? Self.file(forPhysicalSide:model.physicalSide))?.recoveryGraspClearanceMeters ?? 0
     }
-    static func loadTabletopCanBaseHeight(model:ROBGhostRobotModel,file:URL? = nil) throws -> Double? {
-        try configuration(model:model,file:file ?? Self.file(forPhysicalSide:model.physicalSide))?.tabletopCanBaseHeightMeters
+    static func loadTabletopCanBaseHeight(model:ROBGhostRobotModel,file:URL? = nil,registrationID:String? = nil,
+        estimatedCameraProjectionIdentity:String? = nil) throws -> Double? {
+        if registrationID == nil,estimatedCameraProjectionIdentity != nil {return nil}
+        return try scopedConfiguration(model:model,file:file ?? Self.file(forPhysicalSide:model.physicalSide),registrationID:registrationID)?.tabletopCanBaseHeightMeters
     }
     static func registeredFile(base:URL,registrationID:String)->URL {
         base.deletingLastPathComponent().appendingPathComponent("RegisteredReach")

@@ -391,12 +391,14 @@ import simd
                 return
             }
             let baseline = self.freshBaseline().map { model.positions(vendorLeft: $0.q) } ?? model.reference
+            let projectionIdentity=ROBWorkspaceSearch.shared.collisionSnapshot?.estimatedCameraProjectionIdentity ?? ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)
             self.status.stringValue = "Can measured. Computing the ghost reach…"
             self.canPlanTask = Task { @MainActor [weak self] in
                 do {
                     let preview = try await Task.detached(priority: .userInitiated) {
                         try ROBCanGrabPreview.make(can: can, model: model, baseline: baseline, side: side,
-                            reachOffset:side == "left" ? ROBLeftCanReachCalibration.load(model:model,can:can) : .zero)
+                            reachOffset:side == "left" ? ROBLeftCanReachCalibration.load(model:model,can:can,
+                                estimatedCameraProjectionIdentity:projectionIdentity) : .zero)
                     }.value
                     guard let self, !Task.isCancelled, self.canRequestID == request else { return }
                     self.showCanPreview(preview)

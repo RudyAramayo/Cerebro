@@ -348,7 +348,7 @@ def main():
     result["inputSHA256"] = digest(args.input)
     args.output.write_text(json.dumps(result, indent=2, allow_nan=False)+"\n")
     summary = {key: result[key] for key in ("status", "acceptedFrameCount", "consistentPairFrameCount", "rawDepthAgreementAcrossConsistentFrames")}
-    summary["rejectedFrames"] = [{"frameIndex": row["frameIndex"], "reason": row["reason"]} for row in result["rejectedFrames"]
+    summary["rejectedFrames"] = [{"frameIndex": row["frameIndex"], "reason": row["reason"]} for row in result["rejectedFrames"]]
     print(json.dumps(summary))
 
 

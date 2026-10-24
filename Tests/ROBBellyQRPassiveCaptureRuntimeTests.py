@@ -71,8 +71,8 @@ import CoreImage
         for _ in 0..<30 {
             NotificationCenter.default.post(name:.ROBDepthCloudFrame,object:ROBDepthCloudFrame(belly:true,sequence:sequence,stream:stream))
             try await Task.sleep(nanoseconds:200_000_000)
-            if controller.status.contains("two seconds") {
-                try await Task.sleep(nanoseconds:2_250_000_000)
+            if controller.status.contains("five seconds") {
+                try await Task.sleep(nanoseconds:5_250_000_000)
                 return
             }
         }
@@ -154,7 +154,7 @@ import CoreImage
         precondition(observations["acceptanceRulesChanged"] as? Bool==false)
         precondition(input["cameraRole"] as? String=="belly")
         precondition(input["requestedCaptureResolution"] as? String=="1280x800")
-        precondition(input["cameraWarmupSeconds"] as? Double==2.0)
+        precondition(input["cameraWarmupSeconds"] as? Double==5.0)
         precondition(input["captureStreamID"] as? String=="fixture-stream")
         precondition(input["captureSessionID"] as? String != "fixture-stream")
         let frames=input["frames"] as! [[String:Any]]
@@ -206,7 +206,7 @@ import CoreImage
         controller.stop()
         precondition(!controller.isRunning && controller.status.contains("cancelled"))
         precondition(demandEvents.last?["active"] as? Bool==false,"HD demand survived cancellation")
-        print("PASS native QR seed pixels, HD demand lifecycle/low-resolution rejection/two-second warmup, passive belly HEAD/stale filtering, five native RGB-D frames, exact 64-bit source provenance, missing/false pixel metadata, stream restart and cancellation; no robot services linked")
+        print("PASS native QR seed pixels, HD demand lifecycle/low-resolution rejection/five-second warmup, passive belly HEAD/stale filtering, five native RGB-D frames, exact 64-bit source provenance, missing/false pixel metadata, stream restart and cancellation; no robot services linked")
     }
 }
 '''

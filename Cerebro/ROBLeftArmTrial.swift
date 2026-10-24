@@ -995,9 +995,11 @@ struct ROBReviewedArmDispatchStart {
             // still unavailable. This is a model check, never a motion path.
             if let can = objects[.can] {
                 let baseline = model.positions(vendorLeft: q)
+                let projectionIdentity=collisionMap?.estimatedCameraProjectionIdentity ?? ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)
                 let reach = try await Task.detached(priority: .userInitiated) {
                     try ROBCanGrabPreview.make(can: can, model: model, baseline: baseline, side: model.physicalSide,
-                        reachOffset:ROBLeftCanReachCalibration.load(model:model,can:can,file:calibrationFile))
+                        reachOffset:ROBLeftCanReachCalibration.load(model:model,can:can,file:calibrationFile,
+                            estimatedCameraProjectionIdentity:projectionIdentity))
                 }.value
                 try check()
                 if let message = reach.helpRequest {
@@ -1051,9 +1053,12 @@ struct ROBReviewedArmDispatchStart {
                     let entry = try ROBWorkspaceCollisionPlan.make(from:planningStart,to:front,map:map,model:model,
                         generation:session,sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:now)
                     let plan = try ROBCanGrabPreview.make(can:can,model:model,baseline:baseline,side:model.physicalSide,bucket:bucket,
-                        reachOffset:ROBLeftCanReachCalibration.load(model:model,can:can,file:calibrationFile),
-                        bucketYawDegrees:ROBLeftCanReachCalibration.loadBucketYaw(model:model,file:calibrationFile,registrationID:can.registrationID),
-                        bucketInwardMeters:ROBLeftCanReachCalibration.loadBucketInward(model:model,file:calibrationFile,registrationID:can.registrationID))
+                        reachOffset:ROBLeftCanReachCalibration.load(model:model,can:can,file:calibrationFile,
+                            estimatedCameraProjectionIdentity:map.estimatedCameraProjectionIdentity),
+                        bucketYawDegrees:ROBLeftCanReachCalibration.loadBucketYaw(model:model,file:calibrationFile,registrationID:can.registrationID,
+                            estimatedCameraProjectionIdentity:map.estimatedCameraProjectionIdentity),
+                        bucketInwardMeters:ROBLeftCanReachCalibration.loadBucketInward(model:model,file:calibrationFile,registrationID:can.registrationID,
+                            estimatedCameraProjectionIdentity:map.estimatedCameraProjectionIdentity))
                     let actions = Dictionary(uniqueKeysWithValues:plan.steps.enumerated().compactMap { index,step in
                         step.jawAction.map { (index,$0) }
                     })

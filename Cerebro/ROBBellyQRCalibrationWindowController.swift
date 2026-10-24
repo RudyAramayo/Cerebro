@@ -25,7 +25,7 @@ private final class ROBBellyQRFrameMailbox: @unchecked Sendable {
     static let changed = Notification.Name("ROBBellyQRCalibrationDidChange")
     static let cameraDemandChanged = Notification.Name("ROBBellyQRCalibrationCameraDemandDidChange")
     static let captureResolution = "1280x800"
-    private static let captureWarmupSeconds = 2.0
+    private static let captureWarmupSeconds = 5.0
     private(set) var isRunning = false
     private(set) var status = "Open Belly Camera Diagnostics, place both targets in its view, then capture. ROB and both sheets should stay still."
     private(set) var lastCapturePath = ""
@@ -267,7 +267,7 @@ private final class ROBBellyQRFrameMailbox: @unchecked Sendable {
                 warmupStream = frame.sourceCaptureStreamID; firstHDFrameUptime = frame.capturedUptime
             }
             guard frame.capturedUptime - firstHDFrameUptime! >= Self.captureWarmupSeconds else {
-                display("Native 1280 × 800 belly stream received; waiting for two seconds of camera settling before capture.")
+                display("Native 1280 × 800 belly stream received; waiting for five seconds of camera settling before capture.")
                 try await Task.sleep(nanoseconds: 100_000_000); continue
             }
             if let sequence = frame.sourceSequence, let lastSequence, sequence <= lastSequence {

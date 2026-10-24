@@ -1299,7 +1299,10 @@ final class ROBArmRoutineVision {
             return current.scope == fixedContext.scope && current.registration.id == fixedContext.registration.id
         }
         let tabletopCanBaseHeight: Double?
-        if targets.contains(.can), fixedRegisteredView == nil { tabletopCanBaseHeight = try ROBLeftCanReachCalibration.loadTabletopCanBaseHeight(model:model) }
+        if targets.contains(.can), fixedRegisteredView == nil {
+            tabletopCanBaseHeight = try ROBLeftCanReachCalibration.loadTabletopCanBaseHeight(model:model,
+                estimatedCameraProjectionIdentity:estimatedProjectionIdentity)
+        }
         else { tabletopCanBaseHeight = nil }
         var selectedCanMeasurement: ROBWorkspaceLocatedObject?
         var schedule = ROBWorkspaceSearchSchedule(targets:targets,recall:recall,
@@ -1521,7 +1524,8 @@ final class ROBArmRoutineVision {
                                   tabletopCanBaseHeight.map({ abs(sections.bottom[2]-$0) <= 0.15 }) ?? true else { rejected += 1; continue }
                             let object = ROBWorkspaceLocatedObject(target:.can,position:sections.middle,confidence:candidate.confidence,
                                 capturedAt:frame.capturedAt,sequence:frame.sequence,view:view,sections:sections,registrationID:measuredCamera?.registration.id)
-                            guard (try? ROBLeftCanReachCalibration.load(model:model,can:object)) != nil else { rejected += 1; continue }
+                            guard (try? ROBLeftCanReachCalibration.load(model:model,can:object,
+                                estimatedCameraProjectionIdentity:estimatedCamera?.identity)) != nil else { rejected += 1; continue }
                             candidates.append((candidate,object))
                         }
                         // Keep the same currently observed instance across

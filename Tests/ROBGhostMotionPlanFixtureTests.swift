@@ -15,6 +15,69 @@ private extension ROBLeftCanReachCalibration {
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
         let model = try ROBGhostRobotModel(directory: root.appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
         precondition(model.modelID.count == 64 && model.joints.count == 44 && model.hulls.count >= 40)
+        if CommandLine.arguments.last == "photo-origin-residual-scope" {
+            let suite="ROBPhotoResidualScope."+UUID().uuidString,defaults=UserDefaults(suiteName:suite)!
+            let folder=FileManager.default.temporaryDirectory.appendingPathComponent("rob-photo-residual-"+UUID().uuidString)
+            try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
+            defer {try? FileManager.default.removeItem(at:folder);defaults.removePersistentDomain(forName:suite)}
+            let alignment=ROBWorkspaceDepthAlignment.snapshot(defaults:defaults)!,pid=String(repeating:"a",count:64)
+            for side in ["left","right"] {
+                let testModel=try ROBGhostRobotModel(directory:root.appendingPathComponent("Cerebro/Resources/ShadowPlanner"),physicalSide:side)
+                let file=folder.appendingPathComponent(side+"-reach.json")
+                var calibration=ROBLeftCanReachCalibration(modelID:testModel.modelID,referenceID:testModel.referenceID,
+                    mappingID:testModel.selectedMappingID,translationMeters:[0.02,-0.01,-0.03],source:"Legacy camera-only tuning fixture",
+                    bucketYawDegrees:18,bucketInwardMeters:0.035,recoveryGraspClearanceMeters:0.037,canOutwardMeters:0.01,
+                    tabletopCanBaseHeightMeters:0.80)
+                try calibration.saveFixture(to:file)
+                let sections=ROBWorkspaceCanSections(top:[0.5,0.1,0.98],middle:[0.5,0.1,0.92],bottom:[0.5,0.1,0.86],heightMeters:0.12,diameterMeters:0.066)
+                let can=ROBWorkspaceLocatedObject(target:.can,position:sections.middle,confidence:0.9,capturedAt:1000,sequence:1,
+                    view:.init(panDegrees:0,upperTarget:6160),sections:sections)
+                let legacy=try ROBLeftCanReachCalibration.load(model:testModel,can:can,file:file,depthAlignment:alignment)
+                precondition(legacy.x>0.02 && legacy.y != 0 && abs(legacy.z+0.06)<1e-10)
+                let yaw=try ROBLeftCanReachCalibration.loadBucketYaw(model:testModel,file:file)
+                let inward=try ROBLeftCanReachCalibration.loadBucketInward(model:testModel,file:file)
+                let base=try ROBLeftCanReachCalibration.loadTabletopCanBaseHeight(model:testModel,file:file)
+                let clearance=try ROBLeftCanReachCalibration.loadRecoveryGraspClearance(model:testModel,file:file)
+                precondition(yaw==18 && inward==0.035 && base==0.80 && clearance==0.037)
+                let fresh=try ROBLeftCanReachCalibration.load(model:testModel,can:can,file:file,depthAlignment:alignment,estimatedCameraProjectionIdentity:pid)
+                let freshYaw=try ROBLeftCanReachCalibration.loadBucketYaw(model:testModel,file:file,estimatedCameraProjectionIdentity:pid)
+                let freshInward=try ROBLeftCanReachCalibration.loadBucketInward(model:testModel,file:file,estimatedCameraProjectionIdentity:pid)
+                let freshBase=try ROBLeftCanReachCalibration.loadTabletopCanBaseHeight(model:testModel,file:file,estimatedCameraProjectionIdentity:pid)
+                precondition(fresh == .zero && freshYaw==0 && freshInward==0 && freshBase==nil,"Legacy camera tuning leaked into photo-origin coordinates")
+                calibration.tabletopCanBaseHeightMeters=nil;calibration.tabletopGraspHeightMeters=0.85;try calibration.saveFixture(to:file)
+                let oldHeight=try ROBLeftCanReachCalibration.load(model:testModel,can:can,file:file,depthAlignment:alignment)
+                let newHeight=try ROBLeftCanReachCalibration.load(model:testModel,can:can,file:file,depthAlignment:alignment,estimatedCameraProjectionIdentity:pid)
+                precondition(abs(oldHeight.z+0.07)<1e-10 && newHeight == .zero)
+                // Even a corrupt old camera file must not be opened/decoded
+                // merely to discover that its coordinate frame is obsolete.
+                try Data("Invalid legacy file, deliberately isolated fixture".utf8).write(to:file)
+                let noLegacyRead=try ROBLeftCanReachCalibration.load(model:testModel,can:can,file:file,depthAlignment:nil,estimatedCameraProjectionIdentity:pid)
+                let noYawRead=try ROBLeftCanReachCalibration.loadBucketYaw(model:testModel,file:file,estimatedCameraProjectionIdentity:pid)
+                let noInwardRead=try ROBLeftCanReachCalibration.loadBucketInward(model:testModel,file:file,estimatedCameraProjectionIdentity:pid)
+                let noBaseRead=try ROBLeftCanReachCalibration.loadTabletopCanBaseHeight(model:testModel,file:file,estimatedCameraProjectionIdentity:pid)
+                precondition(noLegacyRead == .zero && noYawRead==0 && noInwardRead==0 && noBaseRead==nil)
+                expectBlocked {_ = try ROBLeftCanReachCalibration.load(model:testModel,can:can,file:file,depthAlignment:alignment)}
+                let registration="measured-local-"+side
+                let scoped=try ROBLeftCanReachCalibration.saveRegisteredResidual(model:testModel,registrationID:registration,
+                    regionLowMeters:[0.2,-0.5,0.6],regionHighMeters:[0.8,0.5,1.2],translationMeters:[0.01,0.02,0.03],
+                    source:"Independently registered residual fixture",baseFile:file)
+                var registered=try JSONDecoder().decode(ROBLeftCanReachCalibration.self,from:Data(contentsOf:scoped))
+                registered.bucketYawDegrees = -12;registered.bucketInwardMeters=0.02;registered.tabletopCanBaseHeightMeters=0.78
+                try registered.saveFixture(to:scoped)
+                var registeredCan=can;registeredCan.registrationID=registration
+                let residual=try ROBLeftCanReachCalibration.load(model:testModel,can:registeredCan,file:file,depthAlignment:nil,estimatedCameraProjectionIdentity:pid)
+                let measuredYaw=try ROBLeftCanReachCalibration.loadBucketYaw(model:testModel,file:file,registrationID:registration,estimatedCameraProjectionIdentity:pid)
+                let measuredInward=try ROBLeftCanReachCalibration.loadBucketInward(model:testModel,file:file,registrationID:registration,estimatedCameraProjectionIdentity:pid)
+                let measuredBase=try ROBLeftCanReachCalibration.loadTabletopCanBaseHeight(model:testModel,file:file,registrationID:registration,estimatedCameraProjectionIdentity:pid)
+                precondition(residual==SIMD3(0.01,0.02,0.03) && measuredYaw == -12 && measuredInward==0.02 && measuredBase==0.78,
+                    "Photo-origin policy suppressed an independently matched measured-frame residual")
+                registeredCan.registrationID="unmatched-registration"
+                let unmatched=try ROBLeftCanReachCalibration.load(model:testModel,can:registeredCan,file:file,depthAlignment:nil,estimatedCameraProjectionIdentity:pid)
+                precondition(unmatched == .zero,"An unmatched registration inherited legacy tuning")
+            }
+            print("Photo-origin residual scope: both arms drop legacy translation/outward/table heights/bucket offsets before file read; nil identity preserves legacy behavior; matched registered residuals and physical recovery clearance remain independent")
+            return
+        }
         if CommandLine.arguments.last == "depth-reach-rebase" {
             let suite = "ROBDepthReachFixture."+UUID().uuidString
             let defaults = UserDefaults(suiteName:suite)!

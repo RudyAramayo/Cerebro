@@ -1,6 +1,10 @@
 """Exercise saved actual-pattern images, metric pair geometry and native depth."""
 import copy
 import importlib.util
+import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -63,6 +67,28 @@ class BellyQRDiagnosticsTests(unittest.TestCase):
 
     def tearDown(self):
         self.temporary.cleanup()
+
+    def test_cli_writes_full_report_and_compact_rejection_summary(self):
+        document, _, _ = fixture(self.directory)
+        for frame in document["frames"]:
+            frame["rgbOutputUndistorted"] = False
+        source = self.directory / "capture-input.json"
+        output = self.directory / "diagnostic.json"
+        source.write_text(json.dumps(document))
+        command = [sys.executable, "-B", str(ROOT / "Cerebro/Resources/ShadowPlanner/belly_qr_diagnostic.py"),
+                   "--input", str(source), "--output", str(output)]
+        completed = subprocess.run(command, env=dict(os.environ, PYTHONNOUSERSITE="1"),
+                                   capture_output=True, text=True, timeout=20)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        summary = json.loads(completed.stdout)
+        self.assertEqual(summary["status"], "diagnostic_incomplete")
+        self.assertEqual(summary["acceptedFrameCount"], 0)
+        self.assertEqual(len(summary["rejectedFrames"]), 3)
+        self.assertTrue(all(set(row) == {"frameIndex", "reason"} for row in summary["rejectedFrames"]))
+        report = json.loads(output.read_text())
+        self.assertEqual(report["inputSHA256"], WORKER.digest(source))
+        self.assertFalse(report["registrationVerified"])
+        self.assertFalse(report["armMotionAuthority"])
 
     def test_printed_patterns_decode_to_the_actual_new_payloads(self):
         for target in WORKER.IDS:
