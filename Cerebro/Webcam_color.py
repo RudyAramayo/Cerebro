@@ -11,6 +11,7 @@ import argparse
 from collections import deque
 from datetime import datetime, timedelta, timezone
 import fcntl
+import hashlib
 import json
 import math
 import time
@@ -20,10 +21,29 @@ import signal
 import socket
 import stat
 import struct
+import sys
 import threading
 import tempfile
 
 
+def verified_running_service_source_sha256(running_module_code, source_path):
+    """Hash source only if it compiles to this executing module's code.
+
+    Read once at startup. An atomic app replacement after startup cannot stamp
+    its newer source hash onto frames from an older, still-running worker.
+    """
+    with open(source_path, "rb") as source_file:
+        source = source_file.read()
+    compiled = compile(source, running_module_code.co_filename, "exec",
+                       dont_inherit=True, optimize=sys.flags.optimize)
+    if compiled != running_module_code:
+        raise RuntimeError("Camera service source changed before running-code provenance was verified")
+    return hashlib.sha256(source).hexdigest()
+
+
+RUNNING_SERVICE_SOURCE_SHA256 = verified_running_service_source_sha256(
+    sys._getframe().f_code, __file__)
+RGB_OUTPUT_UNDISTORTED = True
 PROTOCOL_MAGIC = b"CDP1"
 PROTOCOL_VERSION = 2
 FRAME_SIZE = (640, 400)
@@ -780,6 +800,8 @@ def frame_payload(
         "right_length": len(right_bytes),
         "rgb_intrinsics": frame_intrinsics,
         "rgb_intrinsics_source": intrinsics_source,
+        "running_service_source_sha256": RUNNING_SERVICE_SOURCE_SHA256,
+        "rgb_output_undistorted": RGB_OUTPUT_UNDISTORTED,
         "depth_alignment_method": depth_alignment_method,
         "rgb_source_size": source_size,
         "rgb_source_intrinsics": source_intrinsics,
@@ -925,7 +947,7 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                 type=dai.ImgFrame.Type.RGB888i,
                 resizeMode=dai.ImgResizeMode.CROP,
                 fps=frame_rate,
-                enableUndistortion=True,
+                enableUndistortion=RGB_OUTPUT_UNDISTORTED,
             )
 
             # OAK-D Pro is an RVC2 device. DepthAI's automatic v3 Depth node
@@ -995,7 +1017,7 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                             type=dai.ImgFrame.Type.RGB888i,
                             resizeMode=dai.ImgResizeMode.CROP,
                             fps=5.0,
-                            enableUndistortion=True,
+                            enableUndistortion=RGB_OUTPUT_UNDISTORTED,
                         )
                         nn_input_stream.link(nn_model.input)
                         stereo.depth.link(nn_model.inputDepth)

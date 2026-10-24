@@ -22,6 +22,9 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
+		AC241026000000000000000C /* ROBEstimatedFixedHeadCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC241026000000000000000B /* ROBEstimatedFixedHeadCapture.swift */; };
+		AC241026000000000000000E /* ROBNeckRGBPoseDisplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC241026000000000000000D /* ROBNeckRGBPoseDisplay.swift */; };
+		AC241026000000000000000A /* ROBNeckBundleEvidence.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2410260000000000000009 /* ROBNeckBundleEvidence.swift */; };
 		AC2410260000000000000008 /* ROBRecyclingVisualInspection.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2410260000000000000007 /* ROBRecyclingVisualInspection.swift */; };
 		AC2410260000000000000006 /* ROBVisualGraspVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2410260000000000000005 /* ROBVisualGraspVerifier.swift */; };
 		AC2410260000000000000004 /* ROBFixedHeadCalibrationWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2410260000000000000003 /* ROBFixedHeadCalibrationWindowController.swift */; };
@@ -281,6 +284,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		AC241026000000000000000B /* ROBEstimatedFixedHeadCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBEstimatedFixedHeadCapture.swift; sourceTree = "<group>"; };
+		AC241026000000000000000D /* ROBNeckRGBPoseDisplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBNeckRGBPoseDisplay.swift; sourceTree = "<group>"; };
+		AC2410260000000000000009 /* ROBNeckBundleEvidence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBNeckBundleEvidence.swift; sourceTree = "<group>"; };
 		AC2410260000000000000007 /* ROBRecyclingVisualInspection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRecyclingVisualInspection.swift; sourceTree = "<group>"; };
 		AC2410260000000000000005 /* ROBVisualGraspVerifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBVisualGraspVerifier.swift; sourceTree = "<group>"; };
 		AC2410260000000000000003 /* ROBFixedHeadCalibrationWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBFixedHeadCalibrationWindowController.swift; sourceTree = "<group>"; };
@@ -744,6 +750,9 @@
 				AC2410260000000000000001 /* ROBFixedHeadRegistration.swift */,
 				AC2410260000000000000003 /* ROBFixedHeadCalibrationWindowController.swift */,
 				AC2410260000000000000005 /* ROBVisualGraspVerifier.swift */,
+				AC2410260000000000000009 /* ROBNeckBundleEvidence.swift */,
+				AC241026000000000000000B /* ROBEstimatedFixedHeadCapture.swift */,
+				AC241026000000000000000D /* ROBNeckRGBPoseDisplay.swift */,
 				AC2410260000000000000007 /* ROBRecyclingVisualInspection.swift */,
 				AC2310260000000000000013 /* ROBNeckQRCalibration.swift */,
 				AC221026000000000000000B /* ROBEstimatedArmCalibrationPlan.swift */,
@@ -1189,6 +1198,9 @@
 				AC2410260000000000000002 /* ROBFixedHeadRegistration.swift in Sources */,
 				AC2410260000000000000004 /* ROBFixedHeadCalibrationWindowController.swift in Sources */,
 				AC2410260000000000000006 /* ROBVisualGraspVerifier.swift in Sources */,
+				AC241026000000000000000A /* ROBNeckBundleEvidence.swift in Sources */,
+				AC241026000000000000000C /* ROBEstimatedFixedHeadCapture.swift in Sources */,
+				AC241026000000000000000E /* ROBNeckRGBPoseDisplay.swift in Sources */,
 				AC2410260000000000000008 /* ROBRecyclingVisualInspection.swift in Sources */,
 				AC2310260000000000000014 /* ROBNeckQRCalibration.swift in Sources */,
 				AC221026000000000000000C /* ROBEstimatedArmCalibrationPlan.swift in Sources */,

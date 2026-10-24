@@ -19,13 +19,25 @@ import UniformTypeIdentifiers
     private let image = NSImageView()
     private let details = NSTextView()
     private let captureButton = NSButton(title: "Capture + fit current head pose", target: nil, action: nil)
-    private let importButton = NSButton(title: "Import measured landmarks…", target: nil, action: nil)
+    private let importButton = NSButton(title: "Import calibration evidence…", target: nil, action: nil)
     private let stopButton = NSButton(title: "Stop capture", target: nil, action: nil)
     @nonobjc private var task: Task<Void, Never>?
     @nonobjc private var process: Process?
     @nonobjc private var armOwner: UUID?
     private var captureBodyIdentity: String?
     private var cameraHeld = false
+    @nonobjc private(set) var selectedEstimatedContext: ROBEstimatedFixedHeadCapture.Context?
+
+    @nonobjc func currentEstimatedContext(model:ROBGhostRobotModel,frame:ROBArmRoutineVision.Frame) throws -> ROBEstimatedFixedHeadCapture.Context {
+        let current = try scope(model:model,frame:frame)
+        guard let context = selectedEstimatedContext,
+              context.matches(currentScope:current,model:model),
+              frame.intrinsics?.cameraServiceSourceSHA256 == context.cameraServiceSourceSHA256,
+              frame.intrinsics?.rgbOutputUndistorted == true else {
+            throw ROBGhostMotionError.blocked("The estimated neck/depth evidence does not match this exact held camera/body/arm context.")
+        }
+        return context
+    }
 
     private init() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 760),
@@ -233,6 +245,8 @@ import UniformTypeIdentifiers
                 "depthCoverage":frame.depthCoverage,
                 "intrinsicsSource":k.calibrationSource ?? "unspecified",
                 "depthAlignmentMethod":k.depthAlignmentMethod ?? "unspecified"]
+            if let value = k.cameraServiceSourceSHA256 { record["cameraServiceSourceSHA256"] = value }
+            if let value = k.rgbOutputUndistorted { record["rgbOutputUndistorted"] = value }
             if let imu = k.inertial {
                 record["imu"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(imu))
             }
@@ -245,18 +259,34 @@ import UniformTypeIdentifiers
             display("Captured \(records.count)/5 fixed-view frames. Head P\(scope.panTarget) L\(scope.lowerTarget) U\(scope.upperTarget). Arms unchanged.")
             try await Task.sleep(nanoseconds: 250_000_000)
         }
-        guard let scope = firstScope, let pan = expected["pan_degrees"] as? Double,
-              let pose = ROBHeadCameraPoseEstimator.estimateDisplay(panRadians: pan * .pi / 180,
-                lowerTarget: scope.lowerTarget, upperTarget: scope.upperTarget, known: true),
-              let head = model.headPositions(pan: pose.panRadians, lowerPitch: pose.lowerPitch, upperPitch: pose.upperPitch),
-              let optical = model.frames(model.reference.merging(head) { _,new in new })["oak_optical_frame"],
-              let alignment = ROBWorkspaceDepthAlignment.snapshot() else { throw ROBGhostMotionError.blocked("Current head model initializer is unavailable.") }
-        let initial = alignment.applying(to: optical)
+        guard let scope = firstScope else { throw ROBGhostMotionError.blocked("Current head model initializer is unavailable.") }
+        let initial: simd_double4x4
+        let initializerSource: String
+        if let fitted = ROBNeckRGBPoseDisplay.cameraToModel(model:model, panTarget:scope.panTarget,
+            lowerTarget:scope.lowerTarget, upperTarget:scope.upperTarget) {
+            // A better optimizer seed is not registration evidence. The CAD,
+            // held-out depth, observability and uncertainty checks below stay
+            // unchanged, and consume the original captured depth values.
+            initial = fitted
+            initializerSource = "fitted_rgb_neck_candidate_initializer_only"
+        } else {
+            guard let pan = expected["pan_degrees"] as? Double,
+                  let pose = ROBHeadCameraPoseEstimator.estimateDisplay(panRadians:pan * .pi / 180,
+                    lowerTarget:scope.lowerTarget, upperTarget:scope.upperTarget, known:true),
+                  let head = model.headPositions(pan:pose.panRadians, lowerPitch:pose.lowerPitch, upperPitch:pose.upperPitch),
+                  let optical = model.frames(model.reference.merging(head) { _,new in new })["oak_optical_frame"],
+                  let alignment = ROBWorkspaceDepthAlignment.snapshot() else {
+                throw ROBGhostMotionError.blocked("Current head model initializer is unavailable.")
+            }
+            initial = alignment.applying(to:optical)
+            initializerSource = "legacy_neck_prior_initializer_only"
+        }
         let scopeJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(scope))
         let input: [String: Any] = ["schemaVersion":1, "scope":scopeJSON,
             "validRobotVolume":["lowMeters":[-0.65,-0.95,0.05],"highMeters":[1.20,0.95,1.60]],
             "referenceUncertaintyMeters":uncertainty/1000,
-            "initialCameraToRobotColumnMajor":(0..<4).flatMap { col in (0..<4).map { initial[col][$0] } }, "frames":records]
+            "initialCameraToRobotColumnMajor":(0..<4).flatMap { col in (0..<4).map { initial[col][$0] } },
+            "initialCameraToRobotSource":initializerSource, "frames":records]
         let inputURL = destination.appendingPathComponent("capture-input.json"), outputURL = destination.appendingPathComponent("registration-input.json")
         try JSONSerialization.data(withJSONObject: input, options: [.prettyPrinted,.sortedKeys]).write(to: inputURL, options: .atomic)
         try checkPose(expected)
@@ -309,7 +339,7 @@ import UniformTypeIdentifiers
         do {
             let data = try Data(contentsOf: url)
             guard data.count <= 2_000_000 else { throw ROBGhostMotionError.blocked("Measured landmark file exceeds 2 MB.") }
-            _ = try JSONDecoder().decode(ROBFixedHeadRegistrationInput.self, from: data)
+            let kind = (try JSONSerialization.jsonObject(with:data) as? [String:Any])?["kind"] as? String
             guard let resources = Bundle.main.url(forResource:"ShadowPlanner",withExtension:nil),
                   let frame = ROBArmRoutineVision.shared.snapshot()["face"],
                   (0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt) else {
@@ -317,12 +347,29 @@ import UniformTypeIdentifiers
             }
             let model = try ROBGhostRobotModel(directory:resources,physicalSide:side.indexOfSelectedItem == 0 ? "right" : "left")
             let current = try scope(model:model,frame:frame)
+            if kind == "estimated_fixed_head_raw_corrected_union" {
+                selectedEstimatedContext = nil
+                let evidenceRoot = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Cerebro",isDirectory:true)
+                guard let service = Bundle.main.url(forResource:"Webcam_color",withExtension:"py") else {
+                    throw ROBGhostMotionError.blocked("The installed camera-service source is unavailable for pixel-model verification.")
+                }
+                let serviceSHA = ROBGhostRobotModel.hash(try Data(contentsOf:service))
+                let context = try ROBEstimatedFixedHeadCapture.load(packageURL:url,model:model,expectedScope:current,
+                    evidenceRoot:evidenceRoot,verifiedCameraServiceSourceSHA256:[serviceSHA])
+                selectedEstimatedContext = context
+                ROBWorkspaceSearch.shared.depthAlignmentDidChange()
+                display("Estimated fixed-head evidence loaded for the EMPTY right-arm probe only. Raw and corrected returns will both remain occupied. This does not authorize motion or enable grasping.\n" + context.metadata.description)
+                return
+            }
+            _ = try JSONDecoder().decode(ROBFixedHeadRegistrationInput.self,from:data)
             let registration = try ROBFixedHeadRegistrationStore.shared.load(url,scope:current)
+            selectedEstimatedContext = nil
             display("Measured landmark fit installed for the current recorded pose.\n\(registration)")
         } catch { display(error.localizedDescription) }
     }
     @objc func stop() { task?.cancel(); if process?.isRunning == true { process?.terminate() } }
     @objc private func bodyDidMove() {
+        selectedEstimatedContext = nil
         stop()
         ROBWorkspaceSearch.shared.depthAlignmentDidChange()
         display("The body moved. Recorded fixed-head registrations are no longer current; capture a new view before arm travel.")

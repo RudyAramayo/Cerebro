@@ -57,6 +57,28 @@ import simd
                 cameraToRobot:matrix_identity_double4x4,capturedAtMilliseconds:now+4,sequence:4,
                 cameraGeneration:camera,nowMilliseconds:now+1000)
         }
+        let hypothesisID=String(repeating:"a",count:64)
+        func appendUnion(_ map:inout ROBWorkspaceDepthMap,sequence:UInt64,alternative:UInt16?=500,id:String?=hypothesisID) throws {
+            try map.append(width:32,height:24,fx:30,fy:30,cx:16,cy:12,depth:{_,_ in 1000},
+                cameraToRobot:matrix_identity_double4x4,capturedAtMilliseconds:now+Double(sequence),sequence:sequence,
+                cameraGeneration:camera,nowMilliseconds:now+Double(sequence)+1,
+                alternateEstimatedDepth:{_,_ in alternative},estimatedDepthHypothesisID:id)
+        }
+        var union=make()
+        try appendUnion(&union,sequence:1);try appendUnion(&union,sequence:2)
+        let unionSnapshot=union.snapshot(nowMilliseconds:now+3)!
+        expect(unionSnapshot.registrationID==nil && unionSnapshot.observedFrameCount==2,"Estimated hypotheses fabricated registration or doubled a frame")
+        expect(unionSnapshot.observations.allSatisfy{$0.estimatedDepthHypothesisID==hypothesisID && !$0.measuredSelfMaskApplied},"Estimated depth provenance/self-mask changed")
+        expect(unionSnapshot.state(at:SIMD3(0.01,0.01,0.5)) == .occupied,"Near hypothesis disappeared")
+        expect(unionSnapshot.state(at:SIMD3(0.01,0.01,1.0)) == .occupied,"Raw hypothesis disappeared")
+        expect(unionSnapshot.state(at:SIMD3(0.01,0.01,0.35)) == .free,"Shared observed free space was lost")
+        expect(unionSnapshot.state(at:SIMD3(0.01,0.01,0.7)) != .free,"A longer hypothesis erased the shorter surface")
+        rejected("Hypothesis identity changed mid-scene") {try appendUnion(&union,sequence:3,id:String(repeating:"b",count:64))}
+        var missingAlternative=make()
+        try appendUnion(&missingAlternative,sequence:1,alternative:nil);try appendUnion(&missingAlternative,sequence:2,alternative:nil)
+        expect(missingAlternative.snapshot(nowMilliseconds:now+3)!.state(at:SIMD3(0.01,0.01,0.35)) == .unknown,"Missing alternative carved unverified free space")
+        var missingID=make()
+        rejected("Estimated hypothesis lacked provenance") {try appendUnion(&missingID,sequence:1,id:nil)}
         var holes = make()
         try append(&holes,sequence:1,hole:true); try append(&holes,sequence:2,hole:true)
         expect(holes.snapshot(nowMilliseconds:now+3)!.state(at:SIMD3(0.01,0.01,0.5)) == .unknown,"Missing depth carved free space")

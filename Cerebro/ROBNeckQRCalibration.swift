@@ -264,6 +264,8 @@ import simd
             record["imageSize"] = [depth.width, depth.height]; record["lowerTarget"] = pose.lower
             record.merge(stepContext) { _, new in new }
             record["intrinsicsSource"] = k.calibrationSource ?? "unspecified"
+            if let value = k.cameraServiceSourceSHA256 { record["cameraServiceSourceSHA256"] = value }
+            if let value = k.rgbOutputUndistorted { record["rgbOutputUndistorted"] = value }
             if let value = k.calibratedLensPosition { record["calibratedLensPosition"] = value }
             if let value = k.frameLensPosition { record["frameLensPosition"] = value }
             if let value = k.sourceSize { record["rgbSourceSize"] = value }

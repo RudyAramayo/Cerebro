@@ -237,8 +237,11 @@ struct ROBReviewedArmDispatchStart {
         let proof = value.proof, path = value.proposal
         guard Thread.isMainThread else {throw ROBArmRoutineError.blocked("Estimated arm context must be reviewed on the control thread.")}
         if physicalSide == "right" {
-            guard MainActor.assumeIsolated({ROBRecyclingVisualInspection.fixedHeadContextIsCurrent(model:value.model,map:value.map)}) else {
-                throw ROBArmRoutineError.blocked("The fixed registered head/body/camera context changed after the RIGHT preview; no probe admitted.")
+            guard MainActor.assumeIsolated({
+                ROBRecyclingVisualInspection.fixedHeadContextIsCurrent(model:value.model,map:value.map) ||
+                ROBWorkspaceSearch.shared.estimatedContextIsCurrent(model:value.model,map:value.map)
+            }) else {
+                throw ROBArmRoutineError.blocked("The fixed estimated or registered head/body/camera context changed after the RIGHT preview; no probe admitted.")
             }
         }
         guard value.geometryValidationFingerprint == (try estimatedGeometryFingerprint(proof:proof,map:value.map,model:value.model,proposal:path)),
@@ -874,7 +877,7 @@ struct ROBReviewedArmDispatchStart {
             try await beginHeldSceneObservation(allowActiveForPassiveCapture:passiveRightProbe)
             let map:ROBWorkspaceCollisionSnapshot
             if passiveRightProbe {
-                map = try await ROBWorkspaceSearch.shared.captureRegisteredCurrentScene(model:model,generation:current,
+                map = try await ROBWorkspaceSearch.shared.captureEstimatedOrRegisteredCurrentScene(model:model,generation:current,
                     check:{try self.check()},progress:{self.update($0)})
             } else {
                 map = try await ROBWorkspaceSearch.shared.scanCollisionScene(model:model,generation:current,

@@ -13,6 +13,8 @@ import simd
     private var previewFrozen = false
     private let headLinks: Set<String> = ["lower_neck_link", "neck_pan_link", "upper_neck_link", "insta360_link", "oak_link"]
     private var acceptedHeadTargets: ROBHeadCameraPoseEstimator?
+    private var rawHeadTargets: (pan:Int,lower:Int,upper:Int)?
+    private var displayedRGBProfileID: String?
     @nonobjc private var model: ROBGhostRobotModel?
     @nonobjc private var originalNodes: [String: SCNNode] = [:]
     @nonobjc private var ghostNodes: [String: SCNNode] = [:]
@@ -149,6 +151,23 @@ import simd
         updateHeadInfo()
     }
 
+    @objc(setRawHeadPanTarget:lowerTarget:upperTarget:known:)
+    func setRawHeadPanTarget(_ pan:Int,lowerTarget:Int,upperTarget:Int,known:Bool) {
+        rawHeadTargets = known ? (pan,lowerTarget,upperTarget):nil
+    }
+    @nonobjc private func fittedHeadPose()->ROBNeckRGBPoseDisplay.Pose? {
+        guard headEstimate != nil,let model,let raw=rawHeadTargets else{return nil}
+        return ROBNeckRGBPoseDisplay.pose(model:model,panTarget:raw.pan,lowerTarget:raw.lower,upperTarget:raw.upper)
+    }
+    var depthProjectionIdentity:String {
+        guard let model else{return "unavailable"}
+        return [model.modelID,model.referenceID,model.geometryID,fittedHeadPose()?.profileID ?? ROBWorkspaceDepthAlignment.snapshot()?.identity ?? "invalid"].joined(separator:"|")
+    }
+    var headDisplayPoseDescription:String {
+        fittedHeadPose() == nil ? "URDF mount prior":"provisional RGB neck fit · estimated camera offset · raw depth"
+    }
+    var headDisplayUsesRGBFit:Bool {fittedHeadPose() != nil}
+
     @objc(setHeadCommandPan:lowerPitch:upperPitch:known:)
     func setHeadCommand(pan: Double, lowerPitch: Double, upperPitch: Double, known: Bool) {
         let value = known ? model?.headPositions(pan: pan, lowerPitch: lowerPitch, upperPitch: upperPitch) : nil
@@ -162,6 +181,7 @@ import simd
     }
 
     var headOpticalPitchRadians: NSNumber? {
+        if let fitted=fittedHeadPose() {return NSNumber(value:-fitted.depressionRadians)}
         guard headEstimate != nil, let model,
               let rawCamera = model.frames(renderPositions(model.reference, preview: false))["oak_optical_frame"],
               let alignment = ROBWorkspaceDepthAlignment.snapshot() else { return nil }
@@ -176,6 +196,13 @@ import simd
         }
         let targets = acceptedHeadTargets.map { "L\($0.lowerTarget) / U\($0.upperTarget) · " } ?? ""
         let frozen = previewFrozen ? " · live view; reviewed edits locked" : ""
+        if let fitted=fittedHeadPose() {
+            headInfo.stringValue=String(format:"Provisional RGB neck fit: %@optical tilt %+.1f°%@\nPan → lower → upper · QR-up display gauge · estimated camera offset\nRaw depth unchanged; no grasp authority · profile %@",targets,pitch.doubleValue*180 / .pi,frozen,String(fitted.profileID.prefix(10)))
+            if let legacy=ROBWorkspaceDepthAlignment.snapshot() {
+                headInfo.stringValue+=String(format:"\nLegacy %.1f° / %.2f in retained, NOT applied",legacy.downwardPitchDegrees,legacy.towardRobotMeters/0.0254)
+            }
+            return
+        }
         headInfo.stringValue = String(format: "Head command estimate: %@optical tilt %+.1f°%@\nNeck reference: L6011/U6906 · Insta mount ≈20° back", targets,
             pitch.doubleValue * 180 / .pi, frozen)
         if let alignment = ROBWorkspaceDepthAlignment.snapshot() {
@@ -202,13 +229,15 @@ import simd
                 belly ? "belly_oak_optical_frame" : "oak_optical_frame"] else { return [] }
         let basis = simd_double4x4(columns: (SIMD4<Double>(modelBasis.columns.0), SIMD4<Double>(modelBasis.columns.1),
             SIMD4<Double>(modelBasis.columns.2), SIMD4<Double>(modelBasis.columns.3)))
+        let fitted=fittedHeadPose()
         let alignedFrame: simd_double4x4
         if belly { alignedFrame = frame }
+        else if let fitted {alignedFrame=fitted.cameraToModel}
         else {
             guard let alignment = ROBWorkspaceDepthAlignment.snapshot() else { return [] }
             alignedFrame = alignment.applying(to: frame)
         }
-        let transform = basis * alignedFrame
+        let transform = basis * (fitted?.modelToDisplay ?? matrix_identity_double4x4) * alignedFrame
         return (0..<3).flatMap { row in (0..<4).map { NSNumber(value: transform[$0][row]) } }
     }
 
@@ -896,7 +925,11 @@ import simd
     }
     private func updateNodes(_ nodes: [String: SCNNode], positions: [String: Double]) {
         guard let model else { return }
-        let frames = model.frames(positions)
+        var frames = model.frames(positions)
+        let fitted=fittedHeadPose()
+        if let fitted,["neck_pan","lower_neck","upper_neck"].allSatisfy({positions[$0]==headEstimate?[$0]}) {
+            frames.merge(fitted.headFrames){_,new in new}
+        }
         let optical = frames["oak_optical_frame"]
         let alignment = ROBWorkspaceDepthAlignment.snapshot()
         var changes: [(SCNNode, simd_float4x4)] = []
@@ -905,7 +938,7 @@ import simd
                 // Rotate the face-camera housing about its optical origin.
                 // Cloud translation is not a physical camera-mount movement;
                 // the neck and panoramic camera keep their original frames.
-                if link == "oak_link", let optical, let alignment {
+                if fitted == nil,link == "oak_link", let optical, let alignment {
                     transform = alignment.applyingPitch(to: optical) * simd_inverse(optical) * transform
                 }
                 let value = simd_float4x4(columns: (SIMD4<Float>(transform.columns.0), SIMD4<Float>(transform.columns.1),
@@ -939,7 +972,17 @@ import simd
             if busy { status.stringValue = ROBLeftArmTrial.shared.status }
         }
         if previewFrozen && !busy && !ROBControllerArmApproval.shared.isPending { setPreviewFrozen(false) }
-        let base = capturedRobot.presentation.simdWorldTransform * modelBasis
+        let fitted=fittedHeadPose()
+        if displayedRGBProfileID != fitted?.profileID {
+            displayedRGBProfileID=fitted?.profileID
+            invalidateReview()
+            updateNodes(originalNodes,positions:renderPositions(originalPositions,preview:false))
+            updateNodes(ghostNodes,positions:renderPositions(ghostDisplayPositions,preview:true))
+            updateHeadInfo()
+        }
+        let gauge=fitted?.modelToDisplay ?? matrix_identity_double4x4
+        let displayGauge=simd_float4x4(columns:(SIMD4<Float>(gauge.columns.0),SIMD4<Float>(gauge.columns.1),SIMD4<Float>(gauge.columns.2),SIMD4<Float>(gauge.columns.3)))
+        let base = capturedRobot.presentation.simdWorldTransform * modelBasis * displayGauge
         if renderRoot.simdTransform != base { renderRoot.simdTransform = base }
         let now = ProcessInfo.processInfo.systemUptime
         if now - lastCanInfoUpdate >= 1 {

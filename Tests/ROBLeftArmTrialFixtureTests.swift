@@ -243,6 +243,12 @@ final class ROBWorkspaceSearch {
     var collisionScanCalls = 0
     var failCollisionScan = false
     var syntheticDistantPlane = false
+    var estimatedContext = false
+    func estimatedContextIsCurrent(model:ROBGhostRobotModel,map:ROBWorkspaceCollisionSnapshot)->Bool {estimatedContext}
+    @MainActor func captureEstimatedOrRegisteredCurrentScene(model:ROBGhostRobotModel,generation:UInt64,
+        check:() throws->Void,progress:(String)->Void) async throws->ROBWorkspaceCollisionSnapshot {
+        try await captureRegisteredCurrentScene(model:model,generation:generation,check:check,progress:progress)
+    }
     var onCollisionScan: (() -> Void)?
     var collisionSnapshot: ROBWorkspaceCollisionSnapshot? {
         guard let value = collisionSnapshotValue,
@@ -591,9 +597,11 @@ final class ROBArmRoutineCoordinator {
             }
             return true
         }
-        if CommandLine.arguments.last == "right-estimated" {
-            ROBRecyclingVisualInspection.fixedContext=true
-            defer {ROBRecyclingVisualInspection.fixedContext=false}
+        if ["right-estimated","right-estimated-bundle"].contains(CommandLine.arguments.last ?? "") {
+            let estimatedBundle = CommandLine.arguments.last == "right-estimated-bundle"
+            ROBRecyclingVisualInspection.fixedContext = !estimatedBundle
+            ROBWorkspaceSearch.shared.estimatedContext = estimatedBundle
+            defer {ROBRecyclingVisualInspection.fixedContext=false;ROBWorkspaceSearch.shared.estimatedContext=false}
             g.ready=true;g.stale=false;g.commands=[];g.mode=["left":1,"right":1]
             g.q=["left":Array(repeating:0,count:7),"right":Array(repeating:0,count:7)]
             ROBWorkspaceSearch.shared.syntheticDistantPlane=true
@@ -620,11 +628,11 @@ final class ROBArmRoutineCoordinator {
             precondition(sides.isEmpty && g.commands.isEmpty,"Passive preview actuated or asked for authority")
             let proof=trial.collisionReviewProposal!
             precondition(proof.baseline==Array(repeating:0,count:7) && proof.steps.count==1)
-            precondition(proof.steps[0].positions==[0,-0.039,0,0,0,0,0] && proof.steps[0].jawAction==nil)
+            precondition(proof.steps[0].positions==[-0.03,-0.03,0,0,0,0,0] && proof.steps[0].jawAction==nil)
             let result=await run("right_estimated_trial")
             precondition(result["status"] as? String=="completed",result.description)
             precondition(sides==["right"] && g.commands.filter{$0=="ghost_step_0:left"}.count==1)
-            precondition(g.q["left"]==[0,-0.039,0,0,0,0,0] && g.q["right"]==Array(repeating:0,count:7))
+            precondition(g.q["left"]==[-0.03,-0.03,0,0,0,0,0] && g.q["right"]==Array(repeating:0,count:7))
             precondition(g.mode==["left":2,"right":1] && g.activeLeases.isEmpty)
             precondition(!g.commands.contains{$0.hasPrefix("calibrate") || $0.hasPrefix("gripper") || $0.hasPrefix("deactivate") || $0.hasPrefix("waypoint")})
             let csv=try String(contentsOfFile:result["current_recording"] as! String,encoding:.utf8)
@@ -632,7 +640,7 @@ final class ROBArmRoutineCoordinator {
             g.commands=[]
             let replay=await run("right_estimated_trial")
             precondition(replay["status"] as? String=="blocked" && g.commands.isEmpty && sides.count==1)
-            print("Right estimated runtime: passive active-mode preview, one explicit physical-right approval, one4s immutable J2 step on gatewayleft, otherarmunchanged, nojaw/return/replay; actual pixel/depth acquisition is separately covered, never fabricated here.")
+            print("Right estimated runtime: passive active-mode preview, one explicit physical-right approval, one 4s immutable two-joint outward retreat on gateway left, other arm unchanged, no jaw/return/replay; actual pixel/depth acquisition is separately covered, never fabricated here.")
             return
         }
         if ["right-scope","right-three-scope"].contains(CommandLine.arguments.last ?? "") {

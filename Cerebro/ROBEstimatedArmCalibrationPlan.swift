@@ -235,7 +235,10 @@ struct ROBEstimatedArmCalibrationPlan: Codable, Equatable {
     let unknownLocalRegions: [ROBEstimatedArmLocalRegion]
 
     static let jointDeltaRadians: [Double] = [0.10,0.025,-0.075,0,0,0,0]
-    static let rightJointDeltaRadians:[Double] = [0,-0.039,0,0,0,0,0]
+    // Two-joint outward retreat: the former J2-only vector approached a
+    // retained table cell. The complete unchanged proof must admit this new
+    // proposal again for the live map and measured baseline.
+    static let rightJointDeltaRadians:[Double] = [-0.03,-0.03,0,0,0,0,0]
     private static func delta(model:ROBGhostRobotModel)->[Double] {model.physicalSide == "right" ? rightJointDeltaRadians : jointDeltaRadians}
     private static func travelLimit(model:ROBGhostRobotModel)->Double {model.physicalSide == "right" ? 0.03 : maximumVertexTravelMeters}
     static let durationSeconds = 4.0
@@ -291,6 +294,9 @@ struct ROBEstimatedArmCalibrationPlan: Codable, Equatable {
 
     private static func checkMap(_ map: ROBWorkspaceCollisionSnapshot, model: ROBGhostRobotModel, generation: UInt64,
                                  cameraGeneration: UUID, nowMilliseconds: Double) throws {
+        guard map.bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity else {
+            throw ROBGhostMotionError.blocked("The robot body moved after the estimated depth scene was captured. Capture a fresh scene before the outward retreat.")
+        }
         guard generation > 0, map.sessionGeneration == generation, map.cameraGeneration == cameraGeneration,
               map.modelID == model.modelID, map.geometryID == model.geometryID, map.mappingID == model.selectedMappingID,
               map.fingerprint.count == 64 else {

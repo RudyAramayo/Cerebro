@@ -130,6 +130,8 @@ struct CameraIntrinsics: Sendable {
     var imageTransform: [Double]? = nil
     var depthAlignmentMethod: String? = nil
     var inertial: CameraInertialObservation? = nil
+    var cameraServiceSourceSHA256: String? = nil
+    var rgbOutputUndistorted: Bool? = nil
 
     func isValid(forWidth width: Int, height: Int) -> Bool {
         fx.isFinite && fy.isFinite && cx.isFinite && cy.isFinite
@@ -1563,7 +1565,9 @@ private final class DepthCameraServiceClient {
                         sourceIntrinsics: header.rgbSourceIntrinsics,
                         imageTransform: header.rgbImageTransform,
                         depthAlignmentMethod: header.depthAlignmentMethod,
-                        inertial: header.imu.flatMap { $0.isValid ? $0 : nil }
+                        inertial: header.imu.flatMap { $0.isValid ? $0 : nil },
+                        cameraServiceSourceSHA256: header.runningServiceSourceSHA256,
+                        rgbOutputUndistorted: header.rgbOutputUndistorted
                     )
                     return result.isValid(forWidth: header.rgbWidth, height: header.rgbHeight)
                         ? result : nil
@@ -1744,6 +1748,8 @@ private struct DepthCameraPacketHeader: Decodable {
     let rightLength: Int
     let rgbIntrinsics: [Double]?
     let rgbIntrinsicsSource: String?
+    let runningServiceSourceSHA256: String?
+    let rgbOutputUndistorted: Bool?
     let rgbCalibratedLensPosition: Int?
     let rgbFrameLensPosition: Int?
     let rgbSourceSize: [Int]?
@@ -1776,6 +1782,8 @@ private struct DepthCameraPacketHeader: Decodable {
         case rightLength = "right_length"
         case rgbIntrinsics = "rgb_intrinsics"
         case rgbIntrinsicsSource = "rgb_intrinsics_source"
+        case runningServiceSourceSHA256 = "running_service_source_sha256"
+        case rgbOutputUndistorted = "rgb_output_undistorted"
         case rgbCalibratedLensPosition = "rgb_calibrated_lens_position"
         case rgbFrameLensPosition = "rgb_frame_lens_position"
         case rgbSourceSize = "rgb_source_size"

@@ -27,6 +27,7 @@ struct ROBWorkspaceDepthObservation: Codable {
     let fixedHeadScope: ROBFixedHeadRegistrationScope?
     let cameraToRobotColumnMajor: [Double]
     let measuredSelfMaskApplied: Bool
+    var estimatedDepthHypothesisID: String? = nil
 }
 
 /// Session-only evidence. No code writes this map to disk or promotes a neck
@@ -181,7 +182,18 @@ struct ROBWorkspaceDepthMap {
         cameraRegistrationVerified: Bool = false, recordedPanDegrees:Double? = nil,
         recordedUpperTarget:Int? = nil, recordedLowerTarget:Int? = nil,
         registration:ROBFixedHeadRegistration? = nil,
-        registrationScope:ROBFixedHeadRegistrationScope? = nil) throws {
+        registrationScope:ROBFixedHeadRegistrationScope? = nil,
+        alternateEstimatedDepth: ((Int,Int)->UInt16?)? = nil,
+        estimatedDepthHypothesisID: String? = nil) throws {
+        guard (alternateEstimatedDepth == nil && estimatedDepthHypothesisID == nil) ||
+              (alternateEstimatedDepth != nil && registration == nil &&
+               estimatedDepthHypothesisID.map({ $0.count == 64 && $0.allSatisfy(\.isHexDigit) }) == true) else {
+            throw ROBWorkspaceDepthMapError.acquisition("Estimated depth hypotheses need an identified unregistered map; they cannot create measured registration.")
+        }
+        if let first = observations.first,
+           first.estimatedDepthHypothesisID != estimatedDepthHypothesisID {
+            throw ROBWorkspaceDepthMapError.acquisition("Depth hypotheses changed during this scene; start a fresh estimated map.")
+        }
         guard bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity else {
             throw ROBWorkspaceDepthMapError.acquisition("Body moved after this scene began; capture a fresh fixed-head registration and map")
         }
@@ -249,7 +261,8 @@ struct ROBWorkspaceDepthMap {
             recordedLowerTarget:recordedLowerTarget,registrationID:registration?.id,
             registrationUncertaintyMeters:registration?.uncertaintyMeters,fixedHeadScope:registrationScope,
             cameraToRobotColumnMajor:(0..<4).flatMap { column in (0..<4).map { cameraToRobot[column][$0] } },
-            measuredSelfMaskApplied:measuredRegistration && !measuredSelfBounds.isEmpty))
+            measuredSelfMaskApplied:measuredRegistration && !measuredSelfBounds.isEmpty,
+            estimatedDepthHypothesisID:estimatedDepthHypothesisID))
         let origin = SIMD3(cameraToRobot.columns.3.x,cameraToRobot.columns.3.y,cameraToRobot.columns.3.z)
         // A provisional transform cannot justify erasing a table because it
         // overlaps an estimated robot hull. Retain those occupied returns.
@@ -258,6 +271,37 @@ struct ROBWorkspaceDepthMap {
         for y in stride(from: 1, to: height - 1, by: step) {
             for x in stride(from: 1, to: width - 1, by: step) {
                 guard let mm = depth(x,y), (100...3000).contains(Int(mm)) else { continue }
+                if let alternateEstimatedDepth {
+                    // One original frame/sequence, both possible occupied
+                    // endpoints. A missing alternative cannot carve free space.
+                    let alternative = alternateEstimatedDepth(x,y)
+                    let samples = [Optional(mm),alternative].compactMap { $0 }.filter { (100...3000).contains(Int($0)) }
+                    var endpoints:[SIMD3<Double>] = []
+                    for sample in samples {
+                        let z = Double(sample)/1000
+                        let p = cameraToRobot * SIMD4((Double(x)-cx)*z/fx,(Double(y)-cy)*z/fy,z,1)
+                        let endpoint = SIMD3(p.x,p.y,p.z)
+                        if withinBounds(endpoint) { markOccupied(endpoint);endpoints.append(endpoint) }
+                    }
+                    guard samples.count == 2,endpoints.count == 2 else {continue}
+                    let coordinates = [(x-1,y),(x+1,y),(x,y-1),(x,y+1)]
+                    let neighbors = coordinates.compactMap {depth($0.0,$0.1)}
+                    let alternateNeighbors = coordinates.compactMap {alternateEstimatedDepth($0.0,$0.1)}
+                    guard neighbors.count == 4,alternateNeighbors.count == 4,
+                          neighbors.allSatisfy({abs(Int($0)-Int(mm))<=30}),
+                          alternateNeighbors.allSatisfy({abs(Int($0)-Int(alternative!))<=30}) else {continue}
+                    let distances = endpoints.map {simd_length($0-origin)}
+                    guard distances.allSatisfy({$0.isFinite && $0>0.1}) else {continue}
+                    let direction = simd_normalize(endpoints[0]-origin)
+                    let freeUntil = distances.min()!-0.075
+                    guard freeUntil>0.1 else {continue}
+                    for along in stride(from:0.1,to:freeUntil,by:voxelSizeMeters*0.5) {
+                        let point = origin+direction*along
+                        guard withinBounds(point) else {continue}
+                        if free.count<maximumFree {free.insert(voxel(point))} else {truncated=true;break}
+                    }
+                    continue
+                }
                 let z = Double(mm) / 1000
                 let p = cameraToRobot * SIMD4((Double(x)-cx)*z/fx, (Double(y)-cy)*z/fy, z, 1)
                 let endpoint = SIMD3(p.x,p.y,p.z)

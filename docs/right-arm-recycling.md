@@ -60,12 +60,12 @@ in the actual grasp tool frame, rather than an enlarged sphere.
 Ordinary right-arm travel still rejects a modeled hanging tool/tread overlap.
 `right_estimated_preview` instead prepares one separate EMPTY-arm commissioning
 experiment from fresh near-zero feedback. It passively captures the current
-registered head view without moving the neck or arms. Stable active-mode
+held head view without moving the neck or arms. Stable active-mode
 feedback is accepted only for this passive capture; moving-neck scans retain
 their holding/inactive requirements.
 
 `right_estimated_trial` requests one explicit physical-right approval for a
-**4-second J2 −0.039 rad step, followed by hold**. Verified full-hull travel is
+**4-second two-joint outward retreat: J1 −0.030 rad and J2 −0.030 rad, followed by hold**. Verified full-hull travel is
 capped at 30 mm. Actual convex-hull support-plane clearance must never worsen
 and must strictly improve each initial near-tread deficit. Occupied workspace
 checks and the explicitly reviewed local unknown-space volume remain active.
@@ -73,3 +73,24 @@ It sends no jaw command, performs no automatic return and cannot chain another
 probe from its endpoint. It does not satisfy the ordinary 30 mm tread clearance
 or authorize a full grasp. Camera and joint-model errors remain explicitly
 estimated until their measured observations validate them.
+
+The previous J2-only direction approached a retained table-margin cell by
+0.732 mm. The replacement was derived from the actual occupied geometry and
+then checked by the complete existing proof. A historical, read-only audit of
+five TABLE frames at P6111/L6011/U6235 retained both raw and corrected depth
+endpoints for every original frame through the production mapper, carved free
+space only to the nearer return, and applied no measured self-mask. The
+27,063 occupied cells remained intact. The two-joint proposal passed all
+19 sampled poses with 27.248 mm maximum full-hull travel; all four initially
+close occupied pairs moved monotonically farther away by 8.214–10.611 mm.
+Tool/track signed separation improved from −6.713 to 18.862 mm and tool/idler
+from −14.714 to 9.514 mm. These remain below ordinary 30 mm clearance.
+
+The numerical audit artifact `rob-estimated-right-table-production-union-zeroD.json`
+has SHA256 `fa32b06a42c4003b47c78f8d95128bf1e3503054271ee25addd2a33d1bf3767b`.
+It uses an explicitly estimated neck model and pinned torso/base pose, not a
+verified camera-to-arm registration. It is historical evidence, not live
+admission: a new scene, unchanged body/head/camera context, freshly measured
+joints, the complete proof and actual controller/spoken approval are required
+before one physical retreat. Body motion invalidates even an unregistered
+estimated map. No private images are published with this record.

@@ -2,22 +2,25 @@
 """Dependency-free fixture test for Cerebro's DepthAI IPC v2 producer."""
 
 from datetime import timedelta
+import ast
 import importlib.util
 import contextlib
 import io
+import hashlib
 import json
 from pathlib import Path
 import socket
 import struct
 import tempfile
+import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVICE_PATH = ROOT / "Cerebro" / "Webcam_color.py"
 
 
-def load_service():
-    spec = importlib.util.spec_from_file_location("cerebro_depth_camera_service", SERVICE_PATH)
+def load_service(path=SERVICE_PATH, name="cerebro_depth_camera_service"):
+    spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise RuntimeError("Unable to load the bundled depth camera service")
     module = importlib.util.module_from_spec(spec)
@@ -131,8 +134,47 @@ def receive_exact(sock, length):
     return bytes(output)
 
 
+def running_worker_provenance_fixture():
+    original = SERVICE_PATH.read_bytes()
+    changed = original.replace(b"RGB_OUTPUT_UNDISTORTED = True", b"RGB_OUTPUT_UNDISTORTED = False", 1)
+    assert changed != original
+    # Inspect the actual call sites, without constructing an SDK or device.
+    calls = [node for node in ast.walk(ast.parse(original)) if isinstance(node, ast.Call)
+             and isinstance(node.func, ast.Attribute) and node.func.attr == "requestOutput"
+             and isinstance(node.func.value, ast.Name) and node.func.value.id == "rgb_camera"]
+    assert calls and all(any(keyword.arg == "enableUndistortion" and isinstance(keyword.value, ast.Name)
+                            and keyword.value.id == "RGB_OUTPUT_UNDISTORTED" for keyword in call.keywords) for call in calls)
+    with tempfile.TemporaryDirectory(prefix="cerebro-worker-provenance-") as directory:
+        path = Path(directory) / "worker.py"
+        path.write_bytes(original)
+        old_code = compile(original, str(path), "exec", dont_inherit=True, optimize=sys.flags.optimize)
+        old_worker = load_service(path, "old_running_camera_worker")
+        old_sha = old_worker.RUNNING_SERVICE_SOURCE_SHA256
+        path.write_bytes(changed)  # An app replacement while the old worker lives.
+        packet, *_ = old_worker.frame_payload(FakeRGBFrame(), FakeDepthFrame(), FakeMonoFrame((7,8)),
+            FakeMonoFrame((9,10)), [100.,0.,1.,0.,101.,0.5,0.,0.,1.])
+        header = json.loads(packet)
+        assert header["running_service_source_sha256"] == old_sha == hashlib.sha256(original).hexdigest()
+        assert header["rgb_output_undistorted"] is True
+        try:
+            exec(old_code, {"__file__":str(path), "__name__":"startup_swap_fixture"})
+        except RuntimeError as error:
+            assert "source changed" in str(error)
+        else:
+            raise AssertionError("Old executable code stamped a replacement file's hash during startup")
+        replacement = load_service(path, "replacement_camera_worker")
+        packet, *_ = replacement.frame_payload(FakeRGBFrame(), FakeDepthFrame(), FakeMonoFrame((7,8)),
+            FakeMonoFrame((9,10)), [100.,0.,1.,0.,101.,0.5,0.,0.,1.])
+        header = json.loads(packet)
+        assert header["running_service_source_sha256"] == hashlib.sha256(changed).hexdigest() != old_sha
+        assert header["rgb_output_undistorted"] is False
+
+
 def main():
     service = load_service()
+    assert service.RUNNING_SERVICE_SOURCE_SHA256 == hashlib.sha256(SERVICE_PATH.read_bytes()).hexdigest()
+    assert service.RGB_OUTPUT_UNDISTORTED is True
+    running_worker_provenance_fixture()
     class CapturedFrame:
         def __init__(self, seconds): self.seconds = seconds
         def getTimestamp(self): return timedelta(seconds=self.seconds)
@@ -245,6 +287,8 @@ def main():
             "right_length": 2,
             "rgb_intrinsics": intrinsics,
             "rgb_intrinsics_source": "legacy_eeprom",
+            "running_service_source_sha256": service.RUNNING_SERVICE_SOURCE_SHA256,
+            "rgb_output_undistorted": service.RGB_OUTPUT_UNDISTORTED,
             "depth_alignment_method": None,
             "rgb_source_size": None,
             "rgb_source_intrinsics": None,

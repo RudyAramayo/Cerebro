@@ -745,6 +745,191 @@ final class ROBArmRoutineVision {
         return snapshot
     }
 
+    /// Only the dedicated current-scene probe chooses the explicit estimate.
+    /// An invalid selected estimate never falls back to measured registration.
+    @MainActor @nonobjc func captureEstimatedOrRegisteredCurrentScene(model: ROBGhostRobotModel, generation: UInt64,
+        check: () throws -> Void, progress: (String) -> Void) async throws -> ROBWorkspaceCollisionSnapshot {
+        let controller = ROBFixedHeadCalibrationWindowController.shared
+        guard let selected = controller.selectedEstimatedContext else {
+            return try await captureRegisteredCurrentScene(model:model,generation:generation,check:check,progress:progress)
+        }
+        collisionSnapshotValue = nil
+        lastReport = ["status":"waiting_for_estimated_fixed_head_scene", "registration_verified":false,
+            "grasp_authorized":false, "estimated_capture":selected.metadata]
+        do {
+            try check(); try Task.checkCancellation()
+            let frame = try await ROBArmRoutineVision.shared.settledDepthFrame()
+            try check(); try Task.checkCancellation()
+            let context = try controller.currentEstimatedContext(model:model,frame:frame)
+            guard context.depthHypothesisID == selected.depthHypothesisID,
+                  context.bodyMotionIdentity == ROBFixedHeadBodyMotionIdentity.currentIdentity else {
+                throw ROBWorkspaceDepthMapError.acquisition("The selected EMPTY RIGHT estimate changed while waiting for fresh pixels.")
+            }
+            return try await captureEstimatedCurrentScene(model:model,generation:generation,context:context,check:check,progress:progress)
+        } catch {
+            collisionSnapshotValue = nil
+            lastReport = ["status":"estimated_fixed_head_capture_failed", "registration_verified":false,
+                "grasp_authorized":false, "detail":error.localizedDescription]
+            throw error
+        }
+    }
+
+    /// This proves only that the EMPTY RIGHT estimate still describes the
+    /// preview/map; it does not create measured registration or grasp authority.
+    @MainActor @nonobjc func estimatedContextIsCurrent(model: ROBGhostRobotModel,
+        map: ROBWorkspaceCollisionSnapshot) -> Bool {
+        guard let frame = ROBArmRoutineVision.shared.snapshot()["face"],
+              (0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
+              let context = try? ROBFixedHeadCalibrationWindowController.shared.currentEstimatedContext(model:model,frame:frame),
+              let scope = try? ROBFixedHeadCalibrationWindowController.shared.scope(model:model,frame:frame),
+              context.matches(currentScope:scope,model:model),
+              context.depthHypothesisID.count == 64, context.depthHypothesisID.allSatisfy(\.isHexDigit),
+              let depth = frame.depth, let k = frame.intrinsics,
+              depth.width == context.width, depth.height == context.height,
+              k.isValid(forWidth:depth.width,height:depth.height), [k.fx,k.fy,k.cx,k.cy] == context.intrinsics,
+              k.cameraServiceSourceSHA256 == context.cameraServiceSourceSHA256,
+              k.rgbOutputUndistorted == context.rgbOutputUndistorted, context.rgbOutputUndistorted,
+              frame.cameraGeneration == context.scope.cameraGeneration,
+              ROBArmRoutineVision.shared.cameraGeneration == context.scope.cameraGeneration,
+              map.modelID == model.modelID, map.geometryID == model.geometryID, map.mappingID == model.selectedMappingID,
+              map.cameraGeneration == context.scope.cameraGeneration, map.sessionGeneration == context.scope.gatewaySessionGeneration,
+              map.registrationID == nil, map.observedFrameCount == 3, map.observations.count == 3,
+              (0...60_000).contains(Date().timeIntervalSince1970*1000-map.oldestCapturedAtMilliseconds),
+              let readyAt = ROBFixedHeadCalibrationWindowController.shared.readNeck?()["ready_at"] as? Double,
+              readyAt.isFinite,
+              ProcessInfo.processInfo.systemUptime - (Date().timeIntervalSince1970*1000-map.oldestCapturedAtMilliseconds)/1000 >= readyAt,
+              map.bodyMotionIdentity == ROBFixedHeadBodyMotionIdentity.currentIdentity,
+              context.bodyMotionIdentity == map.bodyMotionIdentity else { return false }
+        let matrix = (0..<4).flatMap { column in (0..<4).map { context.cameraToModel[column][$0] } }
+        return map.observations.allSatisfy {
+            $0.registrationID == nil && $0.estimatedDepthHypothesisID == context.depthHypothesisID &&
+            $0.fixedHeadScope == context.scope && !$0.measuredSelfMaskApplied && $0.cameraToRobotColumnMajor == matrix
+        }
+    }
+
+    /// Passive, unregistered raw/corrected union for the EMPTY RIGHT probe only.
+    /// This never changes a head/arm hold or enters the registered grasp lane.
+    @MainActor @nonobjc func captureEstimatedCurrentScene(model: ROBGhostRobotModel, generation: UInt64,
+        context: ROBEstimatedFixedHeadCapture.Context, check: () throws -> Void,
+        progress: (String) -> Void) async throws -> ROBWorkspaceCollisionSnapshot {
+        collisionSnapshotValue = nil
+        lastReport = ["status":"capturing_estimated_fixed_head_scene", "registration_verified":false,
+            "grasp_authorized":false, "estimated_capture":context.metadata]
+        do {
+            let vision = ROBArmRoutineVision.shared
+            let controller = ROBFixedHeadCalibrationWindowController.shared
+            let bodyIdentity = ROBFixedHeadBodyMotionIdentity.currentIdentity
+            let startedAt = Date().timeIntervalSince1970 * 1000
+            let deadline = ProcessInfo.processInfo.systemUptime + 15
+            guard context.bodyMotionIdentity == bodyIdentity,
+                  context.scope.gatewaySessionGeneration == generation, generation > 0,
+                  context.depthHypothesisID.count == 64,
+                  context.depthHypothesisID.allSatisfy(\.isHexDigit),
+                  let readyAt = controller.readNeck?()["ready_at"] as? Double, readyAt.isFinite else {
+                throw ROBWorkspaceDepthMapError.acquisition("The EMPTY RIGHT estimate no longer matches this held body/session context.")
+            }
+            func validate(_ frame: ROBArmRoutineVision.Frame) throws -> ROBFixedHeadRegistrationScope {
+                try check(); try Task.checkCancellation()
+                guard ROBFixedHeadBodyMotionIdentity.currentIdentity == bodyIdentity,
+                      context.bodyMotionIdentity == bodyIdentity,
+                      vision.cameraGeneration == context.scope.cameraGeneration,
+                      frame.cameraGeneration == context.scope.cameraGeneration,
+                      (0...700).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
+                      controller.readNeck?()["ready_at"] as? Double == readyAt,
+                      let depth = frame.depth, let k = frame.intrinsics,
+                      depth.width == context.width, depth.height == context.height,
+                      k.isValid(forWidth:depth.width,height:depth.height),
+                      k.cameraServiceSourceSHA256 == context.cameraServiceSourceSHA256,
+                      k.rgbOutputUndistorted == context.rgbOutputUndistorted, context.rgbOutputUndistorted,
+                      [k.fx,k.fy,k.cx,k.cy] == context.intrinsics else {
+                    throw ROBWorkspaceDepthMapError.acquisition("The estimated capture lost its exact held head/body or native RGB-D geometry.")
+                }
+                let scope = try controller.scope(model:model,frame:frame)
+                guard scope.gatewaySessionGeneration == generation,
+                      context.matches(currentScope:scope,model:model) else {
+                    throw ROBWorkspaceDepthMapError.acquisition("The estimated camera/model/mapping/gateway scope changed; capture a new probe context.")
+                }
+                return scope
+            }
+            guard let initial = vision.snapshot()["face"] else { throw ROBWorkspaceDepthMapError.invalidFrame }
+            _ = try validate(initial)
+            var map = ROBWorkspaceDepthMap(modelID:model.modelID,geometryID:model.geometryID,
+                mappingID:model.selectedMappingID,sessionGeneration:generation,cameraGeneration:context.scope.cameraGeneration)
+            var previousSequence: UInt64 = 0, previousCapture = 0.0, frames = 0
+            while frames < 3 {
+                try check(); try Task.checkCancellation()
+                guard ProcessInfo.processInfo.systemUptime < deadline,
+                      map.bodyMotionIdentity == bodyIdentity,
+                      map.bodyMotionIdentity == ROBFixedHeadBodyMotionIdentity.currentIdentity,
+                      let current = vision.snapshot()["face"] else {
+                    throw ROBWorkspaceDepthMapError.acquisition("Estimated capture expired or its stationary body context changed.")
+                }
+                _ = try validate(current)
+                let frame = try await vision.settledDepthFrame()
+                let scope = try validate(frame)
+                if frames == 0, frame.capturedAt < startedAt {
+                    // A retained fresh preview is not a post-start observation.
+                    // Keep the same context and wait; never freshen its stamp.
+                    try await Task.sleep(nanoseconds:50_000_000)
+                    continue
+                }
+                guard frame.sequence >= previousSequence, frame.capturedAt >= previousCapture else {
+                    throw ROBWorkspaceDepthMapError.acquisition("Estimated depth frames became old or reordered during the held capture.")
+                }
+                guard frame.sequence != previousSequence, frame.capturedAt != previousCapture else {
+                    try await Task.sleep(nanoseconds:50_000_000)
+                    continue
+                }
+                guard let depth = frame.depth, let k = frame.intrinsics else { throw ROBWorkspaceDepthMapError.invalidFrame }
+                let inputMap = map
+                map = try await Task.detached(priority:.userInitiated) {
+                    var next = inputMap
+                    try next.append(width:depth.width,height:depth.height,fx:k.fx,fy:k.fy,cx:k.cx,cy:k.cy,
+                        depth:{depth.distanceMillimeters(x:$0,y:$1)},cameraToRobot:context.cameraToModel,
+                        capturedAtMilliseconds:frame.capturedAt,sequence:frame.sequence,cameraGeneration:frame.cameraGeneration,
+                        measuredSelfBounds:[],cameraRegistrationVerified:false,
+                        recordedPanDegrees:Double(scope.panTarget-6000)*0.03,
+                        recordedUpperTarget:scope.upperTarget,recordedLowerTarget:scope.lowerTarget,
+                        registration:nil,registrationScope:scope,
+                        alternateEstimatedDepth:{ x,y in
+                            context.correctedMillimeters(raw:depth.distanceMillimeters(x:x,y:y) ?? 0)
+                        },estimatedDepthHypothesisID:context.depthHypothesisID)
+                    return next
+                }.value
+                try check(); try Task.checkCancellation()
+                guard map.bodyMotionIdentity == bodyIdentity,
+                      map.bodyMotionIdentity == ROBFixedHeadBodyMotionIdentity.currentIdentity,
+                      let current = vision.snapshot()["face"] else { throw ROBWorkspaceDepthMapError.invalidFrame }
+                _ = try validate(current)
+                previousSequence = frame.sequence; previousCapture = frame.capturedAt; frames += 1
+                progress("Estimated EMPTY RIGHT scene: \(frames)/3 frames; raw and corrected returns retained.")
+            }
+            try check(); try Task.checkCancellation()
+            guard map.bodyMotionIdentity == bodyIdentity,
+                  map.bodyMotionIdentity == ROBFixedHeadBodyMotionIdentity.currentIdentity,
+                  let current = vision.snapshot()["face"] else { throw ROBWorkspaceDepthMapError.invalidFrame }
+            _ = try validate(current)
+            guard let snapshot = map.snapshot(), snapshot.observedFrameCount == 3,
+                  snapshot.registrationID == nil,
+                  snapshot.bodyMotionIdentity == ROBFixedHeadBodyMotionIdentity.currentIdentity,
+                  snapshot.observations.allSatisfy({$0.estimatedDepthHypothesisID == context.depthHypothesisID &&
+                      $0.fixedHeadScope == context.scope && !$0.measuredSelfMaskApplied}) else {
+                throw ROBWorkspaceDepthMapError.invalidFrame
+            }
+            collisionSnapshotValue = snapshot
+            lastReport = ["status":"estimated_fixed_head_scene_captured", "registration_verified":false,
+                "grasp_authorized":false, "physical_arm":"right", "scene_id":snapshot.sceneID.uuidString,
+                "depth_frames":snapshot.observedFrameCount, "estimated_capture":context.metadata,
+                "detail":"Unregistered EMPTY RIGHT probe; all raw and bounded corrected returns retained, no robot self mask or motion command."]
+            return snapshot
+        } catch {
+            collisionSnapshotValue = nil
+            lastReport = ["status":"estimated_fixed_head_capture_failed", "registration_verified":false,
+                "grasp_authorized":false, "estimated_capture":context.metadata, "detail":error.localizedDescription]
+            throw error
+        }
+    }
+
     /// Start every scene from current pixels while the arms remain held. A
     /// previous route, object location or map never authorizes parking first.
     @MainActor @nonobjc func scanCollisionScene(model: ROBGhostRobotModel, generation: UInt64,
