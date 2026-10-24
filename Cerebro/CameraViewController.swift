@@ -184,6 +184,12 @@ enum ROBSwordTrackerColor: String, CaseIterable {
     public let rgbPixelBuffer: CVPixelBuffer?
     public let isBelly: Bool
     @nonobjc let calibratedIntrinsics: CameraIntrinsics?
+    /// Exact source metadata, when forwarded by the producer. Arrival time
+    /// and capture ordinals must never stand in for these camera identities.
+    @nonobjc let sourceSequence: UInt64?
+    @nonobjc let sourceCapturedAtMilliseconds: Double?
+    @nonobjc let sourceCaptureStreamID: String?
+    @nonobjc let sourceTimestampNanoseconds: UInt64?
     let receivedUptime: TimeInterval
     let capturedUptime: TimeInterval
     public var hasCalibratedIntrinsics: Bool { calibratedIntrinsics?.isValid(forWidth: width, height: height) == true }
@@ -193,13 +199,19 @@ enum ROBSwordTrackerColor: String, CaseIterable {
     public var cameraCY: Double { hasCalibratedIntrinsics ? calibratedIntrinsics!.cy : .nan }
 
     init(depth: CameraDepthFrame, rgbSampleBuffer: CMSampleBuffer, isBelly: Bool = false,
-         intrinsics: CameraIntrinsics? = nil, capturedAtMilliseconds: Double? = nil) {
+         intrinsics: CameraIntrinsics? = nil, capturedAtMilliseconds: Double? = nil,
+         sourceSequence: UInt64? = nil, sourceCapturedAtMilliseconds: Double? = nil,
+         sourceCaptureStreamID: String? = nil, sourceTimestampNanoseconds: UInt64? = nil) {
         millimetersLittleEndian = depth.millimetersLittleEndian as NSData
         width = depth.width
         height = depth.height
         rgbPixelBuffer = CMSampleBufferGetImageBuffer(rgbSampleBuffer)
         self.isBelly = isBelly
         calibratedIntrinsics = intrinsics
+        self.sourceSequence = sourceSequence
+        self.sourceCapturedAtMilliseconds = sourceCapturedAtMilliseconds
+        self.sourceCaptureStreamID = sourceCaptureStreamID
+        self.sourceTimestampNanoseconds = sourceTimestampNanoseconds
         receivedUptime = ProcessInfo.processInfo.systemUptime
         let age = capturedAtMilliseconds.map { Date().timeIntervalSince1970 - $0 / 1000 }
         // A missing/unusable clock gets a conservative transport allowance;
@@ -1718,7 +1730,9 @@ extension CameraViewController: CameraManagerDelegate {
         
         if let depth = frameSet.alignedDepth {
             let hologramFrame = ROBDepthCloudFrame(depth: depth, rgbSampleBuffer: sampleBuffer, isBelly: false,
-                intrinsics: frameSet.intrinsics, capturedAtMilliseconds: frameSet.capturedAtMilliseconds)
+                intrinsics: frameSet.intrinsics, capturedAtMilliseconds: frameSet.capturedAtMilliseconds,
+                sourceSequence: frameSet.sequence, sourceCapturedAtMilliseconds: frameSet.capturedAtMilliseconds,
+                sourceCaptureStreamID: frameSet.captureStreamID, sourceTimestampNanoseconds: frameSet.timestampNanoseconds)
             ROBHologramExporter.shared.capture(hologramFrame)
             if cameraViewIsVisible {
                 faceDepthPointCloudRenderer.offer(depth: depth, rgbSampleBuffer: sampleBuffer, in: skeletonView)

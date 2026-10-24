@@ -30,6 +30,8 @@ import AppKit
               actions: [Action(title: "Show corrected live depth…", command: "ghost:collision"), Action(title: "Capture corrected workspace", command: "left_scan_clearance")]),
         Trial(id: "neck-qr-calibration", title: "Neck / QR calibration", detail: "Select a fixed 120 mm table, floor or wall target. Upper-neck checks start from the current view with lower target 6011 and hold pan fixed. Each selected upper target is checked against the QR, including reverse visits. Protractor mode holds each position until you advance. Posture sweeps repeat pan/upper checks at upright, back and forward lower-neck targets. Keep ROB's base and the target fixed. Results remain unverified until independent measurements validate them.", parameters: .none,
               actions: [Action(title: "Capture current QR view", command: "qr:capture"), Action(title: "Run neck-only calibration sweep", command: "qr:sweep"), Action(title: "Fit recorded views", command: "qr:fit"), Action(title: "Show calibration folder", command: "qr:folder"), Action(title: "Stop calibration", command: "qr:stop"), Action(title: "Check upper neck forward / reverse", command: "qr:upper"), Action(title: "Start protractor measurements", command: "qr:protractor"), Action(title: "Record angle / next position", command: "qr:next"), Action(title: "Sweep upright / back / forward postures", command: "qr:postures"), Action(title: "Refine QR / fit neck mapping", command: "qr:joint-fit"), Action(title: "Calibrate all four targets", command: "qr:all-targets"), Action(title: "Measure selected target", command: "qr:selected-target")]),
+        Trial(id: "belly-qr-calibration", title: "Belly camera calibration", detail: "Capture five passive belly RGB-D frames of the 120 mm B01 and B02 targets with centers 400 mm apart and TOP arrows parallel. The offline report checks the printed geometry, camera pose relative to the sheets and raw depth. It never moves the neck or arms, changes a camera profile or grants motion authority. Keep Belly Camera Diagnostics open for the stream.", parameters: .none,
+              actions: [Action(title: "Open belly QR calibration…", command: "belly-qr:open")]),
         Trial(id: "estimated-calibration", title: "Estimated calibration trial", detail: "Review one estimated EMPTY-left-arm retreat away from the table, then hold for observation. Registration remains unmeasured. One fresh approval covers one slow, 4-second retreat with about 3 cm maximum modeled arm travel. Existing nearby depth-margin overlaps may only improve; new intrusions block motion. Confirm the complete arm's local working space is clear and report the actual direction. No jaw commands, grasp, recycling or automatic return. Open the ghost view before building if needed; restarting the camera requires a new preview.", parameters: .none,
               actions: [Action(title: "Scan / build estimated ghost", command: "estimate:preview"), Action(title: "Inspect estimated ghost / depth map…", command: "ghost:collision"), Action(title: "Run reviewed empty-arm trial", command: "estimate:run")]),
         Trial(id: "object-cycle", title: "Grip and return", detail: "Present the left arm, grip a supported object gently, release into a supporting hand, then return the empty arm. Readiness confirmations remain within the same task authorization. Keep fingers clear of the jaws.", parameters: .current,
@@ -70,7 +72,7 @@ import AppKit
             !ROBArmRoutineCoordinator.shared.ownsPhysicalMotion && !ROBControllerArmApproval.shared.isPending &&
             !ROBGripperStartupCalibration.shared.isRunning && !ROBShowMotionCoordinator.shared.isRunning &&
             !ROBAmberGestureExecutor.shared.isExecuting && !ROBNeckQRCalibration.shared.isRunning &&
-            !ROBFixedHeadCalibrationWindowController.shared.isRunning
+            !ROBFixedHeadCalibrationWindowController.shared.isRunning && !ROBBellyQRCalibrationWindowController.shared.isRunning
     }
 
     private init() {
@@ -86,6 +88,7 @@ import AppKit
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: Notification.Name("ROBControllerArmApprovalDidChange"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: .ROBGripperStartupCalibrationDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: Notification.Name("ROBNeckQRCalibrationDidChange"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: ROBBellyQRCalibrationWindowController.changed, object: nil)
         table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
         collisionRefreshTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             guard let self, self.window?.isVisible == true else { return }
@@ -347,6 +350,9 @@ import AppKit
     @objc private func performTrialAction(_ sender: NSButton) {
         guard selectedTrial.actions.indices.contains(sender.tag) else { return }
         let command = selectedTrial.actions[sender.tag].command
+        if command == "belly-qr:open" {
+            ROBBellyQRCalibrationWindowController.shared.showWindow(self); return
+        }
         // Stop remains available while the calibration owns the neck/camera.
         if command == "qr:stop" { ROBNeckQRCalibration.shared.stop(); refresh(); return }
         if command == "qr:next" {
@@ -412,6 +418,9 @@ import AppKit
         _ = ROBLeftArmTrial.shared.continueOperation(stage: displayedCycleStage); refresh()
     }
     @objc private func showRecording() {
+        if selectedTrial.id == "belly-qr-calibration" {
+            ROBBellyQRCalibrationWindowController.shared.showEvidence(); return
+        }
         if selectedTrial.id == "neck-qr-calibration" {
             ROBNeckQRCalibration.shared.openLastCapture(); return
         }
@@ -419,6 +428,7 @@ import AppKit
         if !path.isEmpty { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
     }
     @objc private func stop() {
+        ROBBellyQRCalibrationWindowController.shared.stop()
         ROBFixedHeadCalibrationWindowController.shared.stop()
         ROBNeckQRCalibration.shared.stop()
         ROBArmRoutineCoordinator.shared.cancel(reason: "Stop requested in Testing Sandbox")
@@ -441,6 +451,8 @@ import AppKit
         if ROBControllerArmApproval.shared.isPending {
             // Keep the complete operation scope visible while approval is pending.
             status.stringValue = ROBControllerArmApproval.shared.status
+        } else if ROBBellyQRCalibrationWindowController.shared.isRunning || selectedTrial.id == "belly-qr-calibration" {
+            status.stringValue = ROBBellyQRCalibrationWindowController.shared.status
         } else if ROBNeckQRCalibration.shared.isRunning || selectedTrial.id == "neck-qr-calibration" {
             status.stringValue = ROBNeckQRCalibration.shared.status
         } else if left.isRunning || observingLeftOperation {

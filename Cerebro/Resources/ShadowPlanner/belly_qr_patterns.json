@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Exact printed belly-only diagnostic patterns; not neck-fit or world-registration targets",
+  "targets": {
+    "ROB:BELLY:B01": {
+      "blackModuleRows": [
+        "111111100101101111111",
+        "100000100011101000001",
+        "101110101000101011101",
+        "101110101000101011101",
+        "101110101111101011101",
+        "100000101000101000001",
+        "111111101010101111111",
+        "000000001111100000000",
+        "101111100100101111100",
+        "001011000010111011111",
+        "110010111011010100110",
+        "011101011110011110110",
+        "000001101101001001011",
+        "000000001001100111100",
+        "111111100010100100011",
+        "100000101111101111101",
+        "101110101010100001010",
+        "101110101010100011000",
+        "101110101101000101000",
+        "100000100000000111101",
+        "111111101001000011100"
+      ],
+      "moduleCount": 21,
+      "symbolSideMeters": 0.12,
+      "errorCorrection": "M",
+      "encoder": "OpenCVQRCodeEncoder defaultautoVersion, params.correction_level=M; cropped encodedborder toblackmodulebbox",
+      "pdfSHA256": "44fe7f38bb97b14252279f23c9b10371948ca95d17e2ef25796abdb0dbf43df9",
+      "pdfFilename": "rob-belly-calibration-B01-120mm.pdf"
+    },
+    "ROB:BELLY:B02": {
+      "blackModuleRows": [
+        "111111100100101111111",
+        "100000100000101000001",
+        "101110101100101011101",
+        "101110101000101011101",
+        "101110101011101011101",
+        "100000101000101000001",
+        "111111101010101111111",
+        "000000001001100000000",
+        "101111100110101111100",
+        "101100011110111011111",
+        "110011111011010100110",
+        "110111001110011110110",
+        "111000101101001001011",
+        "000000001001100111100",
+        "111111100110110100011",
+        "100000101001100111101",
+        "101110101010100001010",
+        "101110101100100011000",
+        "101110101101000101000",
+        "100000100010000111101",
+        "111111101111000011100"
+      ],
+      "moduleCount": 21,
+      "symbolSideMeters": 0.12,
+      "errorCorrection": "M",
+      "encoder": "OpenCVQRCodeEncoder defaultautoVersion, params.correction_level=M; cropped encodedborder toblackmodulebbox",
+      "pdfSHA256": "e07b57d218b452be550278e33bfec351f4298627bd890618c0ab3b9e2a7ec41b",
+      "pdfFilename": "rob-belly-calibration-B02-120mm.pdf"
+    }
+  }
+}
