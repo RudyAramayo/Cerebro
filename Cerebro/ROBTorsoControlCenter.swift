@@ -37,6 +37,7 @@ import Cocoa
             .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
         modelID = manifest?["modelID"] as? String; referenceID = manifest?["referenceID"] as? String
         super.init()
+        transport.onMotionDispatch = { ROBFixedHeadBodyMotionIdentity.invalidate() }
         transport.onState = { [weak self] ready, detail in
             guard let self else { return }
             let unexpectedLoss = !ready && (self.hardwareReady || self.arming)

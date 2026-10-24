@@ -21,9 +21,13 @@ protocol ROBWorkspaceCollisionMap {
     var fingerprint: String { get }
     func state(at point: SIMD3<Double>) -> ROBWorkspaceVoxelState
     func state(inBoundsLow low: SIMD3<Double>, high: SIMD3<Double>) -> ROBWorkspaceVoxelState
+    func containsTargetObservation(sequence: UInt64, capturedAtMilliseconds: Double) -> Bool
+    func occupiedSampleBounds(at point:SIMD3<Double>) -> (low:SIMD3<Double>,high:SIMD3<Double>)?
 }
 
 extension ROBWorkspaceCollisionMap {
+    func containsTargetObservation(sequence:UInt64,capturedAtMilliseconds:Double) -> Bool { false }
+    func occupiedSampleBounds(at point:SIMD3<Double>) -> (low:SIMD3<Double>,high:SIMD3<Double>)? { nil }
     /// An implementation may accelerate this with an octree/bitset, but must
     /// preserve the requirement that every intersecting voxel is known free.
     func state(inBoundsLow low: SIMD3<Double>, high: SIMD3<Double>) -> ROBWorkspaceVoxelState {
@@ -54,6 +58,83 @@ struct ROBWorkspaceCarriedObject: Codable, Equatable {
     }
 }
 
+/// A frozen exception for intentional contact with ONE measured can. It never
+/// clears a map cell, creates free space or exempts another link/table/target.
+/// Cylinder endpoints are measured axis centers, not visible front-wall points.
+struct ROBWorkspaceIntentionalContact: Codable, Equatable {
+    let measurementID: String
+    let observationSequence: UInt64
+    let capturedAtMilliseconds: Double
+    let sceneID: UUID
+    let cameraGeneration: UUID
+    let mapFingerprint: String
+    let modelID: String
+    let geometryID: String
+    let mappingID: String
+    let toolLink: String
+    let topCenterMeters: [Double]
+    let bottomCenterMeters: [Double]
+    let diameterMeters: Double
+    let firstContactStepIndex: Int
+    let gripStepIndex: Int
+    let releaseStepIndex: Int
+    let stepCount: Int
+    /// Explicit measured radial fit tolerance, never the much larger global
+    /// registration uncertainty or a generic obstacle-clearance allowance.
+    var radialFitUncertaintyMeters:Double = 0
+
+    var fingerprint:String {
+        let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
+        return ROBGhostRobotModel.hash((try? encoder.encode(self)) ?? Data())
+    }
+    private var axis:SIMD3<Double> {
+        SIMD3(topCenterMeters[0]-bottomCenterMeters[0],topCenterMeters[1]-bottomCenterMeters[1],topCenterMeters[2]-bottomCenterMeters[2])
+    }
+    var valid:Bool {
+        guard !measurementID.isEmpty,measurementID.utf8.count<=128,observationSequence>0,
+              capturedAtMilliseconds.isFinite,mapFingerprint.count==64,
+              topCenterMeters.count==3,bottomCenterMeters.count==3,
+              (topCenterMeters+bottomCenterMeters).allSatisfy({ $0.isFinite && abs($0)<=5 }),
+              diameterMeters.isFinite,(0.04...0.09).contains(diameterMeters),
+              radialFitUncertaintyMeters.isFinite,(0...0.003).contains(radialFitUncertaintyMeters),
+              (1...80).contains(stepCount),firstContactStepIndex>=0,firstContactStepIndex<=gripStepIndex,
+              gripStepIndex<releaseStepIndex,releaseStepIndex<stepCount else { return false }
+        let length=simd_length(axis)
+        return (0.09...0.18).contains(length) && axis.z>=0.6*length
+    }
+    func validate(map:any ROBWorkspaceCollisionMap,model:ROBGhostRobotModel,nowMilliseconds:Double) throws {
+        guard valid,sceneID==map.sceneID,cameraGeneration==map.cameraGeneration,mapFingerprint==map.fingerprint,
+              modelID==model.modelID,geometryID==model.geometryID,mappingID==model.selectedMappingID,
+              toolLink==model.toolLink,(0...ROBWorkspaceCollisionPlan.maximumMapAgeMilliseconds).contains(nowMilliseconds-capturedAtMilliseconds),
+              capturedAtMilliseconds>=map.oldestCapturedAtMilliseconds-1,
+              capturedAtMilliseconds<=map.lastCapturedAtMilliseconds+1,
+              map.containsTargetObservation(sequence:observationSequence,capturedAtMilliseconds:capturedAtMilliseconds) else {
+            throw ROBGhostMotionError.blocked("Intentional can contact needs a fresh measured cylinder from this exact scene, map, camera, tool and recorded observation.")
+        }
+    }
+    func permits(label:String,payload:ROBWorkspaceCarriedObject?,stepIndex:Int) -> Bool {
+        guard valid,stepIndex>=firstContactStepIndex,stepIndex<=releaseStepIndex else { return false }
+        if label==toolLink { return true }
+        return label=="carried object" && stepIndex>gripStepIndex && payload?.measurementID==measurementID
+    }
+    /// All eight voxel corners must lie inside the measured finite cylinder.
+    /// A center-only/ROI test could also erase an adjacent table or second can.
+    func containsWholeVoxel(center:SIMD3<Double>,size:Double) -> Bool {
+        guard valid,size.isFinite,(0.01...0.04).contains(size) else { return false }
+        return containsMeasuredBounds(low:center-SIMD3(repeating:size/2),high:center+SIMD3(repeating:size/2))
+    }
+    func containsMeasuredBounds(low:SIMD3<Double>,high:SIMD3<Double>) -> Bool {
+        guard valid,(0..<3).allSatisfy({low[$0].isFinite && high[$0].isFinite && abs(low[$0])<=5 && abs(high[$0])<=5 && low[$0]<=high[$0]}) else { return false }
+        let bottom=SIMD3(bottomCenterMeters[0],bottomCenterMeters[1],bottomCenterMeters[2])
+        let length=simd_length(axis),unit=axis/length,radius=diameterMeters/2+radialFitUncertaintyMeters
+        for x in [low.x,high.x] { for y in [low.y,high.y] { for z in [low.z,high.z] {
+            let delta=SIMD3(x,y,z)-bottom,t=simd_dot(delta,unit)
+            guard t>=0,t<=length,simd_length(delta-unit*t)<=radius else { return false }
+        } } }
+        return true
+    }
+}
+
 struct ROBWorkspaceCollisionContext: Codable, Equatable {
     let sceneID: UUID
     let cameraGeneration: UUID
@@ -67,6 +148,7 @@ struct ROBWorkspaceCollisionContext: Codable, Equatable {
     let oldestCapturedAtMilliseconds: Double
     let lastCapturedAtMilliseconds: Double
     let checkedAtMilliseconds: Double
+    var intentionalContactFingerprint: String? = nil
 }
 
 /// Full-arm planning/checking against a fresh, registered RGB-D map. The
@@ -79,6 +161,11 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
     let steps: [ROBLeftGestureProposal.Step]
     let payload: ROBWorkspaceCarriedObject?
     let checkedPoseCount: Int
+    var intentionalContact: ROBWorkspaceIntentionalContact? = nil
+    /// nil reviews the full frozen task; a runtime actual-start review can
+    /// check one logical task segment without changing its contact stage.
+    var contactStepIndex: Int? = nil
+    var carryingAtStart: Bool? = nil
     static let maximumMapAgeMilliseconds = 60_000.0
     static let maximumRegistrationUncertaintyMeters = 0.05
     static let sweptPointTravelMeters = 0.005
@@ -94,9 +181,9 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
     /// exact raw-coordinate ranges the existing gateway accepts.
     static func jointBounds(model: ROBGhostRobotModel) -> [ClosedRange<Double>] {
         (0..<7).map { index in
-            let joint = model.joints.first { $0.name == "left_joint\(index+1)" }!
+            let joint = model.joints.first { $0.name == "\(model.armJointPrefix)\(index+1)" }!
             let raw = ROBArmJointLimits.radians[index]
-            return max(raw.lowerBound,joint.lower+ROBGhostRobotModel.uprightPrior[index])...min(raw.upperBound,joint.upper+ROBGhostRobotModel.uprightPrior[index])
+            return max(raw.lowerBound,joint.lower+model.armUprightPrior[index])...min(raw.upperBound,joint.upper+model.armUprightPrior[index])
         }
     }
 
@@ -104,7 +191,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
                             sceneID: UUID, cameraGeneration: UUID, nowMilliseconds: Double) throws -> ROBWorkspaceCollisionContext {
         guard generation > 0, map.sessionGeneration == generation, map.sceneID == sceneID,
               map.cameraGeneration == cameraGeneration, map.modelID == model.modelID,
-              map.geometryID == model.geometryID, map.mappingID == ROBGhostRobotModel.mappingID,
+              map.geometryID == model.geometryID, map.mappingID == model.selectedMappingID,
               map.fingerprint.count == 64 else {
             throw ROBGhostMotionError.blocked("The workspace map belongs to another robot, scene, camera or arm connection. Scan again before moving.")
         }
@@ -122,7 +209,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
             throw ROBGhostMotionError.blocked("Workspace free-space evidence is stale or invalid. Hold the arm and scan the entire route again.")
         }
         return .init(sceneID:sceneID,cameraGeneration:cameraGeneration,sessionGeneration:generation,modelID:model.modelID,
-            geometryID:model.geometryID,mappingID:ROBGhostRobotModel.mappingID,mapFingerprint:map.fingerprint,
+            geometryID:model.geometryID,mappingID:model.selectedMappingID,mapFingerprint:map.fingerprint,
             registrationID:registrationID,registrationUncertaintyMeters:uncertainty,
             oldestCapturedAtMilliseconds:map.oldestCapturedAtMilliseconds,lastCapturedAtMilliseconds:map.lastCapturedAtMilliseconds,
             checkedAtMilliseconds:nowMilliseconds)
@@ -132,8 +219,10 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
     /// approach, carrying and retreat. No saved-route or TCP-only exemption.
     static func review(baseline: [Double], steps: [ROBLeftGestureProposal.Step], map: any ROBWorkspaceCollisionMap,
                        model: ROBGhostRobotModel, generation: UInt64, sceneID: UUID, cameraGeneration: UUID,
-                       nowMilliseconds: Double, payload: ROBWorkspaceCarriedObject? = nil) throws -> Self {
-        let context = try validateMap(map,model:model,generation:generation,sceneID:sceneID,
+                       nowMilliseconds: Double, payload: ROBWorkspaceCarriedObject? = nil,
+                       intentionalContact:ROBWorkspaceIntentionalContact? = nil,contactStepIndex:Int? = nil,
+                       carryingAtStart:Bool? = nil) throws -> Self {
+        var context = try validateMap(map,model:model,generation:generation,sceneID:sceneID,
             cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds)
         guard !steps.isEmpty, steps.count <= 80, payload?.valid ?? true,
               steps.allSatisfy({ $0.seconds.isFinite && (0.7...5).contains($0.seconds) }),
@@ -143,9 +232,27 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         guard !steps.contains(where:{ $0.jawAction == .grip || $0.jawAction == .release }) || payload != nil else {
             throw ROBGhostMotionError.blocked("A grasp or release route needs a measured payload envelope before any arm travel.")
         }
-        var checker = Checker(map:map,model:model,context:context), previous = baseline
-        var carrying = !steps.contains { $0.jawAction == .grip }
-        for step in steps {
+        if let contact=intentionalContact {
+            try contact.validate(map:map,model:model,nowMilliseconds:nowMilliseconds)
+            guard payload == nil || payload?.measurementID==contact.measurementID else {
+                throw ROBGhostMotionError.blocked("Intentional contact and the carried-object envelope identify different measurements.")
+            }
+            if let index=contactStepIndex {
+                guard (0..<contact.stepCount).contains(index) else { throw ROBGhostMotionError.blocked("The intentional-contact segment index is invalid.") }
+            } else {
+                guard steps.count==contact.stepCount,steps[contact.gripStepIndex].jawAction == .grip,
+                      steps[contact.releaseStepIndex].jawAction == .release,
+                      steps.filter({$0.jawAction == .grip}).count==1,steps.filter({$0.jawAction == .release}).count==1 else {
+                    throw ROBGhostMotionError.blocked("Intentional contact must remain attached to the frozen grasp, lift and release stages.")
+                }
+            }
+            context.intentionalContactFingerprint=contact.fingerprint
+        } else if contactStepIndex != nil { throw ROBGhostMotionError.blocked("A contact-stage index has no measured target proof.") }
+        var checker = Checker(map:map,model:model,context:context,intentionalContact:intentionalContact), previous = baseline
+        guard carryingAtStart != true || payload != nil else {throw ROBGhostMotionError.blocked("A measured payload envelope is required for an attached-object start.")}
+        var carrying = carryingAtStart ?? !steps.contains { $0.jawAction == .grip }
+        for (index,step) in steps.enumerated() {
+            checker.contactStepIndex=contactStepIndex ?? index
             if let reason = checker.segment(from:previous,to:step.positions,payload:carrying ? payload : nil) {
                 throw ROBGhostMotionError.blocked(reason)
             }
@@ -156,7 +263,8 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
             if step.jawAction == .release { carrying = false }
             previous = step.positions
         }
-        return .init(context:context,baseline:baseline,goal:previous,steps:steps,payload:payload,checkedPoseCount:checker.checked)
+        return .init(context:context,baseline:baseline,goal:previous,steps:steps,payload:payload,checkedPoseCount:checker.checked,
+            intentionalContact:intentionalContact,contactStepIndex:contactStepIndex,carryingAtStart:carryingAtStart)
     }
 
     func validate(map: any ROBWorkspaceCollisionMap, model: ROBGhostRobotModel, generation: UInt64,
@@ -169,23 +277,35 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
               context.modelID == current.modelID, context.geometryID == current.geometryID, context.mappingID == current.mappingID,
               context.oldestCapturedAtMilliseconds == current.oldestCapturedAtMilliseconds,
               context.lastCapturedAtMilliseconds == current.lastCapturedAtMilliseconds,
+              context.intentionalContactFingerprint == intentionalContact?.fingerprint,
               context.checkedAtMilliseconds.isFinite, (0...Self.maximumMapAgeMilliseconds).contains(nowMilliseconds-context.checkedAtMilliseconds),
               goal == steps.last?.positions else {
             throw ROBGhostMotionError.blocked("The reviewed workspace map or path changed. Build a new proposal before moving.")
         }
         _ = try Self.review(baseline:baseline,steps:steps,map:map,model:model,generation:generation,sceneID:sceneID,
-            cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,payload:payload)
+            cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,payload:payload,
+            intentionalContact:intentionalContact,contactStepIndex:contactStepIndex,carryingAtStart:carryingAtStart)
     }
 
     /// Deterministic bounded joint-space search. Current/goal poses, every
     /// connecting segment and every shortcut are checked against the map.
     static func make(from start: [Double], to goal: [Double], map: any ROBWorkspaceCollisionMap,
                      model: ROBGhostRobotModel, generation: UInt64, sceneID: UUID, cameraGeneration: UUID,
-                     nowMilliseconds: Double, payload: ROBWorkspaceCarriedObject? = nil) throws -> Self {
-        let context = try validateMap(map,model:model,generation:generation,sceneID:sceneID,
+                     nowMilliseconds: Double, payload: ROBWorkspaceCarriedObject? = nil,
+                     intentionalContact:ROBWorkspaceIntentionalContact? = nil,contactStepIndex:Int? = nil) throws -> Self {
+        var context = try validateMap(map,model:model,generation:generation,sceneID:sceneID,
             cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds)
         guard payload?.valid ?? true else { throw ROBGhostMotionError.blocked("Measure the carried object's complete envelope before planning.") }
-        var checker = Checker(map:map,model:model,context:context)
+        if let contact=intentionalContact {
+            try contact.validate(map:map,model:model,nowMilliseconds:nowMilliseconds)
+            guard let index=contactStepIndex,(0..<contact.stepCount).contains(index),
+                  payload == nil || payload?.measurementID==contact.measurementID else {
+                throw ROBGhostMotionError.blocked("An intentional-contact connector needs an explicit frozen task stage and matching measured payload.")
+            }
+            context.intentionalContactFingerprint=contact.fingerprint
+        } else if contactStepIndex != nil { throw ROBGhostMotionError.blocked("A contact-stage index has no measured target proof.") }
+        var checker = Checker(map:map,model:model,context:context,intentionalContact:intentionalContact,
+            contactStepIndex:contactStepIndex ?? -1)
         if let reason = checker.pose(start,payload:payload) { throw ROBGhostMotionError.blocked("Current arm clearance is unconfirmed. "+reason) }
         if let reason = checker.pose(goal,payload:payload) { throw ROBGhostMotionError.blocked("Requested arm endpoint is blocked. "+reason) }
         var path: [[Double]]?
@@ -227,7 +347,8 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
             }
         }
         return try review(baseline:start,steps:steps,map:map,model:model,generation:generation,sceneID:sceneID,
-            cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,payload:payload)
+            cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,payload:payload,
+            intentionalContact:intentionalContact,contactStepIndex:contactStepIndex)
     }
 
     private struct Node { let q: [Double]; let parent: Int? }
@@ -271,6 +392,8 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         let map: any ROBWorkspaceCollisionMap
         let model: ROBGhostRobotModel
         let context: ROBWorkspaceCollisionContext
+        var intentionalContact:ROBWorkspaceIntentionalContact? = nil
+        var contactStepIndex = -1
         let started = ProcessInfo.processInfo.systemUptime
         var checked = 0
         var limits: [ClosedRange<Double>] { ROBWorkspaceCollisionPlan.jointBounds(model:model) }
@@ -300,17 +423,17 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
             checked += 1
             guard q.count == 7, zip(q,limits).allSatisfy({ $0.isFinite && $1.contains($0) }) else { return "Arm pose exceeds the model or transport joint bounds." }
             let positions = model.positions(vendorLeft:q), bounds = model.worldCollisionBounds(positions:positions)
-            let arms = bounds.keys.filter { $0.hasPrefix("left_") && ($0.hasSuffix("_Link") || $0 == "left_tool" || $0 == "left_base_link") }.sorted()
+            let arms = bounds.keys.filter { $0.hasPrefix(model.physicalSide + "_") && ($0.hasSuffix("_Link") || $0 == model.toolLink || $0 == model.physicalSide + "_base_link") }.sorted()
             guard arms.count >= 8, model.treadSeparation(vendorLeft:q) >= 0.030 else { return "The complete arm model is missing or enters its tread clearance margin." }
             // Sweep sampling is bounded by a conservative 1.5m lever; inflate
             // by one full sample travel as well as registration/voxel error.
             let margin = mechanicalClearanceMeters+context.registrationUncertaintyMeters+sweptPointTravelMeters+sqrt(3)*map.voxelSizeMeters/2
             for link in arms {
-                let box = bounds[link]!, extra = margin+(link == "left_tool" ? openJawAdditionalMarginMeters : 0)
-                if let reason = volume(low:box.low-SIMD3(repeating:extra),high:box.high+SIMD3(repeating:extra),label:link) { return reason }
+                let box = bounds[link]!, extra = margin+(link == model.toolLink ? openJawAdditionalMarginMeters : 0)
+                if let reason = volume(low:box.low-SIMD3(repeating:extra),high:box.high+SIMD3(repeating:extra),label:link,payload:payload) { return reason }
             }
             if let payload {
-                guard payload.valid, let tool = model.frames(positions)["left_tool"] else { return "The carried-object envelope or tool transform is invalid." }
+                guard payload.valid, let tool = model.frames(positions)[model.toolLink] else { return "The carried-object envelope or tool transform is invalid." }
                 let center = payload.centerInToolMeters, half = payload.halfExtentsMeters
                 var points: [SIMD3<Double>] = []
                 for x in [-1.0,1] { for y in [-1.0,1] { for z in [-1.0,1] {
@@ -320,12 +443,35 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
                 } } }
                 let low = points.reduce(points[0]) { simd_min($0,$1) }-SIMD3<Double>(repeating:margin)
                 let high = points.reduce(points[0]) { simd_max($0,$1) }+SIMD3<Double>(repeating:margin)
-                if let reason = volume(low:low,high:high,label:"carried object") { return reason }
+                if let reason = volume(low:low,high:high,label:"carried object",payload:payload) { return reason }
             }
             return nil
         }
-        func volume(low:SIMD3<Double>,high:SIMD3<Double>,label:String) -> String? {
-            switch map.state(inBoundsLow:low,high:high) {
+        func volume(low:SIMD3<Double>,high:SIMD3<Double>,label:String,payload:ROBWorkspaceCarriedObject?) -> String? {
+            var state=map.state(inBoundsLow:low,high:high)
+            if state == .occupied,let contact=intentionalContact,
+               contact.permits(label:label,payload:payload,stepIndex:contactStepIndex) {
+                let size=map.voxelSizeMeters
+                let lo=(0..<3).map{Int(floor(low[$0]/size))},hi=(0..<3).map{Int(floor(high[$0]/size))}
+                guard zip(lo,hi).allSatisfy({$1 >= $0 && $1-$0<=200}),
+                      zip(lo,hi).reduce(1,{$0*($1.1-$1.0+1)})<=250_000 else { return "Intentional-contact voxel review exceeded its bounded volume." }
+                state = .free
+                cells: for x in lo[0]...hi[0] { for y in lo[1]...hi[1] { for z in lo[2]...hi[2] {
+                    let point=SIMD3((Double(x)+0.5)*size,(Double(y)+0.5)*size,(Double(z)+0.5)*size)
+                    let cell=map.state(at:point)
+                    if cell == .free { continue }
+                    if cell == .occupied {
+                        if let bounds=map.occupiedSampleBounds(at:point) {
+                            // Includes EVERY source endpoint contributing to
+                            // this cell, including conservative map dilation.
+                            // Never inspect just the closest/selected sample.
+                            if contact.containsMeasuredBounds(low:bounds.low,high:bounds.high) { continue }
+                        } else if contact.containsWholeVoxel(center:point,size:size) { continue }
+                    }
+                    state=cell;break cells
+                } } }
+            }
+            switch state {
             case .free: return nil
             case .occupied: return "\(label) would intersect an observed workspace obstacle. No arm movement was authorized by this check."
             case .unknown: return "\(label) enters unobserved space. Scan the whole arm route before moving."

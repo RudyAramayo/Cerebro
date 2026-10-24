@@ -381,10 +381,17 @@ struct ROBWorkspaceCanSections: Codable {
     let bottom: [Double]
     let heightMeters: Double
     let diameterMeters: Double
+    /// RGB-D bands sample the visible wall. A measured projection may shift
+    /// them to an estimated cylinder axis; legacy section records lack this.
+    var surfaceToAxisOffsetMeters: [Double]? = nil
     var valid: Bool {
         guard [top,middle,bottom].allSatisfy({ $0.count == 3 && $0.allSatisfy(\.isFinite) }),
               heightMeters.isFinite, (0.09...0.18).contains(heightMeters),
               diameterMeters.isFinite, (0.04...0.09).contains(diameterMeters) else { return false }
+        if let offset = surfaceToAxisOffsetMeters {
+            guard offset.count == 3, offset.allSatisfy(\.isFinite),
+                  abs(simd_length(SIMD3(offset[0],offset[1],offset[2]))-diameterMeters/2) <= 0.000001 else { return false }
+        }
         let a = SIMD3(top[0],top[1],top[2]), b = SIMD3(bottom[0],bottom[1],bottom[2])
         let m = SIMD3(middle[0],middle[1],middle[2]), axis = a-b, length = simd_length(axis)
         return length.isFinite && abs(length-heightMeters) <= 0.001 && axis.z >= 0.6*length &&
@@ -404,11 +411,11 @@ struct ROBWorkspaceCanSections: Codable {
     }
     static func measure(detection:ROBWorkspaceDetection,width:Int,height:Int,
                         fx:Double,fy:Double,cx:Double,cy:Double,depth:(Int,Int)->UInt16?,
-                        view:ROBWorkspaceView,model:ROBGhostRobotModel) -> Self? {
+                        view:ROBWorkspaceView,model:ROBGhostRobotModel, cameraToRobot:simd_double4x4? = nil) -> Self? {
         guard detection.usable, detection.box.allSatisfy({ (0.02...0.98).contains($0) }),
               width > 1, height > 1, [fx,fy,cx,cy].allSatisfy(\.isFinite), fx > 0, fy > 0,
               (0..<Double(width)).contains(cx), (0..<Double(height)).contains(cy),
-              let transform = view.cameraFrame(model:model) else { return nil }
+              let transform = cameraToRobot ?? view.cameraFrame(model:model) else { return nil }
         let left = detection.box[0]*Double(width-1), right = detection.box[2]*Double(width-1)
         let top = detection.box[1]*Double(height-1), bottom = detection.box[3]*Double(height-1), u = (left+right)/2
         let radiusX = max(1,min(3,Int((right-left)*0.12))), radiusY = max(1,min(3,Int((bottom-top)*0.04)))
@@ -427,8 +434,20 @@ struct ROBWorkspaceCanSections: Codable {
             return (SIMD3(point.x,point.y,point.z),z)
         }
         guard let upper = band(0.18), let middle = band(0.50), let lower = band(0.82) else { return nil }
-        return fit(topBand:upper.point,middleBand:middle.point,bottomBand:lower.point,
-            diameterMeters:(right-left)*middle.depth/fx)
+        let diameter = (right-left)*middle.depth/fx
+        guard let surface = fit(topBand:upper.point,middleBand:middle.point,bottomBand:lower.point,
+            diameterMeters:diameter) else { return nil }
+        let a = SIMD3(surface.top[0],surface.top[1],surface.top[2])
+        let b = SIMD3(surface.bottom[0],surface.bottom[1],surface.bottom[2])
+        let axis = simd_normalize(a-b)
+        let origin = SIMD3(transform.columns.3.x,transform.columns.3.y,transform.columns.3.z)
+        let ray = middle.point-origin, radial = ray-axis*simd_dot(ray,axis)
+        guard simd_length(radial) > 0.01 else { return nil }
+        let offset = simd_normalize(radial)*(diameter/2)
+        func shifted(_ p:[Double])->[Double] { [p[0]+offset.x,p[1]+offset.y,p[2]+offset.z] }
+        return Self(top:shifted(surface.top),middle:shifted(surface.middle),bottom:shifted(surface.bottom),
+            heightMeters:surface.heightMeters,diameterMeters:diameter,
+            surfaceToAxisOffsetMeters:[offset.x,offset.y,offset.z])
     }
 }
 
@@ -442,6 +461,7 @@ struct ROBWorkspaceLocatedObject: Codable {
     var openingRadius: Double? = nil
     var floorCorrectionDegrees: Double? = nil
     var sections: ROBWorkspaceCanSections? = nil
+    var registrationID: String? = nil
     var point: SIMD3<Double> { SIMD3(position[0], position[1], position[2]) }
     func agrees(with other: Self) -> Bool {
         target == other.target && sequence != other.sequence && other.capturedAt > capturedAt &&
@@ -511,6 +531,12 @@ struct ROBLeftCanReachCalibration: Codable {
     let mappingID: String
     let translationMeters: [Double]
     let source: String
+    /// A new measured optical transform needs its own local residual. Historical
+    /// left-reach tuning belongs to the old provisional camera frame.
+    var registrationID: String? = nil
+    var toolLink: String? = nil
+    var validRegionLowMeters: [Double]? = nil
+    var validRegionHighMeters: [Double]? = nil
     var bucketYawDegrees: Double? = nil
     var bucketInwardMeters: Double? = nil
     var recoveryGraspClearanceMeters: Double? = nil
@@ -520,7 +546,10 @@ struct ROBLeftCanReachCalibration: Codable {
     /// Head-depth placement in effect when translationMeters was calibrated.
     /// Older files predate that adjustment and therefore use the raw frame.
     var depthTowardRobotMetersAtCalibration: Double? = nil
-    static var file: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Cerebro/LeftArmCalibration/can-reach.json") }
+    static var file: URL { file(forPhysicalSide:"left") }
+    static func file(forPhysicalSide side:String) -> URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Cerebro/\(side == "right" ? "Right" : "Left")ArmCalibration/can-reach.json")
+    }
     func effectiveTranslation(depthAlignment: ROBWorkspaceDepthAlignment.Snapshot? = ROBWorkspaceDepthAlignment.snapshot()) throws -> SIMD3<Double> {
         guard let depthAlignment, translationMeters.count == 3,
               translationMeters.allSatisfy({ $0.isFinite && abs($0) <= 0.15 }),
@@ -538,9 +567,19 @@ struct ROBLeftCanReachCalibration: Codable {
         }
         return result
     }
-    static func load(model: ROBGhostRobotModel, can: ROBWorkspaceLocatedObject? = nil, file: URL = file,
+    static func load(model: ROBGhostRobotModel, can: ROBWorkspaceLocatedObject? = nil, file: URL? = nil,
                      depthAlignment: ROBWorkspaceDepthAlignment.Snapshot? = ROBWorkspaceDepthAlignment.snapshot()) throws -> SIMD3<Double> {
-        guard let value = try configuration(model:model,file:file) else { return .zero }
+        guard let value = try scopedConfiguration(model:model,file:file ?? Self.file(forPhysicalSide:model.physicalSide),registrationID:can?.registrationID) else { return .zero }
+        if let registration=can?.registrationID {
+            guard value.registrationID==registration,value.toolLink==model.toolLink,
+                  let low=value.validRegionLowMeters,let high=value.validRegionHighMeters,
+                  low.count==3,high.count==3,let point=can?.point,
+                  (0..<3).allSatisfy({point[$0]>=low[$0] && point[$0]<=high[$0]}) else { return .zero }
+            // A residual taught in measured robot XYZ is not rebased by the
+            // visualization-only head shift and does not inherit old tabletop Z.
+            return SIMD3(value.translationMeters[0],value.translationMeters[1],value.translationMeters[2])
+        }
+        guard value.registrationID == nil else { return .zero }
         guard let depthAlignment else {
             throw ROBGhostMotionError.blocked("The current head depth adjustment is invalid.")
         }
@@ -577,24 +616,63 @@ struct ROBLeftCanReachCalibration: Codable {
         }
         return correction
     }
-    static func loadBucketYaw(model:ROBGhostRobotModel,file:URL = file) throws -> Double {
-        try configuration(model:model,file:file)?.bucketYawDegrees ?? 0
+    static func loadBucketYaw(model:ROBGhostRobotModel,file:URL? = nil,registrationID:String? = nil) throws -> Double {
+        guard let value=try scopedConfiguration(model:model,file:file ?? Self.file(forPhysicalSide:model.physicalSide),registrationID:registrationID) else{return 0}
+        return value.bucketYawDegrees ?? 0
     }
-    static func loadBucketInward(model:ROBGhostRobotModel,file:URL = file) throws -> Double {
-        try configuration(model:model,file:file)?.bucketInwardMeters ?? 0
+    static func loadBucketInward(model:ROBGhostRobotModel,file:URL? = nil,registrationID:String? = nil) throws -> Double {
+        guard let value=try scopedConfiguration(model:model,file:file ?? Self.file(forPhysicalSide:model.physicalSide),registrationID:registrationID) else{return 0}
+        return value.bucketInwardMeters ?? 0
     }
-    static func loadRecoveryGraspClearance(model:ROBGhostRobotModel,file:URL = file) throws -> Double {
-        try configuration(model:model,file:file)?.recoveryGraspClearanceMeters ?? 0
+    static func loadRecoveryGraspClearance(model:ROBGhostRobotModel,file:URL? = nil) throws -> Double {
+        try configuration(model:model,file:file ?? Self.file(forPhysicalSide:model.physicalSide))?.recoveryGraspClearanceMeters ?? 0
     }
-    static func loadTabletopCanBaseHeight(model:ROBGhostRobotModel,file:URL = file) throws -> Double? {
-        try configuration(model:model,file:file)?.tabletopCanBaseHeightMeters
+    static func loadTabletopCanBaseHeight(model:ROBGhostRobotModel,file:URL? = nil) throws -> Double? {
+        try configuration(model:model,file:file ?? Self.file(forPhysicalSide:model.physicalSide))?.tabletopCanBaseHeightMeters
+    }
+    static func registeredFile(base:URL,registrationID:String)->URL {
+        base.deletingLastPathComponent().appendingPathComponent("RegisteredReach")
+            .appendingPathComponent(ROBGhostRobotModel.hash(Data(registrationID.utf8))+".json")
+    }
+    /// Explicit experiment correction; it preserves the historical prior-frame
+    /// file and is valid only for this registration, tool and measured region.
+    @discardableResult static func saveRegisteredResidual(model:ROBGhostRobotModel,registrationID:String,
+        regionLowMeters:[Double],regionHighMeters:[Double],translationMeters:[Double],source:String,baseFile:URL) throws ->URL {
+        guard !registrationID.isEmpty,registrationID.utf8.count<=512,!source.isEmpty,source.utf8.count<=1024,
+              translationMeters.count==3,translationMeters.allSatisfy({$0.isFinite && abs($0)<=0.15}),
+              regionLowMeters.count==3,regionHighMeters.count==3,
+              (0..<3).allSatisfy({regionLowMeters[$0].isFinite && regionHighMeters[$0].isFinite &&
+                  abs(regionLowMeters[$0])<=5 && abs(regionHighMeters[$0])<=5 && regionLowMeters[$0]<regionHighMeters[$0]}) else {
+            throw ROBGhostMotionError.blocked("A reach correction needs a measured registration, tool, finite local region and translation within 15 cm.")
+        }
+        let value=Self(modelID:model.modelID,referenceID:model.referenceID,mappingID:model.selectedMappingID,
+            translationMeters:translationMeters,source:source,registrationID:registrationID,toolLink:model.toolLink,
+            validRegionLowMeters:regionLowMeters,validRegionHighMeters:regionHighMeters)
+        let destination=registeredFile(base:baseFile,registrationID:registrationID)
+        try FileManager.default.createDirectory(at:destination.deletingLastPathComponent(),withIntermediateDirectories:true)
+        let encoder=JSONEncoder();encoder.outputFormatting=[.prettyPrinted,.sortedKeys]
+        try encoder.encode(value).write(to:destination,options:.atomic)
+        return destination
+    }
+    private static func scopedConfiguration(model:ROBGhostRobotModel,file:URL,registrationID:String?) throws ->Self? {
+        guard let registrationID else { return try configuration(model:model,file:file) }
+        let scoped=registeredFile(base:file,registrationID:registrationID)
+        let candidate=FileManager.default.fileExists(atPath:scoped.path) ? scoped : file
+        guard FileManager.default.fileExists(atPath:candidate.path) else{return nil}
+        let data=try Data(contentsOf:candidate)
+        guard data.count<=16_384 else{throw ROBGhostMotionError.blocked("The local reach calibration is too large.")}
+        // An old provisional-frame file is not a measured-frame residual.
+        // Its translation, tabletop datum and release offsets are ignored.
+        guard let metadata=try? JSONSerialization.jsonObject(with:data) as? [String:Any],
+              metadata["registrationID"] as? String==registrationID else{return nil}
+        return try configuration(model:model,file:candidate)
     }
     private static func configuration(model:ROBGhostRobotModel,file:URL) throws -> Self? {
         guard FileManager.default.fileExists(atPath:file.path) else { return nil }
         let data = try Data(contentsOf:file)
         guard data.count <= 16_384, let value = try? JSONDecoder().decode(Self.self,from:data),
               value.modelID == model.modelID, value.referenceID == model.referenceID,
-              value.mappingID == ROBGhostRobotModel.mappingID, !value.source.isEmpty,
+              value.mappingID == model.selectedMappingID, !value.source.isEmpty,
               value.translationMeters.count == 3, value.translationMeters.allSatisfy({ $0.isFinite && abs($0) <= 0.15 }),
               (value.bucketYawDegrees ?? 0).isFinite, abs(value.bucketYawDegrees ?? 0) <= 30,
               (value.bucketInwardMeters ?? 0).isFinite, (0...0.08).contains(value.bucketInwardMeters ?? 0),
@@ -603,8 +681,17 @@ struct ROBLeftCanReachCalibration: Codable {
               value.tabletopGraspHeightMeters.map({ $0.isFinite && (0.30...1.40).contains($0) }) ?? true,
               value.tabletopCanBaseHeightMeters.map({ $0.isFinite && (0.30...1.40).contains($0) }) ?? true,
               value.depthTowardRobotMetersAtCalibration.map({ $0.isFinite && (0...0.30).contains($0) }) ?? true,
-              value.tabletopGraspHeightMeters == nil || value.tabletopCanBaseHeightMeters == nil else {
-            throw ROBGhostMotionError.blocked("The local left-can reach calibration is invalid or belongs to a different robot model.")
+              value.tabletopGraspHeightMeters == nil || value.tabletopCanBaseHeightMeters == nil,
+              value.registrationID.map({!$0.isEmpty && $0.utf8.count<=512}) ?? true,
+              value.toolLink.map({$0==model.toolLink}) ?? true,
+              value.registrationID==nil || (value.toolLink==model.toolLink && value.validRegionLowMeters?.count==3 && value.validRegionHighMeters?.count==3),
+              (value.validRegionLowMeters==nil && value.validRegionHighMeters==nil) ||
+                (value.validRegionLowMeters?.count==3 && value.validRegionHighMeters?.count==3 &&
+                 (0..<3).allSatisfy({ i in
+                    let low=value.validRegionLowMeters![i],high=value.validRegionHighMeters![i]
+                    return low.isFinite && high.isFinite && abs(low)<=5 && abs(high)<=5 && low<high
+                 })) else {
+            throw ROBGhostMotionError.blocked("The local can reach calibration is invalid or belongs to another physical arm/model.")
         }
         return value
     }
@@ -789,11 +876,12 @@ struct ROBCanGrabPreview {
             return best
         }
         var seed = baseline
-        let front = model.positions(vendorLeft: ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.frontIndex)!)
+        let selectedFront = model.physicalSide == side ? model : try ROBGhostRobotModel(directory:model.directory,physicalSide:side)
+        let front = selectedFront.positions(vendorLeft:selectedFront.recyclingFrontTarget)
         // The first pose must be the complete registered front target. Small
         // measured wrist residuals at hanging belong to the baseline, not this
         // target; horizontal leveling chooses its nearest wrist branch next.
-        for i in 1...7 { seed["\(side)_joint\(i)"] = (side == "left" ? 1 : -1) * front["left_joint\(i)"]! }
+        for i in 1...7 { seed["\(side)_joint\(i)"] = front["\(side)_joint\(i)"]! }
         var previous = baseline, steps: [Step] = []
         func append(_ pose: [String: Double], _ stage: String, dwell: Double = 0, action: ROBLeftGestureProposal.JawAction? = nil) {
             let angle = chain.map { abs(pose[$0.name, default: 0] - previous[$0.name, default: 0]) }.max() ?? 0
@@ -832,7 +920,7 @@ struct ROBCanGrabPreview {
             else if bucket != nil { throw ROBWorkspaceReachError.outOfReach(.can) }
         }
         if let bucket {
-            guard side == "left", ready else { throw ROBWorkspaceReachError.outOfReach(.can) }
+            guard ready else { throw ROBWorkspaceReachError.outOfReach(.can) }
             guard bucket.target == .orangeBucket, bucket.position.count == 3, bucket.position.allSatisfy(\.isFinite),
                   (0...60_000).contains(now - bucket.capturedAt), bucket.confidence >= 0.35,
                   let radius = bucket.openingRadius, (0.06...0.28).contains(radius) else {
@@ -842,7 +930,7 @@ struct ROBCanGrabPreview {
             // toward ROB's left around the shoulder, then shift it horizontally
             // toward that shoulder. Raw sightings, height and measured opening
             // radius remain unchanged.
-            let pivotFrame = model.frames(baseline)["left_one_Link"]!
+            let pivotFrame = model.frames(baseline)[side + "_one_Link"]!
             let pivot = SIMD2(pivotFrame.columns.3.x,pivotFrame.columns.3.y)
             let delta = SIMD2(bucket.point.x,bucket.point.y)-pivot, yaw = bucketYawDegrees * .pi/180
             let rotatedDelta = SIMD2(cos(yaw)*delta.x-sin(yaw)*delta.y,sin(yaw)*delta.x+cos(yaw)*delta.y)
@@ -850,7 +938,7 @@ struct ROBCanGrabPreview {
             if bucketInwardMeters > 0 {
                 let distance = simd_length(rotatedDelta)
                 guard distance.isFinite, distance > bucketInwardMeters + 0.05 else {
-                    throw ROBGhostMotionError.blocked("The calibrated bucket release point is too close to the left shoulder.")
+                    throw ROBGhostMotionError.blocked("The calibrated bucket release point is too close to the selected shoulder.")
                 }
                 bucketXY -= rotatedDelta / distance * bucketInwardMeters
             }
@@ -930,10 +1018,10 @@ enum ROBWorkspaceGrounding {
     static func locate(target: ROBWorkspaceTarget, detection: ROBWorkspaceDetection,
                        width: Int, height: Int, fx: Double, fy: Double, cx: Double, cy: Double,
                        depth: (Int, Int) -> UInt16?, view: ROBWorkspaceView, model: ROBGhostRobotModel,
-                       capturedAt: Double, sequence: UInt64) -> ROBWorkspaceLocatedObject? {
+                       capturedAt: Double, sequence: UInt64, cameraToRobot:simd_double4x4? = nil, registrationID:String? = nil) -> ROBWorkspaceLocatedObject? {
         guard detection.usable, width > 0, height > 0, [fx, fy, cx, cy].allSatisfy(\.isFinite), fx > 0, fy > 0,
               (0..<Double(width)).contains(cx), (0..<Double(height)).contains(cy),
-              let transform = view.cameraFrame(model: model) else { return nil }
+              let transform = cameraToRobot ?? view.cameraFrame(model: model) else { return nil }
         let x = Int(detection.depthPoint[0] * Double(width - 1)), y = Int(detection.depthPoint[1] * Double(height - 1))
         var samples: [Double] = []
         for dy in -3...3 { for dx in -3...3 {
@@ -948,7 +1036,7 @@ enum ROBWorkspaceGrounding {
         let position = transform * SIMD4((u - cx) * z / fx, (v - cy) * z / fy, z, 1)
         guard [position.x, position.y, position.z].allSatisfy(\.isFinite) else { return nil }
         return .init(target: target, position: [position.x, position.y, position.z], confidence: detection.confidence,
-            capturedAt: capturedAt, sequence: sequence, view: view)
+            capturedAt: capturedAt, sequence: sequence, view: view, registrationID:registrationID)
     }
 
     static func task(can: ROBWorkspaceLocatedObject, bucket: ROBWorkspaceLocatedObject,

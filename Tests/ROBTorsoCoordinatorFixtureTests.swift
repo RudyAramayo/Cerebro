@@ -41,9 +41,11 @@ final class ROBArmRoutineCoordinator {
             app.run()
             return
         }
+        let originalBodyIdentity=ROBFixedHeadBodyMotionIdentity.currentIdentity
         center.advance(); center.arm(); center.turnToHeading(45)
         RunLoop.current.run(until: Date().addingTimeInterval(0.3))
         try expect(center.commandedVelocity > 0 && fake.calls.isEmpty, "Rehearsal touched motor transport")
+        try expect(ROBFixedHeadBodyMotionIdentity.currentIdentity==originalBodyIdentity,"Rehearsal invalidated physical registration")
         center.setLiveCamera(true)
         try expect(!center.isArmed && !center.canArm, "Preview observation leaked into live authority")
         center.arm()
@@ -65,11 +67,13 @@ final class ROBArmRoutineCoordinator {
         center.arm(); try wait { center.isArmed && center.hardwareReady }
         try expect(!fake.energized && !fake.calls.contains(where: { $0.contains("--energize") }),
                    "Arming the coordinator energized an idle motor")
+        try expect(ROBFixedHeadBodyMotionIdentity.currentIdentity==originalBodyIdentity,"Idle arming invalidated physical registration")
         center.setRemoteActive(true, rotation: 0.1)
         let remoteTarget = 180 / Double.pi + 18
         try expect(abs(center.targetHeading - remoteTarget) < 0.01,
                    "VR heading was not based on the camera angle")
         try wait { fake.currentVelocity > 0 }
+        try expect(ROBFixedHeadBodyMotionIdentity.currentIdentity != originalBodyIdentity,"Physical torso dispatch retained old camera-to-base registration")
         RunLoop.current.run(until: Date().addingTimeInterval(0.02))
         try expect(center.isArmed && center.policy.mode == .heading && abs(center.targetHeading - remoteTarget) < 0.01,
                    "Motor power acknowledgement reset the active heading request")

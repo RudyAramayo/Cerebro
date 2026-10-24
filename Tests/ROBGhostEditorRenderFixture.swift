@@ -4,13 +4,19 @@ import SceneKit
 // Deliberately no transport, arm driver, credential or real approval broker.
 final class ROBAmberGatewayClient {
     static let shared = ROBAmberGatewayClient()
-    func isReady() -> Bool { false }
-    func telemetry(forArm: String) -> FixtureTelemetry? { nil }
-    func connectionSnapshot() -> NSDictionary { [:] }
+    var ready = false
+    var samples: [String:FixtureTelemetry] = [:]
+    var requestedArms: [String] = []
+    func isReady() -> Bool { ready }
+    func telemetry(forArm arm:String) -> FixtureTelemetry? { requestedArms.append(arm);return samples[arm] }
+    func connectionSnapshot() -> NSDictionary { ready ? ["sessionGeneration":NSNumber(value:UInt64(17))] : [:] }
 }
 final class FixtureTelemetry {
-    let effectiveSampleAgeMilliseconds = 1000.0
-    let positionsRadians: [NSNumber] = []
+    let effectiveSampleAgeMilliseconds: Double
+    let positionsRadians: [NSNumber]
+    init(age:Double=1000,positions:[Double]=[]) {
+        effectiveSampleAgeMilliseconds=age;positionsRadians=positions.map(NSNumber.init(value:))
+    }
 }
 final class ROBAmberGatewayTunnel {
     static let shared = ROBAmberGatewayTunnel()
@@ -46,6 +52,7 @@ final class ROBAmberGestureExecutor {
 }
 final class ROBLeftArmTrial {
     static let shared = ROBLeftArmTrial()
+    var physicalSide = "left"
     var isRunning = false
     var isNeckOnlyInspection = false
     let status = "Fixture only", lastRecordingPath = ""
@@ -510,6 +517,62 @@ final class GhostFixtureSnapshotView: NSView {
         precondition(collisionStatus.stringValue.contains("Stored scan preview; rescan before motion.") &&
             ROBWorkspaceSearch.shared.collisionSnapshot == nil)
         print("Collision overlay: real provisional RGB-D cloud capped at 2500 points, unchanged-capture caching, retained stale-camera preview with rescan label, obstacle/path visibility, unverified registration, read-only path FK and continuous rendering passed; execution unavailable")
+
+        // Physical RIGHT uses its own mapping and gateway `left` (L10). An old
+        // physical-left artifact cannot be silently rendered as a right path.
+        trial.physicalSide="right"
+        editor.reviewPresetNamed("collision")
+        precondition(controls.compactMap{$0 as? NSTextField}.contains{$0.stringValue=="Path preview unavailable for this robot model"})
+        precondition(!execute.isEnabled,"Changing physical side must not grant execution")
+        let rightModel=try ROBGhostRobotModel(directory:model.directory,physicalSide:"right")
+        let rightStart=Array(repeating:0.0,count:7),rightEnd=[0.1,-0.03,0.08,0.01,-0.02,0.02,0.04]
+        let rightReadOnly=ROBLeftGestureProposal(id:UUID(),name:"Fixture estimated right preview",kind:"estimated_calibration",
+            modelID:rightModel.modelID,referenceID:rightModel.referenceID,geometryID:rightModel.geometryID,
+            mappingID:rightModel.selectedMappingID,sessionGeneration:17,baseline:rightStart,poses:[],
+            steps:[.init(positions:rightEnd,seconds:4,stage:"Read-only estimated fixture")])
+        trial.collisionReviewProposal=rightReadOnly
+        let normalRightBefore=headNode("Original URDF","right_two_Link").simdTransform
+        let normalLeftBefore=headNode("Original URDF","left_two_Link").simdTransform
+        editor.reviewPresetNamed("collision")
+        precondition(controls.compactMap{$0 as? NSTextField}.contains{
+            $0.stringValue.contains("ESTIMATED EMPTY-ARM TRIAL") && $0.stringValue.contains("Physical right arm") && $0.stringValue.contains("no actuator authority")
+        },"Estimated right artifact must be identified as read-only and physically right")
+        timeline.doubleValue=timeline.maxValue;NSApp.sendAction(timeline.action!,to:timeline.target,from:timeline)
+        let rightFrames=rightModel.frames(rightModel.positions(vendorLeft:rightEnd))
+        for link in ["right_two_Link","right_four_Link","right_tool","left_two_Link"] {
+            let actual=headNode("Blue ghost",link).simdTransform,expected=rightFrames[link]!
+            for col in 0..<4 {precondition(simd_distance(actual[col],SIMD4<Float>(expected[col]))<1e-6,
+                "Right collision preview updated the wrong physical arm or mapping: \(link)")}
+        }
+        precondition(headNode("Original URDF","right_two_Link").simdTransform==normalRightBefore &&
+            headNode("Original URDF","left_two_Link").simdTransform==normalLeftBefore && !execute.isEnabled)
+        NSApp.sendAction(execute.action!,to:execute.target,from:execute)
+
+        // Fresh original feedback must come from L10/gateway-left, while the
+        // unrelated R11 sample is deliberately a different physical pose.
+        let gateway=ROBAmberGatewayClient.shared
+        gateway.ready=true
+        let measuredRight=[0.17,-0.07,0.03,0.01,-0.01,0.02,0.04]
+        gateway.samples=["left":FixtureTelemetry(age:1,positions:measuredRight),
+                         "right":FixtureTelemetry(age:1,positions:[-0.7,0.9,-0.5,0,-0.4,0,0])]
+        gateway.requestedArms=[]
+        let rightScene=SCNScene(),rightOriginal=SCNNode();rightScene.rootNode.addChildNode(rightOriginal)
+        let rightView=SCNView(frame:NSRect(x:0,y:0,width:320,height:240));rightView.scene=rightScene
+        let rightEditor=ROBGhostGestureEditor(sceneView:rightView,originalRobot:rightOriginal)
+        let measuredFrames=rightModel.frames(rightModel.positions(vendorLeft:measuredRight))
+        for link in ["right_two_Link","left_two_Link"] {
+            let actual=rightScene.rootNode.childNodes.flatMap(\.childNodes).first{$0.name=="Original URDF \(link)"}!.simdTransform
+            for col in 0..<4 {precondition(simd_distance(actual[col],SIMD4<Float>(measuredFrames[link]![col]))<1e-6,
+                "Original model used the wrong gateway arm for \(link)")}
+        }
+        precondition(!gateway.requestedArms.isEmpty && gateway.requestedArms.allSatisfy{$0=="left"},
+            "Physical-right initialization read R11 rather than L10")
+        let rightExecute=descendants(rightEditor.panelView).first{$0.identifier?.rawValue=="ghost-execute"} as! NSButton
+        precondition(!rightExecute.isEnabled,"Live-shaped fixture data must not create actuator authority")
+        rightEditor.invalidate();gateway.ready=false;gateway.samples=[:]
+        trial.physicalSide="left";trial.collisionReviewProposal=historical
+        editor.reviewPresetNamed("collision")
+        print("Right preview: side-mismatch rejected, all-right FK with unchanged originals, explicit estimated/read-only label, L10-only fresh baseline and disabled execution passed")
         trial.collisionReviewProposal = nil; trial.collisionReviewStatus = [:]
         if CommandLine.arguments.last != "can" {
             presets.selectItem(at: selection); NSApp.sendAction(presets.action!, to: presets.target, from: presets)

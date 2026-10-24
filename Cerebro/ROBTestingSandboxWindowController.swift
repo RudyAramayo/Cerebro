@@ -18,6 +18,12 @@ import AppKit
         let actions: [Action]
     }
     private static let trials: [Trial] = [
+        Trial(id: "right-recycling", title: "Recycle can · right arm", detail: "Use ROB's physical right arm (Amber L10). Find an empty upright can, grasp its middle, verify a small lift with fixed-head visual evidence, then carry and gravity-drop above the bucket. Right-arm calibration is separate from left-arm reach tuning. One task approval covers both arms holding at their measured positions and only the right arm travelling.", parameters: .current,
+              actions: [Action(title: "Recycle both cans", command: "right_recycle_two_cans"), Action(title: "Recycle one can", command: "right_recycle_can"), Action(title: "Search only", command: "right_search_workspace"), Action(title: "Scan workspace geometry", command: "right_scan_clearance"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision")]),
+        Trial(id: "fixed-head-registration", title: "Camera-to-arm registration", detail: "Measure a local camera-to-robot transform from current RGB-D robot surfaces. Hold the exact head pose; fit and held-out validation use separate surface patches and later frames. A validated fit records its uncertainty and bounded volume. This test never moves an arm and does not manufacture a motion approval.", parameters: .none,
+              actions: [Action(title: "Open fixed-head calibration…", command: "registration:open")]),
+        Trial(id: "right-estimated-calibration", title: "Right-arm calibration step", detail: "Review one empty-right-arm J2 step outward and up, then hold. The four-second step is capped at 3 cm of full-model travel. It is an estimated commissioning test, with existing modeled self-proxy overlaps required to improve. It does not close the jaws, recycle a can or claim a general arm calibration. Inspect the physical local clearance and ghost before one spoken or controller approval.", parameters: .none,
+              actions: [Action(title: "Capture / preview right calibration step", command: "right_estimated_preview"), Action(title: "Inspect estimated ghost…", command: "ghost:collision"), Action(title: "Run reviewed right calibration step", command: "right_estimated_trial")]),
         Trial(id: "recycling", title: "Recycle can", detail: "Find an upright empty can and an open orange bucket using the neck camera. Grasp the can at its middle, lift, carry and release above the opening. Search and preview do not move the arms. A run uses one complete-task authorization or an active supervised session.", parameters: .recycling,
               actions: [Action(title: "Run recycle test", command: "left_recycle_can"), Action(title: "Search only", command: "left_search_workspace"), Action(title: "Scan workspace geometry", command: "left_scan_clearance"), Action(title: "Preview grasp…", command: "ghost:can"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision")]),
         Trial(id: "depth-alignment", title: "Depth alignment", detail: "Adjust the face camera's modeled downward mounting angle and move head-camera depth points horizontally toward ROB. The camera model, live depth view, new workspace scans and object measurements share the pitch correction. Previous scans and previews are cleared when the values change.", parameters: .depthAlignment,
@@ -63,7 +69,8 @@ import AppKit
         !ROBLeftArmTrial.shared.isRunning && !ROBArmRoutineCoordinator.shared.isRunning &&
             !ROBArmRoutineCoordinator.shared.ownsPhysicalMotion && !ROBControllerArmApproval.shared.isPending &&
             !ROBGripperStartupCalibration.shared.isRunning && !ROBShowMotionCoordinator.shared.isRunning &&
-            !ROBAmberGestureExecutor.shared.isExecuting && !ROBNeckQRCalibration.shared.isRunning
+            !ROBAmberGestureExecutor.shared.isExecuting && !ROBNeckQRCalibration.shared.isRunning &&
+            !ROBFixedHeadCalibrationWindowController.shared.isRunning
     }
 
     private init() {
@@ -190,7 +197,7 @@ import AppKit
             protractorPitch.widthAnchor.constraint(greaterThanOrEqualToConstant: 300).isActive = true
             detailStack.addArrangedSubview(protractorPitch)
         }
-        if ["recycling", "depth-alignment", "estimated-calibration", "preparation", "ghost"].contains(trial.id) {
+        if ["recycling", "right-recycling", "depth-alignment", "estimated-calibration", "preparation", "ghost"].contains(trial.id) {
             collisionInfo.identifier = NSUserInterfaceItemIdentifier("sandbox-collision-status")
             collisionInfo.isSelectable = true
             collisionInfo.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
@@ -351,7 +358,10 @@ import AppKit
             protractorPitch.stringValue = ""; refresh(); return
         }
         guard canEdit else { return }
-        if selectedTrial.parameters != .none && selectedTrial.parameters != .depthAlignment && !["left_search_workspace", "left_scan_clearance"].contains(command) && !storeParameters() { return }
+        if selectedTrial.parameters != .none && selectedTrial.parameters != .depthAlignment && !["left_search_workspace", "left_scan_clearance", "right_search_workspace", "right_scan_clearance"].contains(command) && !storeParameters() { return }
+        if command == "registration:open" {
+            ROBFixedHeadCalibrationWindowController.shared.showWindow(self); return
+        }
         if command.hasPrefix("qr:") {
             observingLeftOperation = false; parameterMessage = ""
             switch command {
@@ -409,6 +419,7 @@ import AppKit
         if !path.isEmpty { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
     }
     @objc private func stop() {
+        ROBFixedHeadCalibrationWindowController.shared.stop()
         ROBNeckQRCalibration.shared.stop()
         ROBArmRoutineCoordinator.shared.cancel(reason: "Stop requested in Testing Sandbox")
         _ = ROBAmberGestureExecutor.shared.cancelCurrentGesture(reason: "Stop requested in Testing Sandbox")

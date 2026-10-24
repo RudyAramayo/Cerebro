@@ -22,6 +22,10 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
+		AC2410260000000000000008 /* ROBRecyclingVisualInspection.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2410260000000000000007 /* ROBRecyclingVisualInspection.swift */; };
+		AC2410260000000000000006 /* ROBVisualGraspVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2410260000000000000005 /* ROBVisualGraspVerifier.swift */; };
+		AC2410260000000000000004 /* ROBFixedHeadCalibrationWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2410260000000000000003 /* ROBFixedHeadCalibrationWindowController.swift */; };
+		AC2410260000000000000002 /* ROBFixedHeadRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2410260000000000000001 /* ROBFixedHeadRegistration.swift */; };
 		AC2310260000000000000014 /* ROBNeckQRCalibration.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2310260000000000000013 /* ROBNeckQRCalibration.swift */; };
 		AC2310260000000000000012 /* ROBNeckQRMeasurement.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2310260000000000000011 /* ROBNeckQRMeasurement.swift */; };
 		AC221026000000000000000C /* ROBEstimatedArmCalibrationPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC221026000000000000000B /* ROBEstimatedArmCalibrationPlan.swift */; };
@@ -277,6 +281,10 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		AC2410260000000000000007 /* ROBRecyclingVisualInspection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBRecyclingVisualInspection.swift; sourceTree = "<group>"; };
+		AC2410260000000000000005 /* ROBVisualGraspVerifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBVisualGraspVerifier.swift; sourceTree = "<group>"; };
+		AC2410260000000000000003 /* ROBFixedHeadCalibrationWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBFixedHeadCalibrationWindowController.swift; sourceTree = "<group>"; };
+		AC2410260000000000000001 /* ROBFixedHeadRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBFixedHeadRegistration.swift; sourceTree = "<group>"; };
 		AC2310260000000000000013 /* ROBNeckQRCalibration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBNeckQRCalibration.swift; sourceTree = "<group>"; };
 		AC2310260000000000000011 /* ROBNeckQRMeasurement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBNeckQRMeasurement.swift; sourceTree = "<group>"; };
 		AC221026000000000000000B /* ROBEstimatedArmCalibrationPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ROBEstimatedArmCalibrationPlan.swift; sourceTree = "<group>"; };
@@ -733,6 +741,10 @@
 				AC2509230000000000000001 /* ROBShowMotionCoordinator.swift */,
 				AC2309260000000000000007 /* ROBArmRoutineSettingsViewController.swift */,
 				AC2310260000000000000011 /* ROBNeckQRMeasurement.swift */,
+				AC2410260000000000000001 /* ROBFixedHeadRegistration.swift */,
+				AC2410260000000000000003 /* ROBFixedHeadCalibrationWindowController.swift */,
+				AC2410260000000000000005 /* ROBVisualGraspVerifier.swift */,
+				AC2410260000000000000007 /* ROBRecyclingVisualInspection.swift */,
 				AC2310260000000000000013 /* ROBNeckQRCalibration.swift */,
 				AC221026000000000000000B /* ROBEstimatedArmCalibrationPlan.swift */,
 				AC2210260000000000000009 /* ROBArmJointLimits.swift */,
@@ -1174,6 +1186,10 @@
 				AC2509230000000000000002 /* ROBShowMotionCoordinator.swift in Sources */,
 				AC2309260000000000000008 /* ROBArmRoutineSettingsViewController.swift in Sources */,
 				AC2310260000000000000012 /* ROBNeckQRMeasurement.swift in Sources */,
+				AC2410260000000000000002 /* ROBFixedHeadRegistration.swift in Sources */,
+				AC2410260000000000000004 /* ROBFixedHeadCalibrationWindowController.swift in Sources */,
+				AC2410260000000000000006 /* ROBVisualGraspVerifier.swift in Sources */,
+				AC2410260000000000000008 /* ROBRecyclingVisualInspection.swift in Sources */,
 				AC2310260000000000000014 /* ROBNeckQRCalibration.swift in Sources */,
 				AC221026000000000000000C /* ROBEstimatedArmCalibrationPlan.swift in Sources */,
 				AC221026000000000000000A /* ROBArmJointLimits.swift in Sources */,

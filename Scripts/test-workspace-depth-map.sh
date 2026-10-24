@@ -10,6 +10,6 @@ source = Path("Cerebro/ROBWorkspaceCollisionPlan.swift").read_text()
 Path(sys.argv[1]).write_text(source[:source.index("/// A measured object envelope")])
 PY
 xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path /private/tmp/cerebro-swift-module-cache \
-  Cerebro/ROBArmJointLimits.swift "$task_depth_fixture_dir/protocol.swift" Cerebro/ROBWorkspaceDepthMap.swift \
+  Cerebro/ROBArmJointLimits.swift "$task_depth_fixture_dir/protocol.swift" Cerebro/ROBFixedHeadRegistration.swift Cerebro/ROBWorkspaceDepthMap.swift \
   Tests/ROBWorkspaceDepthMapFixtureTests.swift -o "$task_depth_fixture_dir/depth-map-fixtures"
 "$task_depth_fixture_dir/depth-map-fixtures"

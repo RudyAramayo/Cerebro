@@ -1,0 +1,126 @@
+"""Exercise fixed-head acquisition with synthetic RGB-D and real rigid optimizer."""
+import hashlib
+import json
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+import numpy as np
+
+ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT/'Cerebro/Resources/ShadowPlanner'))
+from fixed_head_registration import proper_fit, read_capture, register
+
+
+class FixedHeadRegistrationTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary=tempfile.TemporaryDirectory()
+        self.root=Path(self.temporary.name)
+        self.width,self.height=160,120
+        k=np.array([120.,120.,80.,60.])
+        v,u=np.indices((self.height,self.width))
+        rx=(u-k[2])/k[0];ry=(v-k[3])/k[1]
+        left=np.where(rx<-.001,-.3/np.minimum(rx,-.001),99)
+        right=np.where(rx>.001,.3/np.maximum(rx,.001),99)
+        floor=np.where(ry>.001,.25/np.maximum(ry,.001),99)
+        surfaces=np.stack([np.full(rx.shape,1.2),left,right,floor])
+        which=np.argmin(surfaces,axis=0)
+        depth=np.min(surfaces,axis=0)
+        self.frames=[]
+        for i in range(3):
+            # Separate captured frames with deterministic submillimeter noise.
+            values=np.rint(depth*1000+((u+2*v+i)%3-1)*.3).astype('<u2')
+            values[3+i,4+i]+=1
+            path=self.root/f'frame-{i}.depth-u16le'
+            path.write_bytes(values.tobytes())
+            self.frames.append(dict(depthPath=path.name,width=self.width,height=self.height,
+                intrinsics=k.tolist(),sequence=i+1,capturedAtMilliseconds=10000+i*200,
+                captureSHA256=hashlib.sha256(path.read_bytes()).hexdigest()))
+        rows=[];normals=[];labels=[]
+        for y in range(5,self.height-5,4):
+            for x in range(5,self.width-5,4):
+                z=depth[y,x]
+                rows.append([rx[y,x]*z,ry[y,x]*z,z])
+                normals.append([[0,0,1],[-1,0,0],[1,0,0],[0,1,0]][which[y,x]])
+                labels.append('torso_link' if y<60 else 'base_link')
+        self.points=np.asarray(rows);self.normals=np.asarray(normals);self.labels=np.asarray(labels)
+        self.scope=dict(modelID='fixture-model',geometryID='fixture-geometry',mappingID='physical-right',
+            cameraGeneration='A041BA7A-4805-431F-A5DC-197DDB43DE98',gatewaySessionGeneration=7,
+            displayCorrectionIdentity='display-fixture',panTarget=6000,lowerTarget=6011,upperTarget=6906,
+            intrinsicsIdentity='fixture-160x120')
+        self.document=dict(schemaVersion=1,scope=self.scope,
+            validRobotVolume=dict(lowMeters=[-.4,-.4,.1],highMeters=[.4,.4,1.3]),
+            referenceUncertaintyMeters=.002,initialCameraToRobotColumnMajor=np.eye(4).flatten(order='F').tolist(),frames=self.frames)
+        owner=self
+        class Estimator:
+            def __init__(self,planner):pass
+            def points(self,q,names):return owner.points,owner.normals,owner.labels
+            @staticmethod
+            def visible(points,camera,depth,intrinsics):return np.ones(len(points),dtype=bool)
+        self.estimator=Estimator
+        class Planner:
+            reference={'modelID':'fixture-model'}
+            q0=np.zeros(1)
+        self.planner=Planner()
+
+    def tearDown(self):self.temporary.cleanup()
+
+    def fit(self):
+        with patch('markerless.MarkerlessEstimator',self.estimator):
+            return register(self.document,self.root,planner=self.planner)
+
+    def test_actual_optimizer_and_withheld_captures(self):
+        output,report=self.fit()
+        self.assertFalse(report['registrationVerified'])
+        self.assertGreaterEqual(report['fitPatchCount'],20)
+        self.assertGreaterEqual(report['heldOutPatchCount'],6)
+        self.assertEqual(report['heldOutFrameCount'],2)
+        training=[s for s in output['samples'] if not s['validationOnly']]
+        held=[s for s in output['samples'] if s['validationOnly']]
+        self.assertTrue(set(s['captureID'] for s in training).isdisjoint(s['captureID'] for s in held))
+        self.assertTrue(set(s['landmarkID'] for s in training).isdisjoint(s['landmarkID'] for s in held))
+        self.assertLess(report['pointNormalRMSEMeters'],.003)
+        matrix=np.array(report['candidateCameraToRobotColumnMajor']).reshape((4,4),order='F')
+        self.assertLess(np.max(np.abs(matrix-np.eye(4))),.01)
+        # Exercise the exact interchange schema with the production Swift fitter.
+        (self.root/'registration-input.json').write_text(json.dumps(output))
+
+    def test_later_depth_disagreement_rejects(self):
+        for frame in self.frames[1:]:
+            path=self.root/frame['depthPath'];values=np.frombuffer(path.read_bytes(),dtype='<u2').copy()
+            values+=100;path.write_bytes(values.tobytes());frame['captureSHA256']=hashlib.sha256(path.read_bytes()).hexdigest()
+        with self.assertRaisesRegex(ValueError,'validation|survived'):
+            self.fit()
+
+    def test_plane_only_registration_is_underconstrained(self):
+        self.points[:,2]=1.2;self.normals[:]=[0,0,1]
+        with self.assertRaisesRegex(ValueError,'underconstrained|inconsistent'):
+            self.fit()
+
+    def test_frame_hash_and_framing_mismatch_reject(self):
+        self.frames[0]['captureSHA256']='0'*64
+        with self.assertRaisesRegex(ValueError,'hash'):
+            read_capture(self.frames[0],self.root)
+        self.frames[0].pop('captureSHA256')
+        self.frames[1]['intrinsics'][0]=121
+        with self.assertRaisesRegex(ValueError,'framing'):
+            self.fit()
+
+    def test_repeated_depth_is_not_independent_capture(self):
+        self.frames[1]['depthPath']=self.frames[0]['depthPath']
+        self.frames[1]['captureSHA256']=self.frames[0]['captureSHA256']
+        with self.assertRaisesRegex(ValueError,'distinct'):
+            self.fit()
+
+    def test_proper_half_turn_does_not_become_reflection(self):
+        points=np.array([[0,0,1],[1,0,1],[0,1,1],[.2,.4,2.]])
+        rotation=np.diag([-1.,-1.,1.]);translation=np.array([.3,-.2,.1])
+        matrix=proper_fit(points,points@rotation.T+translation)
+        self.assertLess(np.max(np.abs(matrix[:3,:3]-rotation)),1e-9)
+        self.assertAlmostEqual(np.linalg.det(matrix[:3,:3]),1)
+        self.assertLess(np.max(np.abs(matrix[:3,3]-translation)),1e-9)
+
+
+if __name__=='__main__':unittest.main()

@@ -47,6 +47,9 @@ final class ROBTicVelocityTransport {
     private var lastStatusAt = 0.0
     private let execute: Executor
     var onState: ((Bool, String) -> Void)?
+    /// Runs on the serialized USB queue immediately before an admitted nonzero
+    /// velocity write. A failed/partial write still invalidates old geometry.
+    var onMotionDispatch: (() -> Void)?
 
     init(execute: Executor? = nil) {
         self.execute = execute ?? Self.executeTic
@@ -184,6 +187,7 @@ final class ROBTicVelocityTransport {
                     guard ProcessInfo.processInfo.systemUptime <= validUntil else {
                         throw Self.error("Torso demand expired before movement")
                     }
+                    if units != 0 {onMotionDispatch?()}
                     _ = try execute(["--velocity", String(units)])
                     if current(token), ProcessInfo.processInfo.systemUptime - lastStatusAt >= 0.25 {
                         try Self.checkStatus(execute(["--status"]), starting: false)

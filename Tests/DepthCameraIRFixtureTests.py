@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""IR configuration fixtures; imports no SDK and never opens a USB device."""
+from collections import defaultdict
+import contextlib
+import importlib.util
+import io
+import json
+import os
+from pathlib import Path
+from types import SimpleNamespace
+import threading
+import tempfile
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location("ir_fixture_service", ROOT / "Cerebro/Webcam_color.py")
+service = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(service)
+
+
+class Projectors:
+    def __init__(self, result=True, error=None):
+        self.calls = []
+        self.result = result
+        self.error = error
+
+    def setIrFloodLightIntensity(self, value):
+        self.calls.append(("flood", value))
+        return self.result
+
+    def setIrLaserDotProjectorIntensity(self, value):
+        self.calls.append(("dot", value))
+        if self.error:
+            raise self.error
+        return self.result
+
+
+def capture(function, *args, **kwargs):
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        result = function(*args, **kwargs)
+    return result, output.getvalue()
+
+
+def run_fixtures():
+    face = service.parse_arguments(["--socket", "/private/tmp/fake-ir.sock"])
+    belly = service.parse_arguments(["--socket", "/private/tmp/fake-ir.sock", "--role", "belly"])
+    assert face.ir_dot_intensity == 0.5 and belly.ir_dot_intensity == 0
+    for value in ["0", "0.25", "1"]:
+        args = service.parse_arguments(["--socket", "fixture", "--ir-dot-intensity", value])
+        assert args.ir_dot_intensity == float(value)
+    for value in ["nan", "inf", "-inf", "-0.01", "1.01", "text"]:
+        with contextlib.redirect_stderr(io.StringIO()):
+            try:
+                service.parse_arguments(["--socket", "fixture", "--ir-dot-intensity=" + value])
+            except SystemExit as error:
+                assert error.code == 2
+            else:
+                raise AssertionError("Invalid normalized intensity admitted: " + value)
+    with contextlib.redirect_stderr(io.StringIO()):
+        try:
+            service.parse_arguments(["--socket", "fixture", "--role", "belly", "--ir-dot-intensity", "0.1"])
+        except SystemExit as error:
+            assert error.code == 2
+        else:
+            raise AssertionError("Belly projector was enabled")
+    for role, requested, expected in [("face", None, 0.5), ("face", 0, 0), ("face", 1, 1), ("belly", None, 0)]:
+        device = Projectors()
+        result, log = capture(service.configure_ir_projectors, device, role, requested)
+        assert result is True and device.calls == [("flood", 0.0), ("dot", expected)]
+        assert "dot_result=accepted" in log and "flood_requested=0.000" in log
+    result, log = capture(service.configure_ir_projectors, object(), "face")
+    assert result is False and "unsupported_sdk" in log and "dot_result=accepted" not in log
+    for return_value in [False, None, 1]:
+        result, log = capture(service.configure_ir_projectors, Projectors(result=return_value), "face")
+        assert result is False and "unavailable_or_rejected" in log and "dot_result=accepted" not in log
+    result, log = capture(service.configure_ir_projectors, Projectors(error=RuntimeError("driver\nnot found")), "face")
+    assert result is False and "dot_result=error" in log and "driver not found" in log
+    assert len(log.splitlines()) == 2
+    path = Path(service.ir_status_directory()) / "face-ir-status.json"
+    status = json.loads(path.read_text())
+    assert status["processID"] == os.getpid() and status["role"] == "face"
+    assert status["dotResult"] == "error" and status["sdkAccepted"] is False
+    assert status["depthImprovementVerified"] is False and status["timestampUTC"]
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert path.parent.stat().st_mode & 0o777 == 0o700
+    assert not list(path.parent.glob(".face-ir-status-*")), "Atomic status left a partial file"
+    with patch.object(service.os, "replace", side_effect=OSError("read only fixture")):
+        result, log = capture(service.configure_ir_projectors, Projectors(), "face")
+    assert result is True and "diagnostic status could not be saved" in log
+    assert json.loads(path.read_text()) == status, "Failed atomic replacement overwrote the previous diagnostic"
+    assert not list(path.parent.glob(".face-ir-status-*")), "Failed write left temporary data"
+    with patch.object(service, "load_depthai", side_effect=AssertionError("Invalid settings opened a device")):
+        try:
+            service.stream_camera(None, None, role="belly", ir_dot_intensity=0.5)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Invalid direct stream configuration was admitted")
+
+    # Execute the actual stream setup with a complete in-memory pipeline. The
+    # projector methods assert that start succeeded, while unavailable emitters
+    # must not prevent the synchronized RGB-D service from reaching STREAMING.
+    class Input:
+        def setMaxSize(self, value): pass
+        def setBlocking(self, value): pass
+
+    class Output:
+        def link(self, target): pass
+        def createOutputQueue(self, *args, **kwargs): return object()
+
+    class Camera:
+        def build(self, value): return self
+        def requestOutput(self, *args, **kwargs): return Output()
+
+    class Stereo:
+        PresetMode = SimpleNamespace(ROBOTICS="robotics")
+        def __init__(self):
+            self.left, self.right = Input(), Input()
+            self.rectifiedLeft, self.rectifiedRight = Output(), Output()
+        def setDefaultProfilePreset(self, value): pass
+        def setLeftRightCheck(self, value): pass
+        def setSubpixel(self, value): pass
+
+    class Sync:
+        def __init__(self): self.inputs, self.out = defaultdict(Input), Output()
+        def setSyncThreshold(self, value): pass
+        def setSyncAttempts(self, value): pass
+
+    class Device(Projectors):
+        def __init__(self, result=True):
+            super().__init__(result=result)
+            self.started, self.closed = False, False
+        def setMaxReconnectionAttempts(self, *args): pass
+        def getUsbSpeed(self): return "super"
+        def getPlatform(self): return "rvc2"
+        def readCalibration2(self): return self
+        def getCameraIntrinsics(self, *args): return [[500, 0, 320], [0, 500, 200], [0, 0, 1]]
+        def close(self): self.closed = True
+        def setIrFloodLightIntensity(self, value):
+            assert self.started, "Flood control preceded pipeline.start"
+            return super().setIrFloodLightIntensity(value)
+        def setIrLaserDotProjectorIntensity(self, value):
+            assert self.started, "Dot control preceded pipeline.start"
+            return super().setIrLaserDotProjectorIntensity(value)
+
+    class Pipeline:
+        def __init__(self, device, fail=False): self.device, self.fail = device, fail
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def create(self, kind): return kind()
+        def start(self):
+            if self.fail: raise RuntimeError("pipeline start failed")
+            self.device.started = True
+        def isRunning(self): return False
+
+    for supported in [True, False]:
+        device = Device(result=supported)
+        fake = SimpleNamespace(Device=lambda *args: device, DeviceInfo=lambda value: value,
+            Pipeline=lambda device: Pipeline(device), UsbSpeed=SimpleNamespace(HIGH="high"),
+            node=SimpleNamespace(Camera=Camera, StereoDepth=Stereo, Sync=Sync),
+            ImgFrame=SimpleNamespace(Type=SimpleNamespace(RGB888i="rgb", GRAY8="gray")),
+            ImgResizeMode=SimpleNamespace(CROP="crop"), CameraBoardSocket=SimpleNamespace(CAM_B="b", CAM_C="c"))
+        stop = threading.Event(); stop.set()
+        with patch.object(service, "load_depthai", return_value=fake), \
+             patch.object(service, "color_camera_socket", return_value="rgb"), \
+             patch.object(service, "configure_rgb_calibrated_focus", return_value=None), \
+             patch.object(service, "configure_rgb_depth_alignment", return_value=(Output(), "fixture")), \
+             patch.object(service, "configure_optional_imu", return_value=(None, None)):
+            _, log = capture(service.stream_camera, None, stop, model_name="nonexistent_fixture_model")
+        assert device.closed and device.calls == [("flood", 0.0), ("dot", 0.5)]
+        assert "CEREBRO_DEPTHCAM_STREAMING" in log
+
+    print("Depth camera IR fixtures passed: validated face/belly CLI defaults, normalized bounds, unsupported/rejected/error reporting, after-start SDK ordering and unchanged RGB-D startup")
+
+
+def main():
+    with tempfile.TemporaryDirectory(prefix="rob-ir-fixture-") as directory:
+        fake_home = Path(directory) / "fake-home"
+        status_directory = fake_home / "Library/Application Support/Cerebro/DepthCamera"
+        with patch.object(service, "ir_status_directory", return_value=str(status_directory)):
+            run_fixtures()
+    print("IR status persistence passed: private permissions, atomic replacement, actual SDK results and nonfatal diagnostic I/O failure; no USB")
+
+
+if __name__ == "__main__":
+    main()

@@ -85,6 +85,14 @@ import Foundation
         request(action: "arm_operation", arguments: ["operation": "manual", "arm": "left", "summary": summary],
             summary: summary, executionLimit: 600, allowArmSession: true, execute: execute, cancel: cancel, completion: completion)
     }
+    /// Right-arm tasks have their own one-shot scope. A left rehearsal grant
+    /// never authorizes them, even while both physical arms are reserved.
+    @nonobjc func requestRightWorkspaceTask(summary: String,
+        execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
+        cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
+        request(action: "arm_operation", arguments: ["operation":"manual","arm":"both","summary":summary],
+            summary:summary,executionLimit:600,allowArmSession:false,execute:execute,cancel:cancel,completion:completion)
+    }
     @nonobjc func requestLeftStationary(summary: String,
         execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
         cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
@@ -184,6 +192,14 @@ import Foundation
         guard let p = pending,
               p.action == "arm_operation", p.arguments["operation"] as? String == "manual",
               p.arguments["arm"] as? String == "left", p.summary == summary,
+              authorizationIsLive(p) else { return false }
+        return true
+    }
+
+    func authorizesRightArmTrial(_ summary: String) -> Bool {
+        guard let p = pending, p.action == "arm_operation",
+              p.arguments["operation"] as? String == "manual",
+              ["right","both"].contains(p.arguments["arm"] as? String ?? ""), p.summary == summary,
               authorizationIsLive(p) else { return false }
         return true
     }

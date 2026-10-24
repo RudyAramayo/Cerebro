@@ -5660,6 +5660,10 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
             if (strongSelf.followPersonCoordinator.active) { [strongSelf.followPersonCoordinator stopWithReason:@"Arm inspection"]; }
             strongSelf.torsoControlsViewController.headTracking_enabled.state = NSControlStateValueOff;
         }
+        if ([ROBLeftArmTrial shared].preservesRegisteredHeadView) {
+            return strongSelf.serialBox.neckCommandStateKnown &&
+                NSProcessInfo.processInfo.systemUptime >= strongSelf.serialBox.neckCommandReadyAtUptime;
+        }
         return [ROBLeftArmTrial shared].isRunning
             ? [strongSelf.serialBox prepareNeckForArmInteraction]
             : [strongSelf.serialBox prepareNeckForArmInspectionWithPanDegrees:routine.inspectionPanDegrees];
@@ -5668,7 +5672,9 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         ROBSerialBox *serial = weakSelf.serialBox;
         return serial != nil && ![ROBTorsoControlCenter shared].isArmed &&
             fabs([ROBTorsoControlCenter shared].commandedVelocity) < 0.001 &&
-            ([ROBLeftArmTrial shared].isRunning ? [serial isNeckReadyForArmInteraction]
+            ([ROBLeftArmTrial shared].preservesRegisteredHeadView ?
+                serial.neckCommandStateKnown && NSProcessInfo.processInfo.systemUptime >= serial.neckCommandReadyAtUptime :
+                [ROBLeftArmTrial shared].isRunning ? [serial isNeckReadyForArmInteraction]
                 : [serial isNeckReadyForArmInspectionWithPanDegrees:routine.inspectionPanDegrees]);
     };
     routine.viewStatus = ^NSString * {
@@ -5780,6 +5786,34 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         return @{@"known": @(known), @"pan_degrees": @(pan),
             @"lower": @(serial.commandedLowerNeckTiltTarget), @"upper": @(serial.commandedUpperNeckTiltTarget),
             @"ready_at": @(serial.neckCommandReadyAtUptime)};
+    };
+    ROBFixedHeadCalibrationWindowController *fixedHead = [ROBFixedHeadCalibrationWindowController shared];
+    fixedHead.cameraDemand = routine.cameraDemand;
+    fixedHead.holdCurrentView = ^BOOL {
+        ROBMainViewController *owner = weakSelf;
+        if (owner == nil || owner.stageShowCoordinator.isRunning ||
+            owner.pendingRobotActionRequests.count > 0 || [ROBAmberStackMaintenanceController shared].isRunning ||
+            [ROBTorsoControlCenter shared].isArmed || fabs([ROBTorsoControlCenter shared].commandedVelocity) >= 0.001 ||
+            !owner.serialBox.neckCommandStateKnown) { return NO; }
+        [owner.serialBox stopBaseMotionAndDropHeartbeat];
+        if (owner.autonomyCoordinator.active) { [owner.autonomyCoordinator stopWithReason:@"Fixed-head registration"]; }
+        if (owner.followPersonCoordinator.active) { [owner.followPersonCoordinator stopWithReason:@"Fixed-head registration"]; }
+        owner.torsoControlsViewController.headTracking_enabled.state = NSControlStateValueOff;
+        [owner.serialBox cancelPersonTrackingPostureSequence];
+        return NSProcessInfo.processInfo.systemUptime >= owner.serialBox.neckCommandReadyAtUptime;
+    };
+    fixedHead.readNeck = ^NSDictionary * {
+        ROBSerialBox *serial = weakSelf.serialBox;
+        if (serial == nil) { return @{@"known":@NO}; }
+        ROBNeckSafetyConfig config = [serial neckSafetyConfiguration];
+        double pan = 0;
+        BOOL known = serial.neckCommandStateKnown && ROBNeckSafetyPanTargetToDegrees(&config,
+            (int32_t)serial.commandedNeckPanTarget, &pan);
+        return @{@"known":@(known), @"stationary":@(![ROBTorsoControlCenter shared].isArmed &&
+            fabs([ROBTorsoControlCenter shared].commandedVelocity) < 0.001),
+            @"pan":@(serial.commandedNeckPanTarget), @"pan_degrees":@(pan),
+            @"lower":@(serial.commandedLowerNeckTiltTarget), @"upper":@(serial.commandedUpperNeckTiltTarget),
+            @"ready_at":@(serial.neckCommandReadyAtUptime)};
     };
     workspace.announce = ^(NSString *text) { [weakSelf.speechBox sayIt:text]; };
     ROBShowMotionCoordinator *rehearsal = [ROBShowMotionCoordinator shared];

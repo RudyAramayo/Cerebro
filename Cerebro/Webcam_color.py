@@ -9,7 +9,7 @@ SDK failures are reported and retried instead of terminating the service.
 
 import argparse
 from collections import deque
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 import fcntl
 import json
 import math
@@ -21,6 +21,7 @@ import socket
 import stat
 import struct
 import threading
+import tempfile
 
 
 PROTOCOL_MAGIC = b"CDP1"
@@ -46,7 +47,108 @@ def emit_error(message):
     emit("CEREBRO_DEPTHCAM_ERROR " + text)
 
 
-def parse_arguments():
+def normalized_ir_intensity(argument):
+    try:
+        if isinstance(argument, bool):
+            raise ValueError("boolean is not an intensity")
+        value = float(argument)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError("IR dot intensity must be a finite number from 0 to 1")
+    if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+        raise argparse.ArgumentTypeError("IR dot intensity must be a finite number from 0 to 1")
+    return value
+
+
+def ir_dot_intensity_for_role(role, requested=None):
+    if role not in ("face", "belly"):
+        raise ValueError("IR configuration requires a face or belly camera role")
+    value = (0.5 if role == "face" else 0.0) if requested is None else normalized_ir_intensity(requested)
+    if role == "belly" and value != 0.0:
+        raise ValueError("nonzero --ir-dot-intensity is supported only for the face camera; belly IR remains off")
+    return value
+
+
+def ir_status_directory():
+    return os.path.join(os.path.expanduser("~"), "Library", "Application Support", "Cerebro", "DepthCamera")
+
+
+def write_ir_status(status):
+    """Persist only the last SDK configuration result, never image evidence."""
+    temporary_path = None
+    try:
+        role = status["role"]
+        if role not in ("face", "belly"):
+            raise ValueError("invalid IR status role")
+        directory = ir_status_directory()
+        os.makedirs(directory, mode=0o700, exist_ok=True)
+        os.chmod(directory, 0o700)
+        descriptor, temporary_path = tempfile.mkstemp(prefix="." + role + "-ir-status-", suffix=".json", dir=directory)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            os.fchmod(output.fileno(), 0o600)
+            json.dump(status, output, sort_keys=True, indent=2)
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary_path, os.path.join(directory, role + "-ir-status.json"))
+        temporary_path = None
+        return True
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        emit_error("IR diagnostic status could not be saved: " + str(error))
+        return False
+    finally:
+        if temporary_path is not None:
+            try:
+                os.unlink(temporary_path)
+            except OSError:
+                pass
+
+
+def configure_ir_projectors(device, role, requested=None):
+    """Use the SDK's normalized controls after pipeline.start().
+
+    A successful SDK command is not proof of depth improvement. Non-Pro
+    devices or unavailable SDK methods remain usable RGB-D sources and report
+    the actual unsupported/rejected result instead of claiming an emitter.
+    """
+    intensity = ir_dot_intensity_for_role(role, requested)
+
+    def apply(method_name, value):
+        setter = getattr(device, method_name, None)
+        if not callable(setter):
+            return "unsupported_sdk"
+        try:
+            # DepthAI 3.8.0 documents a Bool return. None/other values must not
+            # be mistaken for confirmed driver support or accepted settings.
+            return "accepted" if setter(value) is True else "unavailable_or_rejected"
+        except Exception as error:
+            emit_error("IR {}: {}".format(method_name, error))
+            return "error"
+
+    # Keep the flood LED off on both cameras. The face-only dot pattern adds
+    # stereo texture without enabling the belly projector/interference.
+    flood_result = apply("setIrFloodLightIntensity", 0.0)
+    dot_result = apply("setIrLaserDotProjectorIntensity", intensity)
+    emit("CEREBRO_DEPTHCAM_IR role={} dot_requested={:.3f} dot_result={} flood_requested=0.000 flood_result={}".format(
+        role, intensity, dot_result, flood_result
+    ))
+    accepted = dot_result == "accepted" and flood_result == "accepted"
+    write_ir_status({
+        "schemaVersion": 1,
+        "timestampUTC": datetime.now(timezone.utc).isoformat(),
+        "timestampUnixMilliseconds": time.time() * 1000,
+        "processID": os.getpid(),
+        "role": role,
+        "dotRequested": intensity,
+        "floodRequested": 0.0,
+        "dotResult": dot_result,
+        "floodResult": flood_result,
+        "sdkAccepted": accepted,
+        "depthImprovementVerified": False,
+    })
+    return accepted
+
+
+def parse_arguments(argv=None):
     parser = argparse.ArgumentParser(
         description="Stream synchronized Luxonis RGB and aligned depth to Cerebro."
     )
@@ -93,7 +195,18 @@ def parse_arguments():
         default=720,
         help="Main video stream height.",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--ir-dot-intensity",
+        type=normalized_ir_intensity,
+        default=None,
+        help="Face-camera IR dot projector intensity, 0–1 (default 0.5); belly remains 0. Flood IR stays off.",
+    )
+    args = parser.parse_args(argv)
+    try:
+        args.ir_dot_intensity = ir_dot_intensity_for_role(args.role, args.ir_dot_intensity)
+    except ValueError as error:
+        parser.error(str(error))
+    return args
 
 
 def normalized_socket_path(argument):
@@ -769,7 +882,8 @@ def load_face_model_manifest(blob_path):
         return None
 
 
-def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess", width=1280, height=720):
+def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess", width=1280, height=720, ir_dot_intensity=None):
+    ir_dot_intensity = ir_dot_intensity_for_role(role, ir_dot_intensity)
     frame_size = (width, height)
     # Footage capture may request a color size above the OV9282 stereo
     # sensors' native output. Keep stereo at a supported aspect-matched size;
@@ -918,6 +1032,7 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                     IMU_DISABLED_AFTER_START_FAILURE.add(imu_retry_key)
                     emit_error("Pipeline startup failed with optional IMU; retrying RGB-D without IMU telemetry")
                 raise
+            configure_ir_projectors(device, role, ir_dot_intensity)
             intrinsic_matrix = calibration.getCameraIntrinsics(
                 rgb_socket, frame_size[0], frame_size[1]
             )
@@ -1050,7 +1165,7 @@ def client_is_connected(client):
         return False
 
 
-def serve(server, stop_event, mxid=None, role="face", model_name="chess", width=1280, height=720):
+def serve(server, stop_event, mxid=None, role="face", model_name="chess", width=1280, height=720, ir_dot_intensity=None):
     while not stop_event.is_set():
         client = accept_client(server, stop_event)
         if client is None:
@@ -1060,7 +1175,8 @@ def serve(server, stop_event, mxid=None, role="face", model_name="chess", width=
             retry_delay = INITIAL_RETRY_DELAY_SECONDS
             while not stop_event.is_set():
                 try:
-                    stream_camera(client, stop_event, mxid, role, model_name, width, height)
+                    stream_camera(client, stop_event, mxid, role, model_name, width, height,
+                                  ir_dot_intensity=ir_dot_intensity)
                     break
                 except (BrokenPipeError, ConnectionResetError, socket.timeout) as error:
                     emit_error("camera client disconnected: " + str(error))
@@ -1137,7 +1253,8 @@ def main():
         )
         parent_monitor.start()
         emit("CEREBRO_DEPTHCAM_READY " + socket_path)
-        serve(server, stop_event, args.mxid, args.role, args.model_name, args.width, args.height)
+        serve(server, stop_event, args.mxid, args.role, args.model_name, args.width, args.height,
+              ir_dot_intensity=args.ir_dot_intensity)
         return 0
     except KeyboardInterrupt:
         return 0

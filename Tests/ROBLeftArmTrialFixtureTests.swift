@@ -1,6 +1,25 @@
 import AppKit
 import simd
 
+// Hardware-free workspace-gate fixtures do not fabricate pixel evidence.
+// Pure verifier fixtures separately exercise actual RGB-D tracking. Any legacy
+// travel-positive case reaching this adapter must stop instead of inventing it.
+enum ROBRecyclingVisualInspection {
+    enum TargetMoved:Error {case displacement(Double)}
+    static var fixedContext=false
+    @_optimize(none)
+    @MainActor static func fixedHeadContextIsCurrent(model:ROBGhostRobotModel,map:ROBWorkspaceCollisionSnapshot)->Bool {fixedContext}
+    struct Context {}
+    @_optimize(none)
+    @MainActor static func begin(model:ROBGhostRobotModel,can:ROBWorkspaceLocatedObject,gatewayArm:String,check:() throws ->Void) async throws ->Context {
+        throw ROBArmRoutineError.blocked("No synthetic visual baseline has been supplied to this fixture.")
+    }
+    @_optimize(none)
+    @MainActor static func verifyAfterLift(context:Context,model:ROBGhostRobotModel,gatewayArm:String,check:() throws ->Void) async throws ->ROBVisualGraspVerifier.Evidence {
+        throw ROBArmRoutineError.blocked("No synthetic visual motion evidence has been supplied to this fixture.")
+    }
+}
+
 final class ROBShowMotionCoordinator {
     static let shared = ROBShowMotionCoordinator()
     static let greetingSummary = "Fixture combined greeting"
@@ -159,9 +178,10 @@ final class ROBAmberGatewayClient: NSObject {
             generation: expectedSessionGeneration) == nil)
         precondition(ROBLeftArmTrial.shared.approvedGestureTarget(id: proposalID, index: index + 1, seconds: duration,
             generation: expectedSessionGeneration) == nil)
-        q["right"] = target
-        activeLeases.insert("right")
-        let id = ack("ghost_step_\(index)", "right"); onGhostStep?(); return id
+        let selected=ROBLeftArmTrial.shared.executionGatewayArm
+        q[selected] = target
+        activeLeases.insert(selected)
+        let id = ack("ghost_step_\(index)", selected); onGhostStep?(); return id
     }
     func priorityHold(forArm arm: String) -> UInt64 {
         if !rejectHold { activeLeases.remove(arm) }
@@ -231,6 +251,10 @@ final class ROBWorkspaceSearch {
               (0...60_000).contains(Date().timeIntervalSince1970 * 1000 - value.oldestCapturedAtMilliseconds) else { return nil }
         return value
     }
+    @MainActor func captureRegisteredCurrentScene(model:ROBGhostRobotModel,generation:UInt64,
+        check:() throws->Void,progress:(String)->Void) async throws->ROBWorkspaceCollisionSnapshot {
+        try await scanCollisionScene(model:model,generation:generation,check:check,progress:progress)
+    }
     func clearCollisionScene() { collisionSnapshotValue = nil }
     @MainActor func scanCollisionScene(model: ROBGhostRobotModel, generation: UInt64,
         check: () throws -> Void, progress: (String) -> Void) async throws -> ROBWorkspaceCollisionSnapshot {
@@ -240,7 +264,7 @@ final class ROBWorkspaceSearch {
         let now = Date().timeIntervalSince1970 * 1000
         let camera = ROBArmRoutineVision.shared.cameraGeneration
         var map = ROBWorkspaceDepthMap(modelID: model.modelID, geometryID: model.geometryID,
-            mappingID: ROBGhostRobotModel.mappingID, sessionGeneration: generation,
+            mappingID: model.selectedMappingID, sessionGeneration: generation,
             cameraGeneration: camera, nowMilliseconds: now - 200)
         var transform = ROBWorkspaceView(panDegrees: 0, upperTarget: 6306).cameraFrame(model: model)!
         // Explicit synthetic scene for the estimated-runtime fixture only:
@@ -314,16 +338,19 @@ final class ROBArmRoutineCoordinator {
 }
 
 @main struct LeftArmTrialFixtures {
+    @_optimize(none)
     @MainActor static func run(_ proposal: ROBLeftGestureProposal, model: ROBGhostRobotModel) async -> NSDictionary {
         await withCheckedContinuation { continuation in
             ROBLeftArmTrial.shared.perform(proposal: proposal, model: model) { continuation.resume(returning: $0) }
         }
     }
+    @_optimize(none)
     @MainActor static func run(_ command: String) async -> NSDictionary {
         await withCheckedContinuation { continuation in
             ROBLeftArmTrial.shared.perform(command) { continuation.resume(returning: $0) }
         }
     }
+    @_optimize(none)
     @MainActor static func estimatedCalibrationTests(model: ROBGhostRobotModel, folder: URL) async throws {
         let trial = ROBLeftArmTrial.shared, gateway = ROBAmberGatewayClient.shared
         let search = ROBWorkspaceSearch.shared, vision = ROBArmRoutineVision.shared
@@ -440,6 +467,7 @@ final class ROBArmRoutineCoordinator {
         print("Estimated runtime rejection: decline, Stop before approval/during motion, lost/replaced map, camera/session change, >2mm start/dispatch drift and missing/consumed proof never admit another step or any jaw/encoder/deactivation command")
     }
 
+    @_optimize(none)
     @MainActor static func delayedTelemetryTests() async throws {
         let g = ROBAmberGatewayClient.shared
         for scenario in ["delivery", "source", "live_loss", "malformed", "current_jump"] {
@@ -485,6 +513,7 @@ final class ROBArmRoutineCoordinator {
         UserDefaults.standard.set(0, forKey: ROBLeftArmTrial.currentLimitKey)
         print("Delayed telemetry: 700 ms queued history retained only with newer live feedback; stale source, true feedback loss, malformed currents and historical current jumps still stop; stationary jaws only after valid live feedback; no travel or grant recovery")
     }
+    @_optimize(none)
     @MainActor static func tests() async throws {
         let dispatchID = UUID(), dispatchMap = String(repeating:"a",count:64)
         let reviewed = ROBReviewedArmDispatchStart(proposalID:dispatchID,index:3,generation:42,mapFingerprint:dispatchMap,
@@ -561,6 +590,82 @@ final class ROBArmRoutineCoordinator {
                 }
             }
             return true
+        }
+        if CommandLine.arguments.last == "right-estimated" {
+            ROBRecyclingVisualInspection.fixedContext=true
+            defer {ROBRecyclingVisualInspection.fixedContext=false}
+            g.ready=true;g.stale=false;g.commands=[];g.mode=["left":1,"right":1]
+            g.q=["left":Array(repeating:0,count:7),"right":Array(repeating:0,count:7)]
+            ROBWorkspaceSearch.shared.syntheticDistantPlane=true
+            ROBWorkspaceSearch.shared.clearCollisionScene()
+            ROBArmRoutineCoordinator.shared.prepareView={true};ROBArmRoutineCoordinator.shared.viewIsStationary={true}
+            var sides:[String]=[]
+            broker.send = { message,_,_ in
+                if message.kind == .actionRequest {
+                    sides.append(message.arguments["arm"] as! String)
+                    precondition(message.arguments["arm"] as? String=="right")
+                    precondition((message.arguments["summary"] as? String)?.contains("physical RIGHT-arm") == true)
+                    DispatchQueue.main.async {
+                        _ = broker.receive(.actionStatus(callID:message.callID!,state:.accepted,
+                            detail:"Isolated right nudge decision",result:[:],senderID:"fixture-controller",recipientID:message.senderID),
+                            device:device,session:session)
+                    }
+                }
+                return true
+            }
+            let noProof=await run("right_estimated_trial")
+            precondition(noProof["status"] as? String=="blocked" && sides.isEmpty && g.commands.isEmpty)
+            let preview=await run("right_estimated_preview")
+            precondition(preview["status"] as? String=="accepted_unverified",preview.description)
+            precondition(sides.isEmpty && g.commands.isEmpty,"Passive preview actuated or asked for authority")
+            let proof=trial.collisionReviewProposal!
+            precondition(proof.baseline==Array(repeating:0,count:7) && proof.steps.count==1)
+            precondition(proof.steps[0].positions==[0,-0.039,0,0,0,0,0] && proof.steps[0].jawAction==nil)
+            let result=await run("right_estimated_trial")
+            precondition(result["status"] as? String=="completed",result.description)
+            precondition(sides==["right"] && g.commands.filter{$0=="ghost_step_0:left"}.count==1)
+            precondition(g.q["left"]==[0,-0.039,0,0,0,0,0] && g.q["right"]==Array(repeating:0,count:7))
+            precondition(g.mode==["left":2,"right":1] && g.activeLeases.isEmpty)
+            precondition(!g.commands.contains{$0.hasPrefix("calibrate") || $0.hasPrefix("gripper") || $0.hasPrefix("deactivate") || $0.hasPrefix("waypoint")})
+            let csv=try String(contentsOfFile:result["current_recording"] as! String,encoding:.utf8)
+            precondition(csv.contains(",right,left,"))
+            g.commands=[]
+            let replay=await run("right_estimated_trial")
+            precondition(replay["status"] as? String=="blocked" && g.commands.isEmpty && sides.count==1)
+            print("Right estimated runtime: passive active-mode preview, one explicit physical-right approval, one4s immutable J2 step on gatewayleft, otherarmunchanged, nojaw/return/replay; actual pixel/depth acquisition is separately covered, never fabricated here.")
+            return
+        }
+        if CommandLine.arguments.last == "right-scope" {
+            var requestArms:[String]=[]
+            broker.send = { message,_,_ in
+                if message.kind == .actionRequest {
+                    requestArms.append(message.arguments["arm"] as! String)
+                    DispatchQueue.main.async {
+                        _ = broker.receive(.actionStatus(callID:message.callID!,state:.accepted,
+                            detail:"Isolated scope decision",result:[:],senderID:"fixture-controller",recipientID:message.senderID),
+                            device:device,session:session)
+                    }
+                }
+                return true
+            }
+            _ = await withCheckedContinuation { continuation in broker.beginArmSession {continuation.resume(returning:$0)} }
+            precondition(broker.armSessionActive && requestArms == ["left"])
+            g.commands=[];g.ready=true;g.stale=false;g.mode=["left":1,"right":1];g.calibrated=["left","right"]
+            ROBArmRoutineCoordinator.shared.prepareView={true}; ROBArmRoutineCoordinator.shared.viewIsStationary={true}
+            ROBWorkspaceSearch.shared.clearCollisionScene()
+            let result=await run("right_recycle_can")
+            precondition(requestArms == ["left","both"],"A left-only rehearsal grant was incorrectly reused for the right task")
+            precondition(trial.physicalSide=="right" && trial.executionGatewayArm=="left")
+            precondition(!broker.authorizesRightArmTrial("invented"))
+            precondition(g.mode==["left":2,"right":2],"Both active arms were not held before neck scanning")
+            precondition(g.commands.contains("position_mode:left") && g.commands.contains("position_mode:right"))
+            precondition(!g.commands.contains {$0.hasPrefix("waypoint_") || $0.hasPrefix("ghost_step_") || $0.hasPrefix("gripper_") || $0.hasPrefix("calibrate:")})
+            precondition(g.q.values.allSatisfy {$0==Array(repeating:0.0,count:7)})
+            precondition(result["arm_motion_sent"] as? Bool==false && ["not_reachable","not_localized","not_found","needs_help"].contains(result["status"] as? String ?? ""),result.description)
+            precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty && !broker.isPending)
+            broker.cancel(reason:"Isolated right-scope fixture finished")
+            print("Right task scope: left rehearsal does not authorize right travel; one fresh both-arm stationary-hold/right-travel approval; active1 -> measuredhold2 on both without parking, jaw motion or path bypass; unregistered map still blocks.")
+            return
         }
         if CommandLine.arguments.last == "estimated-calibration" {
             let model = try ROBGhostRobotModel(directory:URL(fileURLWithPath:CommandLine.arguments[1]).appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
@@ -1119,5 +1224,6 @@ final class ROBArmRoutineCoordinator {
         print("Recycling assistance: one short request before motion for a distant can, even without bucket depth; reachable can never substitutes for missing release geometry")
         try await delayedTelemetryTests()
     }
+    @_optimize(none)
     static func main() async throws { setbuf(stdout, nil); try await tests(); print("Left-arm trial fixtures passed; no hardware transport exists in this executable") }
 }

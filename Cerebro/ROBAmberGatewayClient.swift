@@ -879,7 +879,7 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
     /// vectors, no model-reference promotion, and no replay across reconnects.
     /// The coordinator owns camera clearance and the physical hanging datum.
     @nonobjc func sendRoutineWaypoint(arm: String, index: Int, duration: Double, expectedSessionGeneration: UInt64) -> UInt64 {
-        let leftTrial = ROBLeftArmTrial.shared.authorizesTaughtWaypoint(
+        let leftTrial = ROBLeftArmTrial.shared.physicalSide == "left" && ROBLeftArmTrial.shared.authorizesTaughtWaypoint(
             arm: arm, expectedSessionGeneration: expectedSessionGeneration)
         guard Thread.isMainThread,
               ROBArmRoutineCoordinator.shared.isRunning || leftTrial,
@@ -909,16 +909,17 @@ private struct ROBAmberGatewayGripperAcknowledgementResult {
     /// ghost proposal. Neither the UI nor the caller supplies a raw vector.
     @nonobjc func sendApprovedLeftGestureStep(proposalID: UUID, index: Int, duration: Double,
                                              expectedSessionGeneration: UInt64) -> UInt64 {
+        let selectedArm = ROBLeftArmTrial.shared.executionGatewayArm
         guard Thread.isMainThread,
               let target = ROBLeftArmTrial.shared.approvedGestureTarget(id: proposalID, index: index,
                 seconds: duration, generation: expectedSessionGeneration),
-              let sample = telemetry(forArm: "right"), sample.effectiveSampleAgeMilliseconds <= 250,
+              let sample = telemetry(forArm: selectedArm), sample.effectiveSampleAgeMilliseconds <= 250,
               sample.effectiveGripperFeedbackAgeMilliseconds <= 250,
               sample.statuses.count == 7, sample.statuses.allSatisfy({ $0.intValue == 2 }),
-              modes(forArm: "right").count == 7, modes(forArm: "right").allSatisfy({ $0.intValue == 2 }),
+              modes(forArm: selectedArm).count == 7, modes(forArm: selectedArm).allSatisfy({ $0.intValue == 2 }),
               let minimum = ROBLeftArmInteractionPlan.duration(from: sample.positionsRadians.map(\.doubleValue), to: target),
               duration.isFinite, duration >= minimum - 0.05, duration <= 5 else { return 0 }
-        return sendVendorLeasedTrajectory(arm: "right", positionsRadians: target.map(NSNumber.init(value:)),
+        return sendVendorLeasedTrajectory(arm: selectedArm, positionsRadians: target.map(NSNumber.init(value:)),
             duration: duration, leaseMilliseconds: 1500, expectedSessionGeneration: expectedSessionGeneration)
     }
 

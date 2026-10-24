@@ -56,7 +56,7 @@ import simd
     private let angleText = NSTextField(labelWithString: "")
     private let xyz = (0..<3).map { _ in NSTextField(string: "0") }
     private let poseCount = NSTextField(labelWithString: "No custom poses")
-    private let referenceInfo = NSTextField(wrappingLabelWithString: "Original model: waiting for left-arm feedback")
+    private let referenceInfo = NSTextField(wrappingLabelWithString: "Original model: waiting for selected-arm feedback")
     private let headInfo = NSTextField(wrappingLabelWithString: "Head: waiting for accepted neck commands")
     private let continueButton = NSButton()
     private var displayedInteractionStage = ""
@@ -78,7 +78,7 @@ import simd
             guard let directory = Bundle.main.url(forResource: "ShadowPlanner", withExtension: nil) else {
                 throw ROBGhostMotionError.blocked("Bundled robot model is missing.")
             }
-            let model = try ROBGhostRobotModel(directory: directory)
+            let model = try ROBGhostRobotModel(directory: directory, physicalSide:ROBLeftArmTrial.shared.physicalSide)
             self.model = model; ghost = model.reference
             // ROB X-forward/Y-left/Z-up -> the existing scene's Y-up/-Z-forward.
             let scale = ROBScanVisualModel.presentationScale
@@ -110,8 +110,8 @@ import simd
             capturedRobot.isHidden = true
             let initial = freshBaseline()
             updateOriginal(initial.map { model.positions(vendorLeft: $0.q) } ?? model.reference)
-            referenceInfo.stringValue = initial == nil ? "Original: scan reference; fresh left feedback unavailable."
-                : "Original left: fresh encoders with upright mapping prior. Other joints: scan reference."
+            referenceInfo.stringValue = initial == nil ? "Original: scan reference; fresh \(model.physicalSide) feedback unavailable."
+                : "Original physical \(model.physicalSide): fresh encoders with recorded mapping prior. Other joints: scan reference."
             for joint in model.joints where joint.kind != "fixed" && joint.upper > joint.lower {
                 joints.addItem(withTitle: joint.name)
             }
@@ -443,7 +443,13 @@ import simd
     /// This is a value-only review of the last checked artifact. It deliberately
     /// never assigns the executable proposal or binds a live execution baseline.
     @objc private func showLatestCollisionReview() {
-        guard let model, !ROBLeftArmTrial.shared.isRunning, !ROBArmRoutineCoordinator.shared.isRunning else { return }
+        guard !ROBLeftArmTrial.shared.isRunning, !ROBArmRoutineCoordinator.shared.isRunning else { return }
+        let selectedSide = ROBLeftArmTrial.shared.physicalSide
+        if model?.physicalSide != selectedSide, let directory = model?.directory {
+            do { model = try ROBGhostRobotModel(directory:directory,physicalSide:selectedSide) }
+            catch { status.stringValue = error.localizedDescription; return }
+        }
+        guard let model else { return }
         invalidateReview(); liveBaseline = false; poses = []; tabletopEditing = false
         refreshCollisionScene(force: true)
         guard let candidate = ROBLeftArmTrial.shared.collisionReviewProposal else {
@@ -460,8 +466,9 @@ import simd
         presets.selectItem(at: 2); name.stringValue = "Collision route · read-only"
         ghost = model.positions(vendorLeft: candidate.baseline)
         timeline.minValue = 0; timeline.maxValue = candidate.seconds; timeline.doubleValue = 0
-        identity.stringValue = "READ-ONLY PATH · no actuator authority\nProposal \(candidate.id.uuidString)\nModel \(candidate.modelID.prefix(12))… · \(candidate.steps.count) steps"
-        poseCount.stringValue = "All seven left-arm joints · checked route preview"
+        let label = candidate.kind.contains("estimated") ? "ESTIMATED EMPTY-ARM TRIAL" : "READ-ONLY PATH"
+        identity.stringValue = "\(label) · no actuator authority\nPhysical \(model.physicalSide) arm · proposal \(candidate.id.uuidString)\nModel \(candidate.modelID.prefix(12))… · \(candidate.steps.count) steps"
+        poseCount.stringValue = "All seven \(model.physicalSide)-arm joints · route preview"
         status.stringValue = collisionInfo.stringValue
         var points: [SCNVector3] = [], previous = candidate.baseline
         for step in candidate.steps {
@@ -677,8 +684,9 @@ import simd
     }
     private func freshBaseline() -> (q: [Double], generation: UInt64)? {
         let gateway = ROBAmberGatewayClient.shared
-        guard gateway.isReady(), let sample = gateway.telemetry(forArm: "right"), sample.effectiveSampleAgeMilliseconds <= 250,
-              sample.positionsRadians.count == 7,
+        let gatewayArm = model?.physicalSide == "right" ? "left" : "right"
+        guard gateway.isReady(), let sample = gateway.telemetry(forArm: gatewayArm), sample.effectiveSampleAgeMilliseconds <= 250,
+              sample.positionsRadians.count == 7, sample.positionsRadians.allSatisfy({ $0.doubleValue.isFinite }),
               let generation = (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value,
               generation > 0 else { return nil }
         return (sample.positionsRadians.map(\.doubleValue), generation)
@@ -1000,7 +1008,7 @@ import simd
             timeline.maxValue = samples.last?.time ?? 1; timeline.doubleValue = 0
             currentPlot.values = samples.map { ($0.time, $0.deltas.map(abs).max() ?? 0) }
             identity.stringValue = "RECORDING REPLAY · no execution\n\(url.lastPathComponent)"
-            status.stringValue = "Original: measured left joints. Blue: approved step target when a matching manifest exists. Raw-current trace below; scrub to inspect peaks."
+            status.stringValue = "Original: measured \(model.physicalSide) joints. Blue: approved step target when a matching manifest exists. Raw-current trace below; scrub to inspect peaks."
             renderTime(0)
         } catch { status.stringValue = error.localizedDescription }
     }

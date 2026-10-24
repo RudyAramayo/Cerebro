@@ -1,4 +1,5 @@
 import AppKit
+import simd
 
 /// Ephemeral admission evidence for one already-authorized waypoint. It is
 /// never encoded or retained across steps/sessions. Account for start drift
@@ -29,16 +30,20 @@ struct ROBReviewedArmDispatchStart {
 
 /// Operator-supervised trials with fresh scene evidence and a complete
 /// dynamically checked arm sweep. Physical geometry still needs commissioning.
-/// Physical left is Amber R11, gateway `right`; never dispatch to L10 here.
+/// Physical sides are explicit: LEFT=R11/gateway right, RIGHT=L10/gateway left.
+/// Existing left gesture commands retain their original scope; right recycling
+/// has an independent model mapping and one-shot approval.
 @objcMembers final class ROBLeftArmTrial: NSObject {
     static let shared = ROBLeftArmTrial()
     static let commands = ["left_wave", "left_prepare", "left_grip", "left_release", "left_relax", "left_object_cycle",
         "left_pick_place", "left_recycle_can", "left_search_workspace", "left_check_hanging", "left_scan_clearance",
-        "left_estimated_preview", "left_estimated_calibration"]
+        "left_estimated_preview", "left_estimated_calibration",
+        "right_estimated_preview", "right_estimated_trial", "right_recycle_can", "right_recycle_two_cans", "left_recycle_two_cans", "right_search_workspace", "right_scan_clearance"]
     private static let neckOnlyCommands = ["left_search_workspace", "left_check_hanging", "left_scan_clearance", "left_estimated_preview"]
     static let currentLimitKey = "ROBLeftArmCurrentJumpLimitRaw"
     private(set) var isRunning = false
     var isNeckOnlyInspection: Bool { isRunning && Self.neckOnlyCommands.contains(activeCommand) }
+    var preservesRegisteredHeadView: Bool { isRunning && (activeCommand == "left_recycle_can" || physicalSide == "right" && activeCommand == "left_estimated_calibration") }
     private(set) var status = "Left arm ready for a supervised trial"
     private(set) var lastRecordingPath = ""
     /// Local readiness within the one controller-approved object cycle.
@@ -57,7 +62,19 @@ struct ROBReviewedArmDispatchStart {
     @nonobjc private var sceneHold: [String:(positions:[Double],modes:[Int])] = [:]
     @nonobjc private var reviewedDispatchStart: ROBReviewedArmDispatchStart?
 
-    private let arm = "right"
+    private(set) var physicalSide = "left"
+    @nonobjc var executionGatewayArm: String { physicalSide == "left" ? "right" : "left" }
+    private var arm: String { executionGatewayArm }
+    @nonobjc var rightCanReachCalibrationFile = ROBLeftCanReachCalibration.file(forPhysicalSide:"right")
+    @nonobjc private var selectedCanReachCalibrationFile: URL {
+        physicalSide == "left" ? canReachCalibrationFile : rightCanReachCalibrationFile
+    }
+    private func selectPhysicalSide(_ side: String) {
+        guard physicalSide != side else { return }
+        physicalSide = side; referencedGeneration = 0; recoveryPath = []; recoveryGeneration = 0; offeredRecovery = nil
+        collisionMap = nil; collisionModel = nil; collisionReviewProposal = nil
+        collisionReviewStatus = ["status":"not_scanned","detail":"Physical arm changed; scan its current scene before planning."]
+    }
     private let gateway = ROBAmberGatewayClient.shared
     private let vision = ROBArmRoutineVision.shared
     private var task: Task<Void, Never>?
@@ -90,6 +107,11 @@ struct ROBReviewedArmDispatchStart {
     private var maxDelayedSampleAge = 0.0
     private var phase = "preflight"
     private var activeCommand = ""
+    private var requestedCanCount = 1
+    @nonobjc private var recyclingCan: ROBWorkspaceLocatedObject?
+    @nonobjc private var lastVisualGraspEvidence: ROBVisualGraspVerifier.Evidence?
+    private var movingTargetReplansRemaining = 1
+    private var recyclingGripDispatched = false
     private var inactiveWorkspaceSearch = false
     private var readinessConfirmed = false
     private var jawIntensity = 10
@@ -109,6 +131,8 @@ struct ROBReviewedArmDispatchStart {
         let model: ROBGhostRobotModel
         let proposal: ROBLeftGestureProposal
         let otherArmHold: (positions: [Double], modes: [Int])
+        let geometryValidationFingerprint:String
+        let resourceFingerprint:String
     }
     @nonobjc private var pendingEstimated: EstimatedPreview?
     @nonobjc private var activeEstimated: EstimatedPreview?
@@ -127,7 +151,7 @@ struct ROBReviewedArmDispatchStart {
         do {
             guard !isRunning, !ROBArmRoutineCoordinator.shared.isRunning,
                   !ROBShowMotionCoordinator.shared.isRunning, !ROBAmberGestureExecutor.shared.isExecuting,
-                  !ROBControllerArmApproval.shared.isPending, let pending = pendingEstimated else {
+                  !ROBControllerArmApproval.shared.isPending, let pending = pendingEstimated, pending.model.physicalSide==physicalSide else {
                 throw ROBArmRoutineError.blocked("Prepare and review a fresh estimated single-step preview first; finish other operations.")
             }
             try validateEstimatedContext(pending, generation: pending.proof.sessionGeneration)
@@ -139,10 +163,10 @@ struct ROBReviewedArmDispatchStart {
             let changes = zip(pending.proof.baseline,pending.proof.target).enumerated().map {
                 String(format:"J%d %+.4f rad",$0.offset+1,$0.element.1-$0.element.0)
             }.joined(separator:"; ")
-            let text = "ONE estimated EMPTY physical LEFT-arm retreat away from the table over 4 seconds: \(changes), modeled vertex travel \(Int(ceil(pending.proof.maximumVertexDisplacementMeters*1000))) mm. Confirm empty jaws and visually clear the complete arm and its surrounding local working space. Camera registration remains UNVERIFIED. This supervised EMPTY retreat may start inside the estimated 150 mm depth margin: recorded existing nearby cells must have at least 100 mm plus jaw allowance of modeled starting separation and move farther from the arm at every checked pose, with strict final improvement. New margin intrusions still block. These are estimated geometry checks, not measured collision protection. No grasp, jaw command, encoder reset, torque-off, return or repeat. Hold at the measured finish and report physical direction. Proof \(pending.proof.id.uuidString); scene \(pending.map.sceneID.uuidString); map SHA256 \(pending.map.fingerprint). Keep Stop + hold ready."
+            let text = "ONE estimated EMPTY physical \(physicalSide.uppercased())-arm retreat away from the table over 4 seconds: \(changes), modeled vertex travel \(Int(ceil(pending.proof.maximumVertexDisplacementMeters*1000))) mm. Confirm empty jaws and visually clear the complete arm and its surrounding local working space. Camera registration remains UNVERIFIED. This supervised EMPTY retreat may start inside the estimated 150 mm depth margin: recorded existing nearby cells must have at least 100 mm plus jaw allowance of modeled starting separation and move farther from the arm at every checked pose, with strict final improvement. New margin intrusions still block. These are estimated geometry checks, not measured collision protection. No grasp, jaw command, encoder reset, torque-off, return or repeat. Hold at the measured finish and report physical direction. Proof \(pending.proof.id.uuidString); scene \(pending.map.sceneID.uuidString); map SHA256 \(pending.map.fingerprint). Keep Stop + hold ready."
             estimatedApprovalPending = true
             update("Awaiting approval for one estimated empty-arm calibration step")
-            ROBControllerArmApproval.shared.request(operation: "manual", arm: "left", summary: text,
+            ROBControllerArmApproval.shared.request(operation: "manual", arm: physicalSide, summary: text,
                 execute: { [weak self] done in
                     guard let self else { return }
                     self.estimatedApprovalPending = false
@@ -175,6 +199,23 @@ struct ROBReviewedArmDispatchStart {
         }
     }
 
+    private func estimatedGeometryFingerprint(proof:ROBEstimatedArmCalibrationPlan,map:ROBWorkspaceCollisionSnapshot,
+        model:ROBGhostRobotModel,proposal:ROBLeftGestureProposal) throws ->String {
+        let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
+        var bytes=try encoder.encode(proof)
+        bytes.append(Data("|\(proposal.fingerprint)|\(map.fingerprint)|\(model.modelID)|\(model.referenceID)|\(model.geometryID)|\(model.selectedMappingID)|\(model.physicalSide)".utf8))
+        return ROBGhostRobotModel.hash(bytes)
+    }
+    private func estimatedResourceFingerprint(model:ROBGhostRobotModel) throws ->String {
+        let paths=["model.urdf","reference.json","surfaces.json"]+Array(Set(model.hulls.values)).sorted()
+        var bytes=Data()
+        for path in paths {
+            bytes.append(Data(path.utf8));bytes.append(0)
+            bytes.append(Data(ROBGhostRobotModel.hash(try Data(contentsOf:model.directory.appendingPathComponent(path))).utf8))
+        }
+        return ROBGhostRobotModel.hash(bytes)
+    }
+
     private func estimatedStartMatches(_ actual: [Double], baseline: [Double]) -> Bool {
         actual.count == 7 && baseline.count == 7 && actual.allSatisfy(\.isFinite) &&
             1.5*zip(actual,baseline).reduce(0.0,{ $0+abs($1.0-$1.1) }) <= ROBReviewedArmDispatchStart.maximumStartPointDriftMeters
@@ -194,7 +235,14 @@ struct ROBReviewedArmDispatchStart {
 
     private func validateEstimatedContext(_ value: EstimatedPreview, generation: UInt64) throws {
         let proof = value.proof, path = value.proposal
-        guard gateway.isReady(),
+        guard Thread.isMainThread else {throw ROBArmRoutineError.blocked("Estimated arm context must be reviewed on the control thread.")}
+        if physicalSide == "right" {
+            guard MainActor.assumeIsolated({ROBRecyclingVisualInspection.fixedHeadContextIsCurrent(model:value.model,map:value.map)}) else {
+                throw ROBArmRoutineError.blocked("The fixed registered head/body/camera context changed after the RIGHT preview; no probe admitted.")
+            }
+        }
+        guard value.geometryValidationFingerprint == (try estimatedGeometryFingerprint(proof:proof,map:value.map,model:value.model,proposal:path)),
+              value.model.physicalSide==physicalSide, gateway.isReady(),
               (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == generation,
               let current = ROBWorkspaceSearch.shared.collisionSnapshot,
               current.sceneID == value.map.sceneID, current.fingerprint == value.map.fingerprint,
@@ -213,10 +261,10 @@ struct ROBReviewedArmDispatchStart {
            !estimatedCorridorMatches(try measured().positionsRadians.map(\.doubleValue),proof:proof) {
             throw ROBArmRoutineError.blocked("Measured LEFT joints left the approved estimated retreat corridor; hold requested.")
         }
-        let held = value.otherArmHold
-        guard let sample = gateway.telemetry(forArm:"left"), sample.effectiveSampleAgeMilliseconds <= 250,
+        let held = value.otherArmHold, otherGatewayArm = arm == "right" ? "left" : "right"
+        guard let sample = gateway.telemetry(forArm:otherGatewayArm), sample.effectiveSampleAgeMilliseconds <= 250,
               sample.positionsRadians.count == 7, sample.positionsRadians.allSatisfy({ $0.doubleValue.isFinite }),
-              gateway.modes(forArm:"left").map(\.intValue) == held.modes,
+              gateway.modes(forArm:otherGatewayArm).map(\.intValue) == held.modes,
               sample.statuses.map(\.intValue) == held.modes,
               1.5*zip(sample.positionsRadians.map(\.doubleValue),held.positions).reduce(0.0,{ $0+abs($1.0-$1.1) }) <= 0.003 else {
             throw ROBArmRoutineError.blocked("The other arm moved, changed mode or lost fresh feedback; hold the estimated trial.")
@@ -291,6 +339,7 @@ struct ROBReviewedArmDispatchStart {
             }
             let limit = UserDefaults.standard.double(forKey: Self.currentLimitKey)
             guard limit.isFinite, limit >= 0 else { throw ROBGhostMotionError.blocked("Invalid current jump threshold.") }
+            selectPhysicalSide(model.physicalSide)
             let range = (0..<7).map { index in
                 let values = [proposal.baseline[index]] + proposal.steps.map { $0.positions[index] }
                 return String(format: "J%d %.2f…%.2f", index + 1, values.min()!, values.max()!)
@@ -302,13 +351,18 @@ struct ROBReviewedArmDispatchStart {
                 : "Move only the empty physical LEFT arm; jaws unchanged."
             let text = "Reviewed ghost gesture ‘\(proposal.name)’: \(proposal.steps.count) steps, \(Int(ceil(proposal.seconds))) seconds scheduled, maximum 180 seconds including settling. \(range). Proposal \(proposal.id.uuidString), SHA256 \(proposal.fingerprint). \(scope) Camera centers at upright lower 6011 / upper 6306. Confirm physically hanging at encoder zero for the first movement of this session. Model/encoder mapping uses the recorded upright prior; watch actual arm, tread and cable clearance. This is a supervised trial, not certified collision or force protection. Keep Stop + hold ready; keep the controller open when using controller approval. \(current)"
             update("Awaiting controller approval for reviewed ghost: \(proposal.name)")
-            ROBControllerArmApproval.shared.requestLeftGesture(summary: text,
-                execute: { [weak self] done in
-                    guard let self else { return }
-                    self.proposal = proposal
-                    self.start("left_ghost", summary: text, limit: limit, completion: done)
-                }, cancel: { [weak self] in self?.abort("Controller cancelled the ghost gesture; hold requested.") },
-                completion: { [weak self] result in self?.update(result["detail"] as? String ?? "Ghost gesture ended"); completion(result) })
+            let execute: (@escaping (NSDictionary) -> Void) -> Void = { [weak self] done in
+                guard let self else { return }
+                self.proposal = proposal
+                self.start("left_ghost", summary:text, limit:limit, completion:done)
+            }
+            let cancelled = { [weak self] in self?.abort("Controller cancelled the ghost gesture; hold requested."); return }
+            let finished: (NSDictionary) -> Void = { [weak self] result in self?.update(result["detail"] as? String ?? "Ghost gesture ended"); completion(result) }
+            if model.physicalSide == "right" {
+                ROBControllerArmApproval.shared.requestRightWorkspaceTask(summary:text,execute:execute,cancel:cancelled,completion:finished)
+            } else {
+                ROBControllerArmApproval.shared.requestLeftGesture(summary:text,execute:execute,cancel:cancelled,completion:finished)
+            }
         } catch { completion(["status": "blocked", "detail": error.localizedDescription]) }
     }
 
@@ -350,7 +404,7 @@ struct ROBReviewedArmDispatchStart {
         }
         guard steps.reduce(0, { $0 + $1.seconds }) <= 135 else { throw ROBGhostMotionError.blocked("Recovery path exceeds one approval window.") }
         let value = ROBLeftGestureProposal(id: UUID(), name: "Return interrupted gesture", kind: "recover", modelID: model.modelID,
-            referenceID: model.referenceID, geometryID: model.geometryID, mappingID: ROBGhostRobotModel.mappingID,
+            referenceID: model.referenceID, geometryID: model.geometryID, mappingID: model.selectedMappingID,
             sessionGeneration: recoveryGeneration, baseline: q, poses: [], steps: steps)
         offeredRecovery = value; return value
     }
@@ -384,9 +438,21 @@ struct ROBReviewedArmDispatchStart {
             }
     }
 
-    func perform(_ command: String, completion: @escaping (NSDictionary) -> Void) {
+    func perform(_ requestedCommand: String, completion: @escaping (NSDictionary) -> Void) {
         precondition(Thread.isMainThread)
-        guard Self.commands.contains(command) else { completion(["status": "rejected"]); return }
+        guard Self.commands.contains(requestedCommand) else { completion(["status": "rejected"]); return }
+        // Normalize shared task semantics only after preserving physical identity.
+        // Busy callers cannot change the side of an already-running operation.
+        guard !isRunning else { completion(["status":"busy","detail":"An arm operation is already running."]); return }
+        guard !ROBArmRoutineCoordinator.shared.isRunning, !ROBShowMotionCoordinator.shared.isRunning,
+              !ROBAmberGestureExecutor.shared.isExecuting,
+              !ROBControllerArmApproval.shared.isPending || requestedCommand == "left_relax" else {
+            completion(["status":"busy","detail":"Finish the current operation or use Stop + hold."]);return
+        }
+        selectPhysicalSide(requestedCommand.hasPrefix("right_") ? "right" : "left")
+        requestedCanCount = requestedCommand.hasSuffix("_recycle_two_cans") ? 2 : 1
+        let canonical = requestedCommand.hasPrefix("right_") ? "left_" + requestedCommand.dropFirst(6) : requestedCommand
+        let command = canonical == "left_recycle_two_cans" ? "left_recycle_can" : canonical == "left_estimated_trial" ? "left_estimated_calibration" : canonical
         if command == "left_estimated_calibration" { performEstimatedCalibration(completion:completion); return }
         if !isRunning { invalidateEstimatedPreview(reason:"Another operation replaced the estimated preview") }
         if command == "left_pick_place" {
@@ -436,12 +502,16 @@ struct ROBReviewedArmDispatchStart {
         case "left_object_cycle": action = "Complete one LEFT object handoff using fresh depth and dynamically checked full-arm connectors. Reuse startup gripper setup, open and wait for Object placed / fingers clear before gripping at intensity 2. Wait for Receiver supporting before release, then Object clear / jaws empty before a checked empty return to hanging and deactivation. Readiness signals continue the same approval. Opening, retention and force remain unmeasured."
         default: action = "Return the empty LEFT arm to hanging through a fresh dynamically calculated full-arm collision-checked route, then deactivate only at measured hanging. Remove any object first. No extra approval is needed for this empty return."
         }
-        let notice = " Arm travel requires measured camera/robot registration, fresh observed space and complete arm clearance. Unknown space blocks the path. Confirm the joint reference for the first motion of a session. The right arm stays still. Watch actual clearance; Stop + hold remains available."
+        let notice = " Physical \(physicalSide.uppercased()) arm only. Arm travel requires measured camera/robot registration, fresh observed space and complete arm clearance. Unknown space blocks the path. Confirm the joint reference for the first motion of a session. The other arm stays still. Watch actual clearance; Stop + hold remains available."
         let current = limit == 0 ? " Current recording only; automatic current cutoff is not configured."
             : " Request hold if any joint's current changes by more than \(limit) raw units between samples; this is not a calibrated force limit."
         let travel = ["left_wave", "left_prepare", "left_relax", "left_object_cycle"].contains(command)
         let workspace = ["left_recycle_can", "left_search_workspace", "left_check_hanging", "left_scan_clearance"].contains(command)
-        let approvedSummary = action + notice + current + (workspace ? " Maximum 600 seconds including search, planning and movement." : travel ? " Maximum 180 seconds including preparation and settling." : "")
+        let bothHolds = physicalSide == "right" && command == "left_recycle_can"
+            ? " Both arms may enter a measured stationary position hold without travel; only the physical RIGHT arm may execute the planned path. If both are already measured hanging and empty, stationary startup jaw initialization may finish there without raising them. The physical LEFT arm otherwise stays at its measured pose." : ""
+        let batch = requestedCanCount == 2 && command == "left_recycle_can"
+            ? " TWO empty cans, sequentially: fresh perception, collision review and visual grasp check for each. A failed or uncertain grasp stops the batch in a hold; no blind next-can retry. One approval covers both complete transfers." : ""
+        let approvedSummary = action + batch + notice + bothHolds + current + (workspace ? " Maximum 600 seconds including search, planning and movement." : travel ? " Maximum 180 seconds including preparation and settling." : "")
         if Self.neckOnlyCommands.contains(command) || command == "left_relax" {
             update(command == "left_relax" ? "Returning the empty left arm to hanging" : "Starting local neck-camera inspection")
             start(command, summary: action, limit: limit, completion: completion)
@@ -456,7 +526,9 @@ struct ROBReviewedArmDispatchStart {
         let finished: (NSDictionary) -> Void = { [weak self] result in
             self?.update(result["detail"] as? String ?? "Left-arm operation ended"); completion(result)
         }
-        if workspace {
+        if workspace && physicalSide == "right" {
+            ROBControllerArmApproval.shared.requestRightWorkspaceTask(summary: approvedSummary, execute:execute, cancel:cancel, completion:finished)
+        } else if workspace {
             ROBControllerArmApproval.shared.requestLeftWorkspaceTask(summary: approvedSummary, execute: execute,
                 cancel: cancel, completion: finished)
         } else if travel {
@@ -545,7 +617,7 @@ struct ROBReviewedArmDispatchStart {
         }
     }
 
-    @MainActor private func beginHeldSceneObservation() async throws {
+    @MainActor private func beginHeldSceneObservation(allowActiveForPassiveCapture:Bool = false) async throws {
         guard !leased, leaseRenewals.isEmpty else {
             throw ROBArmRoutineError.blocked("Finish the measured arm hold before moving the neck to scan.")
         }
@@ -555,7 +627,7 @@ struct ROBReviewedArmDispatchStart {
             let modes = gateway.modes(forArm:side).map(\.intValue)
             guard let sample = gateway.telemetry(forArm:side), sample.effectiveSampleAgeMilliseconds <= 250,
                   sample.positionsRadians.count == 7, sample.positionsRadians.allSatisfy({ $0.doubleValue.isFinite }),
-                  modes.count == 7, [0,2].contains(modes[0]), modes.allSatisfy({ $0 == modes[0] }),
+                  modes.count == 7, ([0,2].contains(modes[0]) || allowActiveForPassiveCapture && modes[0]==1), modes.allSatisfy({ $0 == modes[0] }),
                   sample.statuses.map(\.intValue) == modes else {
                 throw ROBArmRoutineError.blocked("Fresh unchanged holding or inactive feedback is required for the neck-only scene scan.")
             }
@@ -639,7 +711,8 @@ struct ROBReviewedArmDispatchStart {
                        completion: @escaping (NSDictionary) -> Void) {
         let id = UUID()
         // Reserve both physical arms so another controller cannot move the
-        // other arm into this trial. Only the left arm receives commands.
+        // other arm into this trial. Only the selected arm receives waypoints;
+        // the right-task scope separately covers current-pose holds on both.
         guard ROBAmberArmMotionArbiter.shared.reserve(.left, owner: id) else {
             completion(["status": "blocked", "detail": "Another controller owns the left arm."]); return
         }
@@ -656,7 +729,7 @@ struct ROBReviewedArmDispatchStart {
         collisionModel = command == "left_estimated_calibration" ? activeEstimated?.model : nil
         sceneCapturedForThisTask = command == "left_estimated_calibration"; reviewedDispatchStart = nil
         armTravelDispatched = false; sceneHold = [:]
-        activeCommand = command; inactiveWorkspaceSearch = false; interactionStage = ""; readinessConfirmed = false; taskJawTarget = nil
+        activeCommand = command; recyclingCan=nil; lastVisualGraspEvidence=nil; movingTargetReplansRemaining=1; recyclingGripDispatched=false; inactiveWorkspaceSearch = false; interactionStage = ""; readinessConfirmed = false; taskJawTarget = nil
         lastRecordingPath = ""; sampleCount = 0; peakJump = 0
         failure = nil; generation = 0; cameraReady = false; positionReady = false; leased = false
         allowsArmTravel = ["left_wave", "left_prepare", "left_relax", "left_ghost", "left_object_cycle", "left_recycle_can", "left_estimated_calibration"].contains(command)
@@ -683,7 +756,7 @@ struct ROBReviewedArmDispatchStart {
     private func check() throws {
         try Task.checkCancellation()
         if let failure { throw ROBArmRoutineError.blocked(failure) }
-        guard Self.neckOnlyCommands.contains(activeCommand) || activeCommand == "left_relax" || ROBControllerArmApproval.shared.authorizesLeftArmTrial(summary) else {
+        guard Self.neckOnlyCommands.contains(activeCommand) || activeCommand == "left_relax" || (physicalSide == "left" ? ROBControllerArmApproval.shared.authorizesLeftArmTrial(summary) : ROBControllerArmApproval.shared.authorizesRightArmTrial(summary)) else {
             throw ROBArmRoutineError.blocked("Left-arm authorization ended; hold requested.")
         }
         guard ProcessInfo.processInfo.systemUptime < deadline else { throw ROBArmRoutineError.blocked("Left-arm trial timed out.") }
@@ -769,14 +842,43 @@ struct ROBReviewedArmDispatchStart {
     }
 
     @MainActor private func execute(_ command: String) async throws -> NSDictionary {
+        guard command == "left_recycle_can", requestedCanCount == 2 else { return try await executeSingle(command) }
+        var results:[[String:Any]]=[]
+        for index in 0..<2 {
+            try check()
+            update("Recycling can \(index+1) of 2; freshly checking this can and the bucket")
+            recyclingCan=nil; lastVisualGraspEvidence=nil; movingTargetReplansRemaining=1; recyclingGripDispatched=false; sceneCapturedForThisTask=false;collisionMap=nil;collisionModel=nil;collisionReviewProposal=nil
+            let result=try await executeSingle(command)
+            results.append(result as! [String:Any])
+            guard result["motion_completed"] as? Bool == true,
+                  result["grasp_visually_supported"] as? Bool == true else {
+                var stopped=result as! [String:Any]
+                stopped["batch_requested"]=2;stopped["batch_completed"]=index;stopped["batch_results"]=results
+                stopped["detail"]="Two-can test stopped at can \(index+1): " + (result["detail"] as? String ?? "Unconfirmed result; held for observation.")
+                return stopped as NSDictionary
+            }
+        }
+        return ["status":"accepted_unverified","motion_completed":true,"grasp_visually_supported":true,
+            "placement_verified":false,"batch_requested":2,"batch_completed":2,"batch_results":results,
+            "physical_arm":physicalSide,"detail":"Both can-transfer paths completed with visual support for each grasp. Gravity releases were commanded over the measured opening; landing inside the bucket remains unmeasured."]
+    }
+
+    @MainActor private func executeSingle(_ command: String) async throws -> NSDictionary {
         if command == "left_scan_clearance" || command == "left_estimated_preview" {
             let model = try workspaceModel()
             let current = (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value ?? 0
             guard current > 0, gateway.isReady() else { throw ROBArmRoutineError.blocked("Connect Amber before scanning arm-clearance geometry.") }
             generation = current
-            try await beginHeldSceneObservation()
-            let map = try await ROBWorkspaceSearch.shared.scanCollisionScene(model:model,generation:current,
-                check:{ try self.check() },progress:{ self.update($0) })
+            let passiveRightProbe = physicalSide == "right" && command == "left_estimated_preview"
+            try await beginHeldSceneObservation(allowActiveForPassiveCapture:passiveRightProbe)
+            let map:ROBWorkspaceCollisionSnapshot
+            if passiveRightProbe {
+                map = try await ROBWorkspaceSearch.shared.captureRegisteredCurrentScene(model:model,generation:current,
+                    check:{try self.check()},progress:{self.update($0)})
+            } else {
+                map = try await ROBWorkspaceSearch.shared.scanCollisionScene(model:model,generation:current,
+                    check:{ try self.check() },progress:{ self.update($0) })
+            }
             collisionMap = map; collisionReviewProposal = nil
             collisionModel = model; sceneCapturedForThisTask = true
             publishCollisionReview(map:map,detail:map.registrationDetail)
@@ -789,14 +891,16 @@ struct ROBReviewedArmDispatchStart {
                 }.value
                 try check()
                 guard estimatedStartMatches(try measured().positionsRadians.map(\.doubleValue),baseline:baseline),
-                      let held = sceneHold["left"] else {
+                      let held = sceneHold[arm == "right" ? "left" : "right"] else {
                     throw ROBArmRoutineError.blocked("The arms changed during estimated calibration review; capture again.")
                 }
                 let path = ROBLeftGestureProposal(id:proof.id,name:"Estimated EMPTY-arm retreat away from the table",
                     kind:"estimated_calibration",modelID:proof.modelID,referenceID:proof.referenceID,
                     geometryID:proof.geometryID,mappingID:proof.mappingID,sessionGeneration:proof.sessionGeneration,
                     baseline:proof.baseline,poses:[],steps:proof.steps)
-                let pending = EstimatedPreview(proof:proof,map:map,model:model,proposal:path,otherArmHold:held)
+                let pending = EstimatedPreview(proof:proof,map:map,model:model,proposal:path,otherArmHold:held,
+                    geometryValidationFingerprint:try estimatedGeometryFingerprint(proof:proof,map:map,model:model,proposal:path),
+                    resourceFingerprint:try estimatedResourceFingerprint(model:model))
                 try validateEstimatedContext(pending,generation:current)
                 pendingEstimated = pending; collisionReviewProposal = path
                 try writeEstimatedRecording(proof:proof,proposal:path)
@@ -855,11 +959,13 @@ struct ROBReviewedArmDispatchStart {
             let recyclingParameters = try ROBRecyclingTestParameters.load(file: recyclingTestParametersFile)
             // Search while holding the measured pose. Parking is itself a
             // motion and may collide with a newly positioned table.
+            if physicalSide == "right" { try await prepareRightRecyclingSceneHolds() }
+            q = try measured().positionsRadians.map(\.doubleValue)
             let searchBaseline = q
             try await beginHeldSceneObservation(); phase = "stationary neck-only scene search"
             update("Holding the arms still while searching and mapping the current workspace")
             let model = try workspaceModel()
-            let calibrationFile = canReachCalibrationFile
+            let calibrationFile = selectedCanReachCalibrationFile
             let objects = try await ROBWorkspaceSearch.shared.run(targets: ROBWorkspaceTarget.allCases,
                 model: model, requireDepth: true, check: { try self.check() }, progress: { self.update($0) })
             sceneCapturedForThisTask = true
@@ -879,7 +985,7 @@ struct ROBReviewedArmDispatchStart {
             if let can = objects[.can] {
                 let baseline = model.positions(vendorLeft: q)
                 let reach = try await Task.detached(priority: .userInitiated) {
-                    try ROBCanGrabPreview.make(can: can, model: model, baseline: baseline,
+                    try ROBCanGrabPreview.make(can: can, model: model, baseline: baseline, side: model.physicalSide,
                         reachOffset:ROBLeftCanReachCalibration.load(model:model,can:can,file:calibrationFile))
                 }.value
                 try check()
@@ -901,6 +1007,7 @@ struct ROBReviewedArmDispatchStart {
                     "detail": detail,
                     "workspace_search": ROBWorkspaceSearch.shared.lastReport]
             }
+            recyclingCan=can
             guard [can, bucket].allSatisfy({ Date().timeIntervalSince1970 * 1000 - $0.capturedAt < 60_000 }) else {
                 throw ROBGhostMotionError.blocked("Object observations expired during search; no reach was sent.")
             }
@@ -927,18 +1034,15 @@ struct ROBReviewedArmDispatchStart {
                     throw ROBArmRoutineError.blocked("The arm joint reference must be verified before a dynamic approach from this held pose.")
                 }
                 let planningStart = q, session = generation, camera = vision.cameraGeneration
-                let front = ROBLeftArmInteractionPlan.target(index:ROBLeftArmInteractionPlan.frontIndex)!
+                let front = model.recyclingFrontTarget
                 let baseline = model.positions(vendorLeft:front), now = Date().timeIntervalSince1970*1000
-                let radius = hypot(sections.heightMeters/2,sections.diameterMeters/2)+0.012
-                let payload = ROBWorkspaceCarriedObject(measurementID:"can-frame-\(can.sequence)",
-                    centerInToolMeters:[0,0,0],halfExtentsMeters:[radius,radius,radius])
                 let compiled = try await Task.detached(priority:.userInitiated) {
                     let entry = try ROBWorkspaceCollisionPlan.make(from:planningStart,to:front,map:map,model:model,
                         generation:session,sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:now)
-                    let plan = try ROBCanGrabPreview.make(can:can,model:model,baseline:baseline,bucket:bucket,
+                    let plan = try ROBCanGrabPreview.make(can:can,model:model,baseline:baseline,side:model.physicalSide,bucket:bucket,
                         reachOffset:ROBLeftCanReachCalibration.load(model:model,can:can,file:calibrationFile),
-                        bucketYawDegrees:ROBLeftCanReachCalibration.loadBucketYaw(model:model,file:calibrationFile),
-                        bucketInwardMeters:ROBLeftCanReachCalibration.loadBucketInward(model:model,file:calibrationFile))
+                        bucketYawDegrees:ROBLeftCanReachCalibration.loadBucketYaw(model:model,file:calibrationFile,registrationID:can.registrationID),
+                        bucketInwardMeters:ROBLeftCanReachCalibration.loadBucketInward(model:model,file:calibrationFile,registrationID:can.registrationID))
                     let actions = Dictionary(uniqueKeysWithValues:plan.steps.enumerated().compactMap { index,step in
                         step.jawAction.map { (index,$0) }
                     })
@@ -946,8 +1050,35 @@ struct ROBReviewedArmDispatchStart {
                         poses:plan.steps.map(\.pose),model:model,baseline:planningStart,generation:session,recyclingActions:actions,
                         recyclingParameters:recyclingParameters,workspaceApproachPlan:entry,collisionMap:map,
                         collisionSceneID:map.sceneID,collisionCameraGeneration:camera,nowMilliseconds:now)
+                    guard sections.surfaceToAxisOffsetMeters != nil,
+                          let grip=raw.steps.firstIndex(where:{$0.jawAction == .grip}),
+                          let release=raw.steps.firstIndex(where:{$0.jawAction == .release}),
+                          let prepared=raw.steps.firstIndex(where:{$0.jawAction == .prepare}),
+                          let tool=model.frames(model.positions(vendorLeft:raw.steps[grip].positions))[model.toolLink] else {
+                        throw ROBArmRoutineError.blocked("A fresh measured can axis and frozen jaw stages are required for intentional grasp contact.")
+                    }
+                    let inverseTool=simd_inverse(tool)
+                    func local(_ values:[Double])->SIMD3<Double> {
+                        let p=inverseTool*SIMD4(values[0],values[1],values[2],1)
+                        return SIMD3(p.x,p.y,p.z)
+                    }
+                    let top=local(sections.top),bottom=local(sections.bottom),axis=simd_normalize(top-bottom)
+                    let radius=sections.diameterMeters/2
+                    let radial=SIMD3((0..<3).map { radius*sqrt(max(0,1-axis[$0]*axis[$0])) })
+                    let low=simd_min(top,bottom)-radial,high=simd_max(top,bottom)+radial
+                    let center=(low+high)/2,half=(high-low)/2+SIMD3<Double>(repeating:0.003)
+                    let measurementID="can-frame-\(can.sequence)"
+                    let payload=ROBWorkspaceCarriedObject(measurementID:measurementID,
+                        centerInToolMeters:[center.x,center.y,center.z],halfExtentsMeters:[half.x,half.y,half.z])
+                    let contact=ROBWorkspaceIntentionalContact(measurementID:measurementID,observationSequence:can.sequence,
+                        capturedAtMilliseconds:can.capturedAt,sceneID:map.sceneID,cameraGeneration:camera,
+                        mapFingerprint:map.fingerprint,modelID:model.modelID,geometryID:model.geometryID,
+                        mappingID:model.selectedMappingID,toolLink:model.toolLink,topCenterMeters:sections.top,
+                        bottomCenterMeters:sections.bottom,diameterMeters:sections.diameterMeters,
+                        firstContactStepIndex:min(grip,prepared+1),gripStepIndex:grip,releaseStepIndex:release,stepCount:raw.steps.count)
                     let review = try ROBWorkspaceCollisionPlan.review(baseline:raw.baseline,steps:raw.steps,map:map,model:model,
-                        generation:session,sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:now,payload:payload)
+                        generation:session,sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:now,payload:payload,
+                        intentionalContact:contact)
                     return try ROBLeftGestureCompiler.compile(kind:"recycling",name:raw.name,poses:raw.poses,model:model,
                         baseline:planningStart,generation:session,id:raw.id,recyclingActions:actions,
                         recyclingParameters:recyclingParameters,workspaceCollisionPlan:review,workspaceApproachPlan:entry,
@@ -1007,14 +1138,26 @@ struct ROBReviewedArmDispatchStart {
         if stationaryJaw {
             try await settleFront()
         } else if let proposal {
-            try await move(proposal)
+            do { try await move(proposal) }
+            catch let moved as ROBRecyclingVisualInspection.TargetMoved {
+                guard command == "left_recycle_can", !recyclingGripDispatched,movingTargetReplansRemaining>0 else {throw moved}
+                movingTargetReplansRemaining-=1
+                try await holdTaskPosition(try measured().positionsRadians.map(\.doubleValue))
+                self.proposal=nil;proposalStep = -1;taskJawTarget=nil;recyclingCan=nil;lastVisualGraspEvidence=nil
+                collisionMap=nil;collisionModel=nil;collisionReviewProposal=nil;sceneCapturedForThisTask=false
+                ROBWorkspaceSearch.shared.announce?("The can moved. I am holding and checking its new position.")
+                update("Can moved before closing; one bounded fresh search and full replan under the same approval")
+                return try await executeSingle(command)
+            }
             if ["tabletop", "recycling"].contains(proposal.kind) {
                 try await holdTaskPosition(proposal.steps.last!.positions)
                 return ["status": "accepted_unverified", "measured": false, "motion_completed": true,
-                    "gripper_measured": false, "placement_verified": false, "gripper_intensity": ROBTabletopPickPlace.intensity,
+                    "gripper_measured": false, "placement_verified": false,
+                    "grasp_visually_supported":lastVisualGraspEvidence?.verdict == .supported,
+                    "gripper_intensity": ROBTabletopPickPlace.intensity,
                     "gripper_opening_intensity": proposal.kind == "recycling" ? 10 : 2,
                     "workspace_search": command == "left_recycle_can" ? ROBWorkspaceSearch.shared.lastReport : [:],
-                    "detail": "The left arm reached all recycling-task positions; closing at intensity 2 and opening at intensity \(proposal.kind == "recycling" ? 10 : 2) were accepted. It is holding at the retreat pose. Object retention, jaw opening and placement in the bucket are unverified; inspect the result."]
+                    "physical_arm":physicalSide, "detail": "The \(physicalSide) arm reached all recycling-task positions; closing at intensity 2 and opening at intensity \(proposal.kind == "recycling" ? 10 : 2) were accepted. It is holding at the retreat pose. Object retention, jaw opening and placement in the bucket are unverified; inspect the result."]
             }
             return ["status": "completed", "measured": true, "motion_proposal_id": proposal.id.uuidString,
                 "motion_proposal_sha256": proposal.fingerprint,
@@ -1077,10 +1220,22 @@ struct ROBReviewedArmDispatchStart {
             throw ROBArmRoutineError.blocked("The measured start changed during mode preparation; no calibration step sent.")
         }
         let session = generation, camera = vision.cameraGeneration, now = Date().timeIntervalSince1970*1000
-        try await Task.detached(priority:.userInitiated) {
-            try active.proof.validate(map:active.map,model:active.model,generation:session,
+        if physicalSide == "right" {
+            // This value was built internally from the complete geometry review
+            // and is held immutably in this one pending/active operation. Reuse
+            // only identical inputs; imported decoded proofs still use validate().
+            guard active.resourceFingerprint == (try estimatedResourceFingerprint(model:active.model)),
+                  active.geometryValidationFingerprint == (try estimatedGeometryFingerprint(proof:active.proof,map:active.map,model:active.model,proposal:active.proposal)) else {
+                throw ROBArmRoutineError.blocked("The frozen RIGHT geometry, proposal or resources changed; no cached review is reusable.")
+            }
+            try active.proof.validateContext(map:active.map,model:active.model,generation:session,
                 cameraGeneration:camera,nowMilliseconds:now)
-        }.value
+        } else {
+            try await Task.detached(priority:.userInitiated) {
+                try active.proof.validate(map:active.map,model:active.model,generation:session,
+                    cameraGeneration:camera,nowMilliseconds:now)
+            }.value
+        }
         let review = ROBReviewedArmDispatchStart(proposalID:active.proof.id,index:0,generation:session,
             mapFingerprint:active.map.fingerprint,positions:q,sequence:sample.sequence,
             reviewCompletedAtUptime:ProcessInfo.processInfo.systemUptime)
@@ -1124,7 +1279,78 @@ struct ROBReviewedArmDispatchStart {
             "map_fingerprint":active.map.fingerprint,"baseline_positions":active.proof.baseline,
             "target_positions":active.proof.target,"measured_positions":end,
             "measured_joint_delta":zip(active.proof.baseline,end).map { $1-$0 },
-            "detail":"One 4-second estimated EMPTY-left-arm retreat completed and is held. Joint feedback measured; physical calibration remains unverified. No jaw command or automatic return. Report the observed direction and clearance."]
+            "physical_arm":physicalSide,"detail":"One 4-second estimated EMPTY-\(physicalSide)-arm retreat completed and is held. Joint feedback measured; physical calibration remains unverified. No jaw command or automatic return. Report the observed direction and clearance."]
+    }
+
+    /// Part of the explicit one-shot RIGHT recycling scope: both physical
+    /// arms remain at measured positions. This is not a parking trajectory.
+    /// Inactive arms need no extra torque; active arms enter a measured hold.
+    @MainActor private func prepareRightRecyclingSceneHolds() async throws {
+        guard physicalSide == "right", activeCommand == "left_recycle_can",
+              ROBControllerArmApproval.shared.authorizesRightArmTrial(summary), let owner else {
+            throw ROBArmRoutineError.blocked("The complete right recycling approval does not cover stationary preparation.")
+        }
+        var baselines: [String:[Double]] = [:]
+        var sequences: [String:UInt64] = [:]
+        for side in ["left","right"] {
+            guard let sample=gateway.telemetry(forArm:side),sample.effectiveSampleAgeMilliseconds<=250,
+                  sample.effectiveGripperFeedbackAgeMilliseconds<=250,sample.positionsRadians.count==7,
+                  sample.positionsRadians.allSatisfy({$0.doubleValue.isFinite}),
+                  sample.statuses.count==7,let first=sample.statuses.first?.intValue,[0,1,2].contains(first),
+                  sample.statuses.allSatisfy({$0.intValue==first}),
+                  gateway.modes(forArm:side).map(\.intValue)==sample.statuses.map(\.intValue) else {
+                throw ROBArmRoutineError.blocked("Both arms need current consistent per-joint feedback before stationary preparation.")
+            }
+            baselines[side]=sample.positionsRadians.map(\.doubleValue);sequences[side]=sample.sequence
+        }
+        let heldSince=ProcessInfo.processInfo.systemUptime
+        try await wait(2) {
+            guard ProcessInfo.processInfo.systemUptime-heldSince>=0.3 else{return false}
+            return ["left","right"].allSatisfy { side in
+                guard let sample=self.gateway.telemetry(forArm:side),sample.sequence>(sequences[side] ?? 0),
+                      sample.effectiveSampleAgeMilliseconds<=250,let q=baselines[side] else{return false}
+                return sample.positionsRadians.count==7 && 1.5*zip(sample.positionsRadians.map(\.doubleValue),q).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003
+            }
+        }
+        // Finish a deferred startup only at the already-established hanging
+        // zero. A raised arm is never lowered blindly to initialize jaws.
+        if !ROBGripperStartupCalibration.shared.calibrationReady(forArm:arm),
+           baselines.values.allSatisfy({ROBArmRoutinePlan.near($0,Array(repeating:0,count:7))}) {
+            for side in ["left","right"] where gateway.modes(forArm:side).contains(where:{$0.intValue != 0}) {
+                guard let sample=gateway.telemetry(forArm:side),sample.effectiveSampleAgeMilliseconds<=250,
+                      sample.effectiveGripperFeedbackAgeMilliseconds<=250,
+                      ROBArmRoutinePlan.near(sample.positionsRadians.map(\.doubleValue),Array(repeating:0,count:7)),
+                      gateway.modes(forArm:side).map(\.intValue)==sample.statuses.map(\.intValue) else {
+                    throw ROBArmRoutineError.blocked("An arm left its measured hanging state before stationary jaw setup; torque remains unchanged.")
+                }
+                try await accepted { gateway.deactivateArm(side) }
+            }
+            try await wait(2) { ["left","right"].allSatisfy { side in
+                self.gateway.modes(forArm:side).map(\.intValue)==Array(repeating:0,count:7) &&
+                self.gateway.telemetry(forArm:side)?.statuses.map(\.intValue)==Array(repeating:0,count:7)
+            } }
+            try await ROBGripperStartupCalibration.shared.ensureReady(whileParkedBy:owner)
+            try check()
+        }
+        for side in ["left","right"] {
+            if gateway.modes(forArm:side).map(\.intValue)==Array(repeating:1,count:7) {
+                guard let sample=gateway.telemetry(forArm:side),sample.effectiveSampleAgeMilliseconds<=250,
+                      sample.effectiveGripperFeedbackAgeMilliseconds<=250,let q=baselines[side],
+                      sample.statuses.map(\.intValue)==Array(repeating:1,count:7),
+                      sample.positionsRadians.count==7,
+                      1.5*zip(sample.positionsRadians.map(\.doubleValue),q).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003 else {
+                    throw ROBArmRoutineError.blocked("An arm changed before entering its measured stationary hold.")
+                }
+                try await accepted { gateway.enterPositionMode(forArm:side) }
+                try await wait(2) {
+                    guard let sample=self.gateway.telemetry(forArm:side),sample.effectiveSampleAgeMilliseconds<=250,
+                          sample.statuses.map(\.intValue)==Array(repeating:2,count:7),let q=baselines[side] else{return false}
+                    return self.gateway.modes(forArm:side).map(\.intValue)==Array(repeating:2,count:7) &&
+                        1.5*zip(sample.positionsRadians.map(\.doubleValue),q).reduce(0.0,{$0+abs($1.0-$1.1)})<=0.003
+                }
+                try await accepted(requiresConfirmedHold:true) { gateway.priorityHold(forArm:side) }
+            }
+        }
     }
 
     @MainActor private func prepareCameraAndMode(stationaryJaw:Bool) async throws {
@@ -1156,7 +1382,7 @@ struct ROBReviewedArmDispatchStart {
         guard let directory = Bundle.main.url(forResource: "ShadowPlanner", withExtension: nil) else {
             throw ROBGhostMotionError.blocked("Bundled workspace model is unavailable.")
         }
-        return try ROBGhostRobotModel(directory: directory)
+        return try ROBGhostRobotModel(directory: directory, physicalSide: physicalSide)
     }
 
     @MainActor private func holdTaskPosition(_ target: [Double]) async throws {
@@ -1184,7 +1410,7 @@ struct ROBReviewedArmDispatchStart {
         } else { try await requireGripperCalibration(allowEmptyCalibration: action == .prepare) }
         phase = "tabletop \(action.rawValue)"
         update(action == .grip ? "Local task: gripping empty can at intensity 2" : "Local task: opening gripper at the planned position")
-        ROBWorkspaceSearch.shared.announce?(action == .prepare ? "Preparing my left hand." : action == .grip ? "Grabbing the can." : "Releasing over the bucket.")
+        ROBWorkspaceSearch.shared.announce?(action == .prepare ? "Preparing my \(physicalSide) hand." : action == .grip ? "Grabbing the can." : "Releasing over the bucket.")
         let intensity = action != .grip && proposal?.kind == "recycling" ? 10 : ROBTabletopPickPlace.intensity
         try await accepted { gateway.controlGripper(forArm: arm, action: action == .grip ? "hold" : "release", force:intensity) }
         let settle = proposal?.recyclingParameters?.jawSettleSeconds ?? 1.5
@@ -1342,21 +1568,42 @@ struct ROBReviewedArmDispatchStart {
                     cameraGeneration:camera,nowMilliseconds:reviewTime)
             }
             return try ROBWorkspaceCollisionPlan.review(baseline:proposal.baseline,steps:proposal.steps,map:map,model:model,
-                generation:session,sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:reviewTime,payload:payload)
+                generation:session,sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:reviewTime,payload:payload,
+                intentionalContact:proposal.workspaceCollisionPlan?.intentionalContact)
         }.value
         var carrying = false
+        var visualContext: ROBRecyclingVisualInspection.Context?
+        var graspSupported = false
         for (index, step) in proposal.steps.enumerated() {
+            // A single already-planned vertical lift may gather evidence. No
+            // transfer/release continues on command acceptance alone.
+            if proposal.kind == "recycling", carrying, !graspSupported, step.stage != "Verification lift" {
+                guard let context=visualContext else {
+                    throw ROBArmRoutineError.blocked("No before-close visual grasp baseline; holding the possible payload.")
+                }
+                let evidence=try await ROBRecyclingVisualInspection.verifyAfterLift(context:context,model:model,gatewayArm:arm,check:{try self.check()})
+                lastVisualGraspEvidence=evidence
+                try writeVisualGraspEvidence(evidence)
+                guard evidence.verdict == .supported else {
+                    try await holdTaskPosition(try measured().positionsRadians.map(\.doubleValue))
+                    throw ROBArmRoutineError.blocked("Grasp \(evidence.verdict.rawValue): \(evidence.reason) Holding; no carry or automatic reopening.")
+                }
+                graspSupported=true
+                ROBWorkspaceSearch.shared.announce?("I have visual support for the grasp.")
+            }
             reviewedDispatchStart = nil
             try check(); try checkCollisionContext()
             let reviewedSample = try measured(), q = reviewedSample.positionsRadians.map(\.doubleValue)
             guard let minimum = ROBLeftArmInteractionPlan.duration(from: q, to: step.positions), step.seconds >= minimum - 0.05 else {
                 throw ROBArmRoutineError.blocked("Measured start drift exceeds the reviewed timing; hold requested.")
             }
-            let currentPayload = carrying || step.jawAction == .grip || step.jawAction == .release ? payload : nil
             let now = Date().timeIntervalSince1970*1000
             _ = try await Task.detached(priority:.userInitiated) {
                 try ROBWorkspaceCollisionPlan.review(baseline:q,steps:[step],map:map,model:model,generation:session,
-                    sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:now,payload:currentPayload)
+                    sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:now,payload:payload,
+                    intentionalContact:proposal.workspaceCollisionPlan?.intentionalContact,
+                    contactStepIndex:proposal.workspaceCollisionPlan?.intentionalContact == nil ? nil : index,
+                    carryingAtStart:carrying)
             }.value
             let dispatchReview = ROBReviewedArmDispatchStart(proposalID:proposal.id,index:index,generation:session,
                 mapFingerprint:map.fingerprint,positions:q,sequence:reviewedSample.sequence,
@@ -1387,6 +1634,12 @@ struct ROBReviewedArmDispatchStart {
                     && ProcessInfo.processInfo.systemUptime - started >= step.seconds
             }
             proposalStep = -1
+            if step.jawAction == .grip, proposal.kind == "recycling" {
+                guard let can=recyclingCan else { throw ROBArmRoutineError.blocked("The fresh can identity was lost before closing.") }
+                try await holdTaskPosition(step.positions)
+                visualContext=try await ROBRecyclingVisualInspection.begin(model:model,can:can,gatewayArm:arm,check:{try self.check()})
+            }
+            if step.jawAction == .grip, proposal.kind == "recycling" { recyclingGripDispatched=true }
             if let action = step.jawAction { try await taskJaw(action, at: step.positions) }
             if step.jawAction == .grip { carrying = true }
             if step.jawAction == .release { carrying = false }
@@ -1410,6 +1663,12 @@ struct ROBReviewedArmDispatchStart {
         } catch { abort(error.localizedDescription) }
     }
 
+    private func writeVisualGraspEvidence(_ evidence: ROBVisualGraspVerifier.Evidence) throws {
+        guard !lastRecordingPath.isEmpty else {throw ROBArmRoutineError.blocked("No recording is available for visual grasp evidence.")}
+        let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys,.prettyPrinted]
+        try encoder.encode(evidence).write(to:URL(fileURLWithPath:lastRecordingPath).deletingPathExtension().appendingPathExtension("grasp-visual.json"),options:.atomic)
+    }
+
     private func writeEstimatedRecording(proof: ROBEstimatedArmCalibrationPlan, proposal: ROBLeftGestureProposal) throws {
         guard !lastRecordingPath.isEmpty else { throw ROBArmRoutineError.blocked("No local calibration recording is open.") }
         let base = URL(fileURLWithPath:lastRecordingPath).deletingPathExtension()
@@ -1420,9 +1679,10 @@ struct ROBReviewedArmDispatchStart {
 
     private func beginRecording(_ command: String) throws {
         let folder = try recordingDirectory ?? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
-            appropriateFor: nil, create: true).appendingPathComponent("Cerebro/LeftArmTrials")
+            appropriateFor: nil, create: true).appendingPathComponent("Cerebro/\(physicalSide == "left" ? "Left" : "Right")ArmTrials")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let url = folder.appendingPathComponent("\(command)-\(UUID().uuidString).csv")
+        let recordingCommand = physicalSide == "right" && command.hasPrefix("left_") ? "right_" + command.dropFirst(5) : command
+        let url = folder.appendingPathComponent("\(recordingCommand)-\(UUID().uuidString).csv")
         try Data("elapsed_s,sequence,robot_arm,gateway_arm,joint,position_rad,current_raw,current_delta_raw,feedback_age_ms,phase\n".utf8).write(to: url, options: .atomic)
         log = try FileHandle(forWritingTo: url); try log?.seekToEnd()
         lastRecordingPath = url.path; logStarted = ProcessInfo.processInfo.systemUptime
@@ -1458,7 +1718,7 @@ struct ROBReviewedArmDispatchStart {
         let jump = changes.map(abs).max() ?? 0
         peakJump = max(peakJump, jump); previousCurrents = currents; lastSequence = sample.sequence; sampleCount += 1
         let elapsed = ProcessInfo.processInfo.systemUptime - logStarted
-        let rows = (0..<7).map { "\(elapsed),\(sample.sequence),left,right,\($0 + 1),\(sample.positionsRadians[$0]),\(currents[$0]),\(changes[$0]),\(deliveredAge),\(phase)\n" }.joined()
+        let rows = (0..<7).map { "\(elapsed),\(sample.sequence),\(physicalSide),\(arm),\($0 + 1),\(sample.positionsRadians[$0]),\(currents[$0]),\(changes[$0]),\(deliveredAge),\(phase)\n" }.joined()
         try log?.write(contentsOf: Data(rows.utf8))
         if currentLimit > 0, jump > currentLimit {
             throw ROBArmRoutineError.blocked("Left-arm current jump \(jump) exceeded \(currentLimit) raw units; hold requested. Inspect the recording before retrying.")
@@ -1490,6 +1750,11 @@ struct ROBReviewedArmDispatchStart {
             recoveryPath = []; recoveryGeneration = 0; offeredRecovery = nil
         }
         var output = result as! [String: Any]
+        output["physical_arm"]=physicalSide
+        if let evidence=lastVisualGraspEvidence {
+            output["grasp_visually_supported"]=evidence.verdict == .supported
+            if let data=try? JSONEncoder().encode(evidence),let value=try? JSONSerialization.jsonObject(with:data) {output["visual_grasp_evidence"]=value}
+        }
         if activeCommand == "left_estimated_calibration" {
             output["arm_motion_sent"] = armTravelDispatched
             output["jaw_command_sent"] = false
@@ -1524,7 +1789,7 @@ struct ROBReviewedArmDispatchStart {
             ROBAmberArmMotionArbiter.shared.release(.right, owner: owner)
         }
         owner = nil; isRunning = false; task = nil; proposal = nil; proposalStep = -1; reviewedDispatchStart = nil
-        activeCommand = ""; inactiveWorkspaceSearch = false; interactionStage = ""; readinessConfirmed = false; taskJawTarget = nil
+        activeCommand = ""; recyclingCan=nil; inactiveWorkspaceSearch = false; interactionStage = ""; readinessConfirmed = false; taskJawTarget = nil
         if keepEstimatedPreview { retainEstimatedPreviewCamera() }
         update(output["detail"] as? String ?? "Left-arm trial ended")
         completion(output as NSDictionary)

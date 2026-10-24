@@ -20,7 +20,7 @@ PY
 xcrun swiftc -swift-version 5 -warnings-as-errors \
   "$fixture_dir/CameraFrameTypes.swift" "$repo_dir/Cerebro/ROBMarkerlessVisionService.swift" \
   "$repo_dir/Cerebro/ROBTorsoMotionPolicy.swift" "$repo_dir/Cerebro/ROBTicVelocityTransport.swift" \
-  "$repo_dir/Cerebro/ROBTorsoControlCenter.swift" "$repo_dir/Cerebro/ROBTorsoControlWindowController.swift" \
+  "$repo_dir/Cerebro/ROBFixedHeadRegistration.swift" "$repo_dir/Cerebro/ROBTorsoControlCenter.swift" "$repo_dir/Cerebro/ROBTorsoControlWindowController.swift" \
   "$repo_dir/Tests/ROBTorsoCoordinatorFixtureTests.swift" -o "$fixture_dir/coordinator"
 "$fixture_dir/coordinator"
 "$python_bin" -B "$repo_dir/Tests/ROBTiccmdTaskLifecycleStaticTests.py"

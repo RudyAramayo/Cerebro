@@ -57,6 +57,22 @@ final class ROBGhostRobotModel {
         let lower: Double, upper: Double
     }
     let directory: URL
+    /// Physical identity is carried through FK, collision hulls and proposal hashes.
+    let physicalSide: String
+    var armJointPrefix: String { physicalSide + "_joint" }
+    var toolLink: String { physicalSide + "_tool" }
+    var selectedMappingID: String {
+        physicalSide == "left" ? Self.mappingID : Self.hash(Data("right-scan-reference-prior-v1:\(referenceID):\(armUprightPrior);driver-directions:1,1,1,1,1,1,1".utf8))
+    }
+    /// Right values come from its own recorded model reference. They remain a
+    /// prior, not an accepted absolute encoder calibration or reflected left fit.
+    var armUprightPrior: [Double] {
+        physicalSide == "left" ? Self.uprightPrior : (1...7).map { -(reference["right_joint\($0)"] ?? 0) }
+    }
+    var recyclingFrontTarget: [Double] {
+        physicalSide == "left" ? ROBLeftArmInteractionPlan.target(index:ROBLeftArmInteractionPlan.frontIndex)!
+            : [1.05,-0.60,0,0,0,0,0]
+    }
     let modelID: String
     let referenceID: String
     let geometryID: String
@@ -67,7 +83,9 @@ final class ROBGhostRobotModel {
     static let uprightPrior = [0.0, 2.080432, 0, -0.687254, 0, 0.027043, 0]
     static let mappingID = hash(Data("upright-prior-2026-09-22:\(uprightPrior);driver-directions:1,1,1,1,1,1,1".utf8))
 
-    init(directory: URL) throws {
+    init(directory: URL, physicalSide: String = "left") throws {
+        guard ["left","right"].contains(physicalSide) else { throw ROBGhostMotionError.blocked("Unknown physical arm.") }
+        self.physicalSide = physicalSide
         self.directory = directory
         let data = try Data(contentsOf: directory.appendingPathComponent("model.urdf"))
         modelID = Self.hash(data)
@@ -162,10 +180,12 @@ final class ROBGhostRobotModel {
         }
         return result
     }
+    /// Legacy argument label retained for saved callers; values always refer
+    /// to this model instance's explicit physicalSide, never both arms.
     func positions(vendorLeft: [Double]) -> [String: Double] {
         var result = reference
         guard vendorLeft.count == 7 else { return result }
-        for index in 0..<7 { result["left_joint\(index + 1)"] = vendorLeft[index] - Self.uprightPrior[index] }
+        for index in 0..<7 { result["\(armJointPrefix)\(index + 1)"] = vendorLeft[index] - armUprightPrior[index] }
         return result
     }
     /// Display-only Maestro-to-URDF prior. Upright/level accepted commands
@@ -184,17 +204,17 @@ final class ROBGhostRobotModel {
         return values
     }
     func vendorLeft(_ positions: [String: Double]) -> [Double] {
-        (0..<7).map { (positions["left_joint\($0 + 1)"] ?? reference["left_joint\($0 + 1)"] ?? 0) + Self.uprightPrior[$0] }
+        (0..<7).map { (positions["\(armJointPrefix)\($0 + 1)"] ?? reference["\(armJointPrefix)\($0 + 1)"] ?? 0) + armUprightPrior[$0] }
     }
     func toolPosition(_ positions: [String: Double]) -> SIMD3<Double>? {
-        guard let frame = frames(positions)["left_tool"] else { return nil }
+        guard let frame = frames(positions)[toolLink] else { return nil }
         return SIMD3(frame.columns.3.x, frame.columns.3.y, frame.columns.3.z)
     }
     /// Conservative rigid-model AABB separation. This does not account for
     /// unmeasured cables, mounting errors, payloads or people.
     func treadSeparation(vendorLeft: [Double]) -> Double {
         let bounds = worldCollisionBounds(positions:positions(vendorLeft:vendorLeft))
-        let arms = bounds.keys.filter { $0.hasPrefix("left_") && ($0.hasSuffix("_Link") || $0 == "left_tool") }
+        let arms = bounds.keys.filter { $0.hasPrefix(physicalSide + "_") && ($0.hasSuffix("_Link") || $0 == toolLink) }
         let treads = bounds.keys.filter { $0.contains("track") || $0.contains("flipper") || $0.contains("sprocket") }
         var minimum = Double.infinity
         for arm in arms {
@@ -225,7 +245,7 @@ final class ROBGhostRobotModel {
     func solveLeft(target: SIMD3<Double>, from initial: [String: Double], frontWorkspace: Bool = false) -> [String: Double]? {
         guard target.x.isFinite, target.y.isFinite, target.z.isFinite else { return nil }
         var q = initial
-        let chain = joints.filter { $0.name.hasPrefix("left_joint") && $0.name != "left_joint7" }
+        let chain = joints.filter { $0.name.hasPrefix(armJointPrefix) && $0.name != armJointPrefix + "7" }
         for _ in 0..<250 {
             guard let tip = toolPosition(q) else { return nil }
             let error = target - tip
@@ -247,10 +267,10 @@ final class ROBGhostRobotModel {
             let changes = columns.map { simd_dot($0, correction) }
             let scale = min(1, 0.06 / max(0.000001, changes.map(abs).max() ?? 0))
             for (joint, change) in zip(chain, changes) {
-                let index = Int(joint.name.dropFirst("left_joint".count))! - 1
-                let bound = ROBLeftGestureCompiler.frontBounds[index]
-                let low = frontWorkspace ? max(joint.lower, bound.lowerBound - Self.uprightPrior[index]) : joint.lower
-                let high = frontWorkspace ? min(joint.upper, bound.upperBound - Self.uprightPrior[index]) : joint.upper
+                let index = Int(joint.name.dropFirst(armJointPrefix.count))! - 1
+                let bound = physicalSide == "left" ? ROBLeftGestureCompiler.frontBounds[index] : ROBArmJointLimits.radians[index]
+                let low = frontWorkspace ? max(joint.lower, bound.lowerBound - armUprightPrior[index]) : joint.lower
+                let high = frontWorkspace ? min(joint.upper, bound.upperBound - armUprightPrior[index]) : joint.upper
                 q[joint.name] = max(low, min(high, (q[joint.name] ?? 0) + change * scale))
             }
         }
@@ -302,7 +322,7 @@ struct ROBLeftGestureProposal: Codable, Equatable {
     /// against today's gesture angles. This never authorizes execution.
     func validForReplay(model: ROBGhostRobotModel) -> Bool {
         modelID == model.modelID && referenceID == model.referenceID && geometryID == model.geometryID &&
-            mappingID == ROBGhostRobotModel.mappingID && baseline.count == 7 && baseline.allSatisfy(\.isFinite) &&
+            mappingID == model.selectedMappingID && baseline.count == 7 && baseline.allSatisfy(\.isFinite) &&
             !steps.isEmpty && steps.count <= 80 && steps.allSatisfy {
                 $0.positions.count == 7 && $0.positions.allSatisfy { $0.isFinite && abs($0) <= 3.1 } &&
                 $0.seconds.isFinite && (ROBArmRoutinePlan.minimumLeasedTrajectorySeconds...5).contains($0.seconds)
@@ -343,13 +363,13 @@ enum ROBLeftGestureCompiler {
                 throw ROBGhostMotionError.blocked("A workspace connector needs a complete frozen collision plan and cannot contain gripper actions.")
             }
             return try checked(.init(id:id,name:name,kind:kind,modelID:model.modelID,referenceID:model.referenceID,
-                geometryID:model.geometryID,mappingID:ROBGhostRobotModel.mappingID,sessionGeneration:generation,
+                geometryID:model.geometryID,mappingID:model.selectedMappingID,sessionGeneration:generation,
                 baseline:baseline,poses:path.steps.map { model.positions(vendorLeft:$0.positions) },steps:path.steps))
         }
         if kind == "recycling" {
             var bodyBaseline = baseline
             if let entry = workspaceApproachPlan {
-                let front = ROBLeftArmInteractionPlan.target(index:ROBLeftArmInteractionPlan.frontIndex)!
+                let front = model.recyclingFrontTarget
                 guard entry.baseline == baseline, entry.goal == front, !entry.steps.isEmpty,
                       entry.steps.allSatisfy({ $0.jawAction == nil }),
                       let map = collisionMap, let sceneID = collisionSceneID, let camera = collisionCameraGeneration else {
@@ -370,6 +390,7 @@ enum ROBLeftGestureCompiler {
                 poses:body.poses,steps:combined,recyclingActions:body.recyclingActions,recyclingParameters:body.recyclingParameters,
                 workspaceApproachPlan:entry))
         }
+        guard model.physicalSide == "left" else { throw ROBGhostMotionError.blocked("Right-arm execution currently supports dynamically checked recycling/connectors only.") }
         guard recyclingParameters == nil else { throw ROBGhostMotionError.blocked("Recycling sandbox parameters cannot alter another gesture type.") }
         if kind == "tabletop" {
             return try checked(ROBTabletopPickPlace.compile(name: name, poses: poses, model: model,
@@ -399,7 +420,7 @@ enum ROBLeftGestureCompiler {
                 guard pose.allSatisfy({ key, value in value.isFinite && model.joints.contains(where: { $0.name == key }) }) else {
                     throw ROBGhostMotionError.blocked("Gesture contains an unknown or non-finite joint.")
                 }
-                for joint in model.joints where !joint.name.hasPrefix("left_joint") {
+                for joint in model.joints where !joint.name.hasPrefix(model.armJointPrefix) {
                     guard abs((pose[joint.name] ?? original[joint.name] ?? 0) - (original[joint.name] ?? 0)) < 0.000001 else {
                         throw ROBGhostMotionError.blocked("\(joint.name) is preview-only until its hardware mapping is calibrated. Physical execution currently supports the left arm.")
                     }
@@ -446,7 +467,7 @@ enum ROBLeftGestureCompiler {
             throw ROBGhostMotionError.blocked("Gesture is too long for one supervised operation. Center the hand first or use fewer poses.")
         }
         return try checked(ROBLeftGestureProposal(id: id, name: name, kind: kind, modelID: model.modelID, referenceID: model.referenceID,
-            geometryID: model.geometryID, mappingID: ROBGhostRobotModel.mappingID,
+            geometryID: model.geometryID, mappingID: model.selectedMappingID,
             sessionGeneration: generation, baseline: baseline, poses: poses, steps: steps))
     }
 
@@ -455,7 +476,7 @@ enum ROBLeftGestureCompiler {
                          collisionSceneID: UUID? = nil, collisionCameraGeneration: UUID? = nil,
                          nowMilliseconds: Double = Date().timeIntervalSince1970*1000) throws {
         guard proposal.modelID == model.modelID, proposal.referenceID == model.referenceID,
-              proposal.geometryID == model.geometryID, proposal.mappingID == ROBGhostRobotModel.mappingID else {
+              proposal.geometryID == model.geometryID, proposal.mappingID == model.selectedMappingID else {
             throw ROBGhostMotionError.blocked("The robot model changed; rebuild and review this proposal.")
         }
         let expected = try compile(kind: proposal.kind, name: proposal.name, poses: proposal.poses, model: model,
@@ -487,10 +508,11 @@ enum ROBHorizontalCanRecycle {
               let grip = actions.first(where: { $0.value == .grip })?.key,
               let release = actions.first(where: { $0.value == .release })?.key,
               grip >= 7, release > grip + 1, release < poses.count - 1,
-              let route = ROBLeftArmInteractionPlan.executionRoute(from: baseline, hanging: false) else {
+              let route = model.physicalSide == "left" ? ROBLeftArmInteractionPlan.executionRoute(from: baseline, hanging: false)
+                : (ROBArmRoutinePlan.near(baseline,model.recyclingFrontTarget,tolerance:0.001) ? [] : nil) else {
             throw ROBGhostMotionError.blocked("The horizontal recycling route or its jaw boundaries are incomplete.")
         }
-        let front = ROBLeftArmInteractionPlan.target(index: ROBLeftArmInteractionPlan.frontIndex)!
+        let front = model.recyclingFrontTarget
         let reference = model.positions(vendorLeft: front)
         let targets = try poses.map { pose -> [Double] in
             guard pose.allSatisfy({ key, value in value.isFinite && model.joints.contains { $0.name == key } }) else {
@@ -498,11 +520,11 @@ enum ROBHorizontalCanRecycle {
             }
             for joint in model.joints {
                 let value = pose[joint.name] ?? reference[joint.name] ?? 0
-                if joint.name.hasPrefix("left_joint"), !(joint.lower...joint.upper).contains(value) {
+                if joint.name.hasPrefix(model.armJointPrefix), !(joint.lower...joint.upper).contains(value) {
                     throw ROBGhostMotionError.blocked("Recycling exceeds the model limit for \(joint.name).")
                 }
-                if !joint.name.hasPrefix("left_joint"), abs(value - (reference[joint.name] ?? 0)) > 0.000001 {
-                    throw ROBGhostMotionError.blocked("Recycling may move only the physical LEFT arm.")
+                if !joint.name.hasPrefix(model.armJointPrefix), abs(value - (reference[joint.name] ?? 0)) > 0.000001 {
+                    throw ROBGhostMotionError.blocked("Recycling may move only the selected physical arm.")
                 }
             }
             let target = model.vendorLeft(pose)
@@ -525,7 +547,7 @@ enum ROBHorizontalCanRecycle {
             }
             steps.append(.init(positions: target, seconds: duration, jawAction: action, stage: stage)); previous = target
         }
-        guard let compact = ROBLeftArmInteractionPlan.compactRoute(from: baseline, indices: route) else {
+        guard let compact = model.physicalSide == "left" ? ROBLeftArmInteractionPlan.compactRoute(from: baseline, indices: route) : [] else {
             throw ROBGhostMotionError.blocked("Start recycling from the registered empty-arm route.")
         }
         for index in compact { try append(ROBLeftArmInteractionPlan.target(index: index)!, stage: "Present empty left arm") }
@@ -540,7 +562,7 @@ enum ROBHorizontalCanRecycle {
                 guard model.treadSeparation(vendorLeft: q) >= 0.030 else {
                     throw ROBGhostMotionError.blocked("The horizontal recycling path enters the tread clearance margin.")
                 }
-                if index > 1, let frame = model.frames(model.positions(vendorLeft: q))["left_tool"] {
+                if index > 1, let frame = model.frames(model.positions(vendorLeft: q))[model.toolLink] {
                     guard max(abs(frame.columns.1.z),abs(frame.columns.2.z)) <= sin(8 * .pi / 180) else {
                         throw ROBGhostMotionError.blocked("The recycling approach would turn the jaws vertically.")
                     }
@@ -549,7 +571,7 @@ enum ROBHorizontalCanRecycle {
             let count = max(1, Int(ceil((zip(start,target).map { abs($0-$1) }.max() ?? 0)/0.30)))
             for part in 1...count {
                 let t = Double(part)/Double(count)
-                try append(zip(start,target).map { $0+($1-$0)*t }, stage: index < grip ? "Approach can with horizontal jaws" : index == grip ? "Grip can" : index < release ? "Lift and carry can" : index == release ? "Release above bucket" : "Retreat above bucket",
+                try append(zip(start,target).map { $0+($1-$0)*t }, stage: index < grip ? "Approach can with horizontal jaws" : index == grip ? "Grip can" : index == grip+1 ? "Verification lift" : index < release ? "Lift and carry can" : index == release ? "Release above bucket" : "Retreat above bucket",
                     action: part == count ? actions[index] : nil)
             }
         }
@@ -558,7 +580,7 @@ enum ROBHorizontalCanRecycle {
             throw ROBGhostMotionError.blocked("The recycling path exceeds one bounded operation; bring the objects closer.")
         }
         return .init(id: id, name: name, kind: "recycling", modelID: model.modelID, referenceID: model.referenceID,
-            geometryID: model.geometryID, mappingID: ROBGhostRobotModel.mappingID, sessionGeneration: generation,
+            geometryID: model.geometryID, mappingID: model.selectedMappingID, sessionGeneration: generation,
             baseline: baseline, poses: poses, steps: steps, recyclingActions: actions,recyclingParameters:parameters)
     }
 
@@ -601,7 +623,7 @@ enum ROBHorizontalCanRecycle {
                 let q = zip(start,target).map { $0+($1-$0)*t }
                 guard zip(original,q).allSatisfy({ abs($0-$1) <= 0.01 }),
                       model.treadSeparation(vendorLeft:q) >= 0.030,
-                      let actualFrame = model.frames(model.positions(vendorLeft:q))["left_tool"],
+                      let actualFrame = model.frames(model.positions(vendorLeft:q))[model.toolLink],
                       let originalTip = model.toolPosition(model.positions(vendorLeft:original)) else { return false }
                 let actualTip = SIMD3(actualFrame.columns.3.x,actualFrame.columns.3.y,actualFrame.columns.3.z)
                 guard simd_distance(actualTip,originalTip) <= parameters.maximumPathDeviationMeters+1e-10,
@@ -663,7 +685,7 @@ enum ROBTabletopPickPlace {
             }
             for joint in model.joints {
                 let value = pose[joint.name] ?? reference[joint.name] ?? 0
-                if joint.name.hasPrefix("left_joint") {
+                if joint.name.hasPrefix(model.armJointPrefix) {
                     guard (joint.lower...joint.upper).contains(value) else {
                         throw ROBGhostMotionError.blocked("Tabletop position exceeds the URDF limit for \(joint.name).")
                     }
@@ -728,7 +750,7 @@ enum ROBTabletopPickPlace {
             throw ROBGhostMotionError.blocked("Tabletop path is too long for one operation. Use closer positions or present the empty arm first.")
         }
         return ROBLeftGestureProposal(id: id, name: name, kind: "tabletop", modelID: model.modelID,
-            referenceID: model.referenceID, geometryID: model.geometryID, mappingID: ROBGhostRobotModel.mappingID,
+            referenceID: model.referenceID, geometryID: model.geometryID, mappingID: model.selectedMappingID,
             sessionGeneration: generation, baseline: baseline, poses: poses, steps: steps)
     }
 }
@@ -849,7 +871,7 @@ enum ROBRecordedLeftRecovery {
             throw ROBGhostMotionError.blocked("The recorded empty return exceeds one preparation operation.")
         }
         return .init(id:UUID(),name:"Return confirmed-empty left arm to front",kind:"recover",modelID:model.modelID,
-            referenceID:model.referenceID,geometryID:model.geometryID,mappingID:ROBGhostRobotModel.mappingID,
+            referenceID:model.referenceID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
             sessionGeneration:generation,baseline:measured,poses:[],steps:steps)
     }
 }

@@ -14,6 +14,8 @@ struct ROBEstimatedConvexHull {
     }
     let vertices: [SIMD3<Double>]
     private let triangles: [Triangle]
+    private let localFaceDirections:[SIMD3<Double>]
+    private let localEdgeDirections:[SIMD3<Double>]
     private static let precision = 0.000001
 
     init(text:String) throws {
@@ -74,6 +76,26 @@ struct ROBEstimatedConvexHull {
             guard visited == fan, adjacent.values.allSatisfy({ $0.count == 2 }) else { throw invalid() }
         }
         vertices = points; triangles = result
+        func normalized(_ raw:SIMD3<Double>)->(SIMD3<Double>,SIMD3<Int>)? {
+            let length=simd_length(raw);guard length>1e-10,length.isFinite else{return nil}
+            var n=raw/length
+            if n.x < -1e-8 || (abs(n.x)<=1e-8 && n.y < -1e-8) || (abs(n.x)<=1e-8 && abs(n.y)<=1e-8 && n.z<0) {n = -n}
+            return (n,SIMD3(Int((n.x*1e7).rounded()),Int((n.y*1e7).rounded()),Int((n.z*1e7).rounded())))
+        }
+        var faceDirections:[SIMD3<Double>]=[],edgeDirections:[SIMD3<Double>]=[]
+        var faceKeys=Set<SIMD3<Int>>(),edgeKeys=Set<SIMD3<Int>>()
+        for triangle in result {
+            if let (n,key)=normalized(triangle.normal),faceKeys.insert(key).inserted {faceDirections.append(n)}
+        }
+        for (edge,pair) in edges {
+            let first=result[pair[0].face],second=result[pair[1].face]
+            // A triangulation diagonal is not a polyhedron edge. Coplanarity
+            // uses the same one-micron export precision as hull validation.
+            let coplanar=[second.a,second.b,second.c].allSatisfy {abs(simd_dot(first.normal,$0-first.a))<=Self.precision} &&
+                [first.a,first.b,first.c].allSatisfy {abs(simd_dot(second.normal,$0-second.a))<=Self.precision}
+            if !coplanar,let (n,key)=normalized(points[edge.b]-points[edge.a]),edgeKeys.insert(key).inserted {edgeDirections.append(n)}
+        }
+        localFaceDirections=faceDirections;localEdgeDirections=edgeDirections
     }
 
     func distance(to point:SIMD3<Double>) throws -> Double {
@@ -91,6 +113,56 @@ struct ROBEstimatedConvexHull {
         }
         guard best.isFinite else { throw ROBGhostMotionError.blocked("The estimated hull has no finite surface distance.") }
         return best
+    }
+
+    /// Convex-polyhedron SAT clearance. A negative result is penetration
+    /// depth along the nearest separating support plane; a positive result is
+    /// a conservative surface-gap lower bound. Face normals and edge-cross
+    /// axes test actual hulls rather than rotated bounding-box overlap.
+    func signedSeparation(to other:Self,frame:simd_double4x4,otherFrame:simd_double4x4) throws ->Double {
+        func vector(_ frame:simd_double4x4,_ v:SIMD3<Double>)->SIMD3<Double> {
+            let p=frame*SIMD4(v,0);return SIMD3(p.x,p.y,p.z)
+        }
+        func points(_ frame:simd_double4x4,_ vertices:[SIMD3<Double>])->[SIMD3<Double>] {
+            vertices.map {let p=frame*SIMD4($0,1);return SIMD3(p.x,p.y,p.z)}
+        }
+        var axes:[SIMD3<Double>]=[],seen=Set<SIMD3<Int>>()
+        func add(_ raw:SIMD3<Double>) {
+            let length=simd_length(raw);guard length>1e-10,length.isFinite else{return}
+            var n=raw/length
+            if n.x < -1e-8 || (abs(n.x)<=1e-8 && n.y < -1e-8) || (abs(n.x)<=1e-8 && abs(n.y)<=1e-8 && n.z<0) {n = -n}
+            let key=SIMD3(Int((n.x*1e7).rounded()),Int((n.y*1e7).rounded()),Int((n.z*1e7).rounded()))
+            if seen.insert(key).inserted {axes.append(n)}
+        }
+        for n in localFaceDirections {add(vector(frame,n))}
+        for n in other.localFaceDirections {add(vector(otherFrame,n))}
+        let aEdges=localEdgeDirections.map {vector(frame,$0)},bEdges=other.localEdgeDirections.map {vector(otherFrame,$0)}
+        for a in aEdges {for b in bEdges {add(simd_cross(a,b))}}
+        let a=points(frame,vertices),b=points(otherFrame,other.vertices)
+        guard !axes.isEmpty,(a+b).allSatisfy({$0.x.isFinite && $0.y.isFinite && $0.z.isFinite}) else {
+            throw ROBGhostMotionError.blocked("The estimated convex-hull separation is invalid.")
+        }
+        // No per-axis map/min/max arrays: this loop is also fast in the
+        // commissioning Debug app, where generic collection iteration boxes
+        // otherwise made a single proof outlive its fresh depth evidence.
+        let signed=a.withUnsafeBufferPointer { ap in b.withUnsafeBufferPointer { bp in
+            axes.withUnsafeBufferPointer { directions in
+                var result = -Double.infinity,axisIndex=0
+                while axisIndex<directions.count {
+                    let n=directions[axisIndex]
+                    var lowA=Double.infinity,highA = -Double.infinity,lowB=Double.infinity,highB = -Double.infinity
+                    var i=0
+                    while i<ap.count {let p=ap[i],v=p.x*n.x+p.y*n.y+p.z*n.z;if v<lowA {lowA=v};if v>highA {highA=v};i+=1}
+                    i=0
+                    while i<bp.count {let p=bp[i],v=p.x*n.x+p.y*n.y+p.z*n.z;if v<lowB {lowB=v};if v>highB {highB=v};i+=1}
+                    let gap=max(lowA-highB,lowB-highA)
+                    if gap>result {result=gap};axisIndex+=1
+                }
+                return result
+            }
+        }}
+        guard signed.isFinite else{throw ROBGhostMotionError.blocked("The estimated convex-hull separation is nonfinite.")}
+        return signed
     }
 
     private static func closest(_ p:SIMD3<Double>,to t:Triangle) -> SIMD3<Double> {
@@ -124,6 +196,8 @@ struct ROBEstimatedArmSelfProxyPair: Codable, Equatable {
     let finalOverlapCubicMeters: Double
     let baselineSeparationMeters: Double
     let finalSeparationMeters: Double
+    var baselineHullSignedSeparationMeters:Double? = nil
+    var finalHullSignedSeparationMeters:Double? = nil
 }
 
 struct ROBEstimatedArmOccupiedRetreatPair: Codable, Equatable {
@@ -161,6 +235,9 @@ struct ROBEstimatedArmCalibrationPlan: Codable, Equatable {
     let unknownLocalRegions: [ROBEstimatedArmLocalRegion]
 
     static let jointDeltaRadians: [Double] = [0.10,0.025,-0.075,0,0,0,0]
+    static let rightJointDeltaRadians:[Double] = [0,-0.039,0,0,0,0,0]
+    private static func delta(model:ROBGhostRobotModel)->[Double] {model.physicalSide == "right" ? rightJointDeltaRadians : jointDeltaRadians}
+    private static func travelLimit(model:ROBGhostRobotModel)->Double {model.physicalSide == "right" ? 0.03 : maximumVertexTravelMeters}
     static let durationSeconds = 4.0
     static let obstacleInflationMeters = 0.15
     static let maximumVertexTravelMeters = 0.06
@@ -174,7 +251,7 @@ struct ROBEstimatedArmCalibrationPlan: Codable, Equatable {
     var steps: [ROBLeftGestureProposal.Step] { [step] }
     var requiresConfirmedEmptyGripper: Bool { true }
     var operatorVisualScope: String {
-        "Confirm the LEFT gripper is empty and the complete arm and its surrounding local working space are clear. One slow bounded retreat only; hold and observe before adjusting calibration."
+        "Confirm the selected gripper is empty and the complete arm and its surrounding local working space are clear. One slow bounded retreat only; hold and observe before adjusting calibration."
     }
 
     static func make(from baseline: [Double], map: ROBWorkspaceCollisionSnapshot, model: ROBGhostRobotModel,
@@ -190,12 +267,12 @@ struct ROBEstimatedArmCalibrationPlan: Codable, Equatable {
         try Self.checkMap(map,model:model,generation:generation,cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds)
         try Self.checkEndpoints(baseline,target:target,model:model)
         guard modelID == model.modelID, referenceID == model.referenceID, geometryID == model.geometryID,
-              mappingID == ROBGhostRobotModel.mappingID, sessionGeneration == generation,
+              mappingID == model.selectedMappingID, sessionGeneration == generation,
               self.cameraGeneration == cameraGeneration, sceneID == map.sceneID, mapFingerprint == map.fingerprint,
               seconds == Self.durationSeconds, registrationMode == Self.mode,
               estimatedInflationMeters == Self.obstacleInflationMeters,
               createdAtMilliseconds.isFinite, (0...Self.maximumMapAgeMilliseconds).contains(nowMilliseconds-createdAtMilliseconds),
-              maximumVertexDisplacementMeters.isFinite, (0...Self.maximumVertexTravelMeters).contains(maximumVertexDisplacementMeters),
+              maximumVertexDisplacementMeters.isFinite, (0...Self.travelLimit(model:model)).contains(maximumVertexDisplacementMeters),
               unknownVoxelCount >= 0, (2...128).contains(checkedPoseCount), baselineCloseOccupiedPairs.count <= 4_096,
               !unknownLocalRegions.isEmpty, unknownLocalRegions.count <= 16, baselineSelfProxyPairs.count <= 100 else {
             throw ROBGhostMotionError.blocked("The estimated calibration proof changed, expired or no longer matches this scene. Review a new single step.")
@@ -215,7 +292,7 @@ struct ROBEstimatedArmCalibrationPlan: Codable, Equatable {
     private static func checkMap(_ map: ROBWorkspaceCollisionSnapshot, model: ROBGhostRobotModel, generation: UInt64,
                                  cameraGeneration: UUID, nowMilliseconds: Double) throws {
         guard generation > 0, map.sessionGeneration == generation, map.cameraGeneration == cameraGeneration,
-              map.modelID == model.modelID, map.geometryID == model.geometryID, map.mappingID == ROBGhostRobotModel.mappingID,
+              map.modelID == model.modelID, map.geometryID == model.geometryID, map.mappingID == model.selectedMappingID,
               map.fingerprint.count == 64 else {
             throw ROBGhostMotionError.blocked("The estimated workspace map belongs to another robot, camera or arm connection.")
         }
@@ -234,9 +311,9 @@ struct ROBEstimatedArmCalibrationPlan: Codable, Equatable {
     private static func checkEndpoints(_ baseline: [Double], target: [Double], model: ROBGhostRobotModel) throws {
         guard baseline.count == 7, target.count == 7, baseline.allSatisfy({ $0.isFinite && abs($0) <= hangingToleranceRadians }),
               target.contains(where:{ abs($0) > hangingToleranceRadians+0.003 }),
-              jointDeltaRadians.allSatisfy({ abs($0) <= 0.20 }),
+              delta(model:model).allSatisfy({ abs($0) <= (model.physicalSide == "right" ? 0.05 : 0.20) }),
               target.enumerated().allSatisfy({ index,value in
-                  value.isFinite && value == baseline[index]+jointDeltaRadians[index]
+                  value.isFinite && value == baseline[index]+delta(model:model)[index]
               }), zip(baseline,ROBWorkspaceCollisionPlan.jointBounds(model:model)).allSatisfy({ $1.contains($0) }),
               zip(target,ROBWorkspaceCollisionPlan.jointBounds(model:model)).allSatisfy({ $1.contains($0) }) else {
             throw ROBGhostMotionError.blocked("This experiment permits only one fixed-vector retreat from a verified near-zero EMPTY arm. The final pose cannot qualify for another retreat.")
@@ -271,7 +348,7 @@ struct ROBEstimatedArmCalibrationPlan: Codable, Equatable {
     /// A link stationary along the planned J2 path can still move under J1
     /// tracking error, so no actuated arm link qualifies for this exception.
     private static func isFixedTorsoMount(_ link:String,model:ROBGhostRobotModel) -> Bool {
-        guard link == "left_base_link" else { return false }
+        guard link == model.physicalSide + "_base_link" else { return false }
         var current = link, seen = Set<String>()
         while current != "torso_link" {
             guard seen.insert(current).inserted else { return false }
@@ -314,12 +391,13 @@ struct ROBEstimatedArmCalibrationPlan: Codable, Equatable {
     private static func build(id:UUID,from baseline:[Double],map:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel,
                               generation:UInt64,cameraGeneration:UUID,nowMilliseconds:Double) throws -> Self {
         try checkMap(map,model:model,generation:generation,cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds)
+        let jointDeltaRadians=delta(model:model), maximumVertexTravelMeters=travelLimit(model:model)
         var target = baseline
         guard target.count == 7 else { throw ROBGhostMotionError.blocked("The estimated calibration start needs all seven measured joints.") }
         for index in 0..<7 { target[index] += jointDeltaRadians[index] }
         try checkEndpoints(baseline,target:target,model:model)
         let verified = try verifiedGeometry(model:model), vertices = verified.vertices
-        let arms = vertices.keys.filter { $0.hasPrefix("left_") && ($0.hasSuffix("_Link") || $0 == "left_tool" || $0 == "left_base_link") }.sorted()
+        let arms = vertices.keys.filter { $0.hasPrefix(model.physicalSide + "_") && ($0.hasSuffix("_Link") || $0 == model.toolLink || $0 == model.physicalSide + "_base_link") }.sorted()
         let treads = vertices.keys.filter { $0.contains("track") || $0.contains("flipper") || $0.contains("sprocket") }.sorted()
         guard arms.count >= 8, !treads.isEmpty else { throw ROBGhostMotionError.blocked("The full arm and tread collision geometry are required for the nudge.") }
         func geometry(_ q:[Double]) throws -> (points:[String:[SIMD3<Double>]],boxes:[String:Box],frames:[String:simd_double4x4]) {
@@ -356,6 +434,13 @@ struct ROBEstimatedArmCalibrationPlan: Codable, Equatable {
         let depthCheckedArms = arms.filter { !fixedMounts.contains($0) }
         var convexHulls: [String:ROBEstimatedConvexHull] = [:]
         for link in depthCheckedArms { convexHulls[link] = try .init(text:verified.texts[link]!) }
+        func checkedHull(_ link:String) throws ->ROBEstimatedConvexHull {
+            if let hull=convexHulls[link] {return hull}
+            do {
+                let hull=try ROBEstimatedConvexHull(text:verified.texts[link]!)
+                convexHulls[link]=hull;return hull
+            } catch {throw ROBGhostMotionError.blocked("The estimated \(link) hull is not closed/convex at the required precision; no probe admitted.")}
+        }
         let voxelHalf = map.voxelSizeMeters/2
         let padding = obstacleInflationMeters+ROBWorkspaceCollisionPlan.sweptPointTravelMeters+sqrt(3)*voxelHalf
         func hullDistance(_ link:String,_ point:SIMD3<Double>,_ frames:[String:simd_double4x4]) throws -> Double {
@@ -365,7 +450,7 @@ struct ROBEstimatedArmCalibrationPlan: Codable, Equatable {
         var baselineOccupied: [OccupiedPair:Double] = [:], previousOccupied: [OccupiedPair:Double] = [:]
         let occupiedVoxels = map.occupiedVoxels
         for link in depthCheckedArms {
-            let jaw = link == "left_tool" ? ROBWorkspaceCollisionPlan.openJawAdditionalMarginMeters : 0
+            let jaw = link == model.toolLink ? ROBWorkspaceCollisionPlan.openJawAdditionalMarginMeters : 0
             let broad = start.boxes[link]!.inflated(padding+jaw)
             for voxel in occupiedVoxels {
                 let point = voxel.center(voxelSizeMeters:map.voxelSizeMeters)
@@ -388,13 +473,18 @@ struct ROBEstimatedArmCalibrationPlan: Codable, Equatable {
         }
         var localRegions: [String:Box] = [:]
         for link in depthCheckedArms {
-            let jaw = link == "left_tool" ? ROBWorkspaceCollisionPlan.openJawAdditionalMarginMeters : 0
+            let jaw = link == model.toolLink ? ROBWorkspaceCollisionPlan.openJawAdditionalMarginMeters : 0
             localRegions[link] = start.boxes[link]!.inflated(padding+jaw+maximumVertexTravelMeters+voxelHalf)
         }
         var initial: [String:Clearance] = [:], previous: [String:Clearance] = [:]
+        var initialHull:[String:Double]=[:],previousHull:[String:Double]=[:]
         for arm in arms { for tread in treads {
             let key = arm+"|"+tread, value = clearance(start.boxes[arm]!,start.boxes[tread]!)
             initial[key] = value; previous[key] = value
+            if model.physicalSide == "right" {
+                let gap = value.separation >= 0.030 ? value.separation : try checkedHull(arm).signedSeparation(to:checkedHull(tread),frame:start.frames[arm]!,otherFrame:start.frames[tread]!)
+                initialHull[key]=gap;previousHull[key]=gap
+            }
         } }
         let count = max(1,Int(ceil(1.5*jointDeltaRadians.reduce(0) { $0+abs($1) }/ROBWorkspaceCollisionPlan.sweptPointTravelMeters)))
         guard count+1 <= 128 else { throw ROBGhostMotionError.blocked("The bounded retreat requires too many swept poses.") }
@@ -412,12 +502,18 @@ struct ROBEstimatedArmCalibrationPlan: Codable, Equatable {
                     maximumVertex = max(maximumVertex,displacement)
                 }
                 guard maximumVertex <= maximumVertexTravelMeters else {
-                    throw ROBGhostMotionError.blocked("A modeled arm vertex would move more than 60mm. No retreat was admitted.")
+                    throw ROBGhostMotionError.blocked("A modeled arm vertex would exceed the \(Int(maximumVertexTravelMeters*1000))mm experiment cap. No retreat was admitted.")
                 }
             }
             for arm in arms { for tread in treads {
                 let key = arm+"|"+tread, current = clearance(pose.boxes[arm]!,pose.boxes[tread]!), prior = previous[key]!
-                guard notWorse(current,than:prior) else {
+                if model.physicalSide == "right" {
+                    let gap = current.separation >= 0.030 ? current.separation : try checkedHull(arm).signedSeparation(to:checkedHull(tread),frame:pose.frames[arm]!,otherFrame:pose.frames[tread]!)
+                    guard gap+1e-9 >= min(previousHull[key]!,0.030) else {
+                        throw ROBGhostMotionError.blocked("The RIGHT probe worsens actual \(arm) / \(tread) hull clearance; no step admitted.")
+                    }
+                    previousHull[key]=gap
+                } else if !notWorse(current,than:prior) {
                     throw ROBGhostMotionError.blocked("The estimated nudge worsens \(arm) / \(tread) clearance. Keep the arm held and adjust its model first.")
                 }
                 previous[key] = current
@@ -433,7 +529,7 @@ struct ROBEstimatedArmCalibrationPlan: Codable, Equatable {
                 previousOccupied[key] = distance
             }
             for link in depthCheckedArms {
-                let jaw = link == "left_tool" ? ROBWorkspaceCollisionPlan.openJawAdditionalMarginMeters : 0
+                let jaw = link == model.toolLink ? ROBWorkspaceCollisionPlan.openJawAdditionalMarginMeters : 0
                 let box = pose.boxes[link]!.inflated(padding+jaw), region = localRegions[link]!, size = map.voxelSizeMeters
                 let low = (0..<3).map { Int(floor(box.low[$0]/size)) }, high = (0..<3).map { Int(floor(box.high[$0]/size)) }
                 guard zip(low,high).allSatisfy({ $1 >= $0 && $1-$0 < 100 }) else {
@@ -470,7 +566,15 @@ struct ROBEstimatedArmCalibrationPlan: Codable, Equatable {
         var pairs: [ROBEstimatedArmSelfProxyPair] = []
         for arm in arms { for tread in treads {
             let key = arm+"|"+tread, a = initial[key]!, b = previous[key]!
-            if a.overlap > 0 || a.separation < 0.030 {
+            if model.physicalSide == "right" {
+                let before=initialHull[key]!,after=previousHull[key]!
+                if before < 0.030 {
+                    guard after>before+1e-9 else {throw ROBGhostMotionError.blocked("The RIGHT probe does not strictly improve every initial actual-hull deficit.")}
+                    pairs.append(.init(armLink:arm,treadLink:tread,baselineOverlapCubicMeters:a.overlap,finalOverlapCubicMeters:b.overlap,
+                        baselineSeparationMeters:a.separation,finalSeparationMeters:b.separation,
+                        baselineHullSignedSeparationMeters:before,finalHullSignedSeparationMeters:after))
+                }
+            } else if a.overlap > 0 || a.separation < 0.030 {
                 guard a.overlap > 0 ? b.overlap < a.overlap-1e-12 : b.separation > a.separation+1e-9 else {
                     throw ROBGhostMotionError.blocked("The nudge does not improve every pre-existing near-tread proxy deficit. No automatic escape was admitted.")
                 }
@@ -489,7 +593,7 @@ struct ROBEstimatedArmCalibrationPlan: Codable, Equatable {
             }
             return .init(link:key.link,voxel:key.voxel,baselineDistanceMeters:baselineDistance,finalDistanceMeters:finalDistance)
         }
-        return .init(id:id,modelID:model.modelID,referenceID:model.referenceID,geometryID:model.geometryID,mappingID:ROBGhostRobotModel.mappingID,
+        return .init(id:id,modelID:model.modelID,referenceID:model.referenceID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
             sessionGeneration:generation,cameraGeneration:cameraGeneration,sceneID:map.sceneID,mapFingerprint:map.fingerprint,
             createdAtMilliseconds:nowMilliseconds,baseline:baseline,target:target,seconds:durationSeconds,registrationMode:mode,
             estimatedInflationMeters:obstacleInflationMeters,maximumVertexDisplacementMeters:maximumVertex,

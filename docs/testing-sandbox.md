@@ -11,6 +11,9 @@ The sandbox catalog contains these independent test items:
 | Test | Actions |
 | --- | --- |
 | Recycle can | Run the physical test, search with the neck camera, scan workspace geometry, preview the grasp |
+| Recycle can · right arm | Recycle one or two empty cans with physical right/L10, separate reach tuning and visual grasp checks |
+| Camera-to-arm registration | Capture, fit and independently validate one fixed head/body view |
+| Right-arm calibration step | Passively capture the registered view, review one small empty-arm outward step, run and hold |
 | Depth alignment | Adjust head-depth placement toward ROB and the face-camera downward mounting angle, then inspect the live cloud |
 | Estimated calibration trial | Build a small estimated empty-arm ghost movement, inspect it, run the reviewed test and hold for observation |
 | Grip and return | Complete the supervised left-arm object handoff |
@@ -88,7 +91,22 @@ This preview is read-only. It never assigns the executable proposal, restores an
 
 ### Current commissioning limits
 
-The concrete depth producer deliberately emits an unregistered map. The existing markerless base/torso fitter can report candidate extrinsics and fit RMS, but it does not yet export the uncertainty and independent validation needed here, or bind each result to the recorded neck pose. Commissioning needs measured base/torso correspondences with separate validation points, per-view neck/camera identities, uncertainty export and repeated-view validation. A small fit residual alone is insufficient.
+The default neck-command projection emits an unregistered map. The separate
+[fixed-head commissioning test](fixed-head-pickup-commissioning.md) can now fit
+raw depth against visible robot surfaces, validate different patches in later
+frames, export an error allowance, and bind a local measurement to its exact
+head/body, camera, model and connection state. Every projected frame must carry
+that evidence for a map to receive measured registration. A small training
+residual alone remains insufficient, and the CAD uncertainty is explicitly an
+assumption. A fixture result does not commission the physical robot.
+
+The physical right-arm model has a genuine convex-proxy overlap with the track
+and upper idler at its hanging reference. The right-arm calibration step is a
+separate estimated empty-arm experiment: J2 −0.039 rad over four seconds, with
+29.399 mm maximum modeled hull travel. It requires improving existing modeled
+self-proxy deficits and fresh local depth, then holds for observation. Its
+endpoint still does not meet the ordinary 30 mm tread margin; the step cannot
+silently unlock a grasp or chain itself into a reach.
 
 The current hanging-tool collision proxy also enters the model's 3 cm tread margin. This requires checking the measured mounting geometry, tool/reference alignment and conservative proxy shapes; it is not proof that the real hanging arm touches a tread. Camera registration will not fix that model-relative discrepancy. The planner currently uses conservative link boxes and an expanded open-jaw envelope. Measured finger geometry, robot self-volume visibility and intentional contact with the grasped target still need commissioning before a live grasp can be admitted. No physical recycling success is claimed for this planner.
 
