@@ -1,5 +1,6 @@
 import Foundation
 import simd
+import Darwin
 
 @main struct ROBWorkspaceDepthMapFixtures {
     static func expect(_ value: @autoclosure () -> Bool, _ detail: String) {
@@ -8,7 +9,105 @@ import simd
     static func rejected(_ detail: String, _ block: () throws -> Void) {
         do { try block(); fatalError(detail) } catch {}
     }
+    static func storageBudgetFixtures() throws {
+        let camera=UUID(),now=20_000.0
+        func make(_ budget:ROBWorkspaceDepthMap.StorageBudget = .standard)->ROBWorkspaceDepthMap {
+            .init(modelID:"resource-model",geometryID:"resource-geometry",mappingID:"resource-mapping",
+                sessionGeneration:9,cameraGeneration:camera,nowMilliseconds:now,storageBudget:budget)
+        }
+        func point(_ map:inout ROBWorkspaceDepthMap,_ sequence:UInt64,_ depth:UInt16) throws {
+            try map.append(width:16,height:16,fx:1000,fy:1000,cx:0.5,cy:0.5,
+                depth:{$0==1 && $1==1 ? depth:nil},cameraToRobot:matrix_identity_double4x4,
+                capturedAtMilliseconds:now+Double(sequence),sequence:sequence,cameraGeneration:camera,
+                nowMilliseconds:now+Double(sequence)+1)
+        }
+        // Exactly27 inflated cells fill this budget. A later observation in
+        // the same cells must still expand sample bounds without truncation.
+        var fullOccupied=make(.init(occupiedVoxels:27,freeVoxels:1))
+        try point(&fullOccupied,1,1000);try point(&fullOccupied,2,1001)
+        let occupiedAtCapacity=fullOccupied.snapshot(nowMilliseconds:now+3)!
+        expect(occupiedAtCapacity.occupiedVoxelCount==27 && !occupiedAtCapacity.isTruncated,
+            "Duplicate occupied cells falsely exhausted storage at exact capacity")
+        let bounds=occupiedAtCapacity.occupiedSampleBounds(at:SIMD3(0.0005,0.0005,1.0005))!
+        expect(bounds.low.z==1 && bounds.high.z==1.001,"A full occupied set stopped retaining observed bounds")
+        try point(&fullOccupied,3,1026)
+        let occupiedOverflow=fullOccupied.snapshot(nowMilliseconds:now+4)!
+        expect(occupiedOverflow.isTruncated && occupiedOverflow.occupiedVoxelCount==27,
+            "A new occupied cell escaped the bounded storage budget")
+        expect(occupiedOverflow.state(at:SIMD3(0.0005,0.0005,1.0005)) == .occupied,
+            "Storage exhaustion erased an earlier obstacle")
+
+        func rays(_ map:inout ROBWorkspaceDepthMap,_ sequence:UInt64,_ union:Bool,
+                  shifted:Bool=false) throws {
+            var transform=matrix_identity_double4x4
+            if shifted {transform.columns.3.x=0.05}
+            try map.append(width:16,height:16,fx:1000,fy:1000,cx:8,cy:8,depth:{_,_ in 1000},
+                cameraToRobot:transform,capturedAtMilliseconds:now+Double(sequence),sequence:sequence,
+                cameraGeneration:camera,nowMilliseconds:now+Double(sequence)+1,
+                alternateEstimatedDepth:union ? {_,_ in UInt16(500)}:nil,
+                estimatedDepthHypothesisID:union ? String(repeating:"c",count:64):nil)
+        }
+        for union in [false,true] {
+            var reference=make()
+            try rays(&reference,1,union);try rays(&reference,2,union)
+            let measured=reference.snapshot(nowMilliseconds:now+3)!
+            expect(measured.freeVoxelCount>0 && !measured.isTruncated,"Resource fixture did not produce free rays")
+            var fullFree=make(.init(occupiedVoxels:1000,freeVoxels:measured.freeVoxelCount))
+            try rays(&fullFree,1,union);try rays(&fullFree,2,union)
+            let atCapacity=fullFree.snapshot(nowMilliseconds:now+3)!
+            expect(!atCapacity.isTruncated && atCapacity.freeVoxelCount==measured.freeVoxelCount,
+                "Duplicate \(union ? "estimated-union":"raw") free cells falsely exhausted exact capacity")
+            let freePoint=atCapacity.freeVoxels[0].center(voxelSizeMeters:atCapacity.voxelSizeMeters)
+            expect(atCapacity.state(at:freePoint) == .free,"Free fixture point was missing")
+            try rays(&fullFree,3,union,shifted:true)
+            let overflow=fullFree.snapshot(nowMilliseconds:now+4)!
+            expect(overflow.isTruncated && overflow.freeVoxelCount<=measured.freeVoxelCount,
+                "New free cells escaped the storage cap")
+            expect(overflow.state(at:freePoint) == .unknown,
+                "A truncated grid still authorized observed-free traversal")
+        }
+
+        // Actual append() of10,240 spatially dispersed depth returns exceeds
+        // the old100k inflated-cell budget. Adjacent invalid samples prevent
+        // any free-space claim; all27 obstacle cells remain required.
+        func dispersed(_ map:inout ROBWorkspaceDepthMap,_ sequence:UInt64) throws {
+            try map.append(width:640,height:400,fx:350,fy:350,cx:320,cy:200,
+                depth:{x,y in
+                    guard x%5==1 && y%5==1 else{return nil}
+                    let mixed=(x*73_856_093) ^ (y*19_349_663)
+                    return UInt16(300+mixed%2000)
+                },cameraToRobot:matrix_identity_double4x4,
+                capturedAtMilliseconds:now+Double(sequence),sequence:sequence,cameraGeneration:camera,
+                nowMilliseconds:now+Double(sequence)+1)
+        }
+        let started=ProcessInfo.processInfo.systemUptime
+        var wide=make()
+        try dispersed(&wide,1);try dispersed(&wide,2)
+        let expanded=wide.snapshot(nowMilliseconds:now+3)!
+        expect(expanded.occupiedVoxelCount>100_000 && !expanded.isTruncated,
+            "A real multi-surface append still exhausted the former100k budget")
+        expect(expanded.voxelSizeMeters==0.025 && expanded.freeVoxelCount==0 && expanded.registrationID==nil,
+            "Resource expansion changed voxel resolution, carved unknown rays, or manufactured registration")
+        for y in stride(from:1,to:399,by:5) {for x in stride(from:1,to:639,by:5) {
+            let z=Double(300+((x*73_856_093) ^ (y*19_349_663))%2000)/1000
+            let endpoint=SIMD3((Double(x)-320)*z/350,(Double(y)-200)*z/350,z)
+            guard (-2...2).contains(endpoint.x) else{continue}
+            let center=ROBWorkspaceVoxel(x:Int(floor(endpoint.x/0.025)),y:Int(floor(endpoint.y/0.025)),z:Int(floor(z/0.025)))
+            for dx in -1...1 {for dy in -1...1 {for dz in -1...1 {
+                let cell=ROBWorkspaceVoxel(x:center.x+dx,y:center.y+dy,z:center.z+dz)
+                expect(expanded.state(at:cell.center(voxelSizeMeters:0.025)) == .occupied,
+                    "Expanded storage dropped an inflated occupied cell")
+            }}}
+        }}
+        print(String(format:"Depth storage: %d occupied / %d free cells from real append; %.3f s including immutable snapshot and all27-cell audit; bounded default400k/600k; duplicate-full occupied/raw-free/union-free and true overflow passed",
+            expanded.occupiedVoxelCount,expanded.freeVoxelCount,ProcessInfo.processInfo.systemUptime-started))
+        var usage=rusage()
+        if getrusage(RUSAGE_SELF,&usage)==0 {
+            print(String(format:"Depth storage fixture peak resident memory: %.1f MiB (includes immutable snapshot/fingerprint construction and Swift runtime)",Double(usage.ru_maxrss)/1_048_576))
+        }
+    }
     static func main() throws {
+        try storageBudgetFixtures()
         let camera = UUID(), now = 10_000.0
         func make() -> ROBWorkspaceDepthMap {
             .init(modelID:"model",geometryID:"geometry",mappingID:"mapping",sessionGeneration:7,

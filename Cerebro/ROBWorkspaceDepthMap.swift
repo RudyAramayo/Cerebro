@@ -143,6 +143,18 @@ struct ROBWorkspaceCollisionSnapshot: Codable, ROBWorkspaceCollisionMap {
 /// mark space in front of their surface free. Never clear behind any return,
 /// depth hole, known self surface, or at an image/depth discontinuity.
 struct ROBWorkspaceDepthMap {
+    struct StorageBudget {
+        static let standard = StorageBudget(occupiedVoxels:400_000,freeVoxels:600_000)
+        let occupiedVoxels:Int
+        let freeVoxels:Int
+
+        /// Smaller budgets support bounded consumers and resource fixtures;
+        /// callers cannot exceed the production storage bound.
+        init(occupiedVoxels:Int,freeVoxels:Int) {
+            precondition((1...400_000).contains(occupiedVoxels) && (1...600_000).contains(freeVoxels))
+            self.occupiedVoxels=occupiedVoxels;self.freeVoxels=freeVoxels
+        }
+    }
     let sceneID = UUID()
     let modelID: String
     let geometryID: String
@@ -152,8 +164,7 @@ struct ROBWorkspaceDepthMap {
     let createdAtMilliseconds: Double
     let bodyMotionIdentity: String
     let voxelSizeMeters = 0.025
-    private let maximumOccupied = 100_000
-    private let maximumFree = 300_000
+    private let storageBudget:StorageBudget
     private var occupied = Set<ROBWorkspaceVoxel>()
     private var free = Set<ROBWorkspaceVoxel>()
     private var occupiedSamples: [ROBWorkspaceVoxel:ROBWorkspaceOccupiedSampleBounds] = [:]
@@ -167,10 +178,12 @@ struct ROBWorkspaceDepthMap {
     private var registrationProofs: [String:Double] = [:]
 
     init(modelID: String, geometryID: String, mappingID: String, sessionGeneration: UInt64,
-         cameraGeneration: UUID, nowMilliseconds: Double = Date().timeIntervalSince1970 * 1000) {
+         cameraGeneration: UUID, nowMilliseconds: Double = Date().timeIntervalSince1970 * 1000,
+         storageBudget:StorageBudget = .standard) {
         self.modelID = modelID; self.geometryID = geometryID; self.mappingID = mappingID
         self.sessionGeneration = sessionGeneration; self.cameraGeneration = cameraGeneration
         createdAtMilliseconds = nowMilliseconds
+        self.storageBudget=storageBudget
         bodyMotionIdentity=ROBFixedHeadBodyMotionIdentity.currentIdentity
     }
 
@@ -298,7 +311,7 @@ struct ROBWorkspaceDepthMap {
                     for along in stride(from:0.1,to:freeUntil,by:voxelSizeMeters*0.5) {
                         let point = origin+direction*along
                         guard withinBounds(point) else {continue}
-                        if free.count<maximumFree {free.insert(voxel(point))} else {truncated=true;break}
+                        if !markFree(point) {break}
                     }
                     continue
                 }
@@ -323,7 +336,7 @@ struct ROBWorkspaceDepthMap {
                 for along in stride(from: 0.1, to: freeUntil, by: voxelSizeMeters * 0.5) {
                     let point = origin + direction * along
                     guard withinBounds(point), registration?.validRobotVolume.contains(point) ?? true else { continue }
-                    if free.count < maximumFree { free.insert(voxel(point)) } else { truncated = true; break }
+                    if !markFree(point) {break}
                 }
             }
         }
@@ -360,13 +373,25 @@ struct ROBWorkspaceDepthMap {
     private mutating func markOccupied(_ point: SIMD3<Double>) {
         let center = voxel(point)
         for x in -1...1 { for y in -1...1 { for z in -1...1 {
-            guard occupied.count < maximumOccupied else { truncated = true; return }
             let cell=ROBWorkspaceVoxel(x:center.x+x,y:center.y+y,z:center.z+z)
+            // Re-observing an existing cell consumes no capacity. Continue
+            // updating its full observed bounds even when the set is full.
+            guard occupied.count < storageBudget.occupiedVoxels || occupied.contains(cell) else {
+                truncated = true;continue
+            }
             occupied.insert(cell)
             if var bounds=occupiedSamples[cell] {
                 bounds.low=simd_min(bounds.low,point);bounds.high=simd_max(bounds.high,point);occupiedSamples[cell]=bounds
             } else {occupiedSamples[cell] = .init(low:point,high:point)}
         } } }
+    }
+    private mutating func markFree(_ point:SIMD3<Double>)->Bool {
+        let cell=voxel(point)
+        guard free.count < storageBudget.freeVoxels || free.contains(cell) else {
+            truncated=true;return false
+        }
+        free.insert(cell)
+        return true
     }
     private func contains(_ p: SIMD3<Double>, bounds: (low: SIMD3<Double>, high: SIMD3<Double>), margin: Double) -> Bool {
         (0..<3).allSatisfy { p[$0] >= bounds.low[$0] - margin && p[$0] <= bounds.high[$0] + margin }
