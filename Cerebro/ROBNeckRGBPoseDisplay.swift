@@ -15,6 +15,7 @@ enum ROBNeckRGBPoseDisplay {
         /// Operator-photo hardware drawing only. It deliberately omits the
         /// optical frame: the fitted QR ray and depth projection stay intact.
         let hardwareFrames: [String:simd_double4x4]?
+        let hardwareSphereRingTiltDegrees: Double?
         let bellyPreviewDownwardPitchDegrees: Double?
         var displayCameraToModel: simd_double4x4 { modelToDisplay * cameraToModel }
         var depthCloudCameraToModel: simd_double4x4 {
@@ -53,6 +54,7 @@ enum ROBNeckRGBPoseDisplay {
         let lowerToUpperPivotMeters:Double
         let upperCenterToSphereMeters:Double,sphereToRGBGlassMeters:Double,upperCenterToRGBGlassMeters:Double
         let sphereForwardLeanDegrees:Double,cameraDepressionAtReferenceDegrees:Double
+        let sphereRingTiltAtReferenceDegrees:Double?
         let sourcePhotoSHA256:String
         var valid:Bool {
             let a=upperCenterToSphereMeters,b=sphereToRGBGlassMeters,c=upperCenterToRGBGlassMeters
@@ -62,6 +64,7 @@ enum ROBNeckRGBPoseDisplay {
                 (0.08...0.25).contains(lowerToUpperPivotMeters) && [a,b,c].allSatisfy{(0.02...0.5).contains($0)} &&
                 abs(a-b)<c && c<a+b && abs(sphereForwardLeanDegrees)<=45 &&
                 (0...90).contains(cameraDepressionAtReferenceDegrees) &&
+                (sphereRingTiltAtReferenceDegrees ?? 0).isFinite && abs(sphereRingTiltAtReferenceDegrees ?? 0)<=45 &&
                 sourcePhotoSHA256.count==64 && sourcePhotoSHA256.allSatisfy(\.isHexDigit)
         }
     }
@@ -266,7 +269,8 @@ enum ROBNeckRGBPoseDisplay {
         } else{hardware=nil}
         return Pose(profileID:profile.id,cameraToModel:torso*value.camera,modelToDisplay:gauge,
             headFrames:value.frames.mapValues{torso*$0},headMount:description,headDepthDisplayLiftMeters:profile.headDepthDisplayLiftMeters,
-            hardwareFrames:hardware,bellyPreviewDownwardPitchDegrees:profile.bellyCameraDownwardPitchDegrees)
+            hardwareFrames:hardware,hardwareSphereRingTiltDegrees:profile.hardwarePose.map{$0.sphereRingTiltAtReferenceDegrees ?? 0},
+            bellyPreviewDownwardPitchDegrees:profile.bellyCameraDownwardPitchDegrees)
     }
     static func cameraToModel(model:ROBGhostRobotModel,panTarget:Int,lowerTarget:Int,upperTarget:Int)->simd_double4x4? {
         pose(model:model,panTarget:panTarget,lowerTarget:lowerTarget,upperTarget:upperTarget)?.cameraToModel

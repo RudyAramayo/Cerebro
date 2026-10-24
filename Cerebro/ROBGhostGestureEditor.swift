@@ -1010,6 +1010,13 @@ import simd
         let alignment = ROBWorkspaceDepthAlignment.snapshot()
         var changes: [(SCNNode, simd_float4x4)] = []
         for (link, node) in nodes {
+            if link == "insta360_link", let mount=node.childNode(withName:"reference-insta-mount",recursively:true) {
+                // The old scan's fixed backward tilt is not part of the new
+                // photographed assembly. Tilt the lens ring independently of
+                // the measured sphere/glass centers and optical calibration.
+                let tilt=CGFloat((fitted?.hardwareSphereRingTiltDegrees ?? -20) * .pi / 180)
+                if mount.eulerAngles.y != tilt {mount.eulerAngles.y=tilt}
+            }
             if var transform = frames[link] {
                 // Rotate the face-camera housing about its optical origin.
                 // Cloud translation is not a physical camera-mount movement;

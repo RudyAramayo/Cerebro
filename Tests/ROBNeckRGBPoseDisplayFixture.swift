@@ -132,6 +132,7 @@ import simd
                 pose.modelToDisplay==before.modelToDisplay && pose.depthCloudCameraToModel==before.depthCloudCameraToModel,
                 "Photo hardware drawing changed QR optical calibration or cloud")
             precondition(pose.profileID != before.profileID && pose.headMount==nil)
+            precondition(pose.hardwareSphereRingTiltDegrees==0,"Omitted photo ring tilt did not default to horizontal")
             let H=pose.hardwareFrames!,L=H["lower_neck_link"]!,U=H["upper_neck_link"]!,S=H["insta360_link"]!,G=H["rgb_glass_frame"]!,O=H["oak_link"]!
             precondition(H["oak_optical_frame"]==nil,"Photo drawing overrode the fitted optical frame")
             precondition(abs(simd_distance(point(L),point(U))-0.15579)<1e-10)
@@ -154,6 +155,26 @@ import simd
                 precondition(abs(-atan2(ray.columns.2.z,hypot(ray.columns.2.x,ray.columns.2.y))*180 / .pi-38.4)<1e-10)
             }
         }
+        let beforeRing=ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6015,lowerTarget:6011,upperTarget:6160)!
+        for ring in [12.0,-45.0,45.0] {
+            hardware["sphereRingTiltAtReferenceDegrees"]=ring;a["hardwarePose"]=hardware;try activate()
+            let changed=ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6015,lowerTarget:6011,upperTarget:6160)!
+            precondition(changed.hardwareSphereRingTiltDegrees==ring && changed.profileID != beforeRing.profileID)
+            precondition(changed.cameraToModel==beforeRing.cameraToModel && changed.headFrames==beforeRing.headFrames &&
+                changed.modelToDisplay==beforeRing.modelToDisplay && changed.depthCloudCameraToModel==beforeRing.depthCloudCameraToModel &&
+                changed.hardwareFrames==beforeRing.hardwareFrames,"Sphere-ring appearance changed optical projection or mount positions")
+        }
+        for ring in [-45.001,45.001] {
+            hardware["sphereRingTiltAtReferenceDegrees"]=ring;a["hardwarePose"]=hardware;try activate()
+            precondition(ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6015,lowerTarget:6011,upperTarget:6160)==nil,"Unbounded sphere-ring tilt accepted")
+        }
+        hardware["sphereRingTiltAtReferenceDegrees"]=0;a["hardwarePose"]=hardware;try activate()
+        let finiteRingJSON=try String(contentsOf:activation,encoding:.utf8)
+        let nonfiniteRingJSON=finiteRingJSON.replacingOccurrences(of:"\"sphereRingTiltAtReferenceDegrees\":0",with:"\"sphereRingTiltAtReferenceDegrees\":1e309")
+        precondition(nonfiniteRingJSON != finiteRingJSON)
+        try nonfiniteRingJSON.write(to:activation,atomically:true,encoding:.utf8)
+        precondition(ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6015,lowerTarget:6011,upperTarget:6160)==nil,"Nonfinite sphere-ring tilt accepted")
+        hardware.removeValue(forKey:"sphereRingTiltAtReferenceDegrees");a["hardwarePose"]=hardware;try activate()
         precondition(ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model)==nil)
         let beforeBelly=ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6015,lowerTarget:6011,upperTarget:6160)!
         let beforeIdentity=ROBNeckRGBPoseDisplay.configurationIdentity(model:model)!
@@ -191,6 +212,6 @@ import simd
         a["fitArtifactSHA256"]=hash(try Data(contentsOf:fit))
         try Data("Changed source image".utf8).write(to:capture.appendingPathComponent("frame-0.jpg"));try activate()
         precondition(ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6000,lowerTarget:6495,upperTarget:5900)==nil)
-        print("PASS synthetic display: raw poses, torso gauge, rigid165/96.5/129 triangle, independent upright photo hardware with unchanged41mm optical fit, glued articulated mounts, independent belly pitch/origin, bounds and source/model/hash rejection")
+        print("PASS synthetic display: raw poses, torso gauge, rigid165/96.5/129 triangle, independent upright photo hardware with unchanged41mm optical fit, horizontal-default/bounded finite sphere ring, glued articulated mounts, independent belly pitch/origin, bounds and source/model/hash rejection")
     }
 }
