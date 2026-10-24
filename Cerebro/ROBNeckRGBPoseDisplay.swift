@@ -12,6 +12,10 @@ enum ROBNeckRGBPoseDisplay {
         let headFrames: [String:simd_double4x4]
         let headMount: HeadMountDescription?
         let headDepthDisplayLiftMeters: Double
+        /// Operator-photo hardware drawing only. It deliberately omits the
+        /// optical frame: the fitted QR ray and depth projection stay intact.
+        let hardwareFrames: [String:simd_double4x4]?
+        let bellyPreviewDownwardPitchDegrees: Double?
         var displayCameraToModel: simd_double4x4 { modelToDisplay * cameraToModel }
         var depthCloudCameraToModel: simd_double4x4 {
             var lift=matrix_identity_double4x4
@@ -40,16 +44,41 @@ enum ROBNeckRGBPoseDisplay {
                 (0.001...0.03).contains(opticalCenterAllowanceMeters) && sphereAzimuthAssumption=="closest_to_nominal"
         }
     }
+    /// A separate visual assembly, not a revised optical fit. Distances are
+    /// measured, while the held-pose angles come from the operator's photo.
+    private struct HardwarePose:Decodable {
+        let kind:String
+        let lowerUprightTarget:Int,upperReferenceTarget:Int
+        let panForwardTarget:Int?
+        let lowerToUpperPivotMeters:Double
+        let upperCenterToSphereMeters:Double,sphereToRGBGlassMeters:Double,upperCenterToRGBGlassMeters:Double
+        let sphereForwardLeanDegrees:Double,cameraDepressionAtReferenceDegrees:Double
+        let sourcePhotoSHA256:String
+        var valid:Bool {
+            let a=upperCenterToSphereMeters,b=sphereToRGBGlassMeters,c=upperCenterToRGBGlassMeters
+            return kind=="operator_photo_hardware_pose" &&
+                [lowerUprightTarget,upperReferenceTarget,panForwardTarget ?? 6000].allSatisfy{(3000...10000).contains($0)} &&
+                [lowerToUpperPivotMeters,a,b,c,sphereForwardLeanDegrees,cameraDepressionAtReferenceDegrees].allSatisfy(\.isFinite) &&
+                (0.08...0.25).contains(lowerToUpperPivotMeters) && [a,b,c].allSatisfy{(0.02...0.5).contains($0)} &&
+                abs(a-b)<c && c<a+b && abs(sphereForwardLeanDegrees)<=45 &&
+                (0...90).contains(cameraDepressionAtReferenceDegrees) &&
+                sourcePhotoSHA256.count==64 && sourcePhotoSHA256.allSatisfy(\.isHexDigit)
+        }
+    }
     private struct Activation:Decodable {
         let schemaVersion:Int,kind:String,modelID:String,referenceID:String,geometryID:String
         let fitArtifactPath:String,fitArtifactSHA256:String,floorReferencePath:String,floorReferenceSHA256:String
         let headMount:HeadMount?
         let headDepthDisplayLiftMeters:Double?
+        let hardwarePose:HardwarePose?
+        let bellyCameraDownwardPitchDegrees:Double?
     }
     private struct Profile {
         let id:String,parameters:[String:Double],upTorso:SIMD3<Double>
         let headMount:HeadMount?
         let headDepthDisplayLiftMeters:Double
+        let hardwarePose:HardwarePose?
+        let bellyCameraDownwardPitchDegrees:Double?
     }
     private static let lock=NSLock()
     private static var cachedKey=""
@@ -78,8 +107,12 @@ enum ROBNeckRGBPoseDisplay {
             guard a.schemaVersion==1,a.kind=="provisional_rgb_neck_display",a.modelID==model.modelID,
                   a.referenceID==model.referenceID,a.geometryID==model.geometryID else {throw Failure.invalid}
             guard a.headMount?.valid ?? true else {throw Failure.invalid}
+            guard a.hardwarePose?.valid ?? true else {throw Failure.invalid}
             let lift=a.headDepthDisplayLiftMeters ?? 0
             guard lift.isFinite,abs(lift)<=0.3048 else {throw Failure.invalid}
+            if let belly=a.bellyCameraDownwardPitchDegrees {
+                guard belly.isFinite,(0...60).contains(belly) else {throw Failure.invalid}
+            }
             let fitData=try read(a.fitArtifactPath,sha:a.fitArtifactSHA256)
             guard let fit=try JSONSerialization.jsonObject(with:fitData)as?[String:Any],
                   fit["status"]as?String=="conditional_torso_bundle_candidate_not_registered",
@@ -116,13 +149,59 @@ enum ROBNeckRGBPoseDisplay {
                 up += SIMD3((C*SIMD4(n,0)).x,(C*SIMD4(n,0)).y,(C*SIMD4(n,0)).z)
             }
             guard simd_length(up)>Double(observations.count)*0.99 else {throw Failure.invalid}
-            cachedProfile=Profile(id:sha(bytes+fitData+referenceData),parameters:p,upTorso:simd_normalize(up),headMount:a.headMount,headDepthDisplayLiftMeters:lift)
+            cachedProfile=Profile(id:sha(bytes+fitData+referenceData),parameters:p,upTorso:simd_normalize(up),headMount:a.headMount,headDepthDisplayLiftMeters:lift,
+                hardwarePose:a.hardwarePose,bellyCameraDownwardPitchDegrees:a.bellyCameraDownwardPitchDegrees)
         } catch {cachedProfile=nil}
         return cachedProfile
     }
     private static func translated(_ t:SIMD3<Double>)->simd_double4x4 {var T=matrix_identity_double4x4;T.columns.3=SIMD4(t,1);return T}
     private static func rotated(_ v:SIMD3<Double>)->simd_double4x4 {
         let a=simd_length(v);return a<1e-14 ? matrix_identity_double4x4:simd_double4x4(simd_quatd(angle:a,axis:v/a))
+    }
+    /// Profile identity is available without a current head-command estimate,
+    /// so changing an explicit belly mount also invalidates its cloud cache.
+    static func configurationIdentity(model:ROBGhostRobotModel)->String? {profile(model:model)?.id}
+
+    /// Canonical model frames only; the renderer applies its existing common
+    /// display gauge once to body, housing and cloud. Raw depth is unchanged.
+    static func bellyPreviewFrames(model:ROBGhostRobotModel)->[String:simd_double4x4]? {
+        guard let pitch=profile(model:model)?.bellyCameraDownwardPitchDegrees else{return nil}
+        let frames=model.frames(model.reference)
+        guard let torso=frames["torso_link"],let optical=frames["belly_oak_optical_frame"],
+              let housing=frames["belly_oak_link"] else{return nil}
+        if pitch==0 {return ["belly_oak_optical_frame":optical,"belly_oak_link":housing]}
+        var torsoRotation=torso;torsoRotation.columns.3=SIMD4(0,0,0,1)
+        let rotation=torsoRotation*rotated(SIMD3(0,pitch * .pi/180,0))*simd_inverse(torsoRotation)
+        let center=SIMD3(optical.columns.3.x,optical.columns.3.y,optical.columns.3.z)
+        let delta=translated(center)*rotation*translated(-center)
+        return ["belly_oak_optical_frame":delta*optical,"belly_oak_link":delta*housing]
+    }
+
+    private static func hardwareFrames(model:ROBGhostRobotModel,parameters p:[String:Double],configuration h:HardwarePose,
+        panTarget:Int,lowerTarget:Int,upperTarget:Int)throws->[String:simd_double4x4] {
+        guard h.valid,[panTarget,lowerTarget,upperTarget].allSatisfy({(3000...10000).contains($0)}) else{throw Failure.invalid}
+        let frames=model.frames(model.reference)
+        guard let torso=frames["torso_link"],let opticalReference=frames["oak_optical_frame"],let oakReference=frames["oak_link"] else{throw Failure.invalid}
+        let radiansPerRaw=Double.pi/6000
+        // Preserve the canonical rearward neck pivot. The photo supplies a
+        // zero at upright; its old fitted lower offset is not a hardware angle.
+        let pan=translated(SIMD3(-0.0207044288303,0,0.355408962871))*rotated(SIMD3(0,0,Double(panTarget-(h.panForwardTarget ?? 6000))*radiansPerRaw*p["panScale"]!))
+        let lower=pan*rotated(SIMD3(0,Double(lowerTarget-h.lowerUprightTarget)*radiansPerRaw*p["lowerScale"]!,0))
+        let upper=lower*translated(SIMD3(0,0,h.lowerToUpperPivotMeters))*rotated(SIMD3(0,-Double(upperTarget-h.upperReferenceTarget)*radiansPerRaw*p["upperScale"]!,0))
+        let a=h.upperCenterToSphereMeters,b=h.sphereToRGBGlassMeters,c=h.upperCenterToRGBGlassMeters
+        let sphereLean=h.sphereForwardLeanDegrees * .pi/180
+        let included=acos(min(1,max(-1,(a*a+c*c-b*b)/(2*a*c))))
+        let glassLean=sphereLean+included // photographed forward/lower branch
+        let sphere=translated(SIMD3(a*sin(sphereLean),0,a*cos(sphereLean)))
+        let depression=h.cameraDepressionAtReferenceDegrees * .pi/180
+        // Optical +X points image-right, +Y image-down, +Z forward. This
+        // orientation belongs only to the visible glass/housing assembly.
+        var glass=simd_double4x4(columns:(SIMD4(0,-1,0,0),SIMD4(-sin(depression),0,-cos(depression),0),
+            SIMD4(cos(depression),0,-sin(depression),0),SIMD4(c*sin(glassLean),0,c*cos(glassLean),1)))
+        glass=upper*glass
+        let oakToOptical=simd_inverse(oakReference)*opticalReference
+        return ["neck_pan_link":torso*pan,"lower_neck_link":torso*lower,"upper_neck_link":torso*upper,
+            "insta360_link":torso*upper*sphere,"rgb_glass_frame":torso*glass,"oak_link":torso*glass*simd_inverse(oakToOptical)]
     }
     private static func chain(model:ROBGhostRobotModel,parameters p:[String:Double],panTarget:Int,lowerTarget:Int,upperTarget:Int,headMount:HeadMount?=nil)throws
         ->(camera:simd_double4x4,frames:[String:simd_double4x4]) {
@@ -179,8 +258,15 @@ enum ROBNeckRGBPoseDisplay {
                 upperToGlassMeters:mount.upperCenterToRGBGlassMeters,glassToOpticalDistanceMeters:simd_distance(SIMD3(glass.columns.3.x,glass.columns.3.y,glass.columns.3.z),SIMD3(value.camera.columns.3.x,value.camera.columns.3.y,value.camera.columns.3.z)),
                 azimuthAssumption:mount.sphereAzimuthAssumption)
         } else {description=nil}
+        let hardware:[String:simd_double4x4]?
+        if let configuration=profile.hardwarePose {
+            guard let value=try? hardwareFrames(model:model,parameters:profile.parameters,configuration:configuration,
+                panTarget:panTarget,lowerTarget:lowerTarget,upperTarget:upperTarget) else{return nil}
+            hardware=value
+        } else{hardware=nil}
         return Pose(profileID:profile.id,cameraToModel:torso*value.camera,modelToDisplay:gauge,
-            headFrames:value.frames.mapValues{torso*$0},headMount:description,headDepthDisplayLiftMeters:profile.headDepthDisplayLiftMeters)
+            headFrames:value.frames.mapValues{torso*$0},headMount:description,headDepthDisplayLiftMeters:profile.headDepthDisplayLiftMeters,
+            hardwareFrames:hardware,bellyPreviewDownwardPitchDegrees:profile.bellyCameraDownwardPitchDegrees)
     }
     static func cameraToModel(model:ROBGhostRobotModel,panTarget:Int,lowerTarget:Int,upperTarget:Int)->simd_double4x4? {
         pose(model:model,panTarget:panTarget,lowerTarget:lowerTarget,upperTarget:upperTarget)?.cameraToModel

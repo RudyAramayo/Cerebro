@@ -113,6 +113,76 @@ import simd
         precondition(ROBNeckRGBPoseDisplay.cameraToModel(model:model,panTarget:4667,lowerTarget:6495,upperTarget:5990)==withTriangle,"Measured render triangle changed optical calibration")
         a["headMount"]=mount;measured["cameraDistanceFromAssumedUpperCenterMeters"]=0.04098;try measuredFit();try activate()
         precondition(ROBNeckRGBPoseDisplay.pose(model:model,panTarget:4667,lowerTarget:6495,upperTarget:5990)==nil,"Disproved41mm optical center was silently stretched to129mm")
+        // A photo drawing is distinct from the radius-constrained optical
+        // headMount above. It must not stretch or replace the rejected fit.
+        a.removeValue(forKey:"headMount");try activate()
+        let hardwareTargets=[(6015,6011,6160),(4667,6495,5990),(6111,6200,6350)]
+        let opticalBeforeHardware=hardwareTargets.map {ROBNeckRGBPoseDisplay.pose(model:model,panTarget:$0.0,lowerTarget:$0.1,upperTarget:$0.2)!}
+        var hardware:[String:Any]=["kind":"operator_photo_hardware_pose","lowerUprightTarget":6011,"upperReferenceTarget":6160,
+            "panForwardTarget":6015,"lowerToUpperPivotMeters":0.15579,"upperCenterToSphereMeters":0.165,
+            "sphereToRGBGlassMeters":0.0965,"upperCenterToRGBGlassMeters":0.129,"sphereForwardLeanDegrees":8.3,
+            "cameraDepressionAtReferenceDegrees":38.4,"sourcePhotoSHA256":String(repeating:"a",count:64)]
+        a["hardwarePose"]=hardware;try activate()
+        var hardwareAssembly:simd_double4x4?,hardwareHousing:simd_double4x4?
+        for (index,target) in hardwareTargets.enumerated() {
+            let pose=ROBNeckRGBPoseDisplay.pose(model:model,panTarget:target.0,lowerTarget:target.1,upperTarget:target.2)!
+            let before=opticalBeforeHardware[index]
+            check(pose,torso:torso)
+            precondition(pose.cameraToModel==before.cameraToModel && pose.headFrames==before.headFrames &&
+                pose.modelToDisplay==before.modelToDisplay && pose.depthCloudCameraToModel==before.depthCloudCameraToModel,
+                "Photo hardware drawing changed QR optical calibration or cloud")
+            precondition(pose.profileID != before.profileID && pose.headMount==nil)
+            let H=pose.hardwareFrames!,L=H["lower_neck_link"]!,U=H["upper_neck_link"]!,S=H["insta360_link"]!,G=H["rgb_glass_frame"]!,O=H["oak_link"]!
+            precondition(H["oak_optical_frame"]==nil,"Photo drawing overrode the fitted optical frame")
+            precondition(abs(simd_distance(point(L),point(U))-0.15579)<1e-10)
+            precondition(abs(simd_distance(point(U),point(S))-0.165)<1e-10)
+            precondition(abs(simd_distance(point(S),point(G))-0.0965)<1e-10)
+            precondition(abs(simd_distance(point(U),point(G))-0.129)<1e-10)
+            let assembly=simd_inverse(S)*G,housing=simd_inverse(G)*O
+            if let hardwareAssembly,let hardwareHousing {
+                for i in 0..<4 {precondition(close(assembly[i],hardwareAssembly[i]) && close(housing[i],hardwareHousing[i]),"Photo hardware mounts did not remain glued")}
+            } else {hardwareAssembly=assembly;hardwareHousing=housing}
+            if index==0 {
+                let lower=simd_inverse(torso)*L,delta=simd_inverse(L)*U
+                precondition(close(lower.columns.2,SIMD4(0,0,1,0)),"Lower neck is not upright at6011")
+                precondition(close(lower.columns.3,SIMD4(-0.0207044288303,0,0.355408962871,1)),"Photo override moved canonical rearward neck pivot")
+                precondition(close(delta.columns.3,SIMD4(0,0,0.15579,1)))
+                let sphere=simd_inverse(U)*S,glass=simd_inverse(U)*G
+                precondition(abs(sphere.columns.3.x-0.165*sin(8.3 * .pi/180))<1e-10)
+                precondition(glass.columns.3.x>sphere.columns.3.x && glass.columns.3.z<sphere.columns.3.z)
+                let ray=simd_inverse(U)*G
+                precondition(abs(-atan2(ray.columns.2.z,hypot(ray.columns.2.x,ray.columns.2.y))*180 / .pi-38.4)<1e-10)
+            }
+        }
+        precondition(ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model)==nil)
+        let beforeBelly=ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6015,lowerTarget:6011,upperTarget:6160)!
+        let beforeIdentity=ROBNeckRGBPoseDisplay.configurationIdentity(model:model)!
+        a["bellyCameraDownwardPitchDegrees"]=25.0;try activate()
+        let withBelly=ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6015,lowerTarget:6011,upperTarget:6160)!
+        precondition(withBelly.bellyPreviewDownwardPitchDegrees==25)
+        precondition(withBelly.cameraToModel==beforeBelly.cameraToModel && withBelly.hardwareFrames==beforeBelly.hardwareFrames &&
+            withBelly.headFrames==beforeBelly.headFrames && withBelly.depthCloudCameraToModel==beforeBelly.depthCloudCameraToModel,
+            "Belly sensor adjustment changed head hardware or RGB/depth pose")
+        precondition(ROBNeckRGBPoseDisplay.configurationIdentity(model:model) != beforeIdentity)
+        let belly=ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model)!,canonical=model.frames(model.reference)
+        let originalBelly=canonical["belly_oak_optical_frame"]!,correctedBelly=belly["belly_oak_optical_frame"]!
+        precondition(close(correctedBelly.columns.3,originalBelly.columns.3),"Belly pitch changed optical origin")
+        let bellyRay=simd_inverse(torso)*correctedBelly
+        precondition(abs(bellyRay.columns.2.x-cos(25 * .pi/180))<1e-10 && abs(bellyRay.columns.2.z+sin(25 * .pi/180))<1e-10)
+        let originalMount=simd_inverse(originalBelly)*canonical["belly_oak_link"]!,correctedMount=simd_inverse(correctedBelly)*belly["belly_oak_link"]!
+        for i in 0..<4 {precondition(close(originalMount[i],correctedMount[i]),"Belly housing detached from optical mount")}
+        a["bellyCameraDownwardPitchDegrees"]=0.0;try activate()
+        precondition(ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model)!["belly_oak_optical_frame"]==originalBelly)
+        a["bellyCameraDownwardPitchDegrees"]=61.0;try activate()
+        precondition(ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model)==nil)
+        a.removeValue(forKey:"bellyCameraDownwardPitchDegrees")
+        for (key,value) in [("sourcePhotoSHA256","bad" as Any),("kind","wrong_kind" as Any),("lowerToUpperPivotMeters",0.4 as Any),
+            ("sphereToRGBGlassMeters",0.49 as Any),("sphereForwardLeanDegrees",90.0 as Any),("cameraDepressionAtReferenceDegrees",91.0 as Any)] {
+            let prior=hardware[key];hardware[key]=value;a["hardwarePose"]=hardware;try activate()
+            precondition(ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6015,lowerTarget:6011,upperTarget:6160)==nil,"Invalid photo hardware option accepted: \(key)")
+            hardware[key]=prior
+        }
+        a.removeValue(forKey:"hardwarePose")
         measured["cameraDistanceFromAssumedUpperCenterMeters"]=0.129;try measuredFit();try activate()
         a["modelID"]="wrong-model";try activate()
         precondition(ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6000,lowerTarget:6495,upperTarget:5900)==nil)
@@ -121,6 +191,6 @@ import simd
         a["fitArtifactSHA256"]=hash(try Data(contentsOf:fit))
         try Data("Changed source image".utf8).write(to:capture.appendingPathComponent("frame-0.jpg"));try activate()
         precondition(ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6000,lowerTarget:6495,upperTarget:5900)==nil)
-        print("PASS synthetic display: raw poses, torso gauge, rigid165/96.5/129 triangle, explicit azimuth/glass allowance, rejected41mm conflict, unchanged optical calibration and source/model/hash rejection")
+        print("PASS synthetic display: raw poses, torso gauge, rigid165/96.5/129 triangle, independent upright photo hardware with unchanged41mm optical fit, glued articulated mounts, independent belly pitch/origin, bounds and source/model/hash rejection")
     }
 }

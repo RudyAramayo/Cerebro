@@ -718,7 +718,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     [self refreshHeadModelEstimate];
     NSArray<NSNumber *> *affine = [self.ghostGestureEditor depthCloudCameraTransform:belly];
     NSString *projectionIdentity = self.ghostGestureEditor.depthProjectionIdentity;
-    BOOL fittedRGBHead = !belly && self.ghostGestureEditor.headDisplayUsesRGBFit;
+    BOOL explicitCameraPose = [self.ghostGestureEditor depthCloudUsesExplicitCameraPose:belly];
     if (!belly && self.headFloorCloudContext) {
         double f = (double)frame.width / (2.0 * tan(69.0 * M_PI / 360.0));
         NSArray *k = @[@(frame.hasCalibratedIntrinsics ? frame.cameraFX : f),
@@ -753,7 +753,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     NSArray<NSNumber *> *targets = @[@(serial.commandedLowerNeckTiltTarget), @(serial.commandedNeckPanTarget), @(serial.commandedUpperNeckTiltTarget)];
     if (belly) self.bellyCloudUpdatePending = YES; else self.cloudUpdatePending = YES;
     SCNMatrix4 robot = self.robotNode.presentationNode.worldTransform;
-    dispatch_async(self.cloudQueue, ^{ [self processDepthFrame:frame robotTransform:robot cameraTransform:camera neckTargets:targets projectionIdentity:projectionIdentity fittedRGBHead:fittedRGBHead]; });
+    dispatch_async(self.cloudQueue, ^{ [self processDepthFrame:frame robotTransform:robot cameraTransform:camera neckTargets:targets projectionIdentity:projectionIdentity explicitCameraPose:explicitCameraPose]; });
 }
 
 - (SCNGeometry *)pointGeometry:(NSArray<NSValue *> *)points colors:(NSArray<NSNumber *> *)colors pointSize:(CGFloat)size
@@ -856,7 +856,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
 }
 
 - (void)processDepthFrame:(ROBDepthCloudFrame *)frame robotTransform:(SCNMatrix4)robotTransform
-          cameraTransform:(ROBDepthCloudTransform)camera neckTargets:(NSArray<NSNumber *> *)targets projectionIdentity:(NSString *)projectionIdentity fittedRGBHead:(BOOL)fittedRGBHead
+          cameraTransform:(ROBDepthCloudTransform)camera neckTargets:(NSArray<NSNumber *> *)targets projectionIdentity:(NSString *)projectionIdentity explicitCameraPose:(BOOL)explicitCameraPose
 {
     if (frame.width <= 0 || frame.height <= 0 || frame.width > 8192 || frame.height > 8192 ||
         frame.millimetersLittleEndian.length < (NSUInteger)frame.width * (NSUInteger)frame.height * 2) {
@@ -944,9 +944,10 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
         floorCandidates.length / sizeof(ROBDepthFloorPoint), floorOptions);
     const ROBDepthFloorPoint *metric = metricPoints.bytes;
     for (NSUInteger index = 0; index < metricPoints.length / sizeof(ROBDepthFloorPoint); index++) {
-        // Keep depth noise and object shapes: align the whole cloud rigidly,
-        // rather than snapping near-floor objects or every point to y=0.
-        ROBDepthFloorPoint aligned = fittedRGBHead ? metric[index] : ROBDepthFloorRectify(floor, metric[index], false);
+        // An explicit camera pose already defines the display frame for its mesh
+        // and raw rays. Report floor residuals without applying another pose.
+        // Legacy previews still align the whole cloud rigidly, preserving shape.
+        ROBDepthFloorPoint aligned = explicitCameraPose ? metric[index] : ROBDepthFloorRectify(floor, metric[index], false);
         SCNVector3 local = SCNVector3Make(aligned.x * presentationScale, aligned.y * presentationScale, aligned.z * presentationScale);
         SCNVector3 world = SCNVector3Make(
             robotTransform.m11 * local.x + robotTransform.m21 * local.y + robotTransform.m31 * local.z + robotTransform.m41,
@@ -954,7 +955,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
             robotTransform.m13 * local.x + robotTransform.m23 * local.y + robotTransform.m33 * local.z + robotTransform.m43);
         [points addObject:[NSValue valueWithSCNVector3:world]];
     }
-    NSString *floorSummary = floor.valid ? [NSString stringWithFormat:fittedRGBHead ? @"raw depth · %.0f%% floor support · %.1f mm RMS · %.1f° residual (not corrected)" : @"aligned · %.0f%% support · %.1f mm RMS · %.1f° correction",
+    NSString *floorSummary = floor.valid ? [NSString stringWithFormat:explicitCameraPose ? @"raw depth · %.0f%% floor support · %.1f mm RMS · %.1f° residual (not corrected)" : @"aligned · %.0f%% support · %.1f mm RMS · %.1f° correction",
         floor.inlierFraction * 100, floor.rmsMeters * 1000, floor.tiltRadians * 180 / M_PI]
         : [NSString stringWithFormat:@"fit rejected · %s · candidates %lu/%lu/%lu (image/height/range)",
             ROBDepthFloorRejectionName(floor.rejection), (unsigned long)imageCandidates,
@@ -1007,10 +1008,10 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
         if (isBelly && ![previous isEqual:context]) { node.geometry = nil; node.hidden = YES; }
         BOOL alignedBefore = isBelly ? self.bellyFloorAlignmentEstablished : self.headFloorAlignmentEstablished;
         double acceptedAt = isBelly ? self.lastBellyCloudUptime : self.lastHeadCloudUptime;
-        BOOL hold = !fittedRGBHead && !floor.valid && alignedBefore && node.geometry != nil &&
+        BOOL hold = !explicitCameraPose && !floor.valid && alignedBefore && node.geometry != nil &&
             (!isBelly || (floor.rejection == ROBDepthFloorExcessNoise && now-acceptedAt <= ROBFloorNoiseHoldInterval));
         double displayUntil = 0;
-        if (fittedRGBHead || floor.valid || !alignedBefore) {
+        if (explicitCameraPose || floor.valid || !alignedBefore) {
             node.geometry = geometry;
             node.hidden = NO;
             if (isBelly) displayUntil = frame.capturedUptime + 0.7;
@@ -1032,13 +1033,13 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
         }
         if (isBelly) {
             self.bellyFloorCloudContext = context;
-            self.bellyFloorAlignmentEstablished = alignedBefore || floor.valid;
+            self.bellyFloorAlignmentEstablished = !explicitCameraPose && (alignedBefore || floor.valid);
             self.bellyFloorHoldingAcceptedFrame = hold;
             self.bellyCloudDisplayUntil = displayUntil;
             self.bellyFloorSummary = [@"BELLY: " stringByAppendingString:displaySummary];
         } else {
-            if (fittedRGBHead || floor.valid || !alignedBefore) self.headFloorCloudContext = context;
-            self.headFloorAlignmentEstablished = !fittedRGBHead && (alignedBefore || floor.valid);
+            if (explicitCameraPose || floor.valid || !alignedBefore) self.headFloorCloudContext = context;
+            self.headFloorAlignmentEstablished = !explicitCameraPose && (alignedBefore || floor.valid);
             self.headFloorHoldingAcceptedFrame = hold;
             self.headFloorSummary = [@"HEAD: " stringByAppendingString:displaySummary];
         }

@@ -163,12 +163,21 @@ import simd
     }
     var depthProjectionIdentity:String {
         guard let model else{return "unavailable"}
-        return [model.modelID,model.referenceID,model.geometryID,fittedHeadPose()?.profileID ?? ROBWorkspaceDepthAlignment.snapshot()?.identity ?? "invalid"].joined(separator:"|")
+        return [model.modelID,model.referenceID,model.geometryID,
+            ROBNeckRGBPoseDisplay.configurationIdentity(model:model) ?? fittedHeadPose()?.profileID ?? ROBWorkspaceDepthAlignment.snapshot()?.identity ?? "invalid"].joined(separator:"|")
     }
     var headDisplayPoseDescription:String {
         fittedHeadPose() == nil ? "URDF mount prior":"provisional RGB neck fit · estimated camera offset · raw depth"
     }
     var headDisplayUsesRGBFit:Bool {fittedHeadPose() != nil}
+
+    /// A supplied mount keeps the housing and raw cloud in one display frame.
+    /// It is not a measured camera-to-arm registration.
+    func depthCloudUsesExplicitCameraPose(_ belly:Bool)->Bool {
+        guard belly else {return headDisplayUsesRGBFit}
+        guard let model else {return false}
+        return ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model) != nil
+    }
 
     @objc(setHeadCommandPan:lowerPitch:upperPitch:known:)
     func setHeadCommand(pan: Double, lowerPitch: Double, upperPitch: Double, known: Bool) {
@@ -202,6 +211,12 @@ import simd
             headInfo.stringValue=String(format:"Provisional RGB neck fit: %@optical tilt %+.1f°%@\nPan → lower → upper · QR-up display gauge · estimated camera offset\nRaw depth unchanged; no grasp authority · profile %@",targets,pitch.doubleValue*180 / .pi,frozen,String(fitted.profileID.prefix(10)))
             if let mount=fitted.headMount {
                 headInfo.stringValue+=String(format:"\nRigid triangle %.0f/%.0f/%.0f mm · sphere azimuth ASSUMED\nGlass/optical separation %.1f mm is inferred, not measured",mount.upperToSphereMeters*1000,mount.sphereToGlassMeters*1000,mount.upperToGlassMeters*1000,mount.glassToOpticalDistanceMeters*1000)
+            }
+            if fitted.hardwareFrames != nil {
+                headInfo.stringValue += "\nNeck / face housing: operator photo pose\nHousing placement is separate from the provisional optical fit"
+            }
+            if let belly=fitted.bellyPreviewDownwardPitchDegrees {
+                headInfo.stringValue += String(format:"\nBelly mount: %.1f° down · operator estimate",belly)
             }
             if fitted.headDepthDisplayLiftMeters != 0 {
                 headInfo.stringValue+=String(format:"\nHead depth preview: %+.2f in up",fitted.headDepthDisplayLiftMeters/0.0254)
@@ -239,7 +254,7 @@ import simd
             SIMD4<Double>(modelBasis.columns.2), SIMD4<Double>(modelBasis.columns.3)))
         let fitted=fittedHeadPose()
         let alignedFrame: simd_double4x4
-        if belly { alignedFrame = frame }
+        if belly { alignedFrame = ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model)?["belly_oak_optical_frame"] ?? frame }
         else if let fitted {alignedFrame=fitted.cameraToModel}
         else {
             guard let alignment = ROBWorkspaceDepthAlignment.snapshot() else { return [] }
@@ -349,14 +364,20 @@ import simd
 
     @objc private func findAndPreviewCan() {
         guard !ROBLeftArmTrial.shared.isRunning, !ROBArmRoutineCoordinator.shared.isRunning,
-              !ROBControllerArmApproval.shared.isPending, let model else { return }
+              !ROBControllerArmApproval.shared.isPending, let directory = model?.directory else { return }
+        let side = canArm.indexOfSelectedItem == 1 ? "right" : "left"
+        let model: ROBGhostRobotModel
+        do { model = try ROBGhostRobotModel(directory: directory, physicalSide: side) }
+        catch { status.stringValue = error.localizedDescription; return }
         invalidateReview()
+        // The selected side determines both encoder mapping and live baseline;
+        // changing the preview selector never changes actuator ownership.
+        self.model = model
         canOverlay.childNodes.forEach { $0.removeFromParentNode() }
         displayedCan = nil
         canInfo.stringValue = "Finding a fresh RGB-D can target…"
         status.stringValue = "Neck-camera search, then ghost rehearsal. Arms and jaws stay unchanged."
         let request = UUID(); canRequestID = request
-        let side = canArm.indexOfSelectedItem == 1 ? "right" : "left"
         ROBArmRoutineCoordinator.shared.performCommand("left_search_workspace", target: "") { [weak self] result in
             guard let self, self.canRequestID == request else { return }
             guard let can = ROBWorkspaceSearch.shared.locatedObjects[.can] else {
@@ -982,7 +1003,9 @@ import simd
         let fitted=fittedHeadPose()
         if let fitted,["neck_pan","lower_neck","upper_neck"].allSatisfy({positions[$0]==headEstimate?[$0]}) {
             frames.merge(fitted.headFrames){_,new in new}
+            if let hardware=fitted.hardwareFrames {frames.merge(hardware){_,new in new}}
         }
+        if let belly=ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model) {frames.merge(belly){_,new in new}}
         let optical = frames["oak_optical_frame"]
         let alignment = ROBWorkspaceDepthAlignment.snapshot()
         var changes: [(SCNNode, simd_float4x4)] = []
