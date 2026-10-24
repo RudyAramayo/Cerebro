@@ -71,6 +71,17 @@ import simd
             }
         }
         precondition(matrices.dropFirst().allSatisfy{$0 != matrices[0]},"Raw P/L/U did not change articulated pose")
+        let beforeLift=ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6000,lowerTarget:6495,upperTarget:5900)!
+        a["headDepthDisplayLiftMeters"]=0.0762;try activate()
+        let lifted=ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6000,lowerTarget:6495,upperTarget:5900)!
+        precondition(lifted.cameraToModel==beforeLift.cameraToModel && lifted.headFrames==beforeLift.headFrames,
+            "Preview height adjustment changed physical camera or head geometry")
+        precondition(abs(lifted.depthCloudCameraToModel.columns.3.z-beforeLift.depthCloudCameraToModel.columns.3.z-0.0762)<1e-10)
+        for i in 0..<3 {precondition(close(lifted.depthCloudCameraToModel[i],beforeLift.depthCloudCameraToModel[i]),"Height adjustment tilted the cloud")}
+        precondition(!lifted.hasDepthProjectionAuthority && lifted.profileID != beforeLift.profileID)
+        a["headDepthDisplayLiftMeters"]=0.5;try activate()
+        precondition(ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6000,lowerTarget:6495,upperTarget:5900)==nil)
+        a.removeValue(forKey:"headDepthDisplayLiftMeters");try activate()
         var measured=p;measured["cameraDistanceFromAssumedUpperCenterMeters"]=0.129
         func measuredFit()throws {
             try write(["status":"conditional_torso_bundle_candidate_not_registered","modelID":model.modelID,

@@ -6,6 +6,7 @@ trap 'rm -rf "$fixture_dir"' EXIT
 app_dir="$fixture_dir/GhostFixture.app"
 mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources"
 ln -s "$repo_dir/Cerebro/Resources/ShadowPlanner" "$app_dir/Contents/Resources/ShadowPlanner"
+ln -s "$repo_dir/Cerebro/rob-visual.json" "$app_dir/Contents/Resources/rob-visual.json"
 cat > "$app_dir/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.orbitusrobotics.ghost-render-fixture</string><key>CFBundleExecutable</key><string>GhostFixture</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>

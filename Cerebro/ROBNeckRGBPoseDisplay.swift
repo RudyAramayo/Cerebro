@@ -11,7 +11,13 @@ enum ROBNeckRGBPoseDisplay {
         let modelToDisplay: simd_double4x4
         let headFrames: [String:simd_double4x4]
         let headMount: HeadMountDescription?
+        let headDepthDisplayLiftMeters: Double
         var displayCameraToModel: simd_double4x4 { modelToDisplay * cameraToModel }
+        var depthCloudCameraToModel: simd_double4x4 {
+            var lift=matrix_identity_double4x4
+            lift.columns.3.z=headDepthDisplayLiftMeters
+            return lift * displayCameraToModel
+        }
         var hasDepthProjectionAuthority: Bool { false }
         var depressionRadians: Double {
             let d=displayCameraToModel.columns.2
@@ -38,10 +44,12 @@ enum ROBNeckRGBPoseDisplay {
         let schemaVersion:Int,kind:String,modelID:String,referenceID:String,geometryID:String
         let fitArtifactPath:String,fitArtifactSHA256:String,floorReferencePath:String,floorReferenceSHA256:String
         let headMount:HeadMount?
+        let headDepthDisplayLiftMeters:Double?
     }
     private struct Profile {
         let id:String,parameters:[String:Double],upTorso:SIMD3<Double>
         let headMount:HeadMount?
+        let headDepthDisplayLiftMeters:Double
     }
     private static let lock=NSLock()
     private static var cachedKey=""
@@ -70,6 +78,8 @@ enum ROBNeckRGBPoseDisplay {
             guard a.schemaVersion==1,a.kind=="provisional_rgb_neck_display",a.modelID==model.modelID,
                   a.referenceID==model.referenceID,a.geometryID==model.geometryID else {throw Failure.invalid}
             guard a.headMount?.valid ?? true else {throw Failure.invalid}
+            let lift=a.headDepthDisplayLiftMeters ?? 0
+            guard lift.isFinite,abs(lift)<=0.3048 else {throw Failure.invalid}
             let fitData=try read(a.fitArtifactPath,sha:a.fitArtifactSHA256)
             guard let fit=try JSONSerialization.jsonObject(with:fitData)as?[String:Any],
                   fit["status"]as?String=="conditional_torso_bundle_candidate_not_registered",
@@ -106,7 +116,7 @@ enum ROBNeckRGBPoseDisplay {
                 up += SIMD3((C*SIMD4(n,0)).x,(C*SIMD4(n,0)).y,(C*SIMD4(n,0)).z)
             }
             guard simd_length(up)>Double(observations.count)*0.99 else {throw Failure.invalid}
-            cachedProfile=Profile(id:sha(bytes+fitData+referenceData),parameters:p,upTorso:simd_normalize(up),headMount:a.headMount)
+            cachedProfile=Profile(id:sha(bytes+fitData+referenceData),parameters:p,upTorso:simd_normalize(up),headMount:a.headMount,headDepthDisplayLiftMeters:lift)
         } catch {cachedProfile=nil}
         return cachedProfile
     }
@@ -170,7 +180,7 @@ enum ROBNeckRGBPoseDisplay {
                 azimuthAssumption:mount.sphereAzimuthAssumption)
         } else {description=nil}
         return Pose(profileID:profile.id,cameraToModel:torso*value.camera,modelToDisplay:gauge,
-            headFrames:value.frames.mapValues{torso*$0},headMount:description)
+            headFrames:value.frames.mapValues{torso*$0},headMount:description,headDepthDisplayLiftMeters:profile.headDepthDisplayLiftMeters)
     }
     static func cameraToModel(model:ROBGhostRobotModel,panTarget:Int,lowerTarget:Int,upperTarget:Int)->simd_double4x4? {
         pose(model:model,panTarget:panTarget,lowerTarget:lowerTarget,upperTarget:upperTarget)?.cameraToModel

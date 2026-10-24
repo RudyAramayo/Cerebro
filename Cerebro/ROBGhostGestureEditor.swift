@@ -18,6 +18,7 @@ import simd
     @nonobjc private var model: ROBGhostRobotModel?
     @nonobjc private var originalNodes: [String: SCNNode] = [:]
     @nonobjc private var ghostNodes: [String: SCNNode] = [:]
+    @nonobjc private lazy var normalHeadMaterials = Self.loadNormalHeadMaterials()
     @nonobjc private let renderRoot = SCNNode()
     @nonobjc private var modelBasis = matrix_identity_float4x4
     @nonobjc private var ghost: [String: Double] = [:]
@@ -95,16 +96,17 @@ import simd
             renderRoot.addChildNode(collisionMapOverlay); renderRoot.addChildNode(collisionPathOverlay)
             for (link, geometry, ghostGeometry) in try capturedGeometry(model) {
                 let originalMaterial = SCNMaterial()
-                originalMaterial.diffuse.contents = headLinks.contains(link) ? NSColor.lightGray : NSColor.white
+                originalMaterial.diffuse.contents = NSColor.white
                 originalMaterial.lightingModel = .constant; originalMaterial.isDoubleSided = true
                 let original = referenceHeadNode(link: link, material: originalMaterial, renderingOrder: 0)
                     ?? SCNNode(geometry: geometry)
                 original.geometry?.materials = [originalMaterial]; original.name = "Original URDF \(link)"
                 renderRoot.addChildNode(original); originalNodes[link] = original
                 let blue = SCNMaterial(); blue.diffuse.contents = NSColor.systemBlue
-                blue.transparency = 0.12
+                blue.transparency = 0.24; blue.blendMode = .alpha
+                blue.transparencyMode = .singleLayer
                 blue.lightingModel = .constant
-                blue.isDoubleSided = true; blue.writesToDepthBuffer = false; blue.readsFromDepthBuffer = false
+                blue.isDoubleSided = true; blue.writesToDepthBuffer = false; blue.readsFromDepthBuffer = true
                 let proposed = referenceHeadNode(link: link, material: blue, renderingOrder: 10) ?? SCNNode(geometry: ghostGeometry)
                 proposed.geometry?.materials = [blue]; proposed.renderingOrder = 10; proposed.name = "Blue ghost \(link)"
                 renderRoot.addChildNode(proposed); ghostNodes[link] = proposed
@@ -201,6 +203,9 @@ import simd
             if let mount=fitted.headMount {
                 headInfo.stringValue+=String(format:"\nRigid triangle %.0f/%.0f/%.0f mm · sphere azimuth ASSUMED\nGlass/optical separation %.1f mm is inferred, not measured",mount.upperToSphereMeters*1000,mount.sphereToGlassMeters*1000,mount.upperToGlassMeters*1000,mount.glassToOpticalDistanceMeters*1000)
             }
+            if fitted.headDepthDisplayLiftMeters != 0 {
+                headInfo.stringValue+=String(format:"\nHead depth preview: %+.2f in up",fitted.headDepthDisplayLiftMeters/0.0254)
+            }
             if let legacy=ROBWorkspaceDepthAlignment.snapshot() {
                 headInfo.stringValue+=String(format:"\nLegacy %.1f° / %.2f in retained, NOT applied",legacy.downwardPitchDegrees,legacy.towardRobotMeters/0.0254)
             }
@@ -240,7 +245,9 @@ import simd
             guard let alignment = ROBWorkspaceDepthAlignment.snapshot() else { return [] }
             alignedFrame = alignment.applying(to: frame)
         }
-        let transform = basis * (fitted?.modelToDisplay ?? matrix_identity_double4x4) * alignedFrame
+        let transform:simd_double4x4
+        if !belly,let fitted { transform=basis*fitted.depthCloudCameraToModel }
+        else { transform=basis*(fitted?.modelToDisplay ?? matrix_identity_double4x4)*alignedFrame }
         return (0..<3).flatMap { row in (0..<4).map { NSNumber(value: transform[$0][row]) } }
     }
 
@@ -664,7 +671,12 @@ import simd
         let root = SCNNode()
         func add(_ geometry: SCNGeometry, _ name: String, _ position: SCNVector3,
                  angles: SCNVector3 = SCNVector3Zero, parent: SCNNode? = nil) {
-            geometry.materials = [material]
+            let surface: String
+            if name.contains("lens") { surface = "lens" }
+            else if name.contains("antenna") { surface = "rubber" }
+            else if name.contains("mount") || name.contains("stem") || name.contains("axis") || name.contains("support") { surface = "aluminum" }
+            else { surface = "polymer" }
+            geometry.materials = [renderingOrder == 0 ? normalHeadMaterials[surface] ?? material : material]
             let node = SCNNode(geometry: geometry); node.name = name
             node.position = position; node.eulerAngles = angles; node.renderingOrder = renderingOrder
             (parent ?? root).addChildNode(node)
@@ -711,6 +723,44 @@ import simd
         return root
     }
 
+    /// Reuse the captured visual asset's hardware palette for the corrected
+    /// reference shapes. An opaque gray override previously turned the dark
+    /// camera body, optical lenses and aluminum brackets into one white mass.
+    /// These appearance materials do not change geometry or optical poses.
+    private static func loadNormalHeadMaterials() -> [String: SCNMaterial] {
+        struct Surface: Decodable { let color: [Double]; let metalness: Double; let roughness: Double }
+        struct Palette: Decodable { let materials: [String: Surface] }
+        // Same reviewed palette as rob-visual.json; retained if its optional
+        // appearance resource is unavailable in a reduced fixture bundle.
+        var surfaces: [String: Surface] = [
+            "polymer": .init(color: [0.188241, 0.211771, 0.231379], metalness: 0, roughness: 0.64),
+            "aluminum": .init(color: [0.658828, 0.701965, 0.729415], metalness: 0.75, roughness: 0.32),
+            "rubber": .init(color: [0.082357, 0.101966, 0.125495], metalness: 0, roughness: 0.9),
+            "lens": .init(color: [0.027451, 0.101966, 0.133339], metalness: 0.6, roughness: 0.12)
+        ]
+        if let url = Bundle.main.url(forResource: "rob-visual", withExtension: "json"),
+           let bytes = try? Data(contentsOf: url), bytes.count <= 1_000_000,
+           let palette = try? JSONDecoder().decode(Palette.self, from: bytes) {
+            for key in Array(surfaces.keys) {
+                if let value = palette.materials[key], value.color.count == 3,
+                   (value.color + [value.metalness, value.roughness]).allSatisfy({ $0.isFinite && (0...1).contains($0) }) {
+                    surfaces[key] = value
+                }
+            }
+        }
+        return Dictionary(uniqueKeysWithValues: surfaces.map { key, surface in
+            let value = SCNMaterial()
+            // Preserve dark captured housings under the controller's bright
+            // inspection lights; metal and optical surfaces retain highlights.
+            value.lightingModel = key == "polymer" || key == "rubber" ? .constant : .physicallyBased
+            value.diffuse.contents = NSColor(srgbRed: CGFloat(surface.color[0]), green: CGFloat(surface.color[1]), blue: CGFloat(surface.color[2]), alpha: 1)
+            value.metalness.contents = surface.metalness; value.roughness.contents = surface.roughness
+            value.transparency = 1; value.isDoubleSided = true
+            value.readsFromDepthBuffer = true; value.writesToDepthBuffer = true
+            return (key, value)
+        })
+    }
+
     private func reloadPresets() {
         presets.removeAllItems(); presets.addItems(withTitles: ["Center hand · J6 inward", "Wave above shoulder · J2/J4", "New custom gesture"] + saved.map(\.name))
     }
@@ -734,7 +784,7 @@ import simd
         ownsPendingRequest = false
         setPreviewFrozen(false)
         proposal = nil; playing = false; replayingRecording = false; record = []; currentPlot.values = []
-        for node in ghostNodes.values { node.isHidden = false }
+        refreshGhostVisibility()
         executeButton.isEnabled = false; identity.stringValue = "Unreviewed edits · no hardware output"
     }
     @objc private func selectPreset() {
@@ -949,9 +999,28 @@ import simd
                 if node.simdTransform != value { changes.append((node, value)) }
             }
         }
-        guard !changes.isEmpty else { return }
+        if !changes.isEmpty {
+            SCNTransaction.begin(); SCNTransaction.disableActions = true
+            for (node, transform) in changes { node.simdTransform = transform }
+            SCNTransaction.commit()
+        }
+        refreshGhostVisibility()
+    }
+    /// Each node already has its complete physical frame, including upstream
+    /// joints and the shared camera-mount estimate. Compare those frames so an
+    /// unchanged child command still shows its proposed parent motion, while
+    /// coincident surfaces never tint the normal robot or camera sphere.
+    private func refreshGhostVisibility() {
+        let recordingWithoutTarget = replayingRecording && proposal == nil
         SCNTransaction.begin(); SCNTransaction.disableActions = true
-        for (node, transform) in changes { node.simdTransform = transform }
+        for (link, proposed) in ghostNodes {
+            guard let original = originalNodes[link] else { proposed.isHidden = true; continue }
+            let a = original.simdTransform, b = proposed.simdTransform
+            let coincident = (0..<4).allSatisfy { column in
+                simd_length(a[column] - b[column]) <= 1e-6
+            }
+            proposed.isHidden = recordingWithoutTarget || coincident
+        }
         SCNTransaction.commit()
     }
     private func updateGhost(_ positions: [String: Double], updateFields: Bool = true) {
@@ -1050,7 +1119,7 @@ import simd
                 }
             }
             invalidateReview(); record = samples; proposal = frozen; replayingRecording = true; liveBaseline = false
-            for node in ghostNodes.values { node.isHidden = frozen == nil }
+            refreshGhostVisibility()
             timeline.maxValue = samples.last?.time ?? 1; timeline.doubleValue = 0
             currentPlot.values = samples.map { ($0.time, $0.deltas.map(abs).max() ?? 0) }
             identity.stringValue = "RECORDING REPLAY · no execution\n\(url.lastPathComponent)"

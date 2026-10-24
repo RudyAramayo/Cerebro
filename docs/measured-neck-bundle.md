@@ -180,6 +180,19 @@ renderer invalidates retained head points when their projection context changes.
 Raw depth values remain unchanged. A camera-angle correction cannot establish
 depth accuracy, remove a remaining depth-plane tilt or authorize a grasp.
 
+The optional `headDepthDisplayLiftMeters` profile value shifts only the head
+point-cloud preview along display-up (positive values raise the points).
+It preserves the physical camera/head frames, raw values, floor angle and
+camera-to-arm calibration. The profile identity changes so retained clouds
+are cleared and rebuilt. This visual comparison against a physical height
+reference is not registration evidence.
+
+The normal robot remains opaque. Ghost overlays appear only where a link's
+complete preview frame differs from its measured frame, including descendants
+moved by a parent joint. Coincident head/camera overlays stay hidden. Normal
+head parts retain their dark camera/servo housings, lens and metal appearances;
+blue is reserved for proposed pose differences.
+
 The fixed-head CAD/depth fitter can use the fitted physical camera transform
 as an initializer. Its original depth, held-out, spatial-support and uncertainty
 checks remain mandatory. A failed fit is still diagnostic.

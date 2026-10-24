@@ -115,6 +115,8 @@ final class GhostFixtureSnapshotView: NSView {
         precondition(levelCamera.count == 12 && downCamera != levelCamera && originalHead.simdTransform != levelHead)
         let headGhost = scene.rootNode.childNodes.flatMap(\.childNodes).first { $0.name == "Blue ghost oak_link" }!
         precondition(headGhost.simdTransform == originalHead.simdTransform, "Untouched ghost neck differs from live model")
+        precondition(headGhost.isHidden && !originalHead.isHidden,
+            "An unchanged camera must show the normal model without a coincident blue overlay")
         let model = try ROBGhostRobotModel(directory: Bundle.main.url(forResource: "ShadowPlanner", withExtension: nil)!)
         let opticalInHead = simd_inverse(model.frames(model.reference)["oak_link"]!) * model.frames(model.reference)["oak_optical_frame"]!
         let origin = originalHead.simdWorldTransform * SIMD4<Float>(opticalInHead.columns.3)
@@ -173,6 +175,8 @@ final class GhostFixtureSnapshotView: NSView {
                 precondition(originalNode.geometry == nil && !originalNode.childNodes.isEmpty,
                     "Normal \(link) still displays a captured scan fragment instead of the corrected reference")
                 assertReferenceGeometry(originalNode, ghostNode)
+                precondition(!originalNode.isHidden && ghostNode.isHidden,
+                    "Accepted live head motion must keep the original visible and hide its coincident ghost")
                 let frame = frames[link]!
                 for col in 0..<4 {
                     precondition(simd_distance(originalNode.simdTransform[col], SIMD4<Float>(frame[col])) < 1e-6,
@@ -204,6 +208,41 @@ final class GhostFixtureSnapshotView: NSView {
             }
         }
         assertAcceptedHead(6011, 6906)
+        let paletteData = try Data(contentsOf: Bundle.main.url(forResource: "rob-visual", withExtension: "json")!)
+        let sourcePalette = (try JSONSerialization.jsonObject(with: paletteData) as! [String: Any])["materials"] as! [String: Any]
+        for (link, primitive, surface) in [
+            ("insta360_link", "reference-insta-body", "polymer"),
+            ("oak_link", "reference-oak-body", "polymer"),
+            ("upper_neck_link", "reference-upper-servo", "polymer"),
+            ("upper_neck_link", "reference-upper-pitch-axis", "aluminum"),
+            ("lower_neck_link", "reference-lower-stem", "aluminum"),
+            ("insta360_link", "reference-insta-lens-0", "lens"),
+            ("oak_link", "reference-oak-lens-0", "lens"),
+            ("insta360_link", "reference-insta-antenna-1.0", "rubber")
+        ] {
+            let normal = headNode("Original URDF", link).childNode(withName: primitive, recursively: true)!
+            let ghost = headNode("Blue ghost", link).childNode(withName: primitive, recursively: true)!
+            let material = normal.geometry!.firstMaterial!
+            let color = (material.diffuse.contents as! NSColor).usingColorSpace(.sRGB)!
+            let expected = (sourcePalette[surface] as! [String: Any])["color"] as! [Double]
+            for (actual, expected) in zip([color.redComponent, color.greenComponent, color.blueComponent], expected) {
+                precondition(abs(Double(actual) - expected) < 1e-6,
+                    "Normal \(primitive) lost the existing \(surface) source appearance")
+            }
+            let expectedLighting: SCNMaterial.LightingModel = surface == "polymer" || surface == "rubber" ? .constant : .physicallyBased
+            precondition(material.lightingModel == expectedLighting && material.transparency == 1 &&
+                material.writesToDepthBuffer && material !== ghost.geometry!.firstMaterial,
+                "Normal hardware appearance must stay opaque and separate from blue movement overlays")
+            if surface == "lens" {
+                precondition(max(color.redComponent, color.greenComponent, color.blueComponent) < 0.2 &&
+                    (material.roughness.contents as! NSNumber).doubleValue < 0.2,
+                    "Normal camera lenses must remain dark and glossy")
+            } else if surface == "polymer" {
+                precondition(max(color.redComponent, color.greenComponent, color.blueComponent) < 0.3,
+                    "The normal camera/servo housing must not become a white merged sphere")
+            }
+        }
+        print("Normal head appearance: original hardware palette retained for dark polymer camera/servo housings, glossy dark lenses, aluminum brackets and rubber antennas; geometry and poses unchanged")
         for prefix in ["Original URDF", "Blue ghost"] {
             let stem = headNode(prefix, "lower_neck_link").childNode(withName: "reference-lower-stem", recursively: true)!
             let stemMatrix = stem.simdWorldTransform
@@ -316,6 +355,46 @@ final class GhostFixtureSnapshotView: NSView {
         let controls = descendants(editor.panelView)
         let jointPicker = controls.compactMap { $0 as? NSPopUpButton }.first { $0.itemTitles.contains("lower_neck") }!
         let jointAngle = controls.compactMap { $0 as? NSSlider }.first { $0.action == NSSelectorFromString("changeAngle") }!
+        func setGhostJoint(_ name: String, radians: Double) {
+            jointPicker.selectItem(withTitle: name)
+            NSApp.sendAction(jointPicker.action!, to: jointPicker.target, from: jointPicker)
+            jointAngle.doubleValue = radians * 180 / .pi
+            NSApp.sendAction(jointAngle.action!, to: jointAngle.target, from: jointAngle)
+        }
+        let allRobotNodes = scene.rootNode.childNodes.flatMap(\.childNodes)
+        let allGhostNodes = allRobotNodes.filter { $0.name?.hasPrefix("Blue ghost ") == true }
+        let allOriginalNodes = allRobotNodes.filter { $0.name?.hasPrefix("Original URDF ") == true }
+        for joint in 1...7 {
+            let name = "left_joint\(joint)"
+            setGhostJoint(name, radians: model.reference[name]!)
+        }
+        precondition(allGhostNodes.count >= 40 && allGhostNodes.allSatisfy(\.isHidden),
+            "A fully coincident baseline must hide every blue link, including cameras and torso")
+        precondition(allOriginalNodes.allSatisfy { !$0.isHidden },
+            "Ghost masking must preserve every normal robot link")
+        let originalFramesBeforeDelta = allOriginalNodes.map(\.simdTransform)
+        setGhostJoint("left_joint4", radians: model.reference["left_joint4"]! + 0.1)
+        let expectedMovingLinks: Set<String> = ["left_four_Link", "left_five_Link", "left_six_Link", "left_seven_Link", "left_tool"]
+        let visibleMovingLinks = Set(allGhostNodes.filter { !$0.isHidden }.map {
+            String($0.name!.dropFirst("Blue ghost ".count))
+        })
+        precondition(visibleMovingLinks == expectedMovingLinks,
+            "A J4 edit must show only its physical link and downstream descendants; got \(visibleMovingLinks)")
+        precondition(allOriginalNodes.map(\.simdTransform) == originalFramesBeforeDelta &&
+            allOriginalNodes.allSatisfy { !$0.isHidden }, "A proposed delta changed or hid the normal model")
+        for link in expectedMovingLinks {
+            let material = headNode("Blue ghost", link).geometry!.firstMaterial!
+            precondition(material.transparency > 0 && material.transparency < 0.5 &&
+                material.blendMode == .alpha && material.transparencyMode == .singleLayer &&
+                !material.writesToDepthBuffer && material.readsFromDepthBuffer,
+                "Blue movement overlays must remain translucent and respect the normal model's depth")
+        }
+        precondition(headLinks.allSatisfy { headNode("Blue ghost", $0).isHidden },
+            "An arm-only edit must not tint a coincident camera sphere or neck")
+        setGhostJoint("left_joint4", radians: model.reference["left_joint4"]!)
+        precondition(allGhostNodes.allSatisfy(\.isHidden),
+            "Returning the ghost to its baseline must immediately remove every coincident overlay")
+        print("Ghost deltas: coincident baseline hidden, original model visible, J4-only descendants blue, opaque normal/translucent depth-respecting ghost materials and untinted unchanged camera passed")
         let acceptedHeadFrames = headLinks.map { headNode("Original URDF", $0).simdTransform }
         let acceptedHeadCloud = editor.depthCloudCameraTransform(false)
         jointPicker.selectItem(withTitle: "lower_neck")
@@ -324,6 +403,8 @@ final class GhostFixtureSnapshotView: NSView {
         NSApp.sendAction(jointAngle.action!, to: jointAngle.target, from: jointAngle)
         precondition(headNode("Blue ghost", "lower_neck_link").simdTransform != acceptedHeadFrames[0],
             "Explicit ghost neck edit did not update its preview")
+        precondition(headLinks.allSatisfy { !headNode("Blue ghost", $0).isHidden },
+            "A proposed lower-neck change must show its moved downstream cameras as blue deltas")
         precondition(headLinks.map { headNode("Original URDF", $0).simdTransform } == acceptedHeadFrames &&
             editor.depthCloudCameraTransform(false) == acceptedHeadCloud,
             "Explicit ghost neck edit changed the normal accepted model or cloud pose")
