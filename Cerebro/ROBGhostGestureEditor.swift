@@ -198,6 +198,9 @@ import simd
         let frozen = previewFrozen ? " · live view; reviewed edits locked" : ""
         if let fitted=fittedHeadPose() {
             headInfo.stringValue=String(format:"Provisional RGB neck fit: %@optical tilt %+.1f°%@\nPan → lower → upper · QR-up display gauge · estimated camera offset\nRaw depth unchanged; no grasp authority · profile %@",targets,pitch.doubleValue*180 / .pi,frozen,String(fitted.profileID.prefix(10)))
+            if let mount=fitted.headMount {
+                headInfo.stringValue+=String(format:"\nRigid triangle %.0f/%.0f/%.0f mm · sphere azimuth ASSUMED\nGlass/optical separation %.1f mm is inferred, not measured",mount.upperToSphereMeters*1000,mount.sphereToGlassMeters*1000,mount.upperToGlassMeters*1000,mount.glassToOpticalDistanceMeters*1000)
+            }
             if let legacy=ROBWorkspaceDepthAlignment.snapshot() {
                 headInfo.stringValue+=String(format:"\nLegacy %.1f° / %.2f in retained, NOT applied",legacy.downwardPitchDegrees,legacy.towardRobotMeters/0.0254)
             }

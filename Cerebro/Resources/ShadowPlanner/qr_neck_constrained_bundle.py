@@ -26,6 +26,20 @@ GLASS_RADIUS_INTERVAL = [.0685, .2615]
 OPTICAL_CENTER_ALLOWANCE_METERS = .015
 
 
+def measured_camera_radius_bounds(glass_radius_meters, optical_allowance_meters=.015):
+    """Actual upper rotation center -> outside RGB glass; not an axial radius.
+
+    Eliminating an unknown glass-to-optical vector of bounded length gives this
+    full-3D optical-radius interval. No extra virtual-shaft slack is included.
+    """
+    if (type(glass_radius_meters) not in (int, float) or not math.isfinite(glass_radius_meters)
+            or not .02 <= glass_radius_meters <= .5
+            or type(optical_allowance_meters) not in (int, float) or not math.isfinite(optical_allowance_meters)
+            or not 0 < optical_allowance_meters <= .03 or optical_allowance_meters >= glass_radius_meters):
+        raise ValueError('Measured glass radius and explicit optical allowance must be finite bounded meters')
+    return glass_radius_meters-optical_allowance_meters, glass_radius_meters+optical_allowance_meters
+
+
 def unit(value):
     value = np.asarray(value, dtype=float)
     length = np.linalg.norm(value)
@@ -137,7 +151,8 @@ def huber_coordinates(values, delta=2.):
     return np.sign(values)*np.sqrt(np.where(absolute <= delta, values*values, 2*delta*absolute-delta*delta))
 
 
-def physical_residual(targets, gravity, captures, imu, torso_camera, training, uncertainties, bias, camera_distance):
+def physical_residual(targets, gravity, captures, imu, torso_camera, training, uncertainties, bias, camera_distance,
+                      measured_radius=None):
     lookup = {c['targetID']: t for c, t in zip(captures, targets)}
     terms = []
     floor_ids = [name for name in ('ROB:FLOOR:L01', 'ROB:FLOOR:R01') if name in lookup]
@@ -159,9 +174,14 @@ def physical_residual(targets, gravity, captures, imu, torso_camera, training, u
     # virtual axis origin's shaft coordinate is not surveyed. Treat the full
     # 3-D triangle as a conservative soft datum, never a perpendicular-radius
     # bound or a reason to reject an otherwise useful small-pivot solution.
-    low=GLASS_RADIUS_INTERVAL[0]-OPTICAL_CENTER_ALLOWANCE_METERS
-    high=GLASS_RADIUS_INTERVAL[1]+OPTICAL_CENTER_ALLOWANCE_METERS
-    terms.append((max(low-camera_distance,0.)+max(camera_distance-high,0.))/uncertainties['upperCenterDatumMeters'])
+    if measured_radius is None:
+        low=GLASS_RADIUS_INTERVAL[0]-OPTICAL_CENTER_ALLOWANCE_METERS
+        high=GLASS_RADIUS_INTERVAL[1]+OPTICAL_CENTER_ALLOWANCE_METERS
+        scale=uncertainties['upperCenterDatumMeters']
+    else:
+        low,high=measured_camera_radius_bounds(*measured_radius)
+        scale=measured_radius[1]
+    terms.append((max(low-camera_distance,0.)+max(camera_distance-high,0.))/scale)
     return np.asarray(terms)
 
 
@@ -215,7 +235,8 @@ def validate_image_models(data, distortion):
             raise ValueError('Undistorted RGB output requires zero output distortion')
 
 
-def fit(captures, directory, maximum_seconds=120., starts=3, distortion=None, seed_report=None, uncertainties=None):
+def fit(captures, directory, maximum_seconds=120., starts=3, distortion=None, seed_report=None, uncertainties=None,
+        measured_glass_radius_meters=None, optical_center_allowance_meters=.015, fixed_lower_offset_radians=None):
     uncertainties = uncertainties or {'surfaceAngleDegrees': .5, 'floorHeightMeters': .003, 'imuDirectionDegrees': 2., 'imuBiasMetersPerSecondSquared': .25, 'upperCenterDatumMeters': .040, 'pixelCoordinates': 1.}
     for name, value in uncertainties.items():
         if not math.isfinite(value) or value <= 0:
@@ -224,6 +245,13 @@ def fit(captures, directory, maximum_seconds=120., starts=3, distortion=None, se
         raise ValueError('Bounded fit requires 1..8 starts and 1..600 seconds')
     if distortion is not None and (len(distortion) not in (4, 5, 8, 12, 14) or not np.isfinite(distortion).all()):
         raise ValueError('Invalid fixed OpenCV distortion')
+    measured_radius=None
+    if measured_glass_radius_meters is not None:
+        measured_camera_radius_bounds(measured_glass_radius_meters,optical_center_allowance_meters)
+        measured_radius=(float(measured_glass_radius_meters),float(optical_center_allowance_meters))
+    if fixed_lower_offset_radians is not None and (type(fixed_lower_offset_radians) not in (int,float)
+            or not math.isfinite(fixed_lower_offset_radians) or abs(fixed_lower_offset_radians)>math.pi/2):
+        raise ValueError('Fixed lower offset must be an explicitly bounded mechanical hypothesis')
     model = MeasuredOrderModel(directory)
     data = prepare(captures, model)
     apply_fixed_distortion_to_pnp(data,distortion)
@@ -235,6 +263,10 @@ def fit(captures, directory, maximum_seconds=120., starts=3, distortion=None, se
                np.tile(np.r_[[-math.pi]*3, [-3., -3., -1.]], count), [-math.pi/2, -math.pi/3, -math.pi/3], [-1.]*3]
     hi = np.r_[[2.6]*3, [math.pi]*3, [.5, math.pi, math.pi/2],
                np.tile(np.r_[[math.pi]*3, [3., 3., 3.]], count), [math.pi/2, math.pi/3, math.pi/3], [1.]*3]
+    if measured_radius is not None:
+        lo[6],hi[6]=measured_camera_radius_bounds(*measured_radius)
+    active=np.ones(len(names),dtype=bool)
+    if fixed_lower_offset_radians is not None:active[-6]=False
     observed = np.array([v['cornersPixels'] for v in data['views']])
     imu = imu_observations(data)
     begin = time.monotonic()
@@ -244,7 +276,7 @@ def fit(captures, directory, maximum_seconds=120., starts=3, distortion=None, se
         pixels, depth, torso_camera, targets, gravity = project(parameters, model, data, distortion)
         selected = data['training']
         pixel = (pixels[selected]-observed[selected])*data['weights'][selected, None, None]/uncertainties['pixelCoordinates']
-        physical = physical_residual(targets, gravity, data['captures'], imu, torso_camera, selected, uncertainties,parameters[-3:],parameters[6])
+        physical = physical_residual(targets, gravity, data['captures'], imu, torso_camera, selected, uncertainties,parameters[-3:],parameters[6],measured_radius)
         behind = np.minimum(depth[selected]-.05, 0).reshape(-1)*1000
         return np.r_[huber_coordinates(pixel.reshape(-1)), physical, behind]
     solutions = []
@@ -263,6 +295,7 @@ def fit(captures, directory, maximum_seconds=120., starts=3, distortion=None, se
             if all(key in old for key in ('cameraX','cameraY','cameraZ')):
                 initial[6:9] = camera_parameters([old['cameraX'],old['cameraY'],old['cameraZ']])
         initial=np.clip(initial,lo+1e-8,hi-1e-8)
+        if fixed_lower_offset_radians is not None:initial[-6]=fixed_lower_offset_radians
         model.lower_offset=float(initial[-6])
         camera,_,_=decode(initial,model,count)
         frames=model.frames(data['commands'],initial[:3])@camera
@@ -270,8 +303,12 @@ def fit(captures, directory, maximum_seconds=120., starts=3, distortion=None, se
             ix=np.where(data['training'] & (data['markerIndices']==marker))[0]
             target=QR.mean_transform([frames[i]@data['poses'][i]['targetToCamera'] for i in ix])
             initial[9+6*marker:15+6*marker]=np.r_[cv2.Rodrigues(target[:3,:3])[0].reshape(3),target[:3,3]]
-        result = least_squares(residual, np.clip(initial, lo+1e-8, hi-1e-8), bounds=(lo, hi),
+        template=initial.copy()
+        def expand(value):
+            full=template.copy();full[active]=value;return full
+        result = least_squares(lambda value:residual(expand(value)), initial[active], bounds=(lo[active], hi[active]),
                                x_scale='jac', max_nfev=180, loss='linear', ftol=1e-9, xtol=1e-9, gtol=1e-7)
+        result.x=expand(result.x)
         solutions.append(result)
         print(json.dumps({'start':start,'trainingCost':float(result.cost),'evaluations':result.nfev}), flush=True)
     best = min(solutions, key=lambda r:r.cost)
@@ -297,7 +334,9 @@ def fit(captures, directory, maximum_seconds=120., starts=3, distortion=None, se
     _, singular, vt = np.linalg.svd(best.jac, full_matrices=False)
     rank = int(np.sum(singular > singular[0]*1e-8))
     inverse = np.where(singular > singular[0]*1e-8, 1/np.maximum(singular,1e-30)**2, 0)
-    covariance = np.einsum('ki,k,kj->ij', vt, inverse, vt)
+    free_covariance = np.einsum('ki,k,kj->ij', vt, inverse, vt)
+    covariance=np.zeros((len(p),len(p)))
+    covariance[np.ix_(active,active)]=free_covariance
     surface = MULTI.surface_checks(targets, data['captures'])
     surface.update(constraintsAppliedToFit=True, baseZIsMeasuredGravity=False,
                    fittedGravityDirectionTorso=gravity.tolist(), uncertainties=uncertainties)
@@ -317,10 +356,21 @@ def fit(captures, directory, maximum_seconds=120., starts=3, distortion=None, se
                    'upperServoCenterToVirtualAxisOriginSurveyed':False,
                    'distanceConstraint':'Soft full3D-distance triangle only; 40mm assumed axial-center datum uncertainty, not perpendicular radius',
                    'bodyLeanAndTorsoYawMeasured':False, 'globalMarkerXYZKnown':False}
+    if measured_radius is not None:
+        assumptions.update(measuredUpperRotationCenterToRGBGlassMeters=measured_radius[0],
+            opticalCenterAndAxisReferenceAllowanceMeters=measured_radius[1],
+            opticalCameraFullRadiusBoundsMeters=measured_camera_radius_bounds(*measured_radius),
+            additionalVirtualShaftDatumSlackMeters=0.,
+            distanceConstraint='Hard measured upper-rotation-center/glass radius bounds with only explicit glass-to-optical allowance',
+            measuredTriangleMeters={'upperToSphere':.165,'sphereToRGBGlass':.0965,'upperToRGBGlass':measured_radius[0]},
+            sphereAzimuthAboutUpperToGlassIdentified=False,spherePositionIndependentlySolved=False,
+            upperZeroAndCameraRotationIndependentlyIdentified=False)
     return {'schemaVersion':1,'status':'conditional_torso_bundle_candidate_not_registered',
             'registrationVerified':False,'candidateURDFReady':False,'calibrationApplied':False,
             'modelID':model.model_id,'mechanism':'pan→lower pitch→155.79mm link→upper pitch→camera',
             'assumptions':assumptions,'parameters':dict(zip(names,map(float,p))),
+            'fixedParameters':{} if fixed_lower_offset_radians is None else {'lowerOffsetRadians':float(fixed_lower_offset_radians)},
+            'lowerZeroHypothesis':'fitted composite offset' if fixed_lower_offset_radians is None else 'explicit fixed mechanical upright-reference hypothesis; not inferred from heldout pixels',
             'parameterBounds':{name:[float(a),float(b)] for name,a,b in zip(names,lo,hi)},
             'parametersAtBounds':[names[i] for i in range(len(p)) if min(p[i]-lo[i],hi[i]-p[i])<1e-5],
             'upperToOpticalCameraRowMajor':camera.reshape(-1).tolist(),
@@ -342,7 +392,7 @@ def fit(captures, directory, maximum_seconds=120., starts=3, distortion=None, se
             'optimization':{'trainingCost':float(best.cost),'success':bool(best.success),'starts':len(solutions),
                             'costs':[float(r.cost) for r in solutions],'elapsedSeconds':time.monotonic()-begin,
                             'selection':'Training objective only; heldout pixels/IMU/depth never enter fit'},
-            'identifiability':{'rank':rank,'parameterCount':len(p),'singularValues':singular.tolist(),
+            'identifiability':{'rank':rank,'parameterCount':len(p),'freeParameterCount':int(active.sum()),'singularValues':singular.tolist(),
                                'conditionNumber':float(singular[0]/max(singular[-1],1e-30)),
                                'conditionalCovariance':covariance.tolist(),
                                'conditionalOneSigma':dict(zip(names,map(float,np.sqrt(np.maximum(np.diag(covariance),0))))),
@@ -468,6 +518,9 @@ def main():
     parser.add_argument('--maximum-seconds',type=float,default=120.)
     parser.add_argument('--validate-manifest',type=Path)
     parser.add_argument('--predict-pose',action='append',default=[],help='panDegrees,lowerRaw,upperRaw')
+    parser.add_argument('--measured-glass-radius-mm',type=float,help='Operator-measured actual upper rotation center to outside RGB glass; hard radius constraint')
+    parser.add_argument('--optical-center-allowance-mm',type=float,default=15.,help='Explicit glass-to-optical center allowance; no additional shaft slack')
+    parser.add_argument('--fixed-lower-offset-degrees',type=float,help='Explicit mechanical lower-zero hypothesis, e.g.0 for operator upright6011; never selected using heldout errors')
     args = parser.parse_args()
     source_digests={name:hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
                     for name in ['qr_neck_constrained_bundle.py','qr_neck_multi_calibration.py','qr_neck_joint_calibration.py','qr_neck_calibration.py','model.urdf','reference.json']}
@@ -480,7 +533,10 @@ def main():
     distortion_document=json.loads(args.distortion_file.read_text()) if args.distortion_file else None
     distortion=distortion_document.get('rgbDistortionCoefficients') if distortion_document else None
     seed=json.loads(args.seed_report.read_text()) if args.seed_report else None
-    report=fit(captures,args.model,args.maximum_seconds,args.starts,distortion,seed)
+    report=fit(captures,args.model,args.maximum_seconds,args.starts,distortion,seed,
+        measured_glass_radius_meters=None if args.measured_glass_radius_mm is None else args.measured_glass_radius_mm/1000,
+        optical_center_allowance_meters=args.optical_center_allowance_mm/1000,
+        fixed_lower_offset_radians=None if args.fixed_lower_offset_degrees is None else math.radians(args.fixed_lower_offset_degrees))
     report.update(sessionID=document['sessionID'],sceneContextID=document['sceneContextID'],manifestSHA256=digest,
                   sourceSHA256=source_digests['qr_neck_constrained_bundle.py'],
                   solverSourcesSHA256=source_digests,

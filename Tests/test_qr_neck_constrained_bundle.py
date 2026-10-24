@@ -20,12 +20,12 @@ MODEL=BUNDLE.MeasuredOrderModel(DIRECTORY)
 QR=BUNDLE.QR
 
 
-def dataset():
+def dataset(lower_offset=-.2):
     gains=[1.9,1.7,1.8]
     camera=MODEL.nominal_camera.copy()
     camera[:3,:3]=camera[:3,:3]@cv2.Rodrigues(np.array([-.08,.015,-.02]))[0]
     camera[:3,3]=[.11,.006,.12]
-    MODEL.lower_offset=-.2
+    MODEL.lower_offset=lower_offset
     tilt=cv2.Rodrigues(np.array([.04,.03,0.]))[0]
     gravity=tilt@np.array([0.,0.,1.])
     horizontal=tilt@np.array([[0.,1,0],[-1,0,0],[0,0,1.]])
@@ -57,7 +57,7 @@ def dataset():
         captures.append({'targetID':identifier,'document':{'schemaVersion':1,'targetID':identifier,
                          'symbolSideMeters':.12,'modelID':MODEL.model_id,'views':views},'captureStatus':'complete'})
     seed=dict(zip(BUNDLE.JOINT.PARAMETER_NAMES[:6],[*gains,-.08,.015,-.02]))
-    seed.update(cameraX=.11,cameraY=.006,cameraZ=.12,lowerOffsetRadians=-.2,gravityRxRadians=.04,gravityRyRadians=.03)
+    seed.update(cameraX=.11,cameraY=.006,cameraZ=.12,lowerOffsetRadians=lower_offset,gravityRxRadians=.04,gravityRyRadians=.03)
     return captures,seed,camera,gravity
 
 
@@ -126,6 +126,44 @@ class ConstrainedBundleTests(unittest.TestCase):
         self.assertAlmostEqual(np.linalg.norm(camera[[0,2],3]),.02)
         self.assertGreater(np.linalg.norm(camera[:3,3]),.0685)
         self.assertEqual(self.result['assumptions']['upperServoCenterToVirtualAxisOriginSurveyed'],False)
+
+    def test_measured129_radius_has_only_explicit15mm_optical_allowance(self):
+        np.testing.assert_allclose(BUNDLE.measured_camera_radius_bounds(.129,.015),[.114,.144],atol=1e-12)
+        for radius,allowance in [(True,.015),(float('nan'),.015),(.129,-.015),(.129,.040),(.01,.015)]:
+            with self.assertRaises(ValueError):BUNDLE.measured_camera_radius_bounds(radius,allowance)
+        data=BUNDLE.prepare(self.captures,MODEL);p=np.array(list(self.result['parameters'].values()))
+        _,_,cameras,targets,gravity=BUNDLE.project(p,MODEL,data,None)
+        u=dict(self.result['surfaceValidation']['uncertainties'])
+        a=BUNDLE.physical_residual(targets,gravity,data['captures'],[],cameras,data['training'],u,np.zeros(3),.041,(.129,.015))
+        u['upperCenterDatumMeters']=5.
+        b=BUNDLE.physical_residual(targets,gravity,data['captures'],[],cameras,data['training'],u,np.zeros(3),.041,(.129,.015))
+        self.assertGreater(a[-1],4.)
+        self.assertEqual(a[-1],b[-1],"Legacy virtual-shaft slack weakened measured radius")
+
+    def test_measured_mode_and_fixed_upright_are_explicit_training_only_hypotheses(self):
+        captures,seed,camera,_=dataset(lower_offset=0.)
+        result=BUNDLE.fit(captures,DIRECTORY,maximum_seconds=60,starts=1,seed_report=seed,
+            measured_glass_radius_meters=.160,optical_center_allowance_meters=.015,fixed_lower_offset_radians=0.)
+        self.assertEqual(result['fixedParameters'],{'lowerOffsetRadians':0.})
+        self.assertEqual(result['parameters']['lowerOffsetRadians'],0.)
+        np.testing.assert_allclose(result['parameterBounds']['cameraDistanceFromAssumedUpperCenterMeters'],[.145,.175])
+        self.assertEqual(result['assumptions']['additionalVirtualShaftDatumSlackMeters'],0.)
+        self.assertFalse(result['assumptions']['sphereAzimuthAboutUpperToGlassIdentified'])
+        self.assertFalse(result['assumptions']['upperZeroAndCameraRotationIndependentlyIdentified'])
+        self.assertFalse(result['registrationVerified'])
+        self.assertLess(result['quality']['heldOut']['cornerRMSEPixels'],1e-5)
+        self.assertEqual(len(result['identifiability']['conditionalCovariance']),len(result['parameters']))
+        changed=copy.deepcopy(captures)
+        for capture in changed:
+            for view in capture['document']['views']:
+                if not view['training']:
+                    view['cornersPixels']=(np.array(view['cornersPixels'])+[1.5,-.2]).tolist()
+                    view['centerDepthMeters']+=.08
+        rerun=BUNDLE.fit(changed,DIRECTORY,maximum_seconds=60,starts=1,seed_report=seed,
+            measured_glass_radius_meters=.160,optical_center_allowance_meters=.015,fixed_lower_offset_radians=0.)
+        np.testing.assert_allclose(list(rerun['parameters'].values()),list(result['parameters'].values()),atol=1e-9)
+        self.assertGreater(rerun['quality']['heldOut']['cornerRMSEPixels'],1.)
+        self.assertGreater(rerun['quality']['heldOut']['centerDepthRMSEMeters'],.079)
 
     def test_pose_prediction_reports_conditional_sensitivity_and_extrapolation(self):
         inside,outside=BUNDLE.predict_camera_to_torso(self.result,[[0,6011,6056],[0,6495,5900]],DIRECTORY)

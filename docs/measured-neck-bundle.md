@@ -188,3 +188,30 @@ For fresh runtime probe evidence, `Scripts/export-frozen-neck-probe-evidence.py`
 accepts predeclared whole-pose roles and immutable current-worker captures. It
 exports the existing frozen neck/depth hypotheses without optimizing them or
 changing original metadata. See `--help` for its required artifact inputs.
+
+## Measured head assembly and repaired servo references
+
+The operator subsequently measured 129 mm from the upper servo rotation center
+to the RGB lens glass. `--measured-glass-radius-mm 129` makes that a hard
+constraint with the explicit `--optical-center-allowance-mm 15`: the optical
+center radius must lie between 114 and 144 mm. This mode does not add the
+earlier assumed 40 mm virtual-shaft allowance. A fixed lower-zero hypothesis
+can be requested separately with `--fixed-lower-offset-degrees`; it is not
+selected automatically from held-out scores.
+
+The optional display profile `headMount` contains
+`upperCenterToSphereMeters`, `sphereToRGBGlassMeters`,
+`upperCenterToRGBGlassMeters`, `opticalCenterAllowanceMeters` and
+`sphereAzimuthAssumption: "closest_to_nominal"`. The measured 165/96.5/129 mm
+triangle remains rigid through every neck pose. Its remaining sphere azimuth
+is assumed; its signed glass-to-optical displacement is not measured. The
+renderer rejects an incompatible optical fit instead of moving its optical
+origin to satisfy the mesh dimensions. This display option grants no motion
+or registration authority.
+
+The neck servos were reinstalled after a break, so historical raw targets 6000
+for forward pan and 6011 for lower upright are numerical references rather
+than established post-repair mechanical zeroes. Fixed room markers alone do
+not establish torso-forward yaw. A separate torso-relative observation must
+anchor that gauge. Record approximate operator observations as provisional,
+preserve their uncertainty, and retain the original captured commands.
