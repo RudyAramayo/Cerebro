@@ -357,7 +357,41 @@ def configure_latest_input(node_input, size=2):
     node_input.setBlocking(False)
 
 
-def configure_rgb_depth_alignment(pipeline, dai, platform, stereo, rgb_output):
+def stereo_capture_size(frame_size):
+    """Bound mono capture to OV9282's1280x800 while preserving exact aspect.
+
+    Keep smaller requests unchanged when hardware-aligned. Rational scaling
+    preserves the common16:10 and16:9 modes without stretching either sensor;
+    StereoDepth requires an output width divisible by16.
+    """
+    width, height = frame_size
+    if type(width) is not int or type(height) is not int or min(width, height) <= 0:
+        raise ValueError("RGB capture dimensions must be positive integers")
+    divisor = math.gcd(width, height)
+    aspect_width, aspect_height = width // divisor, height // divisor
+    multiple = math.lcm(16 // math.gcd(aspect_width, 16), 2 // math.gcd(aspect_height, 2))
+    scale = min(divisor, 1280 // aspect_width, 800 // aspect_height)
+    scale = scale // multiple * multiple
+    if scale < 1:
+        raise ValueError("RGB aspect cannot fit a hardware-aligned1280x800 mono capture")
+    return aspect_width * scale, aspect_height * scale
+
+
+def capture_frame_rate_for_bandwidth(usb2, frame_size, mono_size):
+    """Scale HD capture rates from the observed USB2 baseline payload budget.
+
+    Each synchronized host packet carries RGB888, aligned RAW16 depth and
+    two GRAY8 mono views. SDK timing and original timestamps remain intact.
+    USB3 retains the existing rate; USB2 remains bounded to2..10fps.
+    """
+    if not usb2:
+        return FRAME_RATE
+    baseline_bytes = FRAME_SIZE[0] * FRAME_SIZE[1] * 7
+    packet_bytes = frame_size[0] * frame_size[1] * 5 + mono_size[0] * mono_size[1] * 2
+    return max(2.0, min(10.0, 10.0 * baseline_bytes / packet_bytes))
+
+
+def configure_rgb_depth_alignment(pipeline, dai, platform, stereo, rgb_output, frame_size=FRAME_SIZE):
     """Use the SDK's documented alignment path for each device platform.
 
     RVC2/RVC3 align in StereoDepth; RVC4 uses ImageAlign. This selects pixel
@@ -365,11 +399,17 @@ def configure_rgb_depth_alignment(pipeline, dai, platform, stereo, rgb_output):
     """
     stereo_platforms = [getattr(dai.Platform, name, None) for name in ("RVC2", "RVC3")]
     if platform is not None and platform in [value for value in stereo_platforms if value is not None]:
+        # In SDKv3 alignment chooses the camera geometry but does not resize
+        # depth to its RGB frame. Set the SDK output explicitly, after presets.
+        stereo.setOutputSize(*frame_size)
         configure_latest_input(stereo.inputAlignTo)
         rgb_output.link(stereo.inputAlignTo)
         return stereo.depth, "stereo_input_align_to"
     if platform == getattr(dai.Platform, "RVC4", None) and platform is not None:
         align = pipeline.create(dai.node.ImageAlign)
+        output_size = getattr(align, "setOutputSize", None)
+        if callable(output_size):
+            output_size(*frame_size)
         configure_latest_input(align.input)
         configure_latest_input(align.inputAlignTo)
         stereo.depth.link(align.input)
@@ -910,7 +950,7 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
     # Footage capture may request a color size above the OV9282 stereo
     # sensors' native output. Keep stereo at a supported aspect-matched size;
     # Platform-specific alignment resamples depth into the selected RGB pixels.
-    mono_size = (min(width, 1280), min(height, 720))
+    mono_size = stereo_capture_size(frame_size)
     dai = load_depthai()
     device = None
 
@@ -926,10 +966,9 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
             DEVICE_RECONNECT_ATTEMPTS, reconnection_callback
         )
         usb_speed = device.getUsbSpeed()
-        # RGB + depth + two rectified mono streams exceed the observed USB 2
-        # throughput at 640x400/30. Reduce capture rate before queues accumulate;
-        # USB 3 retains 30 fps. Keep depth and original capture timestamps.
-        frame_rate = 10.0 if usb_speed == dai.UsbSpeed.HIGH else FRAME_RATE
+        frame_rate = capture_frame_rate_for_bandwidth(usb_speed == dai.UsbSpeed.HIGH, frame_size, mono_size)
+        emit("CEREBRO_DEPTHCAM_CAPTURE rgb={}x{} mono={}x{} usb={} fps={:.3f}".format(
+            width, height, mono_size[0], mono_size[1], usb_speed, frame_rate))
         calibration = device.readCalibration2()
 
         with dai.Pipeline(device) as pipeline:
@@ -973,7 +1012,7 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
             right_output.link(stereo.right)
 
             aligned_depth_output, alignment_method = configure_rgb_depth_alignment(
-                pipeline, dai, device.getPlatform(), stereo, rgb_output
+                pipeline, dai, device.getPlatform(), stereo, rgb_output, frame_size
             )
             emit("CEREBRO_DEPTHCAM_ALIGNMENT method={} platform={}".format(
                 alignment_method, device.getPlatform()

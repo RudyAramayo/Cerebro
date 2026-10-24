@@ -110,17 +110,24 @@ def run_fixtures():
         def createOutputQueue(self, *args, **kwargs): return object()
 
     class Camera:
-        def build(self, value): return self
-        def requestOutput(self, *args, **kwargs): return Output()
+        requests = []
+        def build(self, value): self.socket = value; return self
+        def requestOutput(self, size, **kwargs):
+            self.requests.append((self.socket, size, kwargs)); return Output()
 
     class Stereo:
         PresetMode = SimpleNamespace(ROBOTICS="robotics")
         def __init__(self):
             self.left, self.right = Input(), Input()
             self.rectifiedLeft, self.rectifiedRight = Output(), Output()
-        def setDefaultProfilePreset(self, value): pass
-        def setLeftRightCheck(self, value): pass
-        def setSubpixel(self, value): pass
+            self.inputAlignTo, self.depth = Input(), Output()
+            self.preset, self.left_right, self.subpixel, self.output_size = None, None, None, None
+        def setDefaultProfilePreset(self, value): self.preset = value
+        def setLeftRightCheck(self, value): self.left_right = value
+        def setSubpixel(self, value): self.subpixel = value
+        def setOutputSize(self, width, height):
+            assert self.preset == "robotics", "Output sizing preceded the preset that could overwrite it"
+            self.output_size = (width, height)
 
     class Sync:
         def __init__(self): self.inputs, self.out = defaultdict(Input), Output()
@@ -128,11 +135,12 @@ def run_fixtures():
         def setSyncAttempts(self, value): pass
 
     class Device(Projectors):
-        def __init__(self, result=True):
+        def __init__(self, result=True, usb_speed="super"):
             super().__init__(result=result)
             self.started, self.closed = False, False
+            self.usb_speed = usb_speed
         def setMaxReconnectionAttempts(self, *args): pass
-        def getUsbSpeed(self): return "super"
+        def getUsbSpeed(self): return self.usb_speed
         def getPlatform(self): return "rvc2"
         def readCalibration2(self): return self
         def getCameraIntrinsics(self, *args): return [[500, 0, 320], [0, 500, 200], [0, 0, 1]]
@@ -145,19 +153,30 @@ def run_fixtures():
             return super().setIrLaserDotProjectorIntensity(value)
 
     class Pipeline:
+        stereo_nodes = []
         def __init__(self, device, fail=False): self.device, self.fail = device, fail
         def __enter__(self): return self
         def __exit__(self, *args): pass
-        def create(self, kind): return kind()
+        def create(self, kind):
+            node = kind()
+            if kind is Stereo: self.stereo_nodes.append(node)
+            return node
         def start(self):
             if self.fail: raise RuntimeError("pipeline start failed")
             self.device.started = True
         def isRunning(self): return False
 
-    for supported in [True, False]:
-        device = Device(result=supported)
+    for supported, size, mono, usb, expected_fps in [
+            (True, (640, 400), (640, 400), "high", 10.),
+            (True, (1280, 800), (1280, 800), "high", 2.5),
+            (True, (1920, 1080), (1280, 720), "high", 2.),
+            (True, (1280, 800), (1280, 800), "super", service.FRAME_RATE),
+            (False, (640, 400), (640, 400), "super", service.FRAME_RATE)]:
+        Camera.requests = []; Pipeline.stereo_nodes = []
+        device = Device(result=supported, usb_speed=usb)
         fake = SimpleNamespace(Device=lambda *args: device, DeviceInfo=lambda value: value,
             Pipeline=lambda device: Pipeline(device), UsbSpeed=SimpleNamespace(HIGH="high"),
+            Platform=SimpleNamespace(RVC2="rvc2", RVC3="rvc3", RVC4="rvc4"),
             node=SimpleNamespace(Camera=Camera, StereoDepth=Stereo, Sync=Sync),
             ImgFrame=SimpleNamespace(Type=SimpleNamespace(RGB888i="rgb", GRAY8="gray")),
             ImgResizeMode=SimpleNamespace(CROP="crop"), CameraBoardSocket=SimpleNamespace(CAM_B="b", CAM_C="c"))
@@ -165,13 +184,20 @@ def run_fixtures():
         with patch.object(service, "load_depthai", return_value=fake), \
              patch.object(service, "color_camera_socket", return_value="rgb"), \
              patch.object(service, "configure_rgb_calibrated_focus", return_value=None), \
-             patch.object(service, "configure_rgb_depth_alignment", return_value=(Output(), "fixture")), \
              patch.object(service, "configure_optional_imu", return_value=(None, None)):
-            _, log = capture(service.stream_camera, None, stop, model_name="nonexistent_fixture_model")
+            _, log = capture(service.stream_camera, None, stop, width=size[0], height=size[1], model_name="nonexistent_fixture_model")
         assert device.closed and device.calls == [("flood", 0.0), ("dot", 0.5)]
         assert "CEREBRO_DEPTHCAM_STREAMING" in log
+        assert len(Camera.requests) == 3
+        assert [entry[1] for entry in Camera.requests] == [size, mono, mono]
+        assert all(entry[2]["fps"] == expected_fps for entry in Camera.requests)
+        assert Camera.requests[0][2]["enableUndistortion"] is True
+        assert all(entry[2]["enableUndistortion"] is False for entry in Camera.requests[1:])
+        stereo = Pipeline.stereo_nodes[0]
+        assert stereo.output_size == size and stereo.left_right is True and stereo.subpixel is True
+        assert "CEREBRO_DEPTHCAM_CAPTURE rgb={}x{} mono={}x{}".format(*size, *mono) in log
 
-    print("Depth camera IR fixtures passed: validated face/belly CLI defaults, normalized bounds, unsupported/rejected/error reporting, after-start SDK ordering and unchanged RGB-D startup")
+    print("Depth camera IR fixtures passed: validated face/belly CLI defaults, normalized bounds, unsupported/rejected/error reporting, after-start SDK ordering; real RGB-D setup retains metric settings and requests matched SDK dimensions/aspect with USB2/USB3 capture rates")
 
 
 def main():

@@ -213,15 +213,49 @@ private final class ROBBellyQRFrameMailbox: @unchecked Sendable {
         var stream: String?, lastSequence: UInt64?, lastFrameUptime = 0.0
         var warmupStream: String?, firstHDFrameUptime: Double?
         let started = ProcessInfo.processInfo.systemUptime, deadline = started + 40
+        let observationURL = destination.appendingPathComponent("capture-observations.json")
+        var observedFrameCount = 0, observations: [[String: Any]] = []
+        var lastObservationWrite = 0.0, observationSummary = "No belly RGB-D notifications received."
+        func saveObservations() throws {
+            let report: [String: Any] = ["schemaVersion": 1, "kind": "belly_capture_stream_observations",
+                "captureSessionID": capture.uuidString, "requestedCaptureResolution": Self.captureResolution,
+                "observedFrameCount": observedFrameCount, "recentFrames": observations,
+                "acceptanceRulesChanged": false, "registrationVerified": false, "armMotionAuthorized": false]
+            try Self.save(try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]), to: observationURL)
+        }
+        try saveObservations()
         let context = CIContext()
         while records.count < 5 {
             try Task.checkCancellation()
             let now = ProcessInfo.processInfo.systemUptime
             guard activeCapture == capture else { throw CancellationError() }
             guard now < deadline else {
-                throw Failure.invalid("Timed out waiting for settled native 1280 × 800 belly RGB-D frames. The camera must supply aligned HD RGB, depth and intrinsics; no upscaled substitute was saved. Captured files remain in \(destination.path).")
+                try saveObservations()
+                throw Failure.invalid("Timed out waiting for settled native 1280 × 800 belly RGB-D frames. \(observationSummary) The camera must supply aligned HD RGB, depth and intrinsics; no upscaled substitute was saved. Stream observations remain in \(observationURL.path).")
             }
-            guard let frame = mailbox.take(), frame.isBelly, frame.capturedUptime >= started,
+            guard let frame = mailbox.take() else {
+                try await Task.sleep(nanoseconds: 100_000_000); continue
+            }
+            observedFrameCount += 1
+            let rgbWidth = frame.rgbPixelBuffer.map { CVPixelBufferGetWidth($0) } ?? 0
+            let rgbHeight = frame.rgbPixelBuffer.map { CVPixelBufferGetHeight($0) } ?? 0
+            let ageMilliseconds = (now - frame.capturedUptime) * 1000
+            var observed: [String: Any] = ["depthWidth": frame.width, "depthHeight": frame.height,
+                "rgbWidth": rgbWidth, "rgbHeight": rgbHeight, "depthBytes": frame.millimetersLittleEndian.length,
+                "captureAgeMilliseconds": ageMilliseconds, "hasCalibratedIntrinsics": frame.hasCalibratedIntrinsics,
+                "sourceCameraRole": frame.isBelly ? "belly" : "face"]
+            if let value = frame.sourceCaptureStreamID { observed["sourceCaptureStreamID"] = value }
+            if let value = frame.sourceSequence { observed["sourceSequence"] = NSNumber(value: value) }
+            if let value = frame.calibratedIntrinsics?.rgbOutputUndistorted { observed["rgbOutputUndistorted"] = value }
+            if let value = frame.calibratedIntrinsics?.depthAlignmentMethod { observed["depthAlignmentMethod"] = value }
+            observations.append(observed)
+            if observations.count > 12 { observations.removeFirst(observations.count - 12) }
+            observationSummary = String(format: "Received RGB %d × %d / depth %d × %d, age %.0f ms.", rgbWidth, rgbHeight, frame.width, frame.height, ageMilliseconds)
+            if now - lastObservationWrite >= 0.5 {
+                try saveObservations(); lastObservationWrite = now
+                if records.isEmpty { display("Waiting for settled native HD RGB-D. " + observationSummary) }
+            }
+            guard frame.isBelly, frame.capturedUptime >= started,
                   (-0.05...0.7).contains(now - frame.capturedUptime), frame.capturedUptime > lastFrameUptime + 0.20,
                   frame.width == 1280, frame.height == 800,
                   frame.millimetersLittleEndian.length == frame.width * frame.height * 2,
@@ -296,6 +330,7 @@ private final class ROBBellyQRFrameMailbox: @unchecked Sendable {
             display("Saved \(records.count)/5 fresh belly frames. ROB, neck and arms unchanged.")
             try await Task.sleep(nanoseconds: 200_000_000)
         }
+        try saveObservations()
         var input: [String: Any] = ["schemaVersion": 1, "kind": "belly_qr_capture", "cameraRole": "belly",
             "captureSessionID": capture.uuidString, "markerSizeMeters": 0.12, "centerSpacingMeters": centerSpacingMeters,
             "requestedCaptureResolution": Self.captureResolution, "cameraWarmupSeconds": Self.captureWarmupSeconds,

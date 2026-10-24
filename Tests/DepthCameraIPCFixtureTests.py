@@ -193,10 +193,13 @@ def main():
         def __init__(self): self.links = []
         def link(self, node_input): self.links.append(node_input)
     class FakeStereo:
-        def __init__(self): self.depth = FakeOutput(); self.inputAlignTo = FakeInput()
+        def __init__(self): self.depth = FakeOutput(); self.inputAlignTo = FakeInput(); self.output_size = None
+        def setOutputSize(self, width, height): self.output_size = (width, height)
     class FakeAlign:
         def __init__(self):
             self.input = FakeInput(); self.inputAlignTo = FakeInput(); self.outputAligned = FakeOutput()
+            self.output_size = None
+        def setOutputSize(self, width, height): self.output_size = (width, height)
     class FakePipeline:
         def __init__(self): self.created = []
         def create(self, kind):
@@ -206,21 +209,42 @@ def main():
         RVC2 = "rvc2"; RVC3 = "rvc3"; RVC4 = "rvc4"
     class FakeNodes: ImageAlign = FakeAlign
     class FakeDai: Platform = FakePlatform; node = FakeNodes
-    for platform in (FakePlatform.RVC2, FakePlatform.RVC3):
+    for size in [(640, 400), (1280, 800), (1920, 1080)]:
+        for platform in (FakePlatform.RVC2, FakePlatform.RVC3):
+            pipeline, stereo, rgb = FakePipeline(), FakeStereo(), FakeOutput()
+            output, method = service.configure_rgb_depth_alignment(pipeline, FakeDai, platform, stereo, rgb, size)
+            assert output is stereo.depth and method == "stereo_input_align_to"
+            assert stereo.output_size == size, "Geometric alignment did not request matching SDK depth dimensions"
+            assert rgb.links == [stereo.inputAlignTo] and not stereo.depth.links
+            assert not pipeline.created, "Older platforms must not create an external alignment node"
+            assert stereo.inputAlignTo.size == 2 and stereo.inputAlignTo.blocking is False
         pipeline, stereo, rgb = FakePipeline(), FakeStereo(), FakeOutput()
-        output, method = service.configure_rgb_depth_alignment(pipeline, FakeDai, platform, stereo, rgb)
-        assert output is stereo.depth and method == "stereo_input_align_to"
-        assert rgb.links == [stereo.inputAlignTo] and not stereo.depth.links
-        assert not pipeline.created, "Older platforms must not create an external alignment node"
-        assert stereo.inputAlignTo.size == 2 and stereo.inputAlignTo.blocking is False
-    pipeline, stereo, rgb = FakePipeline(), FakeStereo(), FakeOutput()
-    output, method = service.configure_rgb_depth_alignment(pipeline, FakeDai, FakePlatform.RVC4, stereo, rgb)
-    assert len(pipeline.created) == 1
-    align = pipeline.created[0]
-    assert output is align.outputAligned and method == "image_align"
-    assert stereo.depth.links == [align.input] and rgb.links == [align.inputAlignTo]
-    assert align.input.size == align.inputAlignTo.size == 2
-    assert align.input.blocking is align.inputAlignTo.blocking is False
+        output, method = service.configure_rgb_depth_alignment(pipeline, FakeDai, FakePlatform.RVC4, stereo, rgb, size)
+        assert len(pipeline.created) == 1
+        align = pipeline.created[0]
+        assert output is align.outputAligned and method == "image_align"
+        assert align.output_size == size and stereo.output_size is None
+        assert stereo.depth.links == [align.input] and rgb.links == [align.inputAlignTo]
+        assert align.input.size == align.inputAlignTo.size == 2
+        assert align.input.blocking is align.inputAlignTo.blocking is False
+    for requested, expected in [((640, 400), (640, 400)), ((1280, 720), (1280, 720)),
+                                ((1280, 800), (1280, 800)), ((1920, 1080), (1280, 720)),
+                                ((1920, 1200), (1280, 800)), ((3840, 2160), (1280, 720))]:
+        actual = service.stereo_capture_size(requested)
+        assert actual == expected
+        assert actual[0] <= 1280 and actual[1] <= 800 and actual[0] % 16 == actual[1] % 2 == 0
+        assert actual[0] * requested[1] == actual[1] * requested[0], "Mono geometry changed aspect ratio"
+        assert service.capture_frame_rate_for_bandwidth(False, requested, actual) == service.FRAME_RATE
+    assert service.capture_frame_rate_for_bandwidth(True, (640, 400), (640, 400)) == 10.0
+    assert service.capture_frame_rate_for_bandwidth(True, (1280, 800), (1280, 800)) == 2.5
+    assert 2 <= service.capture_frame_rate_for_bandwidth(True, (1920, 1080), (1280, 720)) < 2.5
+    for dimensions in [(0, 400), (-16, 400), (True, 400), (640.0, 400), (640, 401)]:
+        try:
+            service.stereo_capture_size(dimensions)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Invalid/unrepresentable mono aspect admitted: " + str(dimensions))
     for platform in (None, "unknown"):
         try:
             service.configure_rgb_depth_alignment(FakePipeline(), FakeDai, platform, FakeStereo(), FakeOutput())

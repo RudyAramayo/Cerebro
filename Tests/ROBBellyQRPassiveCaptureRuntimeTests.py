@@ -36,6 +36,7 @@ final class ROBDepthCloudFrame:NSObject {
     let rgbPixelBuffer:CVPixelBuffer?
     let isBelly:Bool
     let calibratedIntrinsics:CameraIntrinsics?
+    var hasCalibratedIntrinsics:Bool {calibratedIntrinsics?.isValid(forWidth:width,height:height)==true}
     let receivedUptime:TimeInterval,capturedUptime:TimeInterval
     let sourceSequence:UInt64?,sourceTimestampNanoseconds:UInt64?
     let sourceCapturedAtMilliseconds:Double?
@@ -66,6 +67,17 @@ final class ROBDepthCloudFrame:NSObject {
 import AppKit
 import CoreImage
 @main struct CaptureTest {
+    @MainActor static func warmUp(_ controller:ROBBellyQRCalibrationWindowController,sequence:UInt64,stream:String="fixture-stream") async throws {
+        for _ in 0..<30 {
+            NotificationCenter.default.post(name:.ROBDepthCloudFrame,object:ROBDepthCloudFrame(belly:true,sequence:sequence,stream:stream))
+            try await Task.sleep(nanoseconds:200_000_000)
+            if controller.status.contains("two seconds") {
+                try await Task.sleep(nanoseconds:2_250_000_000)
+                return
+            }
+        }
+        preconditionFailure("No fresh HD warmup frame reached controller: \(controller.status)")
+    }
     @MainActor static func main() async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let controller=ROBBellyQRCalibrationWindowController.shared
@@ -108,17 +120,22 @@ import CoreImage
         NotificationCenter.default.post(name:.ROBDepthCloudFrame,object:ROBDepthCloudFrame(belly:true,sequence:first-3,lowResolution:true))
         try await Task.sleep(nanoseconds:150_000_000)
         precondition(!FileManager.default.fileExists(atPath:controller.lastCapturePath+"/frame-0.jpg"),"Low-resolution RGB-D was accepted as HD")
-        NotificationCenter.default.post(name:.ROBDepthCloudFrame,object:ROBDepthCloudFrame(belly:true,sequence:first-100))
-        try await Task.sleep(nanoseconds:2_250_000_000)
+        try await warmUp(controller,sequence:first-100)
         precondition(!FileManager.default.fileExists(atPath:controller.lastCapturePath+"/frame-0.jpg"),"Warmup frame was saved")
         for index in 0..<5 {
             let flag:Bool?=index==0 ? nil : (index==1 ? false:true)
             NotificationCenter.default.post(name:.ROBDepthCloudFrame,
                 object:ROBDepthCloudFrame(belly:true,sequence:first+UInt64(index),undistorted:flag))
-            for _ in 0..<40 {
+            for _ in 0..<100 {
                 try await Task.sleep(nanoseconds:100_000_000)
                 if controller.status.contains("Saved \(index+1)/5") || !controller.isRunning {break}
             }
+            if index<4 {
+                precondition(controller.status.contains("Saved \(index+1)/5"),"Fixture frame \(index) was not captured: \(controller.status)")
+            }
+            // Match the production >=200ms source-capture spacing even when
+            // a synthetic blank frame's detector finishes in under100ms.
+            try await Task.sleep(nanoseconds:250_000_000)
         }
         for _ in 0..<30 {
             if !controller.isRunning {break}
@@ -129,6 +146,12 @@ import CoreImage
         let folder=URL(fileURLWithPath:controller.lastCapturePath)
         let data=try Data(contentsOf:folder.appendingPathComponent("capture-input.json"))
         let input=try JSONSerialization.jsonObject(with:data) as! [String:Any]
+        let observations=try JSONSerialization.jsonObject(with:Data(contentsOf:folder.appendingPathComponent("capture-observations.json"))) as! [String:Any]
+        precondition((observations["observedFrameCount"] as! Int)>=7)
+        let recent=observations["recentFrames"] as! [[String:Any]]
+        precondition(!recent.isEmpty && recent.count<=12)
+        precondition(recent.last?["depthWidth"] as? Int==1280)
+        precondition(observations["acceptanceRulesChanged"] as? Bool==false)
         precondition(input["cameraRole"] as? String=="belly")
         precondition(input["requestedCaptureResolution"] as? String=="1280x800")
         precondition(input["cameraWarmupSeconds"] as? Double==2.0)
@@ -159,16 +182,20 @@ import CoreImage
 
         // A source restart aborts; it cannot combine two physical camera streams.
         controller.captureCurrentView();try await Task.sleep(nanoseconds:100_000_000)
-        NotificationCenter.default.post(name:.ROBDepthCloudFrame,object:ROBDepthCloudFrame(belly:true,sequence:0,stream:"A"))
-        try await Task.sleep(nanoseconds:2_250_000_000)
+        try await warmUp(controller,sequence:0,stream:"A")
         NotificationCenter.default.post(name:.ROBDepthCloudFrame,object:ROBDepthCloudFrame(belly:true,sequence:1,stream:"A"))
         for _ in 0..<40 {
             try await Task.sleep(nanoseconds:100_000_000)
             if controller.status.contains("Saved 1/5") {break}
         }
+        precondition(controller.status.contains("Saved 1/5"),"First source frame was not committed: \(controller.status)")
+        try await Task.sleep(nanoseconds:250_000_000)
         NotificationCenter.default.post(name:.ROBDepthCloudFrame,object:ROBDepthCloudFrame(belly:true,sequence:2,stream:"B"))
-        try await Task.sleep(nanoseconds:350_000_000)
-        precondition(!controller.isRunning && controller.status.contains("stream restarted"))
+        for _ in 0..<30 {
+            try await Task.sleep(nanoseconds:100_000_000)
+            if !controller.isRunning {break}
+        }
+        precondition(!controller.isRunning && controller.status.contains("stream restarted"),"Source restart was not rejected: \(controller.status)")
         precondition(demandEvents.last?["active"] as? Bool==false,"HD demand survived stream failure")
 
         // Cancellation remains immediate even when no valid BELLY frames arrive.
@@ -193,9 +220,12 @@ import CoreImage
                         str(path / "stubs.swift"), str(path / "controller.swift"), str(path / "main.swift"),
                         "-o", str(path / "capture")], check=True)
         environment = dict(os.environ, PYTHONNOUSERSITE="1", ROB_BELLY_FIXTURE_ROOT=str(path / "captures"))
-        result = subprocess.run([str(path / "capture")], env=environment, capture_output=True, text=True, timeout=45)
+        result = subprocess.run([str(path / "capture")], env=environment, capture_output=True, text=True, timeout=90)
         if result.returncode:
-            raise AssertionError((result.stdout + result.stderr)[-8000:])
+            traces=[]
+            for report in (path / "captures").glob("*/capture-observations.json"):
+                traces.append(report.read_text()[-6000:])
+            raise AssertionError((result.stdout + result.stderr)[-8000:]+"\n"+"\n".join(traces))
         print(result.stdout.strip())
 
 
