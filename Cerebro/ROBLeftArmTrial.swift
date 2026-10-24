@@ -896,10 +896,40 @@ struct ROBReviewedArmDispatchStart {
             if command == "left_estimated_preview" {
                 let baseline = try measured().positionsRadians.map(\.doubleValue)
                 let camera = vision.cameraGeneration, now = Date().timeIntervalSince1970*1000
-                let proof = try await Task.detached(priority:.userInitiated) {
-                    try ROBEstimatedArmCalibrationPlan.make(from:baseline,map:map,model:model,generation:current,
-                        cameraGeneration:camera,nowMilliseconds:now)
-                }.value
+                let proof:ROBEstimatedArmCalibrationPlan
+                do {
+                    proof = try await Task.detached(priority:.userInitiated) {
+                        try ROBEstimatedArmCalibrationPlan.make(from:baseline,map:map,model:model,generation:current,
+                            cameraGeneration:camera,nowMilliseconds:now)
+                    }.value
+                } catch let rejection as ROBEstimatedArmCollisionRejection {
+                    let rejectionOwner=owner
+                    let exportResult:Result<URL,Error>
+                    do {
+                        guard !lastRecordingPath.isEmpty else {throw ROBArmRoutineError.blocked("No collision recording destination is available.")}
+                        let directory=URL(fileURLWithPath:lastRecordingPath).deletingPathExtension().appendingPathExtension("collision-evidence")
+                        let path=try await Task.detached(priority:.utility) {try rejection.export(map:map,to:directory)}.value
+                        exportResult = .success(path)
+                    } catch {exportResult = .failure(error)}
+                    let mayPublish:Bool
+                    do {
+                        try check()
+                        mayPublish=owner==rejectionOwner && activeCommand=="left_estimated_preview" && generation==current &&
+                            vision.cameraGeneration==map.cameraGeneration && map.bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity &&
+                            ROBWorkspaceSearch.shared.estimatedCameraProjectionIsCurrent(model:model,map:map)
+                    }catch{mayPublish=false}
+                    if mayPublish {
+                        switch exportResult {
+                        case .success(let path):
+                            publishCollisionReview(map:map,detail:rejection.localizedDescription+"\nCollision evidence: "+path.path,blocked:true)
+                            var status=collisionReviewStatus as? [String:Any] ?? [:]
+                            status["rejection_evidence_path"]=path.path;collisionReviewStatus=status as NSDictionary
+                        case .failure(let error):
+                            publishCollisionReview(map:map,detail:rejection.localizedDescription+"\nSaving collision evidence failed: "+error.localizedDescription,blocked:true)
+                        }
+                    }
+                    throw rejection
+                }
                 try check()
                 guard estimatedStartMatches(try measured().positionsRadians.map(\.doubleValue),baseline:baseline),
                       let held = sceneHold[arm == "right" ? "left" : "right"] else {

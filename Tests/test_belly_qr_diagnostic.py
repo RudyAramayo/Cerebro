@@ -53,6 +53,17 @@ def fixture(directory, spacing=.4, depth_bias=.0):
             "sequence": index+1, "capturedAtMilliseconds": 1_000_000.+index*500,
             "sequenceSource": "synthetic-test-camera", "sourceCameraRole": "belly",
             "rgbOutputUndistorted": True, "depthAlignmentMethod": "synthetic_aligned_native",
+            "depthIntrinsics": K.reshape(-1).tolist(), "depthIntrinsicsSource": "synthetic_sdk_depth_transformation",
+            "depthSourceSize": [width, height], "depthSourceIntrinsics": K.reshape(-1).tolist(),
+            "depthImageTransform": np.eye(3).reshape(-1).tolist(),
+            "rgbSourceIntrinsics": K.reshape(-1).tolist(), "rgbImageTransform": np.eye(3).reshape(-1).tolist(),
+            "rgbTransformationSize": [width, height], "depthTransformationSize": [width, height],
+            "rgbSourceDistortionCoefficients": [.1, -.2, .003, .004],
+            "depthSourceDistortionCoefficients": [.05, -.1, .001, .002],
+            "rgbSourceDistortionModel": "perspective", "depthSourceDistortionModel": "perspective",
+            "depthRGBGeometryCorrespondence": {"status": "matched", "dimensionsMatch": True,
+                "intrinsicsMatch": True, "maximumIntrinsicDifferencePixels": 0., "sdkAlignedToRGB": True,
+                "sdkEqualTransformationToRGB": True, "depthTransformationValid": True, "rgbTransformationValid": True},
             "detections": copy.deepcopy(seeds)})
     return {"schemaVersion": 1, "kind": "belly_qr_capture", "cameraRole": "belly",
         "captureSessionID": "synthetic-test-only", "captureStreamID": "synthetic-test-stream",
@@ -96,6 +107,44 @@ class BellyQRDiagnosticsTests(unittest.TestCase):
             payload, _, _ = cv2.QRCodeDetector().detectAndDecode(image)
             self.assertEqual(payload, target)
 
+    def test_same_dimensions_without_depth_projection_evidence_stays_unverified(self):
+        document, _, _ = fixture(self.directory)
+        for frame in document["frames"]:
+            del frame["depthRGBGeometryCorrespondence"]
+        result = WORKER.diagnose(document, self.directory)
+        self.assertEqual(result["consistentPairFrameCount"], 3)
+        self.assertFalse(result["rawDepthAgreementAcrossConsistentFrames"])
+        for row in result["frames"]:
+            self.assertEqual(row["depthRGBGeometry"]["status"], "missing_evidence")
+            self.assertFalse(row["depthRGBGeometry"]["pixelCorrespondenceSupported"])
+            for target in row["targets"]:
+                self.assertTrue(target["rawDepth"]["numericResidualsWithinDiagnosticLimits"])
+                self.assertFalse(target["rawDepth"]["withinDiagnosticLimits"])
+
+    def test_sdk_mismatch_and_numeric_crop_mismatch_cannot_claim_correspondence(self):
+        document, _, _ = fixture(self.directory)
+        first, second, third = document["frames"]
+        first["depthRGBGeometryCorrespondence"]["sdkAlignedToRGB"] = False
+        first["depthRGBGeometryCorrespondence"]["status"] = "mismatched"
+        second["depthImageTransform"][2] = 5.
+        third["depthTransformationSize"][1] -= 80
+        result = WORKER.diagnose(document, self.directory)
+        self.assertEqual(result["consistentPairFrameCount"], 3)
+        self.assertFalse(result["rawDepthAgreementAcrossConsistentFrames"])
+        rows = result["frames"]
+        self.assertFalse(rows[0]["depthRGBGeometry"]["SDKChecks"]["sdkAlignedToRGB"])
+        self.assertAlmostEqual(rows[1]["depthRGBGeometry"]["maximumDepthSourceCropDifferencePixels"], 5.)
+        self.assertFalse(rows[2]["depthRGBGeometry"]["numericChecks"]["depthTransformationSizeMatchesPixels"])
+
+    def test_invalid_source_crop_is_explicit_and_json_remains_finite(self):
+        document, _, _ = fixture(self.directory)
+        frame = document["frames"][0]
+        frame["depthImageTransform"] = [1., 0., 0., 0., 1., 0., 1/640, 0., -1.]
+        report = WORKER._depth_pixel_geometry(frame)
+        self.assertEqual(report["status"], "invalid_evidence")
+        self.assertFalse(report["pixelCorrespondenceSupported"])
+        json.dumps(report, allow_nan=False)
+
     def test_empty_and_partial_native_seeds_use_backmapped_multiscale_fallback(self):
         document, _, t = fixture(self.directory)
         document["frames"] = document["frames"][:1]
@@ -128,6 +177,8 @@ class BellyQRDiagnosticsTests(unittest.TestCase):
         self.assertEqual(result["status"], "diagnostic_complete", result["rejectedFrames"])
         self.assertEqual(result["consistentPairFrameCount"], 3)
         self.assertTrue(result["rawDepthAgreementAcrossConsistentFrames"])
+        self.assertTrue(all(row["depthRGBGeometry"]["pixelCorrespondenceSupported"] for row in result["frames"]))
+        self.assertTrue(all(row["depthRGBGeometry"]["sourceDistortionCoefficientsDescribeSourceSensorNotOutputWarp"] for row in result["frames"]))
         for row in result["frames"]:
             self.assertLess(row["pairTranslationErrorMeters"], .002)
             self.assertLess(row["pairRotationErrorDegrees"], .5)

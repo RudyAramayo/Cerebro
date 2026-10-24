@@ -170,11 +170,94 @@ def running_worker_provenance_fixture():
         assert header["rgb_output_undistorted"] is False
 
 
+def native_depth_geometry_fixtures(service):
+    matrix = [[125., 0., .75], [0., 126., .25], [0., 0., 1.]]
+    source = [[1250., 0., 7.5], [0., 1260., 2.5], [0., 0., 1.]]
+    crop = [[.1, 0., 0.], [0., .1, 0.], [0., 0., 1.]]
+
+    class ObservedTransformation(FakeSourceTransformation):
+        def __init__(self):
+            super().__init__([row[:] for row in matrix], [20, 10], [row[:] for row in source], crop)
+            self.valid, self.aligned, self.equal, self.size = True, True, True, (2, 1)
+            self.coefficients = [.1, -.02, .003, -.004, .005]
+        def isValid(self): return self.valid
+        def getSize(self): return self.size
+        def getDistortionCoefficients(self): return self.coefficients
+        def getDistortionModel(self): return "fixture_source_perspective"
+        def isAlignedTo(self, other):
+            assert other is rgb.transformation
+            return self.aligned
+        def isEqualTransformation(self, other):
+            assert other is rgb.transformation
+            return self.equal
+
+    class ObservedDepth(FakeDepthFrame):
+        def __init__(self): self.transformation = ObservedTransformation()
+        def getTransformation(self): return self.transformation
+
+    rgb = FakeTransformedRGBFrame(matrix)
+    rgb.transformation = ObservedTransformation()
+    depth = ObservedDepth()
+    flat = [item for row in matrix for item in row]
+    def inspect(): return service.depth_frame_geometry(depth, rgb, flat)
+    evidence = inspect()
+    assert evidence["depth_intrinsics"] == flat
+    assert evidence["depth_intrinsics_source"] == "transformed_frame"
+    assert evidence["depth_source_size"] == [20, 10]
+    assert evidence["depth_source_intrinsics"] == [item for row in source for item in row]
+    assert evidence["depth_image_transform"] == [item for row in crop for item in row]
+    assert evidence["rgb_transformation_size"] == evidence["depth_transformation_size"] == [2, 1]
+    assert evidence["rgb_source_distortion_coefficients"] == evidence["depth_source_distortion_coefficients"] == [.1, -.02, .003, -.004, .005]
+    assert evidence["rgb_source_distortion_model"] == evidence["depth_source_distortion_model"] == "fixture_source_perspective"
+    comparison = evidence["depth_rgb_geometry_correspondence"]
+    assert comparison == {"status": "matched", "dimensionsMatch": True, "intrinsicsMatch": True,
+        "maximumIntrinsicDifferencePixels": 0., "sdkAlignedToRGB": True,
+        "sdkEqualTransformationToRGB": True, "depthTransformationValid": True,
+        "rgbTransformationValid": True, "detail": None}
+    depth.transformation.equal = False
+    assert inspect()["depth_rgb_geometry_correspondence"]["sdkEqualTransformationToRGB"] is False
+    depth.transformation.aligned = False
+    assert inspect()["depth_rgb_geometry_correspondence"]["status"] == "mismatched"
+    depth.transformation = ObservedTransformation()
+    depth.transformation.matrix[1][2] += .2
+    depth.transformation.source_intrinsics[1][2] += 2
+    mismatch = inspect()["depth_rgb_geometry_correspondence"]
+    assert mismatch["status"] == "mismatched" and mismatch["intrinsicsMatch"] is False
+    assert abs(mismatch["maximumIntrinsicDifferencePixels"]-.2) < 1e-12
+    # A plausible K and matching dimensions cannot replace native SDK proof.
+    depth.transformation = FakeTransformation(matrix)
+    unknown = inspect()["depth_rgb_geometry_correspondence"]
+    assert unknown["status"] == "unavailable" and unknown["intrinsicsMatch"] is True
+    assert unknown["sdkAlignedToRGB"] is None and unknown["depthTransformationValid"] is None
+    depth.transformation = None
+    assert inspect()["depth_intrinsics"] is None
+    for malformed in ("source-crop", "invalid-sdk", "wrong-size", "nonboolean"):
+        depth.transformation = ObservedTransformation()
+        if malformed == "source-crop": depth.transformation.source_intrinsics[0][0] += 10
+        elif malformed == "invalid-sdk": depth.transformation.valid = False
+        elif malformed == "wrong-size": depth.transformation.size = (3, 1)
+        else: depth.transformation.aligned = "true"
+        bad = inspect()["depth_rgb_geometry_correspondence"]
+        assert bad["status"] == "invalid", (malformed, bad)
+    depth.transformation = ObservedTransformation()
+    left, right = FakeMonoFrame((7, 8)), FakeMonoFrame((9, 10))
+    packet, rgb_bytes, depth_bytes, *_ = service.frame_payload(rgb, depth, left, right, flat)
+    transmitted = json.loads(packet)
+    assert transmitted["depth_intrinsics"] == flat
+    assert transmitted["depth_rgb_geometry_correspondence"]["status"] == "matched"
+    assert rgb_bytes == FakeRGBFrame.bytes and depth_bytes == bytes((0x34, 0x12, 0xCD, 0xAB))
+    depth.transformation.valid = False
+    packet, unchanged_rgb, unchanged_depth, *_ = service.frame_payload(rgb, depth, left, right, flat)
+    assert json.loads(packet)["depth_rgb_geometry_correspondence"]["status"] == "invalid"
+    assert unchanged_rgb == rgb_bytes and unchanged_depth == depth_bytes, "Diagnostic failure blocked raw viewing or rewrote metric depth"
+
+
 def main():
     service = load_service()
     assert service.RUNNING_SERVICE_SOURCE_SHA256 == hashlib.sha256(SERVICE_PATH.read_bytes()).hexdigest()
     assert service.RGB_OUTPUT_UNDISTORTED is True
     running_worker_provenance_fixture()
+    native_depth_geometry_fixtures(service)
     class CapturedFrame:
         def __init__(self, seconds): self.seconds = seconds
         def getTimestamp(self): return timedelta(seconds=self.seconds)
@@ -317,6 +400,24 @@ def main():
             "rgb_source_size": None,
             "rgb_source_intrinsics": None,
             "rgb_image_transform": None,
+            "depth_intrinsics": None,
+            "depth_intrinsics_source": "unavailable",
+            "depth_source_size": None,
+            "depth_source_intrinsics": None,
+            "depth_image_transform": None,
+            "rgb_transformation_size": None,
+            "depth_transformation_size": None,
+            "rgb_source_distortion_coefficients": None,
+            "depth_source_distortion_coefficients": None,
+            "rgb_source_distortion_model": None,
+            "depth_source_distortion_model": None,
+            "depth_rgb_geometry_correspondence": {
+                "status": "unavailable", "dimensionsMatch": True, "intrinsicsMatch": None,
+                "maximumIntrinsicDifferencePixels": None, "sdkAlignedToRGB": None,
+                "sdkEqualTransformationToRGB": None, "depthTransformationValid": None,
+                "rgbTransformationValid": None,
+                "detail": "Native depth transformation metadata is unavailable",
+            },
             "imu": None,
             "rgb_calibrated_lens_position": None,
             "rgb_frame_lens_position": None,

@@ -1,5 +1,52 @@
 import Foundation
 import simd
+import CryptoKit
+
+/// A rejected geometric query, never a motion capability. Kept separate from
+/// the proof so failed previews retain actionable evidence without admission.
+struct ROBEstimatedArmCollisionRejection:LocalizedError {
+    struct Evidence:Codable {
+        let stage:String,physicalSide:String,link:String
+        let sceneID:UUID,mapFingerprint:String,modelID:String,referenceID:String,geometryID:String,mappingID:String
+        let bodyMotionIdentity:String,sessionGeneration:UInt64,cameraGeneration:UUID
+        let estimatedCameraProjectionIdentity:String?
+        let checkedAtMilliseconds:Double,baseline:[Double],target:[Double],positions:[Double]
+        let sampleIndex:Int,sampleCount:Int?
+        let voxel:[Int],voxelCenterMeters:[Double],voxelSizeMeters:Double,voxelBoundingSphereRadiusMeters:Double
+        let hullDistanceMeters:Double,baselineHullDistanceMeters:Double,requiredDistanceMeters:Double
+        let jawAdditionalMarginMeters:Double,estimatedInflationMeters:Double,sweptPointAllowanceMeters:Double
+        let hullAABBLowMeters:[Double],hullAABBHighMeters:[Double],hullBoundingSphereCenterMeters:[Double],hullBoundingSphereRadiusMeters:Double
+        let nearestHullSurfacePointMeters:[Double]?,observedReturnBoundsLowMeters:[Double]?,observedReturnBoundsHighMeters:[Double]?
+    }
+    let detail:String
+    let evidence:Evidence
+    var errorDescription:String? {detail}
+
+    /// Saves the complete immutable map even when no proof was produced.
+    /// Raw RGB-D scan frames are not currently retained; say so explicitly.
+    @discardableResult func export(map:ROBWorkspaceCollisionSnapshot,to directory:URL)throws->URL {
+        guard map.sceneID==evidence.sceneID,map.fingerprint==evidence.mapFingerprint else {
+            throw ROBGhostMotionError.blocked("Collision rejection evidence belongs to another scene.")
+        }
+        try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+        let encoder=JSONEncoder();encoder.outputFormatting=[.prettyPrinted,.sortedKeys]
+        let mapData=try encoder.encode(map),mapURL=directory.appendingPathComponent("collision-map.json")
+        try mapData.write(to:mapURL,options:.atomic)
+        try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:mapURL.path)
+        let mapSHA=SHA256.hash(data:mapData).map{String(format:"%02x",$0)}.joined()
+        let report:[String:Any]=["schemaVersion":1,"kind":"estimated_arm_collision_rejection_diagnostic",
+            "detail":detail,"motionAuthority":false,"sourceFramesNotRetained":true,
+            "sourceFrameNote":"The map retains observation sequences, capture times, transforms and sample bounds; original RGB/depth frames and per-return source pixels were not retained.",
+            "boundingSpheresUsedForAdmission":false,"rejectionIsGlobalMinimum":false,
+            "distanceNote":"The existing convex-hull query and thresholds decide rejection. Bounding spheres and the nearest hull surface point are diagnostics only; an inside point retains its original zero admission distance.",
+            "mapFile":"collision-map.json","mapSHA256":mapSHA,
+            "evidence":try JSONSerialization.jsonObject(with:encoder.encode(evidence))]
+        let reportURL=directory.appendingPathComponent("rejection.json")
+        try JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]).write(to:reportURL,options:.atomic)
+        try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:reportURL.path)
+        return reportURL
+    }
+}
 
 /// Exact occupied-point distance for the verified arm hulls used only by the
 /// estimated commissioning lane. OBJ export precision is at most one micron;
@@ -113,6 +160,21 @@ struct ROBEstimatedConvexHull {
         }
         guard best.isFinite else { throw ROBGhostMotionError.blocked("The estimated hull has no finite surface distance.") }
         return best
+    }
+
+    /// Diagnostic-only surface location. distance(to:) above remains the
+    /// admission metric, including its conservative zero for inside points.
+    func nearestSurfacePoint(to point:SIMD3<Double>)throws->SIMD3<Double> {
+        guard [point.x,point.y,point.z].allSatisfy(\.isFinite) else {
+            throw ROBGhostMotionError.blocked("A hull surface diagnostic needs a finite point.")
+        }
+        var closestPoint:SIMD3<Double>?,best=Double.infinity
+        for triangle in triangles {
+            let candidate=Self.closest(point,to:triangle),distance=simd_distance(point,candidate)
+            if distance.isFinite,distance<best {best=distance;closestPoint=candidate}
+        }
+        guard let closestPoint else {throw ROBGhostMotionError.blocked("The hull surface diagnostic has no finite point.")}
+        return closestPoint
     }
 
     /// Convex-polyhedron SAT clearance. A negative result is penetration
@@ -453,6 +515,33 @@ struct ROBEstimatedArmCalibrationPlan: Codable, Equatable {
             let local = simd_inverse(frames[link]!)*SIMD4(point,1)
             return try convexHulls[link]!.distance(to:SIMD3(local.x,local.y,local.z))
         }
+        func rejection(_ detail:String,stage:String,link:String,voxel:ROBWorkspaceVoxel,distance:Double,
+            baselineDistance:Double,required:Double,jaw:Double,q:[Double],sample:Int,count:Int?,
+            boxes:[String:Box],frames:[String:simd_double4x4])->ROBEstimatedArmCollisionRejection {
+            func values(_ p:SIMD3<Double>)->[Double]{[p.x,p.y,p.z]}
+            let point=voxel.center(voxelSizeMeters:map.voxelSizeMeters),box=boxes[link]!
+            let local=simd_inverse(frames[link]!)*SIMD4(point,1)
+            let nearest=try? convexHulls[link]!.nearestSurfacePoint(to:SIMD3(local.x,local.y,local.z))
+            let nearestWorld=nearest.map { value -> [Double] in
+                let p=frames[link]!*SIMD4(value,1);return [p.x,p.y,p.z]
+            }
+            let bounds=map.occupiedSampleBounds(at:point)
+            let evidence=ROBEstimatedArmCollisionRejection.Evidence(stage:stage,physicalSide:model.physicalSide,link:link,
+                sceneID:map.sceneID,mapFingerprint:map.fingerprint,modelID:model.modelID,referenceID:model.referenceID,
+                geometryID:model.geometryID,mappingID:model.selectedMappingID,bodyMotionIdentity:map.bodyMotionIdentity,
+                sessionGeneration:map.sessionGeneration,cameraGeneration:map.cameraGeneration,
+                estimatedCameraProjectionIdentity:map.estimatedCameraProjectionIdentity,checkedAtMilliseconds:nowMilliseconds,
+                baseline:baseline,target:target,positions:q,sampleIndex:sample,sampleCount:count,
+                voxel:[voxel.x,voxel.y,voxel.z],voxelCenterMeters:values(point),voxelSizeMeters:map.voxelSizeMeters,
+                voxelBoundingSphereRadiusMeters:sqrt(3)*map.voxelSizeMeters/2,hullDistanceMeters:distance,
+                baselineHullDistanceMeters:baselineDistance,requiredDistanceMeters:required,jawAdditionalMarginMeters:jaw,
+                estimatedInflationMeters:obstacleInflationMeters,sweptPointAllowanceMeters:ROBWorkspaceCollisionPlan.sweptPointTravelMeters,
+                hullAABBLowMeters:values(box.low),hullAABBHighMeters:values(box.high),
+                hullBoundingSphereCenterMeters:values((box.low+box.high)/2),hullBoundingSphereRadiusMeters:simd_length(box.high-box.low)/2,
+                nearestHullSurfacePointMeters:nearestWorld,observedReturnBoundsLowMeters:bounds.map{values($0.low)},
+                observedReturnBoundsHighMeters:bounds.map{values($0.high)})
+            return .init(detail:detail,evidence:evidence)
+        }
         var baselineOccupied: [OccupiedPair:Double] = [:], previousOccupied: [OccupiedPair:Double] = [:]
         let occupiedVoxels = map.occupiedVoxels
         for link in depthCheckedArms {
@@ -464,7 +553,9 @@ struct ROBEstimatedArmCalibrationPlan: Codable, Equatable {
                 let distance = try hullDistance(link,point,start.frames)
                 guard distance <= padding+jaw else { continue }
                 guard distance >= 0.10+jaw else {
-                    throw ROBGhostMotionError.blocked("The estimated \(link) starts less than 100mm plus jaw clearance from an occupied depth-grid cell. No retreat was admitted.")
+                    throw rejection("The estimated \(link) starts less than 100mm plus jaw clearance from an occupied depth-grid cell. No retreat was admitted.",
+                        stage:"baseline_occupied_clearance",link:link,voxel:voxel,distance:distance,baselineDistance:distance,
+                        required:0.10+jaw,jaw:jaw,q:baseline,sample:0,count:nil,boxes:start.boxes,frames:start.frames)
                 }
                 let key = OccupiedPair(link:link,voxel:voxel)
                 baselineOccupied[key] = distance; previousOccupied[key] = distance
@@ -560,7 +651,9 @@ struct ROBEstimatedArmCalibrationPlan: Codable, Equatable {
                         guard distance <= padding+jaw else { continue }
                         let baselineDistance = try hullDistance(link,point,start.frames)
                         let diagnostic = String(format:"cell [%.3f, %.3f, %.3f]m; verified hull distance %.1fmm; baseline %.1fmm; hull-box distance %.1fmm; sample %d/%d",point.x,point.y,point.z,distance*1000,baselineDistance*1000,nominalDistance*1000,sample,count)
-                        throw ROBGhostMotionError.blocked("The estimated \(link) envelope intersects an occupied depth-grid cell, including the 15cm estimate inflation (\(diagnostic)). No nudge was admitted.")
+                        throw rejection("The estimated \(link) envelope intersects an occupied depth-grid cell, including the 15cm estimate inflation (\(diagnostic)). No nudge was admitted.",
+                            stage:"swept_occupied_intersection",link:link,voxel:voxel,distance:distance,baselineDistance:baselineDistance,
+                            required:padding+jaw,jaw:jaw,q:q,sample:sample,count:count,boxes:pose.boxes,frames:pose.frames)
                     case .unknown:
                         guard region.contains(point) else { throw ROBGhostMotionError.blocked("The nudge enters unknown space outside its explicit local commissioning region.") }
                         unknown.insert(voxel)

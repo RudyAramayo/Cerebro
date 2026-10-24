@@ -10,6 +10,7 @@ from DepthCameraIPCFixtureTests import load_service, FakeRGBFrame, FakeDepthFram
 ROOT=Path(__file__).resolve().parents[1]
 source=(ROOT/'Cerebro/CameraManager.swift').read_text()
 structure=braced_declaration(source,'struct CameraIntrinsics:')
+depth_geometry=braced_declaration(source,'struct CameraDepthRGBGeometryCorrespondence:')
 header=braced_declaration(source,'private struct DepthCameraPacketHeader:')
 camera_source=(ROOT/'Cerebro/CameraViewController.swift').read_text()
 belly_source=(ROOT/'Cerebro/ROBBellyCameraWindowController.swift').read_text()
@@ -34,8 +35,20 @@ service=load_service()
 packet,*_=service.frame_payload(FakeRGBFrame(),FakeDepthFrame(),FakeMonoFrame((7,8)),FakeMonoFrame((9,10)),
                                [100.,0.,1.,0.,101.,0.5,0.,0.,1.])
 actual=json.loads(packet)
-legacy={k:v for k,v in actual.items()if k not in ('running_service_source_sha256','rgb_output_undistorted')}
+depth_keys=('depth_intrinsics','depth_intrinsics_source','depth_source_size','depth_source_intrinsics','depth_image_transform','depth_rgb_geometry_correspondence',
+    'rgb_transformation_size','depth_transformation_size','rgb_source_distortion_coefficients','depth_source_distortion_coefficients','rgb_source_distortion_model','depth_source_distortion_model')
+legacy={k:v for k,v in actual.items()if k not in ('running_service_source_sha256','rgb_output_undistorted',*depth_keys)}
 replacement={**actual,'running_service_source_sha256':'d'*64,'rgb_output_undistorted':False}
+with_depth={**actual,'depth_intrinsics':[100.,0.,1.,0.,101.,.5,0.,0.,1.],
+    'depth_intrinsics_source':'actual_depth_transformation','depth_source_size':[2,1],
+    'depth_source_intrinsics':[100.,0.,1.,0.,101.,.5,0.,0.,1.],
+    'depth_image_transform':[1.,0.,0.,0.,1.,0.,0.,0.,1.],
+    'rgb_transformation_size':[2,1],'depth_transformation_size':[2,1],
+    'rgb_source_distortion_coefficients':[.1,-.2,.003,.004], 'depth_source_distortion_coefficients':[.05,-.1,.001,.002],
+    'rgb_source_distortion_model':'perspective','depth_source_distortion_model':'perspective',
+    'depth_rgb_geometry_correspondence':{'status':'mismatched','dimensionsMatch':True,'intrinsicsMatch':True,
+        'maximumIntrinsicDifferencePixels':0.,'sdkAlignedToRGB':False,'sdkEqualTransformationToRGB':False,
+        'depthTransformationValid':True,'rgbTransformationValid':True,'detail':'fixture: matching K alone cannot prove correspondence'}}
 fixture=r'''
 import Foundation
 import AVFoundation
@@ -64,11 +77,20 @@ private func mapped(_ header:DepthCameraPacketHeader)->CameraIntrinsics? {return
     static func main()throws {
         let decoder=JSONDecoder()
         let packets=try CommandLine.arguments.dropFirst().map{try decoder.decode(DepthCameraPacketHeader.self,from:Data(contentsOf:URL(fileURLWithPath:$0)))}
-        let current=mapped(packets[0])!,old=mapped(packets[1])!,replacement=mapped(packets[2])!
+        let current=mapped(packets[0])!,old=mapped(packets[1])!,replacement=mapped(packets[2])!,depthEvidence=mapped(packets[3])!
         precondition(current.cameraServiceSourceSHA256=="/* EXPECTED_SHA */" && current.rgbOutputUndistorted==true)
         precondition(current.fx==100 && current.fy==101 && current.cx==1 && current.cy==0.5)
         precondition(old.cameraServiceSourceSHA256==nil && old.rgbOutputUndistorted==nil && old.isValid(forWidth:2,height:1),"Legacy viewing invented provenance or lost valid K")
         precondition(replacement.cameraServiceSourceSHA256==String(repeating:"d",count:64) && replacement.rgbOutputUndistorted==false,"Frame provenance was replaced by an app/source assumption")
+        precondition(old.depthIntrinsics==nil && old.depthRGBGeometryCorrespondence==nil,"Legacy viewing fabricated depth/RGB pixel correspondence")
+        precondition(depthEvidence.depthIntrinsics==[100,0,1,0,101,0.5,0,0,1] && depthEvidence.depthSourceSize==[2,1])
+        precondition(depthEvidence.depthSourceIntrinsics==depthEvidence.depthIntrinsics && depthEvidence.depthImageTransform==[1,0,0,0,1,0,0,0,1])
+        precondition(depthEvidence.depthIntrinsicsSource=="actual_depth_transformation")
+        precondition(depthEvidence.rgbTransformationSize==[2,1] && depthEvidence.depthTransformationSize==[2,1])
+        precondition(depthEvidence.rgbSourceDistortionCoefficients==[0.1,-0.2,0.003,0.004] && depthEvidence.depthSourceDistortionCoefficients==[0.05,-0.1,0.001,0.002])
+        precondition(depthEvidence.rgbSourceDistortionModel=="perspective" && depthEvidence.depthSourceDistortionModel=="perspective")
+        precondition(depthEvidence.depthRGBGeometryCorrespondence?.status=="mismatched" && depthEvidence.depthRGBGeometryCorrespondence?.sdkAlignedToRGB==false,
+            "Native mapping replaced an actual SDK mismatch with a dimension/K assumption")
         var pixels:CVPixelBuffer?
         precondition(CVPixelBufferCreate(kCFAllocatorDefault,2,1,kCVPixelFormatType_32BGRA,nil,&pixels)==kCVReturnSuccess)
         var format:CMVideoFormatDescription?
@@ -81,7 +103,8 @@ private func mapped(_ header:DepthCameraPacketHeader)->CameraIntrinsics? {return
         let inputs=[CloudSource(sequence:UInt64.max-5,timestampNanoseconds:UInt64.max-17,capturedAtMilliseconds:captured,
             captureStreamID:"real-manager-stream-17",intrinsics:current,rgbSampleBuffer:sample!),
             CloudSource(sequence:1,timestampNanoseconds:900,capturedAtMilliseconds:nil,captureStreamID:nil,intrinsics:old,rgbSampleBuffer:sample!),
-            CloudSource(sequence:1,timestampNanoseconds:1000,capturedAtMilliseconds:captured,captureStreamID:"new-manager-stream-18",intrinsics:replacement,rgbSampleBuffer:sample!)]
+            CloudSource(sequence:1,timestampNanoseconds:1000,capturedAtMilliseconds:captured,captureStreamID:"new-manager-stream-18",intrinsics:replacement,rgbSampleBuffer:sample!),
+            CloudSource(sequence:2,timestampNanoseconds:1100,capturedAtMilliseconds:captured,captureStreamID:"depth-geometry-stream-19",intrinsics:depthEvidence,rgbSampleBuffer:sample!)]
         for input in inputs {
             let face=faceCloud(input,depth:depth),belly=bellyCloud(input,depth:depth)
             precondition(!face.isBelly && belly.isBelly)
@@ -93,6 +116,10 @@ private func mapped(_ header:DepthCameraPacketHeader)->CameraIntrinsics? {return
                 precondition(cloud.calibratedIntrinsics?.cameraServiceSourceSHA256==input.intrinsics?.cameraServiceSourceSHA256 &&
                     cloud.calibratedIntrinsics?.rgbOutputUndistorted==input.intrinsics?.rgbOutputUndistorted,
                     "Cloud notification lost actual worker provenance")
+                precondition(cloud.calibratedIntrinsics?.depthIntrinsics==input.intrinsics?.depthIntrinsics &&
+                    cloud.calibratedIntrinsics?.depthImageTransform==input.intrinsics?.depthImageTransform &&
+                    cloud.calibratedIntrinsics?.depthRGBGeometryCorrespondence?.sdkAlignedToRGB==input.intrinsics?.depthRGBGeometryCorrespondence?.sdkAlignedToRGB,
+                    "Cloud notification changed or lost actual depth projection evidence")
                 precondition(cloud.width==2 && cloud.height==1 && cloud.millimetersLittleEndian as Data==depth.millimetersLittleEndian)
             }
         }
@@ -103,10 +130,10 @@ private func mapped(_ header:DepthCameraPacketHeader)->CameraIntrinsics? {return
         print("Camera worker provenance runtime passed: actual worker flags and face/belly source sequence, timestamps, stream identity preserve values, nil, false and restart")
     }
 }
-'''.replace('/* INTRINSICS */',structure).replace('/* HEADER */',header).replace('/* DEPTH */',depth_structure).replace('/* CLOUD */',cloud).replace('/* FACE_CONSTRUCTOR */',face_constructor).replace('/* BELLY_CONSTRUCTOR */',belly_constructor).replace('/* MAPPING */',mapping).replace('/* EXPECTED_SHA */',actual['running_service_source_sha256'])
+'''.replace('/* INTRINSICS */',depth_geometry+'\n'+structure).replace('/* HEADER */',header).replace('/* DEPTH */',depth_structure).replace('/* CLOUD */',cloud).replace('/* FACE_CONSTRUCTOR */',face_constructor).replace('/* BELLY_CONSTRUCTOR */',belly_constructor).replace('/* MAPPING */',mapping).replace('/* EXPECTED_SHA */',actual['running_service_source_sha256'])
 with tempfile.TemporaryDirectory(prefix='rob-camera-worker-provenance-',dir='/private/tmp')as directory:
     root=Path(directory);paths=[]
-    for name,value in [('current',actual),('legacy',legacy),('replacement',replacement)]:
+    for name,value in [('current',actual),('legacy',legacy),('replacement',replacement),('depth-evidence',with_depth)]:
         path=root/(name+'.json');path.write_text(json.dumps(value));paths.append(str(path))
     swift=root/'Fixture.swift';swift.write_text(fixture)
     subprocess.run(['xcrun','swiftc','-swift-version','5','-parse-as-library',str(swift),'-o',str(root/'fixture')],check=True)

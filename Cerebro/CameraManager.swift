@@ -117,6 +117,20 @@ struct CameraInertialObservation: Codable, Sendable {
     }
 }
 
+/// Actual SDK transformation observations. Equal dimensions alone do not
+/// establish that a depth sample and an RGB pixel share a projection ray.
+struct CameraDepthRGBGeometryCorrespondence: Codable, Sendable {
+    let status: String
+    let dimensionsMatch: Bool
+    let intrinsicsMatch: Bool?
+    let maximumIntrinsicDifferencePixels: Double?
+    let sdkAlignedToRGB: Bool?
+    let sdkEqualTransformationToRGB: Bool?
+    let depthTransformationValid: Bool?
+    let rgbTransformationValid: Bool?
+    let detail: String?
+}
+
 struct CameraIntrinsics: Sendable {
     let fx: Double
     let fy: Double
@@ -132,6 +146,18 @@ struct CameraIntrinsics: Sendable {
     var inertial: CameraInertialObservation? = nil
     var cameraServiceSourceSHA256: String? = nil
     var rgbOutputUndistorted: Bool? = nil
+    var depthIntrinsics: [Double]? = nil
+    var depthIntrinsicsSource: String? = nil
+    var depthSourceSize: [Int]? = nil
+    var depthSourceIntrinsics: [Double]? = nil
+    var depthImageTransform: [Double]? = nil
+    var depthRGBGeometryCorrespondence: CameraDepthRGBGeometryCorrespondence? = nil
+    var rgbTransformationSize: [Int]? = nil
+    var depthTransformationSize: [Int]? = nil
+    var rgbSourceDistortionCoefficients: [Double]? = nil
+    var depthSourceDistortionCoefficients: [Double]? = nil
+    var rgbSourceDistortionModel: String? = nil
+    var depthSourceDistortionModel: String? = nil
 
     func isValid(forWidth width: Int, height: Int) -> Bool {
         fx.isFinite && fy.isFinite && cx.isFinite && cy.isFinite
@@ -1567,7 +1593,19 @@ private final class DepthCameraServiceClient {
                         depthAlignmentMethod: header.depthAlignmentMethod,
                         inertial: header.imu.flatMap { $0.isValid ? $0 : nil },
                         cameraServiceSourceSHA256: header.runningServiceSourceSHA256,
-                        rgbOutputUndistorted: header.rgbOutputUndistorted
+                        rgbOutputUndistorted: header.rgbOutputUndistorted,
+                        depthIntrinsics: header.depthIntrinsics,
+                        depthIntrinsicsSource: header.depthIntrinsicsSource,
+                        depthSourceSize: header.depthSourceSize,
+                        depthSourceIntrinsics: header.depthSourceIntrinsics,
+                        depthImageTransform: header.depthImageTransform,
+                        depthRGBGeometryCorrespondence: header.depthRGBGeometryCorrespondence,
+                        rgbTransformationSize: header.rgbTransformationSize,
+                        depthTransformationSize: header.depthTransformationSize,
+                        rgbSourceDistortionCoefficients: header.rgbSourceDistortionCoefficients,
+                        depthSourceDistortionCoefficients: header.depthSourceDistortionCoefficients,
+                        rgbSourceDistortionModel: header.rgbSourceDistortionModel,
+                        depthSourceDistortionModel: header.depthSourceDistortionModel
                     )
                     return result.isValid(forWidth: header.rgbWidth, height: header.rgbHeight)
                         ? result : nil
@@ -1756,6 +1794,18 @@ private struct DepthCameraPacketHeader: Decodable {
     let rgbSourceIntrinsics: [Double]?
     let rgbImageTransform: [Double]?
     let depthAlignmentMethod: String?
+    let depthIntrinsics: [Double]?
+    let depthIntrinsicsSource: String?
+    let depthSourceSize: [Int]?
+    let depthSourceIntrinsics: [Double]?
+    let depthImageTransform: [Double]?
+    let depthRGBGeometryCorrespondence: CameraDepthRGBGeometryCorrespondence?
+    let rgbTransformationSize: [Int]?
+    let depthTransformationSize: [Int]?
+    let rgbSourceDistortionCoefficients: [Double]?
+    let depthSourceDistortionCoefficients: [Double]?
+    let rgbSourceDistortionModel: String?
+    let depthSourceDistortionModel: String?
     let imu: CameraInertialObservation?
     let sidewalkCenterDeviation: Double?
     let sidewalkConfidence: Double?
@@ -1790,6 +1840,18 @@ private struct DepthCameraPacketHeader: Decodable {
         case rgbSourceIntrinsics = "rgb_source_intrinsics"
         case rgbImageTransform = "rgb_image_transform"
         case depthAlignmentMethod = "depth_alignment_method"
+        case depthIntrinsics = "depth_intrinsics"
+        case depthIntrinsicsSource = "depth_intrinsics_source"
+        case depthSourceSize = "depth_source_size"
+        case depthSourceIntrinsics = "depth_source_intrinsics"
+        case depthImageTransform = "depth_image_transform"
+        case depthRGBGeometryCorrespondence = "depth_rgb_geometry_correspondence"
+        case rgbTransformationSize = "rgb_transformation_size"
+        case depthTransformationSize = "depth_transformation_size"
+        case rgbSourceDistortionCoefficients = "rgb_source_distortion_coefficients"
+        case depthSourceDistortionCoefficients = "depth_source_distortion_coefficients"
+        case rgbSourceDistortionModel = "rgb_source_distortion_model"
+        case depthSourceDistortionModel = "depth_source_distortion_model"
         case imu
         case sidewalkCenterDeviation = "sidewalk_center_deviation"
         case sidewalkConfidence = "sidewalk_confidence"

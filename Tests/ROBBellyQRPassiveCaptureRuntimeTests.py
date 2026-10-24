@@ -15,11 +15,16 @@ def main():
     storage = 'FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Cerebro/BellyQRCalibration/Captures", isDirectory: true)'
     assert source.count(storage) == 1
     source = source.replace(storage, 'URL(fileURLWithPath: ProcessInfo.processInfo.environment["ROB_BELLY_FIXTURE_ROOT"]!, isDirectory: true)')
+    manager_source = (ROOT / "Cerebro/CameraManager.swift").read_text()
+    contract_start = manager_source.index("struct CameraDepthRGBGeometryCorrespondence:")
+    contract_end = manager_source.index("\n}", contract_start) + 2
+    depth_contract = manager_source[contract_start:contract_end]
     stubs = r'''
 import AppKit
 import CoreImage
 import CoreVideo
 extension Notification.Name { static let ROBDepthCloudFrame = Notification.Name("ROBDepthCloudFrame") }
+/* DEPTH_GEOMETRY */
 struct CameraIntrinsics {
     let fx=980.0,fy=981.0,cx=640.0,cy=400.0
     var rgbOutputUndistorted:Bool?
@@ -28,6 +33,23 @@ struct CameraIntrinsics {
     let depthAlignmentMethod:String?="synthetic_fixture_aligned"
     let sourceSize:[Int]?=[1280,800],sourceIntrinsics:[Double]?=nil,imageTransform:[Double]?=nil
     let calibratedLensPosition:Int?=nil,frameLensPosition:Int?=nil
+    let rgbTransformationSize:[Int]?=[1280,800],depthTransformationSize:[Int]?=[1280,800]
+    let rgbSourceDistortionCoefficients:[Double]?=[0.1,-0.2,0.003,0.004]
+    let depthSourceDistortionCoefficients:[Double]?=[0.05,-0.1,0.001,0.002]
+    let rgbSourceDistortionModel:String?="perspective",depthSourceDistortionModel:String?="perspective"
+    var depthEvidencePresent=true
+    var depthIntrinsics:[Double]? {depthEvidencePresent ? [980,0,640,0,981,400,0,0,1]:nil}
+    var depthIntrinsicsSource:String? {depthEvidencePresent ? "synthetic actual SDK depth transformation":nil}
+    var depthSourceSize:[Int]? {depthEvidencePresent ? [1280,800]:nil}
+    var depthSourceIntrinsics:[Double]? {depthIntrinsics}
+    var depthImageTransform:[Double]? {depthEvidencePresent ? [1,0,0,0,1,0,0,0,1]:nil}
+    var depthRGBGeometryCorrespondence:CameraDepthRGBGeometryCorrespondence? {
+        guard depthEvidencePresent else {return nil}
+        let aligned=rgbOutputUndistorted != false
+        return CameraDepthRGBGeometryCorrespondence(status:aligned ? "matched":"mismatched",dimensionsMatch:true,intrinsicsMatch:true,
+            maximumIntrinsicDifferencePixels:0,sdkAlignedToRGB:aligned,sdkEqualTransformationToRGB:aligned,
+            depthTransformationValid:true,rgbTransformationValid:true,detail:"synthetic fixture only")
+    }
     func isValid(forWidth:Int,height:Int)->Bool {forWidth==1280 && height==800}
 }
 final class ROBDepthCloudFrame:NSObject {
@@ -48,7 +70,7 @@ final class ROBDepthCloudFrame:NSObject {
         receivedUptime=ProcessInfo.processInfo.systemUptime
         capturedUptime=receivedUptime-(stale ? 10:0)
         sourceCapturedAtMilliseconds=1792000000000+Double(sequence%100000)
-        calibratedIntrinsics=CameraIntrinsics(rgbOutputUndistorted:undistorted)
+        calibratedIntrinsics=CameraIntrinsics(rgbOutputUndistorted:undistorted,depthEvidencePresent:undistorted != nil)
         var buffer:CVPixelBuffer?
         precondition(CVPixelBufferCreate(nil,width,height,kCVPixelFormatType_32BGRA,nil,&buffer)==kCVReturnSuccess)
         rgbPixelBuffer=buffer
@@ -63,6 +85,7 @@ final class ROBDepthCloudFrame:NSObject {
     }
 }
 '''
+    stubs = stubs.replace("/* DEPTH_GEOMETRY */", depth_contract)
     fixture = r'''
 import AppKit
 import CoreImage
@@ -81,6 +104,12 @@ import CoreImage
     @MainActor static func main() async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let controller=ROBBellyQRCalibrationWindowController.shared
+        let summary=ROBBellyQRCalibrationWindowController.diagnosticSummary(report:["acceptedFrameCount":5,"consistentPairFrameCount":0,
+            "rawDepthAgreementAcrossConsistentFrames":false,"rejectedFrames":[],"frames":[
+                ["pairTranslationErrorMeters":0.0172,"pairRotationErrorDegrees":6.7],
+                ["pairTranslationErrorMeters":0.0174,"pairRotationErrorDegrees":6.8]]],exitStatus:0,logText:"",evidencePath:"/private/tmp/synthetic-evidence",missing:[])
+        precondition(summary.contains("5/5") && summary.contains("0/5") && summary.contains("17.2-17.4 mm"))
+        precondition(summary.count<1000 && !summary.contains("\"frames\"") && summary.contains("/private/tmp/synthetic-evidence"),"Diagnostic UI emitted implementation JSON instead of concise findings")
         // Detector seeds use the native y-down pixels, not normalized or
         // resized dimensions. Both independent payloads must remain distinct.
         let canvas=CIImage(color:CIColor(red:1,green:1,blue:1)).cropped(to:CGRect(x:0,y:0,width:1280,height:800))
@@ -163,6 +192,17 @@ import CoreImage
         precondition(frames[0]["rgbOutputUndistorted"]==nil,"Missing source flag was fabricated")
         precondition(frames[1]["rgbOutputUndistorted"] as? Bool==false,"False source flag was overwritten")
         precondition(frames[2]["rgbOutputUndistorted"] as? Bool==true)
+        precondition(frames[0]["depthIntrinsics"]==nil && frames[0]["depthRGBGeometryCorrespondence"]==nil,"Missing depth pixel evidence was fabricated")
+        precondition((frames[1]["depthRGBGeometryCorrespondence"] as? [String:Any])?["sdkAlignedToRGB"] as? Bool==false,"SDK mismatch was overwritten")
+        precondition(frames[2]["depthIntrinsics"] as? [Double]==[980,0,640,0,981,400,0,0,1])
+        precondition(frames[2]["depthSourceSize"] as? [Int]==[1280,800])
+        precondition(frames[2]["depthSourceIntrinsics"] as? [Double]==frames[2]["depthIntrinsics"] as? [Double])
+        precondition(frames[2]["depthImageTransform"] as? [Double]==[1,0,0,0,1,0,0,0,1])
+        precondition(frames[2]["rgbDepthDimensionsMatch"] as? Bool==true)
+        precondition(frames[2]["rgbTransformationSize"] as? [Int]==[1280,800])
+        precondition(frames[2]["depthTransformationSize"] as? [Int]==[1280,800])
+        precondition(frames[2]["rgbSourceDistortionCoefficients"] as? [Double]==[0.1,-0.2,0.003,0.004],"Actual source distortion was replaced by fabricated output zeros")
+        precondition(frames[2]["rgbGeometryMatchesNativeDepth"]==nil,"Dimensions alone were labelled pixel correspondence")
         for (index,frame) in frames.enumerated() {
             precondition(frame["sourceCameraRole"] as? String=="belly")
             precondition(frame["sequenceSource"] as? String=="camera_frame_set")

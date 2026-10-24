@@ -195,7 +195,90 @@ def _detections(frame, gray):
     return detections, "native_and_bounded_multiscale_exact_pattern", diagnostics
 
 
-def _depth_report(frame, corners, target, base, image_path, depth_path):
+def _depth_pixel_geometry(frame):
+    """Corroborate SDK pixel-ray metadata; never infer it from image size."""
+    required = ("depthIntrinsics", "depthIntrinsicsSource", "depthSourceSize",
+                "depthSourceIntrinsics", "depthImageTransform", "depthRGBGeometryCorrespondence",
+                "rgbTransformationSize", "depthTransformationSize")
+    missing = [name for name in required if frame.get(name) is None]
+    report = {"status": "missing_evidence" if missing else "unchecked",
+              "pixelCorrespondenceSupported": False, "missingEvidence": missing,
+              "dimensionsAloneEstablishCorrespondence": False,
+              "metadataOnlyNotMetricDepthValidation": True,
+              "reportedSDKCorrespondence": frame.get("depthRGBGeometryCorrespondence")}
+    if missing:
+        return report
+    try:
+        width, height = frame["width"], frame["height"]
+        def matrix(value, label):
+            return _finite(value, (9,), label).reshape(3, 3)
+        def pinhole(value, label):
+            K = matrix(value, label)
+            if min(K[0, 0], K[1, 1]) <= 0 or not np.allclose(K[2], [0, 0, 1], atol=1e-8, rtol=0):
+                raise ValueError(label + " is not a finite pinhole matrix")
+            return K
+        if not isinstance(frame["depthIntrinsicsSource"], str) or not frame["depthIntrinsicsSource"]:
+            raise ValueError("Actual depth intrinsic source is missing")
+        depth_K = pinhole(frame["depthIntrinsics"], "Depth output intrinsics")
+        source_K = pinhole(frame["depthSourceIntrinsics"], "Depth source intrinsics")
+        transform = matrix(frame["depthImageTransform"], "Depth image transform")
+        size = frame["depthSourceSize"]
+        if not isinstance(size, list) or len(size) != 2 or any(type(v) is not int or not 1 <= v <= 8192 for v in size):
+            raise ValueError("Actual depth source dimensions are invalid")
+        if abs(float(np.linalg.det(transform))) < 1e-12:
+            raise ValueError("Depth image transform is singular")
+        if not (0 <= depth_K[0, 2] < width and 0 <= depth_K[1, 2] < height):
+            raise ValueError("Depth principal point lies outside its output image")
+        def reconstructed_K(transform, source):
+            K = np.einsum("ij,jk->ik", transform, source)
+            if not np.isfinite(K).all() or abs(K[2, 2]) < 1e-12:
+                raise ValueError("Source/crop geometry does not reconstruct finite output intrinsics")
+            return K/K[2, 2]
+        reconstructed = reconstructed_K(transform, source_K)
+        source_error = float(np.max(np.abs(reconstructed-depth_K)))
+        fx, fy, cx, cy = _finite(frame["intrinsics"], (4,), "RGB output intrinsics")
+        rgb_K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1.]])
+        rgb_source_error = None
+        if frame.get("rgbSourceIntrinsics") is not None and frame.get("rgbImageTransform") is not None:
+            rgb_reconstructed = reconstructed_K(matrix(frame["rgbImageTransform"], "RGB image transform"),
+                                              pinhole(frame["rgbSourceIntrinsics"], "RGB source intrinsics"))
+            rgb_source_error = float(np.max(np.abs(rgb_reconstructed-rgb_K)))
+        intrinsic_error = float(np.max(np.abs(depth_K-rgb_K)))
+        observed = frame["depthRGBGeometryCorrespondence"]
+        if not isinstance(observed, dict):
+            raise ValueError("SDK correspondence observation is not an object")
+        sdk_checks = {"reportedMatched": observed.get("status") == "matched",
+                      "dimensionsMatch": observed.get("dimensionsMatch") is True,
+                      "intrinsicsMatch": observed.get("intrinsicsMatch") is True,
+                      "sdkAlignedToRGB": observed.get("sdkAlignedToRGB") is True,
+                      "depthTransformationValid": observed.get("depthTransformationValid") is True,
+                      "rgbTransformationValid": observed.get("rgbTransformationValid") is True}
+        numeric_checks = {"outputIntrinsicDifferenceWithin0_001Pixels": intrinsic_error <= .001,
+                          "depthSourceCropReconstructsOutputWithin0_001Pixels": source_error <= .001,
+                          "RGBSourceCropConsistentWhenPresent": rgb_source_error is None or rgb_source_error <= .001,
+                          "RGBTransformationSizeMatchesPixels": frame["rgbTransformationSize"] == [width, height],
+                          "depthTransformationSizeMatchesPixels": frame["depthTransformationSize"] == [width, height]}
+        supported = all(sdk_checks.values()) and all(numeric_checks.values())
+        report.update({"status": "supported_sdk_metadata" if supported else "mismatched_evidence",
+            "pixelCorrespondenceSupported": supported, "SDKChecks": sdk_checks, "numericChecks": numeric_checks,
+            "maximumOutputIntrinsicDifferencePixels": intrinsic_error,
+            "maximumDepthSourceCropDifferencePixels": source_error,
+            "maximumRGBSourceCropDifferencePixels": rgb_source_error,
+            "depthIntrinsics": depth_K.reshape(-1).tolist(), "depthSourceSize": size,
+            "depthSourceIntrinsics": source_K.reshape(-1).tolist(),
+            "depthImageTransform": transform.reshape(-1).tolist(),
+            "rgbTransformationSize": frame["rgbTransformationSize"], "depthTransformationSize": frame["depthTransformationSize"],
+            "rgbSourceDistortionCoefficients": frame.get("rgbSourceDistortionCoefficients"),
+            "depthSourceDistortionCoefficients": frame.get("depthSourceDistortionCoefficients"),
+            "rgbSourceDistortionModel": frame.get("rgbSourceDistortionModel"),
+            "depthSourceDistortionModel": frame.get("depthSourceDistortionModel"),
+            "sourceDistortionCoefficientsDescribeSourceSensorNotOutputWarp": True})
+    except (ValueError, TypeError, KeyError, FloatingPointError) as error:
+        report.update({"status": "invalid_evidence", "reason": str(error)})
+    return report
+
+
+def _depth_report(frame, corners, target, base, image_path, depth_path, pixel_geometry):
     observation = {"width": frame["width"], "height": frame["height"],
                    "cameraMatrix": frame["intrinsics"], "cornersPixels": corners.tolist(),
                    "markerSizeMeters": .12, "zeroDistortionAssumed": True,
@@ -210,12 +293,16 @@ def _depth_report(frame, corners, target, base, image_path, depth_path):
     normal_angle = math.degrees(math.acos(float(np.clip(abs(np.dot(n, sampled["normal"])), -1, 1))))
     optical_stats, plane_stats = _stats(z_error), _stats(normal_error)
     coverage = len(z_error)/sampled["interiorPixelCount"]
+    residuals_within_limits = bool(coverage >= .5 and optical_stats["RMSEMeters"] <= .010 and
+                                   optical_stats["p95AbsoluteMeters"] <= .030 and normal_angle <= 3)
     return {"targetID": target, "region": "15-percent inset; all valid native returns retained",
             "interiorPixelCount": sampled["interiorPixelCount"], "validFraction": coverage,
             "rawOpticalZMinusPnPPlaneIntersection": optical_stats,
             "signedPointToPnPPlane": plane_stats, "rawPlaneNormalDifferenceDegrees": normal_angle,
-            "withinDiagnosticLimits": bool(coverage >= .5 and optical_stats["RMSEMeters"] <= .010 and
-                optical_stats["p95AbsoluteMeters"] <= .030 and normal_angle <= 3),
+            "numericResidualsWithinDiagnosticLimits": residuals_within_limits,
+            "comparisonAssumesUnverifiedSharedPixelRays": not pixel_geometry["pixelCorrespondenceSupported"],
+            "pixelCorrespondenceSupported": pixel_geometry["pixelCorrespondenceSupported"],
+            "withinDiagnosticLimits": bool(pixel_geometry["pixelCorrespondenceSupported"] and residuals_within_limits),
             "correctionFittedOrApplied": False}
 
 
@@ -240,6 +327,7 @@ def _frame(frame, base, spacing):
     if gray is None or gray.shape != (height, width):
         raise ValueError("Saved RGB/depth image dimensions differ")
     detections, detector, detector_diagnostics = _detections(frame, gray)
+    pixel_geometry = _depth_pixel_geometry(frame)
     K = np.array([[k[0], 0, k[2]], [0, k[1], k[3]], [0, 0, 1.]])
     objects = DEPTH.object_corners(.12)
     rows, poses, refined = [], [], []
@@ -253,7 +341,7 @@ def _frame(frame, base, spacing):
         poses.append(pose); refined.append(corners)
         rows.append({"targetID": target, "cornersPixels": corners.tolist(), "patternQuality": quality,
                      "individualPnP": diagnostic, "targetToCameraColumnMajor": pose.T.reshape(-1).tolist(),
-                     "rawDepth": _depth_report(frame, corners, target, base, image_path, depth_path)})
+                     "rawDepth": _depth_report(frame, corners, target, base, image_path, depth_path, pixel_geometry)})
     delta = np.einsum("ji,j->i", poses[0][:3, :3], poses[1][:3, 3]-poses[0][:3, 3])
     separation = float(np.linalg.norm(poses[1][:3, 3]-poses[0][:3, 3]))
     rotation_error = _angle(poses[0][:3, :3], poses[1][:3, :3])
@@ -268,7 +356,8 @@ def _frame(frame, base, spacing):
             "imageSHA256": digest(image_path), "depthSHA256": digest(depth_path),
             "detector": detector, "detectorDiagnostics": detector_diagnostics,
             "cameraServiceSourceSHA256": frame.get("cameraServiceSourceSHA256"),
-            "depthAlignmentMethod": frame.get("depthAlignmentMethod"), "sequenceSource": frame.get("sequenceSource", "unspecified"),
+            "depthAlignmentMethod": frame.get("depthAlignmentMethod"), "depthRGBGeometry": pixel_geometry,
+            "sequenceSource": frame.get("sequenceSource", "unspecified"),
             "targets": rows, "individualCenterSeparationMeters": separation,
             "b02CenterInB01CoordinatesMeters": delta.tolist(), "expectedSeparationMeters": spacing,
             "pairTranslationErrorMeters": pair_error, "pairRotationErrorDegrees": rotation_error,

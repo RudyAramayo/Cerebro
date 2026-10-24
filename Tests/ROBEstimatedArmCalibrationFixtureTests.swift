@@ -1,5 +1,6 @@
 import Foundation
 import simd
+import CryptoKit
 
 @main struct EstimatedArmCalibrationFixtures {
     static func blocked(_ text:String? = nil,line:UInt = #line,_ body:() throws -> Void) {
@@ -62,14 +63,16 @@ import simd
         blocked { _ = try cube.distance(to:[1e308,1e308,1e308]) }
         func grid(origin:SIMD3<Double> = [1.2,1.2,0.9], session:UInt64 = generation,
                   cameraID:UUID = camera, modelID:String? = nil, focalLength:Double = 100,
-                  using selectedModel:ROBGhostRobotModel? = nil) throws -> ROBWorkspaceCollisionSnapshot {
+                  using selectedModel:ROBGhostRobotModel? = nil,projectionID:String? = nil) throws -> ROBWorkspaceCollisionSnapshot {
             let selected=selectedModel ?? model
             var builder = ROBWorkspaceDepthMap(modelID:modelID ?? selected.modelID,geometryID:selected.geometryID,
-                mappingID:selected.selectedMappingID,sessionGeneration:session,cameraGeneration:cameraID,nowMilliseconds:now)
+                mappingID:selected.selectedMappingID,sessionGeneration:session,cameraGeneration:cameraID,nowMilliseconds:now,
+                estimatedCameraProjectionIdentity:projectionID)
             var transform = matrix_identity_double4x4; transform.columns.3 = SIMD4(origin,1)
             for (sequence,captured) in [(UInt64(1),1_900.0),(UInt64(2),1_950.0)] {
                 try builder.append(width:16,height:16,fx:focalLength,fy:focalLength,cx:7.5,cy:7.5,depth:{ _,_ in 800 },cameraToRobot:transform,
-                    capturedAtMilliseconds:captured,sequence:sequence,cameraGeneration:cameraID,nowMilliseconds:now)
+                    capturedAtMilliseconds:captured,sequence:sequence,cameraGeneration:cameraID,nowMilliseconds:now,
+                    estimatedCameraProjectionIdentity:projectionID)
             }
             return builder.snapshot(nowMilliseconds:now)!
         }
@@ -179,9 +182,44 @@ import simd
             generation:generation,cameraGeneration:camera,nowMilliseconds:now) }
         let insideLocal = upperArm.vertices.reduce(SIMD3<Double>.zero,+)/Double(upperArm.vertices.count)
         let insideWorld4 = model.frames(model.positions(vendorLeft:reportedBaseline))["left_two_Link"]!*SIMD4(insideLocal,1)
-        let insideMap = try grid(origin:[insideWorld4.x,insideWorld4.y,insideWorld4.z-0.8],focalLength:1_000_000)
-        blocked("100mm") { _ = try ROBEstimatedArmCalibrationPlan.make(from:reportedBaseline,map:insideMap,model:model,
-            generation:generation,cameraGeneration:camera,nowMilliseconds:now) }
+        let projectionID=String(repeating:"a",count:64)
+        let insideMap = try grid(origin:[insideWorld4.x,insideWorld4.y,insideWorld4.z-0.8],focalLength:1_000_000,projectionID:projectionID)
+        let insideFingerprint=insideMap.fingerprint,insideOccupied=Set(insideMap.occupiedVoxels)
+        do {
+            _ = try ROBEstimatedArmCalibrationPlan.make(from:reportedBaseline,map:insideMap,model:model,
+                generation:generation,cameraGeneration:camera,nowMilliseconds:now)
+            preconditionFailure("A rejected occupied start unexpectedly produced a motion proof")
+        } catch let rejection as ROBEstimatedArmCollisionRejection {
+            let evidence=rejection.evidence
+            precondition(rejection.localizedDescription.contains("100mm") && evidence.stage=="baseline_occupied_clearance")
+            precondition(evidence.estimatedCameraProjectionIdentity==projectionID && evidence.mapFingerprint==insideFingerprint && evidence.sceneID==insideMap.sceneID)
+            precondition(evidence.baseline==reportedBaseline && evidence.positions==reportedBaseline && evidence.sampleIndex==0)
+            precondition(evidence.hullDistanceMeters<evidence.requiredDistanceMeters && evidence.requiredDistanceMeters==0.10+evidence.jawAdditionalMarginMeters && evidence.estimatedInflationMeters==0.15)
+            let world=SIMD3(evidence.voxelCenterMeters[0],evidence.voxelCenterMeters[1],evidence.voxelCenterMeters[2])
+            precondition(insideMap.state(at:world) == .occupied && evidence.nearestHullSurfacePointMeters != nil && evidence.observedReturnBoundsLowMeters != nil)
+            let frame=model.frames(model.positions(vendorLeft:reportedBaseline))[evidence.link]!,local=simd_inverse(frame)*SIMD4(world,1)
+            let exactHull=try ROBEstimatedConvexHull(text:String(contentsOf:model.directory.appendingPathComponent(model.hulls[evidence.link]!),encoding:.utf8))
+            let exactDistance=try exactHull.distance(to:SIMD3(local.x,local.y,local.z))
+            precondition(abs(exactDistance-evidence.hullDistanceMeters)<1e-12,"Rejection diagnostics changed the existing metric")
+            let directory=FileManager.default.temporaryDirectory.appendingPathComponent("rob-rejected-collision-"+UUID().uuidString)
+            defer {try? FileManager.default.removeItem(at:directory)}
+            let exported=try rejection.export(map:insideMap,to:directory)
+            let report=try JSONSerialization.jsonObject(with:Data(contentsOf:exported))as![String:Any]
+            precondition(report["motionAuthority"]as?Bool==false && report["sourceFramesNotRetained"]as?Bool==true &&
+                report["boundingSpheresUsedForAdmission"]as?Bool==false && report["rejectionIsGlobalMinimum"]as?Bool==false)
+            let mapFile=directory.appendingPathComponent(report["mapFile"]as!String),mapBytes=try Data(contentsOf:mapFile)
+            let hash=SHA256.hash(data:mapBytes).map{String(format:"%02x",$0)}.joined()
+            precondition(hash==report["mapSHA256"]as?String)
+            let saved=try JSONDecoder().decode(ROBWorkspaceCollisionSnapshot.self,from:mapBytes)
+            precondition(saved.fingerprint==insideFingerprint && Set(saved.occupiedVoxels)==insideOccupied && saved.observations.count==2 && saved.estimatedCameraProjectionIdentity==projectionID)
+            precondition(saved.registrationID==nil && insideMap.registrationID==nil && insideMap.fingerprint==insideFingerprint && Set(insideMap.occupiedVoxels)==insideOccupied,
+                "Diagnostic export modified or promoted the rejected scene")
+            let permissions=try FileManager.default.attributesOfItem(atPath:exported.path)[.posixPermissions]as!NSNumber
+            precondition(permissions.intValue&0o777==0o600)
+            blocked("another scene") {_ = try rejection.export(map:map,to:directory.appendingPathComponent("wrong-map"))}
+            precondition(!FileManager.default.fileExists(atPath:directory.appendingPathComponent("wrong-map").path))
+            print("Rejected-start evidence: exact cell/link/hull metric and photo projection identity, complete immutable map/hash/private export; no source-frame claim, motion authority or map mutation")
+        }
         var alteredRetreat = try JSONSerialization.jsonObject(with:JSONEncoder().encode(retreat)) as! [String:Any]
         alteredRetreat["baselineCloseOccupiedPairs"] = []
         let missingPairs = try JSONDecoder().decode(ROBEstimatedArmCalibrationPlan.self,from:JSONSerialization.data(withJSONObject:alteredRetreat))

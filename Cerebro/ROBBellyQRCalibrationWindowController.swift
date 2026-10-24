@@ -124,6 +124,42 @@ private final class ROBBellyQRFrameMailbox: @unchecked Sendable {
         try data.write(to: url, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
+    @nonobjc nonisolated static func diagnosticSummary(report: [String: Any]?, exitStatus: Int32,
+        logText: String, evidencePath: String, missing: [String]) -> String {
+        var lines: [String] = []
+        if let report {
+            let accepted = report["acceptedFrameCount"] as? Int ?? 0
+            let consistent = report["consistentPairFrameCount"] as? Int ?? 0
+            let rejected = report["rejectedFrames"] as? [[String: Any]] ?? []
+            let frames = report["frames"] as? [[String: Any]] ?? []
+            let total = accepted + rejected.count
+            lines.append("QR frames accepted: \(accepted)/\(total). Target layout consistent: \(consistent)/\(total).")
+            lines.append("Raw depth agreement: " + (report["rawDepthAgreementAcrossConsistentFrames"] as? Bool == true ? "confirmed for this capture." : "not established."))
+            let supported = frames.filter { ($0["depthRGBGeometry"] as? [String: Any])?["pixelCorrespondenceSupported"] as? Bool == true }.count
+            lines.append("Depth/RGB pixel alignment evidence: \(supported)/\(accepted) accepted frames.")
+            func range(_ key: String, scale: Double, unit: String) -> String? {
+                let values = frames.compactMap { ($0[key] as? NSNumber)?.doubleValue }.filter(\.isFinite).map { $0 * scale }
+                guard let low = values.min(), let high = values.max() else { return nil }
+                return String(format: "%.1f-%.1f %@", low, high, unit)
+            }
+            if let distance = range("pairTranslationErrorMeters", scale: 1000, unit: "mm"),
+               let angle = range("pairRotationErrorDegrees", scale: 1, unit: "degrees") {
+                lines.append("Target-pair errors: \(distance); \(angle).")
+            }
+            for row in rejected.prefix(3) {
+                let index = (row["frameIndex"] as? Int).map { String($0 + 1) } ?? "?"
+                lines.append("Frame \(index): " + String((row["reason"] as? String ?? "Not accepted").prefix(220)))
+            }
+            if rejected.count > 3 { lines.append("\(rejected.count - 3) further frame rejections are in the saved report.") }
+        } else {
+            lines.append("Belly QR diagnostic could not finish (exit \(exitStatus)).")
+            let error = logText.split(separator: "\n").suffix(2).joined(separator: " ")
+            if !error.isEmpty { lines.append(String(error.prefix(420))) }
+        }
+        if !missing.isEmpty { lines.append("Missing source evidence: " + missing.prefix(4).joined(separator: ", ") + (missing.count > 4 ? "…" : "")) }
+        lines.append("No calibration installed. Full report and images: \(evidencePath)")
+        return lines.joined(separator: "\n")
+    }
     private enum Failure: LocalizedError {
         case invalid(String)
         var errorDescription: String? { if case let .invalid(text) = self { return text }; return nil }
@@ -248,6 +284,7 @@ private final class ROBBellyQRFrameMailbox: @unchecked Sendable {
             if let value = frame.sourceSequence { observed["sourceSequence"] = NSNumber(value: value) }
             if let value = frame.calibratedIntrinsics?.rgbOutputUndistorted { observed["rgbOutputUndistorted"] = value }
             if let value = frame.calibratedIntrinsics?.depthAlignmentMethod { observed["depthAlignmentMethod"] = value }
+            if let value = frame.calibratedIntrinsics?.depthRGBGeometryCorrespondence { observed["depthRGBGeometryStatus"] = value.status }
             observations.append(observed)
             if observations.count > 12 { observations.removeFirst(observations.count - 12) }
             observationSummary = String(format: "Received RGB %d × %d / depth %d × %d, age %.0f ms.", rgbWidth, rgbHeight, frame.width, frame.height, ageMilliseconds)
@@ -291,7 +328,7 @@ private final class ROBBellyQRFrameMailbox: @unchecked Sendable {
                 "sourceImageSHA256": Self.hash(jpeg), "depthPath": name + ".depth-u16le", "depthSHA256": Self.hash(depth),
                 "width": frame.width, "height": frame.height, "rgbWidth": cg.width, "rgbHeight": cg.height,
                 "sourceCameraRole": "belly", "capturedUptime": frame.capturedUptime, "receivedUptime": frame.receivedUptime,
-                "rgbGeometryMatchesNativeDepth": cg.width == frame.width && cg.height == frame.height]
+                "rgbDepthDimensionsMatch": cg.width == frame.width && cg.height == frame.height]
             // Run both native QR decoders on the exact saved JPEG geometry.
             // Their quads are seeds only, never a calibration acceptance.
             if let decoded = CIImage(data: jpeg), let savedRGB = context.createCGImage(decoded, from: decoded.extent) {
@@ -322,6 +359,21 @@ private final class ROBBellyQRFrameMailbox: @unchecked Sendable {
                 if let value = k.sourceSize { record["rgbSourceSize"] = value }
                 if let value = k.sourceIntrinsics { record["rgbSourceIntrinsics"] = value }
                 if let value = k.imageTransform { record["rgbImageTransform"] = value }
+                if let value = k.depthIntrinsics { record["depthIntrinsics"] = value }
+                else { missing.insert("depth output intrinsics") }
+                if let value = k.depthIntrinsicsSource { record["depthIntrinsicsSource"] = value }
+                if let value = k.depthSourceSize { record["depthSourceSize"] = value }
+                if let value = k.depthSourceIntrinsics { record["depthSourceIntrinsics"] = value }
+                if let value = k.depthImageTransform { record["depthImageTransform"] = value }
+                if let value = k.rgbTransformationSize { record["rgbTransformationSize"] = value }
+                if let value = k.depthTransformationSize { record["depthTransformationSize"] = value }
+                if let value = k.rgbSourceDistortionCoefficients { record["rgbSourceDistortionCoefficients"] = value }
+                if let value = k.depthSourceDistortionCoefficients { record["depthSourceDistortionCoefficients"] = value }
+                if let value = k.rgbSourceDistortionModel { record["rgbSourceDistortionModel"] = value }
+                if let value = k.depthSourceDistortionModel { record["depthSourceDistortionModel"] = value }
+                if let value = k.depthRGBGeometryCorrespondence {
+                    record["depthRGBGeometryCorrespondence"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(value))
+                } else { missing.insert("SDK depth/RGB pixel correspondence") }
                 if let value = k.calibratedLensPosition { record["calibratedLensPosition"] = value }
                 if let value = k.frameLensPosition { record["frameLensPosition"] = value }
             } else { missing.insert("calibrated camera intrinsics and pixel metadata") }
@@ -381,13 +433,13 @@ private final class ROBBellyQRFrameMailbox: @unchecked Sendable {
                 try await Task.sleep(nanoseconds: 250_000_000)
             }
         } catch { if workerProcess.isRunning { workerProcess.terminate() }; throw error }
-        let report = (try? String(contentsOf: outputURL, encoding: .utf8)) ?? "No diagnostic report was produced."
+        let report = (try? Data(contentsOf: outputURL)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
         let logText = (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
         if FileManager.default.fileExists(atPath: outputURL.path) {
             try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: outputURL.path)
         }
-        let missingText = missing.isEmpty ? "" : "\nMissing source evidence: " + missing.joined(separator: ", ")
-        display("Belly QR diagnostic finished (exit \(workerProcess.terminationStatus)). No profile or arm registration installed.\(missingText)\n\(destination.path)\n" + String(report.suffix(16000)) + (workerProcess.terminationStatus == 0 ? "" : "\n" + String(logText.suffix(3000))))
+        display(Self.diagnosticSummary(report: report, exitStatus: workerProcess.terminationStatus,
+            logText: logText, evidencePath: destination.path, missing: missing))
     }
 
     @objc func stop() {

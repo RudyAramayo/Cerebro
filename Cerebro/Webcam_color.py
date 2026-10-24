@@ -718,6 +718,120 @@ def rgb_frame_source_geometry(rgb_frame, published_intrinsics):
     return source_size, source_intrinsics, image_transform
 
 
+def depth_frame_geometry(depth_frame, rgb_frame, published_rgb_intrinsics):
+    """Observe native depth geometry; never substitute the RGB calibration.
+
+    Equal dimensions alone do not establish pixel correspondence. Keep this
+    diagnostic optional/nonfatal for legacy viewing, with explicit unavailable,
+    invalid and mismatched outcomes rather than manufacturing alignment proof.
+    """
+    dimensions_match = (depth_frame.getWidth(), depth_frame.getHeight()) == (rgb_frame.getWidth(), rgb_frame.getHeight())
+    comparison = {"status": "unavailable", "dimensionsMatch": dimensions_match,
+                  "intrinsicsMatch": None, "maximumIntrinsicDifferencePixels": None,
+                  "sdkAlignedToRGB": None, "sdkEqualTransformationToRGB": None,
+                  "depthTransformationValid": None, "rgbTransformationValid": None,
+                  "detail": None}
+    evidence = {"depth_intrinsics": None, "depth_intrinsics_source": "unavailable",
+                "depth_source_size": None, "depth_source_intrinsics": None,
+                "depth_image_transform": None, "depth_rgb_geometry_correspondence": comparison,
+                "rgb_transformation_size": None, "depth_transformation_size": None,
+                "rgb_source_distortion_coefficients": None, "depth_source_distortion_coefficients": None,
+                "rgb_source_distortion_model": None, "depth_source_distortion_model": None}
+
+    def transformation(frame):
+        accessor = getattr(frame, "getTransformation", None)
+        if accessor is None:
+            return None
+        if not callable(accessor):
+            raise RuntimeError("Native frame transformation accessor is invalid")
+        return accessor()
+
+    def optional_bool(instance, name, *args):
+        method = getattr(instance, name, None)
+        if method is None:
+            return None
+        if not callable(method):
+            raise RuntimeError("Native transformation accessor is invalid: " + name)
+        value = method(*args)
+        if type(value) is not bool:
+            raise RuntimeError("Native transformation did not return a boolean: " + name)
+        return value
+
+    def observe_native_metadata(transform, prefix):
+        if transform is None:
+            return
+        getter = getattr(transform, "getSize", None)
+        if callable(getter):
+            size = getter()
+            if len(size) != 2 or any(type(value) is not int or not 0 <= value <= 8192 for value in size):
+                raise RuntimeError("Invalid native " + prefix + " transformation size")
+            evidence[prefix + "_transformation_size"] = list(size)
+        getter = getattr(transform, "getDistortionCoefficients", None)
+        if callable(getter):
+            values = getter()
+            if len(values) > 64 or any(isinstance(value, (bool, str, bytes)) for value in values):
+                raise RuntimeError("Invalid native " + prefix + " source distortion coefficients")
+            coefficients = [float(value) for value in values]
+            if not all(math.isfinite(value) and abs(value) <= 1_000_000 for value in coefficients):
+                raise RuntimeError("Nonfinite native " + prefix + " source distortion coefficients")
+            # SDK coefficients describe the SOURCE sensor. Do not substitute
+            # zeros or infer the current output is distorted from this alone.
+            evidence[prefix + "_source_distortion_coefficients"] = coefficients
+        getter = getattr(transform, "getDistortionModel", None)
+        if callable(getter):
+            evidence[prefix + "_source_distortion_model"] = str(getter())
+
+    try:
+        depth_transform, rgb_transform = transformation(depth_frame), transformation(rgb_frame)
+        observe_native_metadata(rgb_transform, "rgb")
+        observe_native_metadata(depth_transform, "depth")
+        if depth_transform is None:
+            comparison["detail"] = "Native depth transformation metadata is unavailable"
+            return evidence
+        comparison["depthTransformationValid"] = optional_bool(depth_transform, "isValid")
+        if rgb_transform is not None:
+            comparison["rgbTransformationValid"] = optional_bool(rgb_transform, "isValid")
+        getter = getattr(depth_transform, "getIntrinsicMatrix", None)
+        if getter is None:
+            comparison["detail"] = "Native depth intrinsic metadata is unavailable"
+            return evidence
+        if not callable(getter):
+            raise RuntimeError("Native depth intrinsic accessor is invalid")
+        depth_intrinsics = validated_pinhole_intrinsics(getter(), int(depth_frame.getWidth()), int(depth_frame.getHeight()))
+        evidence["depth_intrinsics"] = depth_intrinsics
+        evidence["depth_intrinsics_source"] = "transformed_frame"
+        source_size, source_intrinsics, image_transform = rgb_frame_source_geometry(depth_frame, depth_intrinsics)
+        evidence.update(depth_source_size=source_size, depth_source_intrinsics=source_intrinsics,
+                        depth_image_transform=image_transform)
+        depth_size = evidence["depth_transformation_size"]
+        if depth_size is not None and tuple(depth_size) != (depth_frame.getWidth(), depth_frame.getHeight()):
+            raise RuntimeError("Native depth transformation dimensions differ from its actual frame")
+        rgb_size = evidence["rgb_transformation_size"]
+        if rgb_size is not None and tuple(rgb_size) != (rgb_frame.getWidth(), rgb_frame.getHeight()):
+            raise RuntimeError("Native RGB transformation dimensions differ from its actual frame")
+        maximum_difference = max(abs(a-b) for a, b in zip(depth_intrinsics, published_rgb_intrinsics))
+        comparison["maximumIntrinsicDifferencePixels"] = maximum_difference
+        comparison["intrinsicsMatch"] = maximum_difference <= .001
+        if rgb_transform is not None:
+            comparison["sdkAlignedToRGB"] = optional_bool(depth_transform, "isAlignedTo", rgb_transform)
+            comparison["sdkEqualTransformationToRGB"] = optional_bool(depth_transform, "isEqualTransformation", rgb_transform)
+        if comparison["depthTransformationValid"] is False or comparison["rgbTransformationValid"] is False:
+            comparison["status"] = "invalid"
+            comparison["detail"] = "The SDK reports an invalid native transformation"
+        elif not dimensions_match or not comparison["intrinsicsMatch"] or comparison["sdkAlignedToRGB"] is False:
+            comparison["status"] = "mismatched"
+            comparison["detail"] = "Native depth/RGB dimensions, intrinsics or SDK alignment disagree"
+        elif comparison["depthTransformationValid"] is True and comparison["rgbTransformationValid"] is True and comparison["sdkAlignedToRGB"] is True:
+            comparison["status"] = "matched"
+        else:
+            comparison["detail"] = "Native validity/alignment proof is unavailable; matching dimensions or K alone are insufficient"
+    except Exception as error:
+        evidence["depth_intrinsics_source"] = "invalid_transform"
+        comparison["status"] = "invalid"
+        comparison["detail"] = " ".join(str(error).split())
+    return evidence
+
+
 def validated_lens_position(value, name):
     """Return an optional integer lens position without rounding or guessing."""
     if value is None:
@@ -780,6 +894,7 @@ def frame_payload(
     source_size, source_intrinsics, image_transform = rgb_frame_source_geometry(
         rgb_frame, frame_intrinsics
     )
+    depth_geometry = depth_frame_geometry(depth_frame, rgb_frame, frame_intrinsics)
     if depth_alignment_method not in (None, "stereo_input_align_to", "image_align"):
         raise RuntimeError("invalid depth alignment method")
     imu_telemetry = validated_imu_telemetry(imu_telemetry)
@@ -853,6 +968,7 @@ def frame_payload(
         "sidewalk_confidence": sidewalk_confidence,
         "chess_pieces": chess_pieces or [],
     }
+    header.update(depth_geometry)
     header_bytes = json.dumps(
         header, ensure_ascii=False, separators=(",", ":")
     ).encode("utf-8")
