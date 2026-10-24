@@ -19,6 +19,7 @@ import AVFoundation
     private var recordingDemandActive = false
     private var remoteVideoDemandActive = false
     private var cameraSessionIsRequested = false
+    private var qrCalibrationCaptureID: String?
     private var overlayManager: CameraOverlayManager?
     private var hasSetAspectRatio = false
     private var isCalibrationRequested = false
@@ -139,6 +140,8 @@ import AVFoundation
             name: .robVideoCameraDemandDidChange,
             object: nil
         )
+        NotificationCenter.default.addObserver(self, selector: #selector(qrCalibrationDemandDidChange(_:)),
+            name: ROBBellyQRCalibrationWindowController.cameraDemandChanged, object: nil)
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(avFoundationDevicesDidChange(_:)),
@@ -239,10 +242,29 @@ import AVFoundation
         reconcileCameraSession()
     }
 
+    @objc private func qrCalibrationDemandDidChange(_ notification: Notification) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.qrCalibrationDemandDidChange(notification) }
+            return
+        }
+        guard let active = notification.userInfo?["active"] as? Bool,
+              let identifier = notification.userInfo?["captureID"] as? String, !identifier.isEmpty else { return }
+        if active {
+            guard notification.userInfo?["resolution"] as? String == ROBBellyQRCalibrationWindowController.captureResolution else { return }
+            qrCalibrationCaptureID = identifier
+        } else {
+            // A cancelled older capture cannot lower a newer capture's demand.
+            guard qrCalibrationCaptureID == identifier else { return }
+            qrCalibrationCaptureID = nil
+        }
+        applyRecordingDemand(); reconcileCameraSession()
+    }
+
     private func applyRecordingDemand() {
         let demand = ROBRecordingCoordinator.shared.cameraCaptureDemand(for: .belly)
         recordingDemandActive = demand.active
-        bellyCameraManager?.setCaptureResolutionOverride(demand.resolutionOverride ?? ((armRoutineDemand || navigationDemandActive) ? "640x400" : nil))
+        let calibrationResolution = qrCalibrationCaptureID == nil ? nil : ROBBellyQRCalibrationWindowController.captureResolution
+        bellyCameraManager?.setCaptureResolutionOverride(calibrationResolution ?? demand.resolutionOverride ?? ((armRoutineDemand || navigationDemandActive) ? "640x400" : nil))
     }
     
     private var armRoutineDemand = false
@@ -256,6 +278,7 @@ import AVFoundation
     private func reconcileCameraSession() {
         guard let bellyCameraManager else { return }
         let shouldRun = cameraViewIsVisible
+            || qrCalibrationCaptureID != nil
             || armRoutineDemand
             || navigationDemandActive
             || recordingDemandActive

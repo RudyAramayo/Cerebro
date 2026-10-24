@@ -167,7 +167,10 @@ import simd
             ROBNeckRGBPoseDisplay.configurationIdentity(model:model) ?? fittedHeadPose()?.profileID ?? ROBWorkspaceDepthAlignment.snapshot()?.identity ?? "invalid"].joined(separator:"|")
     }
     var headDisplayPoseDescription:String {
-        fittedHeadPose() == nil ? "URDF mount prior":"provisional RGB neck fit · estimated camera offset · raw depth"
+        guard let fitted=fittedHeadPose() else{return "URDF mount prior"}
+        return fitted.usesPhotoHardwareOpticalOrigin
+            ? "photo mount origin · provisional RGB orientation · raw depth"
+            : "provisional RGB neck fit · estimated camera offset · raw depth"
     }
     var headDisplayUsesRGBFit:Bool {fittedHeadPose() != nil}
 
@@ -213,7 +216,9 @@ import simd
                 headInfo.stringValue+=String(format:"\nRigid triangle %.0f/%.0f/%.0f mm · sphere azimuth ASSUMED\nGlass/optical separation %.1f mm is inferred, not measured",mount.upperToSphereMeters*1000,mount.sphereToGlassMeters*1000,mount.upperToGlassMeters*1000,mount.glassToOpticalDistanceMeters*1000)
             }
             if fitted.hardwareFrames != nil {
-                headInfo.stringValue += "\nNeck / face housing: operator photo pose\nHousing placement is separate from the provisional optical fit"
+                headInfo.stringValue += fitted.usesPhotoHardwareOpticalOrigin
+                    ? "\nNeck / face camera: photo mount + RGB orientation estimate"
+                    : "\nNeck / face housing: operator photo pose\nHousing placement is separate from the provisional optical fit"
             }
             if let belly=fitted.bellyPreviewDownwardPitchDegrees {
                 headInfo.stringValue += String(format:"\nBelly mount: %.1f° down · operator estimate",belly)
@@ -255,7 +260,7 @@ import simd
         let fitted=fittedHeadPose()
         let alignedFrame: simd_double4x4
         if belly { alignedFrame = ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model)?["belly_oak_optical_frame"] ?? frame }
-        else if let fitted {alignedFrame=fitted.cameraToModel}
+        else if let fitted {alignedFrame=fitted.provisionalCameraToModel}
         else {
             guard let alignment = ROBWorkspaceDepthAlignment.snapshot() else { return [] }
             alignedFrame = alignment.applying(to: frame)
@@ -1004,6 +1009,13 @@ import simd
         if let fitted,["neck_pan","lower_neck","upper_neck"].allSatisfy({positions[$0]==headEstimate?[$0]}) {
             frames.merge(fitted.headFrames){_,new in new}
             if let hardware=fitted.hardwareFrames {frames.merge(hardware){_,new in new}}
+            if fitted.usesPhotoHardwareOpticalOrigin,
+               let oak=fitted.hardwareFrames?["oak_link"],let glass=fitted.hardwareFrames?["rgb_glass_frame"] {
+                // Use one provisional ray frame for the visible lens and raw
+                // depth. The photo supplies its origin; RGB supplies rotation.
+                frames["oak_optical_frame"]=fitted.provisionalCameraToModel
+                frames["oak_link"]=fitted.provisionalCameraToModel * simd_inverse(simd_inverse(oak)*glass)
+            }
         }
         if let belly=ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model) {frames.merge(belly){_,new in new}}
         let optical = frames["oak_optical_frame"]

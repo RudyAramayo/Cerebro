@@ -1,6 +1,8 @@
 import AppKit
 import CoreImage
+import CoreVideo
 import CryptoKit
+import Vision
 
 /// Holds one current passive belly frame without queuing every camera update.
 private final class ROBBellyQRFrameMailbox: @unchecked Sendable {
@@ -21,6 +23,9 @@ private final class ROBBellyQRFrameMailbox: @unchecked Sendable {
 @MainActor @objcMembers final class ROBBellyQRCalibrationWindowController: NSWindowController, NSWindowDelegate {
     static let shared = ROBBellyQRCalibrationWindowController()
     static let changed = Notification.Name("ROBBellyQRCalibrationDidChange")
+    static let cameraDemandChanged = Notification.Name("ROBBellyQRCalibrationCameraDemandDidChange")
+    static let captureResolution = "1280x800"
+    private static let captureWarmupSeconds = 2.0
     private(set) var isRunning = false
     private(set) var status = "Open Belly Camera Diagnostics, place both targets in its view, then capture. ROB and both sheets should stay still."
     private(set) var lastCapturePath = ""
@@ -35,6 +40,7 @@ private final class ROBBellyQRFrameMailbox: @unchecked Sendable {
     @nonobjc private var task: Task<Void, Never>?
     @nonobjc private var process: Process?
     private var activeCapture: UUID?
+    private var cameraDemandCapture: UUID?
 
     private init() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 760),
@@ -123,6 +129,53 @@ private final class ROBBellyQRFrameMailbox: @unchecked Sendable {
         var errorDescription: String? { if case let .invalid(text) = self { return text }; return nil }
     }
 
+    /// These are native-pixel detector seeds. The offline worker independently
+    /// verifies the exact printed modules before using a corner for metrology.
+    @nonobjc nonisolated static func nativeQRSeeds(in image: CGImage) -> [[String: Any]] {
+        let targets = Set(["ROB:BELLY:B01", "ROB:BELLY:B02"])
+        let width = Double(image.width), height = Double(image.height)
+        var seeds: [[String: Any]] = []
+        let request = VNDetectBarcodesRequest(); request.symbologies = [.qr]
+        request.preferBackgroundProcessing = true
+        if (try? VNImageRequestHandler(cgImage: image, orientation: .up, options: [:]).perform([request])) != nil {
+            for observation in request.results ?? [] {
+                guard let payload = observation.payloadStringValue, targets.contains(payload) else { continue }
+                let corners = [observation.topLeft, observation.topRight, observation.bottomRight, observation.bottomLeft]
+                    .map { [Double($0.x) * width, (1 - Double($0.y)) * height] }
+                guard corners.flatMap({ $0 }).allSatisfy(\.isFinite) else { continue }
+                seeds.append(["payload": payload, "cornersPixels": corners, "detector": "apple_vision_native_rgb"])
+            }
+        }
+        // Core Image uses the same native image, with a lower-left origin.
+        // Do not add its second observation of a symbol already found by Vision.
+        let visionPayloads = Set(seeds.compactMap { $0["payload"] as? String })
+        let ci = CIImage(cgImage: image)
+        if let detector = CIDetector(ofType: CIDetectorTypeQRCode, context: nil,
+            options: [CIDetectorAccuracy: CIDetectorAccuracyHigh]) {
+            for feature in detector.features(in: ci) {
+                guard let qr = feature as? CIQRCodeFeature, let payload = qr.messageString,
+                      targets.contains(payload), !visionPayloads.contains(payload) else { continue }
+                let corners = [qr.topLeft, qr.topRight, qr.bottomRight, qr.bottomLeft]
+                    .map { [Double($0.x - ci.extent.minX), height - Double($0.y - ci.extent.minY)] }
+                guard corners.flatMap({ $0 }).allSatisfy(\.isFinite) else { continue }
+                seeds.append(["payload": payload, "cornersPixels": corners, "detector": "apple_core_image_native_rgb"])
+            }
+        }
+        return seeds
+    }
+
+    private func beginCameraDemand(_ capture: UUID) {
+        cameraDemandCapture = capture
+        NotificationCenter.default.post(name: Self.cameraDemandChanged, object: self,
+            userInfo: ["active": true, "captureID": capture.uuidString, "resolution": Self.captureResolution])
+    }
+    private func endCameraDemand(_ capture: UUID) {
+        guard cameraDemandCapture == capture else { return }
+        cameraDemandCapture = nil
+        NotificationCenter.default.post(name: Self.cameraDemandChanged, object: self,
+            userInfo: ["active": false, "captureID": capture.uuidString])
+    }
+
     @objc func captureCurrentView() {
         guard !isRunning else { return }
         guard let millimeters = Double(spacing.stringValue), millimeters.isFinite,
@@ -131,11 +184,13 @@ private final class ROBBellyQRFrameMailbox: @unchecked Sendable {
         }
         let capture = UUID(); activeCapture = capture; isRunning = true
         _ = mailbox.take()
-        display("Waiting for fresh belly RGB-D frames. Keep Belly Camera Diagnostics open; no camera or robot motion is requested.")
+        beginCameraDemand(capture)
+        display("Requesting native 1280 × 800 belly RGB-D for the QR targets; waiting for camera restart and settling. No robot motion is requested.")
         task = Task { @MainActor [weak self] in
             guard let self else { return }
             defer {
                 if self.activeCapture == capture {
+                    self.endCameraDemand(capture)
                     self.activeCapture = nil; self.isRunning = false; self.process = nil; self.task = nil
                     self.display(self.status)
                 }
@@ -156,20 +211,29 @@ private final class ROBBellyQRFrameMailbox: @unchecked Sendable {
         lastCapturePath = destination.path
         var records: [[String: Any]] = [], missing = Set<String>()
         var stream: String?, lastSequence: UInt64?, lastFrameUptime = 0.0
-        let started = ProcessInfo.processInfo.systemUptime, deadline = started + 25
+        var warmupStream: String?, firstHDFrameUptime: Double?
+        let started = ProcessInfo.processInfo.systemUptime, deadline = started + 40
         let context = CIContext()
         while records.count < 5 {
             try Task.checkCancellation()
             let now = ProcessInfo.processInfo.systemUptime
             guard activeCapture == capture else { throw CancellationError() }
             guard now < deadline else {
-                throw Failure.invalid("Timed out waiting for five fresh belly RGB-D frames. Open Belly Camera Diagnostics and retry. Captured files remain in \(destination.path).")
+                throw Failure.invalid("Timed out waiting for settled native 1280 × 800 belly RGB-D frames. The camera must supply aligned HD RGB, depth and intrinsics; no upscaled substitute was saved. Captured files remain in \(destination.path).")
             }
             guard let frame = mailbox.take(), frame.isBelly, frame.capturedUptime >= started,
                   (-0.05...0.7).contains(now - frame.capturedUptime), frame.capturedUptime > lastFrameUptime + 0.20,
-                  (16...4096).contains(frame.width), (16...4096).contains(frame.height),
+                  frame.width == 1280, frame.height == 800,
                   frame.millimetersLittleEndian.length == frame.width * frame.height * 2,
-                  let rgb = frame.rgbPixelBuffer else {
+                  let rgb = frame.rgbPixelBuffer,
+                  CVPixelBufferGetWidth(rgb) == frame.width, CVPixelBufferGetHeight(rgb) == frame.height else {
+                try await Task.sleep(nanoseconds: 100_000_000); continue
+            }
+            if firstHDFrameUptime == nil || (records.isEmpty && warmupStream != frame.sourceCaptureStreamID) {
+                warmupStream = frame.sourceCaptureStreamID; firstHDFrameUptime = frame.capturedUptime
+            }
+            guard frame.capturedUptime - firstHDFrameUptime! >= Self.captureWarmupSeconds else {
+                display("Native 1280 × 800 belly stream received; waiting for two seconds of camera settling before capture.")
                 try await Task.sleep(nanoseconds: 100_000_000); continue
             }
             if let sequence = frame.sourceSequence, let lastSequence, sequence <= lastSequence {
@@ -194,6 +258,14 @@ private final class ROBBellyQRFrameMailbox: @unchecked Sendable {
                 "width": frame.width, "height": frame.height, "rgbWidth": cg.width, "rgbHeight": cg.height,
                 "sourceCameraRole": "belly", "capturedUptime": frame.capturedUptime, "receivedUptime": frame.receivedUptime,
                 "rgbGeometryMatchesNativeDepth": cg.width == frame.width && cg.height == frame.height]
+            // Run both native QR decoders on the exact saved JPEG geometry.
+            // Their quads are seeds only, never a calibration acceptance.
+            if let decoded = CIImage(data: jpeg), let savedRGB = context.createCGImage(decoded, from: decoded.extent) {
+                let seeds = await Task.detached(priority: .userInitiated) { Self.nativeQRSeeds(in: savedRGB) }.value
+                try Task.checkCancellation()
+                if !seeds.isEmpty { record["detections"] = seeds }
+                record["nativeQRDetectorSource"] = "saved_native_rgb_jpeg_without_resizing"
+            }
             if let sequence = frame.sourceSequence {
                 record["sequence"] = NSNumber(value: sequence); record["sequenceSource"] = "camera_frame_set"
                 lastSequence = sequence
@@ -226,6 +298,7 @@ private final class ROBBellyQRFrameMailbox: @unchecked Sendable {
         }
         var input: [String: Any] = ["schemaVersion": 1, "kind": "belly_qr_capture", "cameraRole": "belly",
             "captureSessionID": capture.uuidString, "markerSizeMeters": 0.12, "centerSpacingMeters": centerSpacingMeters,
+            "requestedCaptureResolution": Self.captureResolution, "cameraWarmupSeconds": Self.captureWarmupSeconds,
             "layout": ["symbolSideMeters": 0.12, "centerSeparationMeters": centerSpacingMeters,
                 "b01IsPrintedLeft": true, "parallelPrintedTop": true],
             "frames": records, "missingSourceEvidence": missing.sorted(),
@@ -234,6 +307,7 @@ private final class ROBBellyQRFrameMailbox: @unchecked Sendable {
         if let stream { input["captureStreamID"] = stream }
         let inputURL = destination.appendingPathComponent("capture-input.json")
         try Self.save(try JSONSerialization.data(withJSONObject: input, options: [.prettyPrinted, .sortedKeys]), to: inputURL)
+        endCameraDemand(capture)
         try Task.checkCancellation()
         try await diagnose(inputURL: inputURL, destination: destination, missing: missing.sorted())
     }
@@ -282,6 +356,7 @@ private final class ROBBellyQRFrameMailbox: @unchecked Sendable {
     }
 
     @objc func stop() {
+        if let capture = cameraDemandCapture { endCameraDemand(capture) }
         activeCapture = nil; task?.cancel(); task = nil
         if process?.isRunning == true { process?.terminate() }; process = nil
         isRunning = false; display("Belly capture cancelled. Any saved frames remain diagnostic only.")

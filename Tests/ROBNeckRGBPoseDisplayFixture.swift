@@ -12,7 +12,7 @@ import simd
     static func check(_ pose:ROBNeckRGBPoseDisplay.Pose,torso:simd_double4x4) {
         precondition(!pose.hasDepthProjectionAuthority)
         precondition(pose.headFrames["oak_optical_frame"]==pose.cameraToModel)
-        precondition(pose.displayCameraToModel==pose.modelToDisplay*pose.cameraToModel)
+        precondition(pose.displayCameraToModel==pose.modelToDisplay*pose.provisionalCameraToModel)
         precondition(close(pose.modelToDisplay*torso.columns.3,torso.columns.3),"Display gauge moved its torso pivot")
         let R=simd_double3x3(SIMD3(pose.modelToDisplay.columns.0.x,pose.modelToDisplay.columns.0.y,pose.modelToDisplay.columns.0.z),
             SIMD3(pose.modelToDisplay.columns.1.x,pose.modelToDisplay.columns.1.y,pose.modelToDisplay.columns.1.z),
@@ -155,6 +155,50 @@ import simd
                 precondition(abs(-atan2(ray.columns.2.z,hypot(ray.columns.2.x,ray.columns.2.y))*180 / .pi-38.4)<1e-10)
             }
         }
+        let opticalOriginBefore=ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6015,lowerTarget:6011,upperTarget:6160)!
+        precondition(!opticalOriginBefore.usesPhotoHardwareOpticalOrigin && opticalOriginBefore.provisionalCameraToModel==opticalOriginBefore.cameraToModel)
+        precondition(ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==nil &&
+            ROBNeckRGBPoseDisplay.provisionalCameraToModel(model:model,panTarget:6015,lowerTarget:6011,upperTarget:6160)==nil)
+        a["usePhotoHardwareOpticalOrigin"]=false;try activate()
+        precondition(ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6015,lowerTarget:6011,upperTarget:6160)!.provisionalCameraToModel==opticalOriginBefore.cameraToModel)
+        a["usePhotoHardwareOpticalOrigin"]=true;try activate()
+        let opticalOriginAfter=ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6015,lowerTarget:6011,upperTarget:6160)!
+        let projectionID=ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)!
+        precondition(projectionID.count==64 && opticalOriginAfter.usesPhotoHardwareOpticalOrigin && !opticalOriginAfter.hasDepthProjectionAuthority)
+        precondition(opticalOriginAfter.cameraToModel==opticalOriginBefore.cameraToModel && opticalOriginAfter.headFrames==opticalOriginBefore.headFrames)
+        for i in 0..<3 {precondition(opticalOriginAfter.provisionalCameraToModel[i]==opticalOriginBefore.cameraToModel[i],"Photo origin changed optical rotation")}
+        precondition(opticalOriginAfter.provisionalCameraToModel.columns.3==opticalOriginAfter.hardwareFrames!["rgb_glass_frame"]!.columns.3)
+        let shift=opticalOriginAfter.provisionalCameraToModel.columns.3-opticalOriginBefore.cameraToModel.columns.3
+        for v in [SIMD4<Double>(0,0,0.6,1),SIMD4<Double>(0.2,-0.1,1.2,1)] {
+            precondition(close(opticalOriginAfter.provisionalCameraToModel*v-opticalOriginBefore.cameraToModel*v,shift),"Estimated mapping introduced scale/rotation instead of a pure origin change")
+        }
+        precondition(ROBNeckRGBPoseDisplay.provisionalCameraToModel(model:model,panTarget:6015,lowerTarget:6011,upperTarget:6160)==opticalOriginAfter.provisionalCameraToModel)
+        _=ROBNeckRGBPoseDisplay.pose(model:model,panTarget:4667,lowerTarget:6495,upperTarget:5990)!
+        precondition(ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==projectionID,"Physical projection identity depended on current raw head pose")
+        let savedFloor=try Data(contentsOf:floor)
+        var changedFloor=try JSONSerialization.jsonObject(with:savedFloor)as![String:Any]
+        var changedObservations=changedFloor["observations"]as![[String:Any]]
+        for i in changedObservations.indices {changedObservations[i]["floorNormalOptical"]=[0.0,0.1,-sqrt(0.99)]}
+        changedFloor["observations"]=changedObservations;try write(changedFloor,to:floor)
+        a["floorReferenceSHA256"]=hash(try Data(contentsOf:floor))
+        a["headDepthDisplayLiftMeters"]=0.127;a["bellyCameraDownwardPitchDegrees"]=25.0
+        hardware["sphereRingTiltAtReferenceDegrees"]=12.0;hardware["cameraDepressionAtReferenceDegrees"]=40.0;a["hardwarePose"]=hardware;try activate()
+        let cosmetic=ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6015,lowerTarget:6011,upperTarget:6160)!
+        precondition(cosmetic.modelToDisplay != opticalOriginAfter.modelToDisplay && cosmetic.profileID != opticalOriginAfter.profileID)
+        precondition(ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==projectionID && cosmetic.provisionalCameraToModel==opticalOriginAfter.provisionalCameraToModel,
+            "Display lift/gauge/belly/ring/housing orientation changed the physical projection identity or transform")
+        hardware["sphereForwardLeanDegrees"]=9.3;a["hardwarePose"]=hardware;try activate()
+        precondition(ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model) != projectionID,"A changed physical photo mount retained its projection identity")
+        hardware["sphereForwardLeanDegrees"]=8.3;hardware["sourcePhotoSHA256"]=String(repeating:"b",count:64);a["hardwarePose"]=hardware;try activate()
+        precondition(ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model) != projectionID,"Changed physical photo provenance retained its identity")
+        hardware["sourcePhotoSHA256"]=String(repeating:"a",count:64);hardware.removeValue(forKey:"sphereRingTiltAtReferenceDegrees");hardware["cameraDepressionAtReferenceDegrees"]=38.4
+        a["hardwarePose"]=hardware;a.removeValue(forKey:"headDepthDisplayLiftMeters");a.removeValue(forKey:"bellyCameraDownwardPitchDegrees")
+        try savedFloor.write(to:floor);a["floorReferenceSHA256"]=hash(savedFloor);try activate()
+        precondition(ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==projectionID)
+        a.removeValue(forKey:"hardwarePose");try activate()
+        precondition(ROBNeckRGBPoseDisplay.photoHardwareOpticalOriginRequested && ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==nil &&
+            ROBNeckRGBPoseDisplay.provisionalCameraToModel(model:model,panTarget:6015,lowerTarget:6011,upperTarget:6160)==nil,"Invalid requested photo projection silently became available")
+        a["hardwarePose"]=hardware;a.removeValue(forKey:"usePhotoHardwareOpticalOrigin");try activate()
         let beforeRing=ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6015,lowerTarget:6011,upperTarget:6160)!
         for ring in [12.0,-45.0,45.0] {
             hardware["sphereRingTiltAtReferenceDegrees"]=ring;a["hardwarePose"]=hardware;try activate()

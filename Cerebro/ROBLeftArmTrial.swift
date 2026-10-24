@@ -236,6 +236,13 @@ struct ROBReviewedArmDispatchStart {
     private func validateEstimatedContext(_ value: EstimatedPreview, generation: UInt64) throws {
         let proof = value.proof, path = value.proposal
         guard Thread.isMainThread else {throw ROBArmRoutineError.blocked("Estimated arm context must be reviewed on the control thread.")}
+        if physicalSide == "left", value.map.registrationID == nil {
+            guard MainActor.assumeIsolated({
+                ROBWorkspaceSearch.shared.estimatedCameraProjectionIsCurrent(model:value.model,map:value.map)
+            }) else {
+                throw ROBArmRoutineError.blocked("The estimated camera mount changed after the LEFT preview; capture a fresh scene before moving.")
+            }
+        }
         if physicalSide == "right" {
             guard MainActor.assumeIsolated({
                 ROBRecyclingVisualInspection.fixedHeadContextIsCurrent(model:value.model,map:value.map) ||

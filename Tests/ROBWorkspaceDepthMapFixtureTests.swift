@@ -9,6 +9,39 @@ import Darwin
     static func rejected(_ detail: String, _ block: () throws -> Void) {
         do { try block(); fatalError(detail) } catch {}
     }
+    static func projectionIdentityFixtures() throws {
+        let camera=UUID(),now=30_000.0,first=String(repeating:"a",count:64),second=String(repeating:"b",count:64)
+        func make(_ identity:String?)->ROBWorkspaceDepthMap {
+            .init(modelID:"projection-model",geometryID:"projection-geometry",mappingID:"projection-mapping",
+                sessionGeneration:10,cameraGeneration:camera,nowMilliseconds:now,estimatedCameraProjectionIdentity:identity)
+        }
+        func append(_ map:inout ROBWorkspaceDepthMap,_ sequence:UInt64,_ identity:String?)throws {
+            try map.append(width:16,height:16,fx:1000,fy:1000,cx:8,cy:8,depth:{_,_ in 1000},
+                cameraToRobot:matrix_identity_double4x4,capturedAtMilliseconds:now+Double(sequence),sequence:sequence,
+                cameraGeneration:camera,nowMilliseconds:now+Double(sequence)+1,cameraRegistrationVerified:true,
+                estimatedCameraProjectionIdentity:identity)
+        }
+        var estimated=make(first)
+        try append(&estimated,1,first);try append(&estimated,2,first)
+        let snapshot=estimated.snapshot(nowMilliseconds:now+3)!
+        expect(snapshot.estimatedCameraProjectionIdentity==first && snapshot.observations.allSatisfy{$0.estimatedCameraProjectionIdentity==first},
+            "Estimated camera projection provenance was not retained")
+        expect(snapshot.registrationID==nil,"Photo-origin identity manufactured measured registration")
+        rejected("Changed photo projection was accepted") {try append(&estimated,3,second)}
+        rejected("Photo origin was silently disabled during a scene") {try append(&estimated,3,nil)}
+        expect(estimated.snapshot(nowMilliseconds:now+3)!.fingerprint==snapshot.fingerprint,"Rejected projection changed the frozen scene")
+        var legacy=make(nil)
+        rejected("Photo origin was enabled after a legacy scene began") {try append(&legacy,1,first)}
+        try append(&legacy,1,nil);try append(&legacy,2,nil)
+        let legacySnapshot=legacy.snapshot(nowMilliseconds:now+3)!
+        expect(legacySnapshot.estimatedCameraProjectionIdentity==nil && legacySnapshot.observations.allSatisfy{$0.estimatedCameraProjectionIdentity==nil},
+            "Legacy map invented photo-origin provenance")
+        let encoded=try JSONEncoder().encode(legacySnapshot)
+        expect(!String(data:encoded,encoding:.utf8)!.contains("estimatedCameraProjectionIdentity"),"Nil projection identity changed legacy serialization")
+        let decoded=try JSONDecoder().decode(ROBWorkspaceCollisionSnapshot.self,from:encoded)
+        expect(decoded.estimatedCameraProjectionIdentity==nil,
+            "Legacy snapshot without projection identity failed to decode")
+    }
     static func storageBudgetFixtures() throws {
         let camera=UUID(),now=20_000.0
         func make(_ budget:ROBWorkspaceDepthMap.StorageBudget = .standard)->ROBWorkspaceDepthMap {
@@ -108,6 +141,7 @@ import Darwin
     }
     static func main() throws {
         try storageBudgetFixtures()
+        try projectionIdentityFixtures()
         let camera = UUID(), now = 10_000.0
         func make() -> ROBWorkspaceDepthMap {
             .init(modelID:"model",geometryID:"geometry",mappingID:"mapping",sessionGeneration:7,

@@ -70,6 +70,32 @@ class BellyQRDiagnosticsTests(unittest.TestCase):
             payload, _, _ = cv2.QRCodeDetector().detectAndDecode(image)
             self.assertEqual(payload, target)
 
+    def test_empty_and_partial_native_seeds_use_backmapped_multiscale_fallback(self):
+        document, _, t = fixture(self.directory)
+        document["frames"] = document["frames"][:1]
+        native = copy.deepcopy(document["frames"][0]["detections"])
+        for seeds in [[], native[:1]]:
+            document["frames"][0]["detections"] = seeds
+            result = WORKER.diagnose(document, self.directory)
+            self.assertEqual(result["acceptedFrameCount"], 1, result["rejectedFrames"])
+            row = result["frames"][0]
+            self.assertEqual({target["targetID"] for target in row["targets"]}, set(WORKER.IDS))
+            pose = np.array(row["boardToCameraColumnMajor"]).reshape(4, 4).T
+            np.testing.assert_allclose(pose[:3, 3], t, atol=.002)
+            self.assertTrue(row["detectorDiagnostics"]["methods"])
+
+    def test_undecoded_geometry_requires_strict_actual_pattern_identity(self):
+        document, _, _ = fixture(self.directory)
+        frame = document["frames"][0]
+        gray = cv2.imread(str(self.directory/frame["imagePath"]), cv2.IMREAD_GRAYSCALE)
+        for seed in frame["detections"]:
+            identified, diagnostic = WORKER._identify_undecoded(gray, np.asarray(seed["cornersPixels"]))
+            self.assertIsNotNone(identified, diagnostic)
+            self.assertEqual(identified["payload"], seed["payload"])
+            self.assertGreaterEqual(diagnostic["crossPayloadCorrelationMargin"], WORKER.REFINE.MINIMUM_ORIENTATION_MARGIN)
+            accepted = next(row for row in diagnostic["patternAttempts"] if row["targetID"] == seed["payload"])
+            self.assertGreaterEqual(accepted["correlation"], WORKER.REFINE.MINIMUM_CORRELATION)
+
     def test_metric_pair_pose_and_native_depth_without_world_assumptions(self):
         document, R, t = fixture(self.directory)
         result = WORKER.diagnose(document, self.directory)

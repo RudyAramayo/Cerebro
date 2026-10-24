@@ -28,6 +28,7 @@ struct ROBWorkspaceDepthObservation: Codable {
     let cameraToRobotColumnMajor: [Double]
     let measuredSelfMaskApplied: Bool
     var estimatedDepthHypothesisID: String? = nil
+    var estimatedCameraProjectionIdentity:String? = nil
 }
 
 /// Session-only evidence. No code writes this map to disk or promotes a neck
@@ -45,6 +46,7 @@ struct ROBWorkspaceCollisionSnapshot: Codable, ROBWorkspaceCollisionMap {
     let voxelSizeMeters: Double
     private let capturedRegistrationID: String?
     let bodyMotionIdentity: String
+    let estimatedCameraProjectionIdentity:String?
     var registrationID: String? {
         bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity ? capturedRegistrationID : nil
     }
@@ -68,7 +70,8 @@ struct ROBWorkspaceCollisionSnapshot: Codable, ROBWorkspaceCollisionMap {
         voxelSizeMeters: Double, observedFrameCount: Int, isTruncated: Bool,
         registrationID: String?, registrationUncertaintyMeters: Double?,bodyMotionIdentity:String,
         occupied: Set<ROBWorkspaceVoxel>, free: Set<ROBWorkspaceVoxel>,
-        occupiedSamples:[ROBWorkspaceVoxel:ROBWorkspaceOccupiedSampleBounds], observations:[ROBWorkspaceDepthObservation]) {
+        occupiedSamples:[ROBWorkspaceVoxel:ROBWorkspaceOccupiedSampleBounds], observations:[ROBWorkspaceDepthObservation],
+        estimatedCameraProjectionIdentity:String? = nil) {
         self.sceneID = sceneID; self.modelID = modelID; self.geometryID = geometryID; self.mappingID = mappingID
         self.sessionGeneration = sessionGeneration; self.cameraGeneration = cameraGeneration
         self.createdAtMilliseconds = createdAtMilliseconds
@@ -80,6 +83,7 @@ struct ROBWorkspaceCollisionSnapshot: Codable, ROBWorkspaceCollisionMap {
         self.observations = observations
         self.capturedRegistrationID = registrationID; self.registrationUncertaintyMeters = registrationUncertaintyMeters
         self.bodyMotionIdentity=bodyMotionIdentity
+        self.estimatedCameraProjectionIdentity=estimatedCameraProjectionIdentity
         if let registrationID, let uncertainty = registrationUncertaintyMeters {
             registrationDetail = String(format:"Measured fixed-head optical-to-robot fit %@; local error allowance %.1f mm. Valid only within recorded pose, camera and measured volume.",registrationID,uncertainty*1000)
         } else {
@@ -102,7 +106,7 @@ struct ROBWorkspaceCollisionSnapshot: Codable, ROBWorkspaceCollisionMap {
             if a[1] != b[1] {return a[1]<b[1]}
             return a[2]<b[2]
         }
-        let identity: [String: Any] = ["scene": sceneID.uuidString, "model": modelID, "geometry": geometryID,
+        var identity: [String: Any] = ["scene": sceneID.uuidString, "model": modelID, "geometry": geometryID,
             "mapping": mappingID, "session": NSNumber(value: sessionGeneration), "camera": cameraGeneration.uuidString,
             "bodyMotionIdentity":bodyMotionIdentity,
             "created": createdAtMilliseconds, "oldest": oldestCapturedAtMilliseconds,
@@ -111,6 +115,8 @@ struct ROBWorkspaceCollisionSnapshot: Codable, ROBWorkspaceCollisionMap {
             "registrationUncertaintyMeters": registrationUncertaintyMeters as Any? ?? NSNull(),
             "occupied": ordered(occupied), "free": ordered(self.free),
             "occupiedSampleBounds": sampleRecords]
+        // Preserve legacy/frozen-context fingerprints when this is absent.
+        if let estimatedCameraProjectionIdentity {identity["estimatedCameraProjectionIdentity"]=estimatedCameraProjectionIdentity}
         var bytes = (try? JSONSerialization.data(withJSONObject: identity, options: [.sortedKeys])) ?? Data()
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         bytes.append((try? encoder.encode(observations)) ?? Data())
@@ -163,6 +169,7 @@ struct ROBWorkspaceDepthMap {
     let cameraGeneration: UUID
     let createdAtMilliseconds: Double
     let bodyMotionIdentity: String
+    let estimatedCameraProjectionIdentity:String?
     let voxelSizeMeters = 0.025
     private let storageBudget:StorageBudget
     private var occupied = Set<ROBWorkspaceVoxel>()
@@ -179,11 +186,13 @@ struct ROBWorkspaceDepthMap {
 
     init(modelID: String, geometryID: String, mappingID: String, sessionGeneration: UInt64,
          cameraGeneration: UUID, nowMilliseconds: Double = Date().timeIntervalSince1970 * 1000,
-         storageBudget:StorageBudget = .standard) {
+         storageBudget:StorageBudget = .standard,estimatedCameraProjectionIdentity:String? = nil) {
+        precondition(estimatedCameraProjectionIdentity.map{$0.count==64 && $0.allSatisfy(\.isHexDigit)} ?? true)
         self.modelID = modelID; self.geometryID = geometryID; self.mappingID = mappingID
         self.sessionGeneration = sessionGeneration; self.cameraGeneration = cameraGeneration
         createdAtMilliseconds = nowMilliseconds
         self.storageBudget=storageBudget
+        self.estimatedCameraProjectionIdentity=estimatedCameraProjectionIdentity
         bodyMotionIdentity=ROBFixedHeadBodyMotionIdentity.currentIdentity
     }
 
@@ -197,7 +206,14 @@ struct ROBWorkspaceDepthMap {
         registration:ROBFixedHeadRegistration? = nil,
         registrationScope:ROBFixedHeadRegistrationScope? = nil,
         alternateEstimatedDepth: ((Int,Int)->UInt16?)? = nil,
-        estimatedDepthHypothesisID: String? = nil) throws {
+        estimatedDepthHypothesisID: String? = nil,estimatedCameraProjectionIdentity:String? = nil) throws {
+        guard (registration != nil && estimatedCameraProjectionIdentity == nil) ||
+              (registration == nil && estimatedCameraProjectionIdentity == self.estimatedCameraProjectionIdentity) else {
+            throw ROBWorkspaceDepthMapError.acquisition("The estimated camera projection changed during this scene; capture a new map.")
+        }
+        guard estimatedDepthHypothesisID == nil || self.estimatedCameraProjectionIdentity == nil else {
+            throw ROBWorkspaceDepthMapError.acquisition("A frozen raw/corrected context cannot be combined with a photo-origin projection.")
+        }
         guard (alternateEstimatedDepth == nil && estimatedDepthHypothesisID == nil) ||
               (alternateEstimatedDepth != nil && registration == nil &&
                estimatedDepthHypothesisID.map({ $0.count == 64 && $0.allSatisfy(\.isHexDigit) }) == true) else {
@@ -275,7 +291,7 @@ struct ROBWorkspaceDepthMap {
             registrationUncertaintyMeters:registration?.uncertaintyMeters,fixedHeadScope:registrationScope,
             cameraToRobotColumnMajor:(0..<4).flatMap { column in (0..<4).map { cameraToRobot[column][$0] } },
             measuredSelfMaskApplied:measuredRegistration && !measuredSelfBounds.isEmpty,
-            estimatedDepthHypothesisID:estimatedDepthHypothesisID))
+            estimatedDepthHypothesisID:estimatedDepthHypothesisID,estimatedCameraProjectionIdentity:estimatedCameraProjectionIdentity))
         let origin = SIMD3(cameraToRobot.columns.3.x,cameraToRobot.columns.3.y,cameraToRobot.columns.3.z)
         // A provisional transform cannot justify erasing a table because it
         // overlaps an estimated robot hull. Retain those occupied returns.
@@ -361,7 +377,8 @@ struct ROBWorkspaceDepthMap {
             lastCapturedAtMilliseconds: latestCapture, voxelSizeMeters: voxelSizeMeters,
             observedFrameCount: frameCount, isTruncated: truncated,
             registrationID:registrationID,registrationUncertaintyMeters:uncertainty,bodyMotionIdentity:bodyMotionIdentity,
-            occupied: occupied, free: free, occupiedSamples:occupiedSamples, observations:observations)
+            occupied: occupied, free: free, occupiedSamples:occupiedSamples, observations:observations,
+            estimatedCameraProjectionIdentity:estimatedCameraProjectionIdentity)
     }
 
     private func voxel(_ point: SIMD3<Double>) -> ROBWorkspaceVoxel {

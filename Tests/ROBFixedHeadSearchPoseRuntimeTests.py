@@ -52,6 +52,7 @@ struct ROBGhostRobotModel {}
     var readNeck:(()->NSDictionary)? = { ["pan_degrees":0.0] }
 }
 @MainActor final class HeldSearch {
+    func requireSceneProjectionIdentity()throws {}
     typealias Context=(registration:Registration,scope:Scope)
     let model=ROBGhostRobotModel()
     let vision=ROBArmRoutineVision.shared

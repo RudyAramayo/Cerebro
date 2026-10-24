@@ -17,7 +17,14 @@ enum ROBNeckRGBPoseDisplay {
         let hardwareFrames: [String:simd_double4x4]?
         let hardwareSphereRingTiltDegrees: Double?
         let bellyPreviewDownwardPitchDegrees: Double?
-        var displayCameraToModel: simd_double4x4 { modelToDisplay * cameraToModel }
+        let usesPhotoHardwareOpticalOrigin: Bool
+        /// An opt-in estimated origin, not registration. Keep the pinned RGB
+        /// rotation while drawing/projecting from the measured hardware glass.
+        var provisionalCameraToModel: simd_double4x4 {
+            guard usesPhotoHardwareOpticalOrigin,let glass=hardwareFrames?["rgb_glass_frame"] else{return cameraToModel}
+            var result=cameraToModel;result.columns.3=glass.columns.3;return result
+        }
+        var displayCameraToModel: simd_double4x4 { modelToDisplay * provisionalCameraToModel }
         var depthCloudCameraToModel: simd_double4x4 {
             var lift=matrix_identity_double4x4
             lift.columns.3.z=headDepthDisplayLiftMeters
@@ -75,6 +82,7 @@ enum ROBNeckRGBPoseDisplay {
         let headDepthDisplayLiftMeters:Double?
         let hardwarePose:HardwarePose?
         let bellyCameraDownwardPitchDegrees:Double?
+        let usePhotoHardwareOpticalOrigin:Bool?
     }
     private struct Profile {
         let id:String,parameters:[String:Double],upTorso:SIMD3<Double>
@@ -82,6 +90,8 @@ enum ROBNeckRGBPoseDisplay {
         let headDepthDisplayLiftMeters:Double
         let hardwarePose:HardwarePose?
         let bellyCameraDownwardPitchDegrees:Double?
+        let usePhotoHardwareOpticalOrigin:Bool
+        let estimatedCameraProjectionIdentity:String?
     }
     private static let lock=NSLock()
     private static var cachedKey=""
@@ -111,6 +121,7 @@ enum ROBNeckRGBPoseDisplay {
                   a.referenceID==model.referenceID,a.geometryID==model.geometryID else {throw Failure.invalid}
             guard a.headMount?.valid ?? true else {throw Failure.invalid}
             guard a.hardwarePose?.valid ?? true else {throw Failure.invalid}
+            guard a.usePhotoHardwareOpticalOrigin != true || a.hardwarePose != nil else {throw Failure.invalid}
             let lift=a.headDepthDisplayLiftMeters ?? 0
             guard lift.isFinite,abs(lift)<=0.3048 else {throw Failure.invalid}
             if let belly=a.bellyCameraDownwardPitchDegrees {
@@ -152,8 +163,24 @@ enum ROBNeckRGBPoseDisplay {
                 up += SIMD3((C*SIMD4(n,0)).x,(C*SIMD4(n,0)).y,(C*SIMD4(n,0)).z)
             }
             guard simd_length(up)>Double(observations.count)*0.99 else {throw Failure.invalid}
+            let estimatedIdentity:String?
+            if a.usePhotoHardwareOpticalOrigin==true,let h=a.hardwarePose {
+                // Include only inputs to physical old-R/photo-origin-T and
+                // their model/photo provenance, not cosmetic or display data.
+                let keys=["panScale","lowerScale","upperScale","lowerOffsetRadians","cameraDeltaRx","cameraDeltaRy","cameraDeltaRz"]
+                let physical:[String:Any]=["kind":"photo_hardware_optical_origin_v1","modelID":model.modelID,
+                    "referenceID":model.referenceID,"geometryID":model.geometryID,
+                    "opticalRotationParameters":Dictionary(uniqueKeysWithValues:keys.map{($0,p[$0]!)}),
+                    "lowerUprightTarget":h.lowerUprightTarget,"upperReferenceTarget":h.upperReferenceTarget,
+                    "panForwardTarget":h.panForwardTarget ?? 6000,"lowerToUpperPivotMeters":h.lowerToUpperPivotMeters,
+                    "upperCenterToSphereMeters":h.upperCenterToSphereMeters,"sphereToRGBGlassMeters":h.sphereToRGBGlassMeters,
+                    "upperCenterToRGBGlassMeters":h.upperCenterToRGBGlassMeters,"sphereForwardLeanDegrees":h.sphereForwardLeanDegrees,
+                    "sourcePhotoSHA256":h.sourcePhotoSHA256]
+                estimatedIdentity=sha(try JSONSerialization.data(withJSONObject:physical,options:[.sortedKeys]))
+            }else{estimatedIdentity=nil}
             cachedProfile=Profile(id:sha(bytes+fitData+referenceData),parameters:p,upTorso:simd_normalize(up),headMount:a.headMount,headDepthDisplayLiftMeters:lift,
-                hardwarePose:a.hardwarePose,bellyCameraDownwardPitchDegrees:a.bellyCameraDownwardPitchDegrees)
+                hardwarePose:a.hardwarePose,bellyCameraDownwardPitchDegrees:a.bellyCameraDownwardPitchDegrees,
+                usePhotoHardwareOpticalOrigin:a.usePhotoHardwareOpticalOrigin ?? false,estimatedCameraProjectionIdentity:estimatedIdentity)
         } catch {cachedProfile=nil}
         return cachedProfile
     }
@@ -164,6 +191,14 @@ enum ROBNeckRGBPoseDisplay {
     /// Profile identity is available without a current head-command estimate,
     /// so changing an explicit belly mount also invalidates its cloud cache.
     static func configurationIdentity(model:ROBGhostRobotModel)->String? {profile(model:model)?.id}
+    static func estimatedCameraProjectionIdentity(model:ROBGhostRobotModel)->String? {profile(model:model)?.estimatedCameraProjectionIdentity}
+    /// Lets callers reject an invalid requested configuration rather than
+    /// silently falling back to a different legacy physical projection.
+    static var photoHardwareOpticalOriginRequested:Bool {
+        guard let data=try? Data(contentsOf:activationURL),data.count<100_000,
+              let value=try? JSONSerialization.jsonObject(with:data)as?[String:Any] else{return false}
+        return value["usePhotoHardwareOpticalOrigin"]as?Bool == true
+    }
 
     /// Canonical model frames only; the renderer applies its existing common
     /// display gauge once to body, housing and cloud. Raw depth is unchanged.
@@ -270,9 +305,14 @@ enum ROBNeckRGBPoseDisplay {
         return Pose(profileID:profile.id,cameraToModel:torso*value.camera,modelToDisplay:gauge,
             headFrames:value.frames.mapValues{torso*$0},headMount:description,headDepthDisplayLiftMeters:profile.headDepthDisplayLiftMeters,
             hardwareFrames:hardware,hardwareSphereRingTiltDegrees:profile.hardwarePose.map{$0.sphereRingTiltAtReferenceDegrees ?? 0},
-            bellyPreviewDownwardPitchDegrees:profile.bellyCameraDownwardPitchDegrees)
+            bellyPreviewDownwardPitchDegrees:profile.bellyCameraDownwardPitchDegrees,
+            usesPhotoHardwareOpticalOrigin:profile.usePhotoHardwareOpticalOrigin)
     }
     static func cameraToModel(model:ROBGhostRobotModel,panTarget:Int,lowerTarget:Int,upperTarget:Int)->simd_double4x4? {
         pose(model:model,panTarget:panTarget,lowerTarget:lowerTarget,upperTarget:upperTarget)?.cameraToModel
+    }
+    static func provisionalCameraToModel(model:ROBGhostRobotModel,panTarget:Int,lowerTarget:Int,upperTarget:Int)->simd_double4x4? {
+        guard let value=pose(model:model,panTarget:panTarget,lowerTarget:lowerTarget,upperTarget:upperTarget),value.usesPhotoHardwareOpticalOrigin else{return nil}
+        return value.provisionalCameraToModel
     }
 }

@@ -105,16 +105,94 @@ def _poses(objects, pixels, K, square=False):
                   "alternatives": alternatives}
 
 
+class DetectionFailure(ValueError):
+    def __init__(self, message, diagnostics):
+        super().__init__(message)
+        self.diagnostics = diagnostics
+
+
+def _same_quad(a, b):
+    a, b = np.asarray(a), np.asarray(b)
+    edge = min(np.linalg.norm(np.roll(a, -1, axis=0)-a, axis=1))
+    return float(np.linalg.norm(a.mean(axis=0)-b.mean(axis=0))) < max(6., .35*edge)
+
+
+def _pattern_attempt(gray, corners, target):
+    try:
+        refined, quality = REFINE.refine_image(gray, corners, target)
+        return {"targetID": target, "accepted": True, "correlation": quality["correlation"],
+                "cornersPixels": refined.tolist(), "quality": quality}
+    except ValueError as error:
+        # Retain candidate evidence without accepting it. These original-image
+        # scores explain under-resolved printed modules; no metric is relaxed.
+        scores = []
+        for rotation in range(4):
+            try:
+                _, quality = REFINE._refine_orientation(gray, np.roll(corners, -rotation, axis=0), target)
+                scores.append(quality["correlation"])
+            except ValueError:
+                pass
+        return {"targetID": target, "accepted": False,
+                "correlation": max(scores) if scores else None, "reason": str(error)}
+
+
+def _identify_undecoded(gray, corners):
+    attempts = [_pattern_attempt(gray, corners, target) for target in IDS]
+    ranked = sorted(attempts, key=lambda row: row["correlation"] or -1., reverse=True)
+    best, runner = ranked
+    margin = None if best["correlation"] is None or runner["correlation"] is None else best["correlation"]-runner["correlation"]
+    accepted = best["accepted"] and (margin is not None and margin >= REFINE.MINIMUM_ORIENTATION_MARGIN)
+    return ({"payload": best["targetID"], "cornersPixels": best["cornersPixels"],
+             "identitySource": "strict_exact_printed_pattern"} if accepted else None,
+            {"cornersPixels": np.asarray(corners).tolist(), "patternAttempts": attempts,
+             "crossPayloadCorrelationMargin": margin, "strictIdentityAccepted": bool(accepted)})
+
+
 def _detections(frame, gray):
+    detections = []
     if "detections" in frame:
         if not isinstance(frame["detections"], list):
             raise ValueError("Invalid native detector seeds")
-        return frame["detections"], "native_seeds_verified_by_exact_printed_pattern"
-    result, payloads, corners, _ = cv2.QRCodeDetector().detectAndDecodeMulti(gray)
-    if not result:
-        return [], "opencv_saved_image_decode"
-    return [{"payload": payload, "cornersPixels": points.tolist()}
-            for payload, points in zip(payloads, corners)], "opencv_saved_image_decode"
+        detections = list(frame["detections"])
+    if all(any(row.get("payload") == target for row in detections) for target in IDS):
+        return detections, "native_seeds_verified_by_exact_printed_pattern", {}
+    height, width = gray.shape
+    diagnostics = {"methods": [], "undecodedCandidates": [],
+                   "minimumExactPatternCorrelation": REFINE.MINIMUM_CORRELATION}
+    quads = []
+    aruco = getattr(cv2, "QRCodeDetectorAruco", cv2.QRCodeDetector)
+    variants = [(aruco, "aruco_or_standard_full_2x", 0, 2., False),
+                (cv2.QRCodeDetector, "standard_full_2x", 0, 2., False),
+                (aruco, "aruco_or_standard_lower_2x", height//2, 2., False),
+                (aruco, "aruco_or_standard_lower_clahe_3x", height//2, 3., True)]
+    for factory, method, offset_y, scale, equalize in variants:
+        source = gray[offset_y:]
+        scaled = cv2.resize(source, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+        if equalize:
+            scaled = cv2.createCLAHE(clipLimit=2., tileGridSize=(4, 4)).apply(scaled)
+        _, payloads, corners, _ = factory().detectAndDecodeMulti(scaled)
+        diagnostics["methods"].append(method)
+        if corners is None:
+            continue
+        for payload, points in zip(payloads, corners):
+            # Inverse resize pixel-center mapping, then undo the crop offset.
+            original = (np.asarray(points, dtype=float)+.5)/scale-.5+[0, offset_y]
+            if payload in IDS:
+                same = [row for row in detections if _same_quad(row["cornersPixels"], original)]
+                if not same:
+                    detections.append({"payload": payload, "cornersPixels": original.tolist(), "identitySource": method})
+            elif not any(_same_quad(original, quad) for quad in quads):
+                quads.append(original)
+        if len(quads) >= 2 or all(any(row.get("payload") == target for row in detections) for target in IDS):
+            break
+    for corners in quads[:16]:
+        if any(_same_quad(row["cornersPixels"], corners) for row in detections):
+            continue
+        identified, evidence = _identify_undecoded(gray, corners)
+        diagnostics["undecodedCandidates"].append(evidence)
+        if identified is not None:
+            detections.append(identified)
+    return detections, "native_and_bounded_multiscale_exact_pattern", diagnostics
 
 
 def _depth_report(frame, corners, target, base, image_path, depth_path):
@@ -161,14 +239,15 @@ def _frame(frame, base, spacing):
     gray = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
     if gray is None or gray.shape != (height, width):
         raise ValueError("Saved RGB/depth image dimensions differ")
-    detections, detector = _detections(frame, gray)
+    detections, detector, detector_diagnostics = _detections(frame, gray)
     K = np.array([[k[0], 0, k[2]], [0, k[1], k[3]], [0, 0, 1.]])
     objects = DEPTH.object_corners(.12)
     rows, poses, refined = [], [], []
     for target in IDS:
         matches = [row for row in detections if row.get("payload") == target]
         if len(matches) != 1:
-            raise ValueError(target+" must appear exactly once, fully visible")
+            raise DetectionFailure(target+" must have exactly one strict printed-pattern match; "
+                "candidate finder quads are retained separately", detector_diagnostics)
         corners, quality = REFINE.refine_image(gray, np.asarray(matches[0]["cornersPixels"]), target)
         pose, diagnostic = _poses(objects, corners, K, square=True)
         poses.append(pose); refined.append(corners)
@@ -187,7 +266,8 @@ def _frame(frame, base, spacing):
               "individualPrintedAxesWithin3Degrees": rotation_error <= 3}
     return {"sequence": frame["sequence"], "capturedAtMilliseconds": frame["capturedAtMilliseconds"],
             "imageSHA256": digest(image_path), "depthSHA256": digest(depth_path),
-            "detector": detector, "cameraServiceSourceSHA256": frame.get("cameraServiceSourceSHA256"),
+            "detector": detector, "detectorDiagnostics": detector_diagnostics,
+            "cameraServiceSourceSHA256": frame.get("cameraServiceSourceSHA256"),
             "depthAlignmentMethod": frame.get("depthAlignmentMethod"), "sequenceSource": frame.get("sequenceSource", "unspecified"),
             "targets": rows, "individualCenterSeparationMeters": separation,
             "b02CenterInB01CoordinatesMeters": delta.tolist(), "expectedSeparationMeters": spacing,
@@ -231,7 +311,8 @@ def diagnose(document, base_directory):
             previous_sequence, previous_time = sequence, captured
             accepted.append(_frame(frame, base, spacing))
         except (ValueError, KeyError, cv2.error) as error:
-            rejected.append({"frameIndex": index, "reason": str(error)})
+            rejected.append({"frameIndex": index, "reason": str(error),
+                             **({"detectorDiagnostics": error.diagnostics} if isinstance(error, DetectionFailure) else {})})
     consistent = [row for row in accepted if row["geometryConsistent"]]
     poses = [np.array(row["boardToCameraColumnMajor"]).reshape(4, 4).T for row in consistent]
     translation_spread, rotation_spread = 0., 0.
@@ -266,7 +347,9 @@ def main():
     result = diagnose(document, args.input.parent)
     result["inputSHA256"] = digest(args.input)
     args.output.write_text(json.dumps(result, indent=2, allow_nan=False)+"\n")
-    print(json.dumps({key: result[key] for key in ("status", "acceptedFrameCount", "consistentPairFrameCount", "rawDepthAgreementAcrossConsistentFrames", "rejectedFrames")}))
+    summary = {key: result[key] for key in ("status", "acceptedFrameCount", "consistentPairFrameCount", "rawDepthAgreementAcrossConsistentFrames")}
+    summary["rejectedFrames"] = [{"frameIndex": row["frameIndex"], "reason": row["reason"]} for row in result["rejectedFrames"]
+    print(json.dumps(summary))
 
 
 if __name__ == "__main__":

@@ -262,13 +262,14 @@ import UniformTypeIdentifiers
         guard let scope = firstScope else { throw ROBGhostMotionError.blocked("Current head model initializer is unavailable.") }
         let initial: simd_double4x4
         let initializerSource: String
-        if let fitted = ROBNeckRGBPoseDisplay.cameraToModel(model:model, panTarget:scope.panTarget,
+        if let fitted = ROBNeckRGBPoseDisplay.pose(model:model, panTarget:scope.panTarget,
             lowerTarget:scope.lowerTarget, upperTarget:scope.upperTarget) {
             // A better optimizer seed is not registration evidence. The CAD,
             // held-out depth, observability and uncertainty checks below stay
             // unchanged, and consume the original captured depth values.
-            initial = fitted
-            initializerSource = "fitted_rgb_neck_candidate_initializer_only"
+            initial = fitted.provisionalCameraToModel
+            initializerSource = fitted.usesPhotoHardwareOpticalOrigin
+                ? "photo_mount_origin_rgb_orientation_initializer_only" : "fitted_rgb_neck_candidate_initializer_only"
         } else {
             guard let pan = expected["pan_degrees"] as? Double,
                   let pose = ROBHeadCameraPoseEstimator.estimateDisplay(panRadians:pan * .pi / 180,

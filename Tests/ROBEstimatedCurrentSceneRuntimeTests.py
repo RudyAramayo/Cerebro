@@ -89,6 +89,7 @@ struct ROBEstimatedFixedHeadCapture {
 }
 @MainActor final class ActualSearch:NSObject {
     var collisionSnapshotValue:ROBWorkspaceCollisionSnapshot?
+    var collisionSnapshotModel:ROBGhostRobotModel?
     var lastReport:NSDictionary=[:]
     var registeredCalls=0
     var registeredResult:ROBWorkspaceCollisionSnapshot!
