@@ -60,6 +60,17 @@ If the destination cannot be admitted, this explicit trial may check just the
 approach, grip and 6 cm verification lift, then hold. That partial attempt has
 no carry, release or automatic return and never counts as a recycled can.
 
+The additional default-off **One slow empty-arm commissioning step** option is
+a separate nominal-model experiment. Its receipt freezes that extra permission.
+It permits one four-second outward step, at most 60 mm of full-hull travel and
+0.20 rad per joint, then measured hold and camera inspection. Original occupied
+returns remain checked for nominal contact. Current robot geometry is assumed
+from the model; no sensor return is removed or classified as measured self.
+Local unseen regions and the assumed
+calibration error are recorded as unverified; nominal clearance is not a claim
+of physical clearance after that error. No jaw command, grasp, payload, carry,
+release, automatic return or chained reach occurs. It records zero transfers.
+
 The separate visual-trial planner must recheck the live receipt before dispatch,
 keep the transform unmeasured, and retain observed-obstacle, unknown-space,
 whole-arm, payload, joint-bound and Stop checks. An approval or camera detection

@@ -386,6 +386,9 @@ final class ROBAmberGatewayClient: NSObject {
             check(b.authorizesLocalRecyclingVisualCalibrationTrial(summary: "Exact four-can job", arm: "right"), "Explicit visual-trial permission remains separately scoped")
             check(!b.authorizesLocalRecyclingVisualCalibrationTrial(summary: "Exact four-can job", arm: "left"), "Visual-trial permission cannot cross arms")
             check(b.activeLocalRecyclingApprovalEvidence?["registrationVerifiedByApproval"] as? Bool == false, "An approval never certifies registration")
+            check(b.activeLocalRecyclingApprovalEvidence?["nominalEmptyCommissioningStepEnabled"] as? Bool == false &&
+                !b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary: "Exact four-can job", arm: "right"),
+                "An ordinary visual-trial receipt cannot enable the separate nominal commissioning step")
             expectReceiptRejection(b, url, "Executing receipt cannot import twice")
             let files = try FileManager.default.contentsOfDirectory(at: b.localRecyclingApprovalAuditDirectory, includingPropertiesForKeys: nil)
             check(files.count == 1, "A private replay tombstone is written before the first execution")
@@ -394,6 +397,46 @@ final class ROBAmberGatewayClient: NSObject {
             check(b.localRecyclingApprovalState == nil, "Revoked context cannot appear as an available local approval")
             done?(["status": "completed"])
             check(executed == 1, "Late completion cannot restore local authority")
+        }
+        do {
+            let b = localBroker(); var executed = 0
+            var done: ((NSDictionary) -> Void)?
+            let summary = "One slow empty-right-arm outward commissioning step, then hold; zero transfers"
+            b.requestRecyclingWorkspaceTask(command: "right_recycle_cans", arm: "right", canCount: 4,
+                summary: summary, contextIdentity: { "nominal-step-true-context" }, receiptOnly: true,
+                permitsUnmeasuredVisualCalibrationTrial: true, nominalEmptyCommissioningStepEnabled: true,
+                execute: { executed += 1; done = $0 }, cancel: {}, completion: { _ in })
+            check(b.pendingLocalRecyclingApprovalScope?["nominalEmptyCommissioningStepEnabled"] as? Bool == true,
+                "The exact one-step flag must be visible in the immutable prepared scope")
+            check(!b.receiveSpokenAuthorization("yes proceed") && executed == 0,
+                "Speech cannot enable or grant the one-step receipt-only experiment")
+            let changed = try receipt(b) { value in
+                var scope = value["scope"] as! [String: Any]
+                scope["nominalEmptyCommissioningStepEnabled"] = false; value["scope"] = scope
+            }
+            expectReceiptRejection(b, changed, "An old/default-false receipt cannot grant the new commissioning option")
+            let url = try receipt(b)
+            try b.importLocalRecyclingSessionApproval(fromReceiptURL: url)
+            check(executed == 1 && b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary: summary, arm: "right"),
+                "An exact explicit private receipt grants only its dedicated one-step permission")
+            check(!b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary: summary, arm: "left") &&
+                !b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary: "A recycling grab", arm: "right"),
+                "One-step permission cannot cross arms or a changed operation summary")
+            check(b.activeLocalRecyclingApprovalEvidence?["nominalEmptyCommissioningStepEnabled"] as? Bool == true &&
+                b.activeLocalRecyclingApprovalEvidence?["sourceMessage"] == nil,
+                "Active evidence binds the option without exposing the private user text")
+            done?(["status": "partial", "transfersCompleted": 0])
+            check(!b.authorizesLocalRecyclingNominalEmptyCommissioningStep(summary: summary, arm: "right") &&
+                b.localRecyclingApprovalState == nil, "Finishing the one-step experiment cannot retain a reusable motion grant")
+        }
+        for (receiptOnly, visualTrial) in [(false, true), (true, false)] {
+            let b = localBroker(); var executed = 0, rejected = false
+            b.requestRecyclingWorkspaceTask(command: "right_recycle_cans", arm: "right", canCount: 4,
+                summary: "Not a dedicated explicit commissioning scope", contextIdentity: { "context" }, receiptOnly: receiptOnly,
+                permitsUnmeasuredVisualCalibrationTrial: visualTrial, nominalEmptyCommissioningStepEnabled: true,
+                execute: { _ in executed += 1 }, cancel: {}, completion: { rejected = $0["status"] as? String == "rejected" })
+            check(rejected && executed == 0 && !b.isPending,
+                "The nominal option requires both the dedicated receipt-only lane and explicit visual trial scope")
         }
         for change in ["count", "arm", "command", "summary", "context", "treads", "torso", "gestures", "future", "expired", "too_long", "other_session", "source_hash", "missing_source", "extra_key", "additional_hash"] {
             let b = localBroker(); var executed = 0

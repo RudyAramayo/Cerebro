@@ -263,6 +263,12 @@ struct ROBWorkspaceSelfProxyClearance {
     }
 }
 
+/// Original retained source-return bounds, before conservative voxel dilation.
+/// They remain obstacles; this value supplies no self label or free space.
+struct ROBWorkspaceOccupiedReturnBounds: Codable, Equatable {
+    let lowMeters:[Double],highMeters:[Double]
+}
+
 enum ROBWorkspaceVoxelState: UInt8, Codable { case unknown, free, occupied }
 
 /// A map is evidence from this camera/robot scene, never arm authority. Free
@@ -282,6 +288,7 @@ protocol ROBWorkspaceCollisionMap {
     var registrationUncertaintyMeters: Double? { get }
     var fingerprint: String { get }
     var visualCalibrationScope: ROBWorkspaceVisualCalibrationMapScope? { get }
+    var originalOccupiedReturnBounds:[ROBWorkspaceOccupiedReturnBounds]? {get}
     func state(at point: SIMD3<Double>) -> ROBWorkspaceVoxelState
     func state(inBoundsLow low: SIMD3<Double>, high: SIMD3<Double>) -> ROBWorkspaceVoxelState
     func containsTargetObservation(sequence: UInt64, capturedAtMilliseconds: Double) -> Bool
@@ -290,6 +297,7 @@ protocol ROBWorkspaceCollisionMap {
 
 extension ROBWorkspaceCollisionMap {
     var visualCalibrationScope: ROBWorkspaceVisualCalibrationMapScope? { nil }
+    var originalOccupiedReturnBounds:[ROBWorkspaceOccupiedReturnBounds]? {nil}
     func containsTargetObservation(sequence:UInt64,capturedAtMilliseconds:Double) -> Bool { false }
     func occupiedSampleBounds(at point:SIMD3<Double>) -> (low:SIMD3<Double>,high:SIMD3<Double>)? { nil }
     /// An implementation may accelerate this with an octree/bitset, but must
@@ -1135,5 +1143,246 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
             case .unknown: return "\(label) enters unobserved space. Scan the whole arm route before moving."
             }
         }
+    }
+}
+
+private struct ROBNominalRawBox {let low:SIMD3<Double>,high:SIMD3<Double>;let key:String
+ var center:SIMD3<Double>{(low+high)/2};var half:SIMD3<Double>{(high-low)/2}
+ func gap(to b:ROBNominalRawBox)->Double {simd_length(simd_max(.zero,simd_max(low-b.high,b.low-high)))}
+}
+private struct ROBNominalShape {
+ let local:ROBEstimatedConvexHull,vertices:[SIMD3<Double>],edges:[(Int,Int)],normals:[SIMD3<Double>]
+ init(text:String)throws {local=try ROBEstimatedConvexHull(text:text);var v:[SIMD3<Double>]=[],f:[[Int]]=[]
+  for line in text.split(separator:"\n") {let a=line.split(whereSeparator:\.isWhitespace);if a.first=="v" {v.append(SIMD3(Double(a[1])!,Double(a[2])!,Double(a[3])!))};if a.first=="f" {f.append(a.dropFirst().map{Int($0)!-1})}}
+  vertices=v;var e=Set<String>(),out:[(Int,Int)]=[],ns:[SIMD3<Double>]=[]
+  for a in f {let n=simd_cross(v[a[1]]-v[a[0]],v[a[2]]-v[a[0]]);if simd_length(n)>1e-10 {ns.append(simd_normalize(n))};for (i,j) in [(a[0],a[1]),(a[1],a[2]),(a[2],a[0])] {let lo=min(i,j),hi=max(i,j),k="\(lo):\(hi)";if e.insert(k).inserted {out.append((lo,hi))}}};edges=out;normals=ns
+ }
+}
+private struct ROBNominalWorldShape {
+ let source:ROBNominalShape,frame:simd_double4x4,inverse:simd_double4x4,vertices:[SIMD3<Double>],box:ROBNominalRawBox,axes:[SIMD3<Double>]
+ init(_ shape:ROBNominalShape,_ frame:simd_double4x4) {source=shape;self.frame=frame;inverse=simd_inverse(frame)
+  let v=shape.vertices.map{p->SIMD3<Double> in let q=frame*SIMD4(p,1);return SIMD3(q.x,q.y,q.z)};vertices=v
+  box=ROBNominalRawBox(low:v.reduce(v[0]){simd_min($0,$1)},high:v.reduce(v[0]){simd_max($0,$1)},key:"")
+  var out:[SIMD3<Double>]=[SIMD3(1,0,0),SIMD3(0,1,0),SIMD3(0,0,1)],seen=Set<String>()
+  func add(_ x:SIMD3<Double>){let l=simd_length(x);guard l>1e-9 else{return};var n=x/l;if n.x < -1e-8 || (abs(n.x)<1e-8 && n.y < -1e-8) || (abs(n.x)<1e-8 && abs(n.y)<1e-8 && n.z<0){n = -n};let k="\(Int((n.x*1e7).rounded())):\(Int((n.y*1e7).rounded())):\(Int((n.z*1e7).rounded()))";if seen.insert(k).inserted {out.append(n)}}
+  for n in shape.normals {let a=frame*SIMD4(n,0);add(SIMD3(a.x,a.y,a.z))}
+  for (i,j) in shape.edges {let d=v[j]-v[i];for b in [SIMD3<Double>(1,0,0),SIMD3<Double>(0,1,0),SIMD3<Double>(0,0,1)] {add(simd_cross(d,b))}};axes=out
+ }
+ func point(_ p:SIMD3<Double>)throws->Double {let q=inverse*SIMD4(p,1);return try source.local.distance(to:SIMD3(q.x,q.y,q.z))}
+ func distance(_ b:ROBNominalRawBox)throws->Double {
+  if simd_length(b.high-b.low)<1e-10 {return try point(b.low)}
+  var separated=false
+  for n in axes {var lo=Double.infinity,hi = -Double.infinity;for p in vertices {let d=simd_dot(n,p);lo=min(lo,d);hi=max(hi,d)};let mid=simd_dot(n,b.center),r=simd_dot(simd_abs(n),b.half);if max(lo-(mid+r),(mid-r)-hi)>1e-10 {separated=true;break}}
+  if !separated{return 0}
+  var corners:[SIMD3<Double>]=[];for x in [b.low.x,b.high.x] {for y in [b.low.y,b.high.y] {for z in [b.low.z,b.high.z] {corners.append(SIMD3(x,y,z))}}}
+  var result=Double.infinity
+  for p in corners {result=min(result,try point(p))}
+  for p in vertices {result=min(result,simd_length(simd_max(.zero,simd_max(b.low-p,p-b.high))))}
+  let be=[(0,1),(0,2),(0,4),(1,3),(1,5),(2,3),(2,6),(3,7),(4,5),(4,6),(5,7),(6,7)]
+  for (i,j) in source.edges {for (k,l) in be {result=min(result,robNominalSegmentDistance(vertices[i],vertices[j],corners[k],corners[l]))}}
+  return result
+ }
+}
+private func robNominalSegmentDistance(_ p1:SIMD3<Double>,_ q1:SIMD3<Double>,_ p2:SIMD3<Double>,_ q2:SIMD3<Double>)->Double {
+ let d1=q1-p1,d2=q2-p2,r=p1-p2,a=simd_dot(d1,d1),e=simd_dot(d2,d2),f=simd_dot(d2,r);var s=0.0,t=0.0
+ func clamp(_ x:Double)->Double {max(0,min(1,x))}
+ if a<=1e-18 && e<=1e-18{return simd_distance(p1,p2)}
+ if a<=1e-18 {t=clamp(f/e)} else {let c=simd_dot(d1,r);if e<=1e-18{s=clamp(-c/a)}else{let b=simd_dot(d1,d2),den=a*e-b*b;if den>1e-18{s=clamp((b*f-c*e)/den)};t=(b*s+f)/e;if t<0 {t=0;s=clamp(-c/a)}else if t>1 {t=1;s=clamp((b-c)/a)}}}
+ return simd_distance(p1+d1*s,p2+d2*t)
+}
+
+/// An explicitly UNVERIFIED nominal empty-arm commissioning experiment.
+/// Positive nominal clearance is not certified clearance: the recorded35mm
+/// assumed camera/model uncertainty may exceed this experiment's nominal gap.
+/// This type is never accepted as an ordinary workspace collision certificate.
+struct ROBWorkspaceNominalEmptyCommissioningRetreat:Codable,Equatable {
+    struct LocalRegion:Codable,Equatable {let link:String;let lowMeters:[Double],highMeters:[Double]}
+    let id:UUID
+    let mode:String
+    let context:ROBWorkspaceCollisionContext
+    let baseline:[Double],goal:[Double]
+    let measuredAtMilliseconds:Double
+    let checkedPoseCount:Int
+    let originalOccupiedBoundsCount:Int,deduplicatedOccupiedBoundsCount:Int
+    let originalOccupiedBoundsSHA256:String
+    let minimumRawClearanceMeters:Double
+    let minimumAfterJawEnvelopeMeters:Double
+    let minimumSweptNominalClearanceMeters:Double
+    let closestMovingLink:String
+    let closestRawBounds:ROBWorkspaceOccupiedReturnBounds
+    let assumedCalibrationUncertaintyMeters:Double
+    let isotropicJawEnvelopeMeters:Double
+    let intersamplePointTravelAllowanceMeters:Double
+    let curvatureAllowanceMeters:Double
+    let maximumHullTravelMeters:Double
+    let unknownVoxelCount:Int
+    let unknownLocalRegions:[LocalRegion]
+    let staticRobotLinks:[ROBWorkspaceStaticRobotLinkEvidence]
+    let initialSelfMinimumMeters:Double,endpointSelfMinimumMeters:Double
+    let emptyStateEvidenceSource:String
+    let calibrationUncertaintyCertified:Bool
+    let occupiedVoxelsMutated:Bool
+    let automaticChainingPermitted:Bool
+    var step:ROBLeftGestureProposal.Step {.init(positions:goal,seconds:4,stage:"One UNVERIFIED nominal EMPTY commissioning retreat, then hold")}
+    func validateContext(map:any ROBWorkspaceCollisionMap,model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,
+        cameraGeneration:UUID,nowMilliseconds:Double,trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double,
+        measuredBaseline:[Double],nominalEmptyCommissioningEnabled:Bool,emptyStateEvidenceSource:String)throws {
+        let current=try ROBWorkspaceCollisionPlan.validateVisualCalibrationTrialMap(map,model:model,generation:generation,
+            sceneID:sceneID,cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,trial:trial)
+        let drift=1.5*zip(baseline,measuredBaseline).reduce(0.0){$0+abs($1.0-$1.1)}
+        guard nominalEmptyCommissioningEnabled,mode=="unverified_nominal_empty_commissioning_retreat",model.physicalSide=="right",
+              context.visualTrial==trial,current.mapFingerprint==context.mapFingerprint,
+              context.modelID==current.modelID,context.geometryID==current.geometryID,context.mappingID==current.mappingID,
+              measuredBaseline.count==7,drift.isFinite,drift<=min(0.002,minimumSweptNominalClearanceMeters/2),
+              maximumHullTravelMeters+drift<=0.060,nowMilliseconds-measuredAtMilliseconds>=0,nowMilliseconds-measuredAtMilliseconds<=150,
+              baseline==trial.baseline,goal==zip(baseline,[0.0,-0.075,0,0,0,0,0]).map(+),
+              checkedPoseCount==129,minimumSweptNominalClearanceMeters>0,minimumAfterJawEnvelopeMeters>minimumSweptNominalClearanceMeters,
+              assumedCalibrationUncertaintyMeters==0.035,isotropicJawEnvelopeMeters==0.040,
+              !calibrationUncertaintyCertified,!occupiedVoxelsMutated,!automaticChainingPermitted,
+              self.emptyStateEvidenceSource==emptyStateEvidenceSource,!unknownLocalRegions.isEmpty,
+              (0...60_000).contains(nowMilliseconds-context.checkedAtMilliseconds) else {
+            throw ROBGhostMotionError.blocked("The separate nominal EMPTY commissioning proof, permission, fresh start or context changed. Hold; no trial step admitted.")
+        }
+    }
+    func validate(map:any ROBWorkspaceCollisionMap,model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,
+        cameraGeneration:UUID,nowMilliseconds:Double,trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double,
+        measuredBaseline:[Double],nominalEmptyCommissioningEnabled:Bool,emptyStateEvidenceSource:String)throws {
+        try validateContext(map:map,model:model,generation:generation,sceneID:sceneID,cameraGeneration:cameraGeneration,
+            nowMilliseconds:nowMilliseconds,trial:trial,measuredAtMilliseconds:measuredAtMilliseconds,measuredBaseline:measuredBaseline,
+            nominalEmptyCommissioningEnabled:nominalEmptyCommissioningEnabled,emptyStateEvidenceSource:emptyStateEvidenceSource)
+        let expected=try ROBWorkspaceCollisionPlan.buildNominalEmptyCommissioningRetreat(id:id,from:baseline,map:map,model:model,
+            generation:generation,sceneID:sceneID,cameraGeneration:cameraGeneration,nowMilliseconds:context.checkedAtMilliseconds,
+            trial:trial,measuredAtMilliseconds:self.measuredAtMilliseconds,nominalEmptyCommissioningEnabled:nominalEmptyCommissioningEnabled,
+            emptyStateEvidenceSource:emptyStateEvidenceSource)
+        guard expected==self else {throw ROBGhostMotionError.blocked("The nominal commissioning geometry, raw returns or recorded local scope changed.")}
+    }
+}
+extension ROBWorkspaceCollisionPlan {
+    static func reviewNominalEmptyCommissioningRetreat(from baseline:[Double],map:any ROBWorkspaceCollisionMap,
+        model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,cameraGeneration:UUID,nowMilliseconds:Double,
+        trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double,nominalEmptyCommissioningEnabled:Bool,
+        emptyStateEvidenceSource:String)throws->ROBWorkspaceNominalEmptyCommissioningRetreat {
+        try buildNominalEmptyCommissioningRetreat(id:UUID(),from:baseline,map:map,model:model,generation:generation,sceneID:sceneID,
+            cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,trial:trial,measuredAtMilliseconds:measuredAtMilliseconds,
+            nominalEmptyCommissioningEnabled:nominalEmptyCommissioningEnabled,emptyStateEvidenceSource:emptyStateEvidenceSource)
+    }
+    fileprivate static func buildNominalEmptyCommissioningRetreat(id:UUID,from baseline:[Double],map:any ROBWorkspaceCollisionMap,
+        model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,cameraGeneration:UUID,nowMilliseconds:Double,
+        trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double,nominalEmptyCommissioningEnabled:Bool,
+        emptyStateEvidenceSource:String)throws->ROBWorkspaceNominalEmptyCommissioningRetreat {
+        let context=try validateVisualCalibrationTrialMap(map,model:model,generation:generation,sceneID:sceneID,
+            cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,trial:trial)
+        guard nominalEmptyCommissioningEnabled,model.physicalSide=="right",baseline.count==7,baseline==trial.baseline,
+              baseline.allSatisfy({$0.isFinite && abs($0)<=0.004}),trial.assumedSpatialErrorMeters==0.035,
+              ["operator_declared_empty","local_first_attempt_no_arm_travel_or_task_grip"].contains(emptyStateEvidenceSource),
+              measuredAtMilliseconds.isFinite,(0...150).contains(nowMilliseconds-measuredAtMilliseconds),
+              let supplied=map.originalOccupiedReturnBounds,!supplied.isEmpty,supplied.count<=400_000 else {
+            throw ROBGhostMotionError.blocked("The nominal EMPTY commissioning step needs its distinct local permission, fresh q0,35mm assumed uncertainty and every original occupied return.")
+        }
+        let goal=zip(baseline,[0.0,-0.075,0,0,0,0,0]).map(+),limits=jointBounds(model:model)
+        guard zip(goal,limits).allSatisfy({$0.isFinite && $1.contains($0)}),zip(baseline,goal).allSatisfy({abs($1-$0)<=0.20}) else {
+            throw ROBGhostMotionError.blocked("The nominal commissioning endpoint exceeds unchanged joint bounds.")
+        }
+        var raw:[ROBNominalRawBox]=[],seen=Set<String>()
+        for value in supplied {let lo=value.lowMeters,hi=value.highMeters
+            guard lo.count==3,hi.count==3,(lo+hi).allSatisfy({$0.isFinite && abs($0)<=10}),zip(lo,hi).allSatisfy({$0<=$1}) else {
+                throw ROBGhostMotionError.blocked("An original occupied-return bound is invalid; no nominal trial admitted.")
+            }
+            let key=(lo+hi).map{String($0.bitPattern)}.joined(separator:":")
+            if seen.insert(key).inserted {raw.append(.init(low:SIMD3(lo[0],lo[1],lo[2]),high:SIMD3(hi[0],hi[1],hi[2]),key:key))}
+        }
+        raw.sort{$0.key<$1.key}
+        let rawHash=ROBGhostRobotModel.hash(Data(raw.map(\.key).joined(separator:"\n").utf8))
+        let catalogData=try Data(contentsOf:model.directory.appendingPathComponent("surfaces.json"))
+        guard ROBGhostRobotModel.hash(catalogData)==model.geometryID,
+              let catalog=try JSONSerialization.jsonObject(with:catalogData)as?[String:Any],catalog["modelID"]as?String==model.modelID,
+              let records=catalog["surfaces"]as?[[String:Any]] else {throw ROBGhostMotionError.blocked("The nominal trial geometry catalog changed.")}
+        var shapes:[String:ROBNominalShape]=[:]
+        for row in records {
+            guard let link=row["link"]as?String,link.hasPrefix(model.physicalSide+"_"),
+                  link.hasSuffix("_Link") || link==model.toolLink || link==model.physicalSide+"_base_link" else {continue}
+            guard let path=row["hull"]as?String,model.hulls[link]==path,!path.hasPrefix("/"),!path.contains(".."),
+                  let sha=row["hullSHA256"]as?String,shapes[link]==nil else {throw ROBGhostMotionError.blocked("A nominal arm hull identity is invalid.")}
+            let data=try Data(contentsOf:model.directory.appendingPathComponent(path))
+            guard ROBGhostRobotModel.hash(data)==sha,let text=String(data:data,encoding:.utf8) else {throw ROBGhostMotionError.blocked("A nominal arm hull changed.")}
+            shapes[link]=try ROBNominalShape(text:text)
+        }
+        guard shapes.count>=9 else {throw ROBGhostMotionError.blocked("The complete arm and gripper hulls are required for a nominal trial.")}
+        let links=shapes.keys.sorted(),startFrames=model.frames(model.positions(vendorLeft:baseline)),count=128
+        // Analytic ancestor proof identifies only links upstream of the SOLE
+        // moving joint. Exact transforms and every vertex are checked below.
+        let movingJoint=model.armJointPrefix+"2"
+        var fixed=Set<String>()
+        for link in links {var child=link,visited=Set<String>(),depends=false
+            while child != "base_link" {
+                guard visited.insert(child).inserted,let joint=model.joints.first(where:{$0.child==child}) else {throw ROBGhostMotionError.blocked("The nominal trial kinematic chain is incomplete.")}
+                if joint.name==movingJoint {depends=true};child=joint.parent
+            }
+            if !depends {fixed.insert(link)}
+        }
+        let intersample=1.5*0.075/(2*Double(count)),curvature=0.75*pow(0.075/Double(count),2)
+        var minimumRaw=Double.infinity,minimumJaw=Double.infinity,closestLink="",closestBox:ROBNominalRawBox?
+        var previous:[String:[SIMD3<Double>]]=[:],cumulative:[String:[Double]]=[:],maximumTravel=0.0
+        var regionLow:[String:SIMD3<Double>]=[:],regionHigh:[String:SIMD3<Double>]=[:],fixedEvidence:[ROBWorkspaceStaticRobotLinkEvidence]=[]
+        var selfChecker=ROBWorkspaceSelfProxyClearance(model:model),initialSelf:[String:Double]?,previousSelf:[String:Double]?,endpointSelf:[String:Double]=[:]
+        for sample in 0...count {
+            let t=Double(sample)/Double(count),q=zip(baseline,goal).map{$0+($1-$0)*t},positions=model.positions(vendorLeft:q),frames=model.frames(positions)
+            let selfPairs=try selfChecker.separations(vendorLeft:q)
+            if initialSelf==nil {initialSelf=selfPairs}
+            if let before=previousSelf {for (key,distance) in selfPairs {
+                guard distance+1e-9>=min(before[key]!,0.030) else {throw ROBGhostMotionError.blocked("The nominal empty retreat worsens a current arm/tread clearance pair.")}
+            }}
+            previousSelf=selfPairs;endpointSelf=selfPairs
+            for link in links {
+                guard let frame=frames[link],let firstFrame=startFrames[link] else {throw ROBGhostMotionError.blocked("The nominal trial lost an arm transform.")}
+                let shape=ROBNominalWorldShape(shapes[link]!,frame)
+                if let prior=previous[link] {var lengths=cumulative[link] ?? Array(repeating:0,count:shape.vertices.count)
+                    for i in shape.vertices.indices {lengths[i]+=simd_distance(prior[i],shape.vertices[i])+curvature}
+                    cumulative[link]=lengths;maximumTravel=max(maximumTravel,lengths.max() ?? 0)
+                };previous[link]=shape.vertices
+                guard maximumTravel<=0.060 else {throw ROBGhostMotionError.blocked("The nominal commissioning sweep exceeds60mm full-hull travel.")}
+                if fixed.contains(link) {
+                    guard (0..<4).allSatisfy({c in (0..<4).allSatisfy{abs(frame[c][$0]-firstFrame[c][$0])<=1e-12}}) else {throw ROBGhostMotionError.blocked("A supposedly static robot link moved during the nominal sweep.")}
+                    if sample==0 {fixedEvidence.append(.init(kind:"invariant_robot_link_no_new_sweep",link:link,bodyMotionIdentity:trial.bodyMotionIdentity,
+                        frameColumnMajor:(0..<4).flatMap{c in (0..<4).map{r in frame[c][r]}},lowMeters:[shape.box.low.x,shape.box.low.y,shape.box.low.z],highMeters:[shape.box.high.x,shape.box.high.y,shape.box.high.z]))}
+                    continue
+                }
+                let jaw=link==model.toolLink ? 0.040:0,nominalEnvelope=jaw+intersample+curvature
+                // A broadphase lower bound rejects no source geometry. Every
+                // return that could approach the nominal jaw/hull is queried
+                // against its ORIGINAL bounds, never a dilated voxel center.
+                for b in raw where shape.box.gap(to:b)<=jaw+0.060 {
+                    let distance=try shape.distance(b),afterJaw=distance-jaw
+                    minimumRaw=min(minimumRaw,distance)
+                    if afterJaw<minimumJaw {minimumJaw=afterJaw;closestLink=link;closestBox=b}
+                    guard distance>nominalEnvelope else {throw ROBGhostMotionError.blocked("The UNVERIFIED nominal empty retreat would contact an original occupied return, including40mm gripper envelope and intersample motion. No step admitted.")}
+                }
+                let pad=jaw+intersample+curvature+trial.assumedSpatialErrorMeters
+                let low=shape.box.low-SIMD3(repeating:pad),high=shape.box.high+SIMD3(repeating:pad)
+                regionLow[link]=regionLow[link].map{simd_min($0,low)} ?? low;regionHigh[link]=regionHigh[link].map{simd_max($0,high)} ?? high
+            }
+        }
+        guard endpointSelf.values.allSatisfy({$0>=0.030}),let closestBox,minimumJaw.isFinite,minimumJaw>intersample+curvature else {
+            throw ROBGhostMotionError.blocked("The nominal retreat must finish with ordinary30mm self clearance and retain positive nominal raw-return clearance.")
+        }
+        var unknown=Set<SIMD3<Int>>(),regions:[ROBWorkspaceNominalEmptyCommissioningRetreat.LocalRegion]=[]
+        for link in links where !fixed.contains(link) {let low=regionLow[link]!,high=regionHigh[link]!,size=map.voxelSizeMeters
+            let lo=(0..<3).map{Int(floor(low[$0]/size))},hi=(0..<3).map{Int(floor(high[$0]/size))}
+            guard zip(lo,hi).allSatisfy({$1 >= $0 && $1-$0<=100}),zip(lo,hi).reduce(1,{$0*($1.1-$1.0+1)})<=250_000 else {throw ROBGhostMotionError.blocked("The nominal commissioning unknown region exceeds its local bound.")}
+            for x in lo[0]...hi[0] {for y in lo[1]...hi[1] {for z in lo[2]...hi[2] {
+                if map.state(at:SIMD3((Double(x)+0.5)*size,(Double(y)+0.5)*size,(Double(z)+0.5)*size)) == .unknown {unknown.insert(SIMD3(x,y,z))}
+            }}}
+            regions.append(.init(link:link,lowMeters:[low.x,low.y,low.z],highMeters:[high.x,high.y,high.z]))
+        }
+        return .init(id:id,mode:"unverified_nominal_empty_commissioning_retreat",context:context,baseline:baseline,goal:goal,
+            measuredAtMilliseconds:measuredAtMilliseconds,checkedPoseCount:count+1,originalOccupiedBoundsCount:supplied.count,
+            deduplicatedOccupiedBoundsCount:raw.count,originalOccupiedBoundsSHA256:rawHash,
+            minimumRawClearanceMeters:minimumRaw,minimumAfterJawEnvelopeMeters:minimumJaw,
+            minimumSweptNominalClearanceMeters:minimumJaw-intersample-curvature,closestMovingLink:closestLink,
+            closestRawBounds:.init(lowMeters:[closestBox.low.x,closestBox.low.y,closestBox.low.z],highMeters:[closestBox.high.x,closestBox.high.y,closestBox.high.z]),
+            assumedCalibrationUncertaintyMeters:0.035,isotropicJawEnvelopeMeters:0.040,intersamplePointTravelAllowanceMeters:intersample,
+            curvatureAllowanceMeters:curvature,maximumHullTravelMeters:maximumTravel,unknownVoxelCount:unknown.count,unknownLocalRegions:regions,
+            staticRobotLinks:fixedEvidence,initialSelfMinimumMeters:initialSelf!.values.min()!,endpointSelfMinimumMeters:endpointSelf.values.min()!,
+            emptyStateEvidenceSource:emptyStateEvidenceSource,calibrationUncertaintyCertified:false,occupiedVoxelsMutated:false,automaticChainingPermitted:false)
     }
 }

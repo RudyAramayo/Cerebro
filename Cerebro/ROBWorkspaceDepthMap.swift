@@ -144,6 +144,13 @@ struct ROBWorkspaceCollisionSnapshot: Codable, ROBWorkspaceCollisionMap {
         fingerprint = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
     }
 
+    var originalOccupiedReturnBounds:[ROBWorkspaceOccupiedReturnBounds]? {
+        guard occupied.allSatisfy({occupiedSamples[$0] != nil}) else{return nil}
+        return occupied.map { voxel in let b=occupiedSamples[voxel]!
+            return .init(lowMeters:[b.low.x,b.low.y,b.low.z],highMeters:[b.high.x,b.high.y,b.high.z])
+        }
+    }
+
     func occupiedSampleBounds(at point:SIMD3<Double>)->(low:SIMD3<Double>,high:SIMD3<Double>)? {
         guard [point.x,point.y,point.z].allSatisfy(\.isFinite),simd_length(point)<10 else {return nil}
         let voxel=ROBWorkspaceVoxel(x:Int(floor(point.x/voxelSizeMeters)),y:Int(floor(point.y/voxelSizeMeters)),z:Int(floor(point.z/voxelSizeMeters)))

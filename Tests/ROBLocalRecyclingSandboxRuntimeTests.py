@@ -24,6 +24,11 @@ assert route.index('local-recycling:prepare') < route.index('guard canEdit')
 assert 'guard canEdit' in prepare
 assert 'performUsingLocalRecyclingReceipt(command, target: "4")' in prepare
 assert prepare.index('localVisualTrialAssumedSpatialErrorMeters = spatial') < prepare.index('performUsingLocalRecyclingReceipt')
+assert prepare.index('nominalEmptyCommissioningStepEnabled = nominalEmptyCommissioningStep.state == .on') < prepare.index('performUsingLocalRecyclingReceipt')
+assert 'sandbox-nominal-empty-commissioning-step' in source
+assert 'Current robot occupancy is assumed from the model; calibration error and nearby unobserved space remain unverified.' in source
+assert 'No grip, carry, release or automatic return. Zero cans are transferred.' in source
+assert 'nominalEmptyCommissioningStep.isEnabled = canEdit' in refresh
 assert 'ROBArmRoutineCoordinator' not in prepare
 assert 'localReceiptFilesEnabled' in refresh and '? localReceiptFilesEnabled' in refresh
 assert 'NSSavePanel()' in export and 'localRecyclingReceiptTemplate' in export
@@ -53,12 +58,14 @@ import Foundation
 final class ROBLeftArmTrial {
     static let shared = ROBLeftArmTrial()
     var localVisualTrialAssumedSpatialErrorMeters = 0.05
+    var nominalEmptyCommissioningStepEnabled = false
     var calls:[(String,String)] = []
     func performUsingLocalRecyclingReceipt(_ command:String,target:String,completion:@escaping(NSDictionary)->Void) {
         calls.append((command,target)); completion(["status":"prepared"])
     }
 }
 final class Sandbox {
+    struct Toggle { enum State { case on, off }; var state:State = .off }
     struct Trial { var id:String }
     struct Field { var stringValue:String }
     static var recyclingCount = 4
@@ -66,6 +73,7 @@ final class Sandbox {
     var fields = ["recyclingCount":Field(stringValue:"4"),"localVisualAllowanceMillimeters":Field(stringValue:"50")]
     var canEdit = true, observingLeftOperation = false, refreshes = 0
     var parameterMessage = "old"
+    var nominalEmptyCommissioningStep = Toggle()
     func refresh(){refreshes += 1}
     /* PREPARE */
     func prepare(){prepareLocalRecyclingSessionJob()}
@@ -86,6 +94,10 @@ final class Sandbox {
             precondition(trial.calls.count==before && ui.parameterMessage.contains("exactly four"))
         }
         Sandbox.recyclingCount=4
+        let commissioning=Sandbox(); commissioning.nominalEmptyCommissioningStep.state = .on; commissioning.prepare()
+        precondition(trial.nominalEmptyCommissioningStepEnabled,"Explicit local checkbox was not frozen before preparation")
+        let ordinary=Sandbox(); ordinary.prepare()
+        precondition(!trial.nominalEmptyCommissioningStepEnabled,"New ordinary UI state inherited the commissioning option")
         let adjusted=Sandbox();adjusted.fields["localVisualAllowanceMillimeters"] = .init(stringValue:"35");adjusted.prepare()
         precondition(trial.localVisualTrialAssumedSpatialErrorMeters==0.035)
         for raw in ["24.9","150.1","nan","inf","invalid"] {
@@ -117,6 +129,12 @@ final class Sandbox {
         precondition(available.contains("available") && available.contains("fixture receipt") && !available.contains("PRIVATE"))
         imported["state"]="executing"
         precondition(ROBLocalRecyclingSandboxRouting.scopeDescription(pending:nil,imported:imported).contains("executing"))
+        imported["nominalEmptyCommissioningStepEnabled"]=true
+        let commissioningDescription=ROBLocalRecyclingSandboxRouting.scopeDescription(pending:nil,imported:imported)
+        precondition(commissioningDescription.contains("one slow empty-arm outward step") &&
+            commissioningDescription.contains("Zero transfers") && commissioningDescription.contains("unverified") &&
+            commissioningDescription.contains("Current robot occupancy is assumed from the model") &&
+            !commissioningDescription.contains("PRIVATE"),"The exact commissioning scope/risk must remain visible without private source text")
         precondition(ROBLocalRecyclingSandboxRouting.scopeDescription(pending:nil,imported:nil).contains("no imported job"))
         let live=ROBLocalRecyclingSandboxRouting.activityStatus(trialRunning:true,trialStatus:"Searching: third camera view",
             approvalPending:true,approvalStatus:"Authorized immutable scope",localReceiptState:imported)!
