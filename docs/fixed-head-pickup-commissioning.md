@@ -69,6 +69,14 @@ camera-to-arm registration. A fresh independently validated body reference and
 ordinary path admission remain necessary, and this camera test claims no grasp
 or bucket-delivery success.
 
+A later check at P6015/L6411/U5813 found a larger off-axis error on the
+120 mm left-floor square: standard depth read its center 54.5–55.6 mm farther
+than RGB PnP at approximately 1.03 m. Subpixel reduced depth banding but did not
+remove that bias. The central table result therefore does not validate the
+image field or nearby body surfaces. Body registration remains unaccepted;
+native stereo and RGB alignment are being checked separately. No uniform depth
+scale or arm-registration exemption was applied.
+
 CPU-only profile, identity and restoration fixtures run with
 `python3 -B Scripts/test-runtime-stereo-calibration.py` in the calibration Python
 environment. They do not open a camera or actuate ROB.
