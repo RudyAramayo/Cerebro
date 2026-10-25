@@ -1339,6 +1339,12 @@ final class ROBArmRoutineCoordinator {
         g.q["left"]![6] = 0.5 // unrelated arm is neither read for admission nor moved
         ROBArmRoutineVision.shared.handsClear = false
         ROBArmRoutineVision.shared.blocked = true
+        let humanBlocked = await run("left_wave")
+        precondition(humanBlocked["status"] as? String == "blocked", humanBlocked.description)
+        precondition(!g.commands.contains { $0.hasPrefix("waypoint_") || $0.hasPrefix("ghost_step_") },
+            "A visible hand/person permitted the initial arm target")
+        g.commands = []
+        ROBArmRoutineVision.shared.handsClear = true
         let rightBefore = g.q["left"]!
         let wave = await run("left_wave")
         precondition(wave["status"] as? String == "completed", wave.description)
@@ -1518,7 +1524,7 @@ final class ROBArmRoutineCoordinator {
             precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty)
         }
         print("Stop/faults: stale feedback, replaced session, camera loss and operator cancellation prevent any subsequent waypoint and retain torque")
-        precondition(approvals == 19)
+        precondition(approvals == 20) // Includes the human-vetoed initial-travel request.
 
         // One authenticated approval covers the complete, bounded interaction.
         // Local readiness cannot be queued early or skip any physical step.

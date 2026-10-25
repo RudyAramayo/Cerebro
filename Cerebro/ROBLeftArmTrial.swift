@@ -1227,6 +1227,9 @@ enum ROBInitialRetreatFailureExport {
             guard vision.fresh, ROBArmRoutineCoordinator.shared.viewIsStationary?() == true else {
                 throw ROBArmRoutineError.blocked("Live camera or stationary body view lost; left-arm hold requested.")
             }
+            guard vision.handsClear else {
+                throw ROBArmRoutineError.blocked("Person or hand clearance was lost; an arm hold was requested.")
+            }
         }
         if positionReady {
             let modes = gateway.modes(forArm: arm).map(\.intValue)
