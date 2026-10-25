@@ -72,11 +72,11 @@ static void drain(Harness *h) {
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.002]];
     assert(!h.surfaceUpdatePending);
 }
-static void submit(Harness *h, NSData *samples, ROBDepthCloudFrame *frame, ROBSurfaceDepthView view, BOOL floorValid) {
+static void submit(Harness *h, NSData *samples, ROBDepthCloudFrame *frame, ROBSurfaceDepthView view, BOOL projectionReady) {
     h.lastHeadSurfaceSubmission=0;h.lastBellySurfaceSubmission=0;
     frame.capturedUptime=NSProcessInfo.processInfo.systemUptime;
     [h offerAccumulatedSurfaceSamples:samples frame:frame view:view robotTransform:h.robotNode.worldTransform
-        floorValid:floorValid projectionIdentity:h.ghostGestureEditor.depthProjectionIdentity];
+        projectionReady:projectionReady projectionIdentity:h.ghostGestureEditor.depthProjectionIdentity];
 }
 static void offer(Harness *h, NSData *samples, ROBDepthCloudFrame *frame, ROBSurfaceDepthView view) {
     submit(h,samples,frame,view,YES);
@@ -119,7 +119,9 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
     frame.sequence=1;frame.hasCalibratedIntrinsics=YES;frame.width=frame.height=32;
     frame.millimetersLittleEndian=[NSMutableData dataWithLength:32*32*2];
     ROBSurfaceDepthView view={32,32,frame.millimetersLittleEndian.bytes,30,30,16,16,{1,0,0,0,0,-1,0,1.5,0,0,-1,0}};
-    offer(h,samples,frame,view);assert([h.headSurfaceSummary containsString:@"1 frames"]);
+    /* HEAD projection can be ready from an explicit calibrated camera pose.
+       No unrelated per-frame floor fit is supplied by this fixture. */
+    submit(h,samples,frame,view,YES);drain(h);assert([h.headSurfaceSummary containsString:@"1 frames"]);
     frame.sequence++;offer(h,samples,frame,view);assert([h.headSurfaceSummary containsString:@"2 frames"]);
     SCNNode *map=h.headSurfaceNode.childNodes.firstObject;assert(map.childNodes.count>=4 && h.liveRGBCloudNode.hidden && h.headUsesSurfaces);
     assert([h.surfaceStatusLabel.stringValue containsString:@"cyan = inferred"] && [h.headSurfaceSummary containsString:@"1 inferred cans"]);
@@ -147,7 +149,8 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
     ROBLeftArmTrial.shared.isRunning=NO;
     submit(h,samples,frame,view,NO);
     assert(h.headSurfaceNode.childNodes.firstObject==map && [h.headSurfaceSummary containsString:@"previous scan retained"]);
-    /* Losing floor visibility cannot retain a map from another stream/profile/body context. */
+    assert([h.headSurfaceSummary isEqualToString:@"waiting for an explicit camera pose or fresh floor alignment; previous scan retained"]);
+    /* Losing projection readiness cannot retain another stream/profile/body context. */
     NSUInteger generation=h.surfaceGeneration;
     frame.captureStreamID=@"fixture-head-floor-occluded-reconnect";submit(h,samples,frame,view,NO);
     assertEmptyHistory(h);assert(h.surfaceGeneration>generation);
@@ -181,12 +184,12 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
     ROBLeftArmTrial.shared.isRunning=NO;
     /* A reset while a worker is pending prevents its old result publishing. */
     h.lastHeadSurfaceSubmission=0;frame.sequence++;frame.capturedUptime=NSProcessInfo.processInfo.systemUptime;
-    [h offerAccumulatedSurfaceSamples:samples frame:frame view:view robotTransform:SCNMatrix4Identity floorValid:YES
+    [h offerAccumulatedSurfaceSamples:samples frame:frame view:view robotTransform:SCNMatrix4Identity projectionReady:YES
         projectionIdentity:h.ghostGestureEditor.depthProjectionIdentity];
     [h resetAccumulatedSurfaces:nil];
     dispatch_sync(h.cloudQueue,^{});[NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.05]];
     assert(!h.headSurfaceNode.childNodes.count && !h.headSurfaceAccumulator);
-    [h offerAccumulatedSurfaceSamples:samples frame:frame view:view robotTransform:SCNMatrix4Identity floorValid:YES
+    [h offerAccumulatedSurfaceSamples:samples frame:frame view:view robotTransform:SCNMatrix4Identity projectionReady:YES
         projectionIdentity:h.ghostGestureEditor.depthProjectionIdentity];
     assert(!h.headSurfaceAccumulator && [h.headSurfaceSummary containsString:@"after Reset"]);
     frame.sequence++;offer(h,samples,frame,view);frame.sequence++;offer(h,samples,frame,view);
@@ -206,7 +209,7 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
         double previousCapture=belly ? h.lastBellySurfaceCapture : h.lastHeadSurfaceCapture;
         frame.sequence++;frame.capturedUptime=previousCapture+91;
         h.lastHeadSurfaceSubmission=0;h.lastBellySurfaceSubmission=0;
-        [h offerAccumulatedSurfaceSamples:samples frame:frame view:view robotTransform:SCNMatrix4Identity floorValid:YES
+        [h offerAccumulatedSurfaceSamples:samples frame:frame view:view robotTransform:SCNMatrix4Identity projectionReady:YES
             projectionIdentity:h.ghostGestureEditor.depthProjectionIdentity];
         drain(h);
         assert(surfaceRoot.childNodes.count==1 && surfaceRoot.childNodes.firstObject!=populated);
@@ -228,5 +231,5 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
         NSBitmapImageRep *bitmap=[NSBitmapImageRep imageRepWithData:image.TIFFRepresentation];
         assert(bitmap && [[bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@(argv[1]) atomically:YES]);
     }
-    printf("Production surface renderer/integration passed: packed float vertices/UVs, textured planes, inferred cylinder, separate cameras, duplicate capture rejection, stream/profile/body resets with occluded floor, motion pause, rejected-floor history, stale-worker reset/profile/body/arm rejection and accepted empty-mesh raw fallback for both cameras (%zu triangles).\n",triangles);
+    printf("Production surface renderer/integration passed: explicit HEAD projection without unrelated floor proof, packed float vertices/UVs, textured planes, inferred cylinder, separate cameras, duplicate capture rejection, stream/profile/body resets without projection readiness, motion pause, retained history, stale-worker reset/profile/body/arm rejection and accepted empty-mesh raw fallback for both cameras (%zu triangles).\n",triangles);
 } }

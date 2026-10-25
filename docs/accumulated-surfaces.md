@@ -1,8 +1,8 @@
 # Accumulated surface preview
 
 The controller/ghost viewport has an **Accumulate surfaces** checkbox and a
-**Reset scan** button. Enable accumulation with the base stationary and some
-floor visible. Slowly inspect overlapping views with the neck. Separate HEAD
+**Reset scan** button. Enable accumulation with the base stationary. Slowly
+inspect overlapping views with the neck. Separate HEAD
 and BELLY histories replace their raw clouds after stable geometry is available.
 The normal live cloud remains the default.
 
@@ -42,8 +42,10 @@ can-sized geometry; the colored voxels are the actual measured returns.
 
 ## Accumulation and limits
 
-Only fresh, settled, floor-aligned depth with calibrated intrinsics and a capture
-stream ID/sequence enters the map. Head and belly observations are not fused
+Only fresh, settled depth with calibrated intrinsics, a capture stream
+ID/sequence and a usable display projection enters the map. An explicit camera
+pose can accumulate tabletop-only views without seeing the floor; legacy pose
+priors require a fresh accepted floor alignment. Head and belly observations are not fused
 with each other because their relative registration remains provisional.
 Changing intrinsics, capture stream, base placement, body-motion epoch or the
 active camera/display projection profile resets the histories, including when
@@ -58,7 +60,10 @@ matches, at least 15% sampled overlap, and at most 25 mm nearest-point RMS.
 This checks the current neck/URDF pose prior; it does **not** estimate a camera
 pose or correct drift. A flat floor alone does not establish translation or yaw.
 If a view is rejected, return to an overlapping view or start a new submap.
-Views without a valid floor retain the last history but do not extend it.
+Legacy views without a valid floor retain the last history but do not extend
+it. Explicit poses use their unchanged projection for samples and visibility
+rays even when no floor is visible. This display pose remains provisional and
+does not establish camera-to-arm registration.
 
 Old surfaces disappear after two accepted images consistently see more than
 60 mm through their location. A locally consistent 3×3 depth neighbourhood is

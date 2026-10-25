@@ -2,6 +2,7 @@
 """Exercise the production accumulator, renderer and controller scan methods.
 
 Robot services are inert substitutes; this fixture has no camera/actuator IO.
+Exercises explicit camera-pose admission independently of a floor-fit result.
 """
 from pathlib import Path
 import struct

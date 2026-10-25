@@ -103,7 +103,7 @@ __HELPERS__
 @property(strong) NSData *capturedSurfaceSamples;
 @property ROBSurfaceDepthView capturedSurfaceView;
 @property(copy) NSString *capturedSurfaceProjectionIdentity;
-@property BOOL capturedSurfaceFloorValid;
+@property BOOL capturedSurfaceProjectionReady;
 - (void)processDepthFrame:(ROBDepthCloudFrame *)frame robotTransform:(SCNMatrix4)robot cameraTransform:(ROBDepthCloudTransform)camera neckTargets:(NSArray<NSNumber *> *)targets;
 - (void)processDepthFrame:(ROBDepthCloudFrame *)frame robotTransform:(SCNMatrix4)robot cameraTransform:(ROBDepthCloudTransform)camera neckTargets:(NSArray<NSNumber *> *)targets projectionIdentity:(NSString *)projectionIdentity explicitCameraPose:(BOOL)explicitCameraPose;
 - (void)refreshFloorCloudVisibilityAtUptime:(NSTimeInterval)now;
@@ -118,10 +118,10 @@ __HELPERS__
 - (void)refreshAccumulatedSurfaceStatus {}
 - (void)resetAccumulatedSurfaces:(id)sender {}
 - (void)offerAccumulatedSurfaceSamples:(NSData *)samples frame:(ROBDepthCloudFrame *)frame
-                                 view:(ROBSurfaceDepthView)view robotTransform:(SCNMatrix4)robot floorValid:(BOOL)floorValid
+                                 view:(ROBSurfaceDepthView)view robotTransform:(SCNMatrix4)robot projectionReady:(BOOL)projectionReady
                    projectionIdentity:(NSString *)projectionIdentity {
     self.capturedSurfaceSamples=[samples copy]; self.capturedSurfaceView=view;
-    self.capturedSurfaceProjectionIdentity=projectionIdentity; self.capturedSurfaceFloorValid=floorValid;
+    self.capturedSurfaceProjectionIdentity=projectionIdentity; self.capturedSurfaceProjectionReady=projectionReady;
 }
 - (SCNGeometry *)pointGeometry:(NSArray *)p colors:(NSArray *)c pointSize:(CGFloat)s {
     self.capturedPoints=p; self.capturedColors=c;
@@ -259,6 +259,9 @@ int main(void) { @autoreleasepool {
     publish(raw,table,ROBDepthCloudMakeTransform(tableRows),targets);
     assert(raw.capturedPoints.count>500 && [raw.headFloorSummary containsString:@"raw cloud"] &&
         [raw.headFloorSummary containsString:@"no plane within floor tilt/height bounds"] && !raw.headFloorAlignmentEstablished);
+    // Legacy projection still requires an accepted floor before accumulating;
+    // a tabletop-only raw preview cannot manufacture that floor reference.
+    assert(!raw.capturedSurfaceProjectionReady);
     for(NSValue *value in raw.capturedPoints) assert(fabs(value.SCNVector3Value.y-(5+scale*.75))<.002);
     id acceptedGeometry=h.liveRGBCloudNode.geometry;
     double acceptedAt=h.lastHeadCloudUptime;
@@ -439,7 +442,7 @@ int main(void) { @autoreleasepool {
         assert([summary containsString:@"residual (not corrected)"] && ![summary containsString:@"aligned"]);
         assert(explicit.capturedSurfaceSamples.length/sizeof(ROBSurfaceSample)==explicit.capturedPoints.count);
         ROBSurfaceDepthView explicitView=explicit.capturedSurfaceView;
-        assert(explicit.capturedSurfaceFloorValid && ROBSurfaceViewValid(&explicitView));
+        assert(explicit.capturedSurfaceProjectionReady && ROBSurfaceViewValid(&explicitView));
         assert([explicit.capturedSurfaceProjectionIdentity isEqual:explicit.ghostGestureEditor.depthProjectionIdentity]);
         const ROBSurfaceSample *explicitSurface=explicit.capturedSurfaceSamples.bytes;
         const double *surfaceMatrix=explicitView.cameraToMap;
@@ -476,6 +479,37 @@ int main(void) { @autoreleasepool {
             !explicit.headFloorHoldingAcceptedFrame && !explicit.bellyFloorHoldingAcceptedFrame);
         assert((isBelly ? explicit.lastBellyCloudUptime : explicit.lastHeadCloudUptime)==noise.capturedUptime);
         assert((isBelly ? explicit.liveBellyRGBCloudNode.geometry : explicit.liveRGBCloudNode.geometry)!=nil);
+        // HEAD commonly sees only a tabletop. An explicit projection remains
+        // usable for display accumulation even when floor fitting rejects it.
+        // The flag conveys projection availability, never measured authority.
+        summary=isBelly ? explicit.bellyFloorSummary : explicit.headFloorSummary;
+        assert([summary containsString:@"fit rejected"] && [summary containsString:@"raw cloud"]);
+        ROBSurfaceDepthView noFloorView=explicit.capturedSurfaceView;
+        assert(explicit.capturedSurfaceProjectionReady && ROBSurfaceViewValid(&noFloorView));
+        assert([explicit.capturedSurfaceProjectionIdentity isEqual:explicit.ghostGestureEditor.depthProjectionIdentity]);
+        for(int i=0;i<12;i++) assert(fabs(noFloorView.cameraToMap[i]-explicitCamera.m[i]/scale)<1e-12);
+        ROBDepthCloudTransform noFloorCamera=ROBDepthCloudMakeTransform(noFloorView.cameraToMap);
+        const ROBSurfaceSample *noFloorSamples=explicit.capturedSurfaceSamples.bytes;
+        assert(explicit.capturedSurfaceSamples.length/sizeof(ROBSurfaceSample)==explicit.capturedPoints.count && explicit.capturedPoints.count>500);
+        const uint16_t *noisyMM=noise.millimetersLittleEndian.bytes;
+        index=0;
+        for(int y=0;y<160;y+=4) for(int x=0;x<160;x+=4) if(noisyMM[y*160+x]>=150 && noisyMM[y*160+x]<=10000) {
+            double z=noisyMM[y*160+x]/1000.;
+            double opticalX=(x-noise.cameraCX)*z/noise.cameraFX, opticalY=(y-noise.cameraCY)*z/noise.cameraFY;
+            ROBDepthPoint local=ROBDepthCloudProject(explicitCamera,opticalX,opticalY,z);
+            ROBDepthPoint mapped=ROBDepthCloudProject(noFloorCamera,opticalX,opticalY,z);
+            ROBSurfacePoint sample=noFloorSamples[index].point;
+            assert(ROBSurfaceDistance2(sample,(ROBSurfacePoint){mapped.x,mapped.y,mapped.z})<1e-24);
+            assert(fabs(sample.x-local.x/scale)<1e-12 && fabs(sample.y-local.y/scale)<1e-12 && fabs(sample.z-local.z/scale)<1e-12);
+            SCNVector3 actual=explicit.capturedPoints[index].SCNVector3Value;
+            assert(fabs(actual.x-(world.m11*local.x+world.m21*local.y+world.m31*local.z+world.m41))<1e-6);
+            assert(fabs(actual.y-(world.m12*local.x+world.m22*local.y+world.m32*local.z+world.m42))<1e-6);
+            assert(fabs(actual.z-(world.m13*local.x+world.m23*local.y+world.m33*local.z+world.m43))<1e-6);
+            uint32_t color=((uint32_t)x<<24)|((uint32_t)y<<16)|((uint32_t)((x+y)%256)<<8)|255;
+            assert(noFloorSamples[index].rgba==color && explicit.capturedColors[index].unsignedIntValue==color);
+            index++;
+        }
+        assert(index==explicit.capturedPoints.count);
         if(isBelly) {
             [explicit refreshFloorCloudVisibilityAtUptime:explicit.lastBellyCloudUptime+.701];
             assert(explicit.liveBellyRGBCloudNode.hidden && !explicit.liveBellyRGBCloudNode.geometry);
@@ -551,7 +585,7 @@ int main(void) { @autoreleasepool {
     NSArray *previousPoints=h.capturedPoints; publish(h,f,camera,targets);
     assert(h.capturedPoints==previousPoints && h.capturedSurfaceSamples.length/sizeof(ROBSurfaceSample)>500);
     CVPixelBufferRelease(rejectedHead.rgbPixelBuffer); CVPixelBufferRelease(nearBudget.rgbPixelBuffer); CVPixelBufferRelease(noise.rgbPixelBuffer); CVPixelBufferRelease(empty.rgbPixelBuffer);
-    CVPixelBufferRelease(f.rgbPixelBuffer); puts("Production depth-floor integration passed:8/25/29degree floor bootstrap, rigid0.3m object height, tabletop rejection,9.5mm acceptance, HEAD captured-world retention with age labels and fresh replacement during arm operations, unchanged BELLY250ms noise hold/700ms freshness, explicit HEAD/BELLY raw and surface rays agree without double floor correction, projection-change invalidation, no resurrection after base clears, independent cameras, RGB pairing,20k cap and surface-only geometry delivery");
+    CVPixelBufferRelease(f.rgbPixelBuffer); puts("Production depth-floor integration passed:8/25/29degree floor bootstrap, rigid0.3m object height, tabletop rejection,9.5mm acceptance, HEAD captured-world retention with age labels and fresh replacement during arm operations, unchanged BELLY250ms noise hold/700ms freshness, explicit HEAD/BELLY raw and surface rays agree without double floor correction even without an accepted floor, projection-change invalidation, no resurrection after base clears, independent cameras, RGB pairing,20k cap and surface-only geometry delivery");
 } return 0; }
 '''
 

@@ -787,15 +787,15 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
         self.surfaceStatusLabel.stringValue=@"SURFACES: off · enable to build a stationary-base scan";return;
     }
     double now=NSProcessInfo.processInfo.systemUptime;
-    NSString *head=self.headSurfaceSummary ?: @"waiting for calibrated depth and a visible floor";
-    NSString *belly=self.bellySurfaceSummary ?: @"waiting for calibrated depth and a visible floor";
+    NSString *head=self.headSurfaceSummary ?: @"waiting for calibrated depth and a usable camera pose";
+    NSString *belly=self.bellySurfaceSummary ?: @"waiting for calibrated depth and a usable camera pose";
     self.surfaceStatusLabel.stringValue=[NSString stringWithFormat:@"SURFACE HISTORY · provisional, separate cameras · cyan = inferred\nHEAD %@%@\nBELLY %@%@",
         head,self.lastHeadSurfaceCapture>0 ? [NSString stringWithFormat:@" · %.1f s old",MAX(0,now-self.lastHeadSurfaceCapture)] : @"",
         belly,self.lastBellySurfaceCapture>0 ? [NSString stringWithFormat:@" · %.1f s old",MAX(0,now-self.lastBellySurfaceCapture)] : @""];
 }
 
 - (void)offerAccumulatedSurfaceSamples:(NSData *)samples frame:(ROBDepthCloudFrame *)frame
-                                 view:(ROBSurfaceDepthView)view robotTransform:(SCNMatrix4)robot floorValid:(BOOL)floorValid
+                                 view:(ROBSurfaceDepthView)view robotTransform:(SCNMatrix4)robot projectionReady:(BOOL)projectionReady
                    projectionIdentity:(NSString *)projectionIdentity
 {
     if (self.surfaceMode.state != NSControlStateValueOn) return;
@@ -812,7 +812,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     NSString *blocked=nil;
     if (self.treadCommandsAreActive || armMotion) blocked=@"paused during base/arm motion";
     else if (!frame.hasCalibratedIntrinsics || !frame.captureStreamID.length || !frame.sequence) blocked=@"waiting for calibrated capture provenance";
-    else if (!floorValid) blocked=@"waiting for a fresh floor-aligned view; previous scan retained";
+    else if (!projectionReady) blocked=@"waiting for an explicit camera pose or fresh floor alignment; previous scan retained";
     else if (frame.capturedUptime<self.lastSurfaceResetUptime) blocked=@"waiting for a capture after Reset";
     if (blocked) {
         if (belly) self.bellySurfaceSummary=blocked;else self.headSurfaceSummary=blocked;
@@ -1165,7 +1165,10 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
         floorCandidates.length / sizeof(ROBDepthFloorPoint), floorOptions);
     NSMutableData *surfaceSamples=[NSMutableData dataWithCapacity:capacity*sizeof(ROBSurfaceSample)];
     ROBSurfaceDepthView surfaceView={(int)width,(int)height,bytes,fx,fy,cx,cy,{0}};
-    if (floor.valid) for (int row=0;row<3;row++) for (int column=0;column<4;column++) {
+    // An explicit pose already places tabletop-only observations in the same
+    // display frame. It does not need an unrelated floor patch in every view.
+    // Legacy projections still require the fresh rigid floor correction.
+    if (explicitCameraPose || floor.valid) for (int row=0;row<3;row++) for (int column=0;column<4;column++) {
         double value=explicitCameraPose ? camera.m[row*4+column]/presentationScale : (column==3 ? floor.correction[row*4+3] : 0);
         if (!explicitCameraPose) for (int k=0;k<3;k++) value+=floor.correction[row*4+k]*camera.m[k*4+column]/presentationScale;
         surfaceView.cameraToMap[row*4+column]=value;
@@ -1274,7 +1277,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
             self.headFloorHoldingAcceptedFrame = hold;
             self.headFloorSummary = [@"HEAD: " stringByAppendingString:displaySummary];
         }
-        [self offerAccumulatedSurfaceSamples:surfaceSamples frame:frame view:surfaceView robotTransform:robotTransform floorValid:floor.valid projectionIdentity:projectionIdentity];
+        [self offerAccumulatedSurfaceSamples:surfaceSamples frame:frame view:surfaceView robotTransform:robotTransform projectionReady:(explicitCameraPose || floor.valid) projectionIdentity:projectionIdentity];
         if (self.surfaceMode.state == NSControlStateValueOn) {
             SCNNode *surface=isBelly ? self.bellySurfaceNode : self.headSurfaceNode;
             if (surface.childNodes.firstObject.childNodes.count) node.hidden=YES;
