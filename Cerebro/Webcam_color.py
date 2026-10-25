@@ -1069,11 +1069,219 @@ def rgb_frame_lens_position(rgb_frame):
     return validated_lens_position(get_position(), "RGB frame")
 
 
+def camera_observation_error(method, error):
+    # Optional diagnostics must not overflow the bounded IPC header if an SDK
+    # exception contains a large dump or repeated transport text.
+    return (method + ": " + " ".join(str(error)[:1200].split()))[:400]
+
+
+def rgb_frame_readback(rgb_frame):
+    """Optional actual ImgFrame observations; never configure the camera."""
+    evidence = {"rgb_frame_exposure_microseconds": None, "rgb_frame_iso": None,
+                "rgb_frame_color_temperature_kelvin": None, "rgb_frame_observation_errors": []}
+    errors = evidence["rgb_frame_observation_errors"]
+    for method, key in (("getExposureTime", "rgb_frame_exposure_microseconds"),
+                        ("getSensitivity", "rgb_frame_iso"),
+                        ("getColorTemperature", "rgb_frame_color_temperature_kelvin")):
+        try:
+            getter = getattr(rgb_frame, method, None)
+            if not callable(getter):
+                raise ValueError("getter unavailable")
+            value = getter()
+            if method == "getExposureTime":
+                if not isinstance(value, timedelta):
+                    raise ValueError("expected SDK timedelta")
+                value = value.total_seconds() * 1_000_000
+                if not math.isfinite(value) or not 0 < value <= 1_000_000_000:
+                    raise ValueError("exposure must be finite and positive")
+            elif type(value) is not int or not 0 < value <= 10_000_000:
+                raise ValueError("expected a positive bounded SDK integer")
+            evidence[key] = value
+        except Exception as error:
+            errors.append(camera_observation_error(method, error))
+    return evidence
+
+
+def rectified_stereo_frame_evidence(left_frame, right_frame, meter_unit=None):
+    """Observe each synchronized mono frame's own SDK geometry, nonfatally.
+
+    Matrices are row-major. SDK extrinsics describe SOURCE coordinate systems,
+    not an asserted rectified virtual-camera basis or a measured calibration.
+    No RGB/EEPROM intrinsics, spec translation or default centimeter unit is
+    substituted when actual frame evidence is absent.
+    """
+    def observe(owner, method, errors, validator, *args):
+        try:
+            getter = getattr(owner, method, None)
+            if not callable(getter):
+                raise ValueError("getter unavailable")
+            return validator(getter(*args))
+        except Exception as error:
+            errors.append(camera_observation_error(method, error))
+            return None
+
+    def integer(value):
+        if type(value) is not int or not 0 <= value < 2**64:
+            raise ValueError("expected a nonnegative SDK integer")
+        return value
+
+    def timestamp(value):
+        if not isinstance(value, timedelta):
+            raise ValueError("expected SDK timedelta")
+        seconds = value.total_seconds()
+        if not math.isfinite(seconds) or not 0 <= seconds < (2**64 / 1_000_000_000):
+            raise ValueError("invalid SDK timestamp")
+        return integer(int(round(seconds * 1_000_000_000)))
+
+    def dimensions(value):
+        if len(value) != 2 or any(type(v) is not int or not 1 <= v <= 8192 for v in value):
+            raise ValueError("expected native dimensions from1 to8192")
+        return list(value)
+
+    def boolean(value):
+        if type(value) is not bool:
+            raise ValueError("expected SDK boolean")
+        return value
+
+    def text(value):
+        if value is None or isinstance(value, (bool, int, float, bytes)):
+            raise ValueError("value unavailable")
+        value = str(value)
+        if not value or len(value) > 256:
+            raise ValueError("invalid SDK label")
+        return value
+
+    def available(value):
+        if value is None:
+            raise ValueError("value unavailable")
+        return value
+
+    def matrix(value, size):
+        if len(value) != size or any(len(row) != size for row in value):
+            raise ValueError("expected a {}x{} matrix".format(size, size))
+        values = [item for row in value for item in row]
+        if any(isinstance(item, (bool, str, bytes)) for item in values):
+            raise ValueError("matrix must be numeric")
+        values = [float(item) for item in values]
+        if not all(math.isfinite(item) and abs(item) <= 1_000_000 for item in values):
+            raise ValueError("matrix must be finite and bounded")
+        return values
+
+    def image_matrix(value):
+        values = matrix(value, 3)
+        a, b, c, d, e, f, g, h, i = values
+        determinant = a*(e*i-f*h)-b*(d*i-f*g)+c*(d*h-e*g)
+        if abs(determinant) <= 1e-12:
+            raise ValueError("singular image transform")
+        return values
+
+    def rigid_matrix(value):
+        values = matrix(value, 4)
+        if any(abs(values[12+i] - expected) > 1e-5 for i, expected in enumerate((0, 0, 0, 1))):
+            raise ValueError("invalid homogeneous last row")
+        rotation = [[values[row*4+column] for column in range(3)] for row in range(3)]
+        if any(abs(sum(rotation[k][row]*rotation[k][column] for k in range(3))
+                   - (1 if row == column else 0)) > 1e-3 for row in range(3) for column in range(3)):
+            raise ValueError("extrinsic rotation is not orthonormal")
+        a, b, c = rotation
+        determinant = a[0]*(b[1]*c[2]-b[2]*c[1])-a[1]*(b[0]*c[2]-b[2]*c[0])+a[2]*(b[0]*c[1]-b[1]*c[0])
+        if abs(determinant - 1) > 1e-3 or any(abs(values[index]) > 100 for index in (3, 7, 11)):
+            raise ValueError("extrinsic is not a bounded proper rigid transform in meters")
+        return values
+
+    def coefficients(value):
+        if len(value) > 64 or any(isinstance(v, (bool, str, bytes)) for v in value):
+            raise ValueError("invalid source distortion coefficients")
+        values = [float(v) for v in value]
+        if not all(math.isfinite(v) and abs(v) <= 1_000_000 for v in values):
+            raise ValueError("nonfinite source distortion coefficients")
+        return values
+
+    def mono(frame):
+        errors = []
+        result = {"source": "sdk_frame_transformation", "sequence": None,
+                  "timestampNanoseconds": None, "timestampDeviceNanoseconds": None,
+                  "width": frame.getWidth(), "height": frame.getHeight(),
+                  "intrinsics": None, "sourceSize": None, "sourceIntrinsics": None,
+                  "imageTransform": None, "transformationSize": None, "transformationValid": None,
+                  "sourceDistortionCoefficients": None, "sourceDistortionModel": None,
+                  "extrinsicsToCommon": None, "evidenceErrors": errors}
+        for method, key, validator in (("getSequenceNum", "sequence", integer),
+                                       ("getTimestamp", "timestampNanoseconds", timestamp),
+                                       ("getTimestampDevice", "timestampDeviceNanoseconds", timestamp)):
+            result[key] = observe(frame, method, errors, validator)
+        transform = observe(frame, "getTransformation", errors, available)
+        if transform is None:
+            return result, None
+        for method, key, validator in (("isValid", "transformationValid", boolean),
+                                       ("getSize", "transformationSize", dimensions),
+                                       ("getSourceSize", "sourceSize", dimensions),
+                                       ("getTransformationMatrix", "imageTransform", image_matrix),
+                                       ("getDistortionCoefficients", "sourceDistortionCoefficients", coefficients),
+                                       ("getDistortionModel", "sourceDistortionModel", text)):
+            result[key] = observe(transform, method, errors, validator)
+        result["intrinsics"] = observe(transform, "getIntrinsicMatrix", errors,
+            lambda value: validated_pinhole_intrinsics(value, result["width"], result["height"]))
+        def source_intrinsics(value):
+            values = matrix(value, 3)
+            if result["sourceSize"] is not None:
+                return validated_pinhole_intrinsics(values, *result["sourceSize"], flattened=True)
+            # Retain this actual matrix without inventing its absent dimensions.
+            if (values[0] <= 0 or values[4] <= 0 or values[2] < 0 or values[5] < 0
+                    or any(abs(values[i]) > 1e-6 for i in (1, 3, 6, 7)) or abs(values[8]-1) > 1e-6):
+                raise ValueError("invalid source pinhole intrinsics")
+            return values
+        result["sourceIntrinsics"] = observe(transform, "getSourceIntrinsicMatrix", errors, source_intrinsics)
+        if result["transformationValid"] is False:
+            errors.append("isValid: SDK reports an invalid transformation")
+        if result["transformationSize"] not in (None, [result["width"], result["height"]]):
+            errors.append("getSize: transformation dimensions differ from actual mono pixels")
+        if all(result[key] is not None for key in ("intrinsics", "sourceIntrinsics", "imageTransform")):
+            a, k = result["imageTransform"], result["sourceIntrinsics"]
+            product = [sum(a[row*3+j]*k[j*3+column] for j in range(3)) for row in range(3) for column in range(3)]
+            if any(abs(actual-expected) > .001 for actual, expected in zip(product, result["intrinsics"])):
+                errors.append("source geometry: imageTransform times sourceIntrinsics disagrees with frame intrinsics")
+        extrinsics = observe(transform, "getExtrinsics", errors, available)
+        if extrinsics is not None:
+            ex_errors = []
+            ex = {"source": "sdk_frame_transformation_getExtrinsics", "toCameraSocket": None,
+                  "sourceLengthUnit": None, "lengthUnit": "meter", "useSpecTranslation": False,
+                  "matrix": None, "evidenceErrors": ex_errors}
+            for attribute, key in (("toCameraSocket", "toCameraSocket"), ("lengthUnit", "sourceLengthUnit")):
+                try:
+                    ex[key] = text(getattr(extrinsics, attribute))
+                except Exception as error:
+                    ex_errors.append(camera_observation_error(attribute, error))
+            if meter_unit is None:
+                ex_errors.append("getTransformationMatrix: explicit SDK meter unit unavailable")
+            else:
+                ex["matrix"] = observe(extrinsics, "getTransformationMatrix", ex_errors, rigid_matrix, False, meter_unit)
+            result["extrinsicsToCommon"] = ex
+        return result, transform
+
+    left, left_transform = mono(left_frame)
+    right, right_transform = mono(right_frame)
+    pair = {"source": "sdk_frame_transformation_getExtrinsicsTransformationMatrixTo",
+            "from": "left_source_optical", "to": "right_source_optical",
+            "translationUnit": "meter", "useSpecTranslation": False,
+            "matrix": None, "evidenceErrors": []}
+    if left_transform is None or right_transform is None:
+        pair["evidenceErrors"].append("source left/right frame transformations unavailable")
+    elif meter_unit is None:
+        pair["evidenceErrors"].append("explicit SDK meter unit unavailable")
+    else:
+        pair["matrix"] = observe(left_transform, "getExtrinsicsTransformationMatrixTo", pair["evidenceErrors"],
+                                 rigid_matrix, right_transform, False, meter_unit)
+    return {"rectified_left_geometry": left, "rectified_right_geometry": right,
+            "rectified_left_source_to_right_source": pair}
+
+
 def frame_payload(
     rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
     sidewalk_deviation=None, sidewalk_confidence=None, chess_pieces=None,
     captured_at_milliseconds=None, rgb_calibrated_lens_position=None,
-    depth_alignment_method=None, imu_telemetry=None, stereo_configuration=None
+    depth_alignment_method=None, imu_telemetry=None, stereo_configuration=None,
+    stereo_length_unit_meter=None
 ):
     rgb_width = int(rgb_frame.getWidth())
     rgb_height = int(rgb_frame.getHeight())
@@ -1161,6 +1369,8 @@ def frame_payload(
     }
     header.update(depth_geometry)
     header.update(validated_stereo_configuration(stereo_configuration))
+    header.update(rgb_frame_readback(rgb_frame))
+    header.update(rectified_stereo_frame_evidence(left_frame, right_frame, stereo_length_unit_meter))
     header_bytes = json.dumps(
         header, ensure_ascii=False, separators=(",", ":")
     ).encode("utf-8")
@@ -1171,12 +1381,14 @@ def send_frame(
     client, rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
     sidewalk_deviation=None, sidewalk_confidence=None, chess_pieces=None,
     captured_at_milliseconds=None, rgb_calibrated_lens_position=None,
-    depth_alignment_method=None, imu_telemetry=None, stereo_configuration=None
+    depth_alignment_method=None, imu_telemetry=None, stereo_configuration=None,
+    stereo_length_unit_meter=None
 ):
     header, rgb_bytes, depth_bytes, left_bytes, right_bytes = frame_payload(
         rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
         sidewalk_deviation, sidewalk_confidence, chess_pieces, captured_at_milliseconds,
-        rgb_calibrated_lens_position, depth_alignment_method, imu_telemetry, stereo_configuration
+        rgb_calibrated_lens_position, depth_alignment_method, imu_telemetry, stereo_configuration,
+        stereo_length_unit_meter
     )
     client.sendall(PROTOCOL_MAGIC + struct.pack(">I", len(header)) + header)
     client.sendall(rgb_bytes)
@@ -1410,6 +1622,7 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                     emit_error("Pipeline startup failed with optional IMU; retrying RGB-D without IMU telemetry")
                 raise
             stereo_configuration=observed_stereo_configuration(stereo)
+            stereo_length_unit_meter = getattr(getattr(dai, "LengthUnit", None), "METER", None)
             if stereo_mode=="near_field" and stereo_configuration["stereo_mode"]!="near_field":
                 raise RuntimeError("near_field stereo configuration was not confirmed by SDK readback")
             emit("CEREBRO_DEPTHCAM_STEREO "+json.dumps(stereo_configuration,separators=(",",":")))
@@ -1506,6 +1719,7 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                     depth_alignment_method=alignment_method,
                     imu_telemetry=read_optional_imu(imu_queue, imu_window, rgb_frame),
                     stereo_configuration=stereo_configuration,
+                    stereo_length_unit_meter=stereo_length_unit_meter,
                 )
                 send_finished = time.monotonic()
                 if send_finished - last_timing_at >= 5:

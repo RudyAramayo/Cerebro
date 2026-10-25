@@ -190,6 +190,9 @@ enum ROBSwordTrackerColor: String, CaseIterable {
     @nonobjc let sourceCapturedAtMilliseconds: Double?
     @nonobjc let sourceCaptureStreamID: String?
     @nonobjc let sourceTimestampNanoseconds: UInt64?
+    @nonobjc let rectifiedLeft: CameraStereoFrame?
+    @nonobjc let rectifiedRight: CameraStereoFrame?
+    @nonobjc let stereoSourceExtrinsics: CameraStereoPairExtrinsics?
     let receivedUptime: TimeInterval
     let capturedUptime: TimeInterval
     public var hasCalibratedIntrinsics: Bool { calibratedIntrinsics?.isValid(forWidth: width, height: height) == true }
@@ -201,7 +204,9 @@ enum ROBSwordTrackerColor: String, CaseIterable {
     init(depth: CameraDepthFrame, rgbSampleBuffer: CMSampleBuffer, isBelly: Bool = false,
          intrinsics: CameraIntrinsics? = nil, capturedAtMilliseconds: Double? = nil,
          sourceSequence: UInt64? = nil, sourceCapturedAtMilliseconds: Double? = nil,
-         sourceCaptureStreamID: String? = nil, sourceTimestampNanoseconds: UInt64? = nil) {
+         sourceCaptureStreamID: String? = nil, sourceTimestampNanoseconds: UInt64? = nil,
+         rectifiedLeft: CameraStereoFrame? = nil, rectifiedRight: CameraStereoFrame? = nil,
+         stereoSourceExtrinsics: CameraStereoPairExtrinsics? = nil) {
         millimetersLittleEndian = depth.millimetersLittleEndian as NSData
         width = depth.width
         height = depth.height
@@ -212,6 +217,9 @@ enum ROBSwordTrackerColor: String, CaseIterable {
         self.sourceCapturedAtMilliseconds = sourceCapturedAtMilliseconds
         self.sourceCaptureStreamID = sourceCaptureStreamID
         self.sourceTimestampNanoseconds = sourceTimestampNanoseconds
+        self.rectifiedLeft = rectifiedLeft
+        self.rectifiedRight = rectifiedRight
+        self.stereoSourceExtrinsics = stereoSourceExtrinsics
         receivedUptime = ProcessInfo.processInfo.systemUptime
         let age = capturedAtMilliseconds.map { Date().timeIntervalSince1970 - $0 / 1000 }
         // A missing/unusable clock gets a conservative transport allowance;
@@ -1758,7 +1766,9 @@ extension CameraViewController: CameraManagerDelegate {
             let hologramFrame = ROBDepthCloudFrame(depth: depth, rgbSampleBuffer: sampleBuffer, isBelly: false,
                 intrinsics: frameSet.intrinsics, capturedAtMilliseconds: frameSet.capturedAtMilliseconds,
                 sourceSequence: frameSet.sequence, sourceCapturedAtMilliseconds: frameSet.capturedAtMilliseconds,
-                sourceCaptureStreamID: frameSet.captureStreamID, sourceTimestampNanoseconds: frameSet.timestampNanoseconds)
+                sourceCaptureStreamID: frameSet.captureStreamID, sourceTimestampNanoseconds: frameSet.timestampNanoseconds,
+                rectifiedLeft: frameSet.rectifiedLeft, rectifiedRight: frameSet.rectifiedRight,
+                stereoSourceExtrinsics: frameSet.stereoSourceExtrinsics)
             ROBHologramExporter.shared.capture(hologramFrame)
             if cameraViewIsVisible {
                 faceDepthPointCloudRenderer.offer(depth: depth, rgbSampleBuffer: sampleBuffer, in: skeletonView)

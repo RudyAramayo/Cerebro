@@ -162,6 +162,11 @@ struct CameraIntrinsics: Sendable {
     var stereoModeSource: String? = nil
     var stereoExtendedDisparity: Bool? = nil
     var stereoSubpixel: Bool? = nil
+    /// Observed on this RGB frame; absent values are never camera defaults.
+    var frameExposureMicroseconds: Double? = nil
+    var frameISO: Int? = nil
+    var frameColorTemperatureKelvin: Int? = nil
+    var frameObservationErrors: [String]? = nil
 
     func isValid(forWidth width: Int, height: Int) -> Bool {
         fx.isFinite && fy.isFinite && cx.isFinite && cy.isFinite
@@ -170,12 +175,55 @@ struct CameraIntrinsics: Sendable {
     }
 }
 
+/// Optional SDK source-coordinate evidence, retained without calibration authority.
+struct CameraStereoSourceExtrinsics: Codable, Sendable {
+    let source: String
+    let toCameraSocket: String?
+    let sourceLengthUnit: String?
+    let lengthUnit: String
+    let useSpecTranslation: Bool
+    let matrix: [Double]?
+    let evidenceErrors: [String]
+}
+
+/// These matrices describe SOURCE coordinates, not a verified rectified-ray
+/// triangulation. Preserve the SDK convention for independent offline review.
+struct CameraStereoPairExtrinsics: Codable, Sendable {
+    let source: String
+    let from: String
+    let to: String
+    let translationUnit: String
+    let useSpecTranslation: Bool
+    let matrix: [Double]?
+    let evidenceErrors: [String]
+}
+
+struct CameraStereoGeometry: Codable, Sendable {
+    let source: String
+    let sequence: UInt64?
+    let timestampNanoseconds: UInt64?
+    let timestampDeviceNanoseconds: UInt64?
+    let width: Int
+    let height: Int
+    let intrinsics: [Double]?
+    let sourceSize: [Int]?
+    let sourceIntrinsics: [Double]?
+    let imageTransform: [Double]?
+    let transformationSize: [Int]?
+    let transformationValid: Bool?
+    let sourceDistortionCoefficients: [Double]?
+    let sourceDistortionModel: String?
+    let extrinsicsToCommon: CameraStereoSourceExtrinsics?
+    let evidenceErrors: [String]
+}
+
 /// Rectified grayscale views from the OAK stereo pair. These remain useful
 /// when tuning IR illumination, validating calibration, and debugging depth.
-struct CameraStereoFrame {
+struct CameraStereoFrame: Sendable {
     let width: Int
     let height: Int
     let pixels: Data
+    var geometry: CameraStereoGeometry? = nil
 }
 
 /// The common frame contract used by RGB-only and RGB-D camera providers.
@@ -188,6 +236,7 @@ struct CameraFrameSet {
     var intrinsics: CameraIntrinsics? = nil
     var rectifiedLeft: CameraStereoFrame? = nil
     var rectifiedRight: CameraStereoFrame? = nil
+    var stereoSourceExtrinsics: CameraStereoPairExtrinsics? = nil
     var sidewalkCenterDeviation: Double? = nil
     var sidewalkConfidence: Double? = nil
     var chessPieces: [ROBChessPieceDetection]? = nil
@@ -1681,13 +1730,20 @@ private final class DepthCameraServiceClient {
                         stereoMode: header.stereoMode,
                         stereoModeSource: header.stereoModeSource,
                         stereoExtendedDisparity: header.stereoExtendedDisparity,
-                        stereoSubpixel: header.stereoSubpixel
+                        stereoSubpixel: header.stereoSubpixel,
+                        frameExposureMicroseconds: header.rgbFrameExposureMicroseconds,
+                        frameISO: header.rgbFrameISO,
+                        frameColorTemperatureKelvin: header.rgbFrameColorTemperatureKelvin,
+                        frameObservationErrors: header.rgbFrameObservationErrors
                     )
                     return result.isValid(forWidth: header.rgbWidth, height: header.rgbHeight)
                         ? result : nil
                 },
-                rectifiedLeft: CameraStereoFrame(width: header.stereoWidth, height: header.stereoHeight, pixels: leftData),
-                rectifiedRight: CameraStereoFrame(width: header.stereoWidth, height: header.stereoHeight, pixels: rightData),
+                rectifiedLeft: CameraStereoFrame(width: header.stereoWidth, height: header.stereoHeight,
+                    pixels: leftData, geometry: header.rectifiedLeftGeometry),
+                rectifiedRight: CameraStereoFrame(width: header.stereoWidth, height: header.stereoHeight,
+                    pixels: rightData, geometry: header.rectifiedRightGeometry),
+                stereoSourceExtrinsics: header.rectifiedLeftSourceToRightSource,
                 sidewalkCenterDeviation: header.sidewalkCenterDeviation,
                 sidewalkConfidence: header.sidewalkConfidence,
                 chessPieces: header.chessPieces,
@@ -1871,6 +1927,13 @@ private struct DepthCameraPacketHeader: Decodable {
     let rgbOutputUndistorted: Bool?
     let rgbCalibratedLensPosition: Int?
     let rgbFrameLensPosition: Int?
+    let rgbFrameExposureMicroseconds: Double?
+    let rgbFrameISO: Int?
+    let rgbFrameColorTemperatureKelvin: Int?
+    let rgbFrameObservationErrors: [String]?
+    let rectifiedLeftGeometry: CameraStereoGeometry?
+    let rectifiedRightGeometry: CameraStereoGeometry?
+    let rectifiedLeftSourceToRightSource: CameraStereoPairExtrinsics?
     let rgbSourceSize: [Int]?
     let rgbSourceIntrinsics: [Double]?
     let rgbImageTransform: [Double]?
@@ -1921,6 +1984,13 @@ private struct DepthCameraPacketHeader: Decodable {
         case rgbOutputUndistorted = "rgb_output_undistorted"
         case rgbCalibratedLensPosition = "rgb_calibrated_lens_position"
         case rgbFrameLensPosition = "rgb_frame_lens_position"
+        case rgbFrameExposureMicroseconds = "rgb_frame_exposure_microseconds"
+        case rgbFrameISO = "rgb_frame_iso"
+        case rgbFrameColorTemperatureKelvin = "rgb_frame_color_temperature_kelvin"
+        case rgbFrameObservationErrors = "rgb_frame_observation_errors"
+        case rectifiedLeftGeometry = "rectified_left_geometry"
+        case rectifiedRightGeometry = "rectified_right_geometry"
+        case rectifiedLeftSourceToRightSource = "rectified_left_source_to_right_source"
         case rgbSourceSize = "rgb_source_size"
         case rgbSourceIntrinsics = "rgb_source_intrinsics"
         case rgbImageTransform = "rgb_image_transform"

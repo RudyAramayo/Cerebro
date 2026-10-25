@@ -394,7 +394,14 @@ def main():
         left = receive_exact(receiver, header["left_length"])
         right = receive_exact(receiver, header["right_length"])
 
-        assert header == {
+        # The independent stereo-evidence fixture checks the additive optional
+        # observations. Keep the original IPC/pixel contract exact here.
+        evidence_keys = {"rgb_frame_exposure_microseconds", "rgb_frame_iso",
+                         "rgb_frame_color_temperature_kelvin", "rgb_frame_observation_errors",
+                         "rectified_left_geometry", "rectified_right_geometry",
+                         "rectified_left_source_to_right_source"}
+        assert evidence_keys <= header.keys()
+        assert {key: value for key, value in header.items() if key not in evidence_keys} == {
             "protocol_version": 2,
             "sequence": 42,
             "timestamp_ns": 3_250_000_000,

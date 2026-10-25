@@ -329,6 +329,34 @@ private final class ROBBellyQRFrameMailbox: @unchecked Sendable {
                 "width": frame.width, "height": frame.height, "rgbWidth": cg.width, "rgbHeight": cg.height,
                 "sourceCameraRole": "belly", "capturedUptime": frame.capturedUptime, "receivedUptime": frame.receivedUptime,
                 "rgbDepthDimensionsMatch": cg.width == frame.width && cg.height == frame.height]
+            // Preserve the two unchanged GRAY8 images from this synchronized
+            // source packet. They support offline checks independent of RGB
+            // alignment; source-coordinate extrinsics are not triangulation proof.
+            for (side, stereo) in [("left", frame.rectifiedLeft), ("right", frame.rectifiedRight)] {
+                guard let stereo, stereo.width > 0, stereo.height > 0,
+                      stereo.width <= 8192, stereo.height <= 8192,
+                      stereo.pixels.count == stereo.width * stereo.height else {
+                    missing.insert("\(side) rectified stereo image"); continue
+                }
+                let path = name + "." + side + ".gray8"
+                try Self.save(stereo.pixels, to: destination.appendingPathComponent(path))
+                var saved: [String: Any] = ["imagePath": path, "imageSHA256": Self.hash(stereo.pixels),
+                    "width": stereo.width, "height": stereo.height, "pixelFormat": "GRAY8",
+                    "source": "same_synchronized_camera_packet", "triangulationVerified": false]
+                if let geometry = stereo.geometry,
+                   let encoded = try? JSONEncoder().encode(geometry),
+                   let object = try? JSONSerialization.jsonObject(with: encoded) {
+                    saved["geometry"] = object
+                    if !geometry.evidenceErrors.isEmpty { missing.insert("\(side) stereo geometry: " + geometry.evidenceErrors.joined(separator: "; ")) }
+                } else { missing.insert("\(side) stereo SDK geometry") }
+                record[side == "left" ? "rectifiedLeft" : "rectifiedRight"] = saved
+            }
+            if let extrinsics = frame.stereoSourceExtrinsics,
+               let encoded = try? JSONEncoder().encode(extrinsics),
+               let object = try? JSONSerialization.jsonObject(with: encoded) {
+                record["stereoSourceExtrinsics"] = object
+                if !extrinsics.evidenceErrors.isEmpty { missing.insert("stereo source extrinsics: " + extrinsics.evidenceErrors.joined(separator: "; ")) }
+            } else { missing.insert("stereo source extrinsics") }
             // Run both native QR decoders on the exact saved JPEG geometry.
             // Their quads are seeds only, never a calibration acceptance.
             if let decoded = CIImage(data: jpeg), let savedRGB = context.createCGImage(decoded, from: decoded.extent) {
@@ -376,6 +404,10 @@ private final class ROBBellyQRFrameMailbox: @unchecked Sendable {
                 } else { missing.insert("SDK depth/RGB pixel correspondence") }
                 if let value = k.calibratedLensPosition { record["calibratedLensPosition"] = value }
                 if let value = k.frameLensPosition { record["frameLensPosition"] = value }
+                if let value = k.frameExposureMicroseconds { record["rgbFrameExposureMicroseconds"] = value }
+                if let value = k.frameISO { record["rgbFrameISO"] = value }
+                if let value = k.frameColorTemperatureKelvin { record["rgbFrameColorTemperatureKelvin"] = value }
+                if let value = k.frameObservationErrors { record["rgbFrameObservationErrors"] = value }
             } else { missing.insert("calibrated camera intrinsics and pixel metadata") }
             records.append(record); lastFrameUptime = frame.capturedUptime
             image.image = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))

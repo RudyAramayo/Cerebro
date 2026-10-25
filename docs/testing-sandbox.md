@@ -43,6 +43,15 @@ SDK transformation comparisons, source distortion metadata, timestamps and
 image/depth hashes. A successful diagnostic process does not mean calibration
 passed or that an arm transform was installed.
 
+The same capture also saves the synchronized, unchanged left/right `GRAY8`
+images with their own dimensions, hashes, source times and SDK transformation
+metadata. RGB exposure time, ISO and color temperature are recorded when the
+frame provides them; unavailable observations retain explicit errors. These
+readbacks never set exposure or change stereo processing. Stereo extrinsic
+matrices use explicit meters and describe SDK **source** coordinates; they do
+not establish rectified optical coordinates or validate triangulation. Missing
+stereo diagnostics do not prevent an otherwise valid RGB-D capture.
+
 The worker also supports an offline, local floor-display reference after the
 operator has confirmed that both sheets lie on a flat floor:
 

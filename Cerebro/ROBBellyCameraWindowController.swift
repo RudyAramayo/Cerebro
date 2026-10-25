@@ -391,7 +391,9 @@ import AVFoundation
         let hologramFrame = ROBDepthCloudFrame(depth: depth, rgbSampleBuffer: frameSet.rgbSampleBuffer, isBelly: true,
             intrinsics: frameSet.intrinsics, capturedAtMilliseconds: frameSet.capturedAtMilliseconds,
             sourceSequence: frameSet.sequence, sourceCapturedAtMilliseconds: frameSet.capturedAtMilliseconds,
-            sourceCaptureStreamID: frameSet.captureStreamID, sourceTimestampNanoseconds: frameSet.timestampNanoseconds)
+            sourceCaptureStreamID: frameSet.captureStreamID, sourceTimestampNanoseconds: frameSet.timestampNanoseconds,
+            rectifiedLeft: frameSet.rectifiedLeft, rectifiedRight: frameSet.rectifiedRight,
+            stereoSourceExtrinsics: frameSet.stereoSourceExtrinsics)
         NotificationCenter.default.post(
             name: .ROBDepthCloudFrame,
             object: hologramFrame
