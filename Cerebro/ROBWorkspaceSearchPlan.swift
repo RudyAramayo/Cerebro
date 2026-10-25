@@ -412,42 +412,96 @@ struct ROBWorkspaceCanSections: Codable {
     static func measure(detection:ROBWorkspaceDetection,width:Int,height:Int,
                         fx:Double,fy:Double,cx:Double,cy:Double,depth:(Int,Int)->UInt16?,
                         view:ROBWorkspaceView,model:ROBGhostRobotModel, cameraToRobot:simd_double4x4? = nil) -> Self? {
-        guard detection.usable, detection.box.allSatisfy({ (0.02...0.98).contains($0) }),
-              width > 1, height > 1, [fx,fy,cx,cy].allSatisfy(\.isFinite), fx > 0, fy > 0,
-              (0..<Double(width)).contains(cx), (0..<Double(height)).contains(cy),
-              let transform = cameraToRobot ?? view.cameraFrame(model:model) else { return nil }
+        measureWithDiagnostics(detection:detection,width:width,height:height,fx:fx,fy:fy,cx:cx,cy:cy,
+            depth:depth,view:view,model:model,cameraToRobot:cameraToRobot).sections
+    }
+    /// Bounded evidence from the same raw samples and unchanged fit gates.
+    /// A failed band does not hide the remaining two bands from diagnostics.
+    static func measureWithDiagnostics(detection:ROBWorkspaceDetection,width:Int,height:Int,
+                        fx:Double,fy:Double,cx:Double,cy:Double,depth:(Int,Int)->UInt16?,
+                        view:ROBWorkspaceView,model:ROBGhostRobotModel,cameraToRobot:simd_double4x4? = nil)
+                        -> (sections:Self?,diagnostics:[String:Any]) {
+        func number(_ value:Double)->Any {value.isFinite ? value as Any : NSNull()}
+        var info:[String:Any]=["schema_version":1,"status":"rejected","box":detection.box.map(number),
+            "width":width,"height":height,"intrinsics":[fx,fy,cx,cy].map(number),"bands":[],
+            "thresholds":["minimum_valid_samples":9,"depth_min_mm":150,"depth_max_mm":3000,
+                "maximum_MAD_m":0.025,"maximum_p90_p10_m":0.06,"height_m":[0.09,0.18],
+                "diameter_m":[0.04,0.09],"minimum_axis_up_fraction":0.6,"maximum_middle_deviation_m":0.025]]
+        func rejected(_ stage:String)->(sections:Self?,diagnostics:[String:Any]) {
+            info["rejection_stage"]=stage;return(nil,info)
+        }
+        guard detection.usable else {return rejected("unusable_detection")}
+        guard detection.box.allSatisfy({(0.02...0.98).contains($0)}) else {return rejected("clipped_box")}
+        guard width>1,height>1,[fx,fy,cx,cy].allSatisfy(\.isFinite),fx>0,fy>0,
+              (0..<Double(width)).contains(cx),(0..<Double(height)).contains(cy) else {return rejected("invalid_intrinsics")}
+        guard let transform=cameraToRobot ?? view.cameraFrame(model:model) else {return rejected("camera_projection_unavailable")}
         let left = detection.box[0]*Double(width-1), right = detection.box[2]*Double(width-1)
         let top = detection.box[1]*Double(height-1), bottom = detection.box[3]*Double(height-1), u = (left+right)/2
         let radiusX = max(1,min(3,Int((right-left)*0.12))), radiusY = max(1,min(3,Int((bottom-top)*0.04)))
-        func band(_ fraction:Double) -> (point:SIMD3<Double>,depth:Double)? {
+        var bandReports:[[String:Any]]=[]
+        func band(_ label:String,_ fraction:Double) -> (point:SIMD3<Double>,depth:Double)? {
             let v = top+(bottom-top)*fraction, x = Int(u.rounded()), y = Int(v.rounded())
-            var samples: [Double] = []
+            var samples:[Double]=[],raw:[Any]=[],zeros=0,missing=0,outOfRange=0,outside=0
             for dy in -radiusY...radiusY { for dx in -radiusX...radiusX {
-                guard (0..<width).contains(x+dx), (0..<height).contains(y+dy) else { continue }
-                if let mm = depth(x+dx,y+dy), (150...3000).contains(mm) { samples.append(Double(mm)/1000) }
+                guard (0..<width).contains(x+dx),(0..<height).contains(y+dy) else {outside+=1;continue}
+                guard let mm=depth(x+dx,y+dy) else {missing+=1;raw.append(NSNull());continue}
+                raw.append(Int(mm))
+                if mm==0 {zeros+=1}
+                if (150...3000).contains(mm) {samples.append(Double(mm)/1000)} else {outOfRange+=1}
             } }
-            guard samples.count >= 9 else { return nil }
-            samples.sort(); let z = samples[samples.count/2], deviations = samples.map { abs($0-z) }.sorted()
-            guard deviations[deviations.count/2] <= 0.025,
-                  samples[samples.count*9/10]-samples[samples.count/10] <= 0.06 else { return nil }
+            var report:[String:Any]=["label":label,"fraction":fraction,"pixel_center":[u,v],
+                "rounded_pixel_center":[x,y],"radii":[radiusX,radiusY],"sample_count":raw.count,
+                "valid_count":samples.count,"zero_count":zeros,"missing_count":missing,
+                "out_of_range_count":outOfRange,"outside_image_count":outside,"raw_mm":raw]
+            guard !samples.isEmpty else {
+                report["rejection_stage"]="insufficient_valid_samples";report["minimum_count_pass"]=false
+                bandReports.append(report);return nil
+            }
+            samples.sort();let z=samples[samples.count/2],deviations=samples.map{abs($0-z)}.sorted()
+            let mad=deviations[deviations.count/2],p10=samples[samples.count/10],p90=samples[samples.count*9/10],spread=p90-p10
             let point = transform*SIMD4((u-cx)*z/fx,(v-cy)*z/fy,z,1)
+            report["median_m"]=number(z);report["MAD_m"]=number(mad);report["p10_m"]=number(p10);report["p90_m"]=number(p90)
+            report["spread_m"]=number(spread);report["median_xyz_m"]=[point.x,point.y,point.z].map(number)
+            report["minimum_count_pass"]=samples.count>=9;report["MAD_pass"]=mad<=0.025;report["spread_pass"]=spread<=0.06
+            let failure=samples.count<9 ? "insufficient_valid_samples" : mad>0.025 ? "MAD_exceeded" : spread>0.06 ? "p90_p10_exceeded" : nil
+            report["rejection_stage"]=failure as Any? ?? NSNull();bandReports.append(report)
+            guard failure==nil else {return nil}
             return (SIMD3(point.x,point.y,point.z),z)
         }
-        guard let upper = band(0.18), let middle = band(0.50), let lower = band(0.82) else { return nil }
+        let upperBand=band("top",0.18),middleBand=band("middle",0.50),lowerBand=band("bottom",0.82)
+        info["bands"]=bandReports
+        guard let upper=upperBand,let middle=middleBand,let lower=lowerBand else {
+            let failed=bandReports.filter{($0["rejection_stage"] as? String) != nil}.map{($0["label"] as! String)+":"+($0["rejection_stage"] as! String)}
+            info["failed_bands"]=failed;return rejected("band_depth_quality")
+        }
         let diameter = (right-left)*middle.depth/fx
+        let bandAxis=upper.point-lower.point,length=simd_length(bandAxis),fittedHeight=length/0.64
+        let middleDeviation=simd_distance(middle.point,(upper.point+lower.point)/2)
+        info["diameter_m"]=number(diameter);info["fitted_height_m"]=number(fittedHeight)
+        info["axis_up_fraction"]=length>0 ? number(bandAxis.z/length):NSNull()
+        info["middle_deviation_m"]=number(middleDeviation)
         guard let surface = fit(topBand:upper.point,middleBand:middle.point,bottomBand:lower.point,
-            diameterMeters:diameter) else { return nil }
+            diameterMeters:diameter) else {
+            if !diameter.isFinite || !(0.04...0.09).contains(diameter) {return rejected("diameter_outside_can_range")}
+            if !length.isFinite || !(0.09...0.18).contains(fittedHeight) {return rejected("height_outside_can_range")}
+            if !(bandAxis.z>=0.6*length) {return rejected("axis_not_upright")}
+            if !(middleDeviation<=0.025) {return rejected("middle_band_not_on_axis")}
+            return rejected("invalid_fitted_sections")
+        }
         let a = SIMD3(surface.top[0],surface.top[1],surface.top[2])
         let b = SIMD3(surface.bottom[0],surface.bottom[1],surface.bottom[2])
         let axis = simd_normalize(a-b)
         let origin = SIMD3(transform.columns.3.x,transform.columns.3.y,transform.columns.3.z)
         let ray = middle.point-origin, radial = ray-axis*simd_dot(ray,axis)
-        guard simd_length(radial) > 0.01 else { return nil }
+        info["radial_ray_length_m"]=number(simd_length(radial))
+        guard simd_length(radial) > 0.01 else { return rejected("radial_ray_too_short") }
         let offset = simd_normalize(radial)*(diameter/2)
         func shifted(_ p:[Double])->[Double] { [p[0]+offset.x,p[1]+offset.y,p[2]+offset.z] }
-        return Self(top:shifted(surface.top),middle:shifted(surface.middle),bottom:shifted(surface.bottom),
+        let sections=Self(top:shifted(surface.top),middle:shifted(surface.middle),bottom:shifted(surface.bottom),
             heightMeters:surface.heightMeters,diameterMeters:diameter,
             surfaceToAxisOffsetMeters:[offset.x,offset.y,offset.z])
+        info["status"]="accepted";info["rejection_stage"]=NSNull()
+        return(sections,info)
     }
 }
 
@@ -1226,7 +1280,25 @@ struct ROBWorkspaceSearchSchedule {
             ROBWorkspaceView(panDegrees:0,upperTarget:6306),.init(panDegrees:-30,upperTarget:6306),
             .init(panDegrees:30,upperTarget:6306),.init(panDegrees:0,upperTarget:5650),
             .init(panDegrees:30,upperTarget:5650),.init(panDegrees:-30,upperTarget:5650)] : []
-        pending = recalled + nearby + (coarse + fallback).map { Job(view:$0,target:nil) }
+        // Calibrated pan gain makes native ±55° approximately the physical
+        // side bearings. The old ±45° raster misses objects directly beside
+        // ROB. Cover both side-floor heights after recall even when recall
+        // exists for only one requested object. The native envelope owns the
+        // admitted pan: absent a wider configured envelope, remain at ±45°.
+        var sideFloor:[ROBWorkspaceView]=[]
+        if !targets.isEmpty {
+            for sign in [1.0,-1.0] {
+                for (upper,pans) in [(5650,[55.0,60.0]),(5300,[60.0,55.0])] {
+                    for candidate in pans {
+                        let pan=boundedPan(sign*candidate)
+                        guard pan.isFinite,abs(pan)>45,
+                              !sideFloor.contains(where:{abs($0.panDegrees-pan)<3 && abs($0.upperTarget-upper)<100}) else {continue}
+                        sideFloor.append(.init(panDegrees:pan,upperTarget:upper))
+                    }
+                }
+            }
+        }
+        pending = recalled + sideFloor.map {Job(view:$0,target:nil)} + nearby + (coarse + fallback).map { Job(view:$0,target:nil) }
         plannedViewCount = pending.count
     }
     static func clipped(_ box: [Double]) -> Bool {

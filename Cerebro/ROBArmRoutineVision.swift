@@ -1738,20 +1738,67 @@ struct ROBWorkspaceCanSelection {
                     var measurement: ROBWorkspaceLocatedObject?
                     if target == .can, let depth = frame.depth, let k = frame.intrinsics {
                         var candidates: [(detection: ROBWorkspaceDetection, object: ROBWorkspaceLocatedObject)] = []
+                        var sectionDiagnostics: [[String:Any]] = []
+                        var sectionSource: [String:Any] = ["sequence":NSNumber(value:frame.sequence),
+                            "captured_at_ms":frame.capturedAt,"camera_generation":frame.cameraGeneration.uuidString,
+                            "body_motion_identity":collisionMap?.bodyMotionIdentity ?? sceneBodyIdentity,
+                            "model_id":model.modelID,"geometry_id":model.geometryID,"mapping_id":model.selectedMappingID,
+                            "physical_arm":model.physicalSide,"depth_width":depth.width,"depth_height":depth.height,
+                            "runtime_calibration_identity":k.runtimeCalibration?.identity as Any? ?? NSNull(),
+                            "camera_service_source_sha256":k.cameraServiceSourceSHA256 as Any? ?? NSNull(),
+                            "rgb_output_undistorted_contract":k.rgbOutputUndistorted as Any? ?? NSNull(),
+                            "estimated_camera_projection_identity":estimatedCamera?.identity as Any? ?? NSNull(),
+                            "registration_id":measuredCamera?.registration.id as Any? ?? NSNull(),
+                            "capture_time_refreshed":false,"geometry_thresholds_changed":false]
+                        do {
+                            let sourceScope=try ROBFixedHeadCalibrationWindowController.shared.scope(model:model,frame:frame)
+                            sectionSource["raw_neck_pan_target"]=sourceScope.panTarget
+                            sectionSource["raw_neck_lower_target"]=sourceScope.lowerTarget
+                            sectionSource["raw_neck_upper_target"]=sourceScope.upperTarget
+                            sectionSource["raw_neck_source"]="stationary held-view scope for this source frame; accepted commands, not measured shaft angles"
+                        } catch { sectionSource["source_scope_error"]=error.localizedDescription }
+                        entry["can_section_source"]=sectionSource
                         var rejected = 0
                         for candidate in observation.cans ?? [observation.can] {
-                            guard let sections = ROBWorkspaceCanSections.measure(detection:candidate,width:depth.width,height:depth.height,
+                            let result=ROBWorkspaceCanSections.measureWithDiagnostics(detection:candidate,width:depth.width,height:depth.height,
                                 fx:k.fx,fy:k.fy,cx:k.cx,cy:k.cy,depth:{ depth.distanceMillimeters(x:$0,y:$1) },view:view,model:model,
-                                cameraToRobot:cameraTransform),
-                                  tabletopCanBaseHeight.map({ abs(sections.bottom[2]-$0) <= 0.15 }) ?? true else { rejected += 1; continue }
+                                cameraToRobot:cameraTransform)
+                            var diagnostic=result.diagnostics
+                            diagnostic["source"]=sectionSource
+                            diagnostic["section_measurement_accepted"]=result.sections != nil
+                            guard let sections=result.sections else {
+                                diagnostic["candidate_admission_status"]="section_measurement_rejected"
+                                sectionDiagnostics.append(diagnostic);rejected += 1;continue
+                            }
+                            guard tabletopCanBaseHeight.map({abs(sections.bottom[2]-$0)<=0.15}) ?? true else {
+                                diagnostic["status"]="rejected";diagnostic["rejection_stage"]="tabletop_base_height_disagreement"
+                                diagnostic["measured_base_z_m"]=sections.bottom[2]
+                                diagnostic["tabletop_base_z_m"]=tabletopCanBaseHeight!
+                                diagnostic["candidate_admission_status"]="rejected_after_section_measurement"
+                                sectionDiagnostics.append(diagnostic);rejected += 1;continue
+                            }
                             let object = ROBWorkspaceLocatedObject(target:.can,position:sections.middle,confidence:candidate.confidence,
                                 capturedAt:frame.capturedAt,sequence:frame.sequence,view:view,sections:sections,registrationID:measuredCamera?.registration.id)
                             if let registration = measuredCamera?.registration,
-                               !registration.validRobotVolume.contains(object.point) { rejected += 1; continue }
-                            guard (try? ROBLeftCanReachCalibration.load(model:model,can:object,
-                                estimatedCameraProjectionIdentity:estimatedCamera?.identity)) != nil else { rejected += 1; continue }
+                               !registration.validRobotVolume.contains(object.point) {
+                                diagnostic["status"]="rejected";diagnostic["rejection_stage"]="outside_fixed_head_registration_volume"
+                                diagnostic["candidate_admission_status"]="rejected_after_section_measurement"
+                                sectionDiagnostics.append(diagnostic);rejected += 1;continue
+                            }
+                            do {
+                                _ = try ROBLeftCanReachCalibration.load(model:model,can:object,
+                                    estimatedCameraProjectionIdentity:estimatedCamera?.identity)
+                            } catch {
+                                diagnostic["status"]="rejected";diagnostic["rejection_stage"]="reach_calibration_configuration_invalid"
+                                diagnostic["reason"]=error.localizedDescription
+                                diagnostic["candidate_admission_status"]="rejected_after_section_measurement"
+                                sectionDiagnostics.append(diagnostic);rejected += 1;continue
+                            }
+                            diagnostic["candidate_admission_status"]="accepted"
+                            sectionDiagnostics.append(diagnostic)
                             candidates.append((candidate,object))
                         }
+                        entry["can_section_diagnostics"]=sectionDiagnostics
                         let candidateContext = ROBWorkspaceCanSceneIdentity(sceneID:collisionMap?.sceneID,
                             cameraGeneration:frame.cameraGeneration,sessionGeneration:sceneGatewayGeneration,
                             bodyMotionIdentity:collisionMap?.bodyMotionIdentity ?? sceneBodyIdentity,

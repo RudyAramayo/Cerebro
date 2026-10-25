@@ -369,6 +369,27 @@ private final class CorkscrewFixtureMap:ROBWorkspaceCollisionMap {
                     depth:source,view:view,model:model)
             }
             let measured = sections(detection,depth)!
+            func measuredDiagnostics(_ source:(Int,Int)->UInt16?)->(sections:ROBWorkspaceCanSections?,diagnostics:[String:Any]) {
+                ROBWorkspaceCanSections.measureWithDiagnostics(detection:detection,width:width,height:height,
+                    fx:fx,fy:fy,cx:cx,cy:cy,depth:source,view:view,model:model)
+            }
+            let acceptedDiagnostic=measuredDiagnostics(depth)
+            precondition(acceptedDiagnostic.sections?.valid==true && acceptedDiagnostic.diagnostics["status"] as? String=="accepted")
+            precondition((acceptedDiagnostic.diagnostics["bands"] as? [[String:Any]])?.count==3)
+            precondition(JSONSerialization.isValidJSONObject(acceptedDiagnostic.diagnostics))
+            let missingDiagnostic=measuredDiagnostics{_,_ in nil}
+            let missingBands=missingDiagnostic.diagnostics["bands"] as! [[String:Any]]
+            precondition(missingDiagnostic.sections==nil && missingBands.count==3 && missingDiagnostic.diagnostics["rejection_stage"] as? String=="band_depth_quality")
+            precondition(missingBands.allSatisfy{($0["missing_count"] as? Int ?? 0)>=9 && $0["valid_count"] as? Int==0 && ($0["raw_mm"] as! [Any]).count<=49},
+                "A failed first band must not suppress bounded raw evidence for the other bands")
+            let topBandPixel=minY+(maxY-minY)*0.18
+            let topZeroDiagnostic=measuredDiagnostics{x,y in abs(Double(y)-topBandPixel)<5 ? 0:depth(x,y)}
+            let topZeroBands=topZeroDiagnostic.diagnostics["bands"] as! [[String:Any]]
+            precondition(topZeroDiagnostic.sections==nil && (topZeroBands[0]["zero_count"] as! Int)>0)
+            precondition(topZeroBands.dropFirst().allSatisfy{$0["minimum_count_pass"] as? Bool==true && $0["median_xyz_m"] != nil})
+            let spreadDiagnostic=measuredDiagnostics{x,y in (x+y).isMultiple(of:2) ? 500:700}
+            precondition(spreadDiagnostic.sections==nil && (spreadDiagnostic.diagnostics["bands"] as! [[String:Any]]).allSatisfy{$0["spread_pass"] as? Bool==false})
+            precondition(JSONSerialization.isValidJSONObject(topZeroDiagnostic.diagnostics) && JSONSerialization.isValidJSONObject(missingDiagnostic.diagnostics))
             precondition(measured.valid && abs(measured.heightMeters-canHeight) < 0.006)
             precondition(abs(measured.diameterMeters-canDiameter) < 0.008)
             precondition(measured.top[2] > measured.middle[2] && measured.middle[2] > measured.bottom[2])
@@ -404,6 +425,10 @@ private final class CorkscrewFixtureMap:ROBWorkspaceCollisionMap {
             let clipped = ROBWorkspaceDetection(visible:true,confidence:0.9,box:[0.01,box[1],box[2],box[3]],
                 aim:center,depthPoint:center)
             precondition(sections(clipped,depth) == nil,"Clipped boxes cannot supply a measured full can height")
+            var invalidReads=0
+            let clippedDiagnostic=ROBWorkspaceCanSections.measureWithDiagnostics(detection:clipped,width:width,height:height,
+                fx:fx,fy:fy,cx:cx,cy:cy,depth:{x,y in invalidReads+=1;return depth(x,y)},view:view,model:model)
+            precondition(clippedDiagnostic.diagnostics["rejection_stage"] as? String=="clipped_box" && invalidReads==0)
             precondition(ROBWorkspaceCanSections.fit(topBand:SIMD3(0.6,0.04,0.86),middleBand:SIMD3(0.6,0,0.86),
                 bottomBand:SIMD3(0.6,-0.04,0.86),diameterMeters:canDiameter) == nil,
                 "A fallen can cannot be treated as upright")
@@ -452,6 +477,28 @@ private final class CorkscrewFixtureMap:ROBWorkspaceCollisionMap {
             precondition(search.next(confirmed:[.can,.orangeBucket]) == nil && search.attempted.count == completedViews,
                 "Both fresh confirmations must stop the search before another neck move")
             precondition(completedViews == 2)
+            let onlyCanRecall=ROBWorkspaceRecall(modelID:model.modelID,geometryID:model.geometryID,sightings:[canHint])
+            var sideSearch=ROBWorkspaceSearchSchedule(targets:[.can,.orangeBucket],recall:onlyCanRecall,now:now,
+                boundedPan:{max(-60,min(60,$0))})
+            precondition(sideSearch.next(confirmed:[])==canHint.centeredView)
+            var earlySides:[ROBWorkspaceView]=[]
+            for _ in 0..<8 {earlySides.append(sideSearch.next(confirmed:[.can])!)}
+            for pan in [-60.0,-55,55,60] {for upper in [5650,5300] {
+                precondition(earlySides.contains{ $0.panDegrees==pan && $0.upperTarget==upper },
+                    "A can-only recall hid the missing object's physical side-floor bearings behind the old front raster")
+            }}
+            for pan in [-55.0,55] {
+                let raw=6000+pan/0.03,physical=(raw-6015)*90/Double(7841-6015)
+                precondition(abs(abs(physical)-90)<2,"Early side views must actually cover the operator-calibrated physical90degree bearings")
+            }
+            precondition(sideSearch.next(confirmed:[.can,.orangeBucket])==nil)
+            var clampedSides=ROBWorkspaceSearchSchedule(targets:[.can,.orangeBucket],recall:onlyCanRecall,now:now,
+                boundedPan:{max(-50,min(50,$0))})
+            var clamped:[ROBWorkspaceView]=[]
+            for _ in 0..<4 {clamped.append(clampedSides.next(confirmed:[.can])!)}
+            precondition(clamped.count==4 && Set(clamped.map{ "\($0.panDegrees):\($0.upperTarget)" }).count==4)
+            precondition(clamped.allSatisfy{abs($0.panDegrees)==50 && [5300,5650].contains($0.upperTarget)},
+                "Native bounds must clamp side views without repeating equivalent55/60 requests")
             precondition(ROBWorkspaceSearchSchedule.recallQuality([0.4,0.4,0.6,0.7]) >
                 ROBWorkspaceSearchSchedule.recallQuality(canHint.box),"A clipped glimpse must not replace a better current-search recall view")
 
@@ -500,7 +547,7 @@ private final class CorkscrewFixtureMap:ROBWorkspaceCollisionMap {
             var hangingViews = 0
             while hanging.next(confirmed:[]) != nil { hangingViews += 1 }
             precondition(hangingViews == 3,"An empty object target list must retain the hanging inspection scan")
-            print("Search schedule: clipped can centered, missing bucket reached in2views, confirmed pair stops; fresh rotated scene gets6broadviews, all\(ROBWorkspaceView.sweep.count) fallback intervals retained, distinctcanNMS preserves2instances/max8, hanging scan retained")
+            print("Search schedule: recalls first, physical90degree side-floor coverage early with can-only recall, native bounds/dedup retained; confirmed pair stops; all original raster intervals and hanging scan retained")
             return
         }
         if CommandLine.arguments.last == "can-vector" {
