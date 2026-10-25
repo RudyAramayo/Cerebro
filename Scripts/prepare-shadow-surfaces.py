@@ -12,7 +12,7 @@ from pathlib import Path
 import sys
 
 import numpy as np
-from scipy.spatial import ConvexHull
+from shadow_surface_envelope import serialized_convex_envelope
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("rig", type=Path)
@@ -28,10 +28,7 @@ mesh_dir.mkdir(exist_ok=True)
 for part in rig["segments"]:
     points = np.frombuffer(base64.b64decode(part["positions"]), dtype="<f4").reshape(-1, 3).astype(float)
     normals = np.frombuffer(base64.b64decode(part["normals"]), dtype="<f4").reshape(-1, 3).astype(float)
-    hull = ConvexHull(points)
-    vertices, inverse = np.unique(hull.simplices, return_inverse=True)
-    mesh = "".join("v %.9f %.9f %.9f\n" % tuple(p) for p in points[vertices])
-    mesh += "".join("f %d %d %d\n" % tuple(f + 1) for f in inverse.reshape(-1, 3))
+    mesh, envelope = serialized_convex_envelope(points)
     path = mesh_dir / (part["link"] + ".obj")
     path.write_text(mesh)
     # Deterministic 5 mm voxel representatives, then a bounded uniform sample.
@@ -40,6 +37,7 @@ for part in rig["segments"]:
     surfaces.append(dict(link=part["link"], points=np.round(points[ids], 6).tolist(),
                          normals=np.round(normals[ids], 6).tolist(),
                          hull=str(path.relative_to(output)), hullSHA256=hashlib.sha256(path.read_bytes()).hexdigest(),
+                         envelopeConstruction=envelope,
                          radius=float(np.max(np.linalg.norm(points, axis=1)))))
 document = dict(schemaVersion=1, modelID=reference["modelID"], referenceID=reference["referenceID"],
                 sourceSHA256=hashlib.sha256(args.rig.read_bytes()).hexdigest(),
