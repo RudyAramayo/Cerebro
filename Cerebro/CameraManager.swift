@@ -577,7 +577,7 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     }
 
     func setCalibrationCaptureOverride(token: UUID, resolution: String, stereoMode: String) {
-        guard role == .face, resolution == "640x400", ["standard", "near_field"].contains(stereoMode) else { return }
+        guard role == .face, ["640x400", "640x480"].contains(resolution), ["standard", "near_field"].contains(stereoMode) else { return }
         sessionQueue.async { [weak self] in
             guard let self else { return }
             self.calibrationCaptureOverride = (token, resolution, stereoMode)

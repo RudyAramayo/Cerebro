@@ -53,7 +53,7 @@ the pipeline stops.
 Auto-calibration is explicitly OFF for factory and profile workers. An applied
 profile also explicitly disables all three specification-translation policies.
 The packet's `runtime_calibration` binds device, role, SDK, factory EEPROM hash,
-effective-runtime semantic hash, actual HOST stereo-policy hash and optional
+effective-runtime semantic hash, actual HOST stereo/RGB-normalization policy hash and optional
 candidate/profile hashes. `runtime_calibration_identity` hashes the prefix
 `runtime-camera-calibration-v1` followed by those eight fields in that order,
 joined by LF with no final LF; absent candidate/profile values use `-`. HOST
@@ -77,6 +77,33 @@ image field or nearby body surfaces. Body registration remains unaccepted;
 native stereo and RGB alignment are being checked separately. No uniform depth
 scale or arm-registration exemption was applied.
 
+### RGB raster check, 25 October 2026
+
+Separate, single-output captures at the same held head pose showed that changing
+the Camera RGB undistortion request changed SDK distortion/alignment metadata
+without the predicted several-pixel image warp. The request flag and a reported
+zero-distortion vector therefore did not establish the raster's geometry.
+
+The FACE path now requests one Camera RGB output with undistortion disabled,
+then explicitly runs SDK `ImageManip` with the CPU backend preference and
+`setUndistort(True)`. It preserves the frame dimensions and RGB format and feeds
+the postprocessed output to RGB-D synchronization, depth alignment and detection.
+An exact same-exposure control measured **0.603 px strict QR corner prediction
+error**, versus **6.20 px** for unchanged pixel coordinates. Actual HOST backend
+and normalization configuration enter the runtime policy hash; metadata alone
+still does not prove a particular frame's warp. The belly path is unchanged
+pending its own independent pixel/metric check.
+
+The remaining off-axis left-floor center optical-Z residual was **+28.6–31.8 mm**
+after this change. Source age in the CPU control was approximately **260 ms**.
+These local measurements do not establish a global metric pass. No depth scale,
+camera-to-body registration or successful arm grasp/delivery is claimed.
+
+Engineering note: face NN input now derives from the normalized RGB stream at
+capture cadence with bounded input queues, rather than a separate 5 fps Camera
+request. Loaded-model throughput and latency have not been measured; freshness
+limits remain unchanged.
+
 CPU-only profile, identity and restoration fixtures run with
 `python3 -B Scripts/test-runtime-stereo-calibration.py` in the calibration Python
 environment. They do not open a camera or actuate ROB.
@@ -86,9 +113,19 @@ environment. They do not open a camera or actuate ROB.
 Open **Testing Sandbox → Camera-to-arm registration → Open fixed-head
 calibration**. Choose the physical arm whose model mapping will be used. Hold a
 head view containing visible base-fixed and torso surfaces and choose **Capture
-+ fit current head pose**. This captures five actual RGB-D frames after a
-one-second delivered-frame warmup. It never activates, positions or calibrates
-an arm. Both arms are reserved against competing operations during acquisition.
++ fit current head pose**. This captures five actual RGB-D frames after two
+seconds of advancing source frames in the requested camera mode. It never
+activates, positions or calibrates an arm. Both arms are reserved against
+competing operations during acquisition.
+
+**Full camera height (640 × 480)** optionally requests the full-height view;
+the default remains **640 × 400**. This helps seek a shared view of rigid body
+surfaces and an object's full height, without promising that either is visible
+or that registration will pass. Both sizes retain exact requested dimensions,
+stereo-mode readbacks, source settling/freshness, unchanged head/body and camera
+identity, and all independent fit/validation gates. A different resolution or
+camera mode needs its own matching scope; moving the neck after registration
+does not preserve the fixed-view measurement.
 
 The automatic fitter uses the pinned robot CAD only as a physical surface
 reference and initial pose hypothesis. It fits distinct spatial patches on the

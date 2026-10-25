@@ -9,22 +9,24 @@ struct ROBFixedHeadCaptureFrameGate {
     let requestedAtMilliseconds: Double
     let previousCameraGeneration: UUID?
     let stereoMode: String
+    let expectedHeight: Int
     private var generation: UUID?
     private var lastSequence: UInt64 = 0
     private var lastCapturedAt = 0.0
     private var firstEligible: Double?
 
-    init(requestedAtMilliseconds: Double, previousCameraGeneration: UUID?, stereoMode: String) {
+    init(requestedAtMilliseconds: Double, previousCameraGeneration: UUID?, stereoMode: String, fullHeight: Bool = false) {
         self.requestedAtMilliseconds = requestedAtMilliseconds
         self.previousCameraGeneration = previousCameraGeneration
         self.stereoMode = stereoMode
+        expectedHeight = fullHeight ? 480 : 400
     }
 
     mutating func accepts(cameraGeneration: UUID, sequence: UInt64, capturedAt: Double,
         nowMilliseconds: Double, width: Int, height: Int, intrinsics: CameraIntrinsics) -> Bool {
         guard capturedAt.isFinite, nowMilliseconds.isFinite,
               (0...500).contains(nowMilliseconds-capturedAt), capturedAt >= requestedAtMilliseconds,
-              previousCameraGeneration.map({ cameraGeneration != $0 }) ?? true, width == 640, height == 400,
+              previousCameraGeneration.map({ cameraGeneration != $0 }) ?? true, width == 640, height == expectedHeight,
               intrinsics.stereoMode == stereoMode, intrinsics.stereoModeSource == "sdk_initial_config_readback",
               intrinsics.stereoExtendedDisparity == (stereoMode == "near_field"),
               intrinsics.stereoSubpixel == (stereoMode == "standard"),
@@ -53,6 +55,7 @@ struct ROBFixedHeadCaptureFrameGate {
     private let side = NSPopUpButton()
     private let referenceError = NSTextField(string: "20")
     private let nearFieldDepth = NSButton(checkboxWithTitle: "Near-field body depth", target: nil, action: nil)
+    private let fullCameraHeight = NSButton(checkboxWithTitle: "Full camera height (640 × 480)", target: nil, action: nil)
     private let holdCameraMode = NSButton(checkboxWithTitle: "Hold camera mode for review", target: nil, action: nil)
     private let image = NSImageView()
     private let details = NSTextView()
@@ -115,8 +118,11 @@ struct ROBFixedHeadCaptureFrameGate {
         row.addArrangedSubview(NSTextField(labelWithString: "Assumed CAD reference uncertainty (mm):"))
         row.addArrangedSubview(referenceError); root.addArrangedSubview(row)
         nearFieldDepth.identifier = NSUserInterfaceItemIdentifier("fixed-head-near-field-depth")
-        nearFieldDepth.toolTip = "Temporarily uses 640 × 400 extended-disparity depth for nearby robot surfaces. Restores the previous camera demand after capture."
+        nearFieldDepth.toolTip = "Temporarily uses extended-disparity depth for nearby robot surfaces. Restores the previous camera demand after capture."
         root.addArrangedSubview(nearFieldDepth)
+        fullCameraHeight.identifier = NSUserInterfaceItemIdentifier("fixed-head-full-camera-height")
+        fullCameraHeight.toolTip = "Includes more of the scene above and below the usual crop, to help keep an object and ROB's body in one held view. Capture still requires fresh native depth and the selected dimensions."
+        root.addArrangedSubview(fullCameraHeight)
         holdCameraMode.identifier = NSUserInterfaceItemIdentifier("fixed-head-hold-camera-mode")
         holdCameraMode.toolTip = "Keep this camera mode and source available after fitting or a diagnostic failure. Stop or close the window to restore ordinary camera demand."
         root.addArrangedSubview(holdCameraMode)
@@ -151,6 +157,7 @@ struct ROBFixedHeadCaptureFrameGate {
         captureButton.isEnabled = !isRunning; importButton.isEnabled = !isRunning
         side.isEnabled = !isRunning; referenceError.isEnabled = !isRunning
         nearFieldDepth.isEnabled = !isRunning
+        fullCameraHeight.isEnabled = !isRunning
         holdCameraMode.isEnabled = !isRunning
         stopButton.isEnabled = isRunning || cameraDemandCaptureID != nil
         stopButton.title = isRunning ? "Stop capture" : "Stop camera review"
@@ -202,7 +209,7 @@ struct ROBFixedHeadCaptureFrameGate {
             self.finishCapture(token: token, holdModeForReview: keepModeForReview && !Task.isCancelled)
         }
     }
-    private func beginCapture(token: UUID, stereoMode: String) throws {
+    private func beginCapture(token: UUID, stereoMode: String, resolution: String) throws {
         guard !ROBLeftArmTrial.shared.isRunning, !ROBArmRoutineCoordinator.shared.isRunning,
               !ROBArmRoutineCoordinator.shared.ownsPhysicalMotion, !ROBNeckQRCalibration.shared.isRunning,
               !ROBAmberGestureExecutor.shared.isExecuting, !ROBShowMotionCoordinator.shared.isRunning,
@@ -218,7 +225,7 @@ struct ROBFixedHeadCaptureFrameGate {
         ROBArmRoutineVision.shared.setActive(true)
         cameraDemandCaptureID = token
         NotificationCenter.default.post(name: Self.cameraDemandChanged, object: self,
-            userInfo: ["active": true, "captureID": token.uuidString, "resolution": "640x400", "stereoMode": stereoMode])
+            userInfo: ["active": true, "captureID": token.uuidString, "resolution": resolution, "stereoMode": stereoMode])
         display("Starting the RGB-D camera; waiting for fresh fixed-pose frames…")
     }
     private func releaseCameraDemand(token: UUID) {
@@ -257,9 +264,11 @@ struct ROBFixedHeadCaptureFrameGate {
         }
         let model = try ROBGhostRobotModel(directory: resources, physicalSide: side.indexOfSelectedItem == 0 ? "right" : "left")
         let stereoMode = nearFieldDepth.state == .on ? "near_field" : "standard"
+        let fullHeight = fullCameraHeight.state == .on
+        let resolution = fullHeight ? "640x480" : "640x400"
         let previousCameraGeneration = ROBArmRoutineVision.shared.snapshot()["face"]?.cameraGeneration
         let requestedAtMilliseconds = Date().timeIntervalSince1970 * 1000
-        try beginCapture(token: token, stereoMode: stereoMode)
+        try beginCapture(token: token, stereoMode: stereoMode, resolution: resolution)
         let expected = readNeck?() ?? [:]
         let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Cerebro/FixedHeadRegistration/Captures")
         let destination = root.appendingPathComponent(UUID().uuidString)
@@ -268,7 +277,7 @@ struct ROBFixedHeadCaptureFrameGate {
         var records: [[String: Any]] = [], firstScope: ROBFixedHeadRegistrationScope?
         let deadline = ProcessInfo.processInfo.systemUptime + 40
         var frameGate = ROBFixedHeadCaptureFrameGate(requestedAtMilliseconds: requestedAtMilliseconds,
-            previousCameraGeneration: previousCameraGeneration, stereoMode: stereoMode)
+            previousCameraGeneration: previousCameraGeneration, stereoMode: stereoMode, fullHeight: fullHeight)
         while records.count < 5 {
             try checkPose(expected)
             guard ProcessInfo.processInfo.systemUptime < deadline else {

@@ -27,6 +27,24 @@ The sandbox catalog contains these independent test items:
 
 Status is shared across the sandbox. The scrollable status area shows the complete pending operation scope; the spoken prompt remains **“Can I move my arms?”**. Stop + hold stays available regardless of the selected test.
 
+## Fixed-head camera capture
+
+**Camera-to-arm registration → Open fixed-head calibration** offers an optional
+**Full camera height (640 × 480)** checkbox; the default is **640 × 400**. Use it
+to seek one held view containing both rigid base/torso surfaces and a complete
+can. A taller image does not guarantee that body occlusion, depth coverage or
+registration will pass. Capture still requires the exact requested dimensions
+and observed stereo mode, fresh advancing source frames after settling, unchanged
+head/body and camera identity, and the same independent fitter/validation gates.
+
+The FACE worker now uses explicit CPU `ImageManip` undistortion because a Camera
+request flag alone changed metadata without the expected pixel warp. The
+same-exposure pixel check passed, but a **+28.6–31.8 mm** local floor optical-Z
+residual remains and source age was approximately **260 ms**. The belly processing
+path is unchanged pending independent proof. This camera correction supplies no
+depth scale, arm registration or grasp-success claim. See the measured limits in
+[fixed-head commissioning](fixed-head-pickup-commissioning.md#rgb-raster-check-25-october-2026).
+
 ## Passive belly calibration
 
 Place the B01 and B02 sheets flat on the floor with their 120 mm black squares

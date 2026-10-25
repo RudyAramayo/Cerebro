@@ -1129,11 +1129,12 @@ final class CameraViewController: NSViewController {
               let identifier = notification.userInfo?["captureID"] as? String,
               let token = UUID(uuidString: identifier) else { return }
         if active {
-            guard notification.userInfo?["resolution"] as? String == "640x400",
+            guard let resolution = notification.userInfo?["resolution"] as? String,
+                  ["640x400", "640x480"].contains(resolution),
                   let mode = notification.userInfo?["stereoMode"] as? String,
                   ["standard", "near_field"].contains(mode) else { return }
             fixedHeadCalibrationCaptureID = token
-            cameraManager?.setCalibrationCaptureOverride(token: token, resolution: "640x400", stereoMode: mode)
+            cameraManager?.setCalibrationCaptureOverride(token: token, resolution: resolution, stereoMode: mode)
         } else {
             guard fixedHeadCalibrationCaptureID == token else { return }
             fixedHeadCalibrationCaptureID = nil

@@ -62,9 +62,9 @@ final class Identity {
     func applyRecordingDemand(){recordingRefreshes+=1}
     func reconcileCameraSession(){reconciliations+=1}
     /* DEMAND */
-    func deliver(_ active:Bool,_ token:UUID,_ mode:String="near_field") {
+    func deliver(_ active:Bool,_ token:UUID,_ mode:String="near_field",_ resolution:String="640x400") {
         fixedHeadCalibrationDemandDidChange(Notification(name:Notification.Name("test"),userInfo:[
-            "active":active,"captureID":token.uuidString,"resolution":"640x400","stereoMode":mode]))
+            "active":active,"captureID":token.uuidString,"resolution":resolution,"stereoMode":mode]))
         cameraManager.settle()
     }
 }
@@ -111,6 +111,16 @@ final class Identity {
         let belly=Manager(.belly)
         belly.setCalibrationCaptureOverride(token:a,resolution:"640x400",stereoMode:"near_field");belly.settle()
         precondition(belly.depthClient!.calls.isEmpty,"Face calibration changed the belly camera")
+        let fullManager=Manager()
+        fullManager.setCalibrationCaptureOverride(token:a,resolution:"640x480",stereoMode:"standard");fullManager.settle()
+        precondition(fullManager.depthClient!.calls.last!.0=="640x480" && fullManager.generationChanges==1)
+        let fullCalls=fullManager.depthClient!.calls.count
+        fullManager.setCalibrationCaptureOverride(token:b,resolution:"640x512",stereoMode:"standard");fullManager.settle()
+        precondition(fullManager.depthClient!.calls.count==fullCalls,"Unreviewed calibration dimensions were accepted")
+        fullManager.clearCalibrationCaptureOverride(token:b);fullManager.settle()
+        precondition(fullManager.calibrationCaptureOverride?.token==a,"A stale token cleared the full-height demand")
+        fullManager.clearCalibrationCaptureOverride(token:a);fullManager.settle()
+        precondition(fullManager.depthClient!.calls.last!.0==nil && fullManager.generationChanges==2)
 
         let demand=Demand();demand.deliver(true,a);demand.deliver(true,b)
         let refreshes=demand.recordingRefreshes
@@ -118,6 +128,12 @@ final class Identity {
         precondition(demand.fixedHeadCalibrationCaptureID==b && demand.recordingRefreshes==refreshes)
         demand.deliver(false,b)
         precondition(demand.fixedHeadCalibrationCaptureID==nil && demand.cameraManager.calibrationCaptureOverride==nil)
+        demand.deliver(true,a,"standard","640x480")
+        precondition(demand.cameraManager.calibrationCaptureOverride?.resolution=="640x480",
+            "Full-height notification was dropped or rewritten before reaching the camera")
+        demand.deliver(true,b,"standard","640x512")
+        precondition(demand.fixedHeadCalibrationCaptureID==a,"Unsupported dimensions displaced the valid capture")
+        demand.deliver(false,a)
 
         var k=CameraIntrinsics(fx:400,fy:400,cx:320,cy:200)
         k.stereoMode="near_field";k.stereoModeSource="sdk_initial_config_readback"
@@ -144,6 +160,16 @@ final class Identity {
         let nearIdentity=try Identity.intrinsicsIdentity(.init(intrinsics:k))
         let standardIdentity=try Identity.intrinsicsIdentity(.init(intrinsics:standard))
         precondition(nearIdentity != standardIdentity,"Mode change reused a body registration scope")
+        var fullGate=ROBFixedHeadCaptureFrameGate(requestedAtMilliseconds:10_000,
+            previousCameraGeneration:old,stereoMode:"near_field",fullHeight:true)
+        precondition(!fullGate.accepts(cameraGeneration:fresh,sequence:1,capturedAt:11_000,
+            nowMilliseconds:11_100,width:640,height:400,intrinsics:k),"An old crop satisfied full-height capture")
+        precondition(!fullGate.accepts(cameraGeneration:fresh,sequence:1,capturedAt:11_000,
+            nowMilliseconds:11_100,width:640,height:480,intrinsics:k))
+        precondition(fullGate.accepts(cameraGeneration:fresh,sequence:2,capturedAt:13_000,
+            nowMilliseconds:13_100,width:640,height:480,intrinsics:k),"Full-height source skipped or never completed settling")
+        let fullIdentity=try Identity.intrinsicsIdentity(.init(depth:.init(width:640,height:480),intrinsics:k))
+        precondition(fullIdentity != nearIdentity,"Different image dimensions reused a registration scope")
 
         let review=Review()
         review.captureCurrentView()
@@ -172,7 +198,7 @@ final class Identity {
         precondition(review.cameraDemandCaptureID==newer,"Stale completion released newer held camera demand")
         review.windowWillClose(Notification(name:Notification.Name("closed")))
         precondition(review.cameraDemandCaptureID==nil && ROBAmberArmMotionArbiter.shared.releases==10)
-        print("PASS fixed-head near-field: token restoration/stale cleanup, face-only override, SDK readback, real-source settling/restarts and mode-bound registration identity")
+        print("PASS fixed-head capture: crop/full-height dimensions, token restoration/stale cleanup, face-only override, SDK readback, source settling/restarts and mode/dimension-bound registration identity")
     }
 }
 '''

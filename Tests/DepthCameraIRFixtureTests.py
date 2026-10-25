@@ -113,14 +113,34 @@ def run_fixtures():
         def setBlocking(self, value): pass
 
     class Output:
-        def link(self, target): pass
+        def __init__(self): self.targets = []
+        def link(self, target): self.targets.append(target)
         def createOutputQueue(self, *args, **kwargs): return object()
 
     class Camera:
         requests = []
+        def __init__(self): self.output_requests, self.outputs = [], []
         def build(self, value): self.socket = value; return self
         def requestOutput(self, size, **kwargs):
-            self.requests.append((self.socket, size, kwargs)); return Output()
+            self.output_requests.append(dict(size=list(size), **kwargs))
+            self.requests.append((self.socket, size, kwargs))
+            output = Output(); self.outputs.append(output); return output
+
+    class ManipConfig:
+        ResizeMode = SimpleNamespace(STRETCH=1)
+        def __init__(self):
+            self.value = {"base": {"operations": []}, "reusePreviousImage": False, "skipCurrentImage": False}
+        def setUndistort(self, value): self.value["base"]["undistort"] = value
+        def getUndistort(self): return self.value["base"]["undistort"]
+        def setOutputSize(self, width, height, mode):
+            self.value["base"].update(outputWidth=width, outputHeight=height, resizeMode=mode)
+        def setFrameType(self, value): self.value["outputFrameType"] = value
+
+    class Manip:
+        Backend = SimpleNamespace(CPU=0, HW=1)
+        def __init__(self): self.initialConfig, self.inputImage, self.out = ManipConfig(), Input(), Output()
+        def setBackend(self, value): self.backend = value
+        def setMaxOutputFrameSize(self, value): self.output_bytes = value
 
     class Stereo:
         PresetMode = SimpleNamespace(ROBOTICS="robotics")
@@ -178,11 +198,15 @@ def run_fixtures():
     class Pipeline:
         AutoCalibrationMode = SimpleNamespace(OFF="off")
         stereo_nodes = []
-        def __init__(self, device, fail=False): self.device, self.fail = device, fail
+        def __init__(self, device, fail=False):
+            self.device, self.fail, self.nodes = device, fail, []
+            Pipeline.latest = self
         def __enter__(self): return self
         def __exit__(self, *args): pass
         def create(self, kind):
             node = kind()
+            node.id = len(self.nodes)
+            self.nodes.append(node)
             if kind is Stereo: self.stereo_nodes.append(node)
             return node
         def start(self):
@@ -194,9 +218,16 @@ def run_fixtures():
             self.auto_mode = mode
         def getAutoCalibrationMode(self): return self.auto_mode
         def serializeToJson(self, _):
-            return {"nodes": [[1, {"properties": {"useHomographyRectification": False,
+            nodes = [[-1, {"properties": {"useHomographyRectification": False,
                 "disparityToDepthUseSpecTranslation": None, "rectificationUseSpecTranslation": None,
-                "depthAlignmentUseSpecTranslation": None}}]]}
+                "depthAlignmentUseSpecTranslation": None}}]]
+            for node in self.nodes:
+                if isinstance(node, Camera):
+                    nodes.append([node.id, {"id": node.id, "name": "Camera", "properties": {"outputRequests": node.output_requests}}])
+                elif isinstance(node, Manip):
+                    nodes.append([node.id, {"id": node.id, "name": "ImageManip", "properties": {
+                        "backend": node.backend, "initialConfig": node.initialConfig.value, "outputFrameSize": node.output_bytes}}])
+            return {"nodes": nodes}
 
     for supported, size, mono, usb, expected_fps,mode,role in [
             (True, (640, 400), (640, 400), "high", 10.,"standard","face"),
@@ -211,8 +242,8 @@ def run_fixtures():
         fake = SimpleNamespace(__version__="3.8.0", Device=lambda *args: device, DeviceInfo=lambda value: value,
             Pipeline=Pipeline, UsbSpeed=SimpleNamespace(HIGH="high"),
             Platform=SimpleNamespace(RVC2="rvc2", RVC3="rvc3", RVC4="rvc4"),
-            node=SimpleNamespace(Camera=Camera, StereoDepth=Stereo, Sync=Sync),
-            ImgFrame=SimpleNamespace(Type=SimpleNamespace(RGB888i="rgb", GRAY8="gray")),
+            node=SimpleNamespace(Camera=Camera, StereoDepth=Stereo, Sync=Sync, ImageManip=Manip),
+            ImgFrame=SimpleNamespace(Type=SimpleNamespace(RGB888i=9, GRAY8=30)), ImageManipConfig=ManipConfig,
             ImgResizeMode=SimpleNamespace(CROP="crop"), CameraBoardSocket=SimpleNamespace(CAM_B="b", CAM_C="c"))
         stop = threading.Event(); stop.set()
         with patch.object(service, "load_depthai", return_value=fake), \
@@ -238,9 +269,24 @@ def run_fixtures():
         assert len(Camera.requests) == 3
         assert [entry[1] for entry in Camera.requests] == [size, mono, mono]
         assert all(entry[2]["fps"] == expected_fps for entry in Camera.requests)
-        assert Camera.requests[0][2]["enableUndistortion"] is True
+        assert Camera.requests[0][2]["enableUndistortion"] is (role == "belly")
+        normalization = evidence["runtimeStereoPolicy"]["rgbNormalization"]
+        assert normalization["cameraRole"] == role and normalization["pixelWarpVerifiedByMetadata"] is False
+        assert evidence["requestedPipeline"]["cameraEnableUndistortion"] is (role == "belly")
+        assert evidence["requestedPipeline"]["postRGBUndistortionRequested"] is True
+        assert normalization["method"] == ("explicit_image_manip" if role == "face" else "camera_request")
         assert all(entry[2]["enableUndistortion"] is False for entry in Camera.requests[1:])
         stereo = Pipeline.stereo_nodes[0]
+        rgb_camera = next(n for n in Pipeline.latest.nodes if isinstance(n, Camera) and n.socket == "rgb")
+        sync = next(n for n in Pipeline.latest.nodes if isinstance(n, Sync))
+        if role == "face":
+            manip = next(n for n in Pipeline.latest.nodes if isinstance(n, Manip))
+            assert rgb_camera.outputs[0].targets == [manip.inputImage]
+            assert stereo.inputAlignTo in manip.out.targets and sync.inputs["rgb"] in manip.out.targets
+            assert stereo.inputAlignTo not in rgb_camera.outputs[0].targets
+        else:
+            assert not any(isinstance(n, Manip) for n in Pipeline.latest.nodes)
+            assert stereo.inputAlignTo in rgb_camera.outputs[0].targets and sync.inputs["rgb"] in rgb_camera.outputs[0].targets
         assert stereo.rectification_calls == [False], "Both camera roles must request only mesh rectification"
         assert stereo.output_size == size and stereo.left_right is True and stereo.subpixel is (mode=="standard")
         assert stereo.extended is (mode=="near_field")

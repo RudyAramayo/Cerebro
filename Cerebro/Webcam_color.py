@@ -45,6 +45,9 @@ def verified_running_service_source_sha256(running_module_code, source_path):
 RUNNING_SERVICE_SOURCE_SHA256 = verified_running_service_source_sha256(
     sys._getframe().f_code, __file__)
 RGB_OUTPUT_UNDISTORTED = True
+# Isolated backend preference: change only after a same-exposure pixel and
+# metric check. The SDK does not expose its resolved execution backend.
+FACE_RGB_NORMALIZATION_BACKEND = "CPU"
 PROTOCOL_MAGIC = b"CDP1"
 PROTOCOL_VERSION = 2
 FRAME_SIZE = (640, 400)
@@ -291,7 +294,43 @@ def runtime_stereo_calibration_session(device, pipeline, dai, role, factory, loa
                 raise RuntimeError("runtime calibration restoration failed: " + "; ".join(errors))
 
 
-def runtime_stereo_policy(pipeline, stereo, dai, profile_applied):
+def observed_rgb_normalization(graph, descriptor, dai):
+    """Bind stable, actual HOST image configuration; never infer raster proof."""
+    nodes = graph.get("pipeline", graph).get("nodes", [])
+    nodes = [row[1] if isinstance(row, list) and len(row) == 2 else row for row in nodes]
+    def node(node_id, name):
+        found = [n for n in nodes if isinstance(n, dict) and n.get("id") == node_id and n.get("name") == name]
+        if len(found) != 1:
+            raise RuntimeError("RGB normalization HOST " + name + " configuration unavailable/ambiguous")
+        return found[0]["properties"]
+    camera = node(descriptor["cameraNodeID"], "Camera")
+    requests = camera.get("outputRequests", [])
+    if len(requests) != 1 or requests[0].get("enableUndistortion") is not descriptor["cameraEnableUndistortion"]:
+        raise RuntimeError("RGB normalization requires the declared single Camera output")
+    result = {"schemaVersion": 1, "source": "actual_host_configuration_not_firmware_pixel_status",
+        "cameraRole": descriptor["cameraRole"], "method": descriptor["method"],
+        "cameraOutputRequest": requests[0], "outputUndistortedRequested": True,
+        "resolvedBackendObserved": False, "resolvedBackend": None, "pixelWarpVerifiedByMetadata": False}
+    if descriptor["method"] == "explicit_image_manip":
+        properties = node(descriptor["manipNodeID"], "ImageManip")
+        config = properties.get("initialConfig", {})
+        base = config.get("base", {})
+        width, height = descriptor["frameSize"]
+        if (properties.get("backend") != int(getattr(dai.node.ImageManip.Backend, descriptor["backend"]))
+                or base.get("undistort") is not True or base.get("operations") != []
+                or base.get("outputWidth") != width or base.get("outputHeight") != height
+                or base.get("resizeMode") != int(dai.ImageManipConfig.ResizeMode.STRETCH)
+                or config.get("outputFrameType") != int(dai.ImgFrame.Type.RGB888i)
+                or config.get("reusePreviousImage") is not False or config.get("skipCurrentImage") is not False
+                or properties.get("outputFrameSize") != width * height * 3):
+            raise RuntimeError("RGB normalization HOST ImageManip configuration differs from requested path")
+        result.update(backendRequested=descriptor["backend"], imageManipProperties=properties)
+    elif descriptor["method"] != "camera_request":
+        raise RuntimeError("Unknown RGB normalization path")
+    return result
+
+
+def runtime_stereo_policy(pipeline, stereo, dai, profile_applied, rgb_normalization=None):
     auto_mode = pipeline.getAutoCalibrationMode()
     if auto_mode != dai.Pipeline.AutoCalibrationMode.OFF:
         raise RuntimeError("camera runtime auto-calibration was not confirmed OFF")
@@ -313,9 +352,12 @@ def runtime_stereo_policy(pipeline, stereo, dai, profile_applied):
     if profile_applied and any(properties.get(key) is not False for key in
             ("disparityToDepthUseSpecTranslation", "rectificationUseSpecTranslation", "depthAlignmentUseSpecTranslation")):
         raise RuntimeError("runtime profile HOST calibrated-translation policies were not confirmed")
-    return {"schemaVersion": 1, "source": "actual_host_configuration_not_firmware_resolved_strategy",
+    policy = {"schemaVersion": 1, "source": "actual_host_configuration_not_firmware_resolved_strategy",
             "autoCalibrationMode": str(auto_mode), "stereoMode": observed_stereo_configuration(stereo),
             "stereoDepthProperties": properties}
+    if rgb_normalization is not None:
+        policy["rgbNormalization"] = observed_rgb_normalization(graph, rgb_normalization, dai)
+    return policy
 
 
 def runtime_calibration_identity(value):
@@ -348,7 +390,7 @@ def finalize_runtime_calibration(state, device, pipeline, stereo, dai, role):
         state["calibrationSource"] = "RUNTIME_PROFILE"
     else:
         state["calibrationSource"] = ("FACTORY" if calibration_semantic_sha256(effective) == state["factorySemanticSHA256"] else "OBSERVED_EXISTING_RUNTIME")
-    policy = runtime_stereo_policy(pipeline, stereo, dai, state["applied"])
+    policy = runtime_stereo_policy(pipeline, stereo, dai, state["applied"], state.get("rgbNormalization"))
     value = {"schemaVersion": 1, "actualDeviceMXID": device.getMxId(), "cameraRole": role,
         "sdkVersion": str(dai.__version__), "factoryEEPROMSHA256": state["factoryEEPROMSHA256"],
         "effectiveRuntimeCalibrationSHA256": calibration_semantic_sha256(effective),
@@ -542,6 +584,13 @@ def write_calibration_evidence(device, calibration, dai, role, frame_size, mono_
             for key in ("disparityToDepthUseSpecTranslation", "depthAlignmentUseSpecTranslation", "rectificationUseSpecTranslation"):
                 document["requestedPipeline"][key] = properties.get(key)
             document["requestedPipeline"]["autoCalibrationMode"] = runtime_state["stereoPolicy"]["autoCalibrationMode"]
+            if "rgbNormalization" in runtime_state["stereoPolicy"]:
+                normalization = runtime_state["stereoPolicy"]["rgbNormalization"]
+                document["requestedPipeline"].update(rgbNormalization=normalization,
+                    cameraEnableUndistortion=normalization["cameraOutputRequest"]["enableUndistortion"],
+                    postRGBUndistortionRequested=normalization["outputUndistortedRequested"])
+            if "faceNNInput" in runtime_state:
+                document["requestedPipeline"]["faceNNInput"] = runtime_state["faceNNInput"]
         encoded = (json.dumps(document, sort_keys=True, indent=2, allow_nan=False)+"\n").encode("utf-8")
         directory = ir_status_directory()
         evidence_directory = os.path.join(directory, "CalibrationEvidence")
@@ -871,6 +920,46 @@ def configure_latest_input(node_input, size=2):
     # DepthAI 3.8 Node.Input uses setMaxSize (not the v2 setQueueSize).
     node_input.setMaxSize(size)
     node_input.setBlocking(False)
+
+
+def configure_rgb_output(pipeline, dai, camera, role, frame_size, frame_rate):
+    """One Camera request; FACE uses the independently checked explicit warp."""
+    if role not in ("face", "belly"):
+        raise ValueError("invalid RGB camera role")
+    output = camera.requestOutput(frame_size, type=dai.ImgFrame.Type.RGB888i,
+        resizeMode=dai.ImgResizeMode.CROP, fps=frame_rate, enableUndistortion=(role == "belly"))
+    descriptor = {"schemaVersion": 1, "cameraRole": role, "cameraNodeID": int(camera.id),
+        "cameraEnableUndistortion": role == "belly", "frameSize": list(frame_size), "method": "camera_request"}
+    if role == "face":
+        manip = pipeline.create(dai.node.ImageManip)
+        manip.setBackend(getattr(dai.node.ImageManip.Backend, FACE_RGB_NORMALIZATION_BACKEND))
+        manip.initialConfig.setUndistort(True)
+        manip.initialConfig.setOutputSize(*frame_size, dai.ImageManipConfig.ResizeMode.STRETCH)
+        manip.initialConfig.setFrameType(dai.ImgFrame.Type.RGB888i)
+        manip.setMaxOutputFrameSize(frame_size[0] * frame_size[1] * 3)
+        configure_latest_input(manip.inputImage)
+        output.link(manip.inputImage)
+        if manip.initialConfig.getUndistort() is not True:
+            raise RuntimeError("FACE RGB ImageManip did not retain explicit undistortion")
+        output = manip.out
+        descriptor.update(method="explicit_image_manip", manipNodeID=int(manip.id), backend=FACE_RGB_NORMALIZATION_BACKEND)
+    return output, descriptor
+
+
+def configure_face_nn_input(pipeline, dai, rgb_output, frame_size, nn_size):
+    """Resize the already normalized RGB; never request a second camera view."""
+    if tuple(frame_size) == tuple(nn_size):
+        return rgb_output
+    manip = pipeline.create(dai.node.ImageManip)
+    manip.setBackend(getattr(dai.node.ImageManip.Backend, FACE_RGB_NORMALIZATION_BACKEND))
+    manip.initialConfig.setUndistort(False)
+    # Preserve normalized detection coordinates for the aligned depth stream.
+    manip.initialConfig.setOutputSize(*nn_size, dai.ImageManipConfig.ResizeMode.STRETCH)
+    manip.initialConfig.setFrameType(dai.ImgFrame.Type.RGB888i)
+    manip.setMaxOutputFrameSize(nn_size[0] * nn_size[1] * 3)
+    configure_latest_input(manip.inputImage, size=1)
+    rgb_output.link(manip.inputImage)
+    return manip.out
 
 
 def stereo_capture_size(frame_size):
@@ -1606,7 +1695,7 @@ def frame_payload(
     sidewalk_deviation=None, sidewalk_confidence=None, chess_pieces=None,
     captured_at_milliseconds=None, rgb_calibrated_lens_position=None,
     depth_alignment_method=None, imu_telemetry=None, stereo_configuration=None,
-    stereo_length_unit_meter=None, runtime_calibration=None
+    stereo_length_unit_meter=None, runtime_calibration=None, rgb_normalization=None
 ):
     rgb_width = int(rgb_frame.getWidth())
     rgb_height = int(rgb_frame.getHeight())
@@ -1699,6 +1788,9 @@ def frame_payload(
     if runtime_calibration is not None:
         header["runtime_calibration_identity"] = runtime_calibration_identity(runtime_calibration)
         header["runtime_calibration"] = runtime_calibration
+    if rgb_normalization is not None:
+        header["rgb_normalization"] = rgb_normalization
+        header["rgb_output_undistorted_semantics"] = "post_RGB_HOST_normalization_request_not_per_frame_pixel_proof"
     header_bytes = json.dumps(
         header, ensure_ascii=False, separators=(",", ":")
     ).encode("utf-8")
@@ -1710,13 +1802,13 @@ def send_frame(
     sidewalk_deviation=None, sidewalk_confidence=None, chess_pieces=None,
     captured_at_milliseconds=None, rgb_calibrated_lens_position=None,
     depth_alignment_method=None, imu_telemetry=None, stereo_configuration=None,
-    stereo_length_unit_meter=None, runtime_calibration=None
+    stereo_length_unit_meter=None, runtime_calibration=None, rgb_normalization=None
 ):
     header, rgb_bytes, depth_bytes, left_bytes, right_bytes = frame_payload(
         rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
         sidewalk_deviation, sidewalk_confidence, chess_pieces, captured_at_milliseconds,
         rgb_calibrated_lens_position, depth_alignment_method, imu_telemetry, stereo_configuration,
-        stereo_length_unit_meter, runtime_calibration
+        stereo_length_unit_meter, runtime_calibration, rgb_normalization
     )
     client.sendall(PROTOCOL_MAGIC + struct.pack(">I", len(header)) + header)
     client.sendall(rgb_bytes)
@@ -1836,13 +1928,9 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                     "eeprom" if calibrated_lens_position is not None else "unavailable",
                     calibrated_lens_position,
                 ))
-                rgb_output = rgb_camera.requestOutput(
-                    frame_size,
-                    type=dai.ImgFrame.Type.RGB888i,
-                    resizeMode=dai.ImgResizeMode.CROP,
-                    fps=frame_rate,
-                    enableUndistortion=RGB_OUTPUT_UNDISTORTED,
-                )
+                rgb_output, rgb_normalization = configure_rgb_output(
+                    pipeline, dai, rgb_camera, role, frame_size, frame_rate)
+                runtime_state["rgbNormalization"] = rgb_normalization
 
                 # OAK-D Pro is an RVC2 device. DepthAI's automatic v3 Depth node
                 # does not always infer its OV9282 stereo pair, so wire the two
@@ -1887,6 +1975,11 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                 nn_model = None
                 nn_queue = None
                 face_model_labels = []
+                if role == "face":
+                    runtime_state["faceNNInput"] = {"enabled": False, "source": "post_normalized_rgb",
+                        "sourceCadenceFPS": frame_rate, "inputSize": None, "resizeMode": "STRETCH",
+                        "inputQueueSize": 1, "depthInputQueueSize": 1, "explicitCadenceLimitFPS": None,
+                        "throughputMeasured": False}
                 script_dir = os.path.dirname(os.path.abspath(__file__))
 
                 if role == "belly":
@@ -1914,20 +2007,19 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                             nn_model.setNumClasses(manifest["num_classes"])
                             nn_model.setCoordinateSize(manifest["coordinate_size"])
                             nn_model.setIouThreshold(manifest["iou_threshold"])
-                            nn_input_stream = rgb_camera.requestOutput(
-                                (manifest["input_width"], manifest["input_height"]),
-                                type=dai.ImgFrame.Type.RGB888i,
-                                resizeMode=dai.ImgResizeMode.CROP,
-                                fps=5.0,
-                                enableUndistortion=RGB_OUTPUT_UNDISTORTED,
-                            )
+                            nn_input_stream = configure_face_nn_input(pipeline, dai, rgb_output,
+                                frame_size, (manifest["input_width"], manifest["input_height"]))
                             nn_input_stream.link(nn_model.input)
                             stereo.depth.link(nn_model.inputDepth)
                             face_model_labels = manifest["labels"]
+                            runtime_state["faceNNInput"].update(enabled=True,
+                                inputSize=[manifest["input_width"], manifest["input_height"]])
                         except Exception as error:
                             emit_error("Failed to initialize manifested face spatial neural network: " + str(error))
                             nn_model = None
                             face_model_labels = []
+                if role == "face":
+                    emit("CEREBRO_DEPTHCAM_FACE_NN_INPUT " + json.dumps(runtime_state["faceNNInput"], separators=(",", ":")))
 
                 sync = pipeline.create(dai.node.Sync)
                 sync.setSyncThreshold(SYNC_THRESHOLD)
@@ -2065,6 +2157,7 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                         stereo_configuration=stereo_configuration,
                         stereo_length_unit_meter=stereo_length_unit_meter,
                         runtime_calibration=runtime_provenance,
+                        rgb_normalization=runtime_state["stereoPolicy"]["rgbNormalization"],
                     )
                     send_finished = time.monotonic()
                     if send_finished - last_timing_at >= 5:

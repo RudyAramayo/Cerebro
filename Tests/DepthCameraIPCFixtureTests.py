@@ -139,12 +139,15 @@ def running_worker_provenance_fixture():
     original = SERVICE_PATH.read_bytes()
     changed = original.replace(b"RGB_OUTPUT_UNDISTORTED = True", b"RGB_OUTPUT_UNDISTORTED = False", 1)
     assert changed != original
-    # Inspect the actual call sites, without constructing an SDK or device.
-    calls = [node for node in ast.walk(ast.parse(original)) if isinstance(node, ast.Call)
-             and isinstance(node.func, ast.Attribute) and node.func.attr == "requestOutput"
-             and isinstance(node.func.value, ast.Name) and node.func.value.id == "rgb_camera"]
-    assert calls and all(any(keyword.arg == "enableUndistortion" and isinstance(keyword.value, ast.Name)
-                            and keyword.value.id == "RGB_OUTPUT_UNDISTORTED" for keyword in call.keywords) for call in calls)
+    # Camera request flags alone did not prove raster undistortion. All stream
+    # setup must now use the checked normalization helper, including NN input.
+    tree = ast.parse(original)
+    stream = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "stream_camera")
+    calls = [node for node in ast.walk(stream) if isinstance(node, ast.Call)]
+    assert sum(isinstance(node.func, ast.Name) and node.func.id == "configure_rgb_output" for node in calls) == 1
+    assert sum(isinstance(node.func, ast.Name) and node.func.id == "configure_face_nn_input" for node in calls) == 1
+    assert not any(isinstance(node.func, ast.Attribute) and node.func.attr == "requestOutput"
+                   and isinstance(node.func.value, ast.Name) and node.func.value.id == "rgb_camera" for node in calls)
     with tempfile.TemporaryDirectory(prefix="cerebro-worker-provenance-") as directory:
         path = Path(directory) / "worker.py"
         path.write_bytes(original)
