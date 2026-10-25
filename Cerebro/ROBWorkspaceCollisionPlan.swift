@@ -462,6 +462,17 @@ struct ROBWorkspaceIntentionalContact: Codable, Equatable {
     }
 }
 
+/// Evidence for the existing, invariant selected-arm mounting base. This
+/// exempts no occupied return and creates no observed/free map cells.
+struct ROBWorkspaceStaticRobotLinkEvidence: Codable, Equatable {
+    let kind:String
+    let link:String
+    let bodyMotionIdentity:String
+    let frameColumnMajor:[Double]
+    let lowMeters:[Double]
+    let highMeters:[Double]
+}
+
 struct ROBWorkspaceCollisionContext: Codable, Equatable {
     let sceneID: UUID
     let cameraGeneration: UUID
@@ -477,6 +488,7 @@ struct ROBWorkspaceCollisionContext: Codable, Equatable {
     let checkedAtMilliseconds: Double
     var intentionalContactFingerprint: String? = nil
     var visualTrial: ROBWorkspaceVisualCalibrationTrial? = nil
+    var skippedStaticRobotLinks:[ROBWorkspaceStaticRobotLinkEvidence]? = nil
     var spatialErrorAllowanceMeters: Double {
         visualTrial?.assumedSpatialErrorMeters ?? registrationUncertaintyMeters ?? .infinity
     }
@@ -514,7 +526,8 @@ struct ROBWorkspaceInitialEmptyRetreat: Codable, Equatable {
             emptyTrialEligibility:emptyTrialEligibility,emptyStateEvidenceSource:emptyStateEvidenceSource)
         guard checked.checkedPoseCount==checkedPoseCount,checked.maximumHullTravelMeters==maximumHullTravelMeters,
               checked.initialProxyClearancesMeters==initialProxyClearancesMeters,
-              checked.endpointProxyClearancesMeters==endpointProxyClearancesMeters else {
+              checked.endpointProxyClearancesMeters==endpointProxyClearancesMeters,
+              checked.context.skippedStaticRobotLinks==context.skippedStaticRobotLinks else {
             throw ROBGhostMotionError.blocked("The initial EMPTY retreat geometry proof changed.")
         }
     }
@@ -545,6 +558,25 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
     static let openJawAdditionalMarginMeters = 0.04
     static let maximumPoseChecks = 12_000
     static let maximumPlanningSeconds = 10.0
+
+    static func invariantSelectedArmBase(model:ROBGhostRobotModel,positions:[String:Double],
+        link:String,bodyMotionIdentity:String)->ROBWorkspaceStaticRobotLinkEvidence? {
+        guard link==model.physicalSide+"_base_link",!bodyMotionIdentity.isEmpty else{return nil}
+        var child=link,seen=Set<String>()
+        while child != "base_link" {
+            guard seen.insert(child).inserted,let joint=model.joints.first(where:{$0.child==child}),
+                  !joint.name.hasPrefix(model.armJointPrefix) else{return nil}
+            // The selected-arm mount itself is rigid; body articulation is
+            // frozen independently by the trial/map body identity.
+            if child==link && joint.kind != "fixed" {return nil}
+            child=joint.parent
+        }
+        guard let frame=model.frames(positions)[link],let box=model.worldCollisionBounds(positions:positions)[link] else{return nil}
+        let matrix=(0..<4).flatMap{c in (0..<4).map{r in frame[c][r]}}
+        guard matrix.allSatisfy(\.isFinite),[box.low.x,box.low.y,box.low.z,box.high.x,box.high.y,box.high.z].allSatisfy(\.isFinite) else{return nil}
+        return .init(kind:"skipped_static_robot_link",link:link,bodyMotionIdentity:bodyMotionIdentity,frameColumnMajor:matrix,
+            lowMeters:[box.low.x,box.low.y,box.low.z],highMeters:[box.high.x,box.high.y,box.high.z])
+    }
 
     /// Planning takes the intersection of converted model limits and the
     /// exact raw-coordinate ranges the existing gateway accepts.
@@ -650,7 +682,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         map:any ROBWorkspaceCollisionMap,model:ROBGhostRobotModel,generation:UInt64,sceneID:UUID,cameraGeneration:UUID,
         nowMilliseconds:Double,trial:ROBWorkspaceVisualCalibrationTrial,measuredAtMilliseconds:Double,
         emptyTrialEligibility:Bool,emptyStateEvidenceSource:String) throws -> ROBWorkspaceInitialEmptyRetreat {
-        let context=try validateVisualCalibrationTrialMap(map,model:model,generation:generation,sceneID:sceneID,
+        var context=try validateVisualCalibrationTrialMap(map,model:model,generation:generation,sceneID:sceneID,
             cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds,trial:trial)
         let limits=jointBounds(model:model)
         // Eligibility is an explicit operator/task-history declaration, NOT
@@ -730,6 +762,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         guard initial.allSatisfy({ pair,first in endpoint[pair]!>=0.030 && (first>=0.030 || endpoint[pair]!>first+0.000001) }) else {
             throw ROBGhostMotionError.blocked("Initial retreat must strictly improve every existing proxy deficit and finish with ordinary 30 mm self clearance.")
         }
+        context.skippedStaticRobotLinks=checker.staticRobotLinkEvidence
         return .init(context:context,baseline:start,goal:goal,step:.init(positions:goal,seconds:4,stage:"Initial EMPTY nonworsening self-proxy retreat"),
             checkedPoseCount:checker.checked,maximumHullTravelMeters:maximumTravel,
             initialProxyClearancesMeters:initial,endpointProxyClearancesMeters:endpoint,
@@ -797,6 +830,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
             if step.jawAction == .release { carrying = false }
             previous = step.positions
         }
+        context.skippedStaticRobotLinks=checker.staticRobotLinkEvidence
         return .init(context:context,baseline:baseline,goal:previous,steps:steps,payload:payload,checkedPoseCount:checker.checked,
             intentionalContact:intentionalContact,contactStepIndex:contactStepIndex,carryingAtStart:carryingAtStart)
     }
@@ -837,9 +871,12 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
               baseline == trial.baseline,goal == steps.last?.positions else {
             throw ROBGhostMotionError.blocked("The reviewed visual-calibration trial or path changed. Build a new explicitly scoped proposal.")
         }
-        _ = try Self.reviewUsingContext(baseline:baseline,steps:steps,map:map,model:model,context:current,
+        let reviewed = try Self.reviewUsingContext(baseline:baseline,steps:steps,map:map,model:model,context:current,
             nowMilliseconds:nowMilliseconds,payload:payload,intentionalContact:intentionalContact,
             contactStepIndex:contactStepIndex,carryingAtStart:carryingAtStart)
+        guard reviewed.context.skippedStaticRobotLinks==context.skippedStaticRobotLinks else {
+            throw ROBGhostMotionError.blocked("The invariant static robot-link evidence changed; review the current body and arm context again.")
+        }
     }
 
     /// Deterministic bounded joint-space search. Current/goal poses, every
@@ -974,6 +1011,7 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         var selfProxyClearance:ROBWorkspaceSelfProxyClearance? = nil
         let started = ProcessInfo.processInfo.systemUptime
         var checked = 0
+        var staticRobotLinkEvidence:[ROBWorkspaceStaticRobotLinkEvidence]? = nil
         var limits: [ClosedRange<Double>] { ROBWorkspaceCollisionPlan.jointBounds(model:model) }
         var exhausted: Bool { checked >= maximumPoseChecks || ProcessInfo.processInfo.systemUptime-started > maximumPlanningSeconds }
         mutating func segment(from start:[Double],to end:[Double],payload:ROBWorkspaceCarriedObject?) -> String? {
@@ -1021,7 +1059,18 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
             let margin = mechanicalClearanceMeters+context.spatialErrorAllowanceMeters+sweptPointTravelMeters+sqrt(3)*map.voxelSizeMeters/2
             for link in arms {
                 let box = bounds[link]!, extra = margin+(link == model.toolLink ? openJawAdditionalMarginMeters : 0)
-                if let reason = volume(low:box.low-SIMD3(repeating:extra),high:box.high+SIMD3(repeating:extra),label:link,payload:payload) { return reason }
+                var invariantStaticBase=false
+                if link==model.physicalSide+"_base_link",let trial=context.visualTrial,
+                   let scope=map.visualCalibrationScope,scope.bodyContextIsCurrent,scope.bodyMotionIdentity==trial.bodyMotionIdentity {
+                    guard let evidence=ROBWorkspaceCollisionPlan.invariantSelectedArmBase(model:model,positions:positions,link:link,
+                        bodyMotionIdentity:trial.bodyMotionIdentity) else {return "The selected arm base is not a proven invariant robot link."}
+                    if let prior=staticRobotLinkEvidence?.first {
+                        guard prior==evidence else{return "The selected arm base changed transform or bounds during the reviewed path."}
+                    } else {staticRobotLinkEvidence=[evidence]}
+                    invariantStaticBase=true
+                }
+                if let reason = volume(low:box.low-SIMD3(repeating:extra),high:box.high+SIMD3(repeating:extra),label:link,payload:payload,
+                    invariantStaticBase:invariantStaticBase) { return reason }
             }
             if let payload {
                 guard payload.valid, let tool = model.frames(positions)[model.toolLink] else { return "The carried-object envelope or tool transform is invalid." }
@@ -1038,7 +1087,25 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
             }
             return nil
         }
-        func volume(low:SIMD3<Double>,high:SIMD3<Double>,label:String,payload:ROBWorkspaceCarriedObject?) -> String? {
+        func volume(low:SIMD3<Double>,high:SIMD3<Double>,label:String,payload:ROBWorkspaceCarriedObject?,invariantStaticBase:Bool = false) -> String? {
+            if invariantStaticBase {
+                // The generic query may stop at its FIRST unknown voxel. Scan
+                // the entire bounded static envelope so an unknown return can
+                // never conceal an occupied obstacle later in the same box.
+                let size=map.voxelSizeMeters
+                guard size.isFinite,size>0,(0..<3).allSatisfy({low[$0].isFinite && high[$0].isFinite &&
+                    abs(low[$0])<=20 && abs(high[$0])<=20 && low[$0]<=high[$0]}) else{return "The static robot-link envelope is invalid."}
+                let lo=(0..<3).map{Int(floor(low[$0]/size))},hi=(0..<3).map{Int(floor(high[$0]/size))}
+                guard zip(lo,hi).allSatisfy({$1 >= $0 && $1-$0<=200}),zip(lo,hi).reduce(1,{$0*($1.1-$1.0+1)})<=250_000 else {
+                    return "The static robot-link occupied review exceeded its bounded volume."
+                }
+                for x in lo[0]...hi[0] {for y in lo[1]...hi[1] {for z in lo[2]...hi[2] {
+                    if map.state(at:SIMD3((Double(x)+0.5)*size,(Double(y)+0.5)*size,(Double(z)+0.5)*size)) == .occupied {
+                        return "\(label) would intersect an observed workspace obstacle. The invariant mount does not exempt occupied returns."
+                    }
+                }}}
+                return nil
+            }
             var state=map.state(inBoundsLow:low,high:high)
             if state == .occupied,let contact=intentionalContact,
                contact.permits(label:label,payload:payload,stepIndex:contactStepIndex) {

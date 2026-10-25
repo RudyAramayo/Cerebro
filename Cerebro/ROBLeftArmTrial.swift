@@ -28,6 +28,39 @@ struct ROBReviewedArmDispatchStart {
     }
 }
 
+/// Historical failure evidence only. No image, private instruction text or
+/// restored authority is encoded; the exact map is never altered for export.
+enum ROBInitialRetreatFailureExport {
+    static func write(recording:URL,map:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel,
+        baseline:[Double],goal:[Double],trial:ROBWorkspaceVisualCalibrationTrial,stage:String,
+        reviewTimeMilliseconds:Double,measuredAtMilliseconds:Double,sequence:UInt64,detail:String)throws->URL {
+        let directory=recording.deletingPathExtension().appendingPathExtension("initial-retreat-rejection-"+UUID().uuidString)
+        try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
+        let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
+        func save(_ data:Data,_ name:String)throws {
+            let path=directory.appendingPathComponent(name)
+            // Atomic temporary files remain inside the private0700 directory.
+            try data.write(to:path,options:.atomic)
+            try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:path.path)
+        }
+        let bytes=try encoder.encode(map)
+        try save(bytes,"collision-map.json")
+        let report:[String:Any]=["schemaVersion":1,"kind":"initial_empty_visual_retreat_rejection_diagnostic",
+            "stage":stage,"detail":detail,"motionAuthority":false,"registrationVerified":false,
+            "sourceFramesNotRetained":true,"privateInstructionTextRetained":false,
+            "recordingFile":recording.lastPathComponent,"physicalArm":model.physicalSide,
+            "modelID":model.modelID,"referenceID":model.referenceID,"geometryID":model.geometryID,
+            "mappingID":model.selectedMappingID,"resourceDirectory":model.directory.path,
+            "measuredBaseline":baseline,"goal":goal,"telemetrySequence":NSNumber(value:sequence),
+            "reviewTimeMilliseconds":reviewTimeMilliseconds,"measuredAtMilliseconds":measuredAtMilliseconds,
+            "mapFile":"collision-map.json","mapSHA256":ROBGhostRobotModel.hash(bytes),
+            "mapFingerprint":map.fingerprint,"mapByteCount":bytes.count,
+            "trial":try JSONSerialization.jsonObject(with:encoder.encode(trial))]
+        try save(JSONSerialization.data(withJSONObject:report,options:[.sortedKeys,.prettyPrinted]),"rejection.json")
+        return directory.appendingPathComponent("rejection.json")
+    }
+}
+
 /// Operator-supervised trials with fresh scene evidence and a complete
 /// dynamically checked arm sweep. Physical geometry still needs commissioning.
 /// Physical sides are explicit: LEFT=R11/gateway right, RIGHT=L10/gateway left.
@@ -1661,11 +1694,9 @@ struct ROBReviewedArmDispatchStart {
         let offset=[0,-0.075,0,0,0,0,0]
         let goal=zip(start,offset).map(+),session=generation,camera=vision.cameraGeneration
         let now=Date().timeIntervalSince1970*1000,measuredAt=now-sample.effectiveSampleAgeMilliseconds
-        let initialProof=try await Task.detached(priority:.userInitiated){
-            try ROBWorkspaceCollisionPlan.reviewInitialEmptyVisualCalibrationRetreat(from:start,to:goal,map:map,model:model,
-                generation:session,sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:now,trial:trial,
-                measuredAtMilliseconds:measuredAt,emptyTrialEligibility:true,emptyStateEvidenceSource:emptySource)
-        }.value
+        let initialProof=try await reviewInitialLocalRetreat(map:map,model:model,baseline:start,goal:goal,trial:trial,
+            generation:session,camera:camera,now:now,measuredAt:measuredAt,sequence:sample.sequence,
+            emptySource:emptySource,stage:"before_stationary_mode_preparation")
         try requireLiveVisualTrial(trial,map:map,model:model)
         let initialPath=ROBLeftGestureProposal(id:UUID(),name:"Initial declared-empty visual calibration retreat",kind:"initial_empty_visual_retreat",
             modelID:model.modelID,referenceID:model.referenceID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
@@ -1682,12 +1713,9 @@ struct ROBReviewedArmDispatchStart {
             throw ROBArmRoutineError.blocked("The explicit initial-retreat trial scope disappeared during stationary preparation.")
         }
         let dispatchGoal=zip(q,offset).map(+)
-        let proof=try await Task.detached(priority:.userInitiated){
-            try ROBWorkspaceCollisionPlan.reviewInitialEmptyVisualCalibrationRetreat(from:q,to:dispatchGoal,map:map,model:model,
-                generation:session,sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:reviewTime,trial:dispatchTrial,
-                measuredAtMilliseconds:reviewTime-reviewed.effectiveSampleAgeMilliseconds,
-                emptyTrialEligibility:true,emptyStateEvidenceSource:emptySource)
-        }.value
+        let proof=try await reviewInitialLocalRetreat(map:map,model:model,baseline:q,goal:dispatchGoal,trial:dispatchTrial,
+            generation:session,camera:camera,now:reviewTime,measuredAt:reviewTime-reviewed.effectiveSampleAgeMilliseconds,
+            sequence:reviewed.sequence,emptySource:emptySource,stage:"fresh_dispatch_start")
         let path=ROBLeftGestureProposal(id:initialPath.id,name:initialPath.name,kind:initialPath.kind,
             modelID:model.modelID,referenceID:model.referenceID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
             sessionGeneration:session,baseline:q,poses:[],steps:[proof.step])
@@ -1725,6 +1753,36 @@ struct ROBReviewedArmDispatchStart {
         collisionMap=nil;collisionModel=nil;collisionReviewProposal=nil;sceneCapturedForThisTask=false;localReceiptHeldNeckIdentity=nil
         update("Initial empty retreat completed; observing fresh can and workspace geometry before any grasp")
         return true
+    }
+
+    @MainActor private func reviewInitialLocalRetreat(map:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel,
+        baseline:[Double],goal:[Double],trial:ROBWorkspaceVisualCalibrationTrial,generation:UInt64,camera:UUID,
+        now:Double,measuredAt:Double,sequence:UInt64,emptySource:String,stage:String) async throws ->ROBWorkspaceInitialEmptyRetreat {
+        do {
+            return try await Task.detached(priority:.userInitiated){
+                try ROBWorkspaceCollisionPlan.reviewInitialEmptyVisualCalibrationRetreat(from:baseline,to:goal,map:map,model:model,
+                    generation:generation,sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:now,trial:trial,
+                    measuredAtMilliseconds:measuredAt,emptyTrialEligibility:true,emptyStateEvidenceSource:emptySource)
+            }.value
+        } catch {
+            let original=error,detail=error.localizedDescription,recording=lastRecordingPath
+            do {
+                guard !recording.isEmpty else {throw ROBArmRoutineError.blocked("No task recording path is available for the rejection export.")}
+                let evidence=try await Task.detached(priority:.utility){
+                    try ROBInitialRetreatFailureExport.write(recording:URL(fileURLWithPath:recording),map:map,model:model,
+                        baseline:baseline,goal:goal,trial:trial,stage:stage,reviewTimeMilliseconds:now,
+                        measuredAtMilliseconds:measuredAt,sequence:sequence,detail:detail)
+                }.value
+                var status=collisionReviewStatus as? [String:Any] ?? [:]
+                status["initial_retreat_rejection_evidence_path"]=evidence.path
+                status["status"]="blocked";status["detail"]=detail;collisionReviewStatus=status as NSDictionary
+            } catch {
+                var status=collisionReviewStatus as? [String:Any] ?? [:]
+                status["initial_retreat_rejection_export_error"]=error.localizedDescription;collisionReviewStatus=status as NSDictionary
+            }
+            // Export failure never replaces or softens the original rejection.
+            throw original
+        }
     }
 
     @MainActor private func executeEstimatedCalibration() async throws -> NSDictionary {
