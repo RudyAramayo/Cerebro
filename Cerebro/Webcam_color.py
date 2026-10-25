@@ -123,6 +123,133 @@ def write_ir_status(status):
                 pass
 
 
+def write_calibration_evidence(device, calibration, dai, role, frame_size, mono_size,
+                               requested_mxid=None, requested_stereo_mode="standard"):
+    """Read existing calibration once; never configure or write the device.
+
+    SDK metadata is evidence of what was returned, not physical metric accuracy
+    or proof of the firmware's resolved rectification/baseline strategy.
+    """
+    partial_path = pointer_temporary = None
+    try:
+        if role not in ("face", "belly"):
+            raise ValueError("invalid calibration evidence role")
+
+        def observe(owner, method, *args, _string_result=False, **kwargs):
+            getter = getattr(owner, method, None)
+            if not callable(getter):
+                return {"status": "unavailable", "method": method}
+            try:
+                value = getter(*args, **kwargs)
+                if _string_result:
+                    value = str(value)
+                value = json.loads(json.dumps(value, allow_nan=False))
+                return {"status": "observed", "method": method, "value": value}
+            except Exception as error:
+                return {"status": "error", "method": method, "detail": " ".join(str(error).split())}
+
+        mxid = observe(device, "getMxId")
+        actual_mxid = mxid.get("value")
+        if not isinstance(actual_mxid, str) or not actual_mxid:
+            actual_mxid = None
+        try:
+            rgb_socket = color_camera_socket(device, dai)
+            rgb_socket_observation = {"status": "observed", "value": str(rgb_socket)}
+        except Exception as error:
+            rgb_socket = None
+            rgb_socket_observation = {"status": "error", "detail": " ".join(str(error).split())}
+        sockets = [("rgb", rgb_socket), ("left", getattr(dai.CameraBoardSocket, "CAM_B", None)),
+                   ("right", getattr(dai.CameraBoardSocket, "CAM_C", None))]
+        cameras = []
+        for name, camera_socket in sockets:
+            record = {"name": name, "socket": str(camera_socket) if camera_socket is not None else None}
+            if camera_socket is not None:
+                size = frame_size if name == "rgb" else mono_size
+                record.update(defaultIntrinsics=observe(calibration, "getDefaultIntrinsics", camera_socket),
+                    eepromIntrinsicsAtRequestedSize={"requestedSize": list(size), "keepAspectRatio": True,
+                        **observe(calibration, "getCameraIntrinsics", camera_socket, *size, keepAspectRatio=True)},
+                    sourceDistortionCoefficients=observe(calibration, "getDistortionCoefficients", camera_socket),
+                    eepromLensPosition=observe(calibration, "getLensPosition", camera_socket),
+                    calibratedFovDegrees=observe(calibration, "getFov", camera_socket, False),
+                    specificationFovDegrees=observe(calibration, "getFov", camera_socket, True))
+                getter = getattr(calibration, "getDistortionModel", None)
+                try:
+                    record["sourceDistortionModel"] = {"status": "observed", "value": str(getter(camera_socket))} if callable(getter) else {"status": "unavailable"}
+                except Exception as error:
+                    record["sourceDistortionModel"] = {"status": "error", "detail": " ".join(str(error).split())}
+            cameras.append(record)
+        unit = getattr(getattr(dai, "LengthUnit", None), "METER", None)
+        pairs = []
+        for source, destination in [(sockets[1][1], sockets[2][1]), (sockets[1][1], rgb_socket), (sockets[2][1], rgb_socket)]:
+            pair = {"fromSocket": str(source), "toSocket": str(destination), "translationUnit": "meter"}
+            if unit is None or source is None or destination is None:
+                pair.update(status="unavailable", detail="Explicit SDK meter unit or camera socket is unavailable")
+            else:
+                for label, use_spec in [("calibrated", False), ("specification", True)]:
+                    pair[label] = {"useSpecTranslation": use_spec,
+                        "baselineDistance": observe(calibration, "getBaselineDistance", source, destination, use_spec, unit),
+                        "translationVector": observe(calibration, "getCameraTranslationVector", source, destination, use_spec, unit),
+                        "extrinsics": observe(calibration, "getCameraExtrinsics", source, destination, use_spec, unit)}
+            pairs.append(pair)
+        stored = {}
+        try:
+            eeprom = calibration.getEepromData()
+            for name in ("stereoEnableDistortionCorrection", "stereoUseSpecTranslation", "boardName", "boardRev", "productName", "deviceName"):
+                value = getattr(eeprom, name, None)
+                stored[name] = {"status": "unavailable"} if value is None else {"status": "observed", "value": value}
+        except Exception as error:
+            stored["readError"] = " ".join(str(error).split())
+        document = {"schemaVersion": 1, "kind": "depth_camera_startup_calibration_evidence", "role": role,
+            "timestampUTC": datetime.now(timezone.utc).isoformat(), "timestampUnixMilliseconds": time.time()*1000,
+            "processID": os.getpid(), "parentProcessID": os.getppid(), "cameraServiceSourceSHA256": RUNNING_SERVICE_SOURCE_SHA256,
+            "depthaiVersion": str(getattr(dai, "__version__", "unavailable")),
+            "actualDeviceMXID": actual_mxid, "deviceMXIDObservation": mxid, "requestedDeviceMXID": requested_mxid,
+            "rgbSocketSelection": rgb_socket_observation, "eepromExport": observe(calibration, "eepromToJson"),
+            "storedEEPROMFields": stored, "cameras": cameras, "cameraPairs": pairs,
+            "stereoLeftCameraID": observe(calibration, "getStereoLeftCameraId", _string_result=True),
+            "stereoRightCameraID": observe(calibration, "getStereoRightCameraId", _string_result=True),
+            "stereoLeftRectificationRotation": observe(calibration, "getStereoLeftRectificationRotation"),
+            "stereoRightRectificationRotation": observe(calibration, "getStereoRightRectificationRotation"),
+            "requestedPipeline": {"rgbSize": list(frame_size), "monoSize": list(mono_size),
+                "rgbUndistortion": RGB_OUTPUT_UNDISTORTED, "monoUndistortion": False,
+                "stereoMode": requested_stereo_mode, "rectificationPolicy": "UNSET/AUTO",
+                "disparityToDepthUseSpecTranslation": "UNSET", "depthAlignmentUseSpecTranslation": "UNSET",
+                "rectificationUseSpecTranslation": "UNSET", "resolvedStrategyObserved": False},
+            "intrinsicsScope": "EEPROM/default and explicit requested-size queries only; actual processed frame K remains in per-frame packet metadata",
+            "calibrationWrittenToDevice": False, "metricAccuracyVerified": False, "registrationVerified": False}
+        encoded = (json.dumps(document, sort_keys=True, indent=2, allow_nan=False)+"\n").encode("utf-8")
+        directory = ir_status_directory()
+        evidence_directory = os.path.join(directory, "CalibrationEvidence")
+        os.makedirs(evidence_directory, mode=0o700, exist_ok=True)
+        os.chmod(directory, 0o700); os.chmod(evidence_directory, 0o700)
+        descriptor, partial_path = tempfile.mkstemp(prefix=role+"-calibration-"+str(os.getpid())+"-", suffix=".json", dir=evidence_directory)
+        with os.fdopen(descriptor, "wb") as output:
+            os.fchmod(output.fileno(), 0o600); output.write(encoded); output.flush(); os.fsync(output.fileno())
+        evidence_path = partial_path
+        partial_path = None  # This unique completed evidence file is never replaced.
+        pointer = {key: document[key] for key in ("schemaVersion", "role", "timestampUTC", "timestampUnixMilliseconds",
+            "processID", "parentProcessID", "cameraServiceSourceSHA256", "depthaiVersion", "actualDeviceMXID")}
+        pointer.update(evidencePath=evidence_path, evidenceSHA256=hashlib.sha256(encoded).hexdigest(),
+            eepromExportStatus=document["eepromExport"]["status"])
+        descriptor, pointer_temporary = tempfile.mkstemp(prefix="."+role+"-calibration-latest-", suffix=".json", dir=directory)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            os.fchmod(output.fileno(), 0o600); json.dump(pointer, output, sort_keys=True, indent=2, allow_nan=False)
+            output.write("\n"); output.flush(); os.fsync(output.fileno())
+        os.replace(pointer_temporary, os.path.join(directory, role+"-calibration-latest.json"))
+        pointer_temporary = None
+        emit("CEREBRO_DEPTHCAM_CALIBRATION role={} eeprom_export={} evidence={} sha256={}".format(
+            role, pointer["eepromExportStatus"], evidence_path, pointer["evidenceSHA256"]))
+        return pointer
+    except Exception as error:
+        emit_error("Calibration evidence could not be saved: " + str(error))
+        return None
+    finally:
+        for path in (partial_path, pointer_temporary):
+            if path is not None:
+                try: os.unlink(path)
+                except OSError: pass
+
+
 def configure_ir_projectors(device, role, requested=None):
     """Use the SDK's normalized controls after pipeline.start().
 
@@ -1153,6 +1280,8 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
         emit("CEREBRO_DEPTHCAM_CAPTURE rgb={}x{} mono={}x{} usb={} fps={:.3f}".format(
             width, height, mono_size[0], mono_size[1], usb_speed, frame_rate))
         calibration = device.readCalibration2()
+        write_calibration_evidence(device, calibration, dai, role, frame_size, mono_size,
+            requested_mxid=mxid, requested_stereo_mode=stereo_mode)
 
         with dai.Pipeline(device) as pipeline:
             rgb_socket = color_camera_socket(device, dai)

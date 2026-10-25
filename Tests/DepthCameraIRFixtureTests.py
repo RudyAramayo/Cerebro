@@ -204,6 +204,12 @@ def run_fixtures():
             _, log = capture(service.stream_camera, None, stop, width=size[0], height=size[1], model_name="nonexistent_fixture_model",stereo_mode=mode)
         assert device.closed and device.calls == [("flood", 0.0), ("dot", 0.5)]
         assert "CEREBRO_DEPTHCAM_STREAMING" in log
+        assert "CEREBRO_DEPTHCAM_CALIBRATION role=face" in log
+        evidence_pointer = json.loads((Path(service.ir_status_directory())/"face-calibration-latest.json").read_text())
+        evidence = json.loads(Path(evidence_pointer["evidencePath"]).read_text())
+        assert evidence["requestedPipeline"]["stereoMode"] == mode
+        assert evidence["requestedPipeline"]["resolvedStrategyObserved"] is False
+        assert evidence["metricAccuracyVerified"] is False and evidence["eepromExport"]["status"] == "unavailable"
         assert len(Camera.requests) == 3
         assert [entry[1] for entry in Camera.requests] == [size, mono, mono]
         assert all(entry[2]["fps"] == expected_fps for entry in Camera.requests)
