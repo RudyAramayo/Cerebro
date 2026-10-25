@@ -387,8 +387,8 @@ final class ROBArmRoutineVision {
     }
 
     /// Depth-only settled capture: no LLM/object inference and no arm command.
-    func settledDepthFrame() async throws -> Frame {
-        try await settledInspectionFrame(epoch: inspectionEpoch(), requireStaticScene: true)
+    func settledDepthFrame(deadlineUptime:Double?=nil) async throws -> Frame {
+        try await settledInspectionFrame(epoch: inspectionEpoch(), requireStaticScene: true,deadlineUptime:deadlineUptime)
     }
 
     @MainActor func beginCollisionRegistrationProbe() {
@@ -438,12 +438,12 @@ final class ROBArmRoutineVision {
         return Double(changed) / Double(before.count)
     }
 
-    private func settledInspectionFrame(epoch token: UUID, requireStaticScene: Bool = true) async throws -> Frame {
+    private func settledInspectionFrame(epoch token: UUID, requireStaticScene: Bool = true,deadlineUptime:Double?=nil) async throws -> Frame {
         // Called only when the coordinator has stopped motion and the GPU is
         // ready. A previously captured frame may still depict the neck/arms
         // settling, even though the latest commanded pose is now stationary.
         let notBefore = Date().timeIntervalSince1970 * 1000
-        let deadline = ProcessInfo.processInfo.systemUptime + 3
+        let deadline = min(ProcessInfo.processInfo.systemUptime+3,deadlineUptime ?? .infinity)
         var anchor: Frame?, previous: Frame?
         var distinctSamples = 0
         while ProcessInfo.processInfo.systemUptime < deadline {
@@ -995,6 +995,7 @@ final class ROBArmRoutineVision {
         let estimatedProjectionIdentity=ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)
         try requireEstimatedProjectionIdentity(estimatedProjectionIdentity,model:model)
         let vision = ROBArmRoutineVision.shared
+        let scanBodyIdentity=ROBFixedHeadBodyMotionIdentity.currentIdentity
         var captureAnchor = ROBWorkspaceCaptureAnchor()
         var map:ROBWorkspaceDepthMap?
         let requestedViews = [-45.0,-15,15,45].map { ROBWorkspaceView(panDegrees:$0,upperTarget:5650) }
@@ -1057,15 +1058,40 @@ final class ROBArmRoutineVision {
                 }
                 try await Task.sleep(nanoseconds: 100_000_000)
             }
-            for _ in 0..<2 {
+            var projectionBudget=ROBWorkspaceProjectionRetryBudget(startedAtUptime:ProcessInfo.processInfo.systemUptime)
+            var projectedInView=0,lastAttemptSequence:UInt64=0,lastAttemptCapture=0.0
+            var heldScope:ROBFixedHeadRegistrationScope?,heldServiceSHA:String?,heldUndistorted:Bool?
+            func validateHeldView()throws {
+                try check();try Task.checkCancellation()
+                try requireEstimatedProjectionIdentity(estimatedProjectionIdentity,model:model)
+                guard captureAnchor.permitsCurrent(vision.cameraGeneration),
+                      ROBFixedHeadBodyMotionIdentity.currentIdentity==scanBodyIdentity,
+                      (ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"]as?NSNumber)?.uint64Value==generation,
+                      viewReady?(view.panDegrees,view.upperTarget)==true else {
+                    throw acquisitionFailure("held neck/body, source generation or authenticated Amber session changed during projection capture")
+                }
+                if let heldScope {
+                    let neck=ROBFixedHeadCalibrationWindowController.shared.readNeck?() ?? [:]
+                    guard neck["known"]as?Bool==true,neck["stationary"]as?Bool==true,
+                          neck["pan"]as?Int==heldScope.panTarget,neck["lower"]as?Int==heldScope.lowerTarget,
+                          neck["upper"]as?Int==heldScope.upperTarget else {
+                        throw acquisitionFailure("the exact raw neck hold changed during projection capture")
+                    }
+                }
+            }
+            func projectionDeadlineFailure()->ROBWorkspaceDepthMapError {
+                acquisitionFailure(projectionBudget.lastExpiration?.localizedDescription ?? "camera startup did not provide fresh settled RGB-D for this view within 8 s")
+            }
+            while projectedInView<2 {
                 scanPhase = "waiting for fresh settled RGB-D"
-                let startupDeadline = ProcessInfo.processInfo.systemUptime+8
+                try validateHeldView()
+                guard ProcessInfo.processInfo.systemUptime<projectionBudget.deadlineUptime else {throw projectionDeadlineFailure()}
                 var acceptedFrame:ROBArmRoutineVision.Frame?
                 while acceptedFrame == nil {
-                    try check(); try Task.checkCancellation()
+                    try validateHeldView()
                     let beforeCapture = vision.cameraGeneration
                     do {
-                        let candidate = try await vision.settledDepthFrame()
+                        let candidate = try await vision.settledDepthFrame(deadlineUptime:projectionBudget.deadlineUptime)
                         if captureAnchor.accept(frameGeneration:candidate.cameraGeneration,currentGeneration:vision.cameraGeneration) {
                             acceptedFrame = candidate
                         } else if map != nil {
@@ -1073,16 +1099,22 @@ final class ROBArmRoutineVision {
                         }
                     } catch {
                         try Task.checkCancellation(); try check()
+                        if ProcessInfo.processInfo.systemUptime>=projectionBudget.deadlineUptime {throw projectionDeadlineFailure()}
                         guard captureAnchor.cameraGeneration == nil,
                               error is CancellationError || vision.cameraGeneration != beforeCapture else { throw acquisitionFailure(error.localizedDescription) }
                     }
-                    guard acceptedFrame != nil || ProcessInfo.processInfo.systemUptime < startupDeadline else {
-                        throw acquisitionFailure("camera startup did not provide one stable settled RGB-D generation within 8 s")
+                    guard acceptedFrame != nil || ProcessInfo.processInfo.systemUptime < projectionBudget.deadlineUptime else {
+                        throw projectionDeadlineFailure()
                     }
                 }
                 let frame = acceptedFrame!
                 frameSequence = frame.sequence; frameCapturedAt = frame.capturedAt
-                try check()
+                try validateHeldView()
+                guard ProcessInfo.processInfo.systemUptime<projectionBudget.deadlineUptime else {throw projectionDeadlineFailure()}
+                guard frame.sequence>lastAttemptSequence,frame.capturedAt>lastAttemptCapture else {
+                    throw acquisitionFailure("projection input did not advance beyond the previously attempted source frame")
+                }
+                lastAttemptSequence=frame.sequence;lastAttemptCapture=frame.capturedAt
                 guard captureAnchor.permitsCurrent(vision.cameraGeneration) else {
                     throw acquisitionFailure("captured frame belongs to a camera generation that changed before projection")
                 }
@@ -1094,6 +1126,12 @@ final class ROBArmRoutineVision {
                 guard let depth = frame.depth else { throw acquisitionFailure("settled frame has no aligned depth") }
                 guard let k = frame.intrinsics else { throw acquisitionFailure("settled frame has no camera intrinsics") }
                 guard k.isValid(forWidth:depth.width,height:depth.height) else { throw acquisitionFailure("intrinsics are invalid for aligned depth \(depth.width)x\(depth.height)") }
+                let sourceScope=try ROBFixedHeadCalibrationWindowController.shared.scope(model:model,frame:frame)
+                if let heldScope {
+                    guard sourceScope==heldScope,k.cameraServiceSourceSHA256==heldServiceSHA,k.rgbOutputUndistorted==heldUndistorted else {
+                        throw acquisitionFailure("the exact held pose or native source geometry changed while reacquiring projection pixels")
+                    }
+                } else {heldScope=sourceScope;heldServiceSHA=k.cameraServiceSourceSHA256;heldUndistorted=k.rgbOutputUndistorted}
                 // Preserve actual measured arm FK for self geometry. An
                 // unregistered camera never erases overlapping obstacles.
                 let selfBounds = measuredSelfBounds(model:model)
@@ -1115,9 +1153,25 @@ final class ROBArmRoutineVision {
                             estimatedCameraProjectionIdentity:estimated?.identity)
                         return next
                     }.value
-                } catch { throw acquisitionFailure(error.localizedDescription) }
+                } catch {
+                    // append rejects age BEFORE mutation. Keep completed map
+                    // frames and reacquire actual later pixels, never restamp.
+                    try validateHeldView()
+                    guard let typed=error as?ROBWorkspaceDepthMapError,case .expiredAtProjection=typed else {
+                        throw acquisitionFailure(error.localizedDescription)
+                    }
+                    if projectionBudget.permitsRetry(after:typed,nowUptime:ProcessInfo.processInfo.systemUptime,
+                        contextIsCurrent:true,taskCancelled:Task.isCancelled) {
+                        progress("Discarding expired depth frame \(sequence); checking a new settled frame.")
+                        continue
+                    }
+                    throw acquisitionFailure(error.localizedDescription)
+                }
+                try validateHeldView()
+                guard ProcessInfo.processInfo.systemUptime<projectionBudget.deadlineUptime else {throw projectionDeadlineFailure()}
+                projectedInView+=1
                 framesProjected += 1
-                try check()
+                try validateHeldView()
                 try requireEstimatedProjectionIdentity(estimatedProjectionIdentity,model:model)
                 guard viewReady?(view.panDegrees,view.upperTarget) == true else { throw acquisitionFailure("neck left its settled view while the depth frame was projected") }
             }

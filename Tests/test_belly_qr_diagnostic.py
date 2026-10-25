@@ -19,11 +19,11 @@ WORKER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(WORKER)
 
 
-def fixture(directory, spacing=.4, depth_bias=.0):
+def fixture(directory, spacing=.4, depth_bias=.0, frame_count=3, floor=False, relative_yaw_degrees=0.):
     width, height = 1280, 800
     fx = fy = 1000.; cx = 640.; cy = 400.
     K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1.]])
-    R = cv2.Rodrigues(np.array([.35, -.15, .06]))[0] @ np.diag([1., -1., -1.])
+    R = cv2.Rodrigues(np.array([-1.1, -.02, .01]) if floor else np.array([.35, -.15, .06]))[0] @ np.diag([1., -1., -1.])
     t = np.array([.02, .02, 1.05])
     rv = cv2.Rodrigues(R)[0]
     yy, xx = np.mgrid[:height, :width]
@@ -34,7 +34,11 @@ def fixture(directory, spacing=.4, depth_bias=.0):
     gray = np.full((height, width), 255, np.uint8)
     seeds = []
     for target, side in zip(WORKER.IDS, [-1, 1]):
-        objects = WORKER.DEPTH.object_corners(.12)+[side*spacing/2, 0, 0]
+        symbol = WORKER.DEPTH.object_corners(.12)
+        if side == 1:
+            in_plane = cv2.Rodrigues(np.array([0., 0., np.deg2rad(relative_yaw_degrees)]))[0]
+            symbol = np.einsum("ij,kj->ki", in_plane, symbol)
+        objects = symbol+[side*spacing/2, 0, 0]
         corners = cv2.projectPoints(objects, rv, t, K, np.zeros(5))[0].reshape(4, 2)
         template, template_corners = WORKER.REFINE.template(target)
         homography = cv2.getPerspectiveTransform(template_corners, corners.astype(np.float32))
@@ -43,7 +47,7 @@ def fixture(directory, spacing=.4, depth_bias=.0):
         gray = np.minimum(gray, projected)
         seeds.append({"payload": target, "cornersPixels": (corners+[.25, -.2]).tolist()})
     frames = []
-    for index in range(3):
+    for index in range(frame_count):
         image_path = directory / f"frame-{index}.png"
         depth_path = directory / f"frame-{index}.depth-u16le"
         cv2.imwrite(str(image_path), gray); native.tofile(depth_path)
@@ -87,7 +91,8 @@ class BellyQRDiagnosticsTests(unittest.TestCase):
         output = self.directory / "diagnostic.json"
         source.write_text(json.dumps(document))
         command = [sys.executable, "-B", str(ROOT / "Cerebro/Resources/ShadowPlanner/belly_qr_diagnostic.py"),
-                   "--input", str(source), "--output", str(output)]
+                   "--input", str(source), "--output", str(output),
+                   "--local-floor-reference-output", str(self.directory / "unconfirmed-floor.json")]
         completed = subprocess.run(command, env=dict(os.environ, PYTHONNOUSERSITE="1"),
                                    capture_output=True, text=True, timeout=20)
         self.assertEqual(completed.returncode, 0, completed.stderr)
@@ -100,12 +105,71 @@ class BellyQRDiagnosticsTests(unittest.TestCase):
         self.assertEqual(report["inputSHA256"], WORKER.digest(source))
         self.assertFalse(report["registrationVerified"])
         self.assertFalse(report["armMotionAuthority"])
+        self.assertEqual(report["localRawFloorReference"]["status"], "rejected")
+        self.assertFalse((self.directory / "unconfirmed-floor.json").exists())
 
     def test_printed_patterns_decode_to_the_actual_new_payloads(self):
         for target in WORKER.IDS:
             image, _ = WORKER.REFINE.template(target)
             payload, _, _ = cv2.QRCodeDetector().detectAndDecode(image)
             self.assertEqual(payload, target)
+
+    def test_local_raw_floor_reference_has_real_holdout_without_rigid_pair_calibration(self):
+        document, R, _ = fixture(self.directory, frame_count=5, floor=True, relative_yaw_degrees=4.)
+        source = self.directory / "capture-input.json"
+        source.write_text(json.dumps(document))
+        diagnostic = WORKER.diagnose(document, self.directory)
+        self.assertEqual(diagnostic["acceptedFrameCount"], 5, diagnostic["rejectedFrames"])
+        self.assertEqual(diagnostic["consistentPairFrameCount"], 0, "Rigid pair checks were weakened to admit a floor reference")
+        reference = WORKER.local_raw_floor_reference(document, diagnostic, self.directory, source,
+                                                    operator_confirmed_flat_floor=True)
+        self.assertEqual(reference["kind"], "belly_local_raw_floor_display_reference")
+        self.assertEqual([row["role"] for row in reference["frames"]], ["fit"]*3+["validation"]*2)
+        self.assertLess(reference["fitRMSEMeters"], .001)
+        self.assertLess(reference["validationP95AbsMeters"], .001)
+        self.assertGreater(float(np.dot(reference["normalOptical"], R[:, 2])), .999)
+        self.assertEqual(reference["sourceCaptureInputSHA256"], WORKER.digest(source))
+        for key in ("rawDepthCorrected", "registrationVerified", "armMotionAuthority", "calibrationApplied", "physicalDepthMapAuthority"):
+            self.assertFalse(reference[key])
+        with self.assertRaisesRegex(ValueError, "operator must confirm"):
+            WORKER.local_raw_floor_reference(document, diagnostic, self.directory, source)
+        original_input = source.read_bytes()
+        output = self.directory / "diagnostic-with-reference.json"
+        reference_path = self.directory / "Evidence/local-floor.json"
+        completed = subprocess.run([sys.executable, "-B", str(ROOT / "Cerebro/Resources/ShadowPlanner/belly_qr_diagnostic.py"),
+            "--input", str(source), "--output", str(output), "--local-floor-reference-output", str(reference_path),
+            "--operator-confirmed-flat-floor"], env=dict(os.environ, PYTHONNOUSERSITE="1"),
+            capture_output=True, text=True, timeout=60)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        saved_report = json.loads(output.read_text())
+        self.assertEqual(saved_report["consistentPairFrameCount"], 0)
+        self.assertEqual(saved_report["localRawFloorReference"]["status"], "display_reference_saved")
+        self.assertEqual(saved_report["localRawFloorReference"]["evidenceSHA256"], WORKER.digest(reference_path))
+        self.assertEqual(source.read_bytes(), original_input, "Reference generation modified immutable capture input")
+
+    def test_local_floor_rejects_nonplanar_raw_data_and_later_frame_changes(self):
+        document, _, _ = fixture(self.directory, frame_count=5, floor=True)
+        baseline = WORKER.diagnose(document, self.directory)
+        self.assertEqual(baseline["acceptedFrameCount"], 5, baseline["rejectedFrames"])
+        original = [np.fromfile(self.directory/frame["depthPath"], dtype="<u2") for frame in document["frames"]]
+        source = self.directory / "capture-input.json"
+        for all_frames in (False, True):
+            changed = copy.deepcopy(document)
+            diagnostic = copy.deepcopy(baseline)
+            for index, (frame, samples) in enumerate(zip(changed["frames"], original)):
+                native = samples.copy()
+                if all_frames:
+                    native[::7] += 50  # All valid returns retained; no outlier trimming may hide these.
+                elif index >= 3:
+                    native += 40  # Later validation differs from the frozen first-three plane.
+                path = self.directory/frame["depthPath"]
+                native.tofile(path)
+                frame["depthSHA256"] = WORKER.digest(path)
+                diagnostic["frames"][index]["depthSHA256"] = frame["depthSHA256"]
+            source.write_text(json.dumps(changed))
+            with self.assertRaisesRegex(ValueError, "raw floor|Raw floor"):
+                WORKER.local_raw_floor_reference(changed, diagnostic, self.directory, source,
+                                                operator_confirmed_flat_floor=True)
 
     def test_same_dimensions_without_depth_projection_evidence_stays_unverified(self):
         document, _, _ = fixture(self.directory)

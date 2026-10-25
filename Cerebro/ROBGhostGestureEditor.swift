@@ -220,7 +220,9 @@ import simd
                     ? "\nNeck / face camera: photo mount + RGB orientation estimate"
                     : "\nNeck / face housing: operator photo pose\nHousing placement is separate from the provisional optical fit"
             }
-            if let belly=fitted.bellyPreviewDownwardPitchDegrees {
+            if fitted.bellyFloorDisplayReferenceID != nil {
+                headInfo.stringValue += "\nBelly floor: aligned to captured floor reference"
+            } else if let belly=fitted.bellyPreviewDownwardPitchDegrees {
                 headInfo.stringValue += String(format:"\nBelly mount: %.1f° down · operator estimate",belly)
             }
             if fitted.headDepthDisplayLiftMeters != 0 {
@@ -282,6 +284,7 @@ import simd
     }
 
     @nonobjc private func updateOriginal(_ positions: [String: Double]) {
+        guard originalPositions != positions else { return }
         originalPositions = positions
         updateNodes(originalNodes, positions: renderPositions(positions, preview: false))
     }
@@ -1058,12 +1061,16 @@ import simd
         let recordingWithoutTarget = replayingRecording && proposal == nil
         SCNTransaction.begin(); SCNTransaction.disableActions = true
         for (link, proposed) in ghostNodes {
-            guard let original = originalNodes[link] else { proposed.isHidden = true; continue }
+            guard let original = originalNodes[link] else {
+                if !proposed.isHidden { proposed.isHidden = true }
+                continue
+            }
             let a = original.simdTransform, b = proposed.simdTransform
             let coincident = (0..<4).allSatisfy { column in
                 simd_length(a[column] - b[column]) <= 1e-6
             }
-            proposed.isHidden = recordingWithoutTarget || coincident
+            let hidden = recordingWithoutTarget || coincident
+            if proposed.isHidden != hidden { proposed.isHidden = hidden }
         }
         SCNTransaction.commit()
     }
@@ -1078,19 +1085,23 @@ import simd
         guard let model else { return }
         refreshInteractionStage()
         let busy = ROBLeftArmTrial.shared.isRunning || ROBArmRoutineCoordinator.shared.isRunning
-        let physicalMotion = (ROBLeftArmTrial.shared.isRunning && !ROBLeftArmTrial.shared.isNeckOnlyInspection)
-            || ROBArmRoutineCoordinator.shared.isRunning
-        sceneView?.isHidden = false; sceneView?.rendersContinuously = true; sceneView?.isPlaying = true
-        sceneView?.preferredFramesPerSecond = physicalMotion ? 15 : 30
-        for view in [presets, joints, angle, name] as [NSControl] { view.isEnabled = !busy }
+        if let sceneView {
+            if sceneView.isHidden { sceneView.isHidden = false }
+            if !sceneView.rendersContinuously { sceneView.rendersContinuously = true }
+            if !sceneView.isPlaying { sceneView.isPlaying = true }
+            let framesPerSecond = busy ? 15 : 30
+            if sceneView.preferredFramesPerSecond != framesPerSecond { sceneView.preferredFramesPerSecond = framesPerSecond }
+        }
+        for view in [presets, joints, angle, name] as [NSControl] where view.isEnabled == busy { view.isEnabled = !busy }
         if busy || (ownsPendingRequest && ROBControllerArmApproval.shared.isPending) {
             playing = false; executeButton.isEnabled = false
-            if busy { status.stringValue = ROBLeftArmTrial.shared.status }
+            if busy, status.stringValue != ROBLeftArmTrial.shared.status { status.stringValue = ROBLeftArmTrial.shared.status }
         }
         if previewFrozen && !busy && !ROBControllerArmApproval.shared.isPending { setPreviewFrozen(false) }
         let fitted=fittedHeadPose()
-        if displayedRGBProfileID != fitted?.profileID {
-            displayedRGBProfileID=fitted?.profileID
+        let displayProfileID=ROBNeckRGBPoseDisplay.configurationIdentity(model:model) ?? fitted?.profileID
+        if displayedRGBProfileID != displayProfileID {
+            displayedRGBProfileID=displayProfileID
             invalidateReview()
             updateNodes(originalNodes,positions:renderPositions(originalPositions,preview:false))
             updateNodes(ghostNodes,positions:renderPositions(ghostDisplayPositions,preview:true))
@@ -1117,7 +1128,7 @@ import simd
             executeButton.isEnabled = liveBaseline && fresh.generation == proposal.sessionGeneration
                 && ROBArmRoutinePlan.near(fresh.q, proposal.baseline, tolerance: 0.015)
         } else { executeButton.isEnabled = false }
-        if busy { status.stringValue = ROBLeftArmTrial.shared.status }
+        if busy, status.stringValue != ROBLeftArmTrial.shared.status { status.stringValue = ROBLeftArmTrial.shared.status }
         if playing {
             let time = min(timeline.maxValue, (now - animationStarted) * 4)
             timeline.doubleValue = time; renderTime(time)

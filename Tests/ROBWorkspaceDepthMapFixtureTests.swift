@@ -9,6 +9,60 @@ import Darwin
     static func rejected(_ detail: String, _ block: () throws -> Void) {
         do { try block(); fatalError(detail) } catch {}
     }
+    static func projectionExpirationFixtures()throws {
+        let camera=UUID(),now=50_000.0
+        var map=ROBWorkspaceDepthMap(modelID:"expiry-model",geometryID:"expiry-geometry",mappingID:"expiry-mapping",
+            sessionGeneration:11,cameraGeneration:camera,nowMilliseconds:now)
+        func append(_ sequence:UInt64,_ age:Double)throws {
+            try map.append(width:16,height:16,fx:1000,fy:1000,cx:8,cy:8,depth:{_,_ in 1000},
+                cameraToRobot:matrix_identity_double4x4,capturedAtMilliseconds:now+Double(sequence),sequence:sequence,
+                cameraGeneration:camera,nowMilliseconds:now+Double(sequence)+age)
+        }
+        try append(1,10);try append(2,10)
+        let before=map.snapshot(nowMilliseconds:now+725)!
+        var expired:ROBWorkspaceDepthMapError?
+        do {try append(3,721.6);fatalError("721.6ms projection frame was accepted")}
+        catch let error as ROBWorkspaceDepthMapError {
+            guard case .expiredAtProjection(let age)=error else{fatalError("Projection expiry lost its typed outcome")}
+            expect(abs(age-721.6)<1e-8,"Source age changed during expiry reporting");expired=error
+        }
+        expect(expired!.localizedDescription.contains("721.6 ms is outside 0...700 ms at projection"),"Projection expiry lost its original user reason")
+        expect(map.snapshot(nowMilliseconds:now+725)!.fingerprint==before.fingerprint,"Expired append mutated an existing partial map")
+        var budget=ROBWorkspaceProjectionRetryBudget(startedAtUptime:10)
+        expect(budget.permitsRetry(after:expired!,nowUptime:10.8,contextIsCurrent:true,taskCancelled:false),"Single age expiry did not permit fresh reacquisition")
+        try append(4,20)
+        let after=map.snapshot(nowMilliseconds:now+30)!
+        expect(after.observedFrameCount==3 && after.observations.map(\.sequence)==[1,2,4],"Fresh retry discarded completed frames or enrolled expired pixels")
+        expect(after.observations.map(\.capturedAtMilliseconds)==[now+1,now+2,now+4],"Retry manufactured a source timestamp")
+        expect(after.state(at:SIMD3(0.0005,0.0005,1)) == .occupied,"Reacquisition erased a completed obstacle")
+        rejected("Retry allowed a previously attempted/reordered source") {try append(3,20)}
+        try append(5,700) // The exact existing boundary remains unchanged.
+        for error:Error in [ROBWorkspaceDepthMapError.invalidFrame,ROBWorkspaceDepthMapError.acquisition("invalid geometry"),CancellationError()] {
+            var other=ROBWorkspaceProjectionRetryBudget(startedAtUptime:10)
+            expect(!other.permitsRetry(after:error,nowUptime:11,contextIsCurrent:true,taskCancelled:false) && other.discardedFrameCount==0,
+                "Non-expiry/cancellation error entered the projection retry lane")
+        }
+        for (sameContext,cancelled) in [(false,false),(true,true)] {
+            var changed=ROBWorkspaceProjectionRetryBudget(startedAtUptime:10)
+            expect(!changed.permitsRetry(after:expired!,nowUptime:11,contextIsCurrent:sameContext,taskCancelled:cancelled) && changed.discardedFrameCount==0,
+                "Changed pose/source/gateway/PID or cancellation retried an expired projection")
+        }
+        var exhausted=ROBWorkspaceProjectionRetryBudget(startedAtUptime:10)
+        expect(exhausted.permitsRetry(after:expired!,nowUptime:11,contextIsCurrent:true,taskCancelled:false),"First discard was unavailable")
+        expect(exhausted.permitsRetry(after:expired!,nowUptime:12,contextIsCurrent:true,taskCancelled:false),"Second discard was unavailable")
+        expect(!exhausted.permitsRetry(after:expired!,nowUptime:13,contextIsCurrent:true,taskCancelled:false),"Third expiry did not end the held view")
+        expect(!exhausted.permitsRetry(after:expired!,nowUptime:14,contextIsCurrent:true,taskCancelled:false) && exhausted.discardedFrameCount==3,
+            "Discard count escaped its bound")
+        var deadline=ROBWorkspaceProjectionRetryBudget(startedAtUptime:10)
+        expect(!deadline.permitsRetry(after:expired!,nowUptime:18,contextIsCurrent:true,taskCancelled:false) && deadline.deadlineUptime==18,
+            "Reacquisition extended its original8s deadline")
+        expect(deadline.lastExpiration?.localizedDescription==expired!.localizedDescription,"Deadline replaced the original projection error")
+        do {try append(6,-1);fatalError("Future source frame was accepted")}
+        catch let error as ROBWorkspaceDepthMapError {
+            if case .expiredAtProjection=error {fatalError("Clock/future-frame error became a recoverable expiration")}
+        }
+        print("Projection retry:721.6ms rejected atomically; later advancing source accepted with original timestamps/partial map;700ms unchanged;3-discard/8s bounds;geometry/context/cancel never retry")
+    }
     static func projectionIdentityFixtures() throws {
         let camera=UUID(),now=30_000.0,first=String(repeating:"a",count:64),second=String(repeating:"b",count:64)
         func make(_ identity:String?)->ROBWorkspaceDepthMap {
@@ -140,6 +194,7 @@ import Darwin
         }
     }
     static func main() throws {
+        try projectionExpirationFixtures()
         try storageBudgetFixtures()
         try projectionIdentityFixtures()
         let camera = UUID(), now = 10_000.0

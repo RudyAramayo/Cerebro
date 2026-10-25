@@ -24,6 +24,29 @@ import simd
         let directory=URL(fileURLWithPath:args[1])
         let model=try ROBGhostRobotModel(directory:directory,physicalSide:"right")
         let torso=model.frames(model.reference)["torso_link"]!
+        if let index=args.firstIndex(of:"--actual-belly-reference") {
+            let source=ROBNeckRGBPoseDisplay.activationURL,evidenceURL=URL(fileURLWithPath:args[index+1])
+            let referenceBytes=try Data(contentsOf:evidenceURL)
+            let reference=try JSONSerialization.jsonObject(with:referenceBytes)as![String:Any]
+            let n=reference["normalOptical"]as![Double]
+            let before=ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model)!["belly_oak_optical_frame"]!
+            let beforePose=ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6015,lowerTarget:6011,upperTarget:6160)!
+            let beforePhysical=ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)
+            var activation=try JSONSerialization.jsonObject(with:Data(contentsOf:source))as![String:Any]
+            activation["bellyFloorDisplayReference"]=["evidencePath":evidenceURL.path,"evidenceSHA256":hash(referenceBytes)]
+            let temporary=FileManager.default.temporaryDirectory.appendingPathComponent("belly-display-proof-\(UUID().uuidString).json")
+            defer{try? FileManager.default.removeItem(at:temporary)}
+            try write(activation,to:temporary);setenv("ROB_NECK_RGB_DISPLAY_PROFILE",temporary.path,1)
+            guard let pose=ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6015,lowerTarget:6011,upperTarget:6160),
+                  let frames=ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model),let optical=frames["belly_oak_optical_frame"] else {fatalError("Recorded belly reference failed display validation")}
+            let up=pose.modelToDisplay*optical*SIMD4(n[0],n[1],n[2],0)
+            precondition(close(up,SIMD4(0,0,1,0)) && close(optical.columns.3,before.columns.3))
+            precondition(pose.cameraToModel==beforePose.cameraToModel && pose.provisionalCameraToModel==beforePose.provisionalCameraToModel &&
+                ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==beforePhysical && !pose.hasDepthProjectionAuthority)
+            let delta=optical*simd_inverse(before),trace=delta.columns.0.x+delta.columns.1.y+delta.columns.2.z
+            print("PASS recorded belly display reference: floor-up \(up), minimum turn \(acos(min(1,max(-1,(trace-1)/2)))*180 / .pi) degrees; optical origin/head physical projection unchanged; no activation or depth authority")
+            return
+        }
         if let index=args.firstIndex(of:"--actual-profile") {
             setenv("ROB_NECK_RGB_DISPLAY_PROFILE",args[index+1],1)
             guard let pose=ROBNeckRGBPoseDisplay.pose(model:model,panTarget:4667,lowerTarget:6495,upperTarget:5990) else {fatalError("Actual pinned display profile failed")}
@@ -236,6 +259,84 @@ import simd
         precondition(abs(bellyRay.columns.2.x-cos(25 * .pi/180))<1e-10 && abs(bellyRay.columns.2.z+sin(25 * .pi/180))<1e-10)
         let originalMount=simd_inverse(originalBelly)*canonical["belly_oak_link"]!,correctedMount=simd_inverse(correctedBelly)*belly["belly_oak_link"]!
         for i in 0..<4 {precondition(close(originalMount[i],correctedMount[i]),"Belly housing detached from optical mount")}
+        let bellyCapture=temp.appendingPathComponent("belly-capture"),bellyEvidenceURL=temp.appendingPathComponent("belly-floor-reference.json")
+        try FileManager.default.createDirectory(at:bellyCapture,withIntermediateDirectories:true)
+        let normal=simd_normalize(SIMD3<Double>(-0.00683,-0.94259,-0.33389))
+        var bellyFrames:[[String:Any]]=[],captureFrames:[[String:Any]]=[]
+        for index in 0..<5 {
+            let image=Data("Synthetic belly RGB \(index), never physical evidence".utf8),depth=Data("Synthetic belly raw depth \(index)".utf8)
+            let imageName="frame-\(index).jpg",depthName="frame-\(index).depth-u16le"
+            try image.write(to:bellyCapture.appendingPathComponent(imageName));try depth.write(to:bellyCapture.appendingPathComponent(depthName))
+            let frame:[String:Any]=["role":index<3 ? "fit":"validation","frameIndex":index,"sequence":index+10,
+                "capturedAtMilliseconds":1000.0+Double(index),"imagePath":imageName,"imageSHA256":hash(image),
+                "depthPath":depthName,"depthSHA256":hash(depth),"pixelCorrespondenceSupported":true,"pointCount":200]
+            bellyFrames.append(frame);captureFrames.append(["sequence":index+10,"capturedAtMilliseconds":1000.0+Double(index),"imagePath":imageName,"depthPath":depthName])
+        }
+        let bellyInput=bellyCapture.appendingPathComponent("capture-input.json")
+        try write(["schemaVersion":1,"kind":"belly_qr_capture","cameraRole":"belly","frames":captureFrames],to:bellyInput)
+        let validBellyEvidence:[String:Any]=["schemaVersion":1,"kind":"belly_local_raw_floor_display_reference","cameraRole":"belly",
+            "normalOptical":[normal.x,normal.y,normal.z],"offsetMeters":0.68,"fitFrameCount":3,"validationFrameCount":2,
+            "fitPointCount":600,"validationPointCount":400,"fitRMSEMeters":0.002,"validationRMSEMeters":0.002,
+            "validationP95AbsMeters":0.0042,"validationMaxAbsMeters":0.009,
+            "rawDepthCorrected":false,"registrationVerified":false,"armMotionAuthority":false,"calibrationApplied":false,"physicalDepthMapAuthority":false,
+            "sourceCaptureInputPath":bellyInput.path,"sourceCaptureInputSHA256":hash(try Data(contentsOf:bellyInput)),"sourceCapturePath":bellyCapture.path,
+            "assumptions":["operatorConfirmedFloorFlat":true,"outlierDeletion":false],"frames":bellyFrames]
+        func activateBellyEvidence(_ evidence:[String:Any])throws {
+            try write(evidence,to:bellyEvidenceURL)
+            a["bellyFloorDisplayReference"]=["evidencePath":bellyEvidenceURL.path,"evidenceSHA256":hash(try Data(contentsOf:bellyEvidenceURL))]
+            try activate()
+        }
+        a["usePhotoHardwareOpticalOrigin"]=true;try activate()
+        let beforeFloor=ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6015,lowerTarget:6011,upperTarget:6160)!
+        let physicalBeforeFloor=ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)!
+        let bellyBeforeFloor=ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model)!
+        try activateBellyEvidence(validBellyEvidence)
+        let floorPose=ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6015,lowerTarget:6011,upperTarget:6160)!
+        let floorFrames=ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model)!,floorOptical=floorFrames["belly_oak_optical_frame"]!
+        let floorUp=floorPose.modelToDisplay*floorOptical*SIMD4(normal,0)
+        precondition(close(floorUp,SIMD4(0,0,1,0)),"Belly floor correction ignored the common QR-up gauge")
+        precondition(floorPose.modelToDisplay != matrix_identity_double4x4,"Fixture did not exercise a nonidentity shared gauge")
+        precondition(close(floorOptical.columns.3,originalBelly.columns.3),"Local floor correction moved the optical origin")
+        for i in 0..<4 {precondition(close((simd_inverse(floorOptical)*floorFrames["belly_oak_link"]!)[i],originalMount[i]),"Floor correction detached housing from cloud")}
+        let uncorrectedRotation=bellyBeforeFloor["belly_oak_optical_frame"]!
+        let oldUp4=beforeFloor.modelToDisplay*uncorrectedRotation*SIMD4(normal,0)
+        let displayDelta=beforeFloor.modelToDisplay*floorOptical*simd_inverse(uncorrectedRotation)*simd_inverse(beforeFloor.modelToDisplay)
+        let trace=displayDelta.columns.0.x+displayDelta.columns.1.y+displayDelta.columns.2.z
+        let turn=acos(min(1,max(-1,(trace-1)/2)))
+        precondition(abs(turn-acos(min(1,max(-1,oldUp4.z))))<1e-8,"Floor normal alignment introduced an additional yaw/twist")
+        precondition(floorOptical != uncorrectedRotation && floorPose.profileID != beforeFloor.profileID && floorPose.bellyFloorDisplayReferenceID != nil)
+        precondition(floorPose.cameraToModel==beforeFloor.cameraToModel && floorPose.headFrames==beforeFloor.headFrames &&
+            floorPose.modelToDisplay==beforeFloor.modelToDisplay && floorPose.provisionalCameraToModel==beforeFloor.provisionalCameraToModel &&
+            floorPose.depthCloudCameraToModel==beforeFloor.depthCloudCameraToModel && !floorPose.hasDepthProjectionAuthority &&
+            ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==physicalBeforeFloor,
+            "Belly display evidence changed head/raw rotation, physical projection identity or depth authority")
+        // A bare normal, edited source, rejected report or insufficient held-out
+        // evidence cannot become a cosmetic pose merely by changing its hash.
+        for field in ["kind","normalOptical","validationRMSEMeters","validationP95AbsMeters","validationMaxAbsMeters",
+                      "fitFrameCount","registrationVerified","armMotionAuthority","rawDepthCorrected","physicalDepthMapAuthority",
+                      "sourceCaptureInputSHA256","frames"] {
+            var bad=validBellyEvidence
+            switch field {
+            case "kind":bad[field]="rejected"
+            case "normalOptical":bad[field]=[0.0,-2.0,-1.0]
+            case "validationRMSEMeters":bad[field]=0.005
+            case "validationP95AbsMeters":bad[field]=0.010
+            case "validationMaxAbsMeters":bad[field]=0.020
+            case "fitFrameCount":bad[field]=2
+            case "sourceCaptureInputSHA256":bad[field]=String(repeating:"f",count:64)
+            case "frames":var badFrames=bellyFrames;badFrames[4]["pixelCorrespondenceSupported"]=false;bad[field]=badFrames
+            default:bad[field]=true
+            }
+            try activateBellyEvidence(bad)
+            precondition(ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model)==nil,"Invalid belly evidence accepted: \(field)")
+        }
+        try activateBellyEvidence(validBellyEvidence)
+        a["bellyFloorDisplayReference"]=["evidencePath":bellyEvidenceURL.path,"evidenceSHA256":String(repeating:"f",count:64)];try activate()
+        precondition(ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model)==nil,"Belly evidence SHA mismatch accepted")
+        try activateBellyEvidence(validBellyEvidence)
+        try Data("Changed held-out raw source".utf8).write(to:bellyCapture.appendingPathComponent("frame-4.depth-u16le"));try activate()
+        precondition(ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model)==nil,"Changed held-out raw depth accepted")
+        a.removeValue(forKey:"bellyFloorDisplayReference");a.removeValue(forKey:"usePhotoHardwareOpticalOrigin")
         a["bellyCameraDownwardPitchDegrees"]=0.0;try activate()
         precondition(ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model)!["belly_oak_optical_frame"]==originalBelly)
         a["bellyCameraDownwardPitchDegrees"]=61.0;try activate()
@@ -256,6 +357,6 @@ import simd
         a["fitArtifactSHA256"]=hash(try Data(contentsOf:fit))
         try Data("Changed source image".utf8).write(to:capture.appendingPathComponent("frame-0.jpg"));try activate()
         precondition(ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6000,lowerTarget:6495,upperTarget:5900)==nil)
-        print("PASS synthetic display: raw poses, torso gauge, rigid165/96.5/129 triangle, independent upright photo hardware with unchanged41mm optical fit, horizontal-default/bounded finite sphere ring, glued articulated mounts, independent belly pitch/origin, bounds and source/model/hash rejection")
+        print("PASS synthetic display: raw poses, torso gauge, rigid165/96.5/129 triangle, independent upright photo hardware with unchanged41mm optical fit, horizontal-default/bounded finite sphere ring, glued articulated mounts, belly floor minimum rotation after common gauge with fixed origin/physical identity and hashed3-fit/2-held-out evidence rejection")
     }
 }

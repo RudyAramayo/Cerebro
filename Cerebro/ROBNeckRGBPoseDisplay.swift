@@ -17,6 +17,8 @@ enum ROBNeckRGBPoseDisplay {
         let hardwareFrames: [String:simd_double4x4]?
         let hardwareSphereRingTiltDegrees: Double?
         let bellyPreviewDownwardPitchDegrees: Double?
+        /// Saved raw-plane evidence affects the belly drawing only.
+        let bellyFloorDisplayReferenceID: String?
         let usesPhotoHardwareOpticalOrigin: Bool
         /// An opt-in estimated origin, not registration. Keep the pinned RGB
         /// rotation while drawing/projecting from the measured hardware glass.
@@ -82,7 +84,28 @@ enum ROBNeckRGBPoseDisplay {
         let headDepthDisplayLiftMeters:Double?
         let hardwarePose:HardwarePose?
         let bellyCameraDownwardPitchDegrees:Double?
+        let bellyFloorDisplayReference:BellyFloorDisplayReference?
         let usePhotoHardwareOpticalOrigin:Bool?
+    }
+    private struct BellyFloorDisplayReference:Decodable {
+        let evidencePath:String,evidenceSHA256:String
+    }
+    private struct BellyFloorDisplayEvidence:Decodable {
+        struct Frame:Decodable {
+            let role:String,frameIndex:Int,sequence:UInt64,capturedAtMilliseconds:Double
+            let imagePath:String,imageSHA256:String,depthPath:String,depthSHA256:String
+            let pixelCorrespondenceSupported:Bool,pointCount:Int
+        }
+        struct Assumptions:Decodable {
+            let operatorConfirmedFloorFlat:Bool,outlierDeletion:Bool
+        }
+        let schemaVersion:Int,kind:String,cameraRole:String
+        let normalOptical:[Double],offsetMeters:Double
+        let fitFrameCount:Int,validationFrameCount:Int,fitPointCount:Int,validationPointCount:Int
+        let fitRMSEMeters:Double,validationRMSEMeters:Double,validationP95AbsMeters:Double,validationMaxAbsMeters:Double
+        let rawDepthCorrected:Bool,registrationVerified:Bool,armMotionAuthority:Bool,calibrationApplied:Bool,physicalDepthMapAuthority:Bool
+        let sourceCaptureInputPath:String,sourceCaptureInputSHA256:String,sourceCapturePath:String
+        let assumptions:Assumptions,frames:[Frame]
     }
     private struct Profile {
         let id:String,parameters:[String:Double],upTorso:SIMD3<Double>
@@ -90,6 +113,8 @@ enum ROBNeckRGBPoseDisplay {
         let headDepthDisplayLiftMeters:Double
         let hardwarePose:HardwarePose?
         let bellyCameraDownwardPitchDegrees:Double?
+        let bellyFloorNormalOptical:SIMD3<Double>?
+        let bellyFloorDisplayReferenceID:String?
         let usePhotoHardwareOpticalOrigin:Bool
         let estimatedCameraProjectionIdentity:String?
     }
@@ -109,6 +134,48 @@ enum ROBNeckRGBPoseDisplay {
         let data=try Data(contentsOf:url);guard sha(data)==expected else {throw Failure.invalid};return data
     }
     private enum Failure:Error {case invalid}
+    private static func bellyFloorEvidence(_ reference:BellyFloorDisplayReference)throws->(Data,SIMD3<Double>) {
+        let bytes=try read(reference.evidencePath,sha:reference.evidenceSHA256)
+        let e=try JSONDecoder().decode(BellyFloorDisplayEvidence.self,from:bytes)
+        guard e.schemaVersion==1,e.kind=="belly_local_raw_floor_display_reference",e.cameraRole=="belly",
+              !e.rawDepthCorrected,!e.registrationVerified,!e.armMotionAuthority,!e.calibrationApplied,!e.physicalDepthMapAuthority,
+              e.assumptions.operatorConfirmedFloorFlat,!e.assumptions.outlierDeletion,
+              e.normalOptical.count==3,e.normalOptical.allSatisfy(\.isFinite),
+              e.offsetMeters.isFinite,(0.1...3).contains(e.offsetMeters),
+              e.fitFrameCount==3,e.validationFrameCount==2,e.frames.count==5,
+              e.fitPointCount>=300,e.validationPointCount>=200,
+              [e.fitRMSEMeters,e.validationRMSEMeters,e.validationP95AbsMeters,e.validationMaxAbsMeters].allSatisfy({$0.isFinite && $0>=0}),
+              e.fitRMSEMeters<0.005,e.validationRMSEMeters<0.005,e.validationP95AbsMeters<0.010,e.validationMaxAbsMeters<0.020 else {throw Failure.invalid}
+        let n=SIMD3(e.normalOptical[0],e.normalOptical[1],e.normalOptical[2])
+        guard abs(simd_length(n)-1)<0.001,n.y<0,n.z<0 else {throw Failure.invalid}
+        let captureURL=URL(fileURLWithPath:e.sourceCapturePath).standardizedFileURL
+        guard URL(fileURLWithPath:e.sourceCaptureInputPath).standardizedFileURL==captureURL.appendingPathComponent("capture-input.json") else {throw Failure.invalid}
+        let captureBytes=try read(e.sourceCaptureInputPath,sha:e.sourceCaptureInputSHA256)
+        guard let capture=try JSONSerialization.jsonObject(with:captureBytes)as?[String:Any],
+              capture["schemaVersion"]as?Int==1,capture["kind"]as?String=="belly_qr_capture",
+              capture["cameraRole"]as?String=="belly",let capturedFrames=capture["frames"]as?[[String:Any]],
+              Set(e.frames.map(\.frameIndex)).count==5,Set(e.frames.map(\.sequence)).count==5 else {throw Failure.invalid}
+        var fitPoints=0,validationPoints=0,previousTime=0.0,previousSequence:UInt64=0
+        for (index,frame) in e.frames.enumerated() {
+            guard frame.role==(index<3 ? "fit":"validation"),frame.frameIndex>=0,frame.frameIndex<capturedFrames.count,
+                  frame.sequence>previousSequence,frame.capturedAtMilliseconds.isFinite,frame.capturedAtMilliseconds>previousTime,
+                  frame.pixelCorrespondenceSupported,frame.pointCount>=100,
+                  let sequence=capturedFrames[frame.frameIndex]["sequence"]as?NSNumber,sequence.uint64Value==frame.sequence,
+                  let time=capturedFrames[frame.frameIndex]["capturedAtMilliseconds"]as?Double,time==frame.capturedAtMilliseconds else {throw Failure.invalid}
+            func sourceURL(_ path:String)->URL {
+                (path.hasPrefix("/") ? URL(fileURLWithPath:path):captureURL.appendingPathComponent(path)).standardizedFileURL
+            }
+            guard let capturedImage=capturedFrames[frame.frameIndex]["imagePath"]as?String,
+                  let capturedDepth=capturedFrames[frame.frameIndex]["depthPath"]as?String,
+                  sourceURL(capturedImage)==sourceURL(frame.imagePath),sourceURL(capturedDepth)==sourceURL(frame.depthPath) else {throw Failure.invalid}
+            _=try read(sourceURL(frame.imagePath).path,sha:frame.imageSHA256)
+            _=try read(sourceURL(frame.depthPath).path,sha:frame.depthSHA256)
+            if index<3 {fitPoints+=frame.pointCount}else{validationPoints+=frame.pointCount}
+            previousTime=frame.capturedAtMilliseconds;previousSequence=frame.sequence
+        }
+        guard fitPoints==e.fitPointCount,validationPoints==e.validationPointCount else {throw Failure.invalid}
+        return (bytes,n)
+    }
     private static func profile(model:ROBGhostRobotModel)->Profile? {
         lock.lock();defer{lock.unlock()}
         guard let bytes=try? Data(contentsOf:activationURL),bytes.count<100_000 else {cachedKey="";cachedProfile=nil;return nil}
@@ -163,6 +230,7 @@ enum ROBNeckRGBPoseDisplay {
                 up += SIMD3((C*SIMD4(n,0)).x,(C*SIMD4(n,0)).y,(C*SIMD4(n,0)).z)
             }
             guard simd_length(up)>Double(observations.count)*0.99 else {throw Failure.invalid}
+            let bellyEvidence=try a.bellyFloorDisplayReference.map{try bellyFloorEvidence($0)}
             let estimatedIdentity:String?
             if a.usePhotoHardwareOpticalOrigin==true,let h=a.hardwarePose {
                 // Include only inputs to physical old-R/photo-origin-T and
@@ -178,8 +246,9 @@ enum ROBNeckRGBPoseDisplay {
                     "sourcePhotoSHA256":h.sourcePhotoSHA256]
                 estimatedIdentity=sha(try JSONSerialization.data(withJSONObject:physical,options:[.sortedKeys]))
             }else{estimatedIdentity=nil}
-            cachedProfile=Profile(id:sha(bytes+fitData+referenceData),parameters:p,upTorso:simd_normalize(up),headMount:a.headMount,headDepthDisplayLiftMeters:lift,
+            cachedProfile=Profile(id:sha(bytes+fitData+referenceData+(bellyEvidence?.0 ?? Data())),parameters:p,upTorso:simd_normalize(up),headMount:a.headMount,headDepthDisplayLiftMeters:lift,
                 hardwarePose:a.hardwarePose,bellyCameraDownwardPitchDegrees:a.bellyCameraDownwardPitchDegrees,
+                bellyFloorNormalOptical:bellyEvidence?.1,bellyFloorDisplayReferenceID:a.bellyFloorDisplayReference?.evidenceSHA256,
                 usePhotoHardwareOpticalOrigin:a.usePhotoHardwareOpticalOrigin ?? false,estimatedCameraProjectionIdentity:estimatedIdentity)
         } catch {cachedProfile=nil}
         return cachedProfile
@@ -187,6 +256,11 @@ enum ROBNeckRGBPoseDisplay {
     private static func translated(_ t:SIMD3<Double>)->simd_double4x4 {var T=matrix_identity_double4x4;T.columns.3=SIMD4(t,1);return T}
     private static func rotated(_ v:SIMD3<Double>)->simd_double4x4 {
         let a=simd_length(v);return a<1e-14 ? matrix_identity_double4x4:simd_double4x4(simd_quatd(angle:a,axis:v/a))
+    }
+    private static func floorGaugeRotation(torso:simd_double4x4,upTorso:SIMD3<Double>)->simd_double4x4 {
+        let value=torso*SIMD4(upTorso,0),up=simd_normalize(SIMD3(value.x,value.y,value.z))
+        let axis=simd_cross(up,SIMD3<Double>(0,0,1)),length=simd_length(axis)
+        return length<1e-12 ? matrix_identity_double4x4:rotated(axis/length*acos(min(1,max(-1,up.z))))
     }
     /// Profile identity is available without a current head-command estimate,
     /// so changing an explicit belly mount also invalidates its cloud cache.
@@ -203,15 +277,27 @@ enum ROBNeckRGBPoseDisplay {
     /// Canonical model frames only; the renderer applies its existing common
     /// display gauge once to body, housing and cloud. Raw depth is unchanged.
     static func bellyPreviewFrames(model:ROBGhostRobotModel)->[String:simd_double4x4]? {
-        guard let pitch=profile(model:model)?.bellyCameraDownwardPitchDegrees else{return nil}
+        guard let profile=profile(model:model),profile.bellyCameraDownwardPitchDegrees != nil || profile.bellyFloorNormalOptical != nil else{return nil}
+        let pitch=profile.bellyCameraDownwardPitchDegrees ?? 0
         let frames=model.frames(model.reference)
         guard let torso=frames["torso_link"],let optical=frames["belly_oak_optical_frame"],
               let housing=frames["belly_oak_link"] else{return nil}
-        if pitch==0 {return ["belly_oak_optical_frame":optical,"belly_oak_link":housing]}
         var torsoRotation=torso;torsoRotation.columns.3=SIMD4(0,0,0,1)
         let rotation=torsoRotation*rotated(SIMD3(0,pitch * .pi/180,0))*simd_inverse(torsoRotation)
         let center=SIMD3(optical.columns.3.x,optical.columns.3.y,optical.columns.3.z)
-        let delta=translated(center)*rotation*translated(-center)
+        var delta=translated(center)*rotation*translated(-center)
+        if let normal=profile.bellyFloorNormalOptical {
+            let gauge=floorGaugeRotation(torso:torso,upTorso:profile.upTorso)
+            let projected=gauge*delta*optical*SIMD4(normal,0)
+            let up=simd_normalize(SIMD3(projected.x,projected.y,projected.z))
+            let axis=simd_cross(up,SIMD3<Double>(0,0,1)),length=simd_length(axis)
+            guard up.z > 0 else{return nil}
+            let correction=length<1e-12 ? matrix_identity_double4x4:rotated(axis/length*acos(min(1,max(-1,up.z))))
+            // Minimum rotation AFTER the shared QR-up gauge; preserve the
+            // optical origin and rigid housing mount. No yaw or position fit.
+            let localCorrection=simd_inverse(gauge)*correction*gauge
+            delta=translated(center)*localCorrection*translated(-center)*delta
+        }
         return ["belly_oak_optical_frame":delta*optical,"belly_oak_link":delta*housing]
     }
 
@@ -285,9 +371,7 @@ enum ROBNeckRGBPoseDisplay {
     static func pose(model:ROBGhostRobotModel,panTarget:Int,lowerTarget:Int,upperTarget:Int)->Pose? {
         guard let profile=profile(model:model),let torso=model.frames(model.reference)["torso_link"],
               let value=try? chain(model:model,parameters:profile.parameters,panTarget:panTarget,lowerTarget:lowerTarget,upperTarget:upperTarget,headMount:profile.headMount) else {return nil}
-        let up4=torso*SIMD4(profile.upTorso,0),up=simd_normalize(SIMD3(up4.x,up4.y,up4.z))
-        let target=SIMD3<Double>(0,0,1),axis=simd_cross(up,target),length=simd_length(axis)
-        let R=length<1e-12 ? matrix_identity_double4x4:rotated(axis/length*acos(min(1,max(-1,simd_dot(up,target)))))
+        let R=floorGaugeRotation(torso:torso,upTorso:profile.upTorso)
         let center=SIMD3(torso.columns.3.x,torso.columns.3.y,torso.columns.3.z)
         let gauge=translated(center)*R*translated(-center)
         let description:HeadMountDescription?
@@ -306,6 +390,7 @@ enum ROBNeckRGBPoseDisplay {
             headFrames:value.frames.mapValues{torso*$0},headMount:description,headDepthDisplayLiftMeters:profile.headDepthDisplayLiftMeters,
             hardwareFrames:hardware,hardwareSphereRingTiltDegrees:profile.hardwarePose.map{$0.sphereRingTiltAtReferenceDegrees ?? 0},
             bellyPreviewDownwardPitchDegrees:profile.bellyCameraDownwardPitchDegrees,
+            bellyFloorDisplayReferenceID:profile.bellyFloorDisplayReferenceID,
             usesPhotoHardwareOpticalOrigin:profile.usePhotoHardwareOpticalOrigin)
     }
     static func cameraToModel(model:ROBGhostRobotModel,panTarget:Int,lowerTarget:Int,upperTarget:Int)->simd_double4x4? {

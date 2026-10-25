@@ -427,14 +427,131 @@ def diagnose(document, base_directory):
                 "Repeated fixed-view samples measure repeatability; raw depth remains uncorrected."]}
 
 
+def local_raw_floor_reference(document, diagnostic, base_directory, source_input_path,
+                              operator_confirmed_flat_floor=False):
+    """Fit three raw QR-floor views, then check two later views unchanged.
+
+    This deliberately uses no printed-pair yaw, QR metric plane or correction
+    model. The operator's horizontal-floor assumption is explicit. Every valid
+    native return inside both strict printed-symbol insets is retained.
+    """
+    if operator_confirmed_flat_floor is not True:
+        raise ValueError("The operator must confirm that both targets lie flat on the horizontal floor")
+    frames = document.get("frames", [])
+    rows = diagnostic.get("frames", [])
+    if document.get("cameraRole") != "belly" or not isinstance(document.get("captureStreamID"), str) or not document["captureStreamID"]:
+        raise ValueError("A local floor reference needs the actual belly camera stream identity")
+    if len(frames) != 5 or len(rows) != 5 or diagnostic.get("rejectedFrames"):
+        raise ValueError("A local raw floor reference requires five fully observed strict QR frames")
+    source_input = Path(source_input_path).resolve()
+    base = Path(base_directory).resolve()
+    if source_input.parent != base or json.loads(source_input.read_text()) != document:
+        raise ValueError("Floor reference input does not match the immutable capture source")
+    clouds, evidence_frames = [], []
+    previous_sequence, previous_time = 0, 0.
+    for index, (frame, row) in enumerate(zip(frames, rows)):
+        sequence, captured = frame.get("sequence"), frame.get("capturedAtMilliseconds")
+        if type(sequence) is not int or sequence <= previous_sequence or type(captured) not in (int, float) or not math.isfinite(captured) or captured <= previous_time:
+            raise ValueError("Floor fit and later validation must use increasing actual source frames")
+        previous_sequence, previous_time = sequence, captured
+        if frame.get("sourceCameraRole") != "belly" or frame.get("captureStreamID", document.get("captureStreamID")) != document.get("captureStreamID"):
+            raise ValueError("Floor reference combines different camera roles or streams")
+        if row.get("sequence") != sequence or not _depth_pixel_geometry(frame)["pixelCorrespondenceSupported"]:
+            raise ValueError("Actual SDK depth/RGB pixel correspondence is required for every floor frame")
+        image_path = _source(base, frame["imagePath"], frame.get("imageSHA256", frame.get("sourceImageSHA256")), 16_000_000)
+        depth_path = _source(base, frame["depthPath"], frame["depthSHA256"], 5_000_000)
+        if row.get("imageSHA256") != digest(image_path) or row.get("depthSHA256") != digest(depth_path):
+            raise ValueError("Strict QR diagnostic does not match these source RGB/depth hashes")
+        targets = row.get("targets", [])
+        if {target.get("targetID") for target in targets} != set(IDS) or len(targets) != 2:
+            raise ValueError("Both distinct printed QR interiors are required for a floor reference")
+        points = []
+        for target in targets:
+            quality = target.get("patternQuality", {})
+            if quality.get("correlation", -1) < REFINE.MINIMUM_CORRELATION or quality.get("orientationCorrelationMargin", -1) < REFINE.MINIMUM_ORIENTATION_MARGIN:
+                raise ValueError("Floor-region identity did not pass the unchanged strict printed-pattern checks")
+            observation = {"width": frame["width"], "height": frame["height"], "cameraMatrix": frame["intrinsics"],
+                "cornersPixels": target["cornersPixels"], "markerSizeMeters": .12, "zeroDistortionAssumed": True,
+                "sourceImagePath": str(image_path), "sourceImageSHA256": digest(image_path),
+                "depthPath": str(depth_path), "depthSHA256": digest(depth_path)}
+            sample = DEPTH.sample_observation(observation, base, inset_fraction=.15, sample_step=1)
+            if sample["validDepthCount"] < 100 or sample["validDepthCount"]/sample["interiorPixelCount"] < .5:
+                raise ValueError("Each floor QR needs at least 100 valid native returns and 50 percent coverage")
+            points.append(sample["rays"]*sample["raw"][:, None])
+        xyz = np.concatenate(points)
+        if not np.isfinite(xyz).all():
+            raise ValueError("Raw floor points contain a nonfinite value")
+        clouds.append(xyz)
+        evidence_frames.append({"role": "fit" if index < 3 else "validation", "frameIndex": index,
+            "sequence": sequence, "capturedAtMilliseconds": captured, "pointCount": len(xyz),
+            "imagePath": frame["imagePath"], "imageSHA256": digest(image_path),
+            "depthPath": frame["depthPath"], "depthSHA256": digest(depth_path),
+            "pixelCorrespondenceSupported": True})
+    training = np.concatenate(clouds[:3])
+    center = training.mean(axis=0)
+    _, singular, vectors = np.linalg.svd(training-center, full_matrices=False)
+    spans = singular/math.sqrt(len(training))
+    if spans[0] < .12 or spans[1] < .015:
+        raise ValueError("Observed floor interiors do not span a stable two-dimensional plane")
+    normal = vectors[-1]
+    if normal[1] > 0:
+        normal = -normal
+    offset = -float(np.einsum("i,i->", normal, center))
+    if normal[1] >= 0 or normal[2] >= 0 or not .1 <= offset <= 3:
+        raise ValueError("Raw floor orientation/offset is inconsistent with this belly view")
+    fit_errors = np.einsum("ij,j->i", training, normal)+offset
+    fit_rms = float(np.sqrt(np.mean(fit_errors**2)))
+    held_errors = []
+    for evidence, xyz in zip(evidence_frames[3:], clouds[3:]):
+        errors = np.einsum("ij,j->i", xyz, normal)+offset
+        stats = _stats(errors)
+        evidence["heldOutRMSEMeters"] = stats["RMSEMeters"]
+        evidence["heldOutP95AbsMeters"] = stats["p95AbsoluteMeters"]
+        evidence["heldOutMaxAbsMeters"] = stats["maximumAbsoluteMeters"]
+        if stats["RMSEMeters"] >= .005 or stats["p95AbsoluteMeters"] >= .010 or stats["maximumAbsoluteMeters"] >= .020:
+            raise ValueError("Later raw floor frames do not validate the frozen training plane")
+        held_errors.append(errors)
+    validation = _stats(np.concatenate(held_errors))
+    if fit_rms >= .005:
+        raise ValueError("Raw floor samples are not planar within the 5 mm display-reference limit")
+    return {"schemaVersion": 1, "kind": "belly_local_raw_floor_display_reference", "cameraRole": "belly",
+        "normalOptical": normal.tolist(), "offsetMeters": offset, "fitFrameCount": 3, "validationFrameCount": 2,
+        "fitPointCount": len(training), "validationPointCount": sum(len(points) for points in clouds[3:]),
+        "fitRMSEMeters": fit_rms, "validationRMSEMeters": validation["RMSEMeters"],
+        "validationP95AbsMeters": validation["p95AbsoluteMeters"], "validationMaxAbsMeters": validation["maximumAbsoluteMeters"],
+        "rawDepthCorrected": False, "registrationVerified": False, "armMotionAuthority": False,
+        "calibrationApplied": False, "physicalDepthMapAuthority": False,
+        "sourceCapturePath": str(base), "sourceCaptureInputPath": str(source_input), "sourceCaptureInputSHA256": digest(source_input),
+        "captureStreamID": document["captureStreamID"], "frames": evidence_frames,
+        "assumptions": {"operatorConfirmedFloorFlat": True, "region": "Both exact printed QR interiors, 15 percent inset",
+            "outlierDeletion": False, "rigidPrintedPairCalibrationRequired": False},
+        "method": "SVD plane of all valid raw SDK-ray returns in first three frames; plane frozen before later two are evaluated",
+        "scope": "Local floor normal for display only. Same-view repeatability does not establish global metric accuracy, translation or arm registration."}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--local-floor-reference-output", type=Path)
+    parser.add_argument("--operator-confirmed-flat-floor", action="store_true")
     args = parser.parse_args()
     document = json.loads(args.input.read_text())
     result = diagnose(document, args.input.parent)
     result["inputSHA256"] = digest(args.input)
+    if args.local_floor_reference_output is not None:
+        try:
+            reference = local_raw_floor_reference(document, result, args.input.parent, args.input,
+                operator_confirmed_flat_floor=args.operator_confirmed_flat_floor)
+            target = args.local_floor_reference_output
+            target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            target.write_text(json.dumps(reference, indent=2, allow_nan=False)+"\n")
+            target.chmod(0o600)
+            result["localRawFloorReference"] = {"status": "display_reference_saved", "evidencePath": str(target.resolve()),
+                "evidenceSHA256": digest(target), "registrationVerified": False, "armMotionAuthority": False}
+        except (ValueError, KeyError, cv2.error) as error:
+            result["localRawFloorReference"] = {"status": "rejected", "reason": str(error),
+                "registrationVerified": False, "armMotionAuthority": False}
     args.output.write_text(json.dumps(result, indent=2, allow_nan=False)+"\n")
     summary = {key: result[key] for key in ("status", "acceptedFrameCount", "consistentPairFrameCount", "rawDepthAgreementAcrossConsistentFrames")}
     summary["rejectedFrames"] = [{"frameIndex": row["frameIndex"], "reason": row["reason"]} for row in result["rejectedFrames"]]

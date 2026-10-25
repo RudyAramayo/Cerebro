@@ -238,6 +238,7 @@ struct ROBWorkspaceDepthMap {
         }
         let frameAge = nowMilliseconds - capturedAtMilliseconds
         guard (0...700).contains(frameAge) else {
+            if frameAge>700 {throw ROBWorkspaceDepthMapError.expiredAtProjection(frameAgeMilliseconds:frameAge)}
             throw ROBWorkspaceDepthMapError.acquisition("Depth frame age \(String(format:"%.1f",frameAge)) ms is outside 0...700 ms at projection")
         }
         guard nowMilliseconds-createdAtMilliseconds <= 60_000 else {
@@ -432,10 +433,29 @@ struct ROBWorkspaceDepthMap {
 enum ROBWorkspaceDepthMapError: LocalizedError {
     case invalidFrame
     case acquisition(String)
+    case expiredAtProjection(frameAgeMilliseconds:Double)
     var errorDescription: String? {
         switch self {
         case .invalidFrame: return "Depth map invalidated by stale/reordered frames, camera generation, scene expiry, or invalid camera geometry. Scan again without moving ROB."
         case .acquisition(let reason): return "Depth acquisition: \(reason). No arm travel was sent by this scan."
+        case .expiredAtProjection(let age): return "Depth acquisition: Depth frame age \(String(format:"%.1f",age)) ms is outside 0...700 ms at projection. No arm travel was sent by this scan."
         }
+    }
+}
+
+/// A held view may discard stale projection inputs, never relax their age or
+/// recover another failure. The third expiration or original8s deadline ends
+/// the view. Completed map frames are independent of this acquisition budget.
+struct ROBWorkspaceProjectionRetryBudget {
+    let deadlineUptime:Double
+    private(set) var discardedFrameCount=0
+    private(set) var lastExpiration:ROBWorkspaceDepthMapError?
+    init(startedAtUptime:Double) {deadlineUptime=startedAtUptime+8}
+    mutating func permitsRetry(after error:Error,nowUptime:Double,contextIsCurrent:Bool,taskCancelled:Bool)->Bool {
+        guard let typed=error as?ROBWorkspaceDepthMapError,case .expiredAtProjection=typed else{return false}
+        lastExpiration=typed
+        guard contextIsCurrent,!taskCancelled,nowUptime.isFinite,nowUptime<deadlineUptime,discardedFrameCount<3 else{return false}
+        discardedFrameCount+=1
+        return discardedFrameCount<3
     }
 }
