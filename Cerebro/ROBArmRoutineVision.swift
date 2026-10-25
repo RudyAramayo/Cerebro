@@ -920,6 +920,36 @@ enum ROBWorkspaceLocalCanShapePrior {
     }
 }
 
+/// Attention only: current detector boxes can request at most two fresh
+/// views. A rejected plane/shape never becomes an accepted can by recentering.
+enum ROBWorkspaceCanRecenterPlan {
+    static func views(sightings:[ROBWorkspaceRecall.Sighting],physicalSide:String,
+        nowMilliseconds:Double,boundedPan:(Double)->Double)->[ROBWorkspaceView] {
+        guard ["left","right"].contains(physicalSide),nowMilliseconds.isFinite else{return []}
+        let sign=physicalSide=="right" ? -1.0:1.0
+        let current=sightings.filter { $0.target == .can && $0.valid &&
+            (0...30_000).contains(nowMilliseconds-$0.capturedAt) &&
+            sign*$0.centeredView.panDegrees >= -3 }
+        // Lower image centers usually indicate the nearer table row. Prefer
+        // that row, then detector confidence; model reach remains independent.
+        let ranked=current.sorted {
+            let a=($0.box[1]+$0.box[3])/2,b=($1.box[1]+$1.box[3])/2
+            return abs(a-b)>0.02 ? a>b:$0.confidence>$1.confidence
+        }
+        var result:[ROBWorkspaceView]=[]
+        for item in ranked {
+            let centered=item.centeredView,pan=boundedPan(centered.panDegrees)
+            guard pan.isFinite else{continue}
+            let view=ROBWorkspaceView(panDegrees:pan,upperTarget:centered.upperTarget)
+            if !result.contains(where:{abs($0.panDegrees-view.panDegrees)<3 && abs($0.upperTarget-view.upperTarget)<100}) {
+                result.append(view)
+            }
+            if result.count==2 {break}
+        }
+        return result
+    }
+}
+
 struct ROBWorkspaceCanSelection {
     let object: ROBWorkspaceLocatedObject?
     let preview: ROBCanGrabPreview?
@@ -1059,19 +1089,34 @@ struct ROBWorkspaceCanSelection {
                 (ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value == map.sessionGeneration &&
                 estimatedCameraProjectionIsCurrent(model:model,map:map)
         }
-        guard ["left","right"].contains(model.physicalSide), contextIsCurrent(),
-              let shoulder = model.frames(baseline)[model.physicalSide+"_two_Link"] else {
+        return await selectReachableCan(candidates:canCandidates.confirmed(nowMilliseconds:nowMilliseconds),
+            model:model,baseline:baseline,map:map,calibrationFile:calibrationFile,nowMilliseconds:nowMilliseconds,
+            contextIsCurrent:contextIsCurrent)
+    }
+
+    /// Shared reach ranking for the completed scene and its bounded targeted
+    /// reobservations. This never creates a collision or motion permission.
+    @MainActor private func selectReachableCan(candidates observed:[ROBWorkspaceLocatedObject],
+        model:ROBGhostRobotModel,baseline:[String:Double],map:ROBWorkspaceCollisionSnapshot,
+        calibrationFile:URL?=nil,nowMilliseconds:Double,contextIsCurrent:()->Bool) async ->ROBWorkspaceCanSelection {
+        guard ["left","right"].contains(model.physicalSide),contextIsCurrent(),
+              let shoulder=model.frames(baseline)[model.physicalSide+"_two_Link"] else {
             return .init(object:nil,preview:nil,diagnostics:[["status":"scene_context_changed","path_admitted":false]])
         }
-        let origin = SIMD3(shoulder.columns.3.x,shoulder.columns.3.y,shoulder.columns.3.z)
-        let candidates = canCandidates.confirmed(nowMilliseconds:nowMilliseconds).filter { object in
+        let origin=SIMD3(shoulder.columns.3.x,shoulder.columns.3.y,shoulder.columns.3.z)
+        let candidates=observed.filter { object in
             map.observations.contains {
-                $0.sequence == object.sequence && $0.capturedAtMilliseconds == object.capturedAt &&
-                    $0.registrationID == object.registrationID
+                $0.sequence==object.sequence && $0.capturedAtMilliseconds==object.capturedAt &&
+                    $0.registrationID==object.registrationID
             }
         }.sorted {
             let a=simd_distance($0.point,origin),b=simd_distance($1.point,origin)
             return abs(a-b)>0.000001 ? a<b : $0.confidence>$1.confidence
+        }
+        guard !candidates.isEmpty else {
+            return .init(object:nil,preview:nil,diagnostics:[["status":observed.isEmpty
+                ? "no_fresh_confirmed_can_with_valid_sections":"no_matching_enrolled_can_source",
+                "confirmed_candidate_count":observed.count,"path_admitted":false]])
         }
         var diagnostics: [[String:Any]] = []
         for can in candidates {
@@ -1679,7 +1724,8 @@ struct ROBWorkspaceCanSelection {
     }
 
     @MainActor @nonobjc func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true,
-        permitsLocalCanShapePrior: () throws -> Bool = {false}, check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
+        permitsLocalCanShapePrior: () throws -> Bool = {false}, canReachBaseline:[String:Double]? = nil,
+        check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
         let vision = ROBArmRoutineVision.shared
         locatedObjects = [:]
         canCandidates = ROBWorkspaceCanCandidateSet()
@@ -1730,6 +1776,10 @@ struct ROBWorkspaceCanSelection {
         }
         else { tabletopCanBaseHeight = nil }
         var selectedCanMeasurement: ROBWorkspaceLocatedObject?
+        var currentCanSightings:[ROBWorkspaceRecall.Sighting]=[]
+        var reachSelections:[[String:Any]]=[]
+        var localReachSelection:ROBWorkspaceCanSelection?
+        var localReachSelectionRequired=false
         var schedule = ROBWorkspaceSearchSchedule(targets:targets,recall:recall,
             boundedPan:boundedPan ?? { max(-45,min(45,$0)) })
         let recalledViews = schedule.recallViews
@@ -1756,6 +1806,8 @@ struct ROBWorkspaceCanSelection {
                 "depth_required": requireDepth,
                 "recall_views": recalledViews.map { ["pan": $0.panDegrees, "upper": $0.upperTarget] },
                 "historical_positions_used_for_motion": false,
+                "nearest_reachable_can_selections":reachSelections,
+                "nearest_reachable_candidates":localReachSelection?.diagnostics ?? [],
                 "confirmed_can_candidates": confirmedCanCandidates.confirmed(nowMilliseconds:Date().timeIntervalSince1970*1000).map { object -> [String:Any] in
                     ["position":object.position,"confidence":object.confidence,"captured_at_ms":object.capturedAt,"sequence":NSNumber(value:object.sequence)]
                 },
@@ -1948,6 +2000,9 @@ struct ROBWorkspaceCanSelection {
                     var detection = observation[target]
                     var measurement: ROBWorkspaceLocatedObject?
                     if target == .can, let depth = frame.depth, let k = frame.intrinsics {
+                        currentCanSightings=(observation.cans ?? [observation.can]).filter(\.visuallyUsable).map {
+                            ROBWorkspaceRecall.Sighting(target:.can,view:view,box:$0.box,confidence:$0.confidence,capturedAt:frame.capturedAt)
+                        }
                         var candidates: [(detection: ROBWorkspaceDetection, object: ROBWorkspaceLocatedObject)] = []
                         var sectionDiagnostics: [[String:Any]] = []
                         var sectionSource: [String:Any] = ["sequence":NSNumber(value:frame.sequence),
@@ -2271,6 +2326,65 @@ struct ROBWorkspaceCanSelection {
                 catch { try check(); evidence.append(["refresh_error": error.localizedDescription]) }
             }
         }
+        // A visible/confirmed can may belong to the opposite arm. Try only
+        // two current selected-side boxes before ending this can-only search.
+        // Existing inspect requires two advancing exposures and enrolls their
+        // exact RGB-D source frames into the same map before inference.
+        if requireDepth,targets == [.can],fixedRegisteredView==nil,let reachBaseline=canReachBaseline,
+           try permitsLocalCanShapePrior(),collisionMap != nil {
+            guard (1...7).allSatisfy({reachBaseline[model.physicalSide+"_joint\($0)"]?.isFinite==true}) else {
+                throw ROBArmRoutineError.blocked("The targeted can search needs the unchanged measured selected-arm baseline.")
+            }
+            localReachSelectionRequired=true
+            let scene=collisionMap!.sceneID,camera=vision.cameraGeneration,body=sceneBodyIdentity
+            func requireTargetedContext()throws {
+                try check();try Task.checkCancellation();try requireSceneProjectionIdentity()
+                guard try permitsLocalCanShapePrior(),collisionMap?.sceneID==scene,
+                      sceneCaptureAnchor.permitsCurrent(camera),vision.cameraGeneration==camera,
+                      ROBFixedHeadBodyMotionIdentity.currentIdentity==body,
+                      (ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"]as?NSNumber)?.uint64Value==sceneGatewayGeneration else {
+                    throw ROBWorkspaceDepthMapError.invalidFrame
+                }
+            }
+            func rankCurrentCans(_ stage:String) async throws ->ROBWorkspaceCanSelection {
+                try requireTargetedContext()
+                guard let input=collisionMap,
+                      let snapshot=await Task.detached(priority:.userInitiated,operation:{input.snapshot()}).value else {
+                    throw ROBWorkspaceDepthMapError.invalidFrame
+                }
+                try requireTargetedContext()
+                let expected=ROBWorkspaceCanSceneIdentity(sceneID:scene,cameraGeneration:camera,
+                    sessionGeneration:sceneGatewayGeneration,bodyMotionIdentity:body,modelID:model.modelID,
+                    geometryID:model.geometryID,mappingID:model.selectedMappingID,
+                    estimatedCameraProjectionIdentity:estimatedProjectionIdentity)
+                let result=await selectReachableCan(candidates:confirmedCanCandidates.confirmed(nowMilliseconds:Date().timeIntervalSince1970*1000),
+                    model:model,baseline:reachBaseline,map:snapshot,nowMilliseconds:Date().timeIntervalSince1970*1000,
+                    contextIsCurrent:{(try? requireTargetedContext()) != nil && confirmedCanCandidates.context==expected})
+                try requireTargetedContext()
+                reachSelections.append(["stage":stage,"candidates":result.diagnostics,"path_admitted":false])
+                return result
+            }
+            localReachSelection=try await rankCurrentCans("before_targeted_reobservation")
+            if localReachSelection?.object==nil {
+                let views=ROBWorkspaceCanRecenterPlan.views(sightings:currentCanSightings,physicalSide:model.physicalSide,
+                    nowMilliseconds:Date().timeIntervalSince1970*1000,boundedPan:boundedPan ?? {max(-45,min(45,$0))})
+                for (index,view) in views.enumerated() {
+                    try requireTargetedContext()
+                    found.removeValue(forKey:.can);locationConfirmation.invalidate(.can)
+                    // Force this view's own two-exposure confirmation rather
+                    // than ending on the previous opposite-arm discovery.
+                    selectedCanMeasurement=nil
+                    progress("Checking a nearer \(model.physicalSide)-arm can, view \(index+1) of \(views.count).")
+                    try await inspectWithRetry(view)
+                    try requireTargetedContext()
+                    localReachSelection=try await rankCurrentCans("targeted_reobservation_\(index+1)")
+                    evidence.append(["targeted_can_reobservation":true,"attempt":index+1,"maximum_views":2,
+                        "pan":view.panDegrees,"upper":view.upperTarget,"reachable_confirmed_can":localReachSelection?.object != nil,
+                        "shape_thresholds_changed":false,"path_admitted":false])
+                    if localReachSelection?.object != nil {found[.can]=localReachSelection!.object;break}
+                }
+            }
+        }
         // The fast object search need not see the selected hanging arm. Add
         // only two bounded depth views for this explicit local trial; detector
         // inference, self masks, occupied returns and free-space gates are unchanged.
@@ -2327,13 +2441,15 @@ struct ROBWorkspaceCanSelection {
                 "elapsed_seconds":ProcessInfo.processInfo.systemUptime-started,"budget_seconds":14.0,
                 "scene_id":sceneID.uuidString,"occupied_returns_preserved":true,"unknown_space_gate_unchanged":true])
         }
+        if localReachSelectionRequired {found[.can]=localReachSelection?.object}
         let missing = targets.filter { found[$0] == nil }.map(\.spokenName)
         let unseen = targets.filter { !visuallyFound.contains($0) }.map(\.spokenName)
         let seen = targets.filter { visuallyFound.contains($0) }.map(\.spokenName)
-        let status = targets.isEmpty ? (leftHanging && rightHanging ? "observed_hanging" : "hanging_unconfirmed")
+        let noReachableCan=localReachSelectionRequired && localReachSelection?.object==nil
+        let status = noReachableCan ? "no_reachable_can" : targets.isEmpty ? (leftHanging && rightHanging ? "observed_hanging" : "hanging_unconfirmed")
             : validObservations == 0 ? "vision_unavailable" : !requireDepth && unseen.isEmpty ? "visually_found"
                 : missing.isEmpty ? "found" : unseen.isEmpty ? "depth_unconfirmed" : "not_found"
-        let message = targets.isEmpty ? (leftHanging && rightHanging ? "I can see both robot arms hanging." : "I couldn't confirm both arms hanging from these views.")
+        let message = noReachableCan ? "I couldn't confirm a can with valid geometry and a reachable grasp for my \(model.physicalSide) arm. I haven't sent a reach." : targets.isEmpty ? (leftHanging && rightHanging ? "I can see both robot arms hanging." : "I couldn't confirm both arms hanging from these views.")
             : validObservations == 0 ? "My local search could not produce a usable camera observation. I cannot yet confirm the can or bucket. I haven't sent a reach."
                 : missing.isEmpty || !requireDepth && unseen.isEmpty ? "I found the \(targets.map(\.spokenName).joined(separator: " and "))."
                 : unseen.isEmpty ? "I can see the can and orange bucket, but I couldn't confirm their depth positions. I haven't sent a reach."

@@ -1778,7 +1778,8 @@ enum ROBInitialRetreatFailureExport {
                     guard self.localReceiptCommand != nil else {return false}
                     _ = try self.requireLocalReceipt()
                     return true
-                },check: { try self.check() }, progress: { self.update($0) })
+                },canReachBaseline:localReceiptCommand != nil ? model.positions(vendorLeft:searchBaseline):nil,
+                check: { try self.check() }, progress: { self.update($0) })
             sceneCapturedForThisTask = true
             if let map = ROBWorkspaceSearch.shared.collisionSnapshot {
                 collisionMap = map; collisionModel = model

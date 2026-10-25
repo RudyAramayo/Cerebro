@@ -223,6 +223,7 @@ def main():
     vision = (ROOT / 'Cerebro/ROBArmRoutineVision.swift').read_text()
     plan = (ROOT / 'Cerebro/ROBWorkspaceSearchPlan.swift').read_text()
     selection = block(vision, '@MainActor @nonobjc func nearestReachableCan(').replace('@MainActor @nonobjc', '@MainActor')
+    selection += '\n' + block(vision, '@MainActor private func selectReachableCan(')
     actual = '\n'.join(block(vision, marker) for marker in [
         'struct ROBWorkspaceCanSceneIdentity:', 'struct ROBWorkspaceCanCandidateSet {', 'struct ROBWorkspaceCanSelection {'])
     actual += '\n' + block(plan, 'enum ROBWorkspaceTarget:')

@@ -393,7 +393,8 @@ final class ROBWorkspaceSearch {
     var onInspect: (() -> Void)?
     var afterInspect: (() -> Void)?
     @MainActor func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true,
-        permitsLocalCanShapePrior:() throws ->Bool={false},check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
+        permitsLocalCanShapePrior:() throws ->Bool={false},canReachBaseline:[String:Double]?=nil,
+        check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
         requiredDepth = requireDepth
         localCanShapePriorPermissions.append(try permitsLocalCanShapePrior())
         requestedTargets = targets
