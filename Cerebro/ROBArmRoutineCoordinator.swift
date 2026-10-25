@@ -331,6 +331,16 @@ enum ROBArmRoutineError: LocalizedError {
         cancelAuthorized(reason: reason)
     }
 
+    /// Application maintenance stops execution without treating a restart as
+    /// the operator's Stop. A standing campaign retains only its permission
+    /// and object state; every old path and live execution still ends here.
+    func suspendForApplicationRestart(reason: String) {
+        ROBGripperStartupCalibration.shared.stop(reason: reason)
+        ROBControllerArmApproval.shared.pauseStandingLocalCanCampaign(reason: reason)
+        ROBLeftArmTrial.shared.cancel(reason: reason)
+        cancelAuthorized(reason: reason)
+    }
+
     private func cancelAuthorized(reason: String) {
         precondition(Thread.isMainThread)
         startupTicket = nil

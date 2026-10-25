@@ -3261,7 +3261,7 @@ static const CGFloat ROBConversationBubbleTextDownshift = 8.0;
         cancelCurrentGestureWithReason:@"Cerebro is shutting down"];
     (void)[[ROBAmberGestureExecutor shared] requestPriorityHold];
     [[ROBAmberDebugAuthority shared] revoke];
-    [[ROBArmRoutineCoordinator shared] cancelWithReason:@"Cerebro is shutting down"];
+    [[ROBArmRoutineCoordinator shared] suspendForApplicationRestartWithReason:@"Cerebro is shutting down"];
     [[ROBAmberGatewayTunnel shared] disconnect];
     [[ROBMessagesBridge shared] stop];
     [self.baseSerialConsoleWindowController close];
