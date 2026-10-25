@@ -343,14 +343,29 @@ enum ROBLeftGestureCompiler {
                         workspaceApproachPlan: ROBWorkspaceCollisionPlan? = nil,
                         collisionMap: (any ROBWorkspaceCollisionMap)? = nil,
                         collisionSceneID: UUID? = nil, collisionCameraGeneration: UUID? = nil,
+                        visualCalibrationTrial: ROBWorkspaceVisualCalibrationTrial? = nil,
                         nowMilliseconds: Double = Date().timeIntervalSince1970*1000) throws -> ROBLeftGestureProposal {
+        func validatePath(_ path:ROBWorkspaceCollisionPlan,map:any ROBWorkspaceCollisionMap,sceneID:UUID,camera:UUID) throws {
+            if let trial = visualCalibrationTrial {
+                guard path.context.visualTrial == trial else {
+                    throw ROBGhostMotionError.blocked("The visual-calibration compiler needs the caller's matching frozen trial evidence.")
+                }
+                try path.validateVisualCalibrationTrial(map:map,model:model,generation:generation,sceneID:sceneID,
+                    cameraGeneration:camera,nowMilliseconds:nowMilliseconds,trial:trial)
+            } else {
+                // A decoded visualTrial field is never authority to choose the
+                // experimental lane; ordinary callers remain measured-only.
+                try path.validate(map:map,model:model,generation:generation,sceneID:sceneID,
+                    cameraGeneration:camera,nowMilliseconds:nowMilliseconds)
+            }
+        }
         func checked(_ proposal: ROBLeftGestureProposal) throws -> ROBLeftGestureProposal {
             guard let path = workspaceCollisionPlan else { return proposal }
             guard let map = collisionMap, let sceneID = collisionSceneID, let camera = collisionCameraGeneration,
                   path.baseline == proposal.baseline, path.steps == proposal.steps else {
                 throw ROBGhostMotionError.blocked("The complete arm path needs its matching live workspace map before review.")
             }
-            try path.validate(map:map,model:model,generation:generation,sceneID:sceneID,cameraGeneration:camera,nowMilliseconds:nowMilliseconds)
+            try validatePath(path,map:map,sceneID:sceneID,camera:camera)
             var result = proposal; result.workspaceCollisionPlan = path; return result
         }
         guard kind == "recycling" || workspaceApproachPlan == nil else {
@@ -375,7 +390,7 @@ enum ROBLeftGestureCompiler {
                       let map = collisionMap, let sceneID = collisionSceneID, let camera = collisionCameraGeneration else {
                     throw ROBGhostMotionError.blocked("The complete recycling approach needs a matching live map and its exact can-derived pregrasp endpoint before any arm movement.")
                 }
-                try entry.validate(map:map,model:model,generation:generation,sceneID:sceneID,cameraGeneration:camera,nowMilliseconds:nowMilliseconds)
+                try validatePath(entry,map:map,sceneID:sceneID,camera:camera)
                 bodyBaseline = entry.goal
             }
             let body = try ROBHorizontalCanRecycle.compile(name:name,poses:poses,actions:recyclingActions ?? [:],
@@ -416,6 +431,7 @@ enum ROBLeftGestureCompiler {
             let original = model.positions(vendorLeft: center)
             var previous = center
             var outgoing: [[Double]] = []
+            var selfProxy = ROBWorkspaceSelfProxyClearance(model:model)
             for pose in poses {
                 guard pose.allSatisfy({ key, value in value.isFinite && model.joints.contains(where: { $0.name == key }) }) else {
                     throw ROBGhostMotionError.blocked("Gesture contains an unknown or non-finite joint.")
@@ -438,7 +454,7 @@ enum ROBLeftGestureCompiler {
                 for check in 0...checks {
                     let t = Double(check) / Double(checks)
                     let q = zip(previous, target).map { $0 + ($1 - $0) * t }
-                    guard model.treadSeparation(vendorLeft: q) >= 0.030 else {
+                    guard try selfProxy.minimum(vendorLeft:q) >= 0.030 else {
                         throw ROBGhostMotionError.blocked("Custom ghost path enters the model's tread clearance margin. Adjust the target before review.")
                     }
                 }
@@ -474,6 +490,7 @@ enum ROBLeftGestureCompiler {
     static func validate(_ proposal: ROBLeftGestureProposal, model: ROBGhostRobotModel,
                          collisionMap: (any ROBWorkspaceCollisionMap)? = nil,
                          collisionSceneID: UUID? = nil, collisionCameraGeneration: UUID? = nil,
+                         visualCalibrationTrial: ROBWorkspaceVisualCalibrationTrial? = nil,
                          nowMilliseconds: Double = Date().timeIntervalSince1970*1000) throws {
         guard proposal.modelID == model.modelID, proposal.referenceID == model.referenceID,
               proposal.geometryID == model.geometryID, proposal.mappingID == model.selectedMappingID else {
@@ -483,7 +500,8 @@ enum ROBLeftGestureCompiler {
             baseline: proposal.baseline, generation: proposal.sessionGeneration, id: proposal.id,
             recyclingActions: proposal.recyclingActions, recyclingParameters: proposal.recyclingParameters,
             workspaceCollisionPlan:proposal.workspaceCollisionPlan,workspaceApproachPlan:proposal.workspaceApproachPlan,collisionMap:collisionMap,
-            collisionSceneID:collisionSceneID,collisionCameraGeneration:collisionCameraGeneration,nowMilliseconds:nowMilliseconds)
+            collisionSceneID:collisionSceneID,collisionCameraGeneration:collisionCameraGeneration,
+            visualCalibrationTrial:visualCalibrationTrial,nowMilliseconds:nowMilliseconds)
         guard proposal == expected else { throw ROBGhostMotionError.blocked("The reviewed path or timing changed; review a new proposal.") }
     }
 
@@ -556,13 +574,14 @@ enum ROBHorizontalCanRecycle {
               horizontalStart <= grip-4 else {
             throw ROBGhostMotionError.blocked("Recycling needs a continuous horizontal final approach before closing.")
         }
+        var selfProxy = ROBWorkspaceSelfProxyClearance(model:model)
         for (index, target) in targets.enumerated().dropFirst() {
             let start = previous
             let travel = 1.5 * zip(start,target).reduce(0.0) { $0 + abs($1.0-$1.1) }
             let checks = max(1, Int(ceil(travel/0.01)))
             for sample in 0...checks {
                 let t = Double(sample)/Double(checks), q = zip(start,target).map { $0 + ($1-$0)*t }
-                guard model.treadSeparation(vendorLeft: q) >= 0.030 else {
+                guard try selfProxy.minimum(vendorLeft:q) >= 0.030 else {
                     throw ROBGhostMotionError.blocked("The horizontal recycling path enters the tread clearance margin.")
                 }
                 if index > horizontalStart, let frame = model.frames(model.positions(vendorLeft: q))[model.toolLink] {
@@ -594,6 +613,7 @@ enum ROBHorizontalCanRecycle {
     private static func compactSteps(_ steps: [ROBLeftGestureProposal.Step], baseline: [Double], model: ROBGhostRobotModel,
                                 parameters: ROBRecyclingTestParameters) -> [ROBLeftGestureProposal.Step] {
         guard !steps.isEmpty else { return steps }
+        var selfProxy = ROBWorkspaceSelfProxyClearance(model:model)
         let protected = Set(steps.indices.filter { index in
             steps[index].jawAction != nil || (index > 0 && steps[index-1].jawAction != nil) ||
             (index+1 < steps.count && steps[index+1].jawAction != nil) || steps[index].stage == "Present empty left arm"
@@ -625,7 +645,7 @@ enum ROBHorizontalCanRecycle {
                 let original = zip(route[originalIndex],route[originalIndex+1]).map { $0+($1-$0)*fraction }
                 let q = zip(start,target).map { $0+($1-$0)*t }
                 guard zip(original,q).allSatisfy({ abs($0-$1) <= 0.01 }),
-                      model.treadSeparation(vendorLeft:q) >= 0.030,
+                      ((try? selfProxy.minimum(vendorLeft:q)) ?? -Double.infinity) >= 0.030,
                       let actualFrame = model.frames(model.positions(vendorLeft:q))[model.toolLink],
                       let originalTip = model.toolPosition(model.positions(vendorLeft:original)) else { return false }
                 let actualTip = SIMD3(actualFrame.columns.3.x,actualFrame.columns.3.y,actualFrame.columns.3.z)
@@ -726,6 +746,7 @@ enum ROBTabletopPickPlace {
         if steps.last?.positions == center {
             steps[steps.count - 1].jawAction = .prepare
         } else { try append(center, stage: "Open empty gripper", action: .prepare) }
+        var selfProxy = ROBWorkspaceSelfProxyClearance(model:model)
         for (index, target) in targets.enumerated() {
             let start = previous
             let travel = 1.5 * zip(start, target).reduce(0.0) { $0 + abs($1.0 - $1.1) }
@@ -733,7 +754,7 @@ enum ROBTabletopPickPlace {
             for sample in 0...checks {
                 let t = Double(sample) / Double(checks)
                 let q = zip(start, target).map { $0 + ($1 - $0) * t }
-                guard model.treadSeparation(vendorLeft: q) >= 0.030 else {
+                guard try selfProxy.minimum(vendorLeft:q) >= 0.030 else {
                     throw ROBGhostMotionError.blocked("The taught tabletop path enters the model's tread clearance margin. Adjust the taught position before review.")
                 }
             }
@@ -839,6 +860,7 @@ enum ROBRecordedLeftRecovery {
         }
         guard let segment else { throw ROBGhostMotionError.blocked("Measured left arm is outside the recorded route; no recovery movement was proposed.") }
         var steps: [ROBLeftGestureProposal.Step] = [], previousQ = measured
+        var selfProxy = ROBWorkspaceSelfProxyClearance(model:model)
         for index in stride(from: segment-1,through: frontIndex,by:-1) {
             let target = previous.steps[index].positions
             if let toolFloor {
@@ -850,7 +872,7 @@ enum ROBRecordedLeftRecovery {
             let checks = max(1,Int(ceil(1.5*zip(previousQ,target).reduce(0.0) { $0+abs($1.0-$1.1) }/0.01)))
             for sample in 0...checks {
                 let t = Double(sample)/Double(checks), q = zip(previousQ,target).map { $0+($1-$0)*t }
-                guard q.allSatisfy({ abs($0) <= 3.1 }), model.treadSeparation(vendorLeft:q) >= 0.030 else {
+                guard q.allSatisfy({ abs($0) <= 3.1 }),try selfProxy.minimum(vendorLeft:q) >= 0.030 else {
                     throw ROBGhostMotionError.blocked("The measured recorded return enters the tread clearance margin.")
                 }
                 if let toolFloor {

@@ -15,6 +15,13 @@ enum ROBRecyclingVisualInspection {
         throw ROBArmRoutineError.blocked("No synthetic visual baseline has been supplied to this fixture.")
     }
     @_optimize(none)
+    @MainActor static func beginVisualCalibrationTrial(model:ROBGhostRobotModel,can:ROBWorkspaceLocatedObject,
+        map:ROBWorkspaceCollisionSnapshot,trial:ROBWorkspaceVisualCalibrationTrial,gatewayArm:String,
+        check:() throws ->Void) async throws ->Context {
+        try check()
+        throw ROBArmRoutineError.blocked("No synthetic unmeasured visual baseline has been supplied to this fixture.")
+    }
+    @_optimize(none)
     @MainActor static func verifyAfterLift(context:Context,model:ROBGhostRobotModel,gatewayArm:String,check:() throws ->Void) async throws ->ROBVisualGraspVerifier.Evidence {
         throw ROBArmRoutineError.blocked("No synthetic visual motion evidence has been supplied to this fixture.")
     }
@@ -44,6 +51,7 @@ final class ROBAmberArmMotionArbiter {
         guard owners[arm] == nil else { return false }; owners[arm] = owner; return true
     }
     func release(_ arm: ROBArmSide, owner: UUID) { if owners[arm] == owner { owners.removeValue(forKey: arm) } }
+    func isReserved(_ arm:ROBArmSide,owner:UUID)->Bool {owners[arm]==owner}
 }
 final class ROBAmberGestureExecutor {
     static let shared = ROBAmberGestureExecutor()
@@ -236,7 +244,19 @@ final class ROBAmberGatewayClient: NSObject {
 }
 
 enum ROBNeckRGBPoseDisplay {
-    static func estimatedCameraProjectionIdentity(model:ROBGhostRobotModel)->String? {nil}
+    static var projectionIdentity:String? = nil
+    static func estimatedCameraProjectionIdentity(model:ROBGhostRobotModel)->String? {projectionIdentity}
+}
+
+final class ROBFixedHeadCalibrationWindowController {
+    static let shared=ROBFixedHeadCalibrationWindowController()
+    var readNeck:(()->NSDictionary)? = { ["known":true,"stationary":true,"pan":6015,"pan_degrees":0.0,"lower":6011,"upper":6160,"ready_at":0.0] }
+}
+
+struct ROBWorkspaceCanSelection {
+    let object:ROBWorkspaceLocatedObject?
+    let preview:ROBCanGrabPreview?
+    let diagnostics:[[String:Any]]
 }
 
 final class ROBWorkspaceSearch {
@@ -248,6 +268,14 @@ final class ROBWorkspaceSearch {
     var failCollisionScan = false
     var syntheticDistantPlane = false
     var estimatedContext = false
+    var nearestSelectionCalls=0
+    var prepareView:((Double,Int)->Bool)? = {_,_ in true}
+    var viewReady:((Double,Int)->Bool)? = {_,_ in true}
+    @MainActor func nearestReachableCan(model:ROBGhostRobotModel,baseline:[String:Double],map:ROBWorkspaceCollisionSnapshot,
+        calibrationFile:URL?=nil,nowMilliseconds:Double=Date().timeIntervalSince1970*1000) async ->ROBWorkspaceCanSelection {
+        nearestSelectionCalls += 1
+        return .init(object:objects[.can],preview:nil,diagnostics:[["fixture":true,"path_admitted":false]])
+    }
     func estimatedContextIsCurrent(model:ROBGhostRobotModel,map:ROBWorkspaceCollisionSnapshot)->Bool {estimatedContext}
     func estimatedCameraProjectionIsCurrent(model:ROBGhostRobotModel,map:ROBWorkspaceCollisionSnapshot)->Bool {
         map.estimatedCameraProjectionIdentity==ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)
@@ -278,7 +306,8 @@ final class ROBWorkspaceSearch {
         let camera = ROBArmRoutineVision.shared.cameraGeneration
         var map = ROBWorkspaceDepthMap(modelID: model.modelID, geometryID: model.geometryID,
             mappingID: model.selectedMappingID, sessionGeneration: generation,
-            cameraGeneration: camera, nowMilliseconds: now - 200)
+            cameraGeneration: camera, nowMilliseconds: now - 200,
+            estimatedCameraProjectionIdentity:ROBNeckRGBPoseDisplay.projectionIdentity)
         var transform = ROBWorkspaceView(panDegrees: 0, upperTarget: 6306).cameraFrame(model: model)!
         // Explicit synthetic scene for the estimated-runtime fixture only:
         // distant occupied returns leave the arm's local volume UNKNOWN. This
@@ -288,7 +317,8 @@ final class ROBWorkspaceSearch {
             try map.append(width: 24, height: 24, fx: 24, fy: 24, cx: 12, cy: 12,
                 depth: { _, _ in 900 }, cameraToRobot: transform, capturedAtMilliseconds: now-age,
                 sequence: sequence, cameraGeneration: camera, nowMilliseconds: now,
-                recordedPanDegrees: 0, recordedUpperTarget: 6306)
+                recordedPanDegrees: 0, recordedUpperTarget: 6306,recordedLowerTarget:6011,
+                estimatedCameraProjectionIdentity:ROBNeckRGBPoseDisplay.projectionIdentity)
         }
         let snapshot = map.snapshot(nowMilliseconds: now)!
         precondition(snapshot.observedFrameCount == 2 && snapshot.occupiedVoxelCount > 0 && snapshot.freeVoxelCount > 0)
@@ -326,9 +356,18 @@ final class ROBArmRoutineVision {
     var cameraGeneration = UUID()
     var observationCount = 0
     var activationHistory: [Bool] = []
+    var runtimeIdentity=String(repeating:"a",count:64)
+    var clearsFramesOnSetActive=false,frameAvailable=true
+    struct RuntimeCalibration {let identity:String}
+    struct Intrinsics {let runtimeCalibration:RuntimeCalibration?}
+    struct Frame {let cameraGeneration:UUID;let intrinsics:Intrinsics?}
+    func snapshot()->[String:Frame] {frameAvailable ? ["face":.init(cameraGeneration:cameraGeneration,intrinsics:.init(runtimeCalibration:.init(identity:runtimeIdentity)))] : [:]}
     var readinessDescription: String { "Simulated camera unavailable" }
     func healthSnapshot() -> NSDictionary { ["fixture": true] }
-    func setActive(_ active: Bool, teaching: Bool = false) { activationHistory.append(active) }
+    func setActive(_ active: Bool, teaching: Bool = false) {
+        activationHistory.append(active)
+        if clearsFramesOnSetActive {frameAvailable=false}
+    }
     func observe(target: String, grippers: Bool = true, progress: (@MainActor (String) -> Void)? = nil) async throws -> ROBArmRoutineObservation {
         observationCount += 1
         return ROBArmRoutineObservation(pathVisible: !blocked, pathClear: !blocked, hanging: true, armsInFront: !blocked,
@@ -588,6 +627,63 @@ final class ROBArmRoutineCoordinator {
         let device = UUID(), session = UUID()
         let hello = ROBRobotActionMessage.controllerHello(senderID: "fixture-controller", acceptsActions: true, capabilities: ["arm_operation"])
         _ = broker.receive(hello, device: device, session: session)
+        if CommandLine.arguments.last == "local-receipt" {
+            var requests=0,prompts=0
+            broker.send={message,_,_ in if message.kind == .actionRequest {requests += 1};return true}
+            broker.announceApproval={_ in prompts += 1}
+            broker.localRecyclingApprovalAuditDirectory=folder.appendingPathComponent("local-audit")
+            ROBNeckRGBPoseDisplay.projectionIdentity=String(repeating:"b",count:64)
+            ROBArmRoutineVision.shared.clearsFramesOnSetActive=true
+            ROBArmRoutineVision.shared.frameAvailable=true
+            g.ready=true;g.stale=false;g.mode=["left":1,"right":1];g.calibrated=["left","right"];g.commands=[]
+            ROBWorkspaceSearch.shared.objects=[:]
+            func local() async ->NSDictionary {
+                await withCheckedContinuation { continuation in
+                    trial.performUsingLocalRecyclingReceipt("right_recycle_cans",target:"4"){continuation.resume(returning:$0)}
+                }
+            }
+            var result:NSDictionary?
+            Task { @MainActor in result=await local() }
+            let pendingEnd=ProcessInfo.processInfo.systemUptime+2
+            while broker.pendingLocalRecyclingApprovalScope == nil && ProcessInfo.processInfo.systemUptime<pendingEnd {
+                try await Task.sleep(nanoseconds:10_000_000)
+            }
+            precondition(broker.pendingLocalRecyclingApprovalScope?["command"] as? String == "right_recycle_cans")
+            precondition(requests==0 && prompts==0 && g.commands.isEmpty && !trial.isRunning)
+            precondition(!broker.receiveSpokenAuthorization("yes proceed"),"Voice cannot impersonate a local imported receipt")
+            var receipt=broker.localRecyclingReceiptTemplate as! [String:Any]
+            receipt["sourceMessage"]="Synthetic fixture: exactly four cans under one local session instruction."
+            receipt["sourceMessageSHA256"]=ROBGhostRobotModel.hash(Data((receipt["sourceMessage"] as! String).utf8))
+            receipt["additionalUserInstruction"]="Synthetic fixture: permit best-estimate visual calibration for this exact job."
+            receipt["additionalUserInstructionSHA256"]=ROBGhostRobotModel.hash(Data((receipt["additionalUserInstruction"] as! String).utf8))
+            try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+            let url=folder.appendingPathComponent("synthetic-local-receipt.json")
+            try JSONSerialization.data(withJSONObject:receipt,options:.sortedKeys).write(to:url)
+            try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:url.path)
+            try broker.importLocalRecyclingSessionApproval(fromReceiptURL:url)
+            let end=ProcessInfo.processInfo.systemUptime+12
+            while result == nil && ProcessInfo.processInfo.systemUptime<end {try await Task.sleep(nanoseconds:10_000_000)}
+            guard let first=result else {fatalError("Local receipt fixture did not finish")}
+            precondition(first["status"] as? String=="not_found",first.description)
+            precondition(first["arm_motion_sent"] as? Bool==false && first["reach_sent"] as? Bool==false && first["jaw_command_sent"] as? Bool==false)
+            precondition(first["perception_only_rejection"] as? Bool==true && broker.localRecyclingApprovalState?["state"] as? String=="available",first.description)
+            precondition(ROBWorkspaceSearch.shared.nearestSelectionCalls==1)
+            precondition(!g.commands.contains{$0.hasPrefix("ghost_step") || $0.hasPrefix("waypoint") || $0.hasPrefix("gripper") || $0.hasPrefix("calibrate")})
+            let second=await local()
+            precondition(second["status"] as? String=="not_found" && requests==0 && prompts==0,second.description)
+            precondition(ROBWorkspaceSearch.shared.nearestSelectionCalls==2 && broker.localRecyclingApprovalState?["state"] as? String=="available")
+            // An unsafe failure with no trajectory must still revoke, rather
+            // than exploiting the perception-only retry exception.
+            ROBWorkspaceSearch.shared.afterInspect={g.stale=true}
+            let lost=await local()
+            precondition(lost["status"] as? String=="blocked" && lost["perception_only_rejection"] as? Bool==false,lost.description)
+            precondition(broker.localRecyclingApprovalState == nil && !trial.isRunning)
+            ROBWorkspaceSearch.shared.afterInspect=nil;g.stale=false
+            ROBNeckRGBPoseDisplay.projectionIdentity=nil
+            broker.cancel(reason:"Synthetic local fixture complete")
+            print("Local receipt runtime: dedicated exact4 prepare sends no voice/controller request; private URL import authorizes exact job; fresh no-travel/no-jaw perception may retry without another approval, feedback loss revokes; nearest selection used, no fake registration or arm trajectory")
+            return
+        }
         let heartbeat = Timer(timeInterval: 1, repeats: true) { _ in _ = broker.receive(hello, device: device, session: session) }
         RunLoop.main.add(heartbeat, forMode: .common)
         defer { heartbeat.invalidate() }

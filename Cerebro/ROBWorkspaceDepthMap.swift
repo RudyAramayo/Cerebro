@@ -64,6 +64,27 @@ struct ROBWorkspaceCollisionSnapshot: Codable, ROBWorkspaceCollisionMap {
     var occupiedVoxelCount: Int { occupied.count }
     var freeVoxelCount: Int { free.count }
 
+    /// A separate experimental consumer can bind the original unregistered
+    /// evidence. This never changes registration, occupied/free cells or masks.
+    var visualCalibrationScope: ROBWorkspaceVisualCalibrationMapScope? {
+        guard capturedRegistrationID == nil, registrationUncertaintyMeters == nil,
+              !isTruncated, observedFrameCount >= 2, observations.count == observedFrameCount,
+              let projection = estimatedCameraProjectionIdentity, projection.count == 64,
+              observations.allSatisfy({ $0.registrationID == nil && $0.registrationUncertaintyMeters == nil &&
+                  !$0.measuredSelfMaskApplied && $0.estimatedDepthHypothesisID == nil &&
+                  $0.estimatedCameraProjectionIdentity == projection &&
+                  $0.recordedPanDegrees?.isFinite == true && $0.recordedUpperTarget.map({(3000...10000).contains($0)}) == true &&
+                  $0.recordedLowerTarget.map({(3000...10000).contains($0)}) == true &&
+                  $0.cameraToRobotColumnMajor.count == 16 && $0.cameraToRobotColumnMajor.allSatisfy(\.isFinite) }) else { return nil }
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(observations) else { return nil }
+        return .init(bodyMotionIdentity:bodyMotionIdentity,
+            bodyContextIsCurrent:bodyMotionIdentity == ROBFixedHeadBodyMotionIdentity.currentIdentity,
+            estimatedCameraProjectionIdentity:projection,
+            observationPoseIdentity:SHA256.hash(data:data).map {String(format:"%02x",$0)}.joined(),
+            observedFrameCount:observedFrameCount)
+    }
+
     fileprivate init(sceneID: UUID, modelID: String, geometryID: String, mappingID: String,
         sessionGeneration: UInt64, cameraGeneration: UUID, createdAtMilliseconds: Double,
         oldestCapturedAtMilliseconds: Double, lastCapturedAtMilliseconds: Double,

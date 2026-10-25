@@ -73,6 +73,7 @@ import Darwin
             try map.append(width:16,height:16,fx:1000,fy:1000,cx:8,cy:8,depth:{_,_ in 1000},
                 cameraToRobot:matrix_identity_double4x4,capturedAtMilliseconds:now+Double(sequence),sequence:sequence,
                 cameraGeneration:camera,nowMilliseconds:now+Double(sequence)+1,cameraRegistrationVerified:true,
+                recordedPanDegrees:0,recordedUpperTarget:6160,recordedLowerTarget:6011,
                 estimatedCameraProjectionIdentity:identity)
         }
         var estimated=make(first)
@@ -80,6 +81,14 @@ import Darwin
         let snapshot=estimated.snapshot(nowMilliseconds:now+3)!
         expect(snapshot.estimatedCameraProjectionIdentity==first && snapshot.observations.allSatisfy{$0.estimatedCameraProjectionIdentity==first},
             "Estimated camera projection provenance was not retained")
+        let occupiedBefore = Set(snapshot.occupiedVoxels), freeBefore = Set(snapshot.freeVoxels)
+        let visual = snapshot.visualCalibrationScope
+        expect(visual?.estimatedCameraProjectionIdentity == first && visual?.observedFrameCount == 2 &&
+            visual?.bodyContextIsCurrent == true && visual?.observationPoseIdentity.count == 64,
+            "Unregistered raw map did not expose its separate frozen visual-trial evidence scope")
+        expect(snapshot.registrationID == nil && snapshot.registrationUncertaintyMeters == nil &&
+            Set(snapshot.occupiedVoxels) == occupiedBefore && Set(snapshot.freeVoxels) == freeBefore,
+            "Reading visual-trial scope changed registration or occupied/free evidence")
         expect(snapshot.registrationID==nil,"Photo-origin identity manufactured measured registration")
         rejected("Changed photo projection was accepted") {try append(&estimated,3,second)}
         rejected("Photo origin was silently disabled during a scene") {try append(&estimated,3,nil)}
@@ -90,6 +99,7 @@ import Darwin
         let legacySnapshot=legacy.snapshot(nowMilliseconds:now+3)!
         expect(legacySnapshot.estimatedCameraProjectionIdentity==nil && legacySnapshot.observations.allSatisfy{$0.estimatedCameraProjectionIdentity==nil},
             "Legacy map invented photo-origin provenance")
+        expect(legacySnapshot.visualCalibrationScope == nil,"Unidentified legacy projection acquired visual-trial evidence")
         let encoded=try JSONEncoder().encode(legacySnapshot)
         expect(!String(data:encoded,encoding:.utf8)!.contains("estimatedCameraProjectionIdentity"),"Nil projection identity changed legacy serialization")
         let decoded=try JSONDecoder().decode(ROBWorkspaceCollisionSnapshot.self,from:encoded)
@@ -311,6 +321,7 @@ import Darwin
         }
         let capturedBeforeBodyMove=local.snapshot(nowMilliseconds:now+3)!
         expect(capturedBeforeBodyMove.registrationID != nil,"Fixture registration was missing before body motion")
+        expect(capturedBeforeBodyMove.visualCalibrationScope == nil,"Measured map was silently converted to an estimated visual trial")
         ROBFixedHeadBodyMotionIdentity.invalidate()
         expect(capturedBeforeBodyMove.registrationID == nil,"A retained snapshot stayed registered after body motion")
         expect(local.snapshot(nowMilliseconds:now+3) == nil,"A captured depth scene survived body motion")

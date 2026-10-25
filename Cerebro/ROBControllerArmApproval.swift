@@ -1,4 +1,6 @@
 import Foundation
+import CryptoKit
+import Darwin
 
 /// The operator decides on the controller; Cerebro owns execution and its
 /// measured result. No desktop alert, persisted grant, or per-waypoint prompt.
@@ -20,6 +22,249 @@ import Foundation
         ROBControlLiveSessionRegistry.isActiveOperator(controllerID: $0, sessionID: $1)
     }
     @nonobjc var now: () -> Date = Date.init
+
+    // This is a separate, explicitly imported local-user approval. No ordinary
+    // chat, model tool, microphone candidate or controller packet enters it.
+    private let localSessionID = UUID()
+    var localRecyclingApprovalSessionID: String { localSessionID.uuidString }
+    @nonobjc var localRecyclingApprovalAuditDirectory = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/Cerebro/LocalSessionApprovals", isDirectory: true)
+
+    private struct LocalRecyclingScope: Equatable {
+        let command: String
+        let arm: String
+        let summary: String
+        let contextIdentity: String
+        let permitsUnmeasuredVisualCalibrationTrial: Bool
+        var object: [String: Any] {
+            ["command": command, "arm": arm, "canCount": 4, "summary": summary,
+             "summarySHA256": ROBControllerArmApproval.localHash(Data(summary.utf8)),
+             "contextIdentity": contextIdentity, "targetObject": "empty_coke_can",
+             "destination": "orange_bucket", "bothArmsStationaryHolds": true,
+             "treads": false, "torso": false, "manualGestures": false,
+             "permitsUnmeasuredVisualCalibrationTrial": permitsUnmeasuredVisualCalibrationTrial]
+        }
+    }
+    private struct LocalRecyclingApproval {
+        let receiptID: UUID
+        let receiptSHA256: String
+        let scope: LocalRecyclingScope
+        let beginBefore: Date
+        let contextIdentity: () -> String?
+        var activePendingID: String?
+    }
+    private struct LocalReceipt: Decodable {
+        let schemaVersion: Int
+        let kind: String
+        let receiptID: UUID
+        let appSessionID: UUID
+        let issuedAtMilliseconds: Double
+        let expiresAtMilliseconds: Double
+        let source: String
+        let sourceMessage: String
+        let sourceMessageSHA256: String
+        let additionalUserInstruction: String?
+        let additionalUserInstructionSHA256: String?
+    }
+    private var localRecyclingApproval: LocalRecyclingApproval?
+    private static let localApprovalBeginLimit: TimeInterval = 12 * 60 * 60
+
+    var pendingLocalRecyclingApprovalScope: NSDictionary? {
+        guard let p = pending, let scope = p.localRecyclingScope, p.started == nil else { return nil }
+        var value = scope.object
+        value["appSessionID"] = localSessionID.uuidString
+        value["pendingID"] = p.id
+        return value as NSDictionary
+    }
+
+    /// An invalid-by-default template for the dedicated local file-import UI.
+    /// The private file supplies the user's actual source text and its hashes.
+    var localRecyclingReceiptTemplate: NSDictionary? {
+        guard let p = pending, p.started == nil, let scope = p.localRecyclingScope else { return nil }
+        let issued = now().timeIntervalSince1970 * 1000
+        return ["schemaVersion": 1, "kind": "local_user_session_recycling_approval",
+            "receiptID": UUID().uuidString, "appSessionID": localSessionID.uuidString,
+            "issuedAtMilliseconds": issued, "expiresAtMilliseconds": issued + Self.localApprovalBeginLimit * 1000,
+            "source": "explicit_user_session_instruction", "sourceMessage": "", "sourceMessageSHA256": "",
+            "additionalUserInstruction": NSNull(), "additionalUserInstructionSHA256": NSNull(),
+            "scope": scope.object]
+    }
+
+    /// Dedicated Testing Sandbox callers only. A typed four-can request does
+    /// not create a grant; its exact immutable scope must match a local receipt.
+    @nonobjc func requestRecyclingWorkspaceTask(command: String, arm: String, canCount: Int,
+        summary: String, contextIdentity: @escaping () -> String?, receiptOnly: Bool,
+        permitsUnmeasuredVisualCalibrationTrial: Bool = false,
+        execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
+        cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
+        precondition(Thread.isMainThread)
+        guard canCount == 4, ["left", "right"].contains(arm), command == arm + "_recycle_cans",
+              !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, summary.count <= 2048,
+              let identity = contextIdentity(), !identity.isEmpty, identity.utf8.count <= 8192 else {
+            completion(["status": "rejected", "detail": "A local session approval requires the exact four-can recycling task and a current camera/body/arm context."])
+            return
+        }
+        let scope = LocalRecyclingScope(command: command, arm: arm, summary: summary, contextIdentity: identity,
+            permitsUnmeasuredVisualCalibrationTrial: permitsUnmeasuredVisualCalibrationTrial)
+        request(action: "arm_operation", arguments: ["operation": "manual", "arm": arm == "right" ? "both" : "left", "summary": summary],
+            summary: summary, executionLimit: 600, localRecyclingScope: scope,
+            localContextIdentity: contextIdentity, receiptOnly: receiptOnly,
+            execute: execute, cancel: cancel, completion: completion)
+    }
+
+    /// Local OS file selection is the only import lane. There is deliberately
+    /// no equivalent method taking model/controller/chat text or a dictionary.
+    @nonobjc func importLocalRecyclingSessionApproval(fromReceiptURL url: URL) throws {
+        precondition(Thread.isMainThread)
+        guard let p = pending, p.started == nil, let scope = p.localRecyclingScope,
+              let context = p.localContextIdentity, context() == scope.contextIdentity else {
+            throw localApprovalError("Prepare the exact recycling job in Testing Sandbox with its current context before importing its receipt.")
+        }
+        let data = try readPrivateLocalReceipt(url)
+        let top = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let keys: Set<String> = ["schemaVersion", "kind", "receiptID", "appSessionID", "issuedAtMilliseconds",
+            "expiresAtMilliseconds", "source", "sourceMessage", "sourceMessageSHA256", "additionalUserInstruction", "additionalUserInstructionSHA256", "scope"]
+        guard let top, Set(top.keys) == keys, let suppliedScope = top["scope"] as? [String: Any],
+              try localCanonical(suppliedScope) == localCanonical(scope.object) else {
+            throw localApprovalError("The receipt does not match the immutable command, count, arm, summary and context.")
+        }
+        let receipt = try JSONDecoder().decode(LocalReceipt.self, from: data)
+        let issued = Date(timeIntervalSince1970: receipt.issuedAtMilliseconds / 1000)
+        let expires = Date(timeIntervalSince1970: receipt.expiresAtMilliseconds / 1000)
+        guard receipt.schemaVersion == 1, receipt.kind == "local_user_session_recycling_approval",
+              receipt.appSessionID == localSessionID, receipt.source == "explicit_user_session_instruction",
+              !receipt.sourceMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              receipt.sourceMessage.utf8.count <= 8192,
+              receipt.sourceMessageSHA256 == Self.localHash(Data(receipt.sourceMessage.utf8)),
+              receipt.issuedAtMilliseconds.isFinite, receipt.expiresAtMilliseconds.isFinite,
+              receipt.issuedAtMilliseconds <= now().timeIntervalSince1970 * 1000,
+              expires > now(), expires > issued,
+              receipt.expiresAtMilliseconds - receipt.issuedAtMilliseconds <= Self.localApprovalBeginLimit * 1000,
+              now().timeIntervalSince(issued) <= Self.localApprovalBeginLimit else {
+            throw localApprovalError("The local user approval is expired, belongs to another app session, or has invalid source evidence.")
+        }
+        if scope.permitsUnmeasuredVisualCalibrationTrial {
+            guard let additional = receipt.additionalUserInstruction,
+                  !additional.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, additional.utf8.count <= 8192,
+                  receipt.additionalUserInstructionSHA256 == Self.localHash(Data(additional.utf8)) else {
+                throw localApprovalError("The explicitly requested visual-calibration trial needs its additional exact user instruction in the receipt.")
+            }
+        } else if receipt.additionalUserInstruction != nil || receipt.additionalUserInstructionSHA256 != nil {
+            throw localApprovalError("The receipt adds an instruction outside this prepared job.")
+        }
+        // Exclusive, persistent import record before any grant. It is a replay
+        // tombstone/audit, never a persisted grant to reload after a crash.
+        var audit = top
+        audit["receiptSHA256"] = Self.localHash(data); audit["sourceReceiptPath"] = url.path
+        audit["importedAtMilliseconds"] = now().timeIntervalSince1970 * 1000
+        audit["localOSUserID"] = Int(getuid()); audit["pendingID"] = p.id
+        audit["event"] = "imported_once_no_persisted_motion_grant"
+        try writeLocalApprovalAudit(audit, name: "receipt-" + receipt.receiptID.uuidString + ".json")
+        localRecyclingApproval = LocalRecyclingApproval(receiptID: receipt.receiptID,
+            receiptSHA256: Self.localHash(data), scope: scope, beginBefore: expires,
+            contextIdentity: context, activePendingID: p.id)
+        pending?.localSessionApprovalID = receipt.receiptID
+        startTimer(); beginAcceptedOperation()
+    }
+
+    /// This exposes permission only. The planner must separately admit an
+    /// explicitly unmeasured trial; this broker never certifies a transform.
+    @nonobjc func authorizesLocalRecyclingVisualCalibrationTrial(summary: String, arm: String) -> Bool {
+        guard let p = pending, let scope = p.localRecyclingScope,
+              scope.arm == arm, scope.summary == summary, scope.permitsUnmeasuredVisualCalibrationTrial,
+              p.localSessionApprovalID != nil else { return false }
+        return authorizationIsLive(p)
+    }
+
+    var activeLocalRecyclingApprovalEvidence: NSDictionary? {
+        guard let p = pending, let started = p.started, let approval = localRecyclingApproval,
+              p.localSessionApprovalID == approval.receiptID, authorizationIsLive(p) else { return nil }
+        var value = approval.scope.object
+        value["receiptID"] = approval.receiptID.uuidString
+        value["receiptSHA256"] = approval.receiptSHA256
+        value["appSessionID"] = localSessionID.uuidString
+        value["pendingID"] = p.id
+        value["executingUntilMilliseconds"] = started.addingTimeInterval(p.executionLimit).timeIntervalSince1970 * 1000
+        value["beginBeforeMilliseconds"] = approval.beginBefore.timeIntervalSince1970 * 1000
+        value["registrationVerifiedByApproval"] = false
+        return value as NSDictionary
+    }
+
+    /// Read-only sandbox status, including an idle exact-job approval retained
+    /// after a no-travel perception miss. Private source text is never exposed.
+    var localRecyclingApprovalState: NSDictionary? {
+        guard let approval = localRecyclingApproval,
+              approval.contextIdentity() == approval.scope.contextIdentity else { return nil }
+        if approval.activePendingID != nil {
+            guard let p = pending, approval.activePendingID == p.id, authorizationIsLive(p) else { return nil }
+        } else if approval.beginBefore <= now() { return nil }
+        var value = approval.scope.object
+        value["state"] = approval.activePendingID == nil ? "available" : "executing"
+        value["receiptID"] = approval.receiptID.uuidString
+        value["receiptSHA256"] = approval.receiptSHA256
+        value["appSessionID"] = localSessionID.uuidString
+        value["beginBeforeMilliseconds"] = approval.beginBefore.timeIntervalSince1970 * 1000
+        value["source"] = "explicit_local_OS_file_import"
+        return value as NSDictionary
+    }
+
+    private func auditLocalApprovalEvent(_ event: String, approval: LocalRecyclingApproval, detail: String) {
+        let value: [String: Any] = ["schemaVersion": 1, "event": event,
+            "receiptID": approval.receiptID.uuidString, "receiptSHA256": approval.receiptSHA256,
+            "appSessionID": localSessionID.uuidString, "scope": approval.scope.object,
+            "atMilliseconds": now().timeIntervalSince1970 * 1000, "detail": detail]
+        try? writeLocalApprovalAudit(value, name: "event-" + UUID().uuidString + ".json")
+    }
+
+    private func revokeLocalApproval(reason: String) {
+        if let approval = localRecyclingApproval {
+            // Clear first even when passive audit I/O fails.
+            localRecyclingApproval = nil
+            auditLocalApprovalEvent("revoked_or_consumed", approval: approval, detail: reason)
+        }
+    }
+
+    private static func localHash(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+    private func localApprovalError(_ text: String) -> NSError {
+        NSError(domain: "Cerebro.LocalRecyclingApproval", code: 1, userInfo: [NSLocalizedDescriptionKey: text])
+    }
+    private func localCanonical(_ object: [String: Any]) throws -> Data {
+        try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    }
+    private func readPrivateLocalReceipt(_ url: URL) throws -> Data {
+        guard url.isFileURL else { throw localApprovalError("Select a private local receipt file.") }
+        let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW)
+        guard descriptor >= 0 else { throw localApprovalError("The receipt must be a readable regular file, not a symbolic link.") }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        defer { try? handle.close() }
+        var info = stat()
+        guard fstat(descriptor, &info) == 0, info.st_uid == getuid(),
+              info.st_mode & S_IFMT == S_IFREG, info.st_mode & 0o077 == 0,
+              info.st_size > 0, info.st_size <= 32768 else {
+            throw localApprovalError("The receipt must be owned by this OS user, private (0600), and at most 32 KB.")
+        }
+        let value = try handle.read(upToCount: 32769) ?? Data()
+        guard value.count == Int(info.st_size) else { throw localApprovalError("The receipt changed while being read.") }
+        return value
+    }
+    private func writeLocalApprovalAudit(_ value: [String: Any], name: String) throws {
+        let directory = localRecyclingApprovalAuditDirectory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let attrs = try FileManager.default.attributesOfItem(atPath: directory.path)
+        guard attrs[.type] as? FileAttributeType == .typeDirectory,
+              (attrs[.ownerAccountID] as? NSNumber)?.uint32Value == getuid(),
+              ((attrs[.posixPermissions] as? NSNumber)?.intValue ?? 0o777) & 0o077 == 0 else {
+            throw localApprovalError("The local approval audit directory must be private and owned by this OS user.")
+        }
+        let data = try localCanonical(value)
+        let descriptor = open(directory.appendingPathComponent(name).path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
+        guard descriptor >= 0 else { throw localApprovalError("This receipt was already imported, or its audit could not be saved. No new approval was granted.") }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        defer { try? handle.close() }
+        try handle.write(contentsOf: data); try handle.synchronize()
+    }
 
     private struct Peer {
         let device: UUID
@@ -44,6 +289,10 @@ import Foundation
         var voiceAuthorized = false
         var armSessionID: String? = nil
         var attentionReminders = 0
+        var localRecyclingScope: LocalRecyclingScope?
+        var localContextIdentity: (() -> String?)?
+        var awaitingLocalReceipt = false
+        var localSessionApprovalID: UUID?
     }
     private struct ArmSession {
         let id: String
@@ -118,6 +367,13 @@ import Foundation
 
     private func authorizationIsLive(_ p: Pending) -> Bool {
         guard let started = p.started, (0..<p.executionLimit).contains(now().timeIntervalSince(started)) else { return false }
+        if let id = p.localSessionApprovalID {
+            guard let approval = localRecyclingApproval, approval.receiptID == id,
+                  approval.activePendingID == p.id, approval.scope == p.localRecyclingScope,
+                  approval.contextIdentity() == approval.scope.contextIdentity,
+                  p.localContextIdentity?() == approval.scope.contextIdentity else { return false }
+            return true
+        }
         if let id = p.armSessionID {
             return armSession.map { $0.id == id && sessionIsFresh($0) } == true
         }
@@ -128,7 +384,7 @@ import Foundation
     /// suppression. Camera text, typed chat and model tool calls never enter it.
     func receiveSpokenAuthorization(_ text: String) -> Bool {
         precondition(Thread.isMainThread)
-        guard let p = pending, p.started == nil, now().timeIntervalSince(p.created) < Self.operatorApprovalSeconds else { return false }
+        guard let p = pending, !p.awaitingLocalReceipt, p.started == nil, now().timeIntervalSince(p.created) < Self.operatorApprovalSeconds else { return false }
         guard let accepted = Self.spokenDecision(text) else { return false }
         if !accepted { cancel(reason: "Local spoken rejection; no new motion authorized."); return true }
         pending?.voiceAuthorized = true
@@ -140,7 +396,7 @@ import Foundation
     /// recognizer FINAL result before granting anything. Continuous dictation
     /// otherwise may not finalize a short "yes" until its minute-long timeout.
     func isSpokenAuthorizationCandidate(_ text: String) -> Bool {
-        guard let p = pending, p.started == nil, now().timeIntervalSince(p.created) < Self.operatorApprovalSeconds else { return false }
+        guard let p = pending, !p.awaitingLocalReceipt, p.started == nil, now().timeIntervalSince(p.created) < Self.operatorApprovalSeconds else { return false }
         return Self.spokenDecision(text) != nil
     }
 
@@ -155,6 +411,13 @@ import Foundation
 
     private func beginAcceptedOperation() {
         guard let p = pending, p.started == nil else { return }
+        if p.localSessionApprovalID != nil {
+            guard let approval = localRecyclingApproval, approval.activePendingID == p.id,
+                  approval.beginBefore > now(), approval.scope == p.localRecyclingScope,
+                  approval.contextIdentity() == approval.scope.contextIdentity else {
+                cancel(reason: "The local recycling approval lost its scope or current context before execution."); return
+            }
+        }
         pending?.started = now()
         update("Authorized complete operation: \(p.summary)")
         publish(.executing, detail: status, result: [:])
@@ -168,6 +431,25 @@ import Foundation
             let observationOnly = ["not_found", "not_localized", "not_reachable", "needs_help"].contains(outcome)
                 && (result["arm_motion_sent"] as? Bool == false || safelyParked)
             if !succeeded, !observationOnly, p.armSessionID != nil { self.armSession = nil }
+            if let receiptID = p.localSessionApprovalID {
+                // Retain only an explicit no-travel/no-jaw perception result.
+                // An empty return/park is travel and cannot use this exception.
+                let perceptionOutcome = ["not_found", "not_localized", "not_reachable", "needs_help"].contains(outcome)
+                    || outcome == "blocked"
+                let perceptionOnly = perceptionOutcome
+                    && result["perception_only_rejection"] as? Bool == true
+                    && result["arm_motion_sent"] as? Bool == false
+                    && result["reach_sent"] as? Bool == false
+                    && result["jaw_command_sent"] as? Bool == false
+                if perceptionOnly, var approval = self.localRecyclingApproval,
+                   approval.receiptID == receiptID, approval.beginBefore > self.now(),
+                   approval.contextIdentity() == approval.scope.contextIdentity {
+                    approval.activePendingID = nil; self.localRecyclingApproval = approval
+                    self.auditLocalApprovalEvent("perception_only_job_available", approval: approval, detail: outcome)
+                } else {
+                    self.revokeLocalApproval(reason: "Job ended: " + outcome)
+                }
+            }
             self.finish(result, state: succeeded ? .completed : .failed)
         }
     }
@@ -215,6 +497,8 @@ import Foundation
 
     private func request(action: String, arguments: NSDictionary, summary: String, executionLimit: TimeInterval = 120,
                          allowArmSession: Bool = false,
+                         localRecyclingScope: LocalRecyclingScope? = nil,
+                         localContextIdentity: (() -> String?)? = nil, receiptOnly: Bool = false,
                          execute: @escaping (@escaping (NSDictionary) -> Void) -> Void,
                          cancel: @escaping () -> Void, completion: @escaping (NSDictionary) -> Void) {
         precondition(Thread.isMainThread)
@@ -229,6 +513,23 @@ import Foundation
         }
         pending = Pending(id: probe.callID!, action: action, arguments: arguments.copy() as! NSDictionary, summary: summary,
             created: now(), execute: execute, cancel: cancel, completion: completion, executionLimit: executionLimit)
+        pending?.localRecyclingScope = localRecyclingScope
+        pending?.localContextIdentity = localContextIdentity
+        pending?.awaitingLocalReceipt = receiptOnly
+        if let approval = localRecyclingApproval {
+            if let scope = localRecyclingScope, approval.scope == scope, approval.activePendingID == nil,
+               approval.beginBefore > now(), approval.contextIdentity() == scope.contextIdentity,
+               localContextIdentity?() == scope.contextIdentity {
+                localRecyclingApproval?.activePendingID = pending?.id
+                pending?.localSessionApprovalID = approval.receiptID
+                startTimer(); beginAcceptedOperation(); return
+            }
+            revokeLocalApproval(reason: "A different operation or context replaced the exact recycling job.")
+        }
+        if receiptOnly {
+            update("Awaiting local user-session receipt for the exact four-can recycling job: \(summary)")
+            startTimer(); return
+        }
         if allowArmSession, let session = armSession, sessionIsFresh(session) {
             pending?.peer = session.peer; pending?.voiceAuthorized = session.voiceAuthorized
             pending?.armSessionID = session.id
@@ -317,6 +618,7 @@ import Foundation
     func cancel(reason: String) {
         precondition(Thread.isMainThread)
         armSession = nil
+        revokeLocalApproval(reason: reason)
         guard let p = pending else {
             timer?.invalidate(); timer = nil; update(reason); return
         }
@@ -326,13 +628,25 @@ import Foundation
 
     @nonobjc func tick() {
         precondition(Thread.isMainThread)
-        if armSession == nil && pending == nil { timer?.invalidate(); timer = nil; return }
+        if let approval = localRecyclingApproval,
+           approval.contextIdentity() != approval.scope.contextIdentity ||
+            (approval.activePendingID == nil && approval.beginBefore <= now()) {
+            cancel(reason: "Local recycling approval expired or its camera/body/arm context was lost; hold requested."); return
+        }
+        if armSession == nil && pending == nil && localRecyclingApproval == nil { timer?.invalidate(); timer = nil; return }
         if let session = armSession, !sessionIsFresh(session) {
             armSession = nil
             if pending?.armSessionID != nil { cancel(reason: "Arm rehearsal session ended; hold requested."); return }
             update("Arm rehearsal authorization expired or its controller disconnected.")
         }
         guard let p = pending else { return }
+        if p.awaitingLocalReceipt, p.started == nil {
+            if now().timeIntervalSince(p.created) >= Self.localApprovalBeginLimit ||
+                p.localContextIdentity?() != p.localRecyclingScope?.contextIdentity {
+                cancel(reason: "The prepared local recycling request expired or lost its context.")
+            }
+            return
+        }
         if p.started == nil, p.attentionReminders < 2,
            now().timeIntervalSince(p.created) >= (p.attentionReminders == 0 ? 20 : 45),
            now().timeIntervalSince(p.created) < Self.operatorApprovalSeconds {
@@ -341,7 +655,7 @@ import Foundation
             // is missed. Repeat the SAME scope without extending its deadline.
             announceApproval?("Hey! Can I move my arms?")
         }
-        if p.started != nil, p.voiceAuthorized || p.armSessionID != nil {
+        if p.started != nil, p.voiceAuthorized || p.armSessionID != nil || p.localSessionApprovalID != nil {
             if !authorizationIsLive(p) { cancel(reason: "Authorized arm operation expired; hold requested.") }
             return
         }
@@ -446,7 +760,7 @@ import Foundation
         guard let p = pending else { return }
         publish(state, detail: result["detail"] as? String ?? "Arm operation ended", result: result)
         pending = nil
-        if armSessionActive { startTimer() } else { timer?.invalidate(); timer = nil }
+        if armSessionActive || localRecyclingApproval != nil { startTimer() } else { timer?.invalidate(); timer = nil }
         if cancelExecution { p.cancel() }
         update(result["detail"] as? String ?? "Arm operation ended")
         p.completion(result)

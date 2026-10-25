@@ -256,7 +256,8 @@ struct ROBEstimatedFixedHeadCapture {
 # Same compilation unit retains the mapper's fileprivate snapshot initializer;
 # production implementation remains verbatim and uses the real ray semantics.
 depth_map=(ROOT/'Cerebro/ROBWorkspaceDepthMap.swift').read_text()
-protocol=(ROOT/'Cerebro/ROBWorkspaceCollisionPlan.swift').read_text().split('/// A measured object envelope')[0]
+protocol_source=(ROOT/'Cerebro/ROBWorkspaceCollisionPlan.swift').read_text()
+protocol='import Foundation\nimport simd\n'+protocol_source[protocol_source.index('enum ROBWorkspaceVoxelState'):protocol_source.index('/// A measured object envelope')]
 with tempfile.TemporaryDirectory(prefix='rob-estimated-current-scene-',dir='/private/tmp') as temp:
     directory=Path(temp)
     (directory/'Protocol.swift').write_text(protocol)

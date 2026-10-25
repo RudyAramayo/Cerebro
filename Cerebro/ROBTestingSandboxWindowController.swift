@@ -1,8 +1,9 @@
 import AppKit
+import UniformTypeIdentifiers
 
 /// A catalog of changing commissioning trials, separate from robot preferences.
 /// Every physical action still enters the runtime approval path.
-@objcMembers public final class ROBTestingSandboxWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
+@objcMembers public final class ROBTestingSandboxWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     public static let shared = ROBTestingSandboxWindowController()
 
     private enum ParameterSet: Equatable { case recycling, depthAlignment, current, none }
@@ -19,13 +20,13 @@ import AppKit
     }
     private static let trials: [Trial] = [
         Trial(id: "right-recycling", title: "Recycle can · right arm", detail: "Use ROB's physical right arm (Amber L10). Find an empty upright can, grasp its middle, verify a small lift with fixed-head visual evidence, then carry and gravity-drop above the bucket. Right-arm calibration is separate from left-arm reach tuning. One task approval covers both arms holding at their measured positions and only the right arm travelling.", parameters: .current,
-              actions: [Action(title: "Recycle selected cans", command: "right_recycle_cans"), Action(title: "Search only", command: "right_search_workspace"), Action(title: "Scan workspace geometry", command: "right_scan_clearance"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision")]),
+              actions: [Action(title: "Recycle selected cans", command: "right_recycle_cans"), Action(title: "Search only", command: "right_search_workspace"), Action(title: "Scan workspace geometry", command: "right_scan_clearance"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision"), Action(title: "Prepare approved session job", command: "local-recycling:prepare"), Action(title: "Export approval template…", command: "local-recycling:export"), Action(title: "Import session approval…", command: "local-recycling:import")]),
         Trial(id: "fixed-head-registration", title: "Camera-to-arm registration", detail: "Measure a local camera-to-robot transform from current RGB-D robot surfaces. Hold the exact head pose; fit and held-out validation use separate surface patches and later frames. A validated fit records its uncertainty and bounded volume. This test never moves an arm and does not manufacture a motion approval.", parameters: .none,
               actions: [Action(title: "Open fixed-head calibration…", command: "registration:open")]),
         Trial(id: "right-estimated-calibration", title: "Right-arm calibration step", detail: "Review one empty-right-arm two-joint retreat away from the table, then hold. The four-second step is capped at 3 cm of full-model travel. It is an estimated commissioning test, with existing modeled self-proxy overlaps required to improve. It does not close the jaws, recycle a can or claim a general arm calibration. Inspect the physical local clearance and ghost before one spoken or controller approval.", parameters: .none,
               actions: [Action(title: "Capture / preview right calibration step", command: "right_estimated_preview"), Action(title: "Inspect estimated ghost…", command: "ghost:collision"), Action(title: "Run reviewed right calibration step", command: "right_estimated_trial")]),
         Trial(id: "recycling", title: "Recycle can", detail: "Find an upright empty can and an open orange bucket using the neck camera. Grasp the can at its middle, lift, carry and release above the opening. Search and preview do not move the arms. A run uses one complete-task authorization or an active supervised session.", parameters: .recycling,
-              actions: [Action(title: "Recycle selected cans", command: "left_recycle_cans"), Action(title: "Search only", command: "left_search_workspace"), Action(title: "Scan workspace geometry", command: "left_scan_clearance"), Action(title: "Preview grasp…", command: "ghost:can"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision")]),
+              actions: [Action(title: "Recycle selected cans", command: "left_recycle_cans"), Action(title: "Search only", command: "left_search_workspace"), Action(title: "Scan workspace geometry", command: "left_scan_clearance"), Action(title: "Preview grasp…", command: "ghost:can"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision"), Action(title: "Prepare approved session job", command: "local-recycling:prepare"), Action(title: "Export approval template…", command: "local-recycling:export"), Action(title: "Import session approval…", command: "local-recycling:import")]),
         Trial(id: "depth-alignment", title: "Depth alignment", detail: "Adjust the face camera's modeled downward mounting angle and move head-camera depth points horizontally toward ROB. The camera model, live depth view, new workspace scans and object measurements share the pitch correction. Previous scans and previews are cleared when the values change.", parameters: .depthAlignment,
               actions: [Action(title: "Show corrected live depth…", command: "ghost:collision"), Action(title: "Capture corrected workspace", command: "left_scan_clearance")]),
         Trial(id: "neck-qr-calibration", title: "Neck / QR calibration", detail: "Select a fixed 120 mm table, floor or wall target. Upper-neck checks start from the current view with lower target 6011 and hold pan fixed. Each selected upper target is checked against the QR, including reverse visits. Protractor mode holds each position until you advance. Posture sweeps repeat pan/upper checks at upright, back and forward lower-neck targets. Keep ROB's base and the target fixed. Results remain unverified until independent measurements validate them.", parameters: .none,
@@ -58,6 +59,7 @@ import AppKit
     private let status = NSTextField(wrappingLabelWithString: "")
     private let session = NSTextField(wrappingLabelWithString: "")
     private let collisionInfo = NSTextField(wrappingLabelWithString: "")
+    private let localApprovalInfo = NSTextField(wrappingLabelWithString: "")
     private var collisionRefreshTimer: Timer?
     private let continueCycle = NSButton(title: "Continue", target: nil, action: nil)
     private let save = NSButton(title: "Save test parameters", target: nil, action: nil)
@@ -216,6 +218,15 @@ import AppKit
         if ["recycling", "right-recycling"].contains(trial.id) {
             addField("recyclingCount", "Number of cans", Double(Self.recyclingCount),
                 note: "1–\(ROBRecyclingBatchRequest.maximumCount) · each can is checked again")
+            addField("localVisualAllowanceMillimeters", "Assumed visual error (mm)",
+                ROBLeftArmTrial.shared.localVisualTrialAssumedSpatialErrorMeters * 1000,
+                note: "25–150 · local session trial only; not measured")
+            fields["localVisualAllowanceMillimeters"]?.delegate = self
+            localApprovalInfo.identifier = NSUserInterfaceItemIdentifier("sandbox-local-recycling-approval-scope")
+            localApprovalInfo.isSelectable = true
+            detailStack.addArrangedSubview(localApprovalInfo)
+            localApprovalInfo.widthAnchor.constraint(equalTo: detailStack.widthAnchor).isActive = true
+            addHelp("The local session job covers exactly four empty Coke cans and the orange bucket. Save a count of 4 first. Prepare freezes the selected arm and task; export a template, then import its private user-approval receipt. A retained identical job can continue without another prompt. Stop revokes it. The receipt does not verify camera alignment or remove motion checks.")
         }
         if trial.parameters == .depthAlignment {
             let current = ROBWorkspaceDepthAlignment.snapshot()
@@ -265,6 +276,9 @@ import AppKit
         for (index, action) in trial.actions.enumerated() {
             let button = NSButton(title: action.title, target: self, action: #selector(performTrialAction(_:)))
             button.tag = index; button.identifier = NSUserInterfaceItemIdentifier("sandbox-\(trial.id)-\(index)")
+            if action.command.hasPrefix("local-recycling:") {
+                button.identifier = NSUserInterfaceItemIdentifier("sandbox-\(trial.id)-session-\(action.command.dropFirst("local-recycling:".count))")
+            }
             detailStack.addArrangedSubview(button); actionButtons.append(button)
         }
         detailStack.addArrangedSubview(NSButton(title: "Show latest recording", target: self, action: #selector(showRecording)))
@@ -368,6 +382,11 @@ import AppKit
     @objc private func performTrialAction(_ sender: NSButton) {
         guard selectedTrial.actions.indices.contains(sender.tag) else { return }
         let command = selectedTrial.actions[sender.tag].command
+        // File controls must remain reachable while the receipt-only request
+        // deliberately disables ordinary edits and other trial actions.
+        if command == "local-recycling:export" { exportLocalRecyclingApprovalTemplate(); return }
+        if command == "local-recycling:import" { importLocalRecyclingApprovalReceipt(); return }
+        if command == "local-recycling:prepare" { prepareLocalRecyclingSessionJob(); return }
         if command == "belly-qr:open" {
             ROBBellyQRCalibrationWindowController.shared.showWindow(self); return
         }
@@ -424,6 +443,78 @@ import AppKit
         else if command == "speech-test" { ROBArmFeedbackAlerts.shared.testSpeech() }
         else { run(command) }
     }
+    private var localReceiptFilesEnabled: Bool {
+        ROBLocalRecyclingSandboxRouting.receiptFilesEnabled(trialID: selectedTrial.id,
+            pendingScope: ROBControllerArmApproval.shared.pendingLocalRecyclingApprovalScope,
+            operationRunning: ROBLeftArmTrial.shared.isRunning)
+    }
+    private func prepareLocalRecyclingSessionJob() {
+        guard canEdit else { return }
+        let entered = fields["recyclingCount"].flatMap { Double($0.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        guard let command = ROBLocalRecyclingSandboxRouting.preparationCommand(trialID: selectedTrial.id,
+            savedCount: Self.recyclingCount, enteredCount: entered) else {
+            parameterMessage = "This local session approval covers exactly four empty Coke cans. Set Number of cans to 4 and save the test parameters first."
+            refresh(); return
+        }
+        guard let spatial = ROBLocalRecyclingSandboxRouting.spatialAllowanceMeters(
+            fields["localVisualAllowanceMillimeters"].flatMap { Double($0.stringValue) }) else {
+            parameterMessage = "Enter an assumed visual error from 25 to 150 mm. This is an experimental allowance, not measured calibration."
+            refresh(); return
+        }
+        // The exact summary/context freezes this assumption before any receipt.
+        ROBLeftArmTrial.shared.localVisualTrialAssumedSpatialErrorMeters = spatial
+        parameterMessage = ""; observingLeftOperation = true
+        ROBLeftArmTrial.shared.performUsingLocalRecyclingReceipt(command, target: "4") { [weak self] _ in self?.refresh() }
+        refresh()
+    }
+    public func controlTextDidChange(_ notification: Notification) {
+        guard canEdit, let field = fields["localVisualAllowanceMillimeters"],
+              notification.object as? NSTextField === field else { return }
+        let approval = ROBControllerArmApproval.shared
+        if approval.localRecyclingApprovalState != nil {
+            approval.cancel(reason: "The local visual-error assumption changed; review a new exact job receipt.")
+        }
+        if let spatial = ROBLocalRecyclingSandboxRouting.spatialAllowanceMeters(Double(field.stringValue)) {
+            ROBLeftArmTrial.shared.localVisualTrialAssumedSpatialErrorMeters = spatial
+            parameterMessage = "Local visual-error assumption updated for the next session job; this is not a measured transform."
+        } else {
+            parameterMessage = "Enter an assumed visual error from 25 to 150 mm before preparing the session job."
+        }
+        approval.tick(); refresh()
+    }
+    private func exportLocalRecyclingApprovalTemplate() {
+        guard localReceiptFilesEnabled, let template = ROBControllerArmApproval.shared.localRecyclingReceiptTemplate else {
+            parameterMessage = "Prepare the exact four-can session job before exporting its approval template."; refresh(); return
+        }
+        let panel = NSSavePanel(); panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "rob-four-can-session-approval-template.json"
+        panel.title = "Export the pending job's approval template"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            // The exported source text is blank: this template cannot grant.
+            let data = try JSONSerialization.data(withJSONObject: template, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: url, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            parameterMessage = "Exported a private, invalid-by-default approval template. Its actual user instructions and SHA-256 values belong only in the private receipt. Import through this sandbox when ready."
+        } catch { parameterMessage = error.localizedDescription }
+        refresh()
+    }
+    private func importLocalRecyclingApprovalReceipt() {
+        guard localReceiptFilesEnabled else {
+            parameterMessage = "Prepare the matching four-can session job before importing its local approval."; refresh(); return
+        }
+        let panel = NSOpenPanel(); panel.allowedContentTypes = [.json]
+        panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
+        panel.title = "Import the exact pending job's local user approval"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        do {
+            try ROBControllerArmApproval.shared.importLocalRecyclingSessionApproval(fromReceiptURL: url)
+            parameterMessage = "Imported the local job-specific receipt. Motion still requires current feedback, ownership and the selected measured or explicitly unmeasured trial admission. Stop revokes this job approval."
+        } catch { parameterMessage = error.localizedDescription }
+        refresh()
+    }
     @objc private func startSession() { run("arm_session") }
     @objc private func endSession() { run("end_arm_session") }
     private func run(_ command: String) {
@@ -450,6 +541,8 @@ import AppKit
         ROBBellyQRCalibrationWindowController.shared.stop()
         ROBFixedHeadCalibrationWindowController.shared.stop()
         ROBNeckQRCalibration.shared.stop()
+        // Includes an idle exact-job receipt retained after a perception miss.
+        ROBControllerArmApproval.shared.cancel(reason: "Stop requested in Testing Sandbox")
         ROBArmRoutineCoordinator.shared.cancel(reason: "Stop requested in Testing Sandbox")
         _ = ROBAmberGestureExecutor.shared.cancelCurrentGesture(reason: "Stop requested in Testing Sandbox")
         _ = ROBAmberGestureExecutor.shared.requestPriorityHold()
@@ -483,6 +576,9 @@ import AppKit
         }
         if !parameterMessage.isEmpty { status.stringValue = parameterMessage + "\n" + status.stringValue }
         session.stringValue = ROBControllerArmApproval.shared.armSessionDetail
+        localApprovalInfo.stringValue = ROBLocalRecyclingSandboxRouting.scopeDescription(
+            pending: ROBControllerArmApproval.shared.pendingLocalRecyclingApprovalScope,
+            imported: ROBControllerArmApproval.shared.localRecyclingApprovalState)
         displayedCycleStage = left.interactionStage
         switch displayedCycleStage {
         case "object_placed": continueCycle.title = "Object placed; fingers clear → Grip"
@@ -495,11 +591,14 @@ import AppKit
         for field in fields.values { field.isEnabled = canEdit }
         save.isEnabled = canEdit
         for button in actionButtons {
+            let command = selectedTrial.actions.indices.contains(button.tag) ? selectedTrial.actions[button.tag].command : ""
             let isQRStop = selectedTrial.actions.indices.contains(button.tag)
                 && selectedTrial.actions[button.tag].command == "qr:stop"
             let isQRNext = selectedTrial.actions.indices.contains(button.tag)
                 && selectedTrial.actions[button.tag].command == "qr:next"
-            button.isEnabled = isQRStop || (isQRNext ? ROBNeckQRCalibration.shared.awaitingProtractor : canEdit)
+            button.isEnabled = ["local-recycling:export", "local-recycling:import"].contains(command)
+                ? localReceiptFilesEnabled
+                : isQRStop || (isQRNext ? ROBNeckQRCalibration.shared.awaitingProtractor : canEdit)
         }
         qrTarget.isEnabled = canEdit
         protractorPitch.isEnabled = ROBNeckQRCalibration.shared.awaitingProtractor
@@ -510,6 +609,54 @@ import AppKit
 
 private final class ROBTestingSandboxDocumentView: NSView {
     override var isFlipped: Bool { true }
+}
+
+/// Local UI routing only. No text or template produced here authorizes motion.
+enum ROBLocalRecyclingSandboxRouting {
+    static func spatialAllowanceMeters(_ millimeters: Double?) -> Double? {
+        guard let millimeters, millimeters.isFinite, (25...150).contains(millimeters) else { return nil }
+        return millimeters / 1000
+    }
+    static func physicalArm(trialID: String) -> String? {
+        switch trialID {
+        case "right-recycling": return "right"
+        case "recycling": return "left"
+        default: return nil
+        }
+    }
+    static func preparationCommand(trialID: String, savedCount: Int, enteredCount: Double?) -> String? {
+        guard let arm = physicalArm(trialID: trialID), savedCount == 4,
+              let enteredCount, enteredCount.isFinite, enteredCount == 4 else { return nil }
+        return arm + "_recycle_cans"
+    }
+    static func receiptFilesEnabled(trialID: String, pendingScope: NSDictionary?, operationRunning: Bool) -> Bool {
+        guard !operationRunning, let arm = physicalArm(trialID: trialID), let scope = pendingScope,
+              scope["arm"] as? String == arm, scope["command"] as? String == arm + "_recycle_cans",
+              (scope["canCount"] as? NSNumber)?.doubleValue == 4 else { return false }
+        return true
+    }
+    static func scopeDescription(pending: NSDictionary?, imported: NSDictionary?) -> String {
+        guard let scope = imported ?? pending else { return "Local session approval: no imported job is available or executing. Prepare a four-can job to review its exact scope." }
+        let state = imported?["state"] as? String ?? "waiting for private receipt; no grant"
+        let arm = scope["arm"] as? String ?? "unknown"
+        let command = scope["command"] as? String ?? "unknown"
+        let source = imported?["source"] as? String ?? "no local receipt imported"
+        var lines = ["Local session approval: " + state, "Source: " + source,
+            "Job: 4 empty Coke cans → orange bucket · physical " + arm.uppercased() + " arm",
+            "Command: " + command,
+            "Scope: " + (scope["summary"] as? String ?? "missing"),
+            "Summary SHA-256: " + (scope["summarySHA256"] as? String ?? "missing"),
+            "Context: " + (scope["contextIdentity"] as? String ?? "missing")]
+        if let receipt = imported?["receiptID"] as? String { lines.append("Receipt: " + receipt) }
+        if let milliseconds = imported?["beginBeforeMilliseconds"] as? Double, milliseconds.isFinite {
+            lines.append("Begin before: " + DateFormatter.localizedString(from: Date(timeIntervalSince1970: milliseconds / 1000), dateStyle: .short, timeStyle: .short))
+        }
+        if scope["permitsUnmeasuredVisualCalibrationTrial"] as? Bool == true {
+            lines.append(imported == nil ? "Unmeasured visual trial: requested, not yet approved." : "Unmeasured visual trial: explicitly permitted; planner admission is separate.")
+        }
+        lines.append("Both arms may hold stationary; only the selected arm travels. Treads, torso and manual gestures are excluded. Stop revokes this approval.")
+        return lines.joined(separator: "\n")
+    }
 }
 
 /// Read-only presentation shared by the sandbox and SceneKit preview. A model

@@ -17,6 +17,7 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
     var obstacleLow: SIMD3<Double>?
     var obstacleHigh: SIMD3<Double>?
     var observed = true
+    var visualCalibrationScope: ROBWorkspaceVisualCalibrationMapScope? = nil
     var fingerprint: String {
         ROBGhostRobotModel.hash(Data("synthetic-map:\(obstacleLow.debugDescription):\(obstacleHigh.debugDescription):\(observed)".utf8))
     }
@@ -168,6 +169,110 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
         blocked("unobserved") { _ = try make(front,q,unknown) }
         var unregistered = map; unregistered.registrationID = nil; unregistered.registrationUncertaintyMeters = nil
         blocked("registration") { _ = try make(front,q,unregistered) }
+        // The explicit local experimental lane retains nil registration and
+        // exactly the same obstacle, unknown, whole-arm and payload checker.
+        let fixtureHash = ROBGhostRobotModel.hash(Data("isolated visual-trial fixture".utf8))
+        unregistered.visualCalibrationScope = .init(bodyMotionIdentity:"fixture body",bodyContextIsCurrent:true,
+            estimatedCameraProjectionIdentity:fixtureHash,observationPoseIdentity:fixtureHash,observedFrameCount:2)
+        func trial(_ source:SyntheticMap,baseline:[Double] = front,receipt:String = fixtureHash,command:String = "left_recycle_cans",
+                   expiry:Double = 2_000,allowance:Double = 0.05) -> ROBWorkspaceVisualCalibrationTrial {
+            .init(receiptID:"isolated local receipt",receiptSHA256:receipt,appSessionID:"isolated app session",
+                command:command,canCount:4,summarySHA256:fixtureHash,authorizationContextIdentity:"isolated broker scope",
+                sessionGeneration:generation,sceneID:scene,cameraGeneration:camera,modelID:model.modelID,
+                geometryID:model.geometryID,mappingID:model.selectedMappingID,mapFingerprint:source.fingerprint,
+                bodyMotionIdentity:"fixture body",estimatedCameraProjectionIdentity:fixtureHash,observationPoseIdentity:fixtureHash,
+                currentPoseIdentity:fixtureHash,baseline:baseline,issuedAtMilliseconds:1_000,expiresAtMilliseconds:expiry,
+                assumedSpatialErrorMeters:allowance)
+        }
+        let permit = trial(unregistered)
+        let estimated = try ROBWorkspaceCollisionPlan.makeVisualCalibrationTrial(from:front,to:q,map:unregistered,model:model,
+            generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1_000,trial:permit)
+        precondition(unregistered.registrationID == nil && unregistered.registrationUncertaintyMeters == nil &&
+            estimated.context.registrationID == nil && estimated.context.registrationUncertaintyMeters == nil &&
+            estimated.context.visualTrial == permit && estimated.context.spatialErrorAllowanceMeters == 0.05)
+        try estimated.validateVisualCalibrationTrial(map:unregistered,model:model,generation:generation,sceneID:scene,
+            cameraGeneration:camera,nowMilliseconds:1_001,trial:permit)
+        blocked("registration") { _ = try make(front,q,unregistered) }
+        blocked("registration") {
+            try estimated.validate(map:unregistered,model:model,generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1_001)
+        }
+        blocked("registration") {
+            _ = try ROBLeftGestureCompiler.compile(kind:"workspace_collision",name:"No implicit estimated authority",model:model,
+                baseline:front,generation:generation,workspaceCollisionPlan:estimated,collisionMap:unregistered,
+                collisionSceneID:scene,collisionCameraGeneration:camera,nowMilliseconds:1_001)
+        }
+        let experimental = try ROBLeftGestureCompiler.compile(kind:"workspace_collision",name:"Explicit visual calibration trial",model:model,
+            baseline:front,generation:generation,workspaceCollisionPlan:estimated,collisionMap:unregistered,
+            collisionSceneID:scene,collisionCameraGeneration:camera,visualCalibrationTrial:permit,nowMilliseconds:1_001)
+        let imported = try JSONDecoder().decode(ROBLeftGestureProposal.self,from:experimental.encoded())
+        blocked("registration") {
+            try ROBLeftGestureCompiler.validate(imported,model:model,collisionMap:unregistered,collisionSceneID:scene,
+                collisionCameraGeneration:camera,nowMilliseconds:1_001)
+        }
+        try ROBLeftGestureCompiler.validate(imported,model:model,collisionMap:unregistered,collisionSceneID:scene,
+            collisionCameraGeneration:camera,visualCalibrationTrial:permit,nowMilliseconds:1_001)
+        blocked("scope") {
+            _ = try ROBWorkspaceCollisionPlan.makeVisualCalibrationTrial(from:front,to:q,map:unregistered,model:model,generation:generation,
+                sceneID:scene,cameraGeneration:camera,nowMilliseconds:2_001,trial:permit)
+        }
+        for bad in [trial(unregistered,receipt:"not a receipt hash"),trial(unregistered,allowance:0),trial(unregistered,allowance:0.151),
+                    trial(unregistered,command:"right_recycle_cans"),trial(unregistered,command:"left_recycle_can")] {
+            blocked("scope") { _ = try ROBWorkspaceCollisionPlan.validateVisualCalibrationTrialMap(unregistered,model:model,
+                generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1_001,trial:bad) }
+        }
+        let otherReceipt = trial(unregistered,receipt:ROBGhostRobotModel.hash(Data("different receipt".utf8)))
+        blocked("changed") { try estimated.validateVisualCalibrationTrial(map:unregistered,model:model,generation:generation,
+            sceneID:scene,cameraGeneration:camera,nowMilliseconds:1_001,trial:otherReceipt) }
+        var missingScope = unregistered; missingScope.visualCalibrationScope = nil
+        var movedBody = unregistered; movedBody.visualCalibrationScope = .init(bodyMotionIdentity:"fixture body",bodyContextIsCurrent:false,
+            estimatedCameraProjectionIdentity:fixtureHash,observationPoseIdentity:fixtureHash,observedFrameCount:2)
+        var changedProjection = unregistered; changedProjection.visualCalibrationScope = .init(bodyMotionIdentity:"fixture body",bodyContextIsCurrent:true,
+            estimatedCameraProjectionIdentity:String(repeating:"0",count:64),observationPoseIdentity:fixtureHash,observedFrameCount:2)
+        for invalid in [missingScope,movedBody,changedProjection] {
+            blocked("scope") { _ = try ROBWorkspaceCollisionPlan.validateVisualCalibrationTrialMap(invalid,model:model,
+                generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1_001,trial:permit) }
+        }
+        blocked("pose") { _ = try ROBWorkspaceCollisionPlan.makeVisualCalibrationTrial(from:q,to:front,map:unregistered,model:model,
+            generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1_001,trial:permit) }
+        var unseenTrialMap = unregistered; unseenTrialMap.observed = false
+        blocked("unobserved") { _ = try ROBWorkspaceCollisionPlan.makeVisualCalibrationTrial(from:front,to:q,map:unseenTrialMap,model:model,
+            generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1_001,trial:trial(unseenTrialMap)) }
+        var obstructedTrialMap = unregistered
+        obstructedTrialMap.obstacleLow = [0.17,0.23,0.95]; obstructedTrialMap.obstacleHigh = [0.20,0.26,0.98]
+        blocked("obstacle") { _ = try ROBWorkspaceCollisionPlan.makeVisualCalibrationTrial(from:front,to:q,map:obstructedTrialMap,model:model,
+            generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1_001,trial:trial(obstructedTrialMap)) }
+        blocked("payload") { _ = try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(baseline:front,steps:carryingSteps,
+            map:unregistered,model:model,generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1_001,trial:permit) }
+        _ = try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(baseline:front,steps:carryingSteps,map:unregistered,
+            model:model,generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1_001,trial:permit,payload:measuredPayload)
+        var hangingProxyDeficit=false
+        var hangingConvexFailure:String?
+        if model.treadSeparation(vendorLeft:hanging) < 0.030 {
+            var expectedFailure:String?
+            do {
+                var narrow=ROBWorkspaceSelfProxyClearance(model:model)
+                hangingProxyDeficit=try narrow.minimum(vendorLeft:hanging)<0.030
+                if hangingProxyDeficit {expectedFailure="nonworsening retreat"}
+            } catch {
+                // This LEFT scan includes an unverifiable convex proxy. Its
+                // failure must remain a veto, rather than reverting to an
+                // optimistic narrow phase or an initial-retreat exemption.
+                expectedFailure=error.localizedDescription
+                hangingConvexFailure=expectedFailure
+                precondition(expectedFailure!.contains("malformed, open, nonmanifold or nonconvex"))
+            }
+            if let expectedFailure {
+                blocked(expectedFailure) { _ = try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(baseline:hanging,
+                    steps:[.init(positions:hanging,seconds:0.7)],map:unregistered,model:model,generation:generation,sceneID:scene,
+                    cameraGeneration:camera,nowMilliseconds:1_001,trial:trial(unregistered,baseline:hanging)) }
+            }
+        }
+        // Existing measured archives omit the new optional lane entirely.
+        let encoder = JSONEncoder(); var oldContext = try JSONSerialization.jsonObject(with:encoder.encode(clear.context)) as! [String:Any]
+        oldContext.removeValue(forKey:"visualTrial")
+        let oldDecoded = try JSONDecoder().decode(ROBWorkspaceCollisionContext.self,from:JSONSerialization.data(withJSONObject:oldContext))
+        precondition(oldDecoded == clear.context && oldDecoded.registrationID != nil)
+        print("Visual trial: explicit exact receipt/map/pose/expiry lane preserves nil registration; ordinary/imported compiler calls reject; obstacles, unknown space, payload, limits and initial self-proxy overlap remain blocked; measured archives readable")
         var uncertain = map; uncertain.registrationUncertaintyMeters = 0.051
         blocked("registration") { _ = try make(front,q,uncertain) }
         var stale = map; stale.oldestCapturedAtMilliseconds = -60_000
@@ -209,8 +314,8 @@ private struct SyntheticMap: ROBWorkspaceCollisionMap {
         let alternative = try make(front,sideGoal,table)
         try alternative.validate(map:table,model:model,generation:generation,sceneID:scene,cameraGeneration:camera,nowMilliseconds:1_001)
         precondition(alternative.goal == sideGoal && alternative.baseline == front && alternative.steps.count <= 80)
-        if model.treadSeparation(vendorLeft:hanging) < 0.030 {
-            blocked("tread") { _ = try make(front,hanging) }
+        if hangingProxyDeficit || hangingConvexFailure != nil {
+            blocked(hangingConvexFailure ?? "tread") { _ = try make(front,hanging) }
         }
         let toolFrame = model.frames(model.positions(vendorLeft:front))["left_tool"]!
         let payloadCenter4 = toolFrame*SIMD4<Double>(0,0,0.45,1)

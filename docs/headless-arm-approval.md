@@ -10,8 +10,50 @@ empty-arm lowering without more approvals. Accepting a session only authorizes
 it: it does **not** raise the arm or run a preparation/calibration sequence.
 Stop, expiry, sleep/restart, ownership loss or a failed motion ends the session.
 A perception-only rejection that sent no arm motion can retain the existing
-bounded session, but cannot bypass geometry checks. Typed/model/camera/serial
-text cannot authorize. See [current sandbox behavior](testing-sandbox.md).
+bounded session, but cannot bypass geometry checks. Ordinary typed/model/camera/
+serial text cannot authorize. The narrowly scoped local-file exception below
+does not add a chat or model authorization endpoint. See [current sandbox behavior](testing-sandbox.md).
+
+## Current four-can local session approval
+
+On October 25, 2026, Rudy explicitly approved this session's job of recycling
+four empty Coke cans into the orange bucket without another verbal approval.
+He separately permitted a best-available, explicitly unmeasured visual-calibration
+trial, with camera checks of possession and delivery. This is a job-specific
+exception, not a global approval disable or a verified transform.
+
+In the selected recycling test, save **Number of cans = 4**, then use **Prepare
+approved session job**, **Export approval template…**, and **Import session
+approval…**. Preparation freezes the physical arm, plural recycling command,
+count, summary and current camera/body/connection context without a spoken
+prompt. Export and import remain available while this receipt-only request waits.
+The exported template is invalid until the actual user instructions and their
+UTF-8 SHA-256 hashes are added to the private receipt. Exact private source text
+stays outside Git and MainAI context. Only the dedicated local OS file-selection
+action imports it; controller, coordinator and model strings cannot do so.
+
+The receipt must be an OS-user-owned private regular file, bind this app session
+and exact pending scope, and allow at most 12 hours to begin. An exclusive private
+audit record rejects replay; no grant reloads after a crash or restart. Execution
+still has its 600-second limit. One grant covers both arms holding stationary
+and the selected arm's checked travel and gripper actions. It excludes treads,
+torso motion and arbitrary/manual gestures. Stop, feedback or ownership/context
+loss, a material motion failure, completion and expiry revoke or consume it.
+Only a proven no-travel/no-jaw perception rejection may retain the same exact job.
+
+**Assumed visual error (mm)** is a sandbox-only local-trial parameter (25–150,
+default 50), not measured calibration. It is applied before preparation and bound
+into the summary/context. Editing it revokes a retained receipt; pending controls
+are locked, and a new assumption requires a new exact receipt. Ordinary tests
+do not use this allowance.
+
+The separate visual-trial planner must recheck the live receipt before dispatch,
+keep the transform unmeasured, and retain observed-obstacle, unknown-space,
+whole-arm, payload, joint-bound and Stop checks. An approval or camera detection
+does not certify alignment. Feedback loss ends the test; it never permits blind
+commands or a claimed successful grasp/delivery.
+
+## Spoken and controller operations
 
 The droid does not open an arm activation, deactivation, gripper, gesture or
 CAN/core recovery confirmation dialog. Enable **Action Approvals** on the paired
@@ -39,8 +81,9 @@ camera/session context and missing measured camera-to-arm registration block
 travel. Operator supervision or an incomplete camera view cannot waive these
 checks. A provisional neck transform, floor fit, can-target correction or
 self-reported registration success does not provide independently measured
-registration and error evidence. Current provisional maps therefore remain
-visualization-only and do not admit arm travel.
+registration and error evidence. Ordinary provisional maps remain visualization
+only. The explicit four-can visual-trial lane above is separate and uses a
+declared assumed spatial allowance, not measured registration uncertainty.
 
 Automatic empty-gripper setup is a separate, explicitly authorized startup
 behavior: after the first authenticated Amber connection, calibrate and perform
@@ -190,7 +233,11 @@ does not silently queue an operation for later execution.
 
 - `bash Scripts/test-controller-arm-approval.sh`: production broker and wire
   protocol, with hardware-free tests for identity/session binding, replay,
-  rejection, timeout, disconnect, opt-in withdrawal and gateway generation changes.
+  rejection, timeout, disconnect, opt-in withdrawal and gateway generation changes;
+  local receipt scope, expiry, private import, crash replay and retained-job state.
+- `python3 -B Tests/ROBLocalRecyclingSandboxRuntimeTests.py`: dedicated four-can
+  UI routing, receipt controls while ordinary edits are disabled, source-text
+  privacy and Stop revocation, without opening UI or hardware.
 - `bash Scripts/test-arm-routines.sh`: production routine with simulated
   controller approval, gateway acknowledgements, cameras and measured settling.
 - `python3 Tests/ROBAmberManualAdmissionRuntimeTests.py`: actual Objective-C

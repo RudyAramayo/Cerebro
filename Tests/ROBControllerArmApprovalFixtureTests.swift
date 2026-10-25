@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 // Compile the production broker and wire protocol with these socket-free seams.
 enum ROBControlLiveSessionRegistry {
@@ -329,6 +330,210 @@ final class ROBAmberGatewayClient: NSObject {
             check(b.authorizesLeftArmTrial("Deliberate camera search and transfer"), "Camera settling must not exhaust the old short task window")
             clock.addTimeInterval(2); b.tick()
             check(stopped == 1 && !b.authorizesLeftArmTrial("Deliberate camera search and transfer"), "The complete search task remains bounded to ten minutes")
+        }
+
+        // A local imported receipt is a distinct lane, never a microphone or
+        // controller impersonation. All texts here are synthetic fixture data.
+        let localDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("local-recycling-approval-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: localDirectory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: localDirectory) }
+        func localBroker() -> ROBControllerArmApproval {
+            let b = broker()
+            b.localRecyclingApprovalAuditDirectory = localDirectory.appendingPathComponent("audit-" + UUID().uuidString)
+            return b
+        }
+        func hash(_ text: String) -> String {
+            SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+        }
+        func receipt(_ b: ROBControllerArmApproval, mutate: (inout [String: Any]) -> Void = { _ in }) throws -> URL {
+            var value = b.localRecyclingReceiptTemplate! as! [String: Any]
+            value["sourceMessage"] = "Synthetic explicit user instruction for this isolated four-can fixture."
+            value["sourceMessageSHA256"] = hash(value["sourceMessage"] as! String)
+            if (value["scope"] as! [String: Any])["permitsUnmeasuredVisualCalibrationTrial"] as? Bool == true {
+                let additional = "Synthetic explicit instruction permitting an unmeasured visual calibration test, with feedback and Stop retained."
+                value["additionalUserInstruction"] = additional
+                value["additionalUserInstructionSHA256"] = hash(additional)
+            }
+            mutate(&value)
+            let url = localDirectory.appendingPathComponent(UUID().uuidString + ".json")
+            try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]).write(to: url)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            return url
+        }
+        func expectReceiptRejection(_ b: ROBControllerArmApproval, _ url: URL, _ detail: String) {
+            do { try b.importLocalRecyclingSessionApproval(fromReceiptURL: url); check(false, detail) }
+            catch { check(true, detail) }
+        }
+        do {
+            let b = localBroker()
+            var executed = 0, prompts = 0, stopped = 0, context: String? = "context-A"
+            var done: ((NSDictionary) -> Void)?
+            b.announceApproval = { _ in prompts += 1 }
+            b.requestRecyclingWorkspaceTask(command: "right_recycle_cans", arm: "right", canCount: 4,
+                summary: "Exact four-can job", contextIdentity: { context }, receiptOnly: true,
+                permitsUnmeasuredVisualCalibrationTrial: true, execute: { executed += 1; done = $0 },
+                cancel: { stopped += 1 }, completion: { _ in })
+            check(b.isPending && executed == 0 && prompts == 0, "Preparing a local job neither speaks nor grants")
+            check(b.localRecyclingApprovalState == nil, "A prepared template is not an imported approval")
+            check(!b.receiveSpokenAuthorization("yes proceed"), "A receipt-only request cannot be granted by microphone text")
+            check(!b.authorizesRightArmTrial("Exact four-can job"), "A prepared local job cannot move")
+            let url = try receipt(b)
+            try b.importLocalRecyclingSessionApproval(fromReceiptURL: url)
+            check(executed == 1 && prompts == 0 && b.authorizesRightArmTrial("Exact four-can job"), "Exact local receipt starts once without a spoken prompt")
+            check(b.localRecyclingApprovalState?["state"] as? String == "executing" &&
+                b.localRecyclingApprovalState?["sourceMessage"] == nil, "Sandbox state reports execution without exposing private source texts")
+            check(!b.authorizesLeftArmTrial("Exact four-can job") && !b.authorizesRightArmTrial("Other job"), "Local receipt binds physical arm and immutable summary")
+            check(b.authorizesLocalRecyclingVisualCalibrationTrial(summary: "Exact four-can job", arm: "right"), "Explicit visual-trial permission remains separately scoped")
+            check(!b.authorizesLocalRecyclingVisualCalibrationTrial(summary: "Exact four-can job", arm: "left"), "Visual-trial permission cannot cross arms")
+            check(b.activeLocalRecyclingApprovalEvidence?["registrationVerifiedByApproval"] as? Bool == false, "An approval never certifies registration")
+            expectReceiptRejection(b, url, "Executing receipt cannot import twice")
+            let files = try FileManager.default.contentsOfDirectory(at: b.localRecyclingApprovalAuditDirectory, includingPropertiesForKeys: nil)
+            check(files.count == 1, "A private replay tombstone is written before the first execution")
+            context = nil; b.tick()
+            check(stopped == 1 && !b.isPending && b.activeLocalRecyclingApprovalEvidence == nil, "Losing context revokes and requests hold")
+            check(b.localRecyclingApprovalState == nil, "Revoked context cannot appear as an available local approval")
+            done?(["status": "completed"])
+            check(executed == 1, "Late completion cannot restore local authority")
+        }
+        for change in ["count", "arm", "command", "summary", "context", "treads", "torso", "gestures", "future", "expired", "too_long", "other_session", "source_hash", "missing_source", "extra_key", "additional_hash"] {
+            let b = localBroker(); var executed = 0
+            b.requestRecyclingWorkspaceTask(command: "left_recycle_cans", arm: "left", canCount: 4,
+                summary: "Exact fixture scope", contextIdentity: { "context" }, receiptOnly: true,
+                permitsUnmeasuredVisualCalibrationTrial: true, execute: { _ in executed += 1 }, cancel: {}, completion: { _ in })
+            let url = try receipt(b) { value in
+                var scope = value["scope"] as! [String: Any]
+                switch change {
+                case "count": scope["canCount"] = 3
+                case "arm": scope["arm"] = "right"
+                case "command": scope["command"] = "left_wave"
+                case "summary": scope["summary"] = "Changed"
+                case "context": scope["contextIdentity"] = "other"
+                case "treads": scope["treads"] = true
+                case "torso": scope["torso"] = true
+                case "gestures": scope["manualGestures"] = true
+                case "future": value["issuedAtMilliseconds"] = Date().addingTimeInterval(60).timeIntervalSince1970 * 1000
+                case "expired": value["expiresAtMilliseconds"] = Date().addingTimeInterval(-1).timeIntervalSince1970 * 1000
+                case "too_long": value["expiresAtMilliseconds"] = (value["issuedAtMilliseconds"] as! Double) + 43_200_001
+                case "other_session": value["appSessionID"] = UUID().uuidString
+                case "source_hash": value["sourceMessageSHA256"] = String(repeating: "0", count: 64)
+                case "missing_source": value["sourceMessage"] = ""
+                case "extra_key": value["approve_anything"] = true
+                case "additional_hash": value["additionalUserInstructionSHA256"] = String(repeating: "0", count: 64)
+                default: break
+                }
+                value["scope"] = scope
+            }
+            expectReceiptRejection(b, url, "Receipt mutation must reject: " + change)
+            check(executed == 0 && b.activeLocalRecyclingApprovalEvidence == nil, "Invalid receipt never grants: " + change)
+            b.cancel(reason: "Fixture cleanup")
+        }
+        do {
+            let b = localBroker(); var executed = 0
+            b.requestRecyclingWorkspaceTask(command: "left_recycle_cans", arm: "left", canCount: 4,
+                summary: "Private import", contextIdentity: { "context" }, receiptOnly: true,
+                execute: { _ in executed += 1 }, cancel: {}, completion: { _ in })
+            let url = try receipt(b)
+            try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
+            expectReceiptRejection(b, url, "World-readable receipt cannot import")
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            let link = localDirectory.appendingPathComponent("receipt-link.json")
+            try FileManager.default.createSymbolicLink(at: link, withDestinationURL: url)
+            expectReceiptRejection(b, link, "Receipt symlink cannot import")
+            check(executed == 0, "File safety failure cannot dispatch")
+            b.cancel(reason: "Fixture cleanup")
+        }
+        for outcome in ["perception", "explicit_perception", "explicit_veto", "unclassified_block", "motion_failure", "missing_jaw_proof", "complete", "stop", "timeout"] {
+            let b = localBroker(); var clock = Date(), executed = 0, stopped = 0
+            var done: ((NSDictionary) -> Void)?
+            b.now = { clock }
+            func request(_ summary: String = "Retry only same four-can job") {
+                b.requestRecyclingWorkspaceTask(command: "left_recycle_cans", arm: "left", canCount: 4,
+                    summary: summary, contextIdentity: { "context" }, receiptOnly: true,
+                    execute: { executed += 1; done = $0 }, cancel: { stopped += 1 }, completion: { _ in })
+            }
+            request(); let url = try receipt(b); try b.importLocalRecyclingSessionApproval(fromReceiptURL: url)
+            switch outcome {
+            case "perception", "explicit_perception":
+                done?(["status": outcome == "perception" ? "not_found" : "blocked", "perception_only_rejection": true,
+                    "arm_motion_sent": false, "reach_sent": false, "jaw_command_sent": false])
+                check(b.localRecyclingApprovalState?["state"] as? String == "available", "Perception-only result reports retained exact-job availability")
+                request()
+                check(executed == 2 && b.authorizesLeftArmTrial("Retry only same four-can job"), "Explicit perception-only rejection may retry the identical job")
+                check(b.localRecyclingApprovalState?["state"] as? String == "executing", "Retained exact job returns to executing")
+            case "unclassified_block": done?(["status": "blocked", "arm_motion_sent": false, "reach_sent": false, "jaw_command_sent": false])
+            case "explicit_veto": done?(["status": "not_found", "perception_only_rejection": false,
+                "arm_motion_sent": false, "reach_sent": false, "jaw_command_sent": false])
+            case "motion_failure": done?(["status": "blocked", "arm_motion_sent": true, "reach_sent": true, "jaw_command_sent": false])
+            case "missing_jaw_proof": done?(["status": "not_found", "arm_motion_sent": false, "reach_sent": false])
+            case "complete": done?(["status": "completed"])
+            case "stop": b.cancel(reason: "Stop fixture")
+            case "timeout": clock.addTimeInterval(601); b.tick()
+            default: break
+            }
+            if !["perception", "explicit_perception"].contains(outcome) {
+                check(b.localRecyclingApprovalState == nil, "Terminal/unsafe result cannot report an available local approval")
+                request()
+                check(executed == 1 && !b.authorizesLeftArmTrial("Retry only same four-can job"), "Failure/completion/Stop/timeout cannot reuse the local grant: " + outcome)
+                expectReceiptRejection(b, url, "Consumed receipt cannot be replayed: " + outcome)
+            }
+            if ["stop", "timeout"].contains(outcome) { check(stopped == 1, "Stop and task timeout hold once") }
+            b.cancel(reason: "Fixture cleanup")
+        }
+        do {
+            let b = localBroker(); var done: ((NSDictionary) -> Void)?, executed = 0
+            func request(_ summary: String) {
+                b.requestRecyclingWorkspaceTask(command: "right_recycle_cans", arm: "right", canCount: 4,
+                    summary: summary, contextIdentity: { "context" }, receiptOnly: true,
+                    execute: { executed += 1; done = $0 }, cancel: {}, completion: { _ in })
+            }
+            request("Original summary"); let url = try receipt(b); try b.importLocalRecyclingSessionApproval(fromReceiptURL: url)
+            done?(["status": "not_found", "arm_motion_sent": false, "reach_sent": false, "jaw_command_sent": false])
+            request("Changed summary")
+            check(executed == 1 && !b.authorizesRightArmTrial("Changed summary"), "Perception retry cannot change immutable scope")
+            expectReceiptRejection(b, url, "Old receipt cannot approve changed scope")
+            b.cancel(reason: "Fixture cleanup")
+        }
+        do {
+            let b = localBroker(); var clock = Date(), executed = 0
+            b.now = { clock }
+            b.requestRecyclingWorkspaceTask(command: "left_recycle_cans", arm: "left", canCount: 4,
+                summary: "Wait is not approval", contextIdentity: { "context" }, receiptOnly: true,
+                execute: { _ in executed += 1 }, cancel: {}, completion: { _ in })
+            clock.addTimeInterval(43_199); b.tick()
+            check(b.isPending && executed == 0, "Waiting never grants a prepared local request")
+            clock.addTimeInterval(2); b.tick()
+            check(!b.isPending && executed == 0, "Unimported request is bounded to twelve hours")
+        }
+        do {
+            let b = localBroker(); var done: ((NSDictionary) -> Void)?, executed = 0
+            b.requestRecyclingWorkspaceTask(command: "right_recycle_cans", arm: "right", canCount: 4,
+                summary: "Crash replay fixture", contextIdentity: { "context" }, receiptOnly: true,
+                execute: { executed += 1; done = $0 }, cancel: {}, completion: { _ in })
+            let original = try receipt(b)
+            try b.importLocalRecyclingSessionApproval(fromReceiptURL: original)
+            done?(["status": "completed"])
+            let restarted = localBroker()
+            restarted.localRecyclingApprovalAuditDirectory = b.localRecyclingApprovalAuditDirectory
+            restarted.requestRecyclingWorkspaceTask(command: "right_recycle_cans", arm: "right", canCount: 4,
+                summary: "Crash replay fixture", contextIdentity: { "context" }, receiptOnly: true,
+                execute: { _ in executed += 1 }, cancel: {}, completion: { _ in })
+            expectReceiptRejection(restarted, original, "A prior process receipt cannot survive a new app session")
+            var edited = try JSONSerialization.jsonObject(with: Data(contentsOf: original)) as! [String: Any]
+            edited["appSessionID"] = restarted.localRecyclingApprovalSessionID
+            let sameID = localDirectory.appendingPathComponent("same-receipt-id.json")
+            try JSONSerialization.data(withJSONObject: edited, options: [.sortedKeys]).write(to: sameID)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: sameID.path)
+            expectReceiptRejection(restarted, sameID, "Persistent import tombstone rejects a replay even after editing its app-session identifier")
+            check(executed == 1, "Crash replay never dispatches")
+            restarted.cancel(reason: "Fixture cleanup")
+        }
+        for (command, arm, count) in [("left_wave", "left", 4), ("left_recycle_cans", "left", 3), ("right_recycle_cans", "both", 4)] {
+            let b = localBroker(); var rejected = false
+            b.requestRecyclingWorkspaceTask(command: command, arm: arm, canCount: count,
+                summary: "Invalid local scope", contextIdentity: { "context" }, receiptOnly: true,
+                execute: { _ in check(false, "Invalid local scope executed") }, cancel: {},
+                completion: { rejected = $0["status"] as? String == "rejected" })
+            check(rejected && !b.isPending, "Local receipts cannot broaden to another count, gesture or unspecified arm")
         }
         print("Controller/spoken arm approval and session reuse: \(checks) checks passed; no hardware access")
     }
