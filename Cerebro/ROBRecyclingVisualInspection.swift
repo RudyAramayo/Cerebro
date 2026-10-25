@@ -17,6 +17,7 @@ import simd
         let scope:ROBFixedHeadRegistrationScope
         let targetIdentity:String
         let viewIdentity:String
+        let assumedCanGeometry:Bool
     }
     enum Projection {
         case registered(ROBFixedHeadRegistration)
@@ -54,7 +55,7 @@ import simd
         let (observation,frame)=try await ROBArmRoutineVision.shared.observeWorkspace()
         try check()
         guard let registration=try ROBFixedHeadCalibrationWindowController.shared.registration(model:model,frame:frame),
-              can.registrationID==registration.id else {
+              can.registrationID==registration.id,can.sections?.shapePriorEvidence==nil else {
             throw ROBGhostMotionError.blocked("The grasp view needs the same measured fixed-head registration as the can observation.")
         }
         let scope=try ROBFixedHeadCalibrationWindowController.shared.scope(model:model,frame:frame)
@@ -132,16 +133,36 @@ import simd
             box:[currentBox.left,currentBox.top,currentBox.right,currentBox.bottom],
             aim:[currentBox.center.x,currentBox.center.y],depthPoint:[currentBox.center.x,currentBox.center.y],
             confidenceThreshold:detection.confidenceThreshold)
-        guard let measuredCan=ROBWorkspaceCanSections.measure(detection:currentDetection,width:currentDepth.width,height:currentDepth.height,
-            fx:currentK.fx,fy:currentK.fy,cx:currentK.cx,cy:currentK.cy,
-            depth:{currentDepth.distanceMillimeters(x:$0,y:$1)},view:can.view,model:model,cameraToRobot:cameraToModel) else {
-            throw ROBGhostMotionError.blocked("Current can geometry is occluded or depth is ambiguous. Holding before closure.")
+        let currentCan:ROBWorkspaceCanSections
+        let assumedCanGeometry=can.sections?.shapePriorEvidence != nil
+        if assumedCanGeometry {
+            guard case .visualTrial(let visual)=projection,can.sections?.shapePriorEvidence?.valid==true else {
+                throw ROBGhostMotionError.blocked("An assumed can shape needs its exact active unmeasured visual-trial receipt before closure.")
+            }
+            try check();try validateVisualProjection(visual,scope:scope,frame:currentFrame,model:model)
+            let prior=ROBWorkspaceSearch.shared.localCanShapePrior(detection:currentDetection,
+                allCanDetections:(observation.cans ?? [observation.can])+[currentDetection],frame:currentFrame,
+                view:can.view,model:model,cameraToRobot:cameraToModel)
+            try check();try validateVisualProjection(visual,scope:scope,frame:currentFrame,model:model)
+            guard (0...700).contains(Date().timeIntervalSince1970*1000-currentFrame.capturedAt),
+                  let reacquired=prior.sections,reacquired.shapePriorEvidence?.valid==true else {
+                throw ROBGhostMotionError.blocked("Fresh table/silhouette evidence did not reacquire the assumed can cylinder. Holding before closure.")
+            }
+            currentCan=reacquired
+        } else {
+            guard let measuredCan=ROBWorkspaceCanSections.measure(detection:currentDetection,width:currentDepth.width,height:currentDepth.height,
+                fx:currentK.fx,fy:currentK.fy,cx:currentK.cx,cy:currentK.cy,
+                depth:{currentDepth.distanceMillimeters(x:$0,y:$1)},view:can.view,model:model,cameraToRobot:cameraToModel) else {
+                throw ROBGhostMotionError.blocked("Current can geometry is occluded or depth is ambiguous. Holding before closure.")
+            }
+            currentCan=measuredCan
         }
-        let displacement=simd_distance(SIMD3(measuredCan.middle[0],measuredCan.middle[1],measuredCan.middle[2]),can.point)
+        let displacement=simd_distance(SIMD3(currentCan.middle[0],currentCan.middle[1],currentCan.middle[2]),can.point)
         guard displacement<=0.012 else {throw TargetMoved.displacement(displacement)}
         let verifier=try ROBVisualGraspVerifier(baseline:sample,targetBox:currentBox,nowMilliseconds:Date().timeIntervalSince1970*1000)
         try check()
-        return Context(verifier:verifier,projection:projection,scope:scope,targetIdentity:identity,viewIdentity:viewIdentity)
+        return Context(verifier:verifier,projection:projection,scope:scope,targetIdentity:identity,viewIdentity:viewIdentity,
+            assumedCanGeometry:assumedCanGeometry)
     }
     static func verifyAfterLift(context:Context,model:ROBGhostRobotModel,gatewayArm:String,
         check:() throws ->Void) async throws ->ROBVisualGraspVerifier.Evidence {
@@ -153,16 +174,17 @@ import simd
                 let sample=try projectionSample(frame:frame,model:model,gatewayArm:gatewayArm,projection:context.projection,
                     scope:context.scope,identity:context.targetIdentity,viewIdentity:context.viewIdentity)
                 let result=verifier.observe(sample,nowMilliseconds:Date().timeIntervalSince1970*1000)
-                if result.verdict != .collecting {try check();return labelled(result,projection:context.projection)}
+                if result.verdict != .collecting {try check();return labelled(result,projection:context.projection,assumedCanGeometry:context.assumedCanGeometry)}
             }
             try await Task.sleep(nanoseconds:50_000_000)
         }
-        try check();return labelled(verifier.finish(),projection:context.projection)
+        try check();return labelled(verifier.finish(),projection:context.projection,assumedCanGeometry:context.assumedCanGeometry)
     }
-    private static func labelled(_ value:ROBVisualGraspVerifier.Evidence,projection:Projection) ->ROBVisualGraspVerifier.Evidence {
+    private static func labelled(_ value:ROBVisualGraspVerifier.Evidence,projection:Projection,assumedCanGeometry:Bool) ->ROBVisualGraspVerifier.Evidence {
         guard case .visualTrial = projection else {return value}
         var result=value
         result.reason += " Tool comparison uses estimated-camera projection of measured joint feedback; camera alignment and possession are not measured."
+        if assumedCanGeometry {result.reason += " Can dimensions/axis were an explicit local shape prior; verification uses original raw pixels/depth without fabricated cylinder depths."}
         return result
     }
     private static func visualFrameContract(_ frame:ROBArmRoutineVision.Frame) throws ->String {

@@ -587,6 +587,10 @@ struct ROBReviewedArmDispatchStart {
                 completion(["status":"blocked","arm_motion_sent":false,"reach_sent":false,"jaw_command_sent":false,
                     "detail":"A fresh enrolled RGB-D frame is required to prepare this local recycling job."]);return
             }
+            // The new pending operation owns this already-enrolled camera.
+            // An old idle-receipt timer must not turn it off while the new
+            // private receipt is being prepared/imported.
+            localReceiptCameraTimer?.invalidate();localReceiptCameraTimer=nil
             localReceiptContextComponents=nil
             ROBControllerArmApproval.shared.requestRecyclingWorkspaceTask(command:requestedCommand,arm:physicalSide,canCount:canCount,
                 summary:approvedSummary,contextIdentity:{[weak self] in self?.currentLocalRecyclingContextIdentity()},receiptOnly:true,
@@ -1288,7 +1292,11 @@ struct ROBReviewedArmDispatchStart {
             let model = try workspaceModel()
             let calibrationFile = selectedCanReachCalibrationFile
             var objects = try await ROBWorkspaceSearch.shared.run(targets: ROBWorkspaceTarget.allCases,
-                model: model, requireDepth: true, check: { try self.check() }, progress: { self.update($0) })
+                model: model, requireDepth: true,permitsLocalCanShapePrior:{
+                    guard self.localReceiptCommand != nil else {return false}
+                    _ = try self.requireLocalReceipt()
+                    return true
+                },check: { try self.check() }, progress: { self.update($0) })
             sceneCapturedForThisTask = true
             if let map = ROBWorkspaceSearch.shared.collisionSnapshot {
                 collisionMap = map; collisionModel = model
@@ -1327,7 +1335,7 @@ struct ROBReviewedArmDispatchStart {
                         "workspace_search": ROBWorkspaceSearch.shared.lastReport]
                 }
             }
-            guard let can = objects[.can], let bucket = objects[.orangeBucket] else {
+            guard let can = objects[.can],objects[.orangeBucket] != nil || localReceiptCommand != nil else {
                 let report = ROBWorkspaceSearch.shared.lastReport
                 let visible = report["visually_confirmed"] as? [String] ?? []
                 let detail = objects[.orangeBucket] == nil && visible.contains("orangeBucket")
@@ -1338,8 +1346,10 @@ struct ROBReviewedArmDispatchStart {
                     "detail": detail,
                     "workspace_search": ROBWorkspaceSearch.shared.lastReport]
             }
+            let bucket=objects[.orangeBucket]
+            let observedObjects=[can]+(bucket.map{[$0]} ?? [])
             recyclingCan=can
-            guard [can, bucket].allSatisfy({ Date().timeIntervalSince1970 * 1000 - $0.capturedAt < 60_000 }) else {
+            guard observedObjects.allSatisfy({ Date().timeIntervalSince1970 * 1000 - $0.capturedAt < 60_000 }) else {
                 throw ROBGhostMotionError.blocked("Object observations expired during search; no reach was sent.")
             }
             guard ROBArmRoutinePlan.near(try measured().positionsRadians.map(\.doubleValue), q, tolerance: 0.015) else {
@@ -1374,16 +1384,45 @@ struct ROBReviewedArmDispatchStart {
                 let planningStart = q, session = generation, camera = vision.cameraGeneration
                 let baseline = model.positions(vendorLeft:planningStart), now = Date().timeIntervalSince1970*1000
                 let visual=try visualTrial(map:map,model:model,baseline:planningStart)
+                var destinationAdmissionFailure:String?
+                if let bucketPrior=bucket?.bucketShapePrior {
+                    let contained=visual.map { trial in
+                        map.registrationID==nil && bucket?.registrationID==nil && bucketPrior.valid &&
+                            bucket?.openingRadius.map{$0.isFinite && $0>=0.033+trial.assumedSpatialErrorMeters && abs($0-bucketPrior.commonOpeningRadiusMeters)<=0.000001}==true &&
+                            bucketPrior.commonOpeningRadiusMeters>=0.033+trial.assumedSpatialErrorMeters
+                    } ?? false
+                    if !contained {
+                        guard visual != nil else {throw ROBArmRoutineError.blocked("An assumed bucket opening needs its explicit local visual-trial containment proof.")}
+                        destinationAdmissionFailure="The assumed opening does not contain the can plus the trial allowance."
+                    }
+                }
+                if bucket==nil {
+                    guard visual != nil else {throw ROBArmRoutineError.blocked("A complete transfer needs a freshly confirmed bucket opening.")}
+                    destinationAdmissionFailure="The bucket opening is not admitted."
+                }
+                let destinationFailure=destinationAdmissionFailure
                 phase="complete recycling collision planning"
                 let compiled = try await Task.detached(priority:.userInitiated) {
-                    func candidate(_ rearward:Double) throws -> ROBLeftGestureProposal {
-                    let plan = try ROBCanGrabPreview.make(can:can,model:model,baseline:baseline,side:model.physicalSide,bucket:bucket,
+                    func candidate(_ rearward:Double,forceGraspHold:Bool=false) throws -> ROBLeftGestureProposal {
+                    func preview(_ destination:ROBWorkspaceLocatedObject?) throws -> ROBCanGrabPreview {
+                        try ROBCanGrabPreview.make(can:can,model:model,baseline:baseline,side:model.physicalSide,bucket:destination,
                         reachOffset:ROBLeftCanReachCalibration.load(model:model,can:can,file:calibrationFile,
                             estimatedCameraProjectionIdentity:map.estimatedCameraProjectionIdentity),
                         bucketYawDegrees:ROBLeftCanReachCalibration.loadBucketYaw(model:model,file:calibrationFile,registrationID:can.registrationID,
                             estimatedCameraProjectionIdentity:map.estimatedCameraProjectionIdentity),
                         bucketInwardMeters:ROBLeftCanReachCalibration.loadBucketInward(model:model,file:calibrationFile,registrationID:can.registrationID,
                             estimatedCameraProjectionIdentity:map.estimatedCameraProjectionIdentity),rearwardJoint1Radians:rearward)
+                    }
+                    let plan:ROBCanGrabPreview
+                    var graspHold=forceGraspHold || destinationFailure != nil
+                    var holdReason=destinationFailure ?? "The complete transfer route was not admitted."
+                    if graspHold {guard visual != nil else {throw ROBArmRoutineError.blocked("A partial grasp-and-hold needs the exact active local visual trial.")};plan=try preview(nil)}
+                    else {do {plan=try preview(bucket)}catch {
+                        guard visual != nil else {throw error}
+                        graspHold=true;holdReason=error.localizedDescription;plan=try preview(nil)
+                    }}
+                    let kind=graspHold ? "recycling_grasp_hold":"recycling"
+                    let operationName=graspHold ? "Grasp and hold: "+String(holdReason.prefix(80)):"Recycle with complete arm clearance"
                     let entry:ROBWorkspaceCollisionPlan
                     if let visual {
                         var previous=planningStart,segments:[ROBLeftGestureProposal.Step]=[]
@@ -1406,16 +1445,15 @@ struct ROBReviewedArmDispatchStart {
                     let actions = Dictionary(uniqueKeysWithValues:body.enumerated().compactMap { index,step in
                         step.jawAction.map { (index,$0) }
                     })
-                    let raw = try ROBLeftGestureCompiler.compile(kind:"recycling",name:"Recycle with complete arm clearance",
+                    let raw = try ROBLeftGestureCompiler.compile(kind:kind,name:operationName,
                         poses:body.map(\.pose),model:model,baseline:planningStart,generation:session,recyclingActions:actions,
                         recyclingParameters:recyclingParameters,workspaceApproachPlan:entry,collisionMap:map,
                         collisionSceneID:map.sceneID,collisionCameraGeneration:camera,visualCalibrationTrial:visual,nowMilliseconds:now)
-                    guard sections.surfaceToAxisOffsetMeters != nil,
+                    guard sections.surfaceToAxisOffsetMeters != nil || (visual != nil && sections.shapePriorEvidence?.valid==true),
                           let grip=raw.steps.firstIndex(where:{$0.jawAction == .grip}),
-                          let release=raw.steps.firstIndex(where:{$0.jawAction == .release}),
                           let prepared=raw.steps.firstIndex(where:{$0.jawAction == .prepare}),
                           let tool=model.frames(model.positions(vendorLeft:raw.steps[grip].positions))[model.toolLink] else {
-                        throw ROBArmRoutineError.blocked("A fresh measured can axis and frozen jaw stages are required for intentional grasp contact.")
+                        throw ROBArmRoutineError.blocked("A fresh can cylinder with measured or explicitly authorized assumed geometry and frozen jaw stages is required for intentional grasp contact.")
                     }
                     let inverseTool=simd_inverse(tool)
                     func local(_ values:[Double])->SIMD3<Double> {
@@ -1427,7 +1465,7 @@ struct ROBReviewedArmDispatchStart {
                     let radial=SIMD3((0..<3).map { radius*sqrt(max(0,1-axis[$0]*axis[$0])) })
                     let low=simd_min(top,bottom)-radial,high=simd_max(top,bottom)+radial
                     let center=(low+high)/2,half=(high-low)/2+SIMD3<Double>(repeating:0.003)
-                    let measurementID="can-frame-\(can.sequence)"
+                    let measurementID=(sections.shapePriorEvidence==nil ? "can-depth-bands-frame-":"assumed-can-shape-prior-frame-")+String(can.sequence)
                     let payload=ROBWorkspaceCarriedObject(measurementID:measurementID,
                         centerInToolMeters:[center.x,center.y,center.z],halfExtentsMeters:[half.x,half.y,half.z])
                     let contact=ROBWorkspaceIntentionalContact(measurementID:measurementID,observationSequence:can.sequence,
@@ -1435,7 +1473,9 @@ struct ROBReviewedArmDispatchStart {
                         mapFingerprint:map.fingerprint,modelID:model.modelID,geometryID:model.geometryID,
                         mappingID:model.selectedMappingID,toolLink:model.toolLink,topCenterMeters:sections.top,
                         bottomCenterMeters:sections.bottom,diameterMeters:sections.diameterMeters,
-                        firstContactStepIndex:min(grip,prepared+1),gripStepIndex:grip,releaseStepIndex:release,stepCount:raw.steps.count)
+                        firstContactStepIndex:min(grip,prepared+1),gripStepIndex:grip,
+                        releaseStepIndex:raw.steps.firstIndex(where:{$0.jawAction == .release}),stepCount:raw.steps.count,
+                        terminalGraspHold:graspHold ? true:nil)
                     let review:ROBWorkspaceCollisionPlan
                     if let visual {
                         review=try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(baseline:raw.baseline,steps:raw.steps,map:map,model:model,
@@ -1444,7 +1484,7 @@ struct ROBReviewedArmDispatchStart {
                         review=try ROBWorkspaceCollisionPlan.review(baseline:raw.baseline,steps:raw.steps,map:map,model:model,
                             generation:session,sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:now,payload:payload,intentionalContact:contact)
                     }
-                    return try ROBLeftGestureCompiler.compile(kind:"recycling",name:raw.name,poses:raw.poses,model:model,
+                    return try ROBLeftGestureCompiler.compile(kind:kind,name:raw.name,poses:raw.poses,model:model,
                         baseline:planningStart,generation:session,id:raw.id,recyclingActions:actions,
                         recyclingParameters:recyclingParameters,workspaceCollisionPlan:review,workspaceApproachPlan:entry,
                         collisionMap:map,collisionSceneID:map.sceneID,collisionCameraGeneration:camera,visualCalibrationTrial:visual,nowMilliseconds:now)
@@ -1453,18 +1493,31 @@ struct ROBReviewedArmDispatchStart {
                     for rearward in [0.24,0.16,0.32] {
                         do {return try candidate(rearward)} catch {lastFailure=error}
                     }
+                    if visual != nil {
+                        // Review the complete standalone grasp/lift route;
+                        // a failed destination never supplies an exemption
+                        // for its approach, payload or observed environment.
+                        for rearward in [0.24,0.16,0.32] {
+                            do {return try candidate(rearward,forceGraspHold:true)}catch{lastFailure=error}
+                        }
+                    }
                     throw lastFailure
                 }.value
                 try check(); try checkCollisionContext()
                 guard ROBArmRoutinePlan.near(try measured().positionsRadians.map(\.doubleValue),planningStart,tolerance:0.015),
-                      [can,bucket].allSatisfy({ Date().timeIntervalSince1970*1000-$0.capturedAt < 60_000 }) else {
+                      observedObjects.allSatisfy({ Date().timeIntervalSince1970*1000-$0.capturedAt < 60_000 }) else {
                     throw ROBArmRoutineError.blocked("The arm or objects changed while the complete route was being checked.")
                 }
                 proposal = compiled; collisionReviewProposal = compiled
                 collisionReviewStatus = ["status":"reviewed","registration_verified":map.registrationID != nil,
                     "visual_calibration_trial":visual != nil,"assumed_spatial_error_m":visual?.assumedSpatialErrorMeters as Any? ?? NSNull(),
+                    "can_geometry_assumed":sections.shapePriorEvidence != nil,
+                    "can_geometry_source":sections.shapePriorEvidence?.source ?? "RGB_D_depth_body_bands",
+                    "payload_geometry_measured":sections.shapePriorEvidence == nil,
+                    "intentional_contact_geometry_assumed":sections.shapePriorEvidence != nil,
+                    "terminal_grasp_hold":compiled.kind=="recycling_grasp_hold",
                     "checked_poses":compiled.workspaceCollisionPlan?.checkedPoseCount ?? 0,
-                    "detail":"Can-derived corkscrew entry from the measured start, grasp, payload transfer and retreat checked together before travel."]
+                    "detail":compiled.kind=="recycling_grasp_hold" ? compiled.name+". Complete approach/grasp/6cm lift checked; no carry, release or return admitted.":"Can-derived corkscrew entry from the measured start, grasp, payload transfer and retreat checked together before travel."]
             } catch let error as ROBWorkspaceReachError {
                 localReceiptPerceptionFailure=true
                 ROBWorkspaceSearch.shared.announce?(error.helpRequest)
@@ -1477,7 +1530,7 @@ struct ROBReviewedArmDispatchStart {
             }
             try proposal!.encoded().write(to: URL(fileURLWithPath: lastRecordingPath).deletingPathExtension()
                 .appendingPathExtension("proposal.json"), options: .atomic)
-            update("Can and orange bucket confirmed. Executing the bounded local plan under the original approval.")
+            update(proposal?.kind=="recycling_grasp_hold" ? "Can confirmed; the destination route is not admitted. Trying one checked grasp and short lift, then holding.":"Can and orange bucket confirmed. Executing the bounded local plan under the original approval.")
         }
         if let proposal {
             guard proposal.sessionGeneration == generation, ROBArmRoutinePlan.near(q, proposal.baseline, tolerance: 0.015) else {
@@ -1523,6 +1576,14 @@ struct ROBReviewedArmDispatchStart {
                 ROBWorkspaceSearch.shared.announce?("The can moved. I am holding and checking its new position.")
                 update("Can moved before closing; one bounded fresh search and full replan under the same approval")
                 return try await executeSingle(command)
+            }
+            if proposal.kind=="recycling_grasp_hold" {
+                try await holdTaskPosition(proposal.steps.last!.positions)
+                return ["status":"partial_held","measured":false,"motion_completed":false,"transfer_completed":false,
+                    "grasp_attempted":true,"grasp_visually_supported":lastVisualGraspEvidence?.verdict == .supported,
+                    "possible_payload_held":true,"placement_verified":false,"physical_arm":physicalSide,
+                    "detail":"One grasp and6cm verification lift completed; holding at the measured endpoint. No carry, release, return or recycled-can count. Destination needs a separately admitted route.",
+                    "workspace_search":ROBWorkspaceSearch.shared.lastReport]
             }
             if ["tabletop", "recycling"].contains(proposal.kind) {
                 try await holdTaskPosition(proposal.steps.last!.positions)
@@ -1876,7 +1937,7 @@ struct ROBReviewedArmDispatchStart {
     @MainActor private func taskJaw(_ action: ROBLeftGestureProposal.JawAction, at target: [Double]) async throws {
         try await holdTaskPosition(target)
         defer { taskJawTarget = nil }
-        if proposal?.kind == "recycling" {
+        if ["recycling","recycling_grasp_hold"].contains(proposal?.kind ?? "") {
             guard ROBGripperStartupCalibration.shared.calibrationReady(forArm: arm) else {
                 throw ROBArmRoutineError.blocked("Stationary startup gripper setup is unavailable; no grasp was sent.")
             }
@@ -1885,7 +1946,7 @@ struct ROBReviewedArmDispatchStart {
         phase = "tabletop \(action.rawValue)"
         update(action == .grip ? "Local task: gripping empty can at intensity 2" : "Local task: opening gripper at the planned position")
         ROBWorkspaceSearch.shared.announce?(action == .prepare ? "Preparing my \(physicalSide) hand." : action == .grip ? "Grabbing the can." : "Releasing over the bucket.")
-        let intensity = action != .grip && proposal?.kind == "recycling" ? 10 : ROBTabletopPickPlace.intensity
+        let intensity = action != .grip && ["recycling","recycling_grasp_hold"].contains(proposal?.kind ?? "") ? 10 : ROBTabletopPickPlace.intensity
         try await accepted { accountedJawCommand { gateway.controlGripper(forArm: arm, action: action == .grip ? "hold" : "release", force:intensity) } }
         let settle = proposal?.recyclingParameters?.jawSettleSeconds ?? 1.5
         let end = ProcessInfo.processInfo.systemUptime + settle
@@ -2036,6 +2097,7 @@ struct ROBReviewedArmDispatchStart {
         let session = generation, camera = vision.cameraGeneration
         let payload = proposal.workspaceCollisionPlan?.payload
         let visual=proposal.workspaceCollisionPlan?.context.visualTrial
+        let recycling=["recycling","recycling_grasp_hold"].contains(proposal.kind)
         if let visual {try requireLiveVisualTrial(visual,map:map,model:model)}
         let reviewTime = Date().timeIntervalSince1970*1000
         _ = try await Task.detached(priority:.userInitiated) {
@@ -2063,7 +2125,7 @@ struct ROBReviewedArmDispatchStart {
         for (index, step) in proposal.steps.enumerated() {
             // A single already-planned vertical lift may gather evidence. No
             // transfer/release continues on command acceptance alone.
-            if proposal.kind == "recycling", carrying, !graspSupported, step.stage != "Verification lift" {
+            if recycling, carrying, !graspSupported, step.stage != "Verification lift" {
                 guard let context=visualContext else {
                     throw ROBArmRoutineError.blocked("No before-close visual grasp baseline; holding the possible payload.")
                 }
@@ -2116,7 +2178,7 @@ struct ROBReviewedArmDispatchStart {
             let started = ProcessInfo.processInfo.systemUptime
             sentPath.append(step.positions)
             armTravelDispatched = true
-            if proposal.kind == "recycling",1.5*zip(q,step.positions).reduce(0.0,{$0+abs($1.0-$1.1)})>0.000001 {recyclingReachDispatched=true}
+            if recycling,1.5*zip(q,step.positions).reduce(0.0,{$0+abs($1.0-$1.1)})>0.000001 {recyclingReachDispatched=true}
             do {
                 reviewedDispatchStart = dispatchReview
                 defer { reviewedDispatchStart = nil }
@@ -2132,7 +2194,7 @@ struct ROBReviewedArmDispatchStart {
                     && ProcessInfo.processInfo.systemUptime - started >= step.seconds
             }
             proposalStep = -1
-            if step.jawAction == .grip, proposal.kind == "recycling" {
+            if step.jawAction == .grip,recycling {
                 guard let can=recyclingCan else { throw ROBArmRoutineError.blocked("The fresh can identity was lost before closing.") }
                 try await holdTaskPosition(step.positions)
                 if let visual {
@@ -2143,10 +2205,22 @@ struct ROBReviewedArmDispatchStart {
                     visualContext=try await ROBRecyclingVisualInspection.begin(model:model,can:can,gatewayArm:arm,check:{try self.check()})
                 }
             }
-            if step.jawAction == .grip, proposal.kind == "recycling" { recyclingGripDispatched=true }
+            if step.jawAction == .grip,recycling { recyclingGripDispatched=true }
             if let action = step.jawAction { try await taskJaw(action, at: step.positions) }
             if step.jawAction == .grip { carrying = true }
             if step.jawAction == .release { carrying = false }
+        }
+        if proposal.kind=="recycling_grasp_hold" {
+            guard visual != nil,carrying,let context=visualContext,proposal.steps.last?.stage=="Verification lift",
+                  !proposal.steps.contains(where:{$0.jawAction == .release}) else {
+                throw ROBArmRoutineError.blocked("The partial grasp trial lost its explicit terminal-lift/holding state; hold requested.")
+            }
+            let evidence=try await ROBRecyclingVisualInspection.verifyAfterLift(context:context,model:model,gatewayArm:arm,check:{try self.check()})
+            lastVisualGraspEvidence=evidence;try writeVisualGraspEvidence(evidence)
+            try await holdTaskPosition(try measured().positionsRadians.map(\.doubleValue))
+            guard evidence.verdict == .supported else {
+                throw ROBArmRoutineError.blocked("Grasp \(evidence.verdict.rawValue): \(evidence.reason) Holding the possible payload; no carry, release or automatic reopening.")
+            }
         }
     }
 
@@ -2259,7 +2333,7 @@ struct ROBReviewedArmDispatchStart {
         }
         if !Self.neckOnlyCommands.contains(activeCommand), leased || result["status"] as? String == "blocked" { _ = gateway.priorityHold(forArm: arm) }
         leased = false
-        if ["tabletop", "recycling", "estimated_calibration", "initial_empty_visual_retreat"].contains(proposal?.kind ?? "") {
+        if ["tabletop", "recycling", "recycling_grasp_hold", "estimated_calibration", "initial_empty_visual_retreat"].contains(proposal?.kind ?? "") {
             // A failed close/open may leave a payload. Never offer the old
             // empty-arm reverse/recovery automatically for a recycling task.
             recoveryPath = []; recoveryGeneration = 0; offeredRecovery = nil
@@ -2273,8 +2347,18 @@ struct ROBReviewedArmDispatchStart {
         output["arm_motion_sent"]=armTravelDispatched
         output["reach_sent"]=recyclingReachDispatched
         output["jaw_command_sent"] = jawSetupDispatchUncertain && !jawCommandDispatched ? NSNull() : jawCommandDispatched as Any
+        if proposal?.kind=="recycling_grasp_hold" {
+            output["transfer_completed"]=false;output["motion_completed"]=false
+            output["grasp_attempted"]=recyclingGripDispatched;output["possible_payload_held"]=recyclingGripDispatched
+            output["terminal_grasp_hold"]=true;output["placement_verified"]=false
+        }
         if localJob {
             output["local_session_context_diagnostics"]=localRecyclingContextDiagnostics
+            output["can_geometry_assumed"]=recyclingCan?.sections?.shapePriorEvidence != nil
+            if let prior=recyclingCan?.sections?.shapePriorEvidence,
+               let bytes=try?JSONEncoder().encode(prior),let evidence=try?JSONSerialization.jsonObject(with:bytes) {
+                output["can_shape_prior_evidence"]=evidence
+            }
             output["perception_only_rejection"]=preserveLocalReceipt
             output["local_session_receipt_used"]=true
             output["unmeasured_visual_calibration_trial_authorized"]=true

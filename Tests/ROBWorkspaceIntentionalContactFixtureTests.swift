@@ -8,8 +8,9 @@ private struct ContactMap:ROBWorkspaceCollisionMap {
     let modelID:String,geometryID:String,mappingID:String
     let createdAtMilliseconds=1000.0,oldestCapturedAtMilliseconds=1000.0,lastCapturedAtMilliseconds=1000.0
     let voxelSizeMeters=0.025
-    let registrationID:String?="synthetic measured registration"
-    let registrationUncertaintyMeters:Double?=0
+    var registrationID:String?="synthetic measured registration"
+    var registrationUncertaintyMeters:Double?=0
+    var visualCalibrationScope:ROBWorkspaceVisualCalibrationMapScope? = nil
     var points:[SIMD3<Double>]=[]
     var unknown:Key?
     var sampleBoundsAvailable=true
@@ -55,12 +56,12 @@ private struct ContactMap:ROBWorkspaceCollisionMap {
         let tool=model.frames(model.positions(vendorLeft:q))[model.toolLink]!
         let local=simd_inverse(tool)*SIMD4(axis.x,axis.y,axis.z,1)
         let payload=ROBWorkspaceCarriedObject(measurementID:"measured-can-12",centerInToolMeters:[local.x,local.y,local.z],halfExtentsMeters:[0.08,0.08,0.08])
-        func proof(_ map:ContactMap=map,first:Int=0,center:SIMD3<Double> = axis)->ROBWorkspaceIntentionalContact {
+        func proof(_ map:ContactMap=map,first:Int=0,center:SIMD3<Double> = axis,release:Int?=2,terminal:Bool?=nil)->ROBWorkspaceIntentionalContact {
             .init(measurementID:payload.measurementID,observationSequence:12,capturedAtMilliseconds:1000,
                 sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,mapFingerprint:map.fingerprint,
                 modelID:model.modelID,geometryID:model.geometryID,mappingID:model.selectedMappingID,toolLink:model.toolLink,
                 topCenterMeters:[center.x,center.y,center.z+0.06],bottomCenterMeters:[center.x,center.y,center.z-0.06],diameterMeters:0.066,
-                firstContactStepIndex:first,gripStepIndex:1,releaseStepIndex:2,stepCount:3)
+                firstContactStepIndex:first,gripStepIndex:1,releaseStepIndex:release,stepCount:3,terminalGraspHold:terminal)
         }
         func review(_ map:ContactMap=map,contact:ROBWorkspaceIntentionalContact?=nil,substep:Int?=nil,
             steps selected:[ROBLeftGestureProposal.Step]?=nil) throws ->ROBWorkspaceCollisionPlan {
@@ -105,6 +106,52 @@ private struct ContactMap:ROBWorkspaceCollisionMap {
         rejected("index") {_=try review(contact:contact,substep:80)}
         var changed=accepted;changed.intentionalContact?.radialFitUncertaintyMeters=0.001
         rejected("changed") {try changed.validate(map:map,model:model,generation:42,sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,nowMilliseconds:1001)}
+
+        // A typed terminal grasp hold is a different local-trial disposition,
+        // not a fake release index or a measured registration.
+        let holdSteps:[ROBLeftGestureProposal.Step]=[steps[0],steps[1],
+            .init(positions:q,seconds:0.7,stage:"Verification lift")]
+        let measuredHold=proof(release:nil,terminal:true)
+        precondition(measuredHold.valid && measuredHold.releaseStepIndex == nil)
+        rejected("local visual-calibration") {_=try review(contact:measuredHold,steps:holdSteps)}
+        rejected("local visual-calibration") {
+            _=try ROBWorkspaceCollisionPlan.make(from:q,to:q,map:map,model:model,generation:42,sceneID:map.sceneID,
+                cameraGeneration:map.cameraGeneration,nowMilliseconds:1000,payload:payload,intentionalContact:measuredHold,contactStepIndex:2)
+        }
+        var localMap=map;localMap.registrationID=nil;localMap.registrationUncertaintyMeters=nil
+        let hash=ROBGhostRobotModel.hash(Data("isolated terminal grasp hold".utf8))
+        localMap.visualCalibrationScope = .init(bodyMotionIdentity:"fixture body",bodyContextIsCurrent:true,
+            estimatedCameraProjectionIdentity:hash,observationPoseIdentity:hash,observedFrameCount:2)
+        let trial=ROBWorkspaceVisualCalibrationTrial(receiptID:"isolated receipt",receiptSHA256:hash,appSessionID:"isolated app",
+            command:"left_recycle_cans",canCount:4,summarySHA256:hash,authorizationContextIdentity:"isolated scope",
+            sessionGeneration:42,sceneID:localMap.sceneID,cameraGeneration:localMap.cameraGeneration,modelID:model.modelID,
+            geometryID:model.geometryID,mappingID:model.selectedMappingID,mapFingerprint:localMap.fingerprint,
+            bodyMotionIdentity:"fixture body",estimatedCameraProjectionIdentity:hash,observationPoseIdentity:hash,
+            currentPoseIdentity:hash,baseline:q,issuedAtMilliseconds:1000,expiresAtMilliseconds:2000,assumedSpatialErrorMeters:0.035)
+        let localContact=proof(localMap,release:nil,terminal:true)
+        func holdReview(_ selected:[ROBLeftGestureProposal.Step]=holdSteps,substep:Int?=nil)throws->ROBWorkspaceCollisionPlan {
+            try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(baseline:q,steps:selected,map:localMap,model:model,generation:42,
+                sceneID:localMap.sceneID,cameraGeneration:localMap.cameraGeneration,nowMilliseconds:1000,trial:trial,
+                payload:payload,intentionalContact:localContact,contactStepIndex:substep)
+        }
+        let hold=try holdReview()
+        precondition(hold.context.registrationID == nil && hold.intentionalContact?.terminalGraspHold == true)
+        let holdDecoded=try JSONDecoder().decode(ROBWorkspaceCollisionPlan.self,from:JSONEncoder().encode(hold))
+        precondition(holdDecoded == hold && holdDecoded.intentionalContact?.releaseStepIndex == nil)
+        _=try holdReview([holdSteps[2]],substep:2)
+        rejected("registration") {try holdDecoded.validate(map:localMap,model:model,generation:42,sceneID:localMap.sceneID,
+            cameraGeneration:localMap.cameraGeneration,nowMilliseconds:1000)}
+        rejected("without a carry or release") {_=try holdReview(steps)}
+        rejected("verification lift") {_=try holdReview([steps[0],steps[1],.init(positions:q,seconds:0.7,stage:"Carry")])}
+        rejected("cannot release") {_=try holdReview([steps[2]],substep:2)}
+        precondition(!proof(localMap,release:nil).valid && !proof(localMap,terminal:true).valid)
+        precondition(!localContact.permits(label:model.toolLink,payload:nil,stepIndex:3))
+        precondition(localContact.permits(label:"carried object",payload:payload,stepIndex:2))
+        // Legacy complete-contact archives still encode numeric release and
+        // omit the new optional flag, preserving their exact fingerprint.
+        let legacyJSON=try JSONSerialization.jsonObject(with:JSONEncoder().encode(contact)) as! [String:Any]
+        precondition(legacyJSON["releaseStepIndex"] as? Int == 2 && legacyJSON["terminalGraspHold"] == nil)
+        print("Terminal grasp hold: explicit local trial only, nil release, final verification lift, immutable roundtrip; ordinary/connector/imported authority and carry/release substitutions rejected")
 
         // An occupied return on another articulated link stays blocked even if
         // a malformed task chooses that location as its claimed can cylinder.

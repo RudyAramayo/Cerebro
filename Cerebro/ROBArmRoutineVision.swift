@@ -728,6 +728,121 @@ struct ROBWorkspaceCanCandidateSet {
     }
 }
 
+/// A declared geometry prior for the explicitly authorized local trial only.
+/// Table depth anchors the base; height, diameter and upright axis are assumed.
+/// This constructor grants neither measured registration nor collision clearance.
+enum ROBWorkspaceLocalCanShapePrior {
+    static func estimate(detection:ROBWorkspaceDetection,allCanDetections:[ROBWorkspaceDetection],
+        width:Int,height:Int,fx:Double,fy:Double,cx:Double,cy:Double,
+        depth:(Int,Int)->UInt16?,cameraToRobot:simd_double4x4)
+        -> (sections:ROBWorkspaceCanSections?,diagnostics:[String:Any]) {
+        var report:[String:Any]=["schema_version":1,"kind":"local_trial_known_empty_coke_cylinder",
+            "status":"rejected","box":detection.box,"assumed_height_m":0.120,"assumed_diameter_m":0.066,
+            "assumed_axis_robot":[0.0,0,1],"registration_verified":false,"measured_can_wall_depth":false,
+            "local_plane_is_global_floor_calibration":false,"ring_width_pixels":14]
+        func reject(_ stage:String)->(sections:ROBWorkspaceCanSections?,diagnostics:[String:Any]) {
+            report["rejection_stage"]=stage;return (nil,report)
+        }
+        guard detection.usable,width>1,height>1,[fx,fy,cx,cy].allSatisfy(\.isFinite),fx>0,fy>0,
+              detection.box.allSatisfy({(0.02...0.98).contains($0)}),
+              (0..<4).allSatisfy({column in (0..<4).allSatisfy({cameraToRobot[column][$0].isFinite})}) else {
+            return reject("invalid_source_or_clipped_detection")
+        }
+        let x0=detection.box[0]*Double(width-1),y0=detection.box[1]*Double(height-1)
+        let x1=detection.box[2]*Double(width-1),y1=detection.box[3]*Double(height-1)
+        let boxWidth=x1-x0,boxHeight=y1-y0
+        guard boxWidth>=15,boxHeight>=25 else{return reject("insufficient_rgb_silhouette_pixels")}
+        let left=max(0,Int(floor(x0))-14),right=min(width-1,Int(ceil(x1))+14)
+        let top=max(0,Int(floor(y0))-14),bottom=min(height-1,Int(ceil(y1))+14)
+        let step=max(2,Int(ceil(sqrt(Double((right-left+1)*(bottom-top+1))/2000))))
+        func point(_ x:Double,_ y:Double,_ z:Double)->SIMD3<Double> {
+            let p=cameraToRobot*SIMD4((x-cx)*z/fx,(y-cy)*z/fy,z,1);return SIMD3(p.x,p.y,p.z)
+        }
+        var points:[SIMD3<Double>]=[],sampled=0,missing=0
+        for y in stride(from:top,through:bottom,by:step) {for x in stride(from:left,through:right,by:step) {
+            let insideOwn=Double(x)>=x0 && Double(x)<=x1 && Double(y)>=y0 && Double(y)<=y1
+            let insideAnother=allCanDetections.contains { other in
+                other.visuallyUsable && other.box.count==4 && other.box != detection.box &&
+                (other.box[0]*Double(width-1)...other.box[2]*Double(width-1)).contains(Double(x)) &&
+                (other.box[1]*Double(height-1)...other.box[3]*Double(height-1)).contains(Double(y))
+            }
+            if insideOwn || insideAnother {continue};sampled+=1
+            guard let mm=depth(x,y),(150...3000).contains(mm) else {missing+=1;continue}
+            let p=point(Double(x),Double(y),Double(mm)/1000)
+            guard [p.x,p.y,p.z].allSatisfy(\.isFinite) else{return reject("nonfinite_table_points")}
+            points.append(p)
+        }}
+        report["ring_sample_count"]=sampled;report["ring_valid_point_count"]=points.count;report["ring_missing_count"]=missing
+        report["ring_stride_pixels"]=step
+        guard points.count>=80 else{return reject("insufficient_local_table_support")}
+        var best:[Int]=[]
+        for i in 0..<128 {
+            let a=points[(i*17)%points.count],b=points[(i*37+points.count/3)%points.count],c=points[(i*61+points.count*2/3)%points.count]
+            let cross=simd_cross(b-a,c-a),length=simd_length(cross)
+            if length<0.00001 {continue}
+            var normal=cross/length;if normal.z<0 {normal = -normal}
+            if normal.z<0.85 {continue}
+            let offset = -simd_dot(normal,a)
+            let inliers=points.indices.filter{abs(simd_dot(normal,points[$0])+offset)<=0.010}
+            if inliers.count>best.count {best=inliers}
+        }
+        let support=Double(best.count)/Double(points.count)
+        report["plane_inlier_count"]=best.count;report["plane_support_fraction"]=support
+        guard best.count>=80,support>=0.65 else{return reject("no_dominant_local_table_plane")}
+        let inliers=best.map{points[$0]},mean=inliers.reduce(SIMD3<Double>.zero,+)/Double(inliers.count)
+        var xx=0.0,xy=0.0,yy=0.0,xz=0.0,yz=0.0
+        for p in inliers {let d=p-mean;xx+=d.x*d.x;xy+=d.x*d.y;yy+=d.y*d.y;xz+=d.x*d.z;yz+=d.y*d.z}
+        let determinant=xx*yy-xy*xy
+        guard determinant>0.0000000001 else{return reject("degenerate_local_table_plane")}
+        let a=(xz*yy-yz*xy)/determinant,b=(yz*xx-xz*xy)/determinant,c=mean.z-a*mean.x-b*mean.y
+        let scale=sqrt(a*a+b*b+1),normal=SIMD3(-a/scale,-b/scale,1/scale),offset = -c/scale
+        let errors=inliers.map{abs(simd_dot(normal,$0)+offset)}.sorted()
+        let rms=sqrt(errors.reduce(0){$0+$1*$1}/Double(errors.count))
+        report["plane_normal_robot"]=[normal.x,normal.y,normal.z];report["plane_offset_m"]=offset
+        report["plane_rmse_m"]=rms;report["plane_p95_m"]=errors[errors.count*95/100]
+        guard normal.z>=0.85,rms<=0.008,errors[errors.count*95/100]<=0.010 else{return reject("local_table_plane_residual")}
+        let camera=SIMD3(cameraToRobot.columns.3.x,cameraToRobot.columns.3.y,cameraToRobot.columns.3.z)
+        let u=(x0+x1)/2,v=y1,rotated=cameraToRobot*SIMD4((u-cx)/fx,(v-cy)/fy,1,0)
+        let ray=SIMD3(rotated.x,rotated.y,rotated.z),denominator=simd_dot(normal,ray)
+        guard abs(denominator)>0.05 else{return reject("base_ray_parallel_to_table")}
+        let distance = -(simd_dot(normal,camera)+offset)/denominator
+        guard (0.15...3).contains(distance) else{return reject("base_ray_outside_local_range")}
+        let surface=camera+ray*distance
+        let away=SIMD2(surface.x-camera.x,surface.y-camera.y)
+        guard simd_length(away)>0.1 else{return reject("ambiguous_front_surface_to_axis")}
+        let shift=simd_normalize(away)*0.033
+        var base=surface+SIMD3(shift.x,shift.y,0)
+        base.z = -(normal.x*base.x+normal.y*base.y+offset)/normal.z
+        guard [base.x,base.y,base.z].allSatisfy(\.isFinite),(0.30...1.40).contains(base.z) else{return reject("base_outside_tabletop_height_range")}
+        let inverse=simd_inverse(cameraToRobot)
+        var projected:[SIMD2<Double>]=[]
+        for z in [0.0,0.120] {for i in 0..<32 {
+            let theta=Double(i)*2*Double.pi/32,p=inverse*SIMD4(base.x+0.033*cos(theta),base.y+0.033*sin(theta),base.z+z,1)
+            guard p.z>0.1 else{return reject("cylinder_silhouette_behind_camera")}
+            projected.append(SIMD2(fx*p.x/p.z+cx,fy*p.y/p.z+cy))
+        }}
+        let low=projected.reduce(projected[0]){simd_min($0,$1)},high=projected.reduce(projected[0]){simd_max($0,$1)}
+        let intersection=max(0,min(high.x,x1)-max(low.x,x0))*max(0,min(high.y,y1)-max(low.y,y0))
+        let union=(high.x-low.x)*(high.y-low.y)+boxWidth*boxHeight-intersection
+        let iou=union>0 ? intersection/union : 0
+        let edgeError=max(max(abs(low.x-x0),abs(low.y-y0)),max(abs(high.x-x1),abs(high.y-y1)))
+        let edgeLimit=max(12,0.25*max(boxWidth,boxHeight))
+        report["base_ray_pixel"]=[u,v];report["base_front_surface_robot"]=[surface.x,surface.y,surface.z]
+        report["assumed_front_surface_to_axis_horizontal_m"]=[shift.x,shift.y,0]
+        report["estimated_axis_base_robot"]=[base.x,base.y,base.z]
+        report["predicted_silhouette_pixels"]=[low.x,low.y,high.x,high.y]
+        report["silhouette_iou"]=iou;report["silhouette_maximum_edge_error_pixels"]=edgeError
+        report["silhouette_edge_error_limit_pixels"]=edgeLimit
+        guard iou>=0.50,edgeError<=edgeLimit else{return reject("known_cylinder_rgb_silhouette_disagreement")}
+        guard let sections=ROBWorkspaceCanSections.localKnownEmptyCokeCylinder(base:base,axis:SIMD3(0,0,1),
+            planeRMSEMeters:rms,planePointCount:best.count,planeSupportFraction:support,
+            silhouetteIoU:iou,silhouetteMaximumEdgeErrorPixels:edgeError) else{return reject("invalid_known_cylinder_evidence")}
+        report["status"]="accepted_estimated_prior";report["rejection_stage"]=NSNull()
+        report["estimated_middle_robot"]=sections.middle;report["estimated_top_robot"]=sections.top
+        return (sections,report)
+    }
+}
+
 struct ROBWorkspaceCanSelection {
     let object: ROBWorkspaceLocatedObject?
     let preview: ROBCanGrabPreview?
@@ -834,6 +949,20 @@ struct ROBWorkspaceCanSelection {
         locatedObjects = [:]
         canCandidates = ROBWorkspaceCanCandidateSet()
         lastReport = ["status":"depth_alignment_changed", "detail":"Head depth alignment changed; capture a fresh scene."]
+    }
+
+    /// Pure construction only. Both callers must check their active local-trial
+    /// receipt and exact current source before/after using this estimated shape.
+    @MainActor @nonobjc func localCanShapePrior(detection:ROBWorkspaceDetection,allCanDetections:[ROBWorkspaceDetection],
+        frame:ROBArmRoutineVision.Frame,view:ROBWorkspaceView,model:ROBGhostRobotModel,cameraToRobot:simd_double4x4)
+        -> (sections:ROBWorkspaceCanSections?,diagnostics:[String:Any]) {
+        guard let depth=frame.depth,let k=frame.intrinsics,k.isValid(forWidth:depth.width,height:depth.height),
+              k.rgbOutputUndistorted==true else {
+            return (nil,["status":"rejected","rejection_stage":"missing_native_prior_source_geometry"])
+        }
+        return ROBWorkspaceLocalCanShapePrior.estimate(detection:detection,allCanDetections:allCanDetections,
+            width:depth.width,height:depth.height,fx:k.fx,fy:k.fy,cx:k.cx,cy:k.cy,
+            depth:{depth.distanceMillimeters(x:$0,y:$1)},cameraToRobot:cameraToRobot)
     }
 
     /// Reach ranking only. The caller still plans/admit every connector against
@@ -1473,7 +1602,7 @@ struct ROBWorkspaceCanSelection {
     }
 
     @MainActor @nonobjc func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true,
-        check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
+        permitsLocalCanShapePrior: () throws -> Bool = {false}, check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
         let vision = ROBArmRoutineVision.shared
         locatedObjects = [:]
         canCandidates = ROBWorkspaceCanCandidateSet()
@@ -1574,7 +1703,8 @@ struct ROBWorkspaceCanSelection {
             finishView?()
             if collectCollisionDepth { vision.endCollisionRegistrationProbe() }
         }
-        func accumulateCollisionDepth(_ view: ROBWorkspaceView, capturedFrame:ROBArmRoutineVision.Frame? = nil) async throws {
+        func accumulateCollisionDepth(_ view: ROBWorkspaceView, capturedFrame:ROBArmRoutineVision.Frame? = nil,
+                                      preservingSceneID:UUID? = nil) async throws {
             guard collectCollisionDepth else { return }
             try check()
             try requireSceneProjectionIdentity()
@@ -1613,7 +1743,11 @@ struct ROBWorkspaceCanSelection {
             var currentMap = collisionMap ?? ROBWorkspaceDepthMap(modelID:model.modelID,geometryID:model.geometryID,
                 mappingID:model.selectedMappingID,sessionGeneration:sceneGatewayGeneration,cameraGeneration:frame.cameraGeneration,
                 estimatedCameraProjectionIdentity:estimatedProjectionIdentity)
+            guard preservingSceneID.map({$0==currentMap.sceneID}) ?? true else {throw ROBWorkspaceDepthMapError.invalidFrame}
             if Date().timeIntervalSince1970*1000-currentMap.createdAtMilliseconds > 55_000 {
+                guard preservingSceneID==nil else {
+                    throw ROBWorkspaceDepthMapError.acquisition("Arm-side depth coverage cannot replace the object scene with a new map.")
+                }
                 currentMap = ROBWorkspaceDepthMap(modelID:model.modelID,geometryID:model.geometryID,mappingID:model.selectedMappingID,
                     sessionGeneration:sceneGatewayGeneration,cameraGeneration:frame.cameraGeneration,
                     estimatedCameraProjectionIdentity:estimatedProjectionIdentity)
@@ -1638,13 +1772,13 @@ struct ROBWorkspaceCanSelection {
             try requireSceneProjectionIdentity()
             guard isViewReady(view) else { throw ROBWorkspaceDepthMapError.invalidFrame }
         }
-        func moveView(_ view: ROBWorkspaceView) async throws -> Bool {
+        func moveView(_ view: ROBWorkspaceView, deadlineUptime:Double? = nil) async throws -> Bool {
             try requireSceneProjectionIdentity()
             if canUseView?(view.panDegrees, view.upperTarget) == false {
                 evidence.append(["pan": view.panDegrees, "upper": view.upperTarget, "status": "outside_current_neck_envelope"])
                 return false
             }
-            let deadline = ProcessInfo.processInfo.systemUptime + 12
+            let deadline = min(ProcessInfo.processInfo.systemUptime + 12,deadlineUptime ?? .infinity)
             var settledSince: TimeInterval?
             progress(String(format: "Local search: camera pan %+.0f°, tilt target %d", view.panDegrees, view.upperTarget))
             while ProcessInfo.processInfo.systemUptime < deadline {
@@ -1766,13 +1900,37 @@ struct ROBWorkspaceCanSelection {
                             var diagnostic=result.diagnostics
                             diagnostic["source"]=sectionSource
                             diagnostic["section_measurement_accepted"]=result.sections != nil
-                            guard let sections=result.sections else {
+                            var acceptedSections=result.sections
+                            if acceptedSections==nil,try permitsLocalCanShapePrior(),measuredCamera==nil,
+                               let cameraTransform,let projection=estimatedCamera?.identity,
+                               let sourceMap=collisionMap,sourceMap.estimatedCameraProjectionIdentity==projection,
+                               sourceMap.bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity,
+                               frame.cameraGeneration==vision.cameraGeneration,
+                               collisionEnrollment.sequence==frame.sequence,
+                               collisionEnrollment.capturedAtMilliseconds==frame.capturedAt,
+                               (0...30_000).contains(Date().timeIntervalSince1970*1000-frame.capturedAt) {
+                                let prior=localCanShapePrior(detection:candidate,allCanDetections:observation.cans ?? [observation.can],
+                                    frame:frame,view:view,model:model,cameraToRobot:cameraTransform)
+                                diagnostic["local_shape_prior"]=prior.diagnostics
+                                try check();try requireSceneProjectionIdentity()
+                                guard try permitsLocalCanShapePrior(),isViewReady(view),
+                                      frame.cameraGeneration==vision.cameraGeneration,
+                                      sourceMap.bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity else {throw CancellationError()}
+                                acceptedSections=prior.sections
+                            }
+                            guard let sections=acceptedSections else {
                                 diagnostic["candidate_admission_status"]="section_measurement_rejected"
                                 sectionDiagnostics.append(diagnostic);rejected += 1;continue
                             }
+                            if sections.shapePriorEvidence != nil {
+                                diagnostic["measured_section_rejection_stage"]=diagnostic["rejection_stage"] ?? NSNull()
+                                diagnostic["rejection_stage"]=NSNull()
+                                diagnostic["status"]="accepted_estimated_prior"
+                                diagnostic["candidate_geometry_source"]="local_trial_known_empty_coke_prior_not_measured_bands"
+                            }
                             guard tabletopCanBaseHeight.map({abs(sections.bottom[2]-$0)<=0.15}) ?? true else {
                                 diagnostic["status"]="rejected";diagnostic["rejection_stage"]="tabletop_base_height_disagreement"
-                                diagnostic["measured_base_z_m"]=sections.bottom[2]
+                                diagnostic[sections.shapePriorEvidence==nil ? "measured_base_z_m" : "estimated_base_z_m"]=sections.bottom[2]
                                 diagnostic["tabletop_base_z_m"]=tabletopCanBaseHeight!
                                 diagnostic["candidate_admission_status"]="rejected_after_section_measurement"
                                 sectionDiagnostics.append(diagnostic);rejected += 1;continue
@@ -1820,10 +1978,12 @@ struct ROBWorkspaceCanSelection {
                         }
                         entry["visible_table_cans"] = candidates.map { candidate -> [String: Any] in
                             let object = candidate.object, sections = object.sections!
+                            let heightKey=sections.shapePriorEvidence==nil ? "calibrated_middle_height_m" : "estimated_middle_height_m"
                             return ["box":candidate.detection.box,"confidence":object.confidence,"position":object.position,
                                 "top":sections.top,"middle":sections.middle,"base":sections.bottom,
                                 "height_m":sections.heightMeters,"diameter_m":sections.diameterMeters,
-                                "calibrated_middle_height_m":(tabletopCanBaseHeight ?? sections.bottom[2])+sections.heightMeters/2,
+                                heightKey:(tabletopCanBaseHeight ?? sections.bottom[2])+sections.heightMeters/2,
+                                "geometry_source":sections.shapePriorEvidence==nil ? "measured_depth_bands" : "local_trial_assumed_known_cylinder",
                                 "selected":selected.map({ $0.detection.box == candidate.detection.box }) ?? false]
                         }
                         entry["rejected_can_instances"] = rejected
@@ -1849,6 +2009,46 @@ struct ROBWorkspaceCanSelection {
                         }.value
                         measurement = bucket.object
                         entry["bucket_geometry"] = bucket.diagnostics.report
+                        if measurement==nil,try permitsLocalCanShapePrior(),measuredCamera==nil,
+                           let cameraTransform,let projection=estimatedCamera?.identity,
+                           let sourceMap=collisionMap,sourceMap.estimatedCameraProjectionIdentity==projection,
+                           sourceMap.bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity,
+                           frame.cameraGeneration==vision.cameraGeneration,
+                           collisionEnrollment.sequence==frame.sequence,collisionEnrollment.capturedAtMilliseconds==frame.capturedAt,
+                           (0...30_000).contains(Date().timeIntervalSince1970*1000-frame.capturedAt),
+                           let depth=frame.depth,let k=frame.intrinsics,
+                           let cg=CIContext(options:[.useSoftwareRenderer:true]).createCGImage(frame.image,from:frame.image.extent) {
+                            let bitmap=NSBitmapImageRep(cgImage:cg)
+                            if bitmap.pixelsWide==depth.width,bitmap.pixelsHigh==depth.height {
+                                let prior=await Task.detached(priority:.userInitiated) {
+                                    ROBWorkspaceBucketOpeningPrior.estimate(box:detection.box,width:depth.width,height:depth.height,
+                                        fx:k.fx,fy:k.fy,cx:k.cx,cy:k.cy,cameraToRobot:cameraTransform,
+                                        depth:{depth.distanceMillimeters(x:$0,y:$1)},color:{x,y in
+                                            guard let color=bitmap.colorAt(x:x,y:y)?.usingColorSpace(NSColorSpace.deviceRGB) else{return nil}
+                                            return SIMD3(Double(color.redComponent),Double(color.greenComponent),Double(color.blueComponent))
+                                        })
+                                }.value
+                                try check();try requireSceneProjectionIdentity()
+                                guard try permitsLocalCanShapePrior(),isViewReady(view),
+                                      frame.cameraGeneration==vision.cameraGeneration,
+                                      sourceMap.bodyMotionIdentity==ROBFixedHeadBodyMotionIdentity.currentIdentity else {throw CancellationError()}
+                                if let prior {
+                                    measurement = .init(target:.orangeBucket,position:[prior.center.x,prior.center.y,prior.center.z],
+                                        confidence:detection.confidence,capturedAt:frame.capturedAt,sequence:frame.sequence,view:view,
+                                        openingRadius:prior.radius,bucketShapePrior:prior.evidence,registrationID:nil)
+                                    var priorReport:[String:Any]=["status":"accepted_estimated_prior","registration_verified":false,
+                                        "source_sequence":NSNumber(value:frame.sequence),"source_captured_at_ms":frame.capturedAt,
+                                        "camera_generation":frame.cameraGeneration.uuidString,
+                                        "runtime_calibration_identity":k.runtimeCalibration?.identity as Any? ?? NSNull(),
+                                        "camera_service_source_sha256":k.cameraServiceSourceSHA256 as Any? ?? NSNull(),
+                                        "body_motion_identity":sourceMap.bodyMotionIdentity,"estimated_camera_projection_identity":projection,
+                                        "measured_rim_rejected_reason":bucket.diagnostics.report["reason"] as Any? ?? NSNull()]
+                                    if let encoded=try? JSONEncoder().encode(prior.evidence),
+                                       let evidence=try? JSONSerialization.jsonObject(with:encoded) {priorReport["evidence"]=evidence}
+                                    entry["bucket_shape_prior"]=priorReport
+                                } else {entry["bucket_shape_prior"]=["status":"rejected","reason":"rgb_opening_floor_prior_unavailable"]}
+                            }
+                        }
                         try check()
                         try requireSceneProjectionIdentity()
                         guard isViewReady(view) else{throw ROBWorkspaceDepthMapError.invalidFrame}
@@ -1993,6 +2193,57 @@ struct ROBWorkspaceCanSelection {
                 do { try await inspect(object.view) } catch is CancellationError { throw CancellationError() }
                 catch { try check(); evidence.append(["refresh_error": error.localizedDescription]) }
             }
+        }
+        // The fast object search need not see the selected hanging arm. Add
+        // only two bounded depth views for this explicit local trial; detector
+        // inference, self masks, occupied returns and free-space gates are unchanged.
+        if requireDepth,collectCollisionDepth,fixedRegisteredView==nil,
+           found[.can] != nil,found[.orangeBucket] != nil,try permitsLocalCanShapePrior(),
+           let originalMap=collisionMap,originalMap.estimatedCameraProjectionIdentity != nil {
+            let started=ProcessInfo.processInfo.systemUptime,deadline=started+9.5
+            let sceneID=originalMap.sceneID,camera=vision.cameraGeneration,body=originalMap.bodyMotionIdentity
+            let desiredPan=model.physicalSide=="right" ? -55.0 : 55.0
+            let pan=boundedPan?(desiredPan) ?? desiredPan
+            var capturedViews=0
+            func requireCoverageContext() throws {
+                try check();try Task.checkCancellation();try requireSceneProjectionIdentity()
+                guard try permitsLocalCanShapePrior(),collisionMap?.sceneID==sceneID,
+                      vision.cameraGeneration==camera,sceneCaptureAnchor.permitsCurrent(camera),
+                      body==ROBFixedHeadBodyMotionIdentity.currentIdentity,
+                      (ROBAmberGatewayClient.shared.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value==sceneGatewayGeneration else {
+                    throw ROBWorkspaceDepthMapError.invalidFrame
+                }
+            }
+            progress("Checking \(model.physicalSide)-arm depth coverage.")
+            for upper in [5650,5300] {
+                try requireCoverageContext()
+                guard ProcessInfo.processInfo.systemUptime<deadline else {break}
+                let view=ROBWorkspaceView(panDegrees:pan,upperTarget:upper)
+                guard try await moveView(view,deadlineUptime:deadline) else {continue}
+                do {
+                    let frame=try await vision.settledDepthFrame(deadlineUptime:deadline)
+                    try requireCoverageContext()
+                    guard ProcessInfo.processInfo.systemUptime<deadline else {break}
+                    try await accumulateCollisionDepth(view,capturedFrame:frame,preservingSceneID:sceneID)
+                    try requireCoverageContext()
+                    guard collisionEnrollment.sequence==frame.sequence,
+                          collisionEnrollment.capturedAtMilliseconds==frame.capturedAt else {throw ROBWorkspaceDepthMapError.invalidFrame}
+                    capturedViews+=1
+                    evidence.append(["depth_only_arm_coverage":true,"status":"captured","physical_arm":model.physicalSide,
+                        "pan":pan,"upper":upper,"scene_id":sceneID.uuidString,"sequence":NSNumber(value:frame.sequence),
+                        "captured_at_ms":frame.capturedAt,"detector_invoked":false,"free_space_inferred":false])
+                } catch is CancellationError {throw CancellationError()}
+                catch {
+                    try requireCoverageContext()
+                    evidence.append(["depth_only_arm_coverage":true,"status":"unavailable","pan":pan,"upper":upper,
+                        "detail":error.localizedDescription,"detector_invoked":false,"free_space_inferred":false])
+                    if ProcessInfo.processInfo.systemUptime>=deadline {break}
+                }
+            }
+            try requireCoverageContext()
+            evidence.append(["depth_only_arm_coverage_summary":true,"captured_views":capturedViews,"maximum_views":2,
+                "elapsed_seconds":ProcessInfo.processInfo.systemUptime-started,"budget_seconds":9.5,
+                "scene_id":sceneID.uuidString,"occupied_returns_preserved":true,"unknown_space_gate_unchanged":true])
         }
         let missing = targets.filter { found[$0] == nil }.map(\.spokenName)
         let unseen = targets.filter { !visuallyFound.contains($0) }.map(\.spokenName)

@@ -36,13 +36,16 @@ struct CameraIntrinsics {
 }
 struct Depth {let width=320,height=240;func distanceMillimeters(x:Int,y:Int)->UInt16?{750}}
 struct ROBWorkspaceView {let panDegrees:Double;let upperTarget:Int}
-struct Detection {var visuallyUsable=true;var confidence=0.99;var box=[0.4,0.4,0.6,0.7];var confidenceThreshold=0.5}
+typealias Detection=ROBWorkspaceDetection
 struct ROBWorkspaceObservation {var cans:[Detection]?=[Detection()];var can=Detection()}
 struct ROBWorkspaceDetection {
-    let visible:Bool;let confidence:Double;let box:[Double];let aim:[Double];let depthPoint:[Double];let confidenceThreshold:Double
+    var visible=true;var confidence=0.99;var box=[0.4,0.4,0.6,0.7];var aim=[0.5,0.55];var depthPoint=[0.5,0.55];var confidenceThreshold=0.5
+    var visuallyUsable:Bool {visible}
 }
 struct ROBWorkspaceCanSections {
     let middle:[Double]
+    struct ShapePriorEvidence {var valid=true}
+    var shapePriorEvidence:ShapePriorEvidence?=nil
     static var displacement=0.0
     static var validDepth=true
     static func measure(detection:ROBWorkspaceDetection,width:Int,height:Int,fx:Double,fy:Double,cx:Double,cy:Double,
@@ -56,7 +59,19 @@ struct ROBWorkspaceLocatedObject {
     let capturedAt:Double
     let view=ROBWorkspaceView(panDegrees:0,upperTarget:6160)
     var registrationID:String?=nil
+    var sections:ROBWorkspaceCanSections?=nil
     var point:SIMD3<Double> {[0,0,0.75]}
+}
+@MainActor final class ROBWorkspaceSearch {
+    static let shared=ROBWorkspaceSearch()
+    var validPrior=true,priorCalls=0,priorDisplacement=0.0
+    func localCanShapePrior(detection:ROBWorkspaceDetection,allCanDetections:[ROBWorkspaceDetection],
+        frame:ROBArmRoutineVision.Frame,view:ROBWorkspaceView,model:ROBGhostRobotModel,cameraToRobot:simd_double4x4)
+        ->(sections:ROBWorkspaceCanSections?,diagnostics:[String:Any]) {
+        priorCalls+=1
+        guard validPrior,!allCanDetections.isEmpty else{return(nil,[:])}
+        return(.init(middle:[priorDisplacement,0,0.75],shapePriorEvidence:.init()),["geometry_assumed":true])
+    }
 }
 struct Observation {
     let sequence:UInt64=1
@@ -212,10 +227,31 @@ struct Feedback {var effectiveSampleAgeMilliseconds=0.0;var positionsRadians:[NS
         }
         var otherView=map;otherView.observations[0].recordedUpperTarget=6200
         do {_=try await ROBRecyclingVisualInspection.beginVisualCalibrationTrial(model:model,can:can,map:otherView,trial:trial,gatewayArm:"right",check:{});preconditionFailure("Another source can view accepted")}catch{}
+        var priorCan=can;priorCan.sections = .init(middle:[0,0,0.75],shapePriorEvidence:.init())
+        func beginPrior()async throws->ROBRecyclingVisualInspection.Context {
+            try await ROBRecyclingVisualInspection.beginVisualCalibrationTrial(model:model,can:priorCan,map:map,trial:trial,gatewayArm:"right",check:{})
+        }
+        ROBWorkspaceCanSections.validDepth=false
+        let priorContext=try await beginPrior()
+        precondition(priorContext.assumedCanGeometry && ROBWorkspaceSearch.shared.priorCalls>0 && c.registrationCalls==0)
+        for failure in ["table_or_silhouette","moved12mm","receipt"] {
+            if failure=="table_or_silhouette" {ROBWorkspaceSearch.shared.validPrior=false}
+            if failure=="moved12mm" {ROBWorkspaceSearch.shared.priorDisplacement=0.013}
+            if failure=="receipt" {b.authorized=false}
+            do {_=try await beginPrior();preconditionFailure("Unsafe assumed prior closure admitted: "+failure)}catch{}
+            ROBWorkspaceSearch.shared.validPrior=true;ROBWorkspaceSearch.shared.priorDisplacement=0;b.authorized=true
+        }
+        lift()
+        let priorEvidence=try await ROBRecyclingVisualInspection.verifyAfterLift(context:priorContext,model:model,gatewayArm:"right",check:{})
+        precondition(priorEvidence.reason.contains("explicit local shape prior") && !priorEvidence.possessionMeasured)
+        v.lift=false;ROBAmberGatewayClient.shared.feedback.positionsRadians=[-0.0035,0.1638,0.7,0,0,0,0].map(NSNumber.init(value:))
+        ROBWorkspaceCanSections.validDepth=true
         // Registered API still resolves an actual registration and needs no
         // local receipt or estimated PID/normalization metadata contract.
         c.registrationValue=ROBFixedHeadRegistration();b.authorized=false
         var registeredCan=can;registeredCan.registrationID="measured-fixture"
+        var wronglyRegisteredPrior=registeredCan;wronglyRegisteredPrior.sections=priorCan.sections
+        do {_=try await ROBRecyclingVisualInspection.begin(model:model,can:wronglyRegisteredPrior,gatewayArm:"right",check:{});preconditionFailure("Ordinary measured inspection accepted an assumed geometry object")}catch{}
         let registered=try await ROBRecyclingVisualInspection.begin(model:model,can:registeredCan,gatewayArm:"right",check:{})
         if case .visualTrial = registered.projection {preconditionFailure("Measured API changed authority")}
         precondition(c.registrationCalls>0)

@@ -32,6 +32,7 @@ final class ROBGhostRobotModel {
         return ["left_two_Link":left,"right_two_Link":right]
     }
 }
+enum ROBWorkspaceBucketOpeningPrior {struct Evidence:Codable {}}
 struct ROBWorkspaceDepthObservation { let sequence:UInt64; let capturedAtMilliseconds:Double; var registrationID:String?=nil }
 struct ROBWorkspaceCollisionSnapshot {
     var sceneID:UUID; var modelID="model",geometryID="geometry",mappingID="mapping"

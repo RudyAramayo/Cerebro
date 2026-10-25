@@ -334,11 +334,14 @@ final class ROBWorkspaceSearch {
     var fail = false
     var requiredDepth = true
     var requestedTargets: [ROBWorkspaceTarget] = []
+    var localCanShapePriorPermissions:[Bool]=[]
     var objects: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
     var onInspect: (() -> Void)?
     var afterInspect: (() -> Void)?
-    @MainActor func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true, check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
+    @MainActor func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true,
+        permitsLocalCanShapePrior:() throws ->Bool={false},check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
         requiredDepth = requireDepth
+        localCanShapePriorPermissions.append(try permitsLocalCanShapePrior())
         requestedTargets = targets
         onInspect?()
         if fail { throw ROBArmRoutineError.blocked("Fixture observation unavailable") }
@@ -678,6 +681,7 @@ final class ROBArmRoutineCoordinator {
             precondition(first["arm_motion_sent"] as? Bool==false && first["reach_sent"] as? Bool==false && first["jaw_command_sent"] as? Bool==false)
             precondition(first["perception_only_rejection"] as? Bool==true && broker.localRecyclingApprovalState?["state"] as? String=="available",first.description)
             precondition(ROBWorkspaceSearch.shared.nearestSelectionCalls==1)
+            precondition(ROBWorkspaceSearch.shared.localCanShapePriorPermissions==[true],"Dedicated actual receipt did not explicitly authorize its optional shape prior")
             precondition(!g.commands.contains{$0.hasPrefix("ghost_step") || $0.hasPrefix("waypoint") || $0.hasPrefix("gripper") || $0.hasPrefix("calibrate")})
             precondition(trial.localRecyclingContextDiagnostics["status"] as? String=="current")
             precondition(trial.localRecyclingContextDiagnostics["camera_frame_fresh"] as? Bool==false)

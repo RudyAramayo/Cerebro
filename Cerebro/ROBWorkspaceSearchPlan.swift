@@ -376,6 +376,29 @@ enum ROBWorkspaceObservationError: LocalizedError {
 /// The detector's full box supplies endpoints only after unclipped depth and
 /// plausible physical height/diameter checks; these are observations, not poses.
 struct ROBWorkspaceCanSections: Codable {
+    /// An explicit local-trial object prior, never a depth-band measurement or
+    /// camera/body registration. Live source/receipt admission belongs to the
+    /// search executor; these fields preserve how its geometry was estimated.
+    struct ShapePriorEvidence: Codable {
+        let kind: String
+        let source: String
+        let assumedHeightMeters: Double
+        let assumedDiameterMeters: Double
+        let planeRMSEMeters: Double
+        let planePointCount: Int
+        let planeSupportFraction: Double
+        let silhouetteIoU: Double
+        let silhouetteMaximumEdgeErrorPixels: Double
+        var valid:Bool {
+            kind=="local_visual_trial_known_empty_coke_cylinder" &&
+                source=="fresh_RGB_base_ray_local_depth_table_plane_and_silhouette" &&
+                assumedHeightMeters==0.120 && assumedDiameterMeters==0.066 &&
+                planeRMSEMeters.isFinite && planeRMSEMeters>=0 && (3...10000).contains(planePointCount) &&
+                planeSupportFraction.isFinite && planeSupportFraction>0 && planeSupportFraction<=1 &&
+                silhouetteIoU.isFinite && silhouetteIoU>0 && silhouetteIoU<=1 &&
+                silhouetteMaximumEdgeErrorPixels.isFinite && silhouetteMaximumEdgeErrorPixels>=0
+        }
+    }
     let top: [Double]
     let middle: [Double]
     let bottom: [Double]
@@ -384,10 +407,16 @@ struct ROBWorkspaceCanSections: Codable {
     /// RGB-D bands sample the visible wall. A measured projection may shift
     /// them to an estimated cylinder axis; legacy section records lack this.
     var surfaceToAxisOffsetMeters: [Double]? = nil
+    var shapePriorEvidence: ShapePriorEvidence? = nil
     var valid: Bool {
         guard [top,middle,bottom].allSatisfy({ $0.count == 3 && $0.allSatisfy(\.isFinite) }),
               heightMeters.isFinite, (0.09...0.18).contains(heightMeters),
               diameterMeters.isFinite, (0.04...0.09).contains(diameterMeters) else { return false }
+        if let prior=shapePriorEvidence {
+            guard prior.valid,abs(heightMeters-prior.assumedHeightMeters)<1e-9,
+                  abs(diameterMeters-prior.assumedDiameterMeters)<1e-9,
+                  surfaceToAxisOffsetMeters==nil else {return false}
+        }
         if let offset = surfaceToAxisOffsetMeters {
             guard offset.count == 3, offset.allSatisfy(\.isFinite),
                   abs(simd_length(SIMD3(offset[0],offset[1],offset[2]))-diameterMeters/2) <= 0.000001 else { return false }
@@ -396,6 +425,24 @@ struct ROBWorkspaceCanSections: Codable {
         let m = SIMD3(middle[0],middle[1],middle[2]), axis = a-b, length = simd_length(axis)
         return length.isFinite && abs(length-heightMeters) <= 0.001 && axis.z >= 0.6*length &&
             simd_distance(m,(a+b)/2) <= 0.001
+    }
+    /// Pure construction after a separately admitted local visual trial has
+    /// checked its table plane, fresh silhouette and exact source. `base` is
+    /// the estimated AXIS base center, not a measured reflective-wall sample.
+    static func localKnownEmptyCokeCylinder(base:SIMD3<Double>,axis:SIMD3<Double>,planeRMSEMeters:Double,
+        planePointCount:Int,planeSupportFraction:Double,silhouetteIoU:Double,
+        silhouetteMaximumEdgeErrorPixels:Double)->Self? {
+        guard [base,axis].allSatisfy({[$0.x,$0.y,$0.z].allSatisfy(\.isFinite)}),simd_length(axis)>1e-9 else {return nil}
+        let evidence=ShapePriorEvidence(kind:"local_visual_trial_known_empty_coke_cylinder",
+            source:"fresh_RGB_base_ray_local_depth_table_plane_and_silhouette",assumedHeightMeters:0.120,
+            assumedDiameterMeters:0.066,planeRMSEMeters:planeRMSEMeters,planePointCount:planePointCount,
+            planeSupportFraction:planeSupportFraction,silhouetteIoU:silhouetteIoU,
+            silhouetteMaximumEdgeErrorPixels:silhouetteMaximumEdgeErrorPixels)
+        guard evidence.valid else {return nil}
+        let delta=simd_normalize(axis)*0.120,top=base+delta,middle=base+delta/2
+        let value=Self(top:[top.x,top.y,top.z],middle:[middle.x,middle.y,middle.z],bottom:[base.x,base.y,base.z],
+            heightMeters:0.120,diameterMeters:0.066,surfaceToAxisOffsetMeters:nil,shapePriorEvidence:evidence)
+        return value.valid ? value:nil
     }
     static func fit(topBand:SIMD3<Double>,middleBand:SIMD3<Double>,bottomBand:SIMD3<Double>,
                     diameterMeters:Double) -> Self? {
@@ -513,6 +560,7 @@ struct ROBWorkspaceLocatedObject: Codable {
     let sequence: UInt64
     let view: ROBWorkspaceView
     var openingRadius: Double? = nil
+    var bucketShapePrior: ROBWorkspaceBucketOpeningPrior.Evidence? = nil
     var floorCorrectionDegrees: Double? = nil
     var sections: ROBWorkspaceCanSections? = nil
     var registrationID: String? = nil
@@ -854,6 +902,146 @@ enum ROBWorkspaceBucketRim {
     }
 }
 
+/// Explicit RGB/floor SHAPE PRIOR for the locally approved calibration trial.
+/// It never reports a measured rim or a measured recessed interior. The
+/// admitted tapered-bucket family is deliberately recorded with the result.
+enum ROBWorkspaceBucketOpeningPrior {
+    struct Evidence: Codable {
+        let kind: String, source: String
+        let assumedHeightToOpeningDiameterRange: [Double]
+        let assumedBottomToOpeningRadiusRange: [Double]
+        let contourRMSEPixels: Double, contourPointCount: Int
+        let floorRMSEMeters: Double, floorPointCount: Int, floorSupportFraction: Double
+        let commonOpeningRadiusMeters: Double, shapeInsetMeters: Double
+        let maximumVariantCenterXYSpreadMeters: Double, maximumRimHeightMeters: Double
+        let maximumBottomProjectionErrorPixels: Double
+        var valid:Bool {
+            kind == "local_visual_trial_RGB_opening_floor_shape_prior" &&
+            source == "fresh_orange_upper_contour_surrounding_depth_floor_and_declared_tapered_bucket_family" &&
+            assumedHeightToOpeningDiameterRange == [0.8,1.2] && assumedBottomToOpeningRadiusRange == [0.6,1.0] &&
+            [contourRMSEPixels,floorRMSEMeters,floorSupportFraction,commonOpeningRadiusMeters,shapeInsetMeters,
+             maximumVariantCenterXYSpreadMeters,maximumRimHeightMeters,maximumBottomProjectionErrorPixels].allSatisfy(\.isFinite) &&
+            contourPointCount >= 30 && floorPointCount >= 40 && floorSupportFraction >= 0.35 && floorSupportFraction <= 1 &&
+            contourRMSEPixels >= 0 && floorRMSEMeters >= 0 && floorRMSEMeters <= 0.012 &&
+            commonOpeningRadiusMeters >= 0.068 && commonOpeningRadiusMeters <= 0.28 && shapeInsetMeters >= 0.010 &&
+            maximumVariantCenterXYSpreadMeters >= 0 && maximumRimHeightMeters.isFinite && maximumBottomProjectionErrorPixels >= 0
+        }
+    }
+    struct Estimate { let center:SIMD3<Double>, radius:Double, evidence:Evidence }
+    private static func solve(_ rows:[SIMD3<Double>],_ values:[Double])->SIMD3<Double>? {
+        guard rows.count==values.count,rows.count>=3 else{return nil}
+        var a=Array(repeating:Array(repeating:0.0,count:4),count:3)
+        for (r,v) in zip(rows,values) {for i in 0..<3 {for j in 0..<3 {a[i][j]+=r[i]*r[j]};a[i][3]+=r[i]*v}}
+        for c in 0..<3 {let p=(c..<3).max(by:{abs(a[$0][c])<abs(a[$1][c])})!;guard abs(a[p][c])>1e-10 else{return nil};a.swapAt(c,p)
+            let d=a[c][c];for j in c..<4 {a[c][j]/=d};for i in 0..<3 where i != c {let f=a[i][c];for j in c..<4 {a[i][j]-=f*a[c][j]}}}
+        let r=SIMD3(a[0][3],a[1][3],a[2][3]);return [r.x,r.y,r.z].allSatisfy(\.isFinite) ? r:nil
+    }
+    static func estimate(box:[Double],width:Int,height:Int,fx:Double,fy:Double,cx:Double,cy:Double,
+                         cameraToRobot:simd_double4x4,depth:(Int,Int)->UInt16?,
+                         color:(Int,Int)->SIMD3<Double>?) -> Estimate? {
+        guard box.count==4,box.allSatisfy({$0.isFinite && (0.02...0.98).contains($0)}),box[2]>box[0],box[3]>box[1],
+              width>1,height>1,[fx,fy,cx,cy].allSatisfy(\.isFinite),fx>0,fy>0 else{return nil}
+        let x0=Int(box[0]*Double(width-1)),x1=Int(box[2]*Double(width-1)),y0=Int(box[1]*Double(height-1)),y1=Int(box[3]*Double(height-1))
+        let w=x1-x0+1,h=y1-y0+1,scale=max(1,Double(width)/640)
+        guard w>=24,h>=24,w*h<=180_000 else{return nil}
+        var mask=Array(repeating:false,count:w*h)
+        for y in 0..<h {for x in 0..<w {if let c=color(x+x0,y+y0),[c.x,c.y,c.z].allSatisfy(\.isFinite) {
+            mask[y*w+x]=c.x>0.3 && c.x-c.y>0.22 && c.x-c.z>0.32
+        }}}
+        var visited=Array(repeating:false,count:mask.count),component:[Int]=[]
+        for seed in mask.indices where mask[seed] && !visited[seed] {
+            var queue=[seed],index=0;visited[seed]=true
+            while index<queue.count {let p=queue[index];index+=1;let x=p%w,y=p/w
+                for q in [x>0 ? p-1:-1,x+1<w ? p+1:-1,y>0 ? p-w:-1,y+1<h ? p+w:-1] where q>=0 && mask[q] && !visited[q] {visited[q]=true;queue.append(q)}}
+            if queue.count>component.count {component=queue}
+        }
+        guard component.count>=200,Double(component.count)/Double(w*h)<0.9 else{return nil}
+        var columns=Array(repeating:[Int](),count:w)
+        for p in component {columns[p%w].append(p/w)}
+        let edges=columns.enumerated().compactMap {x,ys -> SIMD2<Double>? in guard ys.count>=4,let y=ys.min() else{return nil};return SIMD2(Double(x+x0),Double(y+y0))}
+        guard edges.count>=30,let xmin=edges.map(\.x).min(),let xmax=edges.map(\.x).max(),xmax-xmin>=24 else{return nil}
+        let mid=(xmin+xmax)/2,half=(xmax-xmin)/2
+        var ellipse:(cx:Double,cy:Double,a:Double,b:Double,rmse:Double,support:[SIMD2<Double>])?
+        for center in stride(from:mid-3*scale,through:mid+3*scale,by:0.5*scale) {
+            for radius in stride(from:half-scale,through:half+3.5*scale,by:0.5*scale) where radius>0 {
+                let selected=edges.filter{abs(($0.x-center)/radius)<0.94};guard selected.count>=30 else{continue}
+                let xs=selected.map{sqrt(max(0,1-pow(($0.x-center)/radius,2)))},ys=selected.map(\.y)
+                let n=Double(xs.count),sx=xs.reduce(0,+),sy=ys.reduce(0,+),sxx=xs.reduce(0){$0+$1*$1},sxy=zip(xs,ys).reduce(0){$0+$1.0*$1.1}
+                let det=n*sxx-sx*sx;guard det>1e-8 else{continue}
+                let b=(sx*sy-n*sxy)/det,c=(sy+b*sx)/n
+                guard b>radius*0.25,b<radius*1.2 else{continue}
+                let error=sqrt(zip(xs,ys).reduce(0){$0+pow($1.1-(c-b*$1.0),2)}/n)
+                if error<(ellipse?.rmse ?? .infinity) {ellipse=(center,c,radius,b,error,selected)}
+            }
+        }
+        guard let e=ellipse,e.rmse<=2.5*scale,e.cx-e.a>Double(x0)-5*scale,e.cx+e.a<Double(x1)+5*scale else{return nil}
+        let middleY=component.filter{abs(Double($0%w+x0)-e.cx)<e.a*0.3}.map{Double($0/w+y0)}.sorted()
+        guard middleY.count>=20 else{return nil}
+        let bottom=middleY[middleY.count*99/100]
+        guard bottom-e.cy-e.b>=e.b*0.1,bottom-e.cy-e.b<=e.b*1.2 else{return nil}
+        // An observed shadowed interior below a bright curved lip is required;
+        // a flat uniform orange disk does not become an opening from its box.
+        func luma(_ c:SIMD3<Double>)->Double {0.299*c.x+0.587*c.y+0.114*c.z}
+        let lip=e.support.compactMap{color(Int($0.x),min(height-1,Int($0.y)+3))}.map(luma)
+        let inside=(-2...2).flatMap{dy in (-2...2).compactMap{dx in color(Int(e.cx)+dx,Int(e.cy)+dy)}}.map(luma)
+        guard !lip.isEmpty,!inside.isEmpty,lip.reduce(0,+)/Double(lip.count)-inside.reduce(0,+)/Double(inside.count)>=0.045 else{return nil}
+        let origin=SIMD3(cameraToRobot.columns.3.x,cameraToRobot.columns.3.y,cameraToRobot.columns.3.z)
+        func ray(_ x:Double,_ y:Double)->SIMD3<Double> {let r=cameraToRobot*SIMD4((x-cx)/fx,(y-cy)/fy,1,0);return SIMD3(r.x,r.y,r.z)}
+        var points:[SIMD3<Double>]=[];let pad=Int(50*scale),step=max(2,Int(3*scale))
+        for y in stride(from:max(0,y0-pad),through:min(height-1,y1+pad),by:step) {for x in stride(from:max(0,x0-pad),through:min(width-1,x1+pad),by:step) {
+            if (x0-3...x1+3).contains(x) && (y0-3...y1+3).contains(y) {continue}
+            if let mm=depth(x,y),(200...3000).contains(mm) {points.append(origin+ray(Double(x),Double(y))*Double(mm)/1000)}
+        }}
+        guard points.count>=80 else{return nil}
+        var best:(n:SIMD3<Double>,d:Double,support:[SIMD3<Double>])?
+        for i in 0..<128 {let a=points[(i*17)%points.count],b=points[(i*37+points.count/3)%points.count],c=points[(i*61+points.count*2/3)%points.count]
+            let cross=simd_cross(b-a,c-a),length=simd_length(cross);guard length>0.001 else{continue};var n=cross/length;if n.z<0 {n = -n};let d = -simd_dot(n,a)
+            guard n.z>=cos(35 * .pi/180),(0.6...1.5).contains(simd_dot(n,origin)+d) else{continue}
+            let support=points.filter{abs(simd_dot(n,$0)+d)<=0.015};if support.count>(best?.support.count ?? 0) {best=(n,d,support)}
+        }
+        guard let floor=best,floor.support.count>=40,Double(floor.support.count)/Double(points.count)>=0.35,
+              let ab=solve(floor.support.map{SIMD3($0.x,$0.y,1)},floor.support.map(\.z)) else{return nil}
+        let n=simd_normalize(SIMD3(-ab.x,-ab.y,1)),d = -ab.z/sqrt(ab.x*ab.x+ab.y*ab.y+1),cameraHeight=simd_dot(n,origin)+d
+        let floorRMSE=sqrt(floor.support.reduce(0){$0+pow(simd_dot(n,$1)+d,2)}/Double(floor.support.count))
+        guard n.z>=cos(35 * .pi/180),floorRMSE<=0.012,cameraHeight>0.6,cameraHeight<1.5 else{return nil}
+        let axis=simd_normalize(SIMD3(1,0,0)-n*n.x),other=simd_cross(n,axis)
+        var ground:[SIMD3<Double>]=[]
+        for p in e.support {let r=ray(p.x,p.y),den=simd_dot(n,r);guard den < -0.1 else{return nil};let distance = -cameraHeight/den;guard distance>0,distance<3 else{return nil};ground.append(origin+r*distance)}
+        let uv=ground.map{SIMD2(simd_dot($0,axis),simd_dot($0,other))}
+        guard let circle=solve(uv.map{SIMD3(2*$0.x,2*$0.y,1)},uv.map{simd_length_squared($0)}) else{return nil}
+        let radicand=circle.z+circle.x*circle.x+circle.y*circle.y;guard radicand>0 else{return nil}
+        let r0=sqrt(radicand),c0=axis*circle.x+other*circle.y-n*d
+        let radialRMSE=sqrt(uv.reduce(0){$0+pow(simd_distance($1,SIMD2(circle.x,circle.y))-r0,2)}/Double(uv.count))
+        guard radialRMSE<=0.012 else{return nil}
+        let inverse=simd_inverse(cameraToRobot)
+        func project(_ p:SIMD3<Double>)->SIMD2<Double>? {let q=inverse*SIMD4(p.x,p.y,p.z,1);guard q.z>0 else{return nil};return SIMD2(fx*q.x/q.z+cx,fy*q.y/q.z+cy)}
+        var variants:[(c:SIMD3<Double>,r:Double,h:Double)]=[],bottomError=0.0
+        for aspect in [0.8,1.0,1.2] {let h=2*aspect*r0/(1+2*aspect*r0/cameraHeight),fraction=(cameraHeight-h)/cameraHeight
+            let c=origin+(c0-origin)*fraction,r=r0*fraction;guard (0.12...0.5).contains(h),(0.06...0.28).contains(r) else{return nil};variants.append((c,r,h))
+            // The admitted taper family must explain visible floor contact
+            // within the explicitly assumed35mm local trial precision.
+            var bestError=Double.infinity
+            for taper in [0.6,0.8,1.0] {var projected:[SIMD2<Double>]=[]
+                for k in 0..<72 {let angle=Double(k)*2 * .pi/72;if let p=project(c-n*h+(axis*cos(angle)+other*sin(angle))*r*taper) {projected.append(p)}}
+                if let low=projected.max(by:{$0.y<$1.y}) {bestError=min(bestError,simd_distance(low,SIMD2(e.cx,bottom)))}
+            }
+            bottomError=max(bottomError,bestError)
+        }
+        guard bottomError<=18*scale else{return nil}
+        let selected=variants[1].c,xy=SIMD2(selected.x,selected.y)
+        let spread=variants.map{simd_distance(SIMD2($0.c.x,$0.c.y),xy)}.max()!,rimHeight=variants.map{$0.c.z+sqrt(max(0,1-n.z*n.z))*$0.r}.max()!
+        let inset=max(0.010,floorRMSE+3*radialRMSE+e.rmse*cameraHeight/min(fx,fy))
+        let common=variants.map{$0.r*n.z-simd_distance(SIMD2($0.c.x,$0.c.y),xy)}.min()!-inset
+        guard common>=0.068 else{return nil}
+        let evidence=Evidence(kind:"local_visual_trial_RGB_opening_floor_shape_prior",source:"fresh_orange_upper_contour_surrounding_depth_floor_and_declared_tapered_bucket_family",
+            assumedHeightToOpeningDiameterRange:[0.8,1.2],assumedBottomToOpeningRadiusRange:[0.6,1.0],contourRMSEPixels:e.rmse,contourPointCount:e.support.count,
+            floorRMSEMeters:floorRMSE,floorPointCount:floor.support.count,floorSupportFraction:Double(floor.support.count)/Double(points.count),
+            commonOpeningRadiusMeters:common,shapeInsetMeters:inset,maximumVariantCenterXYSpreadMeters:spread,maximumRimHeightMeters:rimHeight,maximumBottomProjectionErrorPixels:bottomError)
+        guard evidence.valid else{return nil}
+        return Estimate(center:SIMD3(xy.x,xy.y,rimHeight),radius:common,evidence:evidence)
+    }
+}
+
 /// Visual rehearsal only. Deliberately separate from executable proposals:
 /// selecting a right-hand model does not assert a right-arm hardware mapping.
 struct ROBCanGrabPreview {
@@ -1141,7 +1329,16 @@ struct ROBCanGrabPreview {
             // still leaves 5.5 cm of opening radius for the can and fit error.
             let towardHand = SIMD2(graspPoint.x-bucketPoint.x,graspPoint.y-bucketPoint.y)
             let offset = simd_length(towardHand) > 0.001 ? simd_normalize(towardHand) * min(0.04,max(0,radius-0.055)) : .zero
-            let dropXY = bucketXY + offset
+            // The RGB/floor prior contains one common gravity-drop disk for
+            // every admitted shape variant. Keep its center and full inset;
+            // legacy inward/yaw/handward corrections cannot spend that disk.
+            if let prior=bucket.bucketShapePrior {
+                guard prior.valid,bucket.registrationID == nil,bucketYawDegrees==0,bucketInwardMeters==0,
+                      abs(radius-prior.commonOpeningRadiusMeters)<0.000001 else {
+                    throw ROBGhostMotionError.blocked("The explicitly estimated bucket opening or its common drop disk changed.")
+                }
+            }
+            let dropXY = bucket.bucketShapePrior == nil ? bucketXY + offset : SIMD2(bucket.point.x,bucket.point.y)
             var releaseTarget: SIMD3<Double>?
             for extra in [0.15,0.10,0.20,0.25] {
                 let point = SIMD3(dropXY.x,dropXY.y,max(graspPoint.z+extra,bucket.point.z+0.12))

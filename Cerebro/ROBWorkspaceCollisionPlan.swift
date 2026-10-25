@@ -398,11 +398,13 @@ struct ROBWorkspaceIntentionalContact: Codable, Equatable {
     let diameterMeters: Double
     let firstContactStepIndex: Int
     let gripStepIndex: Int
-    let releaseStepIndex: Int
+    let releaseStepIndex: Int?
     let stepCount: Int
     /// Explicit measured radial fit tolerance, never the much larger global
     /// registration uncertainty or a generic obstacle-clearance allowance.
     var radialFitUncertaintyMeters:Double = 0
+    /// Only an explicit local visual trial may finish holding a verified lift.
+    var terminalGraspHold:Bool? = nil
 
     var fingerprint:String {
         let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
@@ -418,8 +420,12 @@ struct ROBWorkspaceIntentionalContact: Codable, Equatable {
               (topCenterMeters+bottomCenterMeters).allSatisfy({ $0.isFinite && abs($0)<=5 }),
               diameterMeters.isFinite,(0.04...0.09).contains(diameterMeters),
               radialFitUncertaintyMeters.isFinite,(0...0.003).contains(radialFitUncertaintyMeters),
-              (1...80).contains(stepCount),firstContactStepIndex>=0,firstContactStepIndex<=gripStepIndex,
-              gripStepIndex<releaseStepIndex,releaseStepIndex<stepCount else { return false }
+              (1...80).contains(stepCount),firstContactStepIndex>=0,firstContactStepIndex<=gripStepIndex else { return false }
+        if let releaseStepIndex {
+            guard terminalGraspHold != true,gripStepIndex<releaseStepIndex,releaseStepIndex<stepCount else{return false}
+        } else {
+            guard terminalGraspHold == true,gripStepIndex<stepCount-1 else{return false}
+        }
         let length=simd_length(axis)
         return (0.09...0.18).contains(length) && axis.z>=0.6*length
     }
@@ -434,7 +440,7 @@ struct ROBWorkspaceIntentionalContact: Codable, Equatable {
         }
     }
     func permits(label:String,payload:ROBWorkspaceCarriedObject?,stepIndex:Int) -> Bool {
-        guard valid,stepIndex>=firstContactStepIndex,stepIndex<=releaseStepIndex else { return false }
+        guard valid,stepIndex>=firstContactStepIndex,stepIndex<=(releaseStepIndex ?? stepCount-1) else { return false }
         if label==toolLink { return true }
         return label=="carried object" && stepIndex>gripStepIndex && payload?.measurementID==measurementID
     }
@@ -745,16 +751,33 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         }
         if let contact=intentionalContact {
             try contact.validate(map:map,model:model,nowMilliseconds:nowMilliseconds)
+            guard contact.releaseStepIndex != nil || (contact.terminalGraspHold == true && context.visualTrial != nil) else {
+                throw ROBGhostMotionError.blocked("A terminal grasp hold needs its explicit local visual-calibration trial; ordinary contact still requires release.")
+            }
             guard payload == nil || payload?.measurementID==contact.measurementID else {
                 throw ROBGhostMotionError.blocked("Intentional contact and the carried-object envelope identify different measurements.")
             }
             if let index=contactStepIndex {
                 guard (0..<contact.stepCount).contains(index) else { throw ROBGhostMotionError.blocked("The intentional-contact segment index is invalid.") }
+                if contact.releaseStepIndex == nil {
+                    guard steps.count==1,steps[0].jawAction != .release,
+                          (index != contact.stepCount-1 || steps[0].stage == "Verification lift") else {
+                        throw ROBGhostMotionError.blocked("A terminal grasp hold segment must retain its frozen verification lift and cannot release.")
+                    }
+                }
             } else {
                 guard steps.count==contact.stepCount,steps[contact.gripStepIndex].jawAction == .grip,
-                      steps[contact.releaseStepIndex].jawAction == .release,
-                      steps.filter({$0.jawAction == .grip}).count==1,steps.filter({$0.jawAction == .release}).count==1 else {
+                      steps.filter({$0.jawAction == .grip}).count==1 else {
                     throw ROBGhostMotionError.blocked("Intentional contact must remain attached to the frozen grasp, lift and release stages.")
+                }
+                if let release=contact.releaseStepIndex {
+                    guard steps[release].jawAction == .release,steps.filter({$0.jawAction == .release}).count==1 else {
+                        throw ROBGhostMotionError.blocked("Intentional contact must retain its frozen release stages.")
+                    }
+                } else {
+                    guard !steps.contains(where:{$0.jawAction == .release}),steps.last?.stage == "Verification lift" else {
+                        throw ROBGhostMotionError.blocked("A terminal grasp hold must end at its verification lift without a carry or release stage.")
+                    }
                 }
             }
             context.intentionalContactFingerprint=contact.fingerprint
@@ -849,6 +872,9 @@ struct ROBWorkspaceCollisionPlan: Codable, Equatable {
         guard payload?.valid ?? true else { throw ROBGhostMotionError.blocked("Measure the carried object's complete envelope before planning.") }
         if let contact=intentionalContact {
             try contact.validate(map:map,model:model,nowMilliseconds:nowMilliseconds)
+            guard contact.releaseStepIndex != nil || (contact.terminalGraspHold == true && context.visualTrial != nil) else {
+                throw ROBGhostMotionError.blocked("A terminal grasp hold needs its explicit local visual-calibration trial; ordinary contact still requires release.")
+            }
             guard let index=contactStepIndex,(0..<contact.stepCount).contains(index),
                   payload == nil || payload?.measurementID==contact.measurementID else {
                 throw ROBGhostMotionError.blocked("An intentional-contact connector needs an explicit frozen task stage and matching measured payload.")

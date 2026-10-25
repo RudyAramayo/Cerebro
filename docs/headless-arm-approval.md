@@ -47,6 +47,19 @@ into the summary/context. Editing it revokes a retained receipt; pending control
 are locked, and a new assumption requires a new exact receipt. Ordinary tests
 do not use this allowance.
 
+When current wall depth cannot describe a reflective can, this lane may use an
+explicit 120 mm × 66 mm upright Coke-can prior anchored to the same frame's RGB
+silhouette and local table plane. It requires independent confirming exposures
+and records the assumed shape separately from measured depth bands. A bucket
+opening prior likewise records its RGB contour, surrounding floor and admitted
+shape/scale range; gravity release must fit their common inset opening. These
+priors do not certify a camera transform or enter ordinary registered trials.
+Before closing, reacquire the can in fresh pixels; after lifting, inconclusive
+possession evidence holds the arm instead of continuing to carry.
+If the destination cannot be admitted, this explicit trial may check just the
+approach, grip and 6 cm verification lift, then hold. That partial attempt has
+no carry, release or automatic return and never counts as a recycled can.
+
 The separate visual-trial planner must recheck the live receipt before dispatch,
 keep the transform unmeasured, and retain observed-obstacle, unknown-space,
 whole-arm, payload, joint-bound and Stop checks. An approval or camera detection

@@ -12,6 +12,8 @@ private final class CorkscrewFixtureMap:ROBWorkspaceCollisionMap {
     let voxelSizeMeters=0.025
     var registrationID:String?="isolated synthetic measured registration"
     var registrationUncertaintyMeters:Double?=0
+    var visualCalibrationScope:ROBWorkspaceVisualCalibrationMapScope?=nil
+    var targetSequence:UInt64?=nil
     var observed=true,queries=0
     var fingerprint:String {ROBGhostRobotModel.hash(Data("corkscrew-fixture-\(observed)-\(registrationID ?? "none")".utf8))}
     init(model:ROBGhostRobotModel,now:Double) {
@@ -20,6 +22,9 @@ private final class CorkscrewFixtureMap:ROBWorkspaceCollisionMap {
     }
     func state(at point:SIMD3<Double>)->ROBWorkspaceVoxelState {queries+=1;return observed ? .free:.unknown}
     func state(inBoundsLow low:SIMD3<Double>,high:SIMD3<Double>)->ROBWorkspaceVoxelState {queries+=1;return observed ? .free:.unknown}
+    func containsTargetObservation(sequence:UInt64,capturedAtMilliseconds:Double)->Bool {
+        sequence==targetSequence && capturedAtMilliseconds==createdAtMilliseconds
+    }
 }
 
 @main struct GhostMotionFixtures {
@@ -32,6 +37,59 @@ private final class CorkscrewFixtureMap:ROBWorkspaceCollisionMap {
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
         let model = try ROBGhostRobotModel(directory: root.appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
         precondition(model.modelID.count == 64 && model.joints.count == 44 && model.hulls.count >= 40)
+        if CommandLine.arguments.last=="grasp-hold" {
+            let arm=try ROBGhostRobotModel(directory:model.directory,physicalSide:"right"),now=Date().timeIntervalSince1970*1000
+            let can=ROBWorkspaceLocatedObject(target:.can,position:[0.45334,-0.17957,0.81673],confidence:0.9,capturedAt:now,sequence:100,
+                view:.init(panDegrees:0,upperTarget:6306))
+            let preview=try ROBCanGrabPreview.make(can:can,model:arm,baseline:arm.positions(vendorLeft:Array(repeating:0,count:7)),side:"right",now:now)
+            precondition(preview.reachesCan && preview.graspError<0.001)
+            let body=Array(preview.recyclingBodySteps),baseline=arm.vendorLeft(body.first!.pose)
+            let actions=Dictionary(uniqueKeysWithValues:body.enumerated().compactMap{i,s in s.jawAction.map{(i,$0)}})
+            let map=CorkscrewFixtureMap(model:arm,now:now),hash=String(repeating:"a",count:64)
+            map.registrationID=nil;map.registrationUncertaintyMeters=nil;map.targetSequence=100
+            map.visualCalibrationScope = .init(bodyMotionIdentity:"fixture-body",bodyContextIsCurrent:true,
+                estimatedCameraProjectionIdentity:hash,observationPoseIdentity:hash,observedFrameCount:2)
+            let trial=ROBWorkspaceVisualCalibrationTrial(receiptID:"synthetic",receiptSHA256:hash,appSessionID:"fixture-app",
+                command:"right_recycle_cans",canCount:4,summarySHA256:hash,authorizationContextIdentity:"fixture-context",
+                sessionGeneration:42,sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,modelID:arm.modelID,
+                geometryID:arm.geometryID,mappingID:arm.selectedMappingID,mapFingerprint:map.fingerprint,bodyMotionIdentity:"fixture-body",
+                estimatedCameraProjectionIdentity:hash,observationPoseIdentity:hash,currentPoseIdentity:hash,baseline:baseline,
+                issuedAtMilliseconds:now-1,expiresAtMilliseconds:now+30_000,assumedSpatialErrorMeters:0.035)
+            let entry=try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(baseline:baseline,
+                steps:[.init(positions:baseline,seconds:0.8)],map:map,model:arm,generation:42,sceneID:map.sceneID,
+                cameraGeneration:map.cameraGeneration,nowMilliseconds:now,trial:trial)
+            func compile(_ evidence:ROBWorkspaceVisualCalibrationTrial?,_ poses:[[String:Double]],_ jaw:[Int:ROBLeftGestureProposal.JawAction])throws->ROBLeftGestureProposal {
+                try ROBLeftGestureCompiler.compile(kind:"recycling_grasp_hold",name:"Synthetic terminal lift hold",poses:poses,model:arm,
+                    baseline:baseline,generation:42,recyclingActions:jaw,workspaceApproachPlan:entry,collisionMap:map,
+                    collisionSceneID:map.sceneID,collisionCameraGeneration:map.cameraGeneration,visualCalibrationTrial:evidence,nowMilliseconds:now)
+            }
+            expectBlocked{_=try compile(nil,body.map(\.pose),actions)}
+            let raw=try compile(trial,body.map(\.pose),actions)
+            precondition(raw.kind=="recycling_grasp_hold" && raw.steps.last?.stage=="Verification lift")
+            precondition(raw.steps.filter{$0.jawAction == .grip}.count==1 && !raw.steps.contains{$0.jawAction == .release})
+            var release=actions;release[body.count-1] = .release
+            expectBlocked{_=try compile(trial,body.map(\.pose),release)}
+            expectBlocked{_=try compile(trial,Array(body.dropLast()).map(\.pose),actions)}
+            let grip=raw.steps.firstIndex{$0.jawAction == .grip}!,prepared=raw.steps.firstIndex{$0.jawAction == .prepare}!
+            let payload=ROBWorkspaceCarriedObject(measurementID:"synthetic-shape-prior",centerInToolMeters:[0,0,0],halfExtentsMeters:[0.033,0.033,0.060])
+            let contact=ROBWorkspaceIntentionalContact(measurementID:payload.measurementID,observationSequence:100,capturedAtMilliseconds:now,
+                sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,mapFingerprint:map.fingerprint,modelID:arm.modelID,
+                geometryID:arm.geometryID,mappingID:arm.selectedMappingID,toolLink:arm.toolLink,
+                topCenterMeters:[can.point.x,can.point.y,can.point.z+0.060],bottomCenterMeters:[can.point.x,can.point.y,can.point.z-0.060],
+                diameterMeters:0.066,firstContactStepIndex:prepared+1,gripStepIndex:grip,releaseStepIndex:nil,stepCount:raw.steps.count,terminalGraspHold:true)
+            let proof=try ROBWorkspaceCollisionPlan.reviewVisualCalibrationTrial(baseline:baseline,steps:raw.steps,map:map,model:arm,
+                generation:42,sceneID:map.sceneID,cameraGeneration:map.cameraGeneration,nowMilliseconds:now,trial:trial,payload:payload,intentionalContact:contact)
+            let frozen=try ROBLeftGestureCompiler.compile(kind:raw.kind,name:raw.name,poses:raw.poses,model:arm,baseline:baseline,generation:42,id:raw.id,
+                recyclingActions:actions,workspaceCollisionPlan:proof,workspaceApproachPlan:entry,collisionMap:map,
+                collisionSceneID:map.sceneID,collisionCameraGeneration:map.cameraGeneration,visualCalibrationTrial:trial,nowMilliseconds:now)
+            let decoded=try JSONDecoder().decode(ROBLeftGestureProposal.self,from:frozen.encoded())
+            expectBlocked{try ROBLeftGestureCompiler.validate(decoded,model:arm,collisionMap:map,collisionSceneID:map.sceneID,collisionCameraGeneration:map.cameraGeneration,nowMilliseconds:now)}
+            try ROBLeftGestureCompiler.validate(decoded,model:arm,collisionMap:map,collisionSceneID:map.sceneID,
+                collisionCameraGeneration:map.cameraGeneration,visualCalibrationTrial:trial,nowMilliseconds:now)
+            precondition(proof.checkedPoseCount>0 && map.queries>0 && contact.releaseStepIndex==nil)
+            print("Terminal grasp hold: actual RIGHT horizontal can reach, explicit trial+checked entry, one grip/6cm lift/no release, payload+full-hull review, decoded default authority/release/missing-lift negatives; synthetic free map only, no hardware")
+            return
+        }
         if CommandLine.arguments.last == "corkscrew-entry" {
             let now=Date().timeIntervalSince1970*1000
             for side in ["left","right"] {
@@ -369,6 +427,17 @@ private final class CorkscrewFixtureMap:ROBWorkspaceCollisionMap {
                     depth:source,view:view,model:model)
             }
             let measured = sections(detection,depth)!
+            precondition(measured.shapePriorEvidence==nil,"Ordinary RGB-D body bands acquired an assumed geometry label")
+            let assumed=ROBWorkspaceCanSections.localKnownEmptyCokeCylinder(base:SIMD3(0.6,0,base),axis:SIMD3(0,0,2),
+                planeRMSEMeters:0.004,planePointCount:100,planeSupportFraction:0.9,silhouetteIoU:0.88,silhouetteMaximumEdgeErrorPixels:3)!
+            precondition(assumed.valid && assumed.heightMeters==0.120 && assumed.diameterMeters==0.066 && assumed.surfaceToAxisOffsetMeters==nil)
+            precondition(assumed.shapePriorEvidence?.source=="fresh_RGB_base_ray_local_depth_table_plane_and_silhouette")
+            let decodedAssumed=try JSONDecoder().decode(ROBWorkspaceCanSections.self,from:JSONEncoder().encode(assumed))
+            precondition(decodedAssumed.shapePriorEvidence?.valid==true && decodedAssumed.valid)
+            precondition(ROBWorkspaceCanSections.localKnownEmptyCokeCylinder(base:SIMD3(0.6,0,base),axis:SIMD3(1,0,0),
+                planeRMSEMeters:0.004,planePointCount:100,planeSupportFraction:0.9,silhouetteIoU:0.88,silhouetteMaximumEdgeErrorPixels:3)==nil)
+            precondition(ROBWorkspaceCanSections.localKnownEmptyCokeCylinder(base:SIMD3(0.6,0,base),axis:SIMD3(0,0,1),
+                planeRMSEMeters:.nan,planePointCount:100,planeSupportFraction:0.9,silhouetteIoU:0.88,silhouetteMaximumEdgeErrorPixels:3)==nil)
             func measuredDiagnostics(_ source:(Int,Int)->UInt16?)->(sections:ROBWorkspaceCanSections?,diagnostics:[String:Any]) {
                 ROBWorkspaceCanSections.measureWithDiagnostics(detection:detection,width:width,height:height,
                     fx:fx,fy:fy,cx:cx,cy:cy,depth:source,view:view,model:model)
