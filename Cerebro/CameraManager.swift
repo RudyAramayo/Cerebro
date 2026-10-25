@@ -158,6 +158,10 @@ struct CameraIntrinsics: Sendable {
     var depthSourceDistortionCoefficients: [Double]? = nil
     var rgbSourceDistortionModel: String? = nil
     var depthSourceDistortionModel: String? = nil
+    var stereoMode: String? = nil
+    var stereoModeSource: String? = nil
+    var stereoExtendedDisparity: Bool? = nil
+    var stereoSubpixel: Bool? = nil
 
     func isValid(forWidth width: Int, height: Int) -> Bool {
         fx.isFinite && fy.isFinite && cx.isFinite && cy.isFinite
@@ -226,6 +230,8 @@ protocol CameraManagerProtocol: AnyObject {
     /// Temporarily changes the hardware capture size for explicit footage
     /// recording. Nil restores the autonomy/default capture configuration.
     func setCaptureResolutionOverride(_ resolution: String?)
+    func setCalibrationCaptureOverride(token: UUID, resolution: String, stereoMode: String)
+    func clearCalibrationCaptureOverride(token: UUID)
     /// Cameras eligible for the RGB-only AVFoundation fallback. DepthAI
     /// devices stay on their dedicated RGB-D path unless legacy UVC mode is
     /// explicitly enabled.
@@ -297,6 +303,9 @@ final class CameraManager: NSObject, CameraManagerProtocol {
     private var acceptedFallbackOutputID: ObjectIdentifier?
     private var acceptedFallbackOutputGeneration: UInt64?
     private var captureResolutionOverride: String?
+    private var calibrationCaptureOverride: (token: UUID, resolution: String, stereoMode: String)?
+    private var appliedCaptureResolutionOverride: String?
+    private var appliedStereoModeOverride: String?
     private let depthIngressLock = NSLock()
     private var pendingDepthFrame: (CameraFrameSet, UInt64, UInt64)?
     private var depthIngressScheduled = false
@@ -425,13 +434,42 @@ final class CameraManager: NSObject, CameraManagerProtocol {
         sessionQueue.async { [weak self] in
             guard let self, self.captureResolutionOverride != normalized else { return }
             self.captureResolutionOverride = normalized
-            self.depthClient?.updateCaptureResolutionOverride(normalized)
-            if let session = self.videoSession {
-                session.beginConfiguration()
-                let preset = Self.capturePreset(for: normalized)
-                if session.canSetSessionPreset(preset) { session.sessionPreset = preset }
-                session.commitConfiguration()
-            }
+            self.applyCaptureConfiguration()
+        }
+    }
+
+    func setCalibrationCaptureOverride(token: UUID, resolution: String, stereoMode: String) {
+        guard role == .face, resolution == "640x400", ["standard", "near_field"].contains(stereoMode) else { return }
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            self.calibrationCaptureOverride = (token, resolution, stereoMode)
+            self.applyCaptureConfiguration()
+        }
+    }
+
+    func clearCalibrationCaptureOverride(token: UUID) {
+        sessionQueue.async { [weak self] in
+            guard let self, self.calibrationCaptureOverride?.token == token else { return }
+            self.calibrationCaptureOverride = nil
+            self.applyCaptureConfiguration()
+        }
+    }
+
+    private func applyCaptureConfiguration() {
+        let resolution = calibrationCaptureOverride?.resolution ?? captureResolutionOverride
+        let mode = calibrationCaptureOverride?.stereoMode
+        if resolution != appliedCaptureResolutionOverride || mode != appliedStereoModeOverride {
+            appliedCaptureResolutionOverride = resolution; appliedStereoModeOverride = mode
+            // An actual hardware configuration restart owns a new native
+            // stream identity even when its K and image dimensions stay equal.
+            if wantsRunning, activeSource == .depthAIService { advanceDeliveryGeneration() }
+        }
+        depthClient?.updateCaptureConfiguration(resolution: resolution, stereoMode: mode)
+        if let session = videoSession {
+            session.beginConfiguration()
+            let preset = Self.capturePreset(for: resolution)
+            if session.canSetSessionPreset(preset) { session.sessionPreset = preset }
+            session.commitConfiguration()
         }
     }
 
@@ -1191,6 +1229,7 @@ private final class DepthCameraServiceClient {
     private let shouldLaunchPython: Bool
     private let role: CameraRole
     private var captureResolutionOverride: String?
+    private var captureStereoModeOverride: String?
 
     var onFrame: ((CameraFrameSet, UInt64) -> Void)?
     var onStateChange: ((CameraSourceState, String?, UInt64) -> Void)?
@@ -1215,10 +1254,11 @@ private final class DepthCameraServiceClient {
         }
     }
 
-    func updateCaptureResolutionOverride(_ resolution: String?) {
+    func updateCaptureConfiguration(resolution: String?, stereoMode: String?) {
         queue.async { [weak self] in
-            guard let self, self.captureResolutionOverride != resolution else { return }
+            guard let self, self.captureResolutionOverride != resolution || self.captureStereoModeOverride != stereoMode else { return }
             self.captureResolutionOverride = resolution
+            self.captureStereoModeOverride = stereoMode
             guard self.shouldLaunchPython, self.shouldRun else { return }
             self.reconnectWorkItem?.cancel()
             self.reconnectWorkItem = nil
@@ -1247,6 +1287,7 @@ private final class DepthCameraServiceClient {
         let height = parts.last ?? "720"
         
         var args = [scriptPath, "--socket", socketPath, "--parent-pid", parentPid, "--role", role.rawValue, "--width", width, "--height", height]
+        if let stereoMode = captureStereoModeOverride { args.append(contentsOf: ["--stereo-mode", stereoMode]) }
         if let mxid = mxid, !mxid.isEmpty {
             args.append(contentsOf: ["--mxid", mxid])
         }
@@ -1636,7 +1677,11 @@ private final class DepthCameraServiceClient {
                         rgbSourceDistortionCoefficients: header.rgbSourceDistortionCoefficients,
                         depthSourceDistortionCoefficients: header.depthSourceDistortionCoefficients,
                         rgbSourceDistortionModel: header.rgbSourceDistortionModel,
-                        depthSourceDistortionModel: header.depthSourceDistortionModel
+                        depthSourceDistortionModel: header.depthSourceDistortionModel,
+                        stereoMode: header.stereoMode,
+                        stereoModeSource: header.stereoModeSource,
+                        stereoExtendedDisparity: header.stereoExtendedDisparity,
+                        stereoSubpixel: header.stereoSubpixel
                     )
                     return result.isValid(forWidth: header.rgbWidth, height: header.rgbHeight)
                         ? result : nil
@@ -1842,6 +1887,10 @@ private struct DepthCameraPacketHeader: Decodable {
     let depthSourceDistortionCoefficients: [Double]?
     let rgbSourceDistortionModel: String?
     let depthSourceDistortionModel: String?
+    let stereoMode: String?
+    let stereoModeSource: String?
+    let stereoExtendedDisparity: Bool?
+    let stereoSubpixel: Bool?
     let imu: CameraInertialObservation?
     let sidewalkCenterDeviation: Double?
     let sidewalkConfidence: Double?
@@ -1888,6 +1937,10 @@ private struct DepthCameraPacketHeader: Decodable {
         case depthSourceDistortionCoefficients = "depth_source_distortion_coefficients"
         case rgbSourceDistortionModel = "rgb_source_distortion_model"
         case depthSourceDistortionModel = "depth_source_distortion_model"
+        case stereoMode = "stereo_mode"
+        case stereoModeSource = "stereo_mode_source"
+        case stereoExtendedDisparity = "stereo_extended_disparity"
+        case stereoSubpixel = "stereo_subpixel"
         case imu
         case sidewalkCenterDeviation = "sidewalk_center_deviation"
         case sidewalkConfidence = "sidewalk_confidence"

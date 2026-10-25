@@ -221,12 +221,76 @@ def parse_arguments(argv=None):
         default=None,
         help="Face-camera IR dot projector intensity, 0–1 (default 0.5); belly remains 0. Flood IR stays off.",
     )
+    parser.add_argument(
+        "--stereo-mode", choices=["standard", "near_field"], default="standard",
+        help="Face calibration only: near_field enables extended disparity and disables subpixel; standard keeps the normal pipeline.",
+    )
     args = parser.parse_args(argv)
     try:
         args.ir_dot_intensity = ir_dot_intensity_for_role(args.role, args.ir_dot_intensity)
+        if args.stereo_mode=="near_field" and args.role!="face":
+            raise ValueError("near_field stereo mode is supported only for face calibration")
     except ValueError as error:
         parser.error(str(error))
     return args
+
+
+def configure_stereo_mode(stereo, requested):
+    if requested not in ("standard", "near_field"):
+        raise ValueError("invalid stereo mode")
+    # Installed DepthAI3.8 documents these modes as mutually incompatible.
+    # Leave the standard preset/extended-disparity behavior unchanged.
+    if requested=="near_field":
+        stereo.setSubpixel(False)
+        stereo.setExtendedDisparity(True)
+    else:
+        stereo.setSubpixel(True)
+
+
+def observed_stereo_configuration(stereo):
+    """Read the SDK node's actual selected configuration, never the CLI value.
+
+    No dynamic config input is connected. This is SDK initial-config readback,
+    not a claim of measured depth improvement or device runtime telemetry.
+    """
+    result={"stereo_mode":None,"stereo_mode_source":None,
+            "stereo_extended_disparity":None,"stereo_subpixel":None}
+    try:
+        config=getattr(stereo,"initialConfig",None)
+        if config is None:
+            return result
+        for name,key in [("getExtendedDisparity","stereo_extended_disparity"),("getSubpixel","stereo_subpixel")]:
+            getter=getattr(config,name,None)
+            if not callable(getter):
+                return result
+            value=getter()
+            if type(value) is not bool:
+                return result
+            result[key]=value
+        result["stereo_mode_source"]="sdk_initial_config_readback"
+        pair=(result["stereo_extended_disparity"],result["stereo_subpixel"])
+        result["stereo_mode"]={(False,True):"standard",(True,False):"near_field"}.get(pair)
+    except Exception as error:
+        emit_error("Stereo configuration readback unavailable: "+str(error))
+    return result
+
+
+def validated_stereo_configuration(value):
+    empty={"stereo_mode":None,"stereo_mode_source":None,
+           "stereo_extended_disparity":None,"stereo_subpixel":None}
+    if value is None:
+        return empty
+    if not isinstance(value,dict) or set(value)!=set(empty):
+        raise RuntimeError("invalid stereo configuration metadata")
+    if any(value[key] is not None and type(value[key]) is not bool for key in ("stereo_extended_disparity","stereo_subpixel")):
+        raise RuntimeError("invalid stereo configuration booleans")
+    if value["stereo_mode_source"] not in (None,"sdk_initial_config_readback"):
+        raise RuntimeError("invalid stereo configuration source")
+    pair=(value["stereo_extended_disparity"],value["stereo_subpixel"])
+    if value["stereo_mode"] is not None and (value["stereo_mode_source"]!="sdk_initial_config_readback" or
+            value["stereo_mode"]!={(False,True):"standard",(True,False):"near_field"}.get(pair)):
+        raise RuntimeError("stereo mode lacks matching SDK configuration readback")
+    return dict(value)
 
 
 def normalized_socket_path(argument):
@@ -882,7 +946,7 @@ def frame_payload(
     rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
     sidewalk_deviation=None, sidewalk_confidence=None, chess_pieces=None,
     captured_at_milliseconds=None, rgb_calibrated_lens_position=None,
-    depth_alignment_method=None, imu_telemetry=None
+    depth_alignment_method=None, imu_telemetry=None, stereo_configuration=None
 ):
     rgb_width = int(rgb_frame.getWidth())
     rgb_height = int(rgb_frame.getHeight())
@@ -969,6 +1033,7 @@ def frame_payload(
         "chess_pieces": chess_pieces or [],
     }
     header.update(depth_geometry)
+    header.update(validated_stereo_configuration(stereo_configuration))
     header_bytes = json.dumps(
         header, ensure_ascii=False, separators=(",", ":")
     ).encode("utf-8")
@@ -979,12 +1044,12 @@ def send_frame(
     client, rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
     sidewalk_deviation=None, sidewalk_confidence=None, chess_pieces=None,
     captured_at_milliseconds=None, rgb_calibrated_lens_position=None,
-    depth_alignment_method=None, imu_telemetry=None
+    depth_alignment_method=None, imu_telemetry=None, stereo_configuration=None
 ):
     header, rgb_bytes, depth_bytes, left_bytes, right_bytes = frame_payload(
         rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
         sidewalk_deviation, sidewalk_confidence, chess_pieces, captured_at_milliseconds,
-        rgb_calibrated_lens_position, depth_alignment_method, imu_telemetry
+        rgb_calibrated_lens_position, depth_alignment_method, imu_telemetry, stereo_configuration
     )
     client.sendall(PROTOCOL_MAGIC + struct.pack(">I", len(header)) + header)
     client.sendall(rgb_bytes)
@@ -1060,8 +1125,10 @@ def load_face_model_manifest(blob_path):
         return None
 
 
-def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess", width=1280, height=720, ir_dot_intensity=None):
+def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess", width=1280, height=720, ir_dot_intensity=None, stereo_mode="standard"):
     ir_dot_intensity = ir_dot_intensity_for_role(role, ir_dot_intensity)
+    if stereo_mode not in ("standard","near_field") or (stereo_mode=="near_field" and role!="face"):
+        raise ValueError("near_field stereo mode requires a face camera; standard is the default")
     frame_size = (width, height)
     # Footage capture may request a color size above the OV9282 stereo
     # sensors' native output. Keep stereo at a supported aspect-matched size;
@@ -1121,7 +1188,7 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
             stereo = pipeline.create(dai.node.StereoDepth)
             stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.ROBOTICS)
             stereo.setLeftRightCheck(True)
-            stereo.setSubpixel(True)
+            configure_stereo_mode(stereo,stereo_mode)
             configure_latest_input(stereo.left)
             configure_latest_input(stereo.right)
             left_output.link(stereo.left)
@@ -1209,6 +1276,10 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                     IMU_DISABLED_AFTER_START_FAILURE.add(imu_retry_key)
                     emit_error("Pipeline startup failed with optional IMU; retrying RGB-D without IMU telemetry")
                 raise
+            stereo_configuration=observed_stereo_configuration(stereo)
+            if stereo_mode=="near_field" and stereo_configuration["stereo_mode"]!="near_field":
+                raise RuntimeError("near_field stereo configuration was not confirmed by SDK readback")
+            emit("CEREBRO_DEPTHCAM_STEREO "+json.dumps(stereo_configuration,separators=(",",":")))
             configure_ir_projectors(device, role, ir_dot_intensity)
             intrinsic_matrix = calibration.getCameraIntrinsics(
                 rgb_socket, frame_size[0], frame_size[1]
@@ -1301,6 +1372,7 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
                     rgb_calibrated_lens_position=calibrated_lens_position,
                     depth_alignment_method=alignment_method,
                     imu_telemetry=read_optional_imu(imu_queue, imu_window, rgb_frame),
+                    stereo_configuration=stereo_configuration,
                 )
                 send_finished = time.monotonic()
                 if send_finished - last_timing_at >= 5:
@@ -1342,7 +1414,7 @@ def client_is_connected(client):
         return False
 
 
-def serve(server, stop_event, mxid=None, role="face", model_name="chess", width=1280, height=720, ir_dot_intensity=None):
+def serve(server, stop_event, mxid=None, role="face", model_name="chess", width=1280, height=720, ir_dot_intensity=None, stereo_mode="standard"):
     while not stop_event.is_set():
         client = accept_client(server, stop_event)
         if client is None:
@@ -1353,7 +1425,7 @@ def serve(server, stop_event, mxid=None, role="face", model_name="chess", width=
             while not stop_event.is_set():
                 try:
                     stream_camera(client, stop_event, mxid, role, model_name, width, height,
-                                  ir_dot_intensity=ir_dot_intensity)
+                                  ir_dot_intensity=ir_dot_intensity,stereo_mode=stereo_mode)
                     break
                 except (BrokenPipeError, ConnectionResetError, socket.timeout) as error:
                     emit_error("camera client disconnected: " + str(error))
@@ -1431,7 +1503,7 @@ def main():
         parent_monitor.start()
         emit("CEREBRO_DEPTHCAM_READY " + socket_path)
         serve(server, stop_event, args.mxid, args.role, args.model_name, args.width, args.height,
-              ir_dot_intensity=args.ir_dot_intensity)
+              ir_dot_intensity=args.ir_dot_intensity,stereo_mode=args.stereo_mode)
         return 0
     except KeyboardInterrupt:
         return 0

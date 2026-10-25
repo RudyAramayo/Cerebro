@@ -1077,23 +1077,24 @@ struct ROBReviewedArmDispatchStart {
                     throw ROBArmRoutineError.blocked("The arm joint reference must be verified before a dynamic approach from this held pose.")
                 }
                 let planningStart = q, session = generation, camera = vision.cameraGeneration
-                let front = model.recyclingFrontTarget
-                let baseline = model.positions(vendorLeft:front), now = Date().timeIntervalSince1970*1000
+                let baseline = model.positions(vendorLeft:planningStart), now = Date().timeIntervalSince1970*1000
                 let compiled = try await Task.detached(priority:.userInitiated) {
-                    let entry = try ROBWorkspaceCollisionPlan.make(from:planningStart,to:front,map:map,model:model,
-                        generation:session,sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:now)
+                    func candidate(_ rearward:Double) throws -> ROBLeftGestureProposal {
                     let plan = try ROBCanGrabPreview.make(can:can,model:model,baseline:baseline,side:model.physicalSide,bucket:bucket,
                         reachOffset:ROBLeftCanReachCalibration.load(model:model,can:can,file:calibrationFile,
                             estimatedCameraProjectionIdentity:map.estimatedCameraProjectionIdentity),
                         bucketYawDegrees:ROBLeftCanReachCalibration.loadBucketYaw(model:model,file:calibrationFile,registrationID:can.registrationID,
                             estimatedCameraProjectionIdentity:map.estimatedCameraProjectionIdentity),
                         bucketInwardMeters:ROBLeftCanReachCalibration.loadBucketInward(model:model,file:calibrationFile,registrationID:can.registrationID,
-                            estimatedCameraProjectionIdentity:map.estimatedCameraProjectionIdentity))
-                    let actions = Dictionary(uniqueKeysWithValues:plan.steps.enumerated().compactMap { index,step in
+                            estimatedCameraProjectionIdentity:map.estimatedCameraProjectionIdentity),rearwardJoint1Radians:rearward)
+                    let entry=try plan.plannedDynamicEntry(map:map,model:model,generation:session,
+                        sceneID:map.sceneID,cameraGeneration:camera,nowMilliseconds:now)
+                    let body=Array(plan.recyclingBodySteps)
+                    let actions = Dictionary(uniqueKeysWithValues:body.enumerated().compactMap { index,step in
                         step.jawAction.map { (index,$0) }
                     })
                     let raw = try ROBLeftGestureCompiler.compile(kind:"recycling",name:"Recycle with complete arm clearance",
-                        poses:plan.steps.map(\.pose),model:model,baseline:planningStart,generation:session,recyclingActions:actions,
+                        poses:body.map(\.pose),model:model,baseline:planningStart,generation:session,recyclingActions:actions,
                         recyclingParameters:recyclingParameters,workspaceApproachPlan:entry,collisionMap:map,
                         collisionSceneID:map.sceneID,collisionCameraGeneration:camera,nowMilliseconds:now)
                     guard sections.surfaceToAxisOffsetMeters != nil,
@@ -1129,6 +1130,12 @@ struct ROBReviewedArmDispatchStart {
                         baseline:planningStart,generation:session,id:raw.id,recyclingActions:actions,
                         recyclingParameters:recyclingParameters,workspaceCollisionPlan:review,workspaceApproachPlan:entry,
                         collisionMap:map,collisionSceneID:map.sceneID,collisionCameraGeneration:camera,nowMilliseconds:now)
+                    }
+                    var lastFailure:Error=ROBGhostMotionError.blocked("No collision-free corkscrew entry was found.")
+                    for rearward in [0.24,0.16,0.32] {
+                        do {return try candidate(rearward)} catch {lastFailure=error}
+                    }
+                    throw lastFailure
                 }.value
                 try check(); try checkCollisionContext()
                 guard ROBArmRoutinePlan.near(try measured().positionsRadians.map(\.doubleValue),planningStart,tolerance:0.015),
@@ -1138,7 +1145,7 @@ struct ROBReviewedArmDispatchStart {
                 proposal = compiled; collisionReviewProposal = compiled
                 collisionReviewStatus = ["status":"reviewed","registration_verified":true,
                     "checked_poses":compiled.workspaceCollisionPlan?.checkedPoseCount ?? 0,
-                    "detail":"Dynamic approach, grasp, payload transfer and retreat checked together before travel."]
+                    "detail":"Can-derived corkscrew entry from the measured start, grasp, payload transfer and retreat checked together before travel."]
             } catch let error as ROBWorkspaceReachError {
                 ROBWorkspaceSearch.shared.announce?(error.helpRequest)
                 return ["status": "needs_help", "arm_motion_sent": armTravelDispatched, "reach_sent": false, "empty_arm_parked": false, "measured": false,

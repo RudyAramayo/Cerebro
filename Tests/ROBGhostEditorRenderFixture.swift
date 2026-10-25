@@ -1,6 +1,12 @@
 import AppKit
 import SceneKit
 
+private extension SCNNode {
+    var fixtureDescendants:[SCNNode] {
+        var nodes:[SCNNode]=[];enumerateChildNodes{node,_ in nodes.append(node)};return nodes
+    }
+}
+
 // Deliberately no transport, arm driver, credential or real approval broker.
 final class ROBAmberGatewayClient {
     static let shared = ROBAmberGatewayClient()
@@ -81,6 +87,12 @@ final class GhostFixtureSnapshotView: NSView {
     @MainActor static func main() throws {
         setbuf(stdout, nil)
         _ = NSApplication.shared
+        let previousProfile=ProcessInfo.processInfo.environment["ROB_NECK_RGB_DISPLAY_PROFILE"]
+        setenv("ROB_NECK_RGB_DISPLAY_PROFILE","/private/tmp/no-installed-render-profile-\(UUID().uuidString)",1)
+        defer {
+            if let previousProfile {setenv("ROB_NECK_RGB_DISPLAY_PROFILE",previousProfile,1)}
+            else {unsetenv("ROB_NECK_RGB_DISPLAY_PROFILE")}
+        }
         NSApp.appearance = NSAppearance(named: .darkAqua)
         let defaults = UserDefaults.standard
         let previousDepthAlignment = defaults.object(forKey: ROBWorkspaceDepthAlignment.preferenceKey)
@@ -105,15 +117,21 @@ final class GhostFixtureSnapshotView: NSView {
         let editor = ROBGhostGestureEditor(sceneView: view, originalRobot: original)
         defer { editor.invalidate(); UserDefaults.standard.removeObject(forKey: "ROBGhostSavedGestures.v1") }
         precondition(original.isHidden, "Canonical URDF model did not load")
+        let meshGroup=scene.rootNode.childNode(withName:"Robot mesh display offset · not registration",recursively:true)!
+        let markerGroup=scene.rootNode.childNode(withName:"Workspace can overlay",recursively:true)!
+        let obstacleGroup=scene.rootNode.childNode(withName:"Observed depth obstacles · provisional registration",recursively:true)!
+        let routeGroup=scene.rootNode.childNode(withName:"Read-only collision route",recursively:true)!
+        precondition(markerGroup.parent===meshGroup.parent && obstacleGroup.parent===meshGroup.parent && routeGroup.parent===meshGroup,
+            "Mesh presentation lift moved measured target/obstacle overlays or detached the modeled tool route")
         precondition(editor.depthCloudCameraTransform(false).isEmpty)
         editor.setHeadCommand(pan: 0, lowerPitch: 0, upperPitch: 0, known: true)
         let levelCamera = editor.depthCloudCameraTransform(false)
-        let originalHead = scene.rootNode.childNodes.flatMap(\.childNodes).first { $0.name == "Original URDF oak_link" }!
+        let originalHead = scene.rootNode.fixtureDescendants.first { $0.name == "Original URDF oak_link" }!
         let levelHead = originalHead.simdTransform
         editor.setHeadCommand(pan: .pi / 12, lowerPitch: 0, upperPitch: -.pi / 10, known: true)
         let downCamera = editor.depthCloudCameraTransform(false)
         precondition(levelCamera.count == 12 && downCamera != levelCamera && originalHead.simdTransform != levelHead)
-        let headGhost = scene.rootNode.childNodes.flatMap(\.childNodes).first { $0.name == "Blue ghost oak_link" }!
+        let headGhost = scene.rootNode.fixtureDescendants.first { $0.name == "Blue ghost oak_link" }!
         precondition(headGhost.simdTransform == originalHead.simdTransform, "Untouched ghost neck differs from live model")
         precondition(headGhost.isHidden && !originalHead.isHidden,
             "An unchanged camera must show the normal model without a coincident blue overlay")
@@ -129,7 +147,7 @@ final class GhostFixtureSnapshotView: NSView {
         // articulated pose rather than silently becoming the display zero.
         let headLinks = ["lower_neck_link", "neck_pan_link", "upper_neck_link", "insta360_link", "oak_link"]
         func headNode(_ prefix: String, _ link: String) -> SCNNode {
-            scene.rootNode.childNodes.flatMap(\.childNodes).first { $0.name == "\(prefix) \(link)" }!
+            scene.rootNode.fixtureDescendants.first { $0.name == "\(prefix) \(link)" }!
         }
         func estimate(_ lower: Int, _ upper: Int, pan: Double = 0) -> ROBHeadCameraPoseEstimator {
             ROBHeadCameraPoseEstimator.estimateDisplay(panRadians: pan, lowerTarget: lower,
@@ -361,7 +379,7 @@ final class GhostFixtureSnapshotView: NSView {
             jointAngle.doubleValue = radians * 180 / .pi
             NSApp.sendAction(jointAngle.action!, to: jointAngle.target, from: jointAngle)
         }
-        let allRobotNodes = scene.rootNode.childNodes.flatMap(\.childNodes)
+        let allRobotNodes = scene.rootNode.fixtureDescendants
         let allGhostNodes = allRobotNodes.filter { $0.name?.hasPrefix("Blue ghost ") == true }
         let allOriginalNodes = allRobotNodes.filter { $0.name?.hasPrefix("Original URDF ") == true }
         for joint in 1...7 {
@@ -419,7 +437,7 @@ final class GhostFixtureSnapshotView: NSView {
         editor.setPreviewFrozen(true)
         precondition(!view.isHidden && view.rendersContinuously && view.isPlaying && pauseHost.subviews.count == 1)
         let frozenHead = originalHead.simdTransform
-        let originalArm = scene.rootNode.childNodes.flatMap(\.childNodes).first { $0.name == "Original URDF left_two_Link" }!
+        let originalArm = scene.rootNode.fixtureDescendants.first { $0.name == "Original URDF left_two_Link" }!
         let frozenArm = originalArm.simdTransform
         editor.setHeadCommand(pan: 0, lowerPitch: 0, upperPitch: -.pi / 10, known: true)
         precondition(originalHead.simdTransform != frozenHead && originalArm.simdTransform == frozenArm,
@@ -458,7 +476,8 @@ final class GhostFixtureSnapshotView: NSView {
         precondition(!view.isHidden && view.isPlaying && view.preferredFramesPerSecond == 15)
         trial.isNeckOnlyInspection = true
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))
-        precondition(!view.isHidden && view.preferredFramesPerSecond == 30)
+        precondition(!view.isHidden && view.preferredFramesPerSecond == 15,
+            "Neck-only trials must retain the existing busy-trial render budget")
         trial.isNeckOnlyInspection = false
         for (stage, title) in [("object_placed", "Object placed; fingers clear → grip"),
                                ("receiver_supporting", "Hand supporting → release"),
@@ -476,7 +495,7 @@ final class GhostFixtureSnapshotView: NSView {
         precondition(trial.continuedStages.count == confirmedCount, "A stale continuation button advanced another stage")
         trial.interactionStage = ""; trial.isRunning = false
         awaitContinuation(nil)
-        let blue = scene.rootNode.childNodes.flatMap(\.childNodes).filter { $0.name?.hasPrefix("Blue ghost ") == true }
+        let blue = scene.rootNode.fixtureDescendants.filter { $0.name?.hasPrefix("Blue ghost ") == true }
         precondition(blue.count >= 40)
         let canTarget = ROBWorkspaceLocatedObject(target: .can, position: [0.589,-0.300,0.873], confidence: 0.6,
             capturedAt: Date().timeIntervalSince1970 * 1000, sequence: 1234,
@@ -642,7 +661,7 @@ final class GhostFixtureSnapshotView: NSView {
         let rightEditor=ROBGhostGestureEditor(sceneView:rightView,originalRobot:rightOriginal)
         let measuredFrames=rightModel.frames(rightModel.positions(vendorLeft:measuredRight))
         for link in ["right_two_Link","left_two_Link"] {
-            let actual=rightScene.rootNode.childNodes.flatMap(\.childNodes).first{$0.name=="Original URDF \(link)"}!.simdTransform
+            let actual=rightScene.rootNode.fixtureDescendants.first{$0.name=="Original URDF \(link)"}!.simdTransform
             for col in 0..<4 {precondition(simd_distance(actual[col],SIMD4<Float>(measuredFrames[link]![col]))<1e-6,
                 "Original model used the wrong gateway arm for \(link)")}
         }

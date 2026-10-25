@@ -235,6 +235,10 @@ final class ROBAmberGatewayClient: NSObject {
     }
 }
 
+enum ROBNeckRGBPoseDisplay {
+    static func estimatedCameraProjectionIdentity(model:ROBGhostRobotModel)->String? {nil}
+}
+
 final class ROBWorkspaceSearch {
     static let shared = ROBWorkspaceSearch()
     var announce: ((String) -> Void)?
@@ -245,6 +249,9 @@ final class ROBWorkspaceSearch {
     var syntheticDistantPlane = false
     var estimatedContext = false
     func estimatedContextIsCurrent(model:ROBGhostRobotModel,map:ROBWorkspaceCollisionSnapshot)->Bool {estimatedContext}
+    func estimatedCameraProjectionIsCurrent(model:ROBGhostRobotModel,map:ROBWorkspaceCollisionSnapshot)->Bool {
+        map.estimatedCameraProjectionIdentity==ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)
+    }
     @MainActor func captureEstimatedOrRegisteredCurrentScene(model:ROBGhostRobotModel,generation:UInt64,
         check:() throws->Void,progress:(String)->Void) async throws->ROBWorkspaceCollisionSnapshot {
         try await captureRegisteredCurrentScene(model:model,generation:generation,check:check,progress:progress)
@@ -711,7 +718,7 @@ final class ROBArmRoutineCoordinator {
             let model = try ROBGhostRobotModel(directory: URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("Cerebro/Resources/ShadowPlanner"))
             let legacyURL = URL(fileURLWithPath:CommandLine.arguments[1]).appendingPathComponent("docs/calibration/evidence/2026-10-22-recycling/first-confirmed-recycle.proposal.json")
             let legacyCarry = try JSONDecoder().decode(ROBLeftGestureProposal.self,from:Data(contentsOf:legacyURL))
-            try ROBLeftGestureCompiler.validate(legacyCarry,model:model)
+            precondition(legacyCarry.validForReplay(model:model),"Historical route must remain viewable without replaying a taught entry")
             precondition(legacyCarry.workspaceCollisionPlan?.payload == nil && legacyCarry.steps.contains(where:{ $0.jawAction == .grip }))
             g.commands = []; let beforeLegacyApproval = approvals, beforeLegacyScan = search.collisionScanCalls
             let missingPayload = await run(legacyCarry,model:model)
@@ -719,7 +726,7 @@ final class ROBArmRoutineCoordinator {
             precondition((missingPayload["detail"] as? String)?.contains("Measure the carried object") == true,missingPayload.description)
             precondition(approvals == beforeLegacyApproval && search.collisionScanCalls == beforeLegacyScan && g.commands.isEmpty,
                 "A legacy carry without measured payload requested authority or attempted capture/actuation")
-            print("Imported carrying proposal: archive still compiles for preview, but missing measured payload rejects before approval, scene capture or actuator commands")
+            print("Imported carrying proposal: archive remains structurally replayable for preview, but missing measured payload rejects before approval, scene capture or actuator commands")
             let hand = model.toolPosition(model.positions(vendorLeft: front))!
             let now = Date().timeIntervalSince1970 * 1000, view = ROBWorkspaceView(panDegrees: 0, upperTarget: 6306)
             search.objects = [

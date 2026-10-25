@@ -13,6 +13,7 @@ import socket
 import struct
 import tempfile
 import sys
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -258,6 +259,26 @@ def main():
     assert service.RGB_OUTPUT_UNDISTORTED is True
     running_worker_provenance_fixture()
     native_depth_geometry_fixtures(service)
+    class StereoReadback:
+        def __init__(self,extended,subpixel):self.extended,self.subpixel=extended,subpixel;self.initialConfig=self
+        def getExtendedDisparity(self):return self.extended
+        def getSubpixel(self):return self.subpixel
+    for extended,subpixel,mode in [(False,True,"standard"),(True,False,"near_field"),(False,False,None),(True,True,None)]:
+        config=service.observed_stereo_configuration(StereoReadback(extended,subpixel))
+        assert config["stereo_mode"]==mode and config["stereo_extended_disparity"] is extended and config["stereo_subpixel"] is subpixel
+        assert config["stereo_mode_source"]=="sdk_initial_config_readback"
+        frame_header,*_=service.frame_payload(FakeRGBFrame(),FakeDepthFrame(),FakeMonoFrame((7,8)),FakeMonoFrame((9,10)),
+            [100.,0.,1.,0.,101.,.5,0.,0.,1.],stereo_configuration=config)
+        actual=json.loads(frame_header)
+        assert all(actual[key]==value for key,value in config.items())
+        assert actual["depth_unit"]=="millimeter" and actual["rgb_intrinsics"]==[100.,0.,1.,0.,101.,.5,0.,0.,1.]
+    for missing in [object(),SimpleNamespace(initialConfig=object()),StereoReadback("true",False)]:
+        assert service.observed_stereo_configuration(missing)["stereo_mode"] is None,"CLI intent replaced missing/invalid SDK readback"
+    for unproved in [{"stereo_mode":"near_field","stereo_mode_source":None,"stereo_extended_disparity":None,"stereo_subpixel":None},
+                    {"stereo_mode":"near_field","stereo_mode_source":"sdk_initial_config_readback","stereo_extended_disparity":False,"stereo_subpixel":True}]:
+        try:service.validated_stereo_configuration(unproved)
+        except RuntimeError:pass
+        else:raise AssertionError("Unproved/inconsistent stereo mode metadata was accepted")
     class CapturedFrame:
         def __init__(self, seconds): self.seconds = seconds
         def getTimestamp(self): return timedelta(seconds=self.seconds)
@@ -397,6 +418,7 @@ def main():
             "running_service_source_sha256": service.RUNNING_SERVICE_SOURCE_SHA256,
             "rgb_output_undistorted": service.RGB_OUTPUT_UNDISTORTED,
             "depth_alignment_method": None,
+            "stereo_mode":None,"stereo_mode_source":None,"stereo_extended_disparity":None,"stereo_subpixel":None,
             "rgb_source_size": None,
             "rgb_source_intrinsics": None,
             "rgb_image_transform": None,

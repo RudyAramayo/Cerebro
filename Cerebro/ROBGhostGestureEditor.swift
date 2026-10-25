@@ -20,6 +20,8 @@ import simd
     @nonobjc private var ghostNodes: [String: SCNNode] = [:]
     @nonobjc private lazy var normalHeadMaterials = Self.loadNormalHeadMaterials()
     @nonobjc private let renderRoot = SCNNode()
+    @nonobjc private let robotPresentationRoot = SCNNode()
+    @nonobjc private let canMotionOverlay = SCNNode()
     @nonobjc private var modelBasis = matrix_identity_float4x4
     @nonobjc private var ghost: [String: Double] = [:]
     @nonobjc private var headEstimate: [String: Double]?
@@ -89,11 +91,15 @@ import simd
                 SIMD4(-scale, 0, 0, 0), SIMD4(0, scale, 0, 0), SIMD4(0, 0, 0, 1)))
             renderRoot.simdTransform = capturedRobot.presentation.simdWorldTransform * modelBasis
             scene.rootNode.addChildNode(renderRoot)
+            robotPresentationRoot.name="Robot mesh display offset · not registration"
+            renderRoot.addChildNode(robotPresentationRoot)
+            canMotionOverlay.name="Simulated can motion"
+            robotPresentationRoot.addChildNode(canMotionOverlay)
             canOverlay.name = "Workspace can overlay"
             renderRoot.addChildNode(canOverlay)
             collisionMapOverlay.name = "Observed depth obstacles · provisional registration"
             collisionPathOverlay.name = "Read-only collision route"
-            renderRoot.addChildNode(collisionMapOverlay); renderRoot.addChildNode(collisionPathOverlay)
+            renderRoot.addChildNode(collisionMapOverlay); robotPresentationRoot.addChildNode(collisionPathOverlay)
             for (link, geometry, ghostGeometry) in try capturedGeometry(model) {
                 let originalMaterial = SCNMaterial()
                 originalMaterial.diffuse.contents = NSColor.white
@@ -101,7 +107,7 @@ import simd
                 let original = referenceHeadNode(link: link, material: originalMaterial, renderingOrder: 0)
                     ?? SCNNode(geometry: geometry)
                 original.geometry?.materials = [originalMaterial]; original.name = "Original URDF \(link)"
-                renderRoot.addChildNode(original); originalNodes[link] = original
+                robotPresentationRoot.addChildNode(original); originalNodes[link] = original
                 let blue = SCNMaterial(); blue.diffuse.contents = NSColor.systemBlue
                 blue.transparency = 0.24; blue.blendMode = .alpha
                 blue.transparencyMode = .singleLayer
@@ -109,7 +115,7 @@ import simd
                 blue.isDoubleSided = true; blue.writesToDepthBuffer = false; blue.readsFromDepthBuffer = true
                 let proposed = referenceHeadNode(link: link, material: blue, renderingOrder: 10) ?? SCNNode(geometry: ghostGeometry)
                 proposed.geometry?.materials = [blue]; proposed.renderingOrder = 10; proposed.name = "Blue ghost \(link)"
-                renderRoot.addChildNode(proposed); ghostNodes[link] = proposed
+                robotPresentationRoot.addChildNode(proposed); ghostNodes[link] = proposed
             }
             capturedRobot.isHidden = true
             let initial = freshBaseline()
@@ -205,8 +211,10 @@ import simd
     }
 
     private func updateHeadInfo() {
+        let lift=model.map{ROBNeckRGBPoseDisplay.robotModelDisplayLiftMeters(model:$0)} ?? 0
+        let modelLabel=lift==0 ? "":String(format:"\nRobot display %+.2f in · presentation only",lift/0.0254)
         guard let pitch = headOpticalPitchRadians else {
-            headInfo.stringValue = "Head: command estimate unavailable"; return
+            headInfo.stringValue = "Head: command estimate unavailable"+modelLabel; return
         }
         let targets = acceptedHeadTargets.map { "L\($0.lowerTarget) / U\($0.upperTarget) · " } ?? ""
         let frozen = previewFrozen ? " · live view; reviewed edits locked" : ""
@@ -231,6 +239,7 @@ import simd
             if let legacy=ROBWorkspaceDepthAlignment.snapshot() {
                 headInfo.stringValue+=String(format:"\nLegacy %.1f° / %.2f in retained, NOT applied",legacy.downwardPitchDegrees,legacy.towardRobotMeters/0.0254)
             }
+            headInfo.stringValue+=modelLabel
             return
         }
         headInfo.stringValue = String(format: "Head command estimate: %@optical tilt %+.1f°%@\nNeck reference: L6011/U6906 · Insta mount ≈20° back", targets,
@@ -239,11 +248,12 @@ import simd
             headInfo.stringValue += String(format: "\nHead depth: %.2f in toward ROB · camera %.1f° down · provisional",
                 alignment.towardRobotMeters / 0.0254, alignment.downwardPitchDegrees)
         }
+        headInfo.stringValue+=modelLabel
     }
 
     @objc private func depthAlignmentDidChange() {
         invalidateReview(); displayedCan = nil
-        canOverlay.childNodes.forEach { $0.removeFromParentNode() }
+        clearCanVisuals()
         collisionMapOverlay.childNodes.forEach { $0.removeFromParentNode() }
         collisionMapRenderKey = nil
         updateNodes(originalNodes, positions: renderPositions(originalPositions, preview: false))
@@ -381,7 +391,7 @@ import simd
         // The selected side determines both encoder mapping and live baseline;
         // changing the preview selector never changes actuator ownership.
         self.model = model
-        canOverlay.childNodes.forEach { $0.removeFromParentNode() }
+        clearCanVisuals()
         displayedCan = nil
         canInfo.stringValue = "Finding a fresh RGB-D can target…"
         status.stringValue = "Neck-camera search, then ghost rehearsal. Arms and jaws stay unchanged."
@@ -422,7 +432,7 @@ import simd
         displayedCan = preview.can; presets.selectItem(at: 2)
         canArm.selectItem(at: preview.side == "right" ? 1 : 0)
         tabletopEditing = false; poses = []; name.stringValue = "Coke can grab — ghost only"
-        canOverlay.childNodes.forEach { $0.removeFromParentNode() }
+        clearCanVisuals()
         let point = preview.can.point
         func material(_ color: NSColor) -> SCNMaterial {
             let value = SCNMaterial(); value.diffuse.contents = color; value.lightingModel = .constant
@@ -487,11 +497,11 @@ import simd
             path.materials = [blue]
             let node = SCNNode(geometry: path); node.name = "Can grab ghost trajectory"; node.renderingOrder = 20
             node.isHidden = collisionPathVisible.state != .on
-            canOverlay.addChildNode(node)
+            canMotionOverlay.addChildNode(node)
         }
         let carried = SCNCylinder(radius: 0.033, height: 0.115); carried.materials = [blue]
         carriedCan.geometry = carried; carriedCan.eulerAngles.x = .pi / 2; carriedCan.opacity = 0.45
-        carriedCan.name = "Simulated held can"; carriedCan.isHidden = true; canOverlay.addChildNode(carriedCan)
+        carriedCan.name = "Simulated held can"; carriedCan.isHidden = true; canMotionOverlay.addChildNode(carriedCan)
         ghost = preview.steps.last?.pose ?? preview.baseline
         joints.selectItem(withTitle: preview.side + "_joint7"); selectJoint()
         for i in 0..<3 { xyz[i].stringValue = String(format: "%.3f", point[i]) }
@@ -506,7 +516,7 @@ import simd
     @objc private func changeCollisionVisibility() {
         collisionMapOverlay.isHidden = collisionMapVisible.state != .on
         collisionPathOverlay.isHidden = collisionPathVisible.state != .on
-        canOverlay.childNode(withName: "Can grab ghost trajectory", recursively: false)?.isHidden = collisionPathVisible.state != .on
+        canMotionOverlay.childNode(withName: "Can grab ghost trajectory", recursively: false)?.isHidden = collisionPathVisible.state != .on
         refreshCollisionScene(force: true)
     }
 
@@ -650,6 +660,11 @@ import simd
         let age = max(0, (Date().timeIntervalSince1970 * 1000 - can.capturedAt) / 1000)
         canInfo.stringValue = String(format: "Coke can · X %.3f / Y %.3f / Z %.3f m\nLast seen %.0f s ago", point.x, point.y, point.z, age) +
             (age > 60 ? " · historical target; rescan" : " · RGB-D position")
+    }
+    private func clearCanVisuals() {
+        canOverlay.childNodes.forEach{$0.removeFromParentNode()}
+        canMotionOverlay.childNodes.forEach{$0.removeFromParentNode()}
+        carriedCan.isHidden=true
     }
 
     private struct CapturedRig: Decodable {
@@ -807,6 +822,7 @@ import simd
     private func invalidateReview() {
         canRequestID = nil; canPlanTask?.cancel(); canPlanTask = nil; canPreview = nil; collisionPreview = nil
         collisionPathOverlay.childNodes.forEach { $0.removeFromParentNode() }
+        canMotionOverlay.childNodes.forEach { $0.removeFromParentNode() }
         canOverlay.childNodes.filter { $0.name != "Detected Coke can RGB-D center" }.forEach { $0.removeFromParentNode() }
         refreshCanInfo()
         if ownsPendingRequest, !ROBLeftArmTrial.shared.isRunning, ROBControllerArmApproval.shared.isPending {
@@ -1111,6 +1127,10 @@ import simd
         let displayGauge=simd_float4x4(columns:(SIMD4<Float>(gauge.columns.0),SIMD4<Float>(gauge.columns.1),SIMD4<Float>(gauge.columns.2),SIMD4<Float>(gauge.columns.3)))
         let base = capturedRobot.presentation.simdWorldTransform * modelBasis * displayGauge
         if renderRoot.simdTransform != base { renderRoot.simdTransform = base }
+        let presentation=ROBNeckRGBPoseDisplay.robotModelPresentationTransform(model:model,modelToDisplay:gauge)
+        let meshOffset=simd_float4x4(columns:(SIMD4<Float>(presentation.columns.0),SIMD4<Float>(presentation.columns.1),
+            SIMD4<Float>(presentation.columns.2),SIMD4<Float>(presentation.columns.3)))
+        if robotPresentationRoot.simdTransform != meshOffset {robotPresentationRoot.simdTransform=meshOffset}
         let now = ProcessInfo.processInfo.systemUptime
         if now - lastCanInfoUpdate >= 1 {
             lastCanInfoUpdate = now; refreshCanInfo(); refreshCollisionScene(force: false)

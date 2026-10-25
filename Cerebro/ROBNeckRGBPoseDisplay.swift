@@ -12,6 +12,7 @@ enum ROBNeckRGBPoseDisplay {
         let headFrames: [String:simd_double4x4]
         let headMount: HeadMountDescription?
         let headDepthDisplayLiftMeters: Double
+        let robotModelDisplayLiftMeters:Double
         /// Operator-photo hardware drawing only. It deliberately omits the
         /// optical frame: the fitted QR ray and depth projection stay intact.
         let hardwareFrames: [String:simd_double4x4]?
@@ -82,6 +83,7 @@ enum ROBNeckRGBPoseDisplay {
         let fitArtifactPath:String,fitArtifactSHA256:String,floorReferencePath:String,floorReferenceSHA256:String
         let headMount:HeadMount?
         let headDepthDisplayLiftMeters:Double?
+        let robotModelDisplayLiftMeters:Double?
         let hardwarePose:HardwarePose?
         let bellyCameraDownwardPitchDegrees:Double?
         let bellyFloorDisplayReference:BellyFloorDisplayReference?
@@ -111,6 +113,7 @@ enum ROBNeckRGBPoseDisplay {
         let id:String,parameters:[String:Double],upTorso:SIMD3<Double>
         let headMount:HeadMount?
         let headDepthDisplayLiftMeters:Double
+        let robotModelDisplayLiftMeters:Double
         let hardwarePose:HardwarePose?
         let bellyCameraDownwardPitchDegrees:Double?
         let bellyFloorNormalOptical:SIMD3<Double>?
@@ -191,6 +194,8 @@ enum ROBNeckRGBPoseDisplay {
             guard a.usePhotoHardwareOpticalOrigin != true || a.hardwarePose != nil else {throw Failure.invalid}
             let lift=a.headDepthDisplayLiftMeters ?? 0
             guard lift.isFinite,abs(lift)<=0.3048 else {throw Failure.invalid}
+            let modelLift=a.robotModelDisplayLiftMeters ?? 0
+            guard modelLift.isFinite,abs(modelLift)<=0.1 else {throw Failure.invalid}
             if let belly=a.bellyCameraDownwardPitchDegrees {
                 guard belly.isFinite,(0...60).contains(belly) else {throw Failure.invalid}
             }
@@ -247,6 +252,7 @@ enum ROBNeckRGBPoseDisplay {
                 estimatedIdentity=sha(try JSONSerialization.data(withJSONObject:physical,options:[.sortedKeys]))
             }else{estimatedIdentity=nil}
             cachedProfile=Profile(id:sha(bytes+fitData+referenceData+(bellyEvidence?.0 ?? Data())),parameters:p,upTorso:simd_normalize(up),headMount:a.headMount,headDepthDisplayLiftMeters:lift,
+                robotModelDisplayLiftMeters:modelLift,
                 hardwarePose:a.hardwarePose,bellyCameraDownwardPitchDegrees:a.bellyCameraDownwardPitchDegrees,
                 bellyFloorNormalOptical:bellyEvidence?.1,bellyFloorDisplayReferenceID:a.bellyFloorDisplayReference?.evidenceSHA256,
                 usePhotoHardwareOpticalOrigin:a.usePhotoHardwareOpticalOrigin ?? false,estimatedCameraProjectionIdentity:estimatedIdentity)
@@ -266,6 +272,15 @@ enum ROBNeckRGBPoseDisplay {
     /// so changing an explicit belly mount also invalidates its cloud cache.
     static func configurationIdentity(model:ROBGhostRobotModel)->String? {profile(model:model)?.id}
     static func estimatedCameraProjectionIdentity(model:ROBGhostRobotModel)->String? {profile(model:model)?.estimatedCameraProjectionIdentity}
+    static func robotModelDisplayLiftMeters(model:ROBGhostRobotModel)->Double {profile(model:model)?.robotModelDisplayLiftMeters ?? 0}
+    /// Child-group presentation only. Conjugate display-up through the common
+    /// gauge so mesh lift stays vertical without translating camera rays or
+    /// measured world overlays. This matrix is never a camera/model transform.
+    static func robotModelPresentationTransform(model:ROBGhostRobotModel,modelToDisplay:simd_double4x4)->simd_double4x4 {
+        let lift=robotModelDisplayLiftMeters(model:model)
+        let local=simd_inverse(modelToDisplay)*SIMD4<Double>(0,0,lift,0)
+        return translated(SIMD3(local.x,local.y,local.z))
+    }
     /// Lets callers reject an invalid requested configuration rather than
     /// silently falling back to a different legacy physical projection.
     static var photoHardwareOpticalOriginRequested:Bool {
@@ -388,6 +403,7 @@ enum ROBNeckRGBPoseDisplay {
         } else{hardware=nil}
         return Pose(profileID:profile.id,cameraToModel:torso*value.camera,modelToDisplay:gauge,
             headFrames:value.frames.mapValues{torso*$0},headMount:description,headDepthDisplayLiftMeters:profile.headDepthDisplayLiftMeters,
+            robotModelDisplayLiftMeters:profile.robotModelDisplayLiftMeters,
             hardwareFrames:hardware,hardwareSphereRingTiltDegrees:profile.hardwarePose.map{$0.sphereRingTiltAtReferenceDegrees ?? 0},
             bellyPreviewDownwardPitchDegrees:profile.bellyCameraDownwardPitchDegrees,
             bellyFloorDisplayReferenceID:profile.bellyFloorDisplayReferenceID,

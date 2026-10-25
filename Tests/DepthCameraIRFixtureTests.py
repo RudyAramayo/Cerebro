@@ -46,6 +46,13 @@ def run_fixtures():
     face = service.parse_arguments(["--socket", "/private/tmp/fake-ir.sock"])
     belly = service.parse_arguments(["--socket", "/private/tmp/fake-ir.sock", "--role", "belly"])
     assert face.ir_dot_intensity == 0.5 and belly.ir_dot_intensity == 0
+    assert face.stereo_mode==belly.stereo_mode=="standard"
+    assert service.parse_arguments(["--socket","fixture","--stereo-mode","near_field"]).stereo_mode=="near_field"
+    for arguments in [["--stereo-mode","unknown"],["--role","belly","--stereo-mode","near_field"]]:
+        with contextlib.redirect_stderr(io.StringIO()):
+            try:service.parse_arguments(["--socket","fixture",*arguments])
+            except SystemExit as error:assert error.code==2
+            else:raise AssertionError("Invalid/unsupported stereo opt-in was accepted")
     for value in ["0", "0.25", "1"]:
         args = service.parse_arguments(["--socket", "fixture", "--ir-dot-intensity", value])
         assert args.ir_dot_intensity == float(value)
@@ -122,9 +129,17 @@ def run_fixtures():
             self.rectifiedLeft, self.rectifiedRight = Output(), Output()
             self.inputAlignTo, self.depth = Input(), Output()
             self.preset, self.left_right, self.subpixel, self.output_size = None, None, None, None
+            self.extended=False;self.initialConfig=self;self.mode_calls=[]
         def setDefaultProfilePreset(self, value): self.preset = value
         def setLeftRightCheck(self, value): self.left_right = value
-        def setSubpixel(self, value): self.subpixel = value
+        def setSubpixel(self, value): self.subpixel = value;self.mode_calls.append(("subpixel",value))
+        def setExtendedDisparity(self, value): self.extended=value;self.mode_calls.append(("extended",value))
+        def getSubpixel(self):
+            assert device.started,"Stereo provenance was stamped before the pipeline started"
+            return self.subpixel
+        def getExtendedDisparity(self):
+            assert device.started,"Stereo provenance was stamped before the pipeline started"
+            return self.extended
         def setOutputSize(self, width, height):
             assert self.preset == "robotics", "Output sizing preceded the preset that could overwrite it"
             self.output_size = (width, height)
@@ -166,12 +181,13 @@ def run_fixtures():
             self.device.started = True
         def isRunning(self): return False
 
-    for supported, size, mono, usb, expected_fps in [
-            (True, (640, 400), (640, 400), "high", 10.),
-            (True, (1280, 800), (1280, 800), "high", 2.5),
-            (True, (1920, 1080), (1280, 720), "high", 2.),
-            (True, (1280, 800), (1280, 800), "super", service.FRAME_RATE),
-            (False, (640, 400), (640, 400), "super", service.FRAME_RATE)]:
+    for supported, size, mono, usb, expected_fps,mode in [
+            (True, (640, 400), (640, 400), "high", 10.,"standard"),
+            (True, (1280, 800), (1280, 800), "high", 2.5,"standard"),
+            (True, (1920, 1080), (1280, 720), "high", 2.,"standard"),
+            (True, (1280, 800), (1280, 800), "super", service.FRAME_RATE,"standard"),
+            (False, (640, 400), (640, 400), "super", service.FRAME_RATE,"standard"),
+            (True, (640, 400), (640, 400), "high", 10.,"near_field")]:
         Camera.requests = []; Pipeline.stereo_nodes = []
         device = Device(result=supported, usb_speed=usb)
         fake = SimpleNamespace(Device=lambda *args: device, DeviceInfo=lambda value: value,
@@ -185,7 +201,7 @@ def run_fixtures():
              patch.object(service, "color_camera_socket", return_value="rgb"), \
              patch.object(service, "configure_rgb_calibrated_focus", return_value=None), \
              patch.object(service, "configure_optional_imu", return_value=(None, None)):
-            _, log = capture(service.stream_camera, None, stop, width=size[0], height=size[1], model_name="nonexistent_fixture_model")
+            _, log = capture(service.stream_camera, None, stop, width=size[0], height=size[1], model_name="nonexistent_fixture_model",stereo_mode=mode)
         assert device.closed and device.calls == [("flood", 0.0), ("dot", 0.5)]
         assert "CEREBRO_DEPTHCAM_STREAMING" in log
         assert len(Camera.requests) == 3
@@ -194,8 +210,23 @@ def run_fixtures():
         assert Camera.requests[0][2]["enableUndistortion"] is True
         assert all(entry[2]["enableUndistortion"] is False for entry in Camera.requests[1:])
         stereo = Pipeline.stereo_nodes[0]
-        assert stereo.output_size == size and stereo.left_right is True and stereo.subpixel is True
+        assert stereo.output_size == size and stereo.left_right is True and stereo.subpixel is (mode=="standard")
+        assert stereo.extended is (mode=="near_field")
+        assert stereo.mode_calls==([("subpixel",False),("extended",True)] if mode=="near_field" else [("subpixel",True)])
+        assert '"stereo_mode":"'+mode+'"' in log and '"stereo_mode_source":"sdk_initial_config_readback"' in log
         assert "CEREBRO_DEPTHCAM_CAPTURE rgb={}x{} mono={}x{}".format(*size, *mono) in log
+
+    # Configuration intent cannot label frames when SDK readback disagrees.
+    device=Device();stop=threading.Event();stop.set()
+    with patch.object(service,"load_depthai",return_value=fake), \
+         patch.object(service,"color_camera_socket",return_value="rgb"), \
+         patch.object(service,"configure_rgb_calibrated_focus",return_value=None), \
+         patch.object(service,"configure_optional_imu",return_value=(None,None)), \
+         patch.object(Stereo,"getExtendedDisparity",return_value=False):
+        try:capture(service.stream_camera,None,stop,width=640,height=400,stereo_mode="near_field")
+        except RuntimeError as error:assert "not confirmed by SDK readback" in str(error)
+        else:raise AssertionError("Rejected near-field configuration streamed as requested")
+    assert device.closed and not device.calls,"Failed near-field readback reached IR/streaming"
 
     print("Depth camera IR fixtures passed: validated face/belly CLI defaults, normalized bounds, unsupported/rejected/error reporting, after-start SDK ordering; real RGB-D setup retains metric settings and requests matched SDK dimensions/aspect with USB2/USB3 capture rates")
 

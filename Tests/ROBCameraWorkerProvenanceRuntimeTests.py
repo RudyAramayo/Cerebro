@@ -38,7 +38,9 @@ actual=json.loads(packet)
 depth_keys=('depth_intrinsics','depth_intrinsics_source','depth_source_size','depth_source_intrinsics','depth_image_transform','depth_rgb_geometry_correspondence',
     'rgb_transformation_size','depth_transformation_size','rgb_source_distortion_coefficients','depth_source_distortion_coefficients','rgb_source_distortion_model','depth_source_distortion_model')
 legacy={k:v for k,v in actual.items()if k not in ('running_service_source_sha256','rgb_output_undistorted',*depth_keys)}
-replacement={**actual,'running_service_source_sha256':'d'*64,'rgb_output_undistorted':False}
+replacement={**actual,'running_service_source_sha256':'d'*64,'rgb_output_undistorted':False,
+    'stereo_mode':'near_field','stereo_mode_source':'sdk_initial_config_readback',
+    'stereo_extended_disparity':True,'stereo_subpixel':False}
 with_depth={**actual,'depth_intrinsics':[100.,0.,1.,0.,101.,.5,0.,0.,1.],
     'depth_intrinsics_source':'actual_depth_transformation','depth_source_size':[2,1],
     'depth_source_intrinsics':[100.,0.,1.,0.,101.,.5,0.,0.,1.],
@@ -82,6 +84,8 @@ private func mapped(_ header:DepthCameraPacketHeader)->CameraIntrinsics? {return
         precondition(current.fx==100 && current.fy==101 && current.cx==1 && current.cy==0.5)
         precondition(old.cameraServiceSourceSHA256==nil && old.rgbOutputUndistorted==nil && old.isValid(forWidth:2,height:1),"Legacy viewing invented provenance or lost valid K")
         precondition(replacement.cameraServiceSourceSHA256==String(repeating:"d",count:64) && replacement.rgbOutputUndistorted==false,"Frame provenance was replaced by an app/source assumption")
+        precondition(replacement.stereoMode=="near_field" && replacement.stereoModeSource=="sdk_initial_config_readback" && replacement.stereoExtendedDisparity==true && replacement.stereoSubpixel==false,
+            "Native mapping lost or invented actual stereo-mode readback")
         precondition(old.depthIntrinsics==nil && old.depthRGBGeometryCorrespondence==nil,"Legacy viewing fabricated depth/RGB pixel correspondence")
         precondition(depthEvidence.depthIntrinsics==[100,0,1,0,101,0.5,0,0,1] && depthEvidence.depthSourceSize==[2,1])
         precondition(depthEvidence.depthSourceIntrinsics==depthEvidence.depthIntrinsics && depthEvidence.depthImageTransform==[1,0,0,0,1,0,0,0,1])
@@ -120,6 +124,9 @@ private func mapped(_ header:DepthCameraPacketHeader)->CameraIntrinsics? {return
                     cloud.calibratedIntrinsics?.depthImageTransform==input.intrinsics?.depthImageTransform &&
                     cloud.calibratedIntrinsics?.depthRGBGeometryCorrespondence?.sdkAlignedToRGB==input.intrinsics?.depthRGBGeometryCorrespondence?.sdkAlignedToRGB,
                     "Cloud notification changed or lost actual depth projection evidence")
+                precondition(cloud.calibratedIntrinsics?.stereoMode==input.intrinsics?.stereoMode &&
+                    cloud.calibratedIntrinsics?.stereoSubpixel==input.intrinsics?.stereoSubpixel,
+                    "Cloud notification changed actual stereo-mode provenance")
                 precondition(cloud.width==2 && cloud.height==1 && cloud.millimetersLittleEndian as Data==depth.millimetersLittleEndian)
             }
         }

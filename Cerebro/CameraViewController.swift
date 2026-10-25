@@ -735,6 +735,7 @@ final class CameraViewController: NSViewController {
     private var followVideoIsActive = false
     private var bubbleVideoIsActive = false
     private var recordingDemandActive = false
+    private var fixedHeadCalibrationCaptureID: UUID?
     private var cameraSessionIsRequested = false
     private var cameraStatusState = CameraSourceState.stopped
     private var cameraStatusDetail: String?
@@ -871,6 +872,8 @@ final class CameraViewController: NSViewController {
         )
         NotificationCenter.default.addObserver(self, selector: #selector(recordingDemandDidChange(_:)),
                                                name: ROBTorsoControlCenter.cameraDemandChanged, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(fixedHeadCalibrationDemandDidChange(_:)),
+            name: ROBFixedHeadCalibrationWindowController.cameraDemandChanged, object: nil)
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(remoteVideoDemandDidChange(_:)),
@@ -1014,6 +1017,7 @@ final class CameraViewController: NSViewController {
             || remoteVideoIsActive
             || geminiVideoIsActive
             || recordingDemandActive
+            || fixedHeadCalibrationCaptureID != nil
             || ROBTorsoControlCenter.shared.cameraDemandActive
             || ROBHologramExporter.shared.isMovieRecording
         guard shouldRun != cameraSessionIsRequested else { return }
@@ -1103,6 +1107,28 @@ final class CameraViewController: NSViewController {
         }
         applyRecordingDemand()
         reconcileCameraSession()
+    }
+
+    @objc private func fixedHeadCalibrationDemandDidChange(_ notification: Notification) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.fixedHeadCalibrationDemandDidChange(notification) }
+            return
+        }
+        guard let active = notification.userInfo?["active"] as? Bool,
+              let identifier = notification.userInfo?["captureID"] as? String,
+              let token = UUID(uuidString: identifier) else { return }
+        if active {
+            guard notification.userInfo?["resolution"] as? String == "640x400",
+                  let mode = notification.userInfo?["stereoMode"] as? String,
+                  ["standard", "near_field"].contains(mode) else { return }
+            fixedHeadCalibrationCaptureID = token
+            cameraManager?.setCalibrationCaptureOverride(token: token, resolution: "640x400", stereoMode: mode)
+        } else {
+            guard fixedHeadCalibrationCaptureID == token else { return }
+            fixedHeadCalibrationCaptureID = nil
+            cameraManager?.clearCalibrationCaptureOverride(token: token)
+        }
+        applyRecordingDemand(); reconcileCameraSession()
     }
 
     private func applyRecordingDemand() {

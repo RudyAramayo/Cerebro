@@ -792,17 +792,89 @@ struct ROBCanGrabPreview {
     let gripperTiltDegrees: Double
     let reachesCan: Bool
     var reachOffset: [Double] = [0,0,0]
+    /// Ghost prefix from the measured start through a can-derived pregrasp.
+    /// Physical callers plan every connector separately against the live map.
+    var dynamicEntryStepCount: Int = 0
+    var dynamicEntryWaypoints: [[String:Double]] {
+        Array(steps.prefix(dynamicEntryStepCount+1).dropFirst().map(\.pose))
+    }
+    var recyclingBodySteps: ArraySlice<Step> { steps.dropFirst(dynamicEntryStepCount) }
     var calibratedGraspPoint: SIMD3<Double> { can.point + SIMD3(reachOffset[0],reachOffset[1],reachOffset[2]) }
     var seconds: Double { steps.reduce(0) { $0 + $1.seconds } }
+    /// Every generated entry connector receives the same registered full-arm,
+    /// open-jaw and observed-space checks as an ordinary workspace path.
+    func plannedDynamicEntry(map:any ROBWorkspaceCollisionMap,model:ROBGhostRobotModel,
+                             generation:UInt64,sceneID:UUID,cameraGeneration:UUID,
+                             nowMilliseconds:Double) throws -> ROBWorkspaceCollisionPlan {
+        guard dynamicEntryStepCount>0,dynamicEntryStepCount<steps.count,
+              model.physicalSide==side,!dynamicEntryWaypoints.isEmpty else {
+            throw ROBGhostMotionError.blocked("The can-derived entry prefix is incomplete.")
+        }
+        let start=model.vendorLeft(baseline)
+        var previous=start,segments:[ROBLeftGestureProposal.Step]=[]
+        for pose in dynamicEntryWaypoints {
+            let goal=model.vendorLeft(pose)
+            let connector=try ROBWorkspaceCollisionPlan.make(from:previous,to:goal,map:map,model:model,
+                generation:generation,sceneID:sceneID,cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds)
+            segments += connector.steps.map { .init(positions:$0.positions,seconds:$0.seconds,
+                jawAction:nil,stage:"Corkscrew entry from measured start") }
+            previous=goal
+        }
+        return try ROBWorkspaceCollisionPlan.review(baseline:start,steps:segments,map:map,model:model,
+            generation:generation,sceneID:sceneID,cameraGeneration:cameraGeneration,nowMilliseconds:nowMilliseconds)
+    }
     var helpRequest: String? {
         // An orientation-only failure must not be described as too far away.
         graspError > 0.012 ? ROBWorkspaceReachError.outOfReach(.can).helpRequest : nil
     }
 
+    /// Compare distal collision-hull centers, rather than the tool alone, to
+    /// choose rearward shoulder rotation in the current side's FK convention.
+    static func rearwardJoint1Direction(model: ROBGhostRobotModel, baseline: [String:Double], side: String) -> Double {
+        let name=side+"_joint1",joint=model.joints.first { $0.name==name }!
+        let links=["three","four","five","six","seven"].map { side+"_"+$0+"_Link" }
+        func meanX(_ pose:[String:Double])->Double {
+            let bounds=model.worldCollisionBounds(positions:pose)
+            let centers=links.compactMap { bounds[$0].map { ($0.low.x+$0.high.x)/2 } }
+            return centers.reduce(0,+)/Double(max(1,centers.count))
+        }
+        let origin=meanX(baseline)
+        let candidates=[1.0,-1.0].map { sign -> (Double,Double) in
+            var pose=baseline
+            pose[name]=max(joint.lower,min(joint.upper,baseline[name,default:0]+sign*0.05))
+            return (sign,meanX(pose)-origin)
+        }
+        return candidates.min { $0.1<$1.1 }!.0
+    }
+
+    private static func forearmHullCenters(model:ROBGhostRobotModel,pose:[String:Double],side:String)->[SIMD3<Double>] {
+        let bounds=model.worldCollisionBounds(positions:pose)
+        return (["four","five","six","seven"].map { side+"_"+$0+"_Link" }+[side+"_tool"]).compactMap {
+            bounds[$0].map { ($0.low+$0.high)/2 }
+        }
+    }
+    static func outwardJoint2Direction(model:ROBGhostRobotModel,baseline:[String:Double],side:String)->Double {
+        let name=side+"_joint2",joint=model.joints.first { $0.name==name }!
+        return [1.0,-1.0].map { sign -> (Double,Double) in
+            var pose=baseline;pose[name]=max(joint.lower,min(joint.upper,baseline[name,default:0]+sign*0.05))
+            let centers=forearmHullCenters(model:model,pose:pose,side:side)
+            return (sign,centers.reduce(0) { $0+abs($1.y) }/Double(max(1,centers.count)))
+        }.max { $0.1<$1.1 }!.0
+    }
+    static func forwardJoint3Direction(model:ROBGhostRobotModel,baseline:[String:Double],side:String)->Double {
+        let name=side+"_joint3",joint=model.joints.first { $0.name==name }!
+        return [1.0,-1.0].map { sign -> (Double,Double) in
+            var pose=baseline;pose[name]=max(joint.lower,min(joint.upper,baseline[name,default:0]+sign*0.05))
+            let centers=forearmHullCenters(model:model,pose:pose,side:side)
+            return (sign,centers.reduce(0) { $0+$1.x }/Double(max(1,centers.count)))
+        }.max { $0.1<$1.1 }!.0
+    }
+
     static func make(can: ROBWorkspaceLocatedObject, model: ROBGhostRobotModel,
                      baseline: [String: Double], side: String = "left", now: Double = Date().timeIntervalSince1970 * 1000,
                      bucket: ROBWorkspaceLocatedObject? = nil, reachOffset: SIMD3<Double> = .zero,
-                     bucketYawDegrees: Double = 0, bucketInwardMeters: Double = 0) throws -> Self {
+                     bucketYawDegrees: Double = 0, bucketInwardMeters: Double = 0,
+                     rearwardJoint1Radians: Double = 0.24) throws -> Self {
         guard can.target == .can, can.position.count == 3, can.position.allSatisfy(\.isFinite),
               ["left", "right"].contains(side),
               can.confidence.isFinite, (0.35...1).contains(can.confidence), can.sequence > 0,
@@ -810,7 +882,8 @@ struct ROBCanGrabPreview {
               baseline.values.allSatisfy(\.isFinite),
               [reachOffset.x,reachOffset.y,reachOffset.z].allSatisfy({ $0.isFinite && abs($0) <= 0.15 }),
               bucketYawDegrees.isFinite, abs(bucketYawDegrees) <= 30,
-              bucketInwardMeters.isFinite, (0...0.08).contains(bucketInwardMeters) else {
+              bucketInwardMeters.isFinite, (0...0.08).contains(bucketInwardMeters),
+              rearwardJoint1Radians.isFinite, (0.12...0.40).contains(rearwardJoint1Radians) else {
             throw ROBGhostMotionError.blocked("Find the can again; its measured position is missing or older than 60 seconds.")
         }
         let graspPoint = can.point + reachOffset
@@ -819,6 +892,13 @@ struct ROBCanGrabPreview {
             return SIMD3(frame.columns.3.x, frame.columns.3.y, frame.columns.3.z)
         }
         let chain = model.joints.filter { $0.name.hasPrefix(side + "_joint") }
+        let selectedModel=model.physicalSide==side ? model:try ROBGhostRobotModel(directory:model.directory,physicalSide:side)
+        let rawBounds=ROBWorkspaceCollisionPlan.jointBounds(model:selectedModel)
+        let allowed=Dictionary(uniqueKeysWithValues:(0..<7).map { index in
+            let lower=rawBounds[index].lowerBound-selectedModel.armUprightPrior[index]
+            let upper=rawBounds[index].upperBound-selectedModel.armUprightPrior[index]
+            return (side+"_joint\(index+1)",lower...upper)
+        })
         // Captured gripper: +Z approaches, +Y spans the jaw opening; +X is
         // its thin plane normal. Keep +Y/+Z horizontal, including wrist roll.
         func features(_ q: [String: Double]) -> [Double] {
@@ -851,7 +931,12 @@ struct ROBCanGrabPreview {
             return b.allSatisfy(\.isFinite) ? b : nil
         }
         func closest(_ target: SIMD3<Double>, _ seed: [String: Double]) -> [String: Double] {
-            var q = seed, best = seed, bestLoss = Double.infinity
+            var q=seed
+            for joint in chain {
+                let range=allowed[joint.name]!
+                q[joint.name]=max(range.lowerBound,min(range.upperBound,seed[joint.name,default:0]))
+            }
+            var best=q,bestLoss=Double.infinity
             let goal = [target.x, target.y, target.z, 0, 0]
             for _ in 0..<250 {
                 let current = features(q), delta = zip(goal, current).map(-)
@@ -870,40 +955,46 @@ struct ROBCanGrabPreview {
                 let changes = columns.map { zip($0, correction).reduce(0) { $0 + $1.0*$1.1 } }
                 let scale = min(1, 0.06 / max(0.000001, changes.map(abs).max() ?? 0))
                 for (joint, change) in zip(chain, changes) {
-                    q[joint.name] = max(joint.lower, min(joint.upper, q[joint.name, default: 0] + change * scale))
+                    let range=allowed[joint.name]!
+                    q[joint.name] = max(range.lowerBound, min(range.upperBound, q[joint.name, default: 0] + change * scale))
                 }
             }
             // Equivalent half-turns preserve the horizontal jaw line. Prefer
             // the branch nearest the starting wrist, avoiding approach flips.
             let wrist = side + "_joint7"
             let reference = seed[wrist, default: baseline[wrist, default: 0]]
-            let joint = chain.first { $0.name == wrist }!
+            let wristRange=allowed[wrist]!
             for delta in [-Double.pi, Double.pi] {
                 let candidate = best[wrist, default: 0] + delta
-                if (joint.lower...joint.upper).contains(candidate), abs(candidate-reference) < abs(best[wrist, default: 0]-reference) {
+                if wristRange.contains(candidate), abs(candidate-reference) < abs(best[wrist, default: 0]-reference) {
                     best[wrist] = candidate
                 }
             }
             return best
         }
-        var seed = baseline
-        let selectedFront = model.physicalSide == side ? model : try ROBGhostRobotModel(directory:model.directory,physicalSide:side)
-        let front = selectedFront.positions(vendorLeft:selectedFront.recyclingFrontTarget)
-        // The first pose must be the complete registered front target. Small
-        // measured wrist residuals at hanging belong to the baseline, not this
-        // target; horizontal leveling chooses its nearest wrist branch next.
-        for i in 1...7 { seed["\(side)_joint\(i)"] = front["\(side)_joint\(i)"]! }
         var previous = baseline, steps: [Step] = []
         func append(_ pose: [String: Double], _ stage: String, dwell: Double = 0, action: ROBLeftGestureProposal.JawAction? = nil) {
             let angle = chain.map { abs(pose[$0.name, default: 0] - previous[$0.name, default: 0]) }.max() ?? 0
             steps.append(.init(pose: pose, seconds: max(0.8, angle / 0.6) + dwell, stage: stage, jawAction: action)); previous = pose
         }
-        append(seed, "Present ghost hand")
-        let frontTip = tip(seed)
-        let level = closest(frontTip, seed)
-        append(level, "Level gripper horizontally")
-        let raised = closest(SIMD3(frontTip.x, frontTip.y, max(frontTip.z, graspPoint.z + 0.15)), level)
-        append(raised, "Raise before crossing")
+        append(baseline, "Measured start (ghost only; clearance unverified)")
+        func shifted(_ pose:[String:Double],joint index:Int,delta:Double)->[String:Double] {
+            let name=side+"_joint\(index)",range=allowed[name]!
+            var result=pose;result[name]=max(range.lowerBound,min(range.upperBound,pose[name,default:0]+delta));return result
+        }
+        let outwardJ2=outwardJoint2Direction(model:model,baseline:baseline,side:side)
+        let outwardLift=shifted(baseline,joint:2,delta:outwardJ2*0.10)
+        append(outwardLift,"Corkscrew: small J2 outward lift (clearance unverified)")
+        let rearward=rearwardJoint1Direction(model:model,baseline:outwardLift,side:side)
+        let forwardJ3=forwardJoint3Direction(model:model,baseline:outwardLift,side:side)
+        var spiral=shifted(outwardLift,joint:1,delta:rearward*rearwardJoint1Radians)
+        spiral=shifted(spiral,joint:2,delta:outwardJ2*0.10)
+        spiral=shifted(spiral,joint:3,delta:forwardJ3*rearwardJoint1Radians*0.75)
+        append(spiral,"Corkscrew: J1 rearward + J2 outward + J3 forearm forward (clearance unverified)")
+        let spiralTip=tip(spiral),outward=side=="left" ? 1.0 : -1.0
+        let liftTarget=SIMD3(spiralTip.x,spiralTip.y+outward*0.02,max(spiralTip.z+0.18,graspPoint.z+0.12))
+        let raised=closest(liftTarget,spiral)
+        append(raised,"Corkscrew: lift and level forearm (clearance unverified)")
         let approachTarget = graspPoint + SIMD3(0, 0, 0.12)
         var approach = closest(approachTarget, raised)
         // A cross-body target can trap the numerical solver in a local
@@ -913,7 +1004,8 @@ struct ROBCanGrabPreview {
             let candidate = closest(approachTarget, alternate)
             if loss(candidate, approachTarget) < loss(approach, approachTarget) { approach = candidate }
         }
-        append(approach, "Cross above can (table clearance unverified)")
+        append(approach, "Can-derived horizontal pregrasp (clearance unverified)")
+        let entryStepCount=steps.count-1
         var grasp = approach
         for index in 1...4 {
             grasp = closest(graspPoint + SIMD3(0, 0, 0.12 * (1 - Double(index)/4)), grasp)
@@ -985,7 +1077,8 @@ struct ROBCanGrabPreview {
             try travel(releaseTarget + SIMD3(0,0,0.08), stage: "Retreat above bucket")
         }
         return .init(can: can, side: side, baseline: baseline, steps: steps, graspError: error,
-            gripperTiltDegrees: tilt, reachesCan: ready, reachOffset:[reachOffset.x,reachOffset.y,reachOffset.z])
+            gripperTiltDegrees: tilt, reachesCan: ready, reachOffset:[reachOffset.x,reachOffset.y,reachOffset.z],
+            dynamicEntryStepCount:entryStepCount)
     }
 }
 

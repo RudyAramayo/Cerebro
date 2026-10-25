@@ -369,11 +369,11 @@ enum ROBLeftGestureCompiler {
         if kind == "recycling" {
             var bodyBaseline = baseline
             if let entry = workspaceApproachPlan {
-                let front = model.recyclingFrontTarget
-                guard entry.baseline == baseline, entry.goal == front, !entry.steps.isEmpty,
+                guard let firstPose=poses.first,
+                      entry.baseline == baseline, ROBArmRoutinePlan.near(entry.goal,model.vendorLeft(firstPose),tolerance:0.001), !entry.steps.isEmpty,
                       entry.steps.allSatisfy({ $0.jawAction == nil }),
                       let map = collisionMap, let sceneID = collisionSceneID, let camera = collisionCameraGeneration else {
-                    throw ROBGhostMotionError.blocked("The complete recycling approach needs a matching live map and an exact front endpoint before any arm movement.")
+                    throw ROBGhostMotionError.blocked("The complete recycling approach needs a matching live map and its exact can-derived pregrasp endpoint before any arm movement.")
                 }
                 try entry.validate(map:map,model:model,generation:generation,sceneID:sceneID,cameraGeneration:camera,nowMilliseconds:nowMilliseconds)
                 bodyBaseline = entry.goal
@@ -507,13 +507,10 @@ enum ROBHorizontalCanRecycle {
               !name.isEmpty, name.count <= 100, actions.count == 2,
               let grip = actions.first(where: { $0.value == .grip })?.key,
               let release = actions.first(where: { $0.value == .release })?.key,
-              grip >= 7, release > grip + 1, release < poses.count - 1,
-              let route = model.physicalSide == "left" ? ROBLeftArmInteractionPlan.executionRoute(from: baseline, hanging: false)
-                : (ROBArmRoutinePlan.near(baseline,model.recyclingFrontTarget,tolerance:0.001) ? [] : nil) else {
+              grip >= 4, release > grip + 1, release < poses.count - 1 else {
             throw ROBGhostMotionError.blocked("The horizontal recycling route or its jaw boundaries are incomplete.")
         }
-        let front = model.recyclingFrontTarget
-        let reference = model.positions(vendorLeft: front)
+        let reference = model.positions(vendorLeft: baseline)
         let targets = try poses.map { pose -> [Double] in
             guard pose.allSatisfy({ key, value in value.isFinite && model.joints.contains { $0.name == key } }) else {
                 throw ROBGhostMotionError.blocked("Recycling pose contains an invalid joint.")
@@ -531,7 +528,7 @@ enum ROBHorizontalCanRecycle {
             guard target.allSatisfy({ $0.isFinite && abs($0) <= 3.1 }) else { throw ROBGhostMotionError.blocked("Recycling exceeds a transport joint limit.") }
             return target
         }
-        guard ROBArmRoutinePlan.near(targets[0], front, tolerance: 0.001),
+        guard ROBArmRoutinePlan.near(targets[0], baseline, tolerance: 0.001),
               ROBArmRoutinePlan.near(targets[grip], targets[grip-1], tolerance: 0.001),
               ROBArmRoutinePlan.near(targets[release], targets[release-1], tolerance: 0.001),
               let grasp = model.toolPosition(poses[grip]), let lift = model.toolPosition(poses[grip+1]),
@@ -547,12 +544,18 @@ enum ROBHorizontalCanRecycle {
             }
             steps.append(.init(positions: target, seconds: duration, jawAction: action, stage: stage)); previous = target
         }
-        guard let compact = model.physicalSide == "left" ? ROBLeftArmInteractionPlan.compactRoute(from: baseline, indices: route) : [] else {
-            throw ROBGhostMotionError.blocked("Start recycling from the registered empty-arm route.")
+        try append(baseline, stage: "Open empty gripper", action: .prepare)
+        // A ghost compiled directly from hanging can include its provisional
+        // entry. Require horizontal jaws throughout the final can approach;
+        // physical entry connectors are independently full-arm map checked.
+        func horizontal(_ q:[Double])->Bool {
+            guard let frame=model.frames(model.positions(vendorLeft:q))[model.toolLink] else{return false}
+            return max(abs(frame.columns.1.z),abs(frame.columns.2.z)) <= sin(5 * .pi/180)
         }
-        for index in compact { try append(ROBLeftArmInteractionPlan.target(index: index)!, stage: "Present empty left arm") }
-        if steps.last?.positions == front { steps[steps.count-1].jawAction = .prepare }
-        else { try append(front, stage: "Open empty gripper", action: .prepare) }
+        guard let horizontalStart=(0..<grip).first(where:{ index in targets[index...grip].allSatisfy(horizontal) }),
+              horizontalStart <= grip-4 else {
+            throw ROBGhostMotionError.blocked("Recycling needs a continuous horizontal final approach before closing.")
+        }
         for (index, target) in targets.enumerated().dropFirst() {
             let start = previous
             let travel = 1.5 * zip(start,target).reduce(0.0) { $0 + abs($1.0-$1.1) }
@@ -562,7 +565,7 @@ enum ROBHorizontalCanRecycle {
                 guard model.treadSeparation(vendorLeft: q) >= 0.030 else {
                     throw ROBGhostMotionError.blocked("The horizontal recycling path enters the tread clearance margin.")
                 }
-                if index > 1, let frame = model.frames(model.positions(vendorLeft: q))[model.toolLink] {
+                if index > horizontalStart, let frame = model.frames(model.positions(vendorLeft: q))[model.toolLink] {
                     guard max(abs(frame.columns.1.z),abs(frame.columns.2.z)) <= sin(8 * .pi / 180) else {
                         throw ROBGhostMotionError.blocked("The recycling approach would turn the jaws vertically.")
                     }
@@ -571,7 +574,7 @@ enum ROBHorizontalCanRecycle {
             let count = max(1, Int(ceil((zip(start,target).map { abs($0-$1) }.max() ?? 0)/0.30)))
             for part in 1...count {
                 let t = Double(part)/Double(count)
-                try append(zip(start,target).map { $0+($1-$0)*t }, stage: index < grip ? "Approach can with horizontal jaws" : index == grip ? "Grip can" : index == grip+1 ? "Verification lift" : index < release ? "Lift and carry can" : index == release ? "Release above bucket" : "Retreat above bucket",
+                try append(zip(start,target).map { $0+($1-$0)*t }, stage: index <= horizontalStart ? "Corkscrew entry from measured start" : index < grip ? "Approach can with horizontal jaws" : index == grip ? "Grip can" : index == grip+1 ? "Verification lift" : index < release ? "Lift and carry can" : index == release ? "Release above bucket" : "Retreat above bucket",
                     action: part == count ? actions[index] : nil)
             }
         }

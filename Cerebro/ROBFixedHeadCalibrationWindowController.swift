@@ -4,10 +4,46 @@ import CryptoKit
 import simd
 import UniformTypeIdentifiers
 
+/// Source-clock settling for a hardware mode change, without issuing motion.
+struct ROBFixedHeadCaptureFrameGate {
+    let requestedAtMilliseconds: Double
+    let previousCameraGeneration: UUID?
+    let stereoMode: String
+    private var generation: UUID?
+    private var lastSequence: UInt64 = 0
+    private var lastCapturedAt = 0.0
+    private var firstEligible: Double?
+
+    init(requestedAtMilliseconds: Double, previousCameraGeneration: UUID?, stereoMode: String) {
+        self.requestedAtMilliseconds = requestedAtMilliseconds
+        self.previousCameraGeneration = previousCameraGeneration
+        self.stereoMode = stereoMode
+    }
+
+    mutating func accepts(cameraGeneration: UUID, sequence: UInt64, capturedAt: Double,
+        nowMilliseconds: Double, width: Int, height: Int, intrinsics: CameraIntrinsics) -> Bool {
+        guard capturedAt.isFinite, nowMilliseconds.isFinite,
+              (0...500).contains(nowMilliseconds-capturedAt), capturedAt >= requestedAtMilliseconds,
+              previousCameraGeneration.map({ cameraGeneration != $0 }) ?? true, width == 640, height == 400,
+              intrinsics.stereoMode == stereoMode, intrinsics.stereoModeSource == "sdk_initial_config_readback",
+              intrinsics.stereoExtendedDisparity == (stereoMode == "near_field"),
+              intrinsics.stereoSubpixel == (stereoMode == "standard"),
+              intrinsics.isValid(forWidth: width, height: height) else { return false }
+        if generation != cameraGeneration {
+            generation = cameraGeneration; lastSequence = 0; lastCapturedAt = 0; firstEligible = nil
+        }
+        guard sequence > lastSequence, capturedAt > lastCapturedAt else { return false }
+        lastSequence = sequence; lastCapturedAt = capturedAt
+        if firstEligible == nil { firstEligible = capturedAt }
+        return capturedAt-firstEligible! >= 2_000
+    }
+}
+
 /// Acquires real fixed-view RGB-D evidence. This controller has no arm command
 /// capability: model placement is an initializer, never a registration proof.
-@MainActor @objcMembers final class ROBFixedHeadCalibrationWindowController: NSWindowController {
+@MainActor @objcMembers final class ROBFixedHeadCalibrationWindowController: NSWindowController, NSWindowDelegate {
     static let shared = ROBFixedHeadCalibrationWindowController()
+    static let cameraDemandChanged = Notification.Name("ROBFixedHeadCalibrationCameraDemandDidChange")
     var readNeck: (() -> NSDictionary)?
     var holdCurrentView: (() -> Bool)?
     var cameraDemand: ((Bool) -> Void)?
@@ -16,6 +52,8 @@ import UniformTypeIdentifiers
     private(set) var lastCapturePath = ""
     private let side = NSPopUpButton()
     private let referenceError = NSTextField(string: "20")
+    private let nearFieldDepth = NSButton(checkboxWithTitle: "Near-field body depth", target: nil, action: nil)
+    private let holdCameraMode = NSButton(checkboxWithTitle: "Hold camera mode for review", target: nil, action: nil)
     private let image = NSImageView()
     private let details = NSTextView()
     private let captureButton = NSButton(title: "Capture + fit current head pose", target: nil, action: nil)
@@ -25,7 +63,8 @@ import UniformTypeIdentifiers
     @nonobjc private var process: Process?
     @nonobjc private var armOwner: UUID?
     private var captureBodyIdentity: String?
-    private var cameraHeld = false
+    private var activeCaptureID: UUID?
+    private var cameraDemandCaptureID: UUID?
     @nonobjc private(set) var selectedEstimatedContext: ROBEstimatedFixedHeadCapture.Context?
 
     @nonobjc func currentEstimatedContext(model:ROBGhostRobotModel,frame:ROBArmRoutineVision.Frame) throws -> ROBEstimatedFixedHeadCapture.Context {
@@ -45,6 +84,7 @@ import UniformTypeIdentifiers
         window.title = "Fixed-head camera-to-arm calibration"
         window.identifier = NSUserInterfaceItemIdentifier("fixed-head-registration")
         super.init(window: window)
+        window.delegate = self
         build()
         window.center()
         NotificationCenter.default.addObserver(self, selector:#selector(bodyDidMove),
@@ -74,6 +114,12 @@ import UniformTypeIdentifiers
         row.addArrangedSubview(side)
         row.addArrangedSubview(NSTextField(labelWithString: "Assumed CAD reference uncertainty (mm):"))
         row.addArrangedSubview(referenceError); root.addArrangedSubview(row)
+        nearFieldDepth.identifier = NSUserInterfaceItemIdentifier("fixed-head-near-field-depth")
+        nearFieldDepth.toolTip = "Temporarily uses 640 × 400 extended-disparity depth for nearby robot surfaces. Restores the previous camera demand after capture."
+        root.addArrangedSubview(nearFieldDepth)
+        holdCameraMode.identifier = NSUserInterfaceItemIdentifier("fixed-head-hold-camera-mode")
+        holdCameraMode.toolTip = "Keep this camera mode and source available after fitting or a diagnostic failure. Stop or close the window to restore ordinary camera demand."
+        root.addArrangedSubview(holdCameraMode)
         let actions = NSStackView(); actions.spacing = 8
         captureButton.target = self; captureButton.action = #selector(captureCurrentView)
         captureButton.identifier = NSUserInterfaceItemIdentifier("fixed-head-capture-fit")
@@ -104,7 +150,10 @@ import UniformTypeIdentifiers
         status = text; details.string = text
         captureButton.isEnabled = !isRunning; importButton.isEnabled = !isRunning
         side.isEnabled = !isRunning; referenceError.isEnabled = !isRunning
-        stopButton.isEnabled = isRunning
+        nearFieldDepth.isEnabled = !isRunning
+        holdCameraMode.isEnabled = !isRunning
+        stopButton.isEnabled = isRunning || cameraDemandCaptureID != nil
+        stopButton.title = isRunning ? "Stop capture" : "Stop camera review"
         NotificationCenter.default.post(name: Notification.Name("ROBFixedHeadRegistrationDidChange"), object: self)
     }
 
@@ -113,7 +162,13 @@ import UniformTypeIdentifiers
               k.isValid(forWidth: depth.width, height: depth.height) else {
             throw ROBGhostMotionError.blocked("Aligned depth and valid intrinsics are required.")
         }
-        let data = try JSONSerialization.data(withJSONObject: [Double(depth.width), Double(depth.height), k.fx, k.fy, k.cx, k.cy])
+        var identity: [Any] = [Double(depth.width), Double(depth.height), k.fx, k.fy, k.cx, k.cy]
+        if let mode = k.stereoMode {
+            identity.append(["stereoMode": mode, "source": k.stereoModeSource ?? "unreported",
+                "extendedDisparity": k.stereoExtendedDisparity as Any? ?? NSNull(),
+                "subpixel": k.stereoSubpixel as Any? ?? NSNull()] as [String: Any])
+        }
+        let data = try JSONSerialization.data(withJSONObject: identity, options: [.sortedKeys])
         return ROBGhostRobotModel.hash(data)
     }
     @nonobjc func scope(model: ROBGhostRobotModel, frame: ROBArmRoutineVision.Frame) throws -> ROBFixedHeadRegistrationScope {
@@ -141,14 +196,17 @@ import UniformTypeIdentifiers
 
     @objc func captureCurrentView() {
         guard !isRunning, task == nil else { return }
+        if let previous = cameraDemandCaptureID { releaseCameraDemand(token: previous) }
+        let token = UUID(); activeCaptureID = token
+        let keepModeForReview = holdCameraMode.state == .on
         task = Task { @MainActor [weak self] in
             guard let self else { return }
-            do { try await self.captureAndFit() }
+            do { try await self.captureAndFit(token: token) }
             catch { self.display(error is CancellationError ? "Capture stopped; saved evidence retained." : error.localizedDescription) }
-            self.finishCapture()
+            self.finishCapture(token: token, holdModeForReview: keepModeForReview && !Task.isCancelled)
         }
     }
-    private func beginCapture() throws {
+    private func beginCapture(token: UUID, stereoMode: String) throws {
         guard !ROBLeftArmTrial.shared.isRunning, !ROBArmRoutineCoordinator.shared.isRunning,
               !ROBArmRoutineCoordinator.shared.ownsPhysicalMotion, !ROBNeckQRCalibration.shared.isRunning,
               !ROBAmberGestureExecutor.shared.isExecuting, !ROBShowMotionCoordinator.shared.isRunning,
@@ -161,18 +219,30 @@ import UniformTypeIdentifiers
             throw ROBGhostMotionError.blocked("Right arm is owned by another operation.")
         }
         armOwner = id; captureBodyIdentity = ROBFixedHeadBodyMotionIdentity.currentIdentity; isRunning = true
-        ROBArmRoutineVision.shared.setActive(true); cameraDemand?(true); cameraHeld = true
+        ROBArmRoutineVision.shared.setActive(true)
+        cameraDemandCaptureID = token
+        NotificationCenter.default.post(name: Self.cameraDemandChanged, object: self,
+            userInfo: ["active": true, "captureID": token.uuidString, "resolution": "640x400", "stereoMode": stereoMode])
         display("Starting the RGB-D camera; waiting for fresh fixed-pose frames…")
     }
-    private func finishCapture() {
+    private func releaseCameraDemand(token: UUID) {
+        guard cameraDemandCaptureID == token else { return }
+        cameraDemandCaptureID = nil
+        NotificationCenter.default.post(name: Self.cameraDemandChanged, object: self,
+            userInfo: ["active": false, "captureID": token.uuidString])
+    }
+    private func finishCapture(token: UUID, holdModeForReview: Bool) {
+        guard activeCaptureID == token else { return }
+        let heldForReview = holdModeForReview && cameraDemandCaptureID == token
+        if !heldForReview { releaseCameraDemand(token: token) }
         if let armOwner {
             ROBAmberArmMotionArbiter.shared.release(.left, owner: armOwner)
             ROBAmberArmMotionArbiter.shared.release(.right, owner: armOwner)
         }
-        armOwner = nil; captureBodyIdentity = nil; isRunning = false; task = nil; process = nil
-        // Keep the camera stream and fixed head alive: restarting it invalidates
-        // the evidence identity. A later task acquires its own arm ownership.
-        display(status)
+        armOwner = nil; captureBodyIdentity = nil; activeCaptureID = nil; isRunning = false; task = nil; process = nil
+        display(status + (heldForReview
+            ? "\nCamera mode held for review. Stop restores ordinary camera mode. Holding the camera grants no registration or motion authority."
+            : "\nOrdinary camera demand restored."))
     }
     private func checkPose(_ expected: NSDictionary) throws {
         try Task.checkCancellation()
@@ -184,45 +254,47 @@ import UniformTypeIdentifiers
             throw ROBGhostMotionError.blocked("The head or base changed during fixed-view capture. Saved evidence was not installed.")
         }
     }
-    private func captureAndFit() async throws {
+    private func captureAndFit(token: UUID) async throws {
         guard let uncertainty = Double(referenceError.stringValue), (5...40).contains(uncertainty),
               let resources = Bundle.main.url(forResource: "ShadowPlanner", withExtension: nil) else {
             throw ROBGhostMotionError.blocked("Use a CAD reference uncertainty between 5 and 40 mm; the bundled model must be available.")
         }
         let model = try ROBGhostRobotModel(directory: resources, physicalSide: side.indexOfSelectedItem == 0 ? "right" : "left")
-        try beginCapture()
+        let stereoMode = nearFieldDepth.state == .on ? "near_field" : "standard"
+        let previousCameraGeneration = ROBArmRoutineVision.shared.snapshot()["face"]?.cameraGeneration
+        let requestedAtMilliseconds = Date().timeIntervalSince1970 * 1000
+        try beginCapture(token: token, stereoMode: stereoMode)
         let expected = readNeck?() ?? [:]
         let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Cerebro/FixedHeadRegistration/Captures")
         let destination = root.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         lastCapturePath = destination.path
-        var records: [[String: Any]] = [], firstScope: ROBFixedHeadRegistrationScope?, lastSequence: UInt64 = 0
-        let deadline = ProcessInfo.processInfo.systemUptime + 25
-        var firstEligible: Double?
+        var records: [[String: Any]] = [], firstScope: ROBFixedHeadRegistrationScope?
+        let deadline = ProcessInfo.processInfo.systemUptime + 40
+        var frameGate = ROBFixedHeadCaptureFrameGate(requestedAtMilliseconds: requestedAtMilliseconds,
+            previousCameraGeneration: previousCameraGeneration, stereoMode: stereoMode)
         while records.count < 5 {
             try checkPose(expected)
             guard ProcessInfo.processInfo.systemUptime < deadline else {
                 let health = ROBArmRoutineVision.shared.healthSnapshot()
-                var diagnostic = "No five fresh fixed-pose RGB-D frames arrived within 25 seconds.\n\(health)"
+                var diagnostic = "No five fresh \(stereoMode) fixed-pose RGB-D frames arrived within 40 seconds.\n\(health)"
                 if let current = ROBArmRoutineVision.shared.snapshot()["face"] {
                     diagnostic += "\nAnalyzed RGB: \(current.image.extent); depth: \(current.depth.map { "\($0.width)x\($0.height)" } ?? "missing"); usable depth: \(current.depthCoverage)"
                 }
                 try? diagnostic.write(to:destination.appendingPathComponent("capture-diagnostic.txt"),atomically:true,encoding:.utf8)
                 throw ROBGhostMotionError.blocked(diagnostic)
             }
-            guard let frame = ROBArmRoutineVision.shared.snapshot()["face"], frame.sequence > lastSequence,
-                  (0...500).contains(Date().timeIntervalSince1970 * 1000 - frame.capturedAt),
+            guard let frame = ROBArmRoutineVision.shared.snapshot()["face"],
                   frame.depthCoverage > 0, let depth = frame.depth, let k = frame.intrinsics,
-                  k.isValid(forWidth: depth.width, height: depth.height) else {
+                  frameGate.accepts(cameraGeneration: frame.cameraGeneration, sequence: frame.sequence,
+                    capturedAt: frame.capturedAt, nowMilliseconds: Date().timeIntervalSince1970*1000,
+                    width: depth.width, height: depth.height, intrinsics: k) else {
                 try await Task.sleep(nanoseconds: 100_000_000); continue
             }
             // This fit consumes native depth and its native intrinsics. The
             // vision preview can be resized, and dark robot surfaces can be
             // sparse. Spatial support and held-out quality are decided by the
             // fitter, rather than a whole-image coverage/preview-size gate.
-            lastSequence = frame.sequence
-            if firstEligible == nil { firstEligible = frame.capturedAt }
-            guard frame.capturedAt - firstEligible! >= 1000 else { continue }
             let scope = try self.scope(model: model, frame: frame)
             if let firstScope { guard scope == firstScope else { throw ROBGhostMotionError.blocked("Camera, head, model or session identity changed during capture.") } }
             else { firstScope = scope }
@@ -241,6 +313,7 @@ import UniformTypeIdentifiers
             var record: [String:Any] = ["depthPath": name + ".depth-u16le", "width": depth.width, "height": depth.height,
                 "intrinsics": [k.fx,k.fy,k.cx,k.cy], "sequence": NSNumber(value: frame.sequence),
                 "capturedAtMilliseconds": frame.capturedAt, "captureSHA256": ROBGhostRobotModel.hash(data),
+                "cameraGeneration": frame.cameraGeneration.uuidString,
                 "previewWidth":Int(frame.image.extent.width),"previewHeight":Int(frame.image.extent.height),
                 "depthCoverage":frame.depthCoverage,
                 "intrinsicsSource":k.calibrationSource ?? "unspecified",
@@ -255,6 +328,22 @@ import UniformTypeIdentifiers
             if let value = k.sourceSize { record["rgbSourceSize"] = value }
             if let value = k.sourceIntrinsics { record["rgbSourceIntrinsics"] = value }
             if let value = k.imageTransform { record["rgbImageTransform"] = value }
+            if let value = k.depthIntrinsics { record["depthIntrinsics"] = value }
+            if let value = k.depthIntrinsicsSource { record["depthIntrinsicsSource"] = value }
+            if let value = k.depthSourceSize { record["depthSourceSize"] = value }
+            if let value = k.depthSourceIntrinsics { record["depthSourceIntrinsics"] = value }
+            if let value = k.depthImageTransform { record["depthImageTransform"] = value }
+            if let value = k.depthRGBGeometryCorrespondence { record["depthRGBGeometryCorrespondence"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(value)) }
+            if let value = k.rgbTransformationSize { record["rgbTransformationSize"] = value }
+            if let value = k.depthTransformationSize { record["depthTransformationSize"] = value }
+            if let value = k.rgbSourceDistortionCoefficients { record["rgbSourceDistortionCoefficients"] = value }
+            if let value = k.depthSourceDistortionCoefficients { record["depthSourceDistortionCoefficients"] = value }
+            if let value = k.rgbSourceDistortionModel { record["rgbSourceDistortionModel"] = value }
+            if let value = k.depthSourceDistortionModel { record["depthSourceDistortionModel"] = value }
+            if let value = k.stereoMode { record["stereoMode"] = value }
+            if let value = k.stereoModeSource { record["stereoModeSource"] = value }
+            if let value = k.stereoExtendedDisparity { record["stereoExtendedDisparity"] = value }
+            if let value = k.stereoSubpixel { record["stereoSubpixel"] = value }
             records.append(record)
             display("Captured \(records.count)/5 fixed-view frames. Head P\(scope.panTarget) L\(scope.lowerTarget) U\(scope.upperTarget). Arms unchanged.")
             try await Task.sleep(nanoseconds: 250_000_000)
@@ -283,7 +372,7 @@ import UniformTypeIdentifiers
             initializerSource = "legacy_neck_prior_initializer_only"
         }
         let scopeJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(scope))
-        let input: [String: Any] = ["schemaVersion":1, "scope":scopeJSON,
+        let input: [String: Any] = ["schemaVersion":1, "scope":scopeJSON, "cameraRole":"face", "requestedStereoMode":stereoMode,
             "validRobotVolume":["lowMeters":[-0.65,-0.95,0.05],"highMeters":[1.20,0.95,1.60]],
             "referenceUncertaintyMeters":uncertainty/1000,
             "initialCameraToRobotColumnMajor":(0..<4).flatMap { col in (0..<4).map { initial[col][$0] } },
@@ -331,7 +420,7 @@ import UniformTypeIdentifiers
             "validationCount":registration.validationCount,"scope":scopeJSON,
             "cameraToRobotColumnMajor":(0..<4).flatMap { col in (0..<4).map { registration.cameraToRobot[col][$0] } }]
         let pretty = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted,.sortedKeys])
-        display("Fixed-pose measured registration installed. This does not authorize arm movement.\n" + (String(data: pretty, encoding: .utf8) ?? ""))
+        display("Measured registration saved for its recorded camera mode. This does not authorize arm movement.\n" + (String(data: pretty, encoding: .utf8) ?? ""))
     }
     @objc private func importLandmarks() {
         guard !isRunning else { return }
@@ -368,7 +457,14 @@ import UniformTypeIdentifiers
             display("Measured landmark fit installed for the current recorded pose.\n\(registration)")
         } catch { display(error.localizedDescription) }
     }
-    @objc func stop() { task?.cancel(); if process?.isRunning == true { process?.terminate() } }
+    @objc func stop() {
+        task?.cancel(); if process?.isRunning == true { process?.terminate() }
+        if let token = cameraDemandCaptureID {
+            releaseCameraDemand(token: token)
+            if !isRunning { display("Camera review ended; ordinary camera demand restored.") }
+        }
+    }
+    func windowWillClose(_ notification: Notification) { stop() }
     @objc private func bodyDidMove() {
         selectedEstimatedContext = nil
         stop()

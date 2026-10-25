@@ -118,7 +118,9 @@ def register(document, root, planner=None, monotonic=time.monotonic):
     if scope["modelID"] != planner.reference["modelID"]:
         raise ValueError("Captured registration model does not match the pinned robot CAD model")
     from markerless import MarkerlessEstimator, numerical_jacobian, rank_and_uncertainty
-    estimator = MarkerlessEstimator(planner)
+    # Passive fixed-head acquisition may inspect more saved CAD rows. All
+    # spatial-patch, independent-frame and observability gates below are intact.
+    estimator = MarkerlessEstimator(planner, surface_samples_per_link=640)
     # Base-fixed and torso surfaces only. Unknown arm FK/commands are never
     # used to position registration references or manufacture a jaw pose.
     names = ["base_link", "left_track_link", "right_track_link", "torso_link", "lean_link", "rplidar_link"]

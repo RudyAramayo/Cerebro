@@ -36,6 +36,8 @@ import AppKit
 @MainActor @objcMembers final class Form: NSWindowController {
     let side = NSPopUpButton()
     let referenceError = NSTextField(string:"20")
+    let nearFieldDepth = NSButton(checkboxWithTitle:"Near-field body depth",target:nil,action:nil)
+    let holdCameraMode = NSButton(checkboxWithTitle:"Hold camera mode for review",target:nil,action:nil)
     let image = NSImageView()
     let details = NSTextView()
     let captureButton = NSButton(title:"Capture",target:nil,action:nil)
@@ -68,6 +70,8 @@ import AppKit
             precondition(form.side.itemTitles == ["Right arm","Left arm"])
             precondition(form.captureButton.target === form)
             precondition(form.stopButton.target === form)
+            precondition(form.nearFieldDepth.state == .off && form.nearFieldDepth.superview != nil)
+            precondition(form.holdCameraMode.state == .off && form.holdCameraMode.superview != nil)
             form.window?.close()
         }
         print("Fixed-head calibration native layout passed at two window sizes; no robot services loaded")

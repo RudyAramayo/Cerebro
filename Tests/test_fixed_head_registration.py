@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -12,6 +13,7 @@ import numpy as np
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'Cerebro/Resources/ShadowPlanner'))
 from fixed_head_registration import proper_fit, read_capture, register
+from markerless import MarkerlessEstimator
 
 
 class FixedHeadRegistrationTests(unittest.TestCase):
@@ -54,8 +56,10 @@ class FixedHeadRegistrationTests(unittest.TestCase):
             validRobotVolume=dict(lowMeters=[-.4,-.4,.1],highMeters=[.4,.4,1.3]),
             referenceUncertaintyMeters=.002,initialCameraToRobotColumnMajor=np.eye(4).flatten(order='F').tolist(),frames=self.frames)
         owner=self
+        self.requested_sample_counts=[]
         class Estimator:
-            def __init__(self,planner):pass
+            def __init__(self,planner,surface_samples_per_link=160):
+                owner.requested_sample_counts.append(surface_samples_per_link)
             def points(self,q,names):return owner.points,owner.normals,owner.labels
             @staticmethod
             def visible(points,camera,depth,intrinsics):return np.ones(len(points),dtype=bool)
@@ -73,6 +77,7 @@ class FixedHeadRegistrationTests(unittest.TestCase):
 
     def test_actual_optimizer_and_withheld_captures(self):
         output,report=self.fit()
+        self.assertEqual(self.requested_sample_counts,[640])
         self.assertFalse(report['registrationVerified'])
         self.assertGreaterEqual(report['fitPatchCount'],20)
         self.assertGreaterEqual(report['heldOutPatchCount'],6)
@@ -86,6 +91,43 @@ class FixedHeadRegistrationTests(unittest.TestCase):
         self.assertLess(np.max(np.abs(matrix-np.eye(4))),.01)
         # Exercise the exact interchange schema with the production Swift fitter.
         (self.root/'registration-input.json').write_text(json.dumps(output))
+
+    def test_saved_cad_density_is_bounded_and_default_stays_160(self):
+        saved=json.loads((ROOT/'Cerebro/Resources/ShadowPlanner/surfaces.json').read_text())['surfaces']
+        planner=SimpleNamespace(clearance=SimpleNamespace(surfaces=saved),q0=np.zeros(1))
+        default=MarkerlessEstimator(planner)
+        dense=MarkerlessEstimator(planner,surface_samples_per_link=640)
+        rigid={'base_link','left_track_link','right_track_link','torso_link','lean_link','rplidar_link'}
+        for surface in saved:
+            count=len(surface['points'])
+            raw_points=np.asarray(surface['points']);raw_normals=np.asarray(surface['normals'])
+            for budget,estimator in [(160,default),(640,dense)]:
+                selected=np.linspace(0,count-1,min(count,budget),dtype=int)
+                points,normals=estimator.surfaces[surface['link']]
+                np.testing.assert_array_equal(points,raw_points[selected])
+                np.testing.assert_array_equal(normals,raw_normals[selected])
+                self.assertEqual(len(np.unique(selected)),len(selected))
+                if surface['link'] in rigid:
+                    self.assertEqual(len(points),budget)
+                    self.assertEqual(len(np.unique(points,axis=0)),budget)
+        for invalid in [0,641,-1,True,160.0,None]:
+            with self.subTest(samples=invalid),self.assertRaisesRegex(ValueError,'integer.*640'):
+                MarkerlessEstimator(planner,surface_samples_per_link=invalid)
+
+    def test_dense_repeated_samples_cannot_manufacture_independent_patches(self):
+        # Over1000 CAD rows are still one physical3cm patch. Higher density
+        # must not turn adjacent/duplicate support into fit/heldout landmarks.
+        self.points=np.repeat(self.points[:1],1024,axis=0)
+        self.normals=np.repeat(self.normals[:1],1024,axis=0)
+        self.labels=np.repeat(self.labels[:1],1024)
+        with self.assertRaisesRegex(ValueError,'spatially separated fit and held-out patches'):
+            self.fit()
+        self.assertEqual(self.requested_sample_counts,[640])
+
+    def test_dense_torso_only_support_still_needs_base_fixed_surfaces(self):
+        self.labels[:]='torso_link'
+        with self.assertRaisesRegex(ValueError,'visible torso and base-fixed surfaces'):
+            self.fit()
 
     def test_later_depth_disagreement_rejects(self):
         for frame in self.frames[1:]:

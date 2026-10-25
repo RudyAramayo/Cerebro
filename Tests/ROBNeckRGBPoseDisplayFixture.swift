@@ -210,6 +210,36 @@ import simd
         precondition(cosmetic.modelToDisplay != opticalOriginAfter.modelToDisplay && cosmetic.profileID != opticalOriginAfter.profileID)
         precondition(ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==projectionID && cosmetic.provisionalCameraToModel==opticalOriginAfter.provisionalCameraToModel,
             "Display lift/gauge/belly/ring/housing orientation changed the physical projection identity or transform")
+        precondition(cosmetic.robotModelDisplayLiftMeters==0,"Missing model presentation lift did not default to zero")
+        let bellyBeforeModelLift=ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model)
+        for lift in [0.03175,-0.1,0.1] {
+            a["robotModelDisplayLiftMeters"]=lift;try activate()
+            let lifted=ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6015,lowerTarget:6011,upperTarget:6160)!
+            let presentation=ROBNeckRGBPoseDisplay.robotModelPresentationTransform(model:model,modelToDisplay:lifted.modelToDisplay)
+            precondition(lifted.robotModelDisplayLiftMeters==lift && lifted.profileID != cosmetic.profileID)
+            precondition(lifted.cameraToModel==cosmetic.cameraToModel && lifted.headFrames==cosmetic.headFrames &&
+                lifted.modelToDisplay==cosmetic.modelToDisplay && lifted.provisionalCameraToModel==cosmetic.provisionalCameraToModel &&
+                lifted.depthCloudCameraToModel==cosmetic.depthCloudCameraToModel &&
+                ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model)==bellyBeforeModelLift &&
+                ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==projectionID && !lifted.hasDepthProjectionAuthority,
+                "Robot mesh touchup changed camera rays, floor reference or physical planning identity")
+            let scale=123.0
+            let basis=simd_double4x4(columns:(SIMD4(0,0,-scale,0),SIMD4(-scale,0,0,0),SIMD4(0,scale,0,0),SIMD4(0,0,0,1)))
+            // Normal/ghost/held-can/trajectory points share this child-group
+            // matrix. World targets and raw rays use the unchanged parent.
+            for point in [SIMD4<Double>(0,0,0,1),SIMD4(0.3,-0.1,0.8,1),SIMD4(-0.2,0.4,1.1,1)] {
+                let before=lifted.modelToDisplay*point,after=lifted.modelToDisplay*presentation*point
+                precondition(close(after-before,SIMD4(0,0,lift,0)),"Mesh lift followed tilted torsoZ instead of displayed floor-up")
+                precondition(close(basis*after-basis*before,SIMD4(0,scale*lift,0,0)),"Presentation scale/axis conversion changed mesh height")
+            }
+            for column in 0..<3 {precondition(close(presentation[column],matrix_identity_double4x4[column]),"Mesh lift introduced a rotation/scale")}
+        }
+        for invalid in [-0.100001,0.100001] {
+            a["robotModelDisplayLiftMeters"]=invalid;try activate()
+            precondition(ROBNeckRGBPoseDisplay.pose(model:model,panTarget:6015,lowerTarget:6011,upperTarget:6160)==nil,"Unbounded model presentation lift accepted")
+        }
+        a.removeValue(forKey:"robotModelDisplayLiftMeters");try activate()
+        precondition(ROBNeckRGBPoseDisplay.robotModelPresentationTransform(model:model,modelToDisplay:cosmetic.modelToDisplay)==matrix_identity_double4x4)
         hardware["sphereForwardLeanDegrees"]=9.3;a["hardwarePose"]=hardware;try activate()
         precondition(ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model) != projectionID,"A changed physical photo mount retained its projection identity")
         hardware["sphereForwardLeanDegrees"]=8.3;hardware["sourcePhotoSHA256"]=String(repeating:"b",count:64);a["hardwarePose"]=hardware;try activate()
