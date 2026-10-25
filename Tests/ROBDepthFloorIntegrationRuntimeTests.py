@@ -19,6 +19,7 @@ HARNESS = r'''
 #import <CoreVideo/CoreVideo.h>
 #import "ROBDepthCloudProjection.h"
 #import "ROBDepthFloorRectification.h"
+#import "ROBAccumulatedSurfaceMap.h"
 #include <assert.h>
 __HELPERS__
 @interface ROBScanVisualModel : NSObject
@@ -83,12 +84,25 @@ __HELPERS__
 @property(strong) NSArray<NSValue *> *capturedPoints;
 @property(strong) NSArray<NSNumber *> *capturedColors;
 @property(strong) FixtureLabel *cloudStatusLabel, *floorStatusLabel;
+@property(strong) NSButton *surfaceMode;
+@property(strong) SCNNode *headSurfaceNode, *bellySurfaceNode;
+@property(copy) NSArray *headSurfaceContext, *bellySurfaceContext;
+@property BOOL treadCommandsAreActive;
+@property BOOL headUsesSurfaces, bellyUsesSurfaces;
+@property(strong) NSData *capturedSurfaceSamples;
+@property ROBSurfaceDepthView capturedSurfaceView;
 - (void)processDepthFrame:(ROBDepthCloudFrame *)frame robotTransform:(SCNMatrix4)robot cameraTransform:(ROBDepthCloudTransform)camera neckTargets:(NSArray<NSNumber *> *)targets;
 - (void)refreshFloorCloudVisibilityAtUptime:(NSTimeInterval)now;
 - (void)retainHeadCloudForDisplayAtUptime:(NSTimeInterval)now;
 - (void)refreshFloorStatus;
 @end
 @implementation Harness
+- (void)refreshAccumulatedSurfaceStatus {}
+- (void)resetAccumulatedSurfaces:(id)sender {}
+- (void)offerAccumulatedSurfaceSamples:(NSData *)samples frame:(ROBDepthCloudFrame *)frame
+                                 view:(ROBSurfaceDepthView)view robotTransform:(SCNMatrix4)robot floorValid:(BOOL)floorValid {
+    self.capturedSurfaceSamples=[samples copy];self.capturedSurfaceView=view;
+}
 - (SCNGeometry *)pointGeometry:(NSArray *)p colors:(NSArray *)c pointSize:(CGFloat)s {
     self.capturedPoints=p; self.capturedColors=c;
     if(p.count==0) return nil;
@@ -191,12 +205,20 @@ int main(void) { @autoreleasepool {
         assert(!h.liveRGBCloudNode.hidden && h.liveRGBCloudNode.geometry && [h.headFloorSummary containsString:@"aligned"]);
         NSUInteger index=0, floorCount=0; double floorError=0, floorSquared=0, objectError=0;
         const uint16_t *mm=f.millimetersLittleEndian.bytes;
+        assert(h.capturedSurfaceSamples.length/sizeof(ROBSurfaceSample)==h.capturedPoints.count);
+        const ROBSurfaceSample *surface=h.capturedSurfaceSamples.bytes;
         for(int y=0;y<160;y+=4) for(int x=0;x<160;x+=4) if(mm[y*160+x]>=150 && mm[y*160+x]<=10000) {
             assert(index<h.capturedPoints.count); SCNVector3 p=h.capturedPoints[index].SCNVector3Value;
             double height=(y>=64 && y<=76 && x>=64 && x<=92) ? .3 : 0;
             double error=fabs(p.y-(5+scale*height)); if(height) objectError=fmax(objectError,error); else { floorError=fmax(floorError,error); floorSquared+=error*error; floorCount++; }
             uint32_t color=((uint32_t)x<<24)|((uint32_t)y<<16)|((uint32_t)((x+y)%256)<<8)|255;
-            assert(h.capturedColors[index].unsignedIntValue==color); index++;
+            assert(h.capturedColors[index].unsignedIntValue==color && surface[index].rgba==color);
+            double opticalDepth=mm[y*160+x]/1000.;
+            ROBDepthCloudTransform surfaceCamera=ROBDepthCloudMakeTransform(h.capturedSurfaceView.cameraToMap);
+            ROBDepthPoint inMap=ROBDepthCloudProject(surfaceCamera,(x-f.cameraCX)*opticalDepth/f.cameraFX,
+                (y-f.cameraCY)*opticalDepth/f.cameraFY,opticalDepth);
+            assert(ROBSurfaceDistance2((ROBSurfacePoint){inMap.x,inMap.y,inMap.z},surface[index].point)<1e-18);
+            assert(fabs(surface[index].point.y-height)<.004);index++;
         }
         assert(index==h.capturedPoints.count && index==h.capturedColors.count && floorError<.004 && sqrt(floorSquared/floorCount)<.0015 && objectError<.002);
     }
@@ -416,6 +438,11 @@ int main(void) { @autoreleasepool {
     h.liveRGBCloudNode.geometry=nil; cap.capturedUptime=NSProcessInfo.processInfo.systemUptime; h.cloudUpdatePending=YES;
     [h processDepthFrame:cap robotTransform:world cameraTransform:camera neckTargets:targets]; h.robotNode.worldTransform=moved; drain(h);
     assert(!h.liveRGBCloudNode.geometry);
+    // Once a surface history replaces the cloud, skip the hidden point
+    // geometry but keep delivering metrically correct samples to accumulation.
+    h.robotNode.worldTransform=world;h.headUsesSurfaces=YES;
+    NSArray *previousPoints=h.capturedPoints;publish(h,f,camera,targets);
+    assert(h.capturedPoints==previousPoints && h.capturedSurfaceSamples.length/sizeof(ROBSurfaceSample)>500);
     CVPixelBufferRelease(nearBudget.rgbPixelBuffer); CVPixelBufferRelease(noise.rgbPixelBuffer); CVPixelBufferRelease(empty.rgbPixelBuffer);
     CVPixelBufferRelease(f.rgbPixelBuffer); puts("Production depth-floor integration passed:8/25/29degree floor bootstrap, rigid0.3m object height, tabletop rejection,9.5mm acceptance, HEAD captured-world retention with age labels and fresh replacement during arm operations, unchanged BELLY250ms noise hold/700ms freshness, no resurrection after base clears, independent cameras, RGB pairing and20k cap");
 } return 0; }

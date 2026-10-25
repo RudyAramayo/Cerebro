@@ -183,6 +183,8 @@ enum ROBSwordTrackerColor: String, CaseIterable {
     public let height: Int
     public let rgbPixelBuffer: CVPixelBuffer?
     public let isBelly: Bool
+    public let captureStreamID: String?
+    public let sequence: UInt64
     @nonobjc let calibratedIntrinsics: CameraIntrinsics?
     let receivedUptime: TimeInterval
     let capturedUptime: TimeInterval
@@ -193,12 +195,15 @@ enum ROBSwordTrackerColor: String, CaseIterable {
     public var cameraCY: Double { hasCalibratedIntrinsics ? calibratedIntrinsics!.cy : .nan }
 
     init(depth: CameraDepthFrame, rgbSampleBuffer: CMSampleBuffer, isBelly: Bool = false,
-         intrinsics: CameraIntrinsics? = nil, capturedAtMilliseconds: Double? = nil) {
+         intrinsics: CameraIntrinsics? = nil, capturedAtMilliseconds: Double? = nil,
+         captureStreamID: String? = nil, sequence: UInt64 = 0) {
         millimetersLittleEndian = depth.millimetersLittleEndian as NSData
         width = depth.width
         height = depth.height
         rgbPixelBuffer = CMSampleBufferGetImageBuffer(rgbSampleBuffer)
         self.isBelly = isBelly
+        self.captureStreamID = captureStreamID
+        self.sequence = sequence
         calibratedIntrinsics = intrinsics
         receivedUptime = ProcessInfo.processInfo.systemUptime
         let age = capturedAtMilliseconds.map { Date().timeIntervalSince1970 - $0 / 1000 }
@@ -1718,7 +1723,8 @@ extension CameraViewController: CameraManagerDelegate {
         
         if let depth = frameSet.alignedDepth {
             let hologramFrame = ROBDepthCloudFrame(depth: depth, rgbSampleBuffer: sampleBuffer, isBelly: false,
-                intrinsics: frameSet.intrinsics, capturedAtMilliseconds: frameSet.capturedAtMilliseconds)
+                intrinsics: frameSet.intrinsics, capturedAtMilliseconds: frameSet.capturedAtMilliseconds,
+                captureStreamID: frameSet.captureStreamID, sequence: frameSet.sequence)
             ROBHologramExporter.shared.capture(hologramFrame)
             if cameraViewIsVisible {
                 faceDepthPointCloudRenderer.offer(depth: depth, rgbSampleBuffer: sampleBuffer, in: skeletonView)
