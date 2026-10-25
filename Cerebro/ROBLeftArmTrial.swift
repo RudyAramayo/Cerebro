@@ -40,6 +40,7 @@ struct ROBReviewedArmDispatchStart {
         "left_estimated_preview", "left_estimated_calibration",
         "right_estimated_preview", "right_estimated_trial", "right_recycle_can", "right_recycle_two_cans", "right_recycle_three_cans", "left_recycle_two_cans", "right_search_workspace", "right_scan_clearance"]
     private static let neckOnlyCommands = ["left_search_workspace", "left_check_hanging", "left_scan_clearance", "left_estimated_preview"]
+    @nonobjc private var workspaceSearchTargets = ROBWorkspaceTarget.allCases
     static let currentLimitKey = "ROBLeftArmCurrentJumpLimitRaw"
     private(set) var isRunning = false
     var isNeckOnlyInspection: Bool { isRunning && Self.neckOnlyCommands.contains(activeCommand) }
@@ -449,6 +450,10 @@ struct ROBReviewedArmDispatchStart {
     }
 
     func perform(_ requestedCommand: String, completion: @escaping (NSDictionary) -> Void) {
+        perform(requestedCommand, target: "", completion: completion)
+    }
+
+    func perform(_ requestedCommand: String, target: String, completion: @escaping (NSDictionary) -> Void) {
         precondition(Thread.isMainThread)
         guard Self.commands.contains(requestedCommand) else { completion(["status": "rejected"]); return }
         // Normalize shared task semantics only after preserving physical identity.
@@ -463,6 +468,9 @@ struct ROBReviewedArmDispatchStart {
         requestedCanCount = requestedCommand.hasSuffix("_recycle_three_cans") ? 3 : requestedCommand.hasSuffix("_recycle_two_cans") ? 2 : 1
         let canonical = requestedCommand.hasPrefix("right_") ? "left_" + requestedCommand.dropFirst(6) : requestedCommand
         let command = ["left_recycle_two_cans","left_recycle_three_cans"].contains(canonical) ? "left_recycle_can" : canonical == "left_estimated_trial" ? "left_estimated_calibration" : canonical
+        workspaceSearchTargets = command == "left_search_workspace"
+            && target.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "can"
+            ? [.can] : ROBWorkspaceTarget.allCases
         if command == "left_estimated_calibration" { performEstimatedCalibration(completion:completion); return }
         if !isRunning { invalidateEstimatedPreview(reason:"Another operation replaced the estimated preview") }
         if command == "left_pick_place" {
@@ -502,7 +510,7 @@ struct ROBReviewedArmDispatchStart {
         switch command {
         case "left_estimated_preview": action = "Capture fresh neck-only depth while both arms remain still, then review one estimated EMPTY-left-arm retreat away from the table over 4 seconds. No arm motion or gripper command."
         case "left_scan_clearance": action = "Scan the current workspace with the neck RGB-D camera while both arms remain still. Retain occupied surfaces and observed free space for a full-arm collision review. A provisional camera transform does not authorize movement."
-        case "left_search_workspace": action = "Search locally for a Coke can and an orange bucket by panning/tilting the neck camera. Confirm detections in two fresh RGB-D observations using the offline object detector. If missing, ask the nearest visible person to point and search in the estimated pointing direction. Report found/not found. No arm activation, gripper commands or arm travel."
+        case "left_search_workspace": action = "Search locally for \(workspaceSearchTargets == [.can] ? "a Coke can" : "a Coke can and an orange bucket") by panning/tilting the neck camera. Confirm detections in two fresh RGB-D observations using the offline object detector. If missing, ask the nearest visible person to point and search in the estimated pointing direction. Report found/not found. No arm activation, gripper commands or arm travel."
         case "left_check_hanging": action = "Inspect both robot arms by panning/tilting the neck camera using on-device MLX; report whether each is visibly hanging. This observation never resets encoders or activates/moves either arm."
         case "left_recycle_can": action = "One experimental recycling test: hold the current arm pose while the neck camera finds the empty can, bucket opening and workspace depth. Check measured camera/arm registration and the complete arm, open jaws and payload sweep. Dynamically plan the entire approach, middle grasp, carry, gravity release and retreat before moving; no blind parking or taught-route exemption. Reuse stationary startup gripper setup. Open at intensity 10 before approaching, grip at intensity 2, and release above the opening at intensity 10. Deferred empty-jaw setup may happen only after a collision-checked empty return to hanging/inactive. One authorization covers all waypoints. No force escalation, driving, blind retries or torque-off with a payload. Pickup and placement remain unmeasured."
         case "left_wave": action = "Scan current geometry, dynamically connect the empty LEFT arm to the wave targets, check each complete arm sweep, wave and leave raised. Jaws unchanged."
@@ -957,7 +965,7 @@ struct ROBReviewedArmDispatchStart {
         }
         if command == "left_search_workspace" || command == "left_check_hanging" {
             let model = try workspaceModel()
-            _ = try await ROBWorkspaceSearch.shared.run(targets: command == "left_check_hanging" ? [] : ROBWorkspaceTarget.allCases,
+            _ = try await ROBWorkspaceSearch.shared.run(targets: command == "left_check_hanging" ? [] : workspaceSearchTargets,
                 model: model, requireDepth: false, check: { try self.check() }, progress: { self.update($0) })
             return ["status": "accepted_unverified", "measured": false, "arm_motion_sent": false,
                 "detail": ROBWorkspaceSearch.shared.lastReport["detail"] ?? "Local workspace search ended.",

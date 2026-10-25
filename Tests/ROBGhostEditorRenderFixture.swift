@@ -36,9 +36,12 @@ final class ROBControllerArmApproval {
 final class ROBArmRoutineCoordinator {
     static let shared = ROBArmRoutineCoordinator()
     let isRunning = false
+    var searchRequests = 0
     func cancel(reason: String) {}
     func performCommand(_ command: String, target: String, completion: @escaping (NSDictionary) -> Void) {
         precondition(command == "left_search_workspace", "Ghost can search attempted a motion command")
+        precondition(target == "can", "Ghost can preview waited for unrelated bucket search")
+        searchRequests += 1
         completion(["detail":"Fixture camera only"])
     }
 }
@@ -371,6 +374,10 @@ final class GhostFixtureSnapshotView: NSView {
         assertAcceptedHead(6011, 6306, pan: .pi / 12)
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
         let controls = descendants(editor.panelView)
+        let findCan = controls.compactMap { $0 as? NSButton }.first { $0.title == "Find Coke can + ghost grab" }!
+        NSApp.sendAction(findCan.action!, to: findCan.target, from: findCan)
+        precondition(ROBArmRoutineCoordinator.shared.searchRequests == 1,
+            "Ghost preview did not enter the existing neck-only coordinator lane")
         let jointPicker = controls.compactMap { $0 as? NSPopUpButton }.first { $0.itemTitles.contains("lower_neck") }!
         let jointAngle = controls.compactMap { $0 as? NSSlider }.first { $0.action == NSSelectorFromString("changeAngle") }!
         func setGhostJoint(_ name: String, radians: Double) {

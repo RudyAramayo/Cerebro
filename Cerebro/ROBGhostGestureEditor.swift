@@ -396,7 +396,7 @@ import simd
         canInfo.stringValue = "Finding a fresh RGB-D can target…"
         status.stringValue = "Neck-camera search, then ghost rehearsal. Arms and jaws stay unchanged."
         let request = UUID(); canRequestID = request
-        ROBArmRoutineCoordinator.shared.performCommand("left_search_workspace", target: "") { [weak self] result in
+        ROBArmRoutineCoordinator.shared.performCommand("left_search_workspace", target: "can") { [weak self] result in
             guard let self, self.canRequestID == request else { return }
             guard let can = ROBWorkspaceSearch.shared.locatedObjects[.can] else {
                 self.canInfo.stringValue = "Can target: no confirmed RGB-D position"

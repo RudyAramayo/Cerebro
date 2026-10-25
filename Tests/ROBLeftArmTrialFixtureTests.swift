@@ -303,11 +303,13 @@ final class ROBWorkspaceSearch {
 
     var fail = false
     var requiredDepth = true
+    var requestedTargets: [ROBWorkspaceTarget] = []
     var objects: [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] = [:]
     var onInspect: (() -> Void)?
     var afterInspect: (() -> Void)?
     @MainActor func run(targets: [ROBWorkspaceTarget], model: ROBGhostRobotModel, requireDepth: Bool = true, check: () throws -> Void, progress: (String) -> Void) async throws -> [ROBWorkspaceTarget: ROBWorkspaceLocatedObject] {
         requiredDepth = requireDepth
+        requestedTargets = targets
         onInspect?()
         if fail { throw ROBArmRoutineError.blocked("Fixture observation unavailable") }
         if requireDepth {
@@ -358,9 +360,9 @@ final class ROBArmRoutineCoordinator {
         }
     }
     @_optimize(none)
-    @MainActor static func run(_ command: String) async -> NSDictionary {
+    @MainActor static func run(_ command: String, target: String = "") async -> NSDictionary {
         await withCheckedContinuation { continuation in
-            ROBLeftArmTrial.shared.perform(command) { continuation.resume(returning: $0) }
+            ROBLeftArmTrial.shared.perform(command, target: target) { continuation.resume(returning: $0) }
         }
     }
     @_optimize(none)
@@ -704,13 +706,32 @@ final class ROBArmRoutineCoordinator {
             precondition(searched["status"] as? String == "accepted_unverified", searched.description)
             precondition(approvals == 0 && g.commands.isEmpty)
             precondition(!ROBWorkspaceSearch.shared.requiredDepth, "A visual search must not wait for bucket release geometry")
+            precondition(ROBWorkspaceSearch.shared.requestedTargets == (command == "left_check_hanging" ? [] : ROBWorkspaceTarget.allCases))
+        }
+        for (command,target,expected) in [
+            ("left_search_workspace","can",[ROBWorkspaceTarget.can]),
+            ("left_search_workspace"," Can \n",[ROBWorkspaceTarget.can]),
+            ("right_search_workspace","can",[ROBWorkspaceTarget.can]),
+            ("left_search_workspace","",ROBWorkspaceTarget.allCases),
+            ("left_search_workspace","can and bucket",ROBWorkspaceTarget.allCases),
+            ("left_search_workspace","unrecognized",ROBWorkspaceTarget.allCases)] {
+            let searched = await run(command,target:target)
+            precondition(searched["status"] as? String == "accepted_unverified",searched.description)
+            precondition(ROBWorkspaceSearch.shared.requestedTargets == expected,
+                "Only an explicit can search may skip waiting for the bucket")
+            precondition(!ROBWorkspaceSearch.shared.requiredDepth && approvals == 0 && g.commands.isEmpty)
+            precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty)
         }
         ROBWorkspaceSearch.shared.fail = true
-        let failedSearch = await run("left_search_workspace")
+        let failedSearch = await run("left_search_workspace",target:"can")
         precondition(failedSearch["status"] as? String == "blocked")
         precondition(approvals == 0 && g.commands.isEmpty && ROBAmberGatewayTunnel.shared.connections == 0)
         ROBWorkspaceSearch.shared.fail = false; ROBWorkspaceSearch.shared.onInspect = nil; g.ready = true
         print("Neck-only search and hanging checks: no arm approval, gateway connection, motor or hold commands, including failure")
+        if CommandLine.arguments.last == "can-only-search" {
+            print("Can-only neck search: recognized can target exits without bucket work; empty/unknown defaults retain both targets; left/right neck lanes and failed search preserve ownership/no-actuation guards")
+            return
+        }
         let legacyExecutor = CommandLine.arguments.contains("legacy-executor")
         if !legacyExecutor && CommandLine.arguments.last != "telemetry" {
             let search = ROBWorkspaceSearch.shared

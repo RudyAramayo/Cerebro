@@ -157,7 +157,7 @@ enum ROBArmRoutineError: LocalizedError {
         }
         if ROBLeftArmTrial.commands.contains(command) {
             ROBLeftArmTrial.shared.statusChanged = { [weak self] in self?.setStatus($0) }
-            ROBLeftArmTrial.shared.perform(command, completion: completion)
+            ROBLeftArmTrial.shared.perform(command, target: target, completion: completion)
             return
         }
         guard !ROBLeftArmTrial.shared.isRunning else {
