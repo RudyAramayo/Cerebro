@@ -2,11 +2,19 @@
 #define ROBAccumulatedSurfaceRenderer_h
 #import <AppKit/AppKit.h>
 #import <SceneKit/SceneKit.h>
+#import <CoreVideo/CoreVideo.h>
 #include "ROBAccumulatedSurfaceMap.h"
+
+@interface ROBSurfaceTrackedNode : SCNNode
+@property uint32_t surfaceTrackID;
+@property uint32_t cylinderTrackID;
+@property double observationAge;
+@end
 
 /* All vertices remain in physical submap metres. The caller applies exactly
  * one presentation scale and the base placement captured for this submap. */
-static inline SCNGeometry *ROBSurfacePlaneGeometry(const ROBSurfacePlane *plane) {
+static inline SCNGeometry *ROBSurfacePlaneGeometryWithPhoto(const ROBSurfacePlane *plane, CGImageRef photo,
+                                                           double originU, double originV, double spanU, double spanV) {
     size_t count=plane->rectangleCount*4;
     if (!count || !plane->rgba) return nil;
     typedef struct { float x,y,z; } Vertex;
@@ -23,7 +31,9 @@ static inline SCNGeometry *ROBSurfacePlaneGeometry(const ROBSurfacePlane *plane)
                 ROBSurfaceAdd(ROBDepthFloorScale(plane->u,(plane->originU+x[j])*ROBSurfaceTexelSize),
                               ROBDepthFloorScale(plane->v,(plane->originV+y[j])*ROBSurfaceTexelSize)));
             vertices[i*4+j]=(Vertex){(float)p.x,(float)p.y,(float)p.z};
-            uv[i*4+j]=(UV){(float)(x[j]/plane->width),(float)(1-y[j]/plane->height)};
+            uv[i*4+j]=photo ? (UV){(float)(((plane->originU+x[j])*ROBSurfaceTexelSize-originU)/spanU),
+                (float)(1-((plane->originV+y[j])*ROBSurfaceTexelSize-originV)/spanV)} :
+                (UV){(float)(x[j]/plane->width),(float)(1-y[j]/plane->height)};
         }
         uint32_t b=(uint32_t)(i*4);uint32_t t[6]={b,b+1,b+2,b,b+2,b+3};memcpy(triangles+i*6,t,sizeof(t));
     }
@@ -39,13 +49,21 @@ static inline SCNGeometry *ROBSurfacePlaneGeometry(const ROBSurfacePlane *plane)
         bitmapFormat:NSBitmapFormatAlphaNonpremultiplied bytesPerRow:plane->width*4 bitsPerPixel:32];
     if (!bitmap.bitmapData) return nil;
     for (int y=0;y<plane->height;y++) for (int x=0;x<plane->width;x++) {
-        uint32_t c=plane->rgba[(size_t)y*plane->width+x];uint8_t *pixel=bitmap.bitmapData+y*bitmap.bytesPerRow+x*4;
+        /* Without a photographic keyframe show neutral geometry. Repainting
+         * coarse voxel RGB cells destroys small printed features such as QR. */
+        uint32_t c=plane->rgba[(size_t)y*plane->width+x] ? 0x70808CFF : 0;uint8_t *pixel=bitmap.bitmapData+y*bitmap.bytesPerRow+x*4;
         pixel[0]=(c>>24)&255;pixel[1]=(c>>16)&255;pixel[2]=(c>>8)&255;pixel[3]=c&255;
     }
-    SCNMaterial *material=[SCNMaterial material];material.diffuse.contents=(__bridge id)bitmap.CGImage;
+    SCNMaterial *material=[SCNMaterial material];material.diffuse.contents=(__bridge id)(photo ?: bitmap.CGImage);
     material.lightingModelName=SCNLightingModelConstant;material.doubleSided=YES;
-    material.diffuse.minificationFilter=SCNFilterModeNearest;material.diffuse.magnificationFilter=SCNFilterModeNearest;
-    material.diffuse.mipFilter=SCNFilterModeNone;geometry.firstMaterial=material;return geometry;
+    material.diffuse.minificationFilter=photo ? SCNFilterModeLinear : SCNFilterModeNearest;
+    material.diffuse.magnificationFilter=photo ? SCNFilterModeLinear : SCNFilterModeNearest;
+    material.diffuse.mipFilter=photo ? SCNFilterModeLinear : SCNFilterModeNone;
+    if (photo) {material.diffuse.wrapS=SCNWrapModeClampToBorder;material.diffuse.wrapT=SCNWrapModeClampToBorder;}
+    geometry.firstMaterial=material;return geometry;
+}
+static inline SCNGeometry *ROBSurfacePlaneGeometry(const ROBSurfacePlane *plane) {
+    return ROBSurfacePlaneGeometryWithPhoto(plane,NULL,0,0,1,1);
 }
 static inline SCNGeometry *ROBSurfaceResidualGeometry(const ROBSurfaceMesh *mesh) {
     if (!mesh->residualCount) return nil;
@@ -73,8 +91,9 @@ static inline SCNNode *ROBSurfaceMeshNode(const ROBSurfaceMesh *mesh) {
     SCNNode *root=[SCNNode node];root.name=@"Accumulated observed surfaces · provisional display submap";
     for (size_t i=0;i<mesh->planeCount;i++) {
         SCNGeometry *geometry=ROBSurfacePlaneGeometry(&mesh->planes[i]);if (!geometry) continue;
-        SCNNode *node=[SCNNode nodeWithGeometry:geometry];
-        node.name=[NSString stringWithFormat:@"Observed plane %zu · %.1f mm RMS",i+1,mesh->planes[i].rms*1000];[root addChildNode:node];
+        ROBSurfaceTrackedNode *node=[ROBSurfaceTrackedNode new];node.geometry=geometry;
+        node.name=[NSString stringWithFormat:@"Observed plane %zu · %.1f mm RMS",i+1,mesh->planes[i].rms*1000];
+        node.surfaceTrackID=mesh->planes[i].trackID;[root addChildNode:node];
     }
     SCNGeometry *residuals=ROBSurfaceResidualGeometry(mesh);
     if (residuals) { SCNNode *node=[SCNNode nodeWithGeometry:residuals];node.name=@"Observed irregular surface voxels";[root addChildNode:node]; }
@@ -83,8 +102,12 @@ static inline SCNNode *ROBSurfaceMeshNode(const ROBSurfaceMesh *mesh) {
         geometry.radialSegmentCount=24;
         SCNMaterial *material=[SCNMaterial material];material.diffuse.contents=NSColor.systemCyanColor;
         material.lightingModelName=SCNLightingModelConstant;material.transparency=.23;material.writesToDepthBuffer=NO;material.doubleSided=YES;
-        geometry.firstMaterial=material;SCNNode *node=[SCNNode nodeWithGeometry:geometry];
-        node.position=SCNVector3Make(c.center.x,c.center.y,c.center.z);node.name=@"Inferred can-sized cylinder · unseen surface is a prior";
+        geometry.firstMaterial=material;ROBSurfaceTrackedNode *node=[ROBSurfaceTrackedNode new];node.geometry=geometry;
+        node.position=SCNVector3Make(c.center.x,c.center.y,c.center.z);
+        double length=hypot(c.axis.x,c.axis.z);
+        if (length>1e-8) node.rotation=SCNVector4Make(c.axis.z/length,0,-c.axis.x/length,acos(fmin(1,fmax(-1,c.axis.y))));
+        node.name=c.observedAgeSeconds>0 ? @"Tracked inferred can · brief observation gap" : @"Inferred can-sized cylinder · unseen surface is a prior";
+        node.cylinderTrackID=c.trackID;node.observationAge=c.observedAgeSeconds;
         [root addChildNode:node];
     }
     return root;
@@ -96,5 +119,7 @@ static inline SCNNode *ROBSurfaceMeshNode(const ROBSurfaceMesh *mesh) {
 @property(nonatomic, readonly) NSUInteger voxelCount;
 - (SCNNode *)accumulate:(NSData *)samples view:(ROBSurfaceDepthView)view capturedAt:(double)capturedAt
                sequence:(uint64_t)sequence summary:(NSString **)summary;
+- (SCNNode *)accumulate:(NSData *)samples view:(ROBSurfaceDepthView)view capturedAt:(double)capturedAt
+               sequence:(uint64_t)sequence rgbPixelBuffer:(CVPixelBufferRef)rgb summary:(NSString **)summary;
 @end
 #endif

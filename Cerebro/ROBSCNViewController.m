@@ -819,7 +819,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
         [self refreshAccumulatedSurfaceStatus];return;
     }
     double now=NSProcessInfo.processInfo.systemUptime;
-    if (self.surfaceUpdatePending || now-(belly ? self.lastBellySurfaceSubmission : self.lastHeadSurfaceSubmission)<.5) return;
+    if (self.surfaceUpdatePending || now-(belly ? self.lastBellySurfaceSubmission : self.lastHeadSurfaceSubmission)<.25) return;
     if (belly) {
         self.lastBellySurfaceSubmission=now;self.bellySurfaceContext=context;
         if (!self.bellySurfaceAccumulator) self.bellySurfaceAccumulator=[ROBSurfaceAccumulator new];
@@ -832,7 +832,8 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     ROBSurfaceAccumulator *accumulator=belly ? self.bellySurfaceAccumulator : self.headSurfaceAccumulator;
     dispatch_async(self.cloudQueue, ^{
         NSString *summary=nil;
-        SCNNode *result=[accumulator accumulate:samples view:view capturedAt:frame.capturedUptime sequence:frame.sequence summary:&summary];
+        SCNNode *result=[accumulator accumulate:samples view:view capturedAt:frame.capturedUptime sequence:frame.sequence
+            rgbPixelBuffer:frame.rgbPixelBuffer summary:&summary];
         dispatch_async(dispatch_get_main_queue(), ^{
             if (generation != self.surfaceGeneration) return;
             self.surfaceUpdatePending=NO;
@@ -843,9 +844,11 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
                 ![bodyIdentity isEqual:ROBFixedHeadBodyMotionIdentity.currentIdentity]) return;
             SCNNode *root=belly ? self.bellySurfaceNode : self.headSurfaceNode;
             if (result) {
-                for (SCNNode *child in root.childNodes.copy) [child removeFromParentNode];
                 result.transform=SCNMatrix4Scale(robot,ROBScanVisualModel.presentationScale,ROBScanVisualModel.presentationScale,ROBScanVisualModel.presentationScale);
-                [root addChildNode:result];
+                [SCNTransaction begin];[SCNTransaction setDisableActions:YES];
+                SCNNode *previous=root.childNodes.firstObject;
+                if (previous) [root replaceChildNode:previous with:result];else [root addChildNode:result];
+                [SCNTransaction commit];
                 if (belly) self.lastBellySurfaceCapture=frame.capturedUptime;else self.lastHeadSurfaceCapture=frame.capturedUptime;
             }
             if (belly) self.bellySurfaceSummary=summary;else self.headSurfaceSummary=summary;
@@ -924,7 +927,7 @@ static NSString *ROBDiagnosticInhibitReason(NSString *reason)
     // publication during all trials, including neck scans; capture/watchdogs are separate.
     BOOL trialBusy = ROBLeftArmTrial.shared.isRunning || ROBArmRoutineCoordinator.shared.isRunning;
     BOOL surfaceDisplay=belly ? self.bellyUsesSurfaces : self.headUsesSurfaces;
-    if (now - (belly ? self.lastBellyCloudSubmission : self.lastHeadCloudSubmission) < (trialBusy || surfaceDisplay ? 0.5 : 0.125)) return;
+    if (now - (belly ? self.lastBellyCloudSubmission : self.lastHeadCloudSubmission) < (trialBusy ? 0.5 : (surfaceDisplay ? 0.25 : 0.125))) return;
     if (belly) self.lastBellyCloudSubmission = now; else self.lastHeadCloudSubmission = now;
     [self refreshHeadModelEstimate];
     NSArray<NSNumber *> *affine = [self.ghostGestureEditor depthCloudCameraTransform:belly];

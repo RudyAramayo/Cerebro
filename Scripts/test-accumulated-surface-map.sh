@@ -9,3 +9,9 @@ xcrun clang -O2 -std=c11 -Wall -Wextra -Werror \
 xcrun clang -O1 -g -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
   "$repo_dir/Tests/ROBAccumulatedSurfaceMapFixtureTests.c" -o "$fixture_dir/surfaces-sanitized"
 "$fixture_dir/surfaces-sanitized"
+xcrun clang -O2 -std=c11 -Wall -Wextra -Werror \
+  "$repo_dir/Tests/ROBAccumulatedSurfaceTemporalFixtureTests.c" -o "$fixture_dir/temporal"
+"$fixture_dir/temporal"
+xcrun clang -O1 -g -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+  "$repo_dir/Tests/ROBAccumulatedSurfaceTemporalFixtureTests.c" -o "$fixture_dir/temporal-sanitized"
+"$fixture_dir/temporal-sanitized"

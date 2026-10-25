@@ -21,6 +21,7 @@
 + (float)presentationScale {return 1.2f;}
 @end
 @interface ROBDepthCloudFrame : NSObject
+@property CVPixelBufferRef rgbPixelBuffer;
 @property BOOL isBelly,hasCalibratedIntrinsics;
 @property NSInteger width,height;
 @property(copy) NSString *captureStreamID;

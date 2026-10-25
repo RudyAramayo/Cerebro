@@ -27,14 +27,6 @@ typedef struct {
     double rgb[3], pendingRGB[3];
 } ROBSurfaceVoxel;
 typedef struct {
-    ROBSurfaceVoxel *slots;
-    uint32_t touched[ROBSurfaceMaximumInput];
-    size_t count, tombstones;
-    uint64_t frame;
-    double lastCapture;
-    bool full;
-} ROBSurfaceMap;
-typedef struct {
     int width, height;
     const uint8_t *depthLittleEndian;
     double fx, fy, cx, cy;
@@ -43,6 +35,8 @@ typedef struct {
 typedef struct { uint16_t x, y, width, height; } ROBSurfaceRectangle;
 typedef struct {
     ROBSurfacePoint normal, u, v;
+    ROBSurfacePoint centroid;
+    uint32_t trackID;
     double offset;
     int originU, originV, width, height;
     uint32_t *rgba;
@@ -53,9 +47,41 @@ typedef struct {
 typedef struct {
     bool valid;
     ROBSurfacePoint center;
+    ROBSurfacePoint axis;
     double radius, height, rms, observedArcRadians;
+    double observedAgeSeconds;
+    uint32_t trackID;
     size_t support;
 } ROBSurfaceCylinder;
+typedef struct {
+    bool valid;
+    uint32_t id;
+    ROBSurfacePoint normal, u, v;
+    ROBSurfacePoint centroid;
+    double offset, lastSeen;
+    uint64_t lastFrame;
+    unsigned fits;
+} ROBSurfacePlaneTrack;
+typedef struct {
+    ROBSurfaceCylinder cylinder;
+    double lastSeen;
+    unsigned contradictions;
+} ROBSurfaceCylinderTrack;
+typedef struct {
+    ROBSurfaceVoxel *slots;
+    ROBSurfaceSample *recentSamples; /* Two raw frames; small objects retain detail. */
+    size_t recentCounts[2];
+    double recentTimes[2];
+    unsigned recentIndex;
+    ROBSurfacePlaneTrack planeTracks[12];
+    ROBSurfaceCylinderTrack cylinderTracks[4];
+    uint32_t nextTrackID;
+    uint32_t touched[ROBSurfaceMaximumInput];
+    size_t count, tombstones;
+    uint64_t frame;
+    double lastCapture;
+    bool full;
+} ROBSurfaceMap;
 typedef struct {
     ROBSurfacePlane planes[ROBSurfaceMaximumPlanes];
     size_t planeCount, quadCount, stableVoxelCount;
@@ -78,10 +104,11 @@ static inline uint32_t ROBSurfaceHash(int x, int y, int z) {
 static inline ROBSurfaceMap *ROBSurfaceMapCreate(void) {
     ROBSurfaceMap *m = calloc(1,sizeof(*m));
     if (m) m->slots = calloc(ROBSurfaceSlotCount,sizeof(*m->slots));
-    if (m && !m->slots) { free(m); return NULL; }
+    if (m) m->recentSamples=calloc(2*ROBSurfaceMaximumInput,sizeof(*m->recentSamples));
+    if (m && (!m->slots || !m->recentSamples)) { free(m->slots);free(m->recentSamples);free(m);return NULL; }
     return m;
 }
-static inline void ROBSurfaceMapDestroy(ROBSurfaceMap *m) { if (m) { free(m->slots); free(m); } }
+static inline void ROBSurfaceMapDestroy(ROBSurfaceMap *m) { if (m) { free(m->slots);free(m->recentSamples);free(m); } }
 static inline int ROBSurfaceFind(const ROBSurfaceMap *m, int x, int y, int z, bool insert) {
     uint32_t start = ROBSurfaceHash(x,y,z); int tombstone = -1;
     for (uint32_t probe=0;probe<ROBSurfaceSlotCount;probe++) {
@@ -231,6 +258,17 @@ static inline bool ROBSurfaceMapIntegrate(ROBSurfaceMap *m, const ROBSurfaceSamp
         for (int c=0;c<3;c++) v->rgb[c]=v->rgb[c]*(1-weight)+v->pendingRGB[c]*weight/n;
         if (v->frames < UINT16_MAX) v->frames++; v->lastSeen=capturedAt; v->misses=0;
     }
+    m->recentIndex=(m->recentIndex+1)%2;
+    memcpy(m->recentSamples+m->recentIndex*ROBSurfaceMaximumInput,samples,count*sizeof(*samples));
+    m->recentCounts[m->recentIndex]=count;m->recentTimes[m->recentIndex]=capturedAt;
+    for (int i=0;i<4;i++) {
+        ROBSurfaceCylinderTrack *t=&m->cylinderTracks[i];if (!t->cylinder.valid) continue;
+        unsigned through=0;
+        for (int j=-1;j<=1;j++) if (ROBSurfaceContradicted(ROBSurfaceAdd(t->cylinder.center,
+            ROBDepthFloorScale(t->cylinder.axis,j*t->cylinder.height*.25)),view)) through++;
+        t->contradictions=through>=2 ? t->contradictions+1 : 0;
+        if (t->contradictions>=2) t->cylinder.valid=false;
+    }
     return true;
 }
 
@@ -292,7 +330,7 @@ static inline bool ROBSurfaceFitPlane(const ROBSurfaceSample *samples, const uin
         if (fabs(error) <= .015) { squared+=error*error;inliers++; }
     }
     if (inliers < 80 || sqrt(squared/inliers) > .010) return false;
-    plane->normal=normal;plane->offset=offset;plane->rms=sqrt(squared/inliers);
+    plane->normal=normal;plane->offset=offset;plane->rms=sqrt(squared/inliers);plane->centroid=mean;
     ROBSurfacePoint axis=fabs(normal.y) < .9 ? (ROBSurfacePoint){0,1,0} : (ROBSurfacePoint){1,0,0};
     plane->u=ROBDepthFloorCross(axis,normal);
     plane->u=ROBDepthFloorScale(plane->u,1/sqrt(ROBDepthFloorDot(plane->u,plane->u)));
@@ -335,6 +373,41 @@ static inline bool ROBSurfaceRasterizePlane(ROBSurfacePlane *p, const ROBSurface
     }
     free(accum);free(covered);return p->rectangleCount > 0;
 }
+/* Plane identity and its UV frame survive refits. A near-vertical normal can
+ * change sign numerically; matching is sign independent. Never derive a new
+ * texture basis or move an established plane on each camera update. */
+static inline void ROBSurfaceAnchorPlane(ROBSurfaceMap *m, ROBSurfacePlane *p, uint32_t matched[ROBSurfaceMaximumPlanes], size_t matchedCount) {
+    int best=-1;double error=.025;
+    for (int i=0;i<12;i++) {
+        ROBSurfacePlaneTrack *t=&m->planeTracks[i];
+        if (m->lastCapture-t->lastSeen>90) t->valid=false;
+        if (!t->valid) continue;
+        bool used=false;for (size_t j=0;j<matchedCount;j++) if (matched[j]==t->id) used=true;
+        double dot=ROBDepthFloorDot(t->normal,p->normal),sign=dot<0 ? -1 : 1;
+        double distance=fabs(t->offset-p->offset*sign);
+        if (!used && fabs(dot)>.999 && distance<error) {best=i;error=distance;}
+    }
+    if (best<0) {
+        for (int i=0;i<12;i++) if (!m->planeTracks[i].valid || m->lastCapture-m->planeTracks[i].lastSeen>90) {best=i;break;}
+        if (best<0) return;
+        m->planeTracks[best]=(ROBSurfacePlaneTrack){true,++m->nextTrackID,p->normal,p->u,p->v,p->centroid,p->offset,m->lastCapture,m->frame,0};
+    }
+    ROBSurfacePlaneTrack *t=&m->planeTracks[best];t->lastSeen=m->lastCapture;
+    if (t->lastFrame!=m->frame || !t->fits) {t->fits++;t->lastFrame=m->frame;}
+    if (p->support>=400 && t->fits<2) t->fits=2;
+    p->trackID=t->id;p->normal=t->normal;p->u=t->u;p->v=t->v;p->offset=t->offset;
+}
+static inline size_t ROBSurfacePlaneSupport(ROBSurfacePlane *p, const ROBSurfaceSample *samples, const uint8_t *used, size_t count) {
+    size_t support=0;double squared=0;
+    for (size_t i=0;i<count;i++) if (!used[i]) {
+        double error=ROBDepthFloorDot(p->normal,samples[i].point)+p->offset;
+        if (fabs(error)<=.015) {support++;squared+=error*error;}
+    }
+    p->support=support;if (support) p->rms=sqrt(squared/support);return support;
+}
+static inline void ROBSurfaceSkipPlane(const ROBSurfacePlane *p, const ROBSurfaceSample *samples, uint8_t *used, size_t count) {
+    for (size_t i=0;i<count;i++) if (!used[i] && fabs(ROBDepthFloorDot(p->normal,samples[i].point)+p->offset)<=.015) used[i]=2;
+}
 /* Fit a KNOWN upright can-size prior to observed side samples. Completion is
  * deliberately a separate output: unseen back/top pixels are never invented. */
 static inline ROBSurfaceCylinder ROBSurfaceFitCylinder(const ROBSurfaceSample *samples, size_t count,
@@ -373,20 +446,102 @@ static inline ROBSurfaceCylinder ROBSurfaceFitCylinder(const ROBSurfaceSample *s
         int level=(int)((p.y-baseY)/height*3);if (level<0) level=0;if (level>2) level=2;heightMask|=1u<<level;
     }
     unsigned bins=0;for (int i=0;i<12;i++) if (angleMask&(1u<<i)) bins++;
-    if (inliers < 20 || inliers < count*.8 || bins < 4 || heightMask != 7 || high-low < height*.6 ||
+    if (inliers < 20 || inliers < count*.55 || bins < 4 || heightMask != 7 || high-low < height*.6 ||
         high < baseY+height*.8 || sqrt(squared/inliers) > .0045) return out;
     /* Circular gap yields actual angular support, independent of the seam. */
     for (size_t i=1;i<inliers;i++) { double value=angles[i];size_t j=i;while (j && angles[j-1]>value) {angles[j]=angles[j-1];j--;}angles[j]=value; }
     double gap=angles[0]+2*3.14159265358979323846-angles[inliers-1];
     for (size_t i=1;i<inliers;i++) gap=fmax(gap,angles[i]-angles[i-1]);
     double arc=2*3.14159265358979323846-gap;if (arc < 1.5) return out;
-    out.valid=true;out.center=(ROBSurfacePoint){bx,baseY+height/2,bz};out.radius=radius;out.height=height;
+    out.valid=true;out.center=(ROBSurfacePoint){bx,baseY+height/2,bz};out.axis=(ROBSurfacePoint){0,1,0};out.radius=radius;out.height=height;
     out.rms=sqrt(squared/inliers);out.observedArcRadians=arc;out.support=inliers;return out;
 }
 static inline void ROBSurfaceMeshDestroy(ROBSurfaceMesh *mesh) {
     if (!mesh) return;for (size_t i=0;i<ROBSurfaceMaximumPlanes;i++) { free(mesh->planes[i].rgba);free(mesh->planes[i].rectangles); }free(mesh);
 }
-static inline ROBSurfaceMesh *ROBSurfaceMapBuildMesh(const ROBSurfaceMap *m) {
+static inline size_t ROBSurfaceCylinderEvidence(ROBSurfaceCylinder c, const ROBSurfaceSample *samples, size_t count) {
+    size_t hits=0;double low=DBL_MAX,high=-DBL_MAX;
+    for (size_t i=0;i<count;i++) {
+        ROBSurfacePoint p=ROBDepthFloorSubtract(samples[i].point,c.center);
+        double height=ROBDepthFloorDot(p,c.axis);if (fabs(height)>c.height/2+.015) continue;
+        ROBSurfacePoint radial=ROBDepthFloorSubtract(p,ROBDepthFloorScale(c.axis,height));
+        if (fabs(sqrt(ROBDepthFloorDot(radial,radial))-c.radius)>.015) continue;
+        hits++;low=fmin(low,height);high=fmax(high,height);
+    }
+    return high-low>=.03 ? hits : 0;
+}
+static inline bool ROBSurfaceCanAppearance(uint32_t rgba) {
+    double r=(rgba>>24)&255,g=(rgba>>16)&255,b=(rgba>>8)&255;
+    return r>70 && r>g*1.3 && r>b*1.3 && b>g*.75;
+}
+static inline void ROBSurfaceUpdateCylinders(ROBSurfaceMap *m, ROBSurfaceMesh *mesh) {
+    for (int i=0;i<4;i++) if (m->lastCapture-m->cylinderTracks[i].lastSeen>3) m->cylinderTracks[i].cylinder.valid=false;
+    const ROBSurfaceSample *current=m->recentSamples+m->recentIndex*ROBSurfaceMaximumInput;
+    size_t currentCount=m->recentCounts[m->recentIndex],count=0;
+    ROBSurfaceSample *fine=calloc(2*ROBSurfaceMaximumInput,sizeof(*fine));
+    uint8_t *visited=calloc(2*ROBSurfaceMaximumInput,1);
+    if (!fine || !visited) {free(fine);free(visited);return;}
+    for (int frame=0;frame<2;frame++) if (m->lastCapture-m->recentTimes[frame]<=2) {
+        memcpy(fine+count,m->recentSamples+frame*ROBSurfaceMaximumInput,m->recentCounts[frame]*sizeof(*fine));
+        count+=m->recentCounts[frame];
+    }
+    unsigned attempts=0;bool updated[4]={0};
+    for (size_t plane=0;plane<mesh->planeCount && attempts<16;plane++) {
+        ROBSurfacePlane *p=&mesh->planes[plane];if (p->normal.y<.7) continue;
+        memset(visited,0,count);
+        for (size_t i=0;i<count && attempts<16;i++) if (!visited[i] && ROBSurfacePointValid(fine[i].point) && ROBSurfaceCanAppearance(fine[i].rgba)) {
+            ROBSurfacePoint seed=fine[i].point;
+            double height=ROBDepthFloorDot(p->normal,seed)+p->offset;
+            if (height<.025 || height>.145) continue;
+            double su=ROBDepthFloorDot(p->u,seed),sv=ROBDepthFloorDot(p->v,seed);
+            int u=(int)floor(su/ROBSurfaceTexelSize)-p->originU,v=(int)floor(sv/ROBSurfaceTexelSize)-p->originV;
+            unsigned nearby=0;
+            for (int y=-2;y<=2;y++) for (int x=-2;x<=2;x++) if (u+x>=0 && u+x<p->width && v+y>=0 && v+y<p->height &&
+                p->rgba[(size_t)(v+y)*p->width+u+x]) nearby++;
+            if (nearby<4) continue;
+            ROBSurfaceSample local[1024];size_t n=0,seen=0;uint32_t random=0x51c331u;
+            for (size_t j=0;j<count;j++) if (ROBSurfacePointValid(fine[j].point) && ROBSurfaceCanAppearance(fine[j].rgba)) {
+                ROBSurfacePoint world=fine[j].point;
+                double h=ROBDepthFloorDot(p->normal,world)+p->offset;
+                double x=ROBDepthFloorDot(p->u,world),z=ROBDepthFloorDot(p->v,world);
+                if (h<.016 || h>.145 || hypot(x-su,z-sv)>.09) continue;
+                visited[j]=1;seen++;
+                ROBSurfaceSample sample={{x,h,z},fine[j].rgba};
+                if (n<1024) local[n++]=sample;
+                else {size_t slot=ROBSurfaceRandom(&random)%seen;if (slot<1024) local[slot]=sample;}
+            }
+            attempts++;
+            ROBSurfaceCylinder c=ROBSurfaceFitCylinder(local,n,0,.033,.115);if (!c.valid) continue;
+            c.center=ROBSurfaceAdd(ROBDepthFloorScale(p->normal,c.center.y-p->offset),
+                ROBSurfaceAdd(ROBDepthFloorScale(p->u,c.center.x),ROBDepthFloorScale(p->v,c.center.z)));
+            c.axis=p->normal;
+            if (ROBSurfaceCylinderEvidence(c,current,currentCount)<6) continue;
+            int match=-1;double nearest=.065;
+            for (int j=0;j<4;j++) if (m->cylinderTracks[j].cylinder.valid) {
+                double distance=sqrt(ROBSurfaceDistance2(c.center,m->cylinderTracks[j].cylinder.center));
+                if (distance<nearest && ROBDepthFloorDot(c.axis,m->cylinderTracks[j].cylinder.axis)>.97) {nearest=distance;match=j;}
+            }
+            if (match>=0 && updated[match]) continue;
+            if (match<0) for (int j=0;j<4;j++) if (!m->cylinderTracks[j].cylinder.valid || m->lastCapture-m->cylinderTracks[j].lastSeen>3) {match=j;break;}
+            if (match<0) continue;
+            ROBSurfaceCylinderTrack *t=&m->cylinderTracks[match];
+            if (t->cylinder.valid && m->lastCapture-t->lastSeen<=3) {
+                c.center=ROBSurfaceAdd(ROBDepthFloorScale(t->cylinder.center,.8),ROBDepthFloorScale(c.center,.2));
+                c.trackID=t->cylinder.trackID;
+            } else c.trackID=++m->nextTrackID;
+            t->cylinder=c;t->lastSeen=m->lastCapture;t->contradictions=0;updated[match]=true;
+        }
+    }
+    for (int i=0;i<4;i++) {
+        ROBSurfaceCylinderTrack *t=&m->cylinderTracks[i];if (!t->cylinder.valid) continue;
+        if (!updated[i] && ROBSurfaceCylinderEvidence(t->cylinder,current,currentCount)>=6) t->lastSeen=m->lastCapture;
+        double age=m->lastCapture-t->lastSeen;
+        if (age>3 || t->contradictions>=2) {t->cylinder.valid=false;continue;}
+        t->cylinder.observedAgeSeconds=age;mesh->cylinders[mesh->cylinderCount++]=t->cylinder;
+    }
+    free(fine);free(visited);
+}
+static inline ROBSurfaceMesh *ROBSurfaceMapBuildMesh(ROBSurfaceMap *m) {
     if (!m) return NULL;ROBSurfaceMesh *mesh=calloc(1,sizeof(*mesh));
     ROBSurfaceSample *samples=calloc(m->count+1,sizeof(*samples));uint8_t *used=calloc(m->count+1,1);
     if (!mesh || !samples || !used) { free(samples);free(used);ROBSurfaceMeshDestroy(mesh);return NULL; }
@@ -394,49 +549,48 @@ static inline ROBSurfaceMesh *ROBSurfaceMapBuildMesh(const ROBSurfaceMap *m) {
         samples[count++]=(ROBSurfaceSample){m->slots[i].point,ROBSurfaceColor(&m->slots[i])};
     }
     mesh->stableVoxelCount=count;mesh->truncated=m->full;
-    for (size_t i=0;i<ROBSurfaceMaximumPlanes;i++) {
-        ROBSurfacePlane *p=&mesh->planes[i];
-        if (!ROBSurfaceFitPlane(samples,used,count,p)) break;
+    uint32_t matched[ROBSurfaceMaximumPlanes]={0};
+    /* Reuse confirmed surfaces before seeking new ones. They survive noisy
+     * RANSAC proposals while actual accumulated support remains. */
+    for (int i=0;i<12 && mesh->planeCount<ROBSurfaceMaximumPlanes;i++) {
+        ROBSurfacePlaneTrack *t=&m->planeTracks[i];if (!t->valid || t->fits<2 || m->lastCapture-t->lastSeen>90) continue;
+        ROBSurfacePlane *p=&mesh->planes[mesh->planeCount];
+        p->normal=t->normal;p->u=t->u;p->v=t->v;p->centroid=t->centroid;p->offset=t->offset;p->trackID=t->id;
+        bool duplicate=false;
+        for (size_t j=0;j<mesh->planeCount;j++) if (fabs(ROBDepthFloorDot(p->normal,mesh->planes[j].normal))>.97 &&
+            fabs(ROBDepthFloorDot(mesh->planes[j].normal,p->centroid)+mesh->planes[j].offset)<.035) duplicate=true;
+        if (duplicate) {ROBSurfaceSkipPlane(p,samples,used,count);memset(p,0,sizeof(*p));continue;}
+        if (ROBSurfacePlaneSupport(p,samples,used,count)<80 || p->rms>.010) {memset(p,0,sizeof(*p));continue;}
+        p->support=0;
         if (!ROBSurfaceRasterizePlane(p,samples,used,count,ROBSurfaceMaximumQuads-mesh->quadCount)) {
-            free(p->rgba);free(p->rectangles);memset(p,0,sizeof(*p));break;
+            free(p->rgba);free(p->rectangles);memset(p,0,sizeof(*p));continue;
         }
+        t->lastSeen=m->lastCapture;matched[mesh->planeCount]=t->id;
         mesh->planeCount++;mesh->quadCount+=p->rectangleCount;
     }
+    for (unsigned attempt=0;attempt<18 && mesh->planeCount<ROBSurfaceMaximumPlanes;attempt++) {
+        ROBSurfacePlane *p=&mesh->planes[mesh->planeCount];
+        if (!ROBSurfaceFitPlane(samples,used,count,p)) break;
+        bool duplicate=false;
+        for (size_t j=0;j<mesh->planeCount;j++) if (fabs(ROBDepthFloorDot(p->normal,mesh->planes[j].normal))>.97 &&
+            fabs(ROBDepthFloorDot(mesh->planes[j].normal,p->centroid)+mesh->planes[j].offset)<.035) duplicate=true;
+        if (duplicate) {ROBSurfaceSkipPlane(p,samples,used,count);memset(p,0,sizeof(*p));continue;}
+        ROBSurfacePlaneSupport(p,samples,used,count);ROBSurfaceAnchorPlane(m,p,matched,mesh->planeCount);
+        bool confirmed=false;for (int j=0;j<12;j++) if (m->planeTracks[j].id==p->trackID && m->planeTracks[j].fits>=2) confirmed=true;
+        if (!confirmed) {ROBSurfaceSkipPlane(p,samples,used,count);memset(p,0,sizeof(*p));continue;}
+        p->support=0;
+        if (!ROBSurfaceRasterizePlane(p,samples,used,count,ROBSurfaceMaximumQuads-mesh->quadCount)) {
+            free(p->rgba);free(p->rectangles);memset(p,0,sizeof(*p));continue;
+        }
+        matched[mesh->planeCount]=p->trackID;mesh->planeCount++;mesh->quadCount+=p->rectangleCount;
+    }
     size_t residualsSeen=0;uint32_t random=0x971bc3u;
-    for (size_t i=0;i<count;i++) if (!used[i]) {
+    for (size_t i=0;i<count;i++) if (used[i]!=1) {
         residualsSeen++;if (mesh->residualCount<ROBSurfaceMaximumResiduals) mesh->residuals[mesh->residualCount++]=samples[i];
         else { size_t slot=ROBSurfaceRandom(&random)%residualsSeen;if (slot<ROBSurfaceMaximumResiduals) mesh->residuals[slot]=samples[i]; }
     }
     if (residualsSeen > ROBSurfaceMaximumResiduals || mesh->quadCount == ROBSurfaceMaximumQuads) mesh->truncated=true;
-    /* Can candidates must sit on a fitted, observed horizontal surface. Search
-     * only small residual neighbourhoods; room planes cannot become cylinders. */
-    unsigned cylinderAttempts=0;
-    for (size_t plane=0;plane<mesh->planeCount && mesh->cylinderCount<4 && cylinderAttempts<16;plane++) {
-        ROBSurfacePlane *p=&mesh->planes[plane];if (p->normal.y < .995) continue;
-        for (size_t i=0;i<count && mesh->cylinderCount<4 && cylinderAttempts<16;i++) if (!used[i]) {
-            ROBSurfacePoint seed=samples[i].point;
-            double base=-(p->offset+p->normal.x*seed.x+p->normal.z*seed.z)/p->normal.y;
-            if (base<.25 || base>1.5 || seed.y<=base+.02 || seed.y>=base+.14) continue;
-            int u=(int)floor(ROBDepthFloorDot(p->u,seed)/ROBSurfaceTexelSize)-p->originU,
-                v=(int)floor(ROBDepthFloorDot(p->v,seed)/ROBSurfaceTexelSize)-p->originV;
-            unsigned nearby=0;
-            for (int y=-2;y<=2;y++) for (int x=-2;x<=2;x++) if (u+x>=0 && u+x<p->width && v+y>=0 && v+y<p->height &&
-                p->rgba[(size_t)(v+y)*p->width+u+x]) nearby++;
-            if (nearby<4) continue;
-            bool duplicate=false;
-            for (size_t j=0;j<mesh->cylinderCount;j++) if (hypot(seed.x-mesh->cylinders[j].center.x,seed.z-mesh->cylinders[j].center.z)<.1) duplicate=true;
-            if (duplicate) continue;
-            ROBSurfaceSample local[512];size_t n=0;
-            for (size_t j=0;j<count && n<512;j++) if (!used[j] && samples[j].point.y>base+.005 && samples[j].point.y<base+.14 &&
-                hypot(seed.x-samples[j].point.x,seed.z-samples[j].point.z)<.085) local[n++]=samples[j];
-            /* Avoid re-fitting every point in the same rejected neighbourhood. */
-            for (size_t j=0;j<count;j++) if (!used[j] && samples[j].point.y>base+.005 && samples[j].point.y<base+.14 &&
-                hypot(seed.x-samples[j].point.x,seed.z-samples[j].point.z)<.085) used[j]=2;
-            cylinderAttempts++;
-            ROBSurfaceCylinder cylinder=ROBSurfaceFitCylinder(local,n,base,.033,.115);
-            if (cylinder.valid) mesh->cylinders[mesh->cylinderCount++]=cylinder;
-        }
-    }
+    ROBSurfaceUpdateCylinders(m,mesh);
     free(samples);free(used);return mesh;
 }
 
