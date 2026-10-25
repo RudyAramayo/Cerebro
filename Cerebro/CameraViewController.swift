@@ -183,6 +183,9 @@ enum ROBSwordTrackerColor: String, CaseIterable {
     public let height: Int
     public let rgbPixelBuffer: CVPixelBuffer?
     public let isBelly: Bool
+    /// Objective-C display consumers share the exact source identity used by calibration.
+    public var captureStreamID: String? { sourceCaptureStreamID }
+    public var sequence: UInt64 { sourceSequence ?? 0 }
     @nonobjc let calibratedIntrinsics: CameraIntrinsics?
     /// Exact source metadata, when forwarded by the producer. Arrival time
     /// and capture ordinals must never stand in for these camera identities.
