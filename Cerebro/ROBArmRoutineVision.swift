@@ -2279,11 +2279,11 @@ struct ROBWorkspaceCanSelection {
         if requireDepth,collectCollisionDepth,fixedRegisteredView==nil,
            found[.can] != nil,(found[.orangeBucket] != nil || targets == [.can]),try permitsLocalCanShapePrior(),
            let originalMap=collisionMap,originalMap.estimatedCameraProjectionIdentity != nil {
-            let started=ProcessInfo.processInfo.systemUptime,deadline=started+9.5
+            let started=ProcessInfo.processInfo.systemUptime,deadline=started+14
             let sceneID=originalMap.sceneID,camera=vision.cameraGeneration,body=originalMap.bodyMotionIdentity
             let desiredPan=model.physicalSide=="right" ? -55.0 : 55.0
             let alternatePan=model.physicalSide=="right" ? -35.0 : 35.0
-            let coverageViews=[desiredPan,alternatePan].map {
+            let coverageViews=[alternatePan,desiredPan].map {
                 ROBWorkspaceView(panDegrees:boundedPan?($0) ?? $0,upperTarget:5650)
             }
             var capturedViews=0
@@ -2324,7 +2324,7 @@ struct ROBWorkspaceCanSelection {
             }
             try requireCoverageContext()
             evidence.append(["depth_only_arm_coverage_summary":true,"captured_views":capturedViews,"maximum_views":2,
-                "elapsed_seconds":ProcessInfo.processInfo.systemUptime-started,"budget_seconds":9.5,
+                "elapsed_seconds":ProcessInfo.processInfo.systemUptime-started,"budget_seconds":14.0,
                 "scene_id":sceneID.uuidString,"occupied_returns_preserved":true,"unknown_space_gate_unchanged":true])
         }
         let missing = targets.filter { found[$0] == nil }.map(\.spokenName)

@@ -698,6 +698,8 @@ final class ROBArmRoutineCoordinator {
         precondition(!trial.continueOperation(stage: "object_placed"), "Idle readiness admitted an operation")
         let broker = ROBControllerArmApproval.shared
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("left-arm-fixture-" + UUID().uuidString)
+        broker.standingCanCampaignDirectory=folder.appendingPathComponent("isolated-standing-state")
+        broker.localRecyclingApprovalAuditDirectory=folder.appendingPathComponent("isolated-local-audit")
         trial.recordingDirectory = folder
         trial.canReachCalibrationFile = folder.appendingPathComponent("isolated-can-calibration.json")
         trial.recyclingTestParametersFile = folder.appendingPathComponent("isolated-recycling-parameters.json")

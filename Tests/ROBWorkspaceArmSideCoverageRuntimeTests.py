@@ -31,9 +31,9 @@ final class Vision {
  var cameraGeneration=UUID(),next:UInt64=2
  var mode="normal"
  func settledDepthFrame(deadlineUptime:Double?)async throws->Frame {
-  precondition(deadlineUptime==109.5)
+  precondition(deadlineUptime==114.0)
   if mode=="frame_unavailable" {throw ROBWorkspaceDepthMapError.acquisition}
-  if mode=="deadline" {ProcessInfo.processInfo.systemUptime=110}
+  if mode=="deadline" {ProcessInfo.processInfo.systemUptime=115}
   if mode=="source_changed" {cameraGeneration=UUID()}
   let frame=Frame(sequence:next,capturedAt:1000+Double(next)*100);next+=1
   return frame
@@ -56,7 +56,7 @@ struct Result {let evidence:[[String:Any]];let views:[ROBWorkspaceView];let capt
  func requireSceneProjectionIdentity()throws {}
  func progress(_ value:String) {}
  func moveView(_ view:ROBWorkspaceView,deadlineUptime:Double?)async throws->Bool {
-  precondition(deadlineUptime==109.5);views.append(view)
+  precondition(deadlineUptime==114.0);views.append(view)
   return mode != "view_unavailable"
  }
  func accumulateCollisionDepth(_ view:ROBWorkspaceView,capturedFrame:Frame?,preservingSceneID:UUID?)async throws {
@@ -72,13 +72,13 @@ struct Result {let evidence:[[String:Any]];let views:[ROBWorkspaceView];let capt
 @main struct CoverageFixtures {
  @MainActor static func main()async throws {
   let right=try await exercise()
-  precondition(right.views==[.init(panDegrees:-55,upperTarget:5650),.init(panDegrees:-35,upperTarget:5650)])
+  precondition(right.views==[.init(panDegrees:-35,upperTarget:5650),.init(panDegrees:-55,upperTarget:5650)])
   precondition(right.captured.map(\.sequence)==[2,3] && right.captured.map(\.capturedAt)==[1200,1300])
   precondition(right.evidence.filter{$0["depth_only_arm_coverage"] as? Bool==true}.count==2)
   precondition(right.evidence.allSatisfy{$0["detector_invoked"] as? Bool != true && $0["free_space_inferred"] as? Bool != true})
-  let summary=right.evidence.last!;precondition(summary["captured_views"] as! Int==2 && summary["budget_seconds"] as! Double==9.5)
+  let summary=right.evidence.last!;precondition(summary["captured_views"] as! Int==2 && summary["budget_seconds"] as! Double==14.0)
   precondition(summary["scene_id"] as! String==right.map!.sceneID.uuidString)
-  let left=try await exercise(side:"left");precondition(left.views==[.init(panDegrees:55,upperTarget:5650),.init(panDegrees:35,upperTarget:5650)])
+  let left=try await exercise(side:"left");precondition(left.views==[.init(panDegrees:35,upperTarget:5650),.init(panDegrees:55,upperTarget:5650)])
   let firstGrasp=try await exercise(objects:false,canOnly:true)
   precondition(firstGrasp.views.count==2 && firstGrasp.captured.count==2,"Can-only grasp must retain whole-arm coverage without finding a bucket first")
   for mode in 0..<3 {
@@ -94,7 +94,7 @@ struct Result {let evidence:[[String:Any]];let views:[ROBWorkspaceView];let capt
    do {_=try await exercise(mode:mode);preconditionFailure("Changed context published coverage")}
    catch ROBWorkspaceDepthMapError.invalidFrame {}
   }
-  print("PASS actual selected-arm depth-only coverage: local-only/defaultclosed/fixed-head untouched, two mirrored views/shared9.5sdeadline, exact original timestamps/same scene enrollment, no detector or free-space invention, source/body/map changes reject")
+  print("PASS actual selected-arm depth-only coverage: local-only/defaultclosed/fixed-head untouched, two mirrored views/shared14sdeadline, exact original timestamps/same scene enrollment, no detector or free-space invention, source/body/map changes reject")
  }
 }
 '''
