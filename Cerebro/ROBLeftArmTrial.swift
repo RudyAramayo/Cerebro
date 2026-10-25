@@ -68,6 +68,8 @@ struct ROBReviewedArmDispatchStart {
     private var localReceiptEvidence: NSDictionary?
     private var localReceiptHeldNeckIdentity: String?
     private var localReceiptPerceptionFailure = false
+    @nonobjc private var localReceiptContextComponents: [String:String]?
+    @nonobjc private(set) var localRecyclingContextDiagnostics: NSDictionary = [:]
     @nonobjc private var localReceiptModel: ROBGhostRobotModel?
     private var localReceiptCameraTimer: Timer?
     @nonobjc private var activeLocalRetreat: ROBWorkspaceInitialEmptyRetreat?
@@ -581,6 +583,11 @@ struct ROBReviewedArmDispatchStart {
             self?.update(result["detail"] as? String ?? "Left-arm operation ended"); completion(result)
         }
         if localReceiptOnly {
+            guard vision.fresh else {
+                completion(["status":"blocked","arm_motion_sent":false,"reach_sent":false,"jaw_command_sent":false,
+                    "detail":"A fresh enrolled RGB-D frame is required to prepare this local recycling job."]);return
+            }
+            localReceiptContextComponents=nil
             ROBControllerArmApproval.shared.requestRecyclingWorkspaceTask(command:requestedCommand,arm:physicalSide,canCount:canCount,
                 summary:approvedSummary,contextIdentity:{[weak self] in self?.currentLocalRecyclingContextIdentity()},receiptOnly:true,
                 permitsUnmeasuredVisualCalibrationTrial:true,execute:execute,cancel:cancel,completion:finished)
@@ -638,21 +645,35 @@ struct ROBReviewedArmDispatchStart {
     /// Stable job identity deliberately excludes neck targets and arm q: both
     /// may legitimately change during the authorized search/planned motion.
     private func currentLocalRecyclingContextIdentity() -> String? {
-        guard Thread.isMainThread, gateway.isReady(), vision.fresh else {return nil}
+        func unavailable(_ reason:String)->String? {
+            localRecyclingContextDiagnostics=["status":"unavailable","reason":reason,"camera_frame_fresh":vision.fresh]
+            return nil
+        }
+        guard Thread.isMainThread,gateway.isReady() else {return unavailable("gateway_unavailable")}
         if localReceiptModel?.physicalSide != physicalSide {localReceiptModel=try?workspaceModel()}
-        guard let model=localReceiptModel,
-              let session = (gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value,session>0,
-              let frame = vision.snapshot()["face"],frame.cameraGeneration == vision.cameraGeneration,
-              let runtime = frame.intrinsics?.runtimeCalibration?.identity,
-              let projection = ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model),
-              runtime.count == 64,projection.count == 64,
-              localVisualTrialAssumedSpatialErrorMeters.isFinite,(0.025...0.15).contains(localVisualTrialAssumedSpatialErrorMeters) else {return nil}
+        guard let model=localReceiptModel else {return unavailable("model_unavailable")}
+        guard let session=(gateway.connectionSnapshot()["sessionGeneration"] as? NSNumber)?.uint64Value,session>0 else {return unavailable("gateway_generation_unavailable")}
+        guard let frame=vision.snapshot()["face"] else {return unavailable("enrolled_face_snapshot_unavailable")}
+        guard frame.cameraGeneration==vision.cameraGeneration else {return unavailable("face_capture_generation_changed")}
+        guard let calibration=frame.intrinsics?.runtimeCalibration,calibration.identity.count==64,
+              calibration.stereoPolicySHA256.count==64 else {return unavailable("actual_runtime_or_mode_identity_unavailable")}
+        guard let projection=ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model),projection.count==64 else {return unavailable("physical_projection_identity_unavailable")}
+        guard localVisualTrialAssumedSpatialErrorMeters.isFinite,(0.025...0.15).contains(localVisualTrialAssumedSpatialErrorMeters) else {return unavailable("assumed_spatial_allowance_invalid")}
+        // Vision's generation enrolls the actual source, stream, dimensions
+        // and K; the runtime policy binds actual HOST stereo mode/normalization.
+        // A transient age/depth-coverage lapse is readiness, not a new identity.
         let value:[String:Any] = ["kind":"local_four_can_visual_trial_context_v1","physicalSide":physicalSide,
-            "cameraGeneration":vision.cameraGeneration.uuidString,"runtimeCalibrationIdentity":runtime,
+            "cameraGeneration":vision.cameraGeneration.uuidString,"runtimeCalibrationIdentity":calibration.identity,
+            "stereoPolicySHA256":calibration.stereoPolicySHA256,
             "gatewayGeneration":NSNumber(value:session),"bodyMotionIdentity":ROBFixedHeadBodyMotionIdentity.currentIdentity,
             "modelID":model.modelID,"referenceID":model.referenceID,"geometryID":model.geometryID,
             "mappingID":model.selectedMappingID,"physicalProjectionIdentity":projection,
             "assumedSpatialErrorMeters":localVisualTrialAssumedSpatialErrorMeters]
+        let components=value.mapValues{String(describing:$0)}
+        let changed=localReceiptContextComponents.map { prior in components.keys.filter{prior[$0] != components[$0]}.sorted() } ?? []
+        if localReceiptContextComponents==nil {localReceiptContextComponents=components}
+        localRecyclingContextDiagnostics=["status":changed.isEmpty ? "current":"changed","changed_components":changed,
+            "camera_frame_fresh":vision.fresh,"source_mode_binding":"actual Vision capture generation and runtime stereo policy"]
         return (try? JSONSerialization.data(withJSONObject:value,options:.sortedKeys)).map(ROBGhostRobotModel.hash)
     }
 
@@ -734,6 +755,7 @@ struct ROBReviewedArmDispatchStart {
 
     private func requireLiveVisualTrial(_ trial:ROBWorkspaceVisualCalibrationTrial,map:ROBWorkspaceCollisionSnapshot,model:ROBGhostRobotModel) throws {
         let e=try requireLocalReceipt()
+        guard vision.fresh else {throw ROBArmRoutineError.blocked("The visual-calibration motion needs a fresh camera frame; the unchanged job receipt does not permit stale-image travel.")}
         guard trial.receiptID==e["receiptID"] as? String,trial.receiptSHA256==e["receiptSHA256"] as? String,
               trial.appSessionID==e["appSessionID"] as? String,trial.command==e["command"] as? String,
               trial.summarySHA256==e["summarySHA256"] as? String,trial.authorizationContextIdentity==e["contextIdentity"] as? String,
@@ -2252,6 +2274,7 @@ struct ROBReviewedArmDispatchStart {
         output["reach_sent"]=recyclingReachDispatched
         output["jaw_command_sent"] = jawSetupDispatchUncertain && !jawCommandDispatched ? NSNull() : jawCommandDispatched as Any
         if localJob {
+            output["local_session_context_diagnostics"]=localRecyclingContextDiagnostics
             output["perception_only_rejection"]=preserveLocalReceipt
             output["local_session_receipt_used"]=true
             output["unmeasured_visual_calibration_trial_authorized"]=true

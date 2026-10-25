@@ -97,10 +97,12 @@ import UniformTypeIdentifiers
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: Notification.Name("ROBNeckQRCalibrationDidChange"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: ROBBellyQRCalibrationWindowController.changed, object: nil)
         table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
-        collisionRefreshTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             guard let self, self.window?.isVisible == true else { return }
-            self.refreshCollisionInfo()
+            if ROBLeftArmTrial.shared.isRunning || ROBControllerArmApproval.shared.isPending { self.refresh() }
+            else { self.refreshCollisionInfo() }
         }
+        collisionRefreshTimer = timer; RunLoop.main.add(timer, forMode: .common)
         refresh()
     }
     required init?(coder: NSCoder) { fatalError("Use shared") }
@@ -534,8 +536,12 @@ import UniformTypeIdentifiers
         if selectedTrial.id == "neck-qr-calibration" {
             ROBNeckQRCalibration.shared.openLastCapture(); return
         }
-        let path = ROBLeftArmTrial.shared.lastRecordingPath
-        if !path.isEmpty { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
+        guard let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first,
+              let url = ROBLocalRecyclingSandboxRouting.latestRecordingURL(trialID: selectedTrial.id,
+                lastRecordingPath: ROBLeftArmTrial.shared.lastRecordingPath, applicationSupport: support) else {
+            parameterMessage = "No recording is available for this selected arm test."; refresh(); return
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
     @objc private func stop() {
         ROBBellyQRCalibrationWindowController.shared.stop()
@@ -558,11 +564,16 @@ import UniformTypeIdentifiers
             admissionCurrent: admissionCurrent)
     }
     @objc private func refresh() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.refresh() }; return
+        }
         refreshCollisionInfo()
         let left = ROBLeftArmTrial.shared
-        if ROBControllerArmApproval.shared.isPending {
-            // Keep the complete operation scope visible while approval is pending.
-            status.stringValue = ROBControllerArmApproval.shared.status
+        let approval = ROBControllerArmApproval.shared
+        if let activity = ROBLocalRecyclingSandboxRouting.activityStatus(trialRunning: left.isRunning,
+            trialStatus: left.status, approvalPending: approval.isPending, approvalStatus: approval.status,
+            localReceiptState: approval.localRecyclingApprovalState) {
+            status.stringValue = activity
         } else if ROBBellyQRCalibrationWindowController.shared.isRunning || selectedTrial.id == "belly-qr-calibration" {
             status.stringValue = ROBBellyQRCalibrationWindowController.shared.status
         } else if ROBNeckQRCalibration.shared.isRunning || selectedTrial.id == "neck-qr-calibration" {
@@ -574,7 +585,9 @@ import UniformTypeIdentifiers
         } else {
             status.stringValue = ROBArmRoutineCoordinator.shared.status
         }
-        if !parameterMessage.isEmpty { status.stringValue = parameterMessage + "\n" + status.stringValue }
+        if !parameterMessage.isEmpty {
+            status.stringValue = left.isRunning ? status.stringValue + "\n" + parameterMessage : parameterMessage + "\n" + status.stringValue
+        }
         session.stringValue = ROBControllerArmApproval.shared.armSessionDetail
         localApprovalInfo.stringValue = ROBLocalRecyclingSandboxRouting.scopeDescription(
             pending: ROBControllerArmApproval.shared.pendingLocalRecyclingApprovalScope,
@@ -613,6 +626,30 @@ private final class ROBTestingSandboxDocumentView: NSView {
 
 /// Local UI routing only. No text or template produced here authorizes motion.
 enum ROBLocalRecyclingSandboxRouting {
+    static func activityStatus(trialRunning: Bool, trialStatus: String, approvalPending: Bool,
+        approvalStatus: String, localReceiptState: NSDictionary?) -> String? {
+        if trialRunning {
+            return (localReceiptState?["state"] as? String == "executing" ? "Local session receipt executing.\n" : "") + trialStatus
+        }
+        return approvalPending ? approvalStatus : nil
+    }
+    static func latestRecordingURL(trialID: String, lastRecordingPath: String,
+        applicationSupport: URL, fileManager: FileManager = .default) -> URL? {
+        let arm = trialID.hasPrefix("right-") ? "right" : physicalArm(trialID: trialID)
+        guard let arm else { return lastRecordingPath.isEmpty ? nil : URL(fileURLWithPath: lastRecordingPath) }
+        let directory = applicationSupport.appendingPathComponent("Cerebro/\(arm == "right" ? "Right" : "Left")ArmTrials")
+        var files = (try? fileManager.contentsOfDirectory(at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey], options: .skipsHiddenFiles)) ?? []
+        if !lastRecordingPath.isEmpty { files.append(URL(fileURLWithPath: lastRecordingPath)) }
+        return files.filter { url in
+            url.pathExtension == "csv" && url.lastPathComponent.hasPrefix(arm + "_") &&
+                (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+        }.max { a, b in
+            let first = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let second = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return first < second
+        }
+    }
     static func spatialAllowanceMeters(_ millimeters: Double?) -> Double? {
         guard let millimeters, millimeters.isFinite, (25...150).contains(millimeters) else { return nil }
         return millimeters / 1000

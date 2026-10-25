@@ -35,6 +35,12 @@ assert 'ROBControllerArmApproval.shared.cancel(reason:' in stop
 assumption_edit = braced_declaration(source, '    public func controlTextDidChange(')
 assert 'localRecyclingApprovalState != nil' in assumption_edit and 'approval.cancel(reason:' in assumption_edit
 assert 'approval.tick()' in assumption_edit
+assert 'Notification.Name("ROBArmRoutineDidChange")' in source
+assert 'RunLoop.main.add(timer, forMode: .common)' in source
+assert 'ROBLeftArmTrial.shared.isRunning || ROBControllerArmApproval.shared.isPending { self.refresh() }' in source
+assert 'activityStatus(trialRunning: left.isRunning' in refresh
+recording = braced_declaration(source, '    @objc private func showRecording()')
+assert 'latestRecordingURL(trialID: selectedTrial.id' in recording
 for name in ('Cerebro/ROBAI.swift', 'Cerebro/ROBArmRoutineCoordinator.swift'):
     other = (ROOT / name).read_text()
     assert 'importLocalRecyclingSessionApproval' not in other
@@ -112,7 +118,34 @@ final class Sandbox {
         imported["state"]="executing"
         precondition(ROBLocalRecyclingSandboxRouting.scopeDescription(pending:nil,imported:imported).contains("executing"))
         precondition(ROBLocalRecyclingSandboxRouting.scopeDescription(pending:nil,imported:nil).contains("no imported job"))
+        let live=ROBLocalRecyclingSandboxRouting.activityStatus(trialRunning:true,trialStatus:"Searching: third camera view",
+            approvalPending:true,approvalStatus:"Authorized immutable scope",localReceiptState:imported)!
+        precondition(live.contains("receipt executing") && live.contains("Searching: third camera view") && !live.contains("Authorized immutable"))
+        precondition(ROBLocalRecyclingSandboxRouting.activityStatus(trialRunning:true,trialStatus:"Checking actual arm clearance",
+            approvalPending:true,approvalStatus:"old broker state",localReceiptState:nil)=="Checking actual arm clearance")
+        precondition(ROBLocalRecyclingSandboxRouting.activityStatus(trialRunning:false,trialStatus:"old phase",
+            approvalPending:true,approvalStatus:"Waiting for receipt",localReceiptState:nil)=="Waiting for receipt")
+        precondition(ROBLocalRecyclingSandboxRouting.activityStatus(trialRunning:false,trialStatus:"old phase",
+            approvalPending:false,approvalStatus:"old approval",localReceiptState:nil)==nil)
+        let support=FileManager.default.temporaryDirectory.appendingPathComponent("sandbox-arm-recording-"+UUID().uuidString)
+        let right=support.appendingPathComponent("Cerebro/RightArmTrials")
+        try! FileManager.default.createDirectory(at:right,withIntermediateDirectories:true)
+        defer{try?FileManager.default.removeItem(at:support)}
+        let old=right.appendingPathComponent("right_recycle_can-old.csv"),new=right.appendingPathComponent("right_recycle_can-new.csv")
+        let other=support.appendingPathComponent("left_recycle_can-latest.csv")
+        for (url,time) in [(old,100.0),(new,200.0),(other,300.0)] {
+            try! Data("synthetic recording".utf8).write(to:url)
+            try! FileManager.default.setAttributes([.modificationDate:Date(timeIntervalSince1970:time)],ofItemAtPath:url.path)
+        }
+        let selectedRight=ROBLocalRecyclingSandboxRouting.latestRecordingURL(trialID:"right-recycling",lastRecordingPath:other.path,
+            applicationSupport:support)
+        precondition(selectedRight?.standardizedFileURL.path==new.standardizedFileURL.path,"Right task opened the newer LEFT task recording")
+        precondition(ROBLocalRecyclingSandboxRouting.latestRecordingURL(trialID:"right-estimated-calibration",lastRecordingPath:old.path,
+            applicationSupport:support)?.standardizedFileURL.path==new.standardizedFileURL.path,"Right calibration did not find the newest matching recording")
+        precondition(ROBLocalRecyclingSandboxRouting.latestRecordingURL(trialID:"recycling",lastRecordingPath:other.path,
+            applicationSupport:support)?.standardizedFileURL.path==other.standardizedFileURL.path,"Selected left recycling must preserve its own recording")
         print("PASS local recycling sandbox: exact saved four-can/side routing, immutable pending file controls, executing/mismatched scopes disabled, private source text excluded, dedicated local-only OS import/export and unconditional Stop revocation")
+        print("PASS live sandbox status: active phase precedes broker scope, common-mode progress fallback; selected RIGHT recording cannot open latest LEFT evidence")
     }
 }
 '''.replace('/* HELPER */', helper).replace('/* PREPARE */', prepare)

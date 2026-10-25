@@ -357,11 +357,12 @@ final class ROBArmRoutineVision {
     var observationCount = 0
     var activationHistory: [Bool] = []
     var runtimeIdentity=String(repeating:"a",count:64)
+    var stereoPolicyIdentity=String(repeating:"c",count:64)
     var clearsFramesOnSetActive=false,frameAvailable=true
-    struct RuntimeCalibration {let identity:String}
+    struct RuntimeCalibration {let identity:String;let stereoPolicySHA256:String}
     struct Intrinsics {let runtimeCalibration:RuntimeCalibration?}
     struct Frame {let cameraGeneration:UUID;let intrinsics:Intrinsics?}
-    func snapshot()->[String:Frame] {frameAvailable ? ["face":.init(cameraGeneration:cameraGeneration,intrinsics:.init(runtimeCalibration:.init(identity:runtimeIdentity)))] : [:]}
+    func snapshot()->[String:Frame] {frameAvailable ? ["face":.init(cameraGeneration:cameraGeneration,intrinsics:.init(runtimeCalibration:.init(identity:runtimeIdentity,stereoPolicySHA256:stereoPolicyIdentity)))] : [:]}
     var readinessDescription: String { "Simulated camera unavailable" }
     func healthSnapshot() -> NSDictionary { ["fixture": true] }
     func setActive(_ active: Bool, teaching: Bool = false) {
@@ -637,6 +638,15 @@ final class ROBArmRoutineCoordinator {
             ROBArmRoutineVision.shared.frameAvailable=true
             g.ready=true;g.stale=false;g.mode=["left":1,"right":1];g.calibrated=["left","right"];g.commands=[]
             ROBWorkspaceSearch.shared.objects=[:]
+            // A source frame may age while stationary perception is running.
+            // It must not alter the exact receipt's source/runtime identity,
+            // and it never permits preparation or arm travel while stale.
+            ROBWorkspaceSearch.shared.afterInspect={
+                ROBArmRoutineVision.shared.fresh=false
+                broker.tick()
+                precondition(broker.activeLocalRecyclingApprovalEvidence != nil)
+                precondition(!trial.authorizesTaughtWaypoint(arm:"left",expectedSessionGeneration:g.generation))
+            }
             func local() async ->NSDictionary {
                 await withCheckedContinuation { continuation in
                     trial.performUsingLocalRecyclingReceipt("right_recycle_cans",target:"4"){continuation.resume(returning:$0)}
@@ -669,6 +679,14 @@ final class ROBArmRoutineCoordinator {
             precondition(first["perception_only_rejection"] as? Bool==true && broker.localRecyclingApprovalState?["state"] as? String=="available",first.description)
             precondition(ROBWorkspaceSearch.shared.nearestSelectionCalls==1)
             precondition(!g.commands.contains{$0.hasPrefix("ghost_step") || $0.hasPrefix("waypoint") || $0.hasPrefix("gripper") || $0.hasPrefix("calibrate")})
+            precondition(trial.localRecyclingContextDiagnostics["status"] as? String=="current")
+            precondition(trial.localRecyclingContextDiagnostics["camera_frame_fresh"] as? Bool==false)
+            broker.tick()
+            precondition(broker.localRecyclingApprovalState?["state"] as? String=="available")
+            let stalePreparation=await local()
+            precondition(stalePreparation["status"] as? String=="blocked" && broker.localRecyclingApprovalState != nil)
+            precondition(ROBWorkspaceSearch.shared.nearestSelectionCalls==1,"Stale camera was admitted to a new motion operation")
+            ROBWorkspaceSearch.shared.afterInspect=nil;ROBArmRoutineVision.shared.fresh=true
             let second=await local()
             precondition(second["status"] as? String=="not_found" && requests==0 && prompts==0,second.description)
             precondition(ROBWorkspaceSearch.shared.nearestSelectionCalls==2 && broker.localRecyclingApprovalState?["state"] as? String=="available")
@@ -679,9 +697,40 @@ final class ROBArmRoutineCoordinator {
             precondition(lost["status"] as? String=="blocked" && lost["perception_only_rejection"] as? Bool==false,lost.description)
             precondition(broker.localRecyclingApprovalState == nil && !trial.isRunning)
             ROBWorkspaceSearch.shared.afterInspect=nil;g.stale=false
+            // New source generation, actual runtime or HOST stereo policy
+            // must revoke an idle receipt; no prior pixels/receipt are reused.
+            for change in ["source_generation","runtime","stereo_policy"] {
+                ROBArmRoutineVision.shared.frameAvailable=true;ROBArmRoutineVision.shared.fresh=true
+                var next:NSDictionary?
+                Task { @MainActor in next=await local() }
+                let pendingEnd=ProcessInfo.processInfo.systemUptime+2
+                while broker.pendingLocalRecyclingApprovalScope==nil && ProcessInfo.processInfo.systemUptime<pendingEnd {
+                    try await Task.sleep(nanoseconds:10_000_000)
+                }
+                var receipt=broker.localRecyclingReceiptTemplate as! [String:Any]
+                receipt["sourceMessage"]="Synthetic fixture scoped source identity test."
+                receipt["sourceMessageSHA256"]=ROBGhostRobotModel.hash(Data((receipt["sourceMessage"] as! String).utf8))
+                receipt["additionalUserInstruction"]="Synthetic fixture explicitly permits this exact unmeasured job."
+                receipt["additionalUserInstructionSHA256"]=ROBGhostRobotModel.hash(Data((receipt["additionalUserInstruction"] as! String).utf8))
+                let receiptURL=folder.appendingPathComponent(change+"-receipt.json")
+                try JSONSerialization.data(withJSONObject:receipt,options:.sortedKeys).write(to:receiptURL)
+                try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:receiptURL.path)
+                try broker.importLocalRecyclingSessionApproval(fromReceiptURL:receiptURL)
+                let finishEnd=ProcessInfo.processInfo.systemUptime+12
+                while next==nil && ProcessInfo.processInfo.systemUptime<finishEnd {try await Task.sleep(nanoseconds:10_000_000)}
+                precondition(next?["perception_only_rejection"] as? Bool==true && broker.localRecyclingApprovalState != nil)
+                switch change {
+                case "source_generation":ROBArmRoutineVision.shared.cameraGeneration=UUID()
+                case "runtime":ROBArmRoutineVision.shared.runtimeIdentity=String(repeating:"d",count:64)
+                default:ROBArmRoutineVision.shared.stereoPolicyIdentity=String(repeating:"e",count:64)
+                }
+                broker.tick()
+                precondition(broker.localRecyclingApprovalState==nil,"Changed source/runtime/mode retained an old receipt")
+                precondition(trial.localRecyclingContextDiagnostics["status"] as? String=="changed")
+            }
             ROBNeckRGBPoseDisplay.projectionIdentity=nil
             broker.cancel(reason:"Synthetic local fixture complete")
-            print("Local receipt runtime: dedicated exact4 prepare sends no voice/controller request; private URL import authorizes exact job; fresh no-travel/no-jaw perception may retry without another approval, feedback loss revokes; nearest selection used, no fake registration or arm trajectory")
+            print("Local receipt runtime: exact4 private import; transient stale stationary perception retains source identity/receipt but rejects new preparation and motion; actual source generation/runtime/stereo-policy changes and feedback loss revoke; no fake registration or arm trajectory")
             return
         }
         let heartbeat = Timer(timeInterval: 1, repeats: true) { _ in _ = broker.receive(hello, device: device, session: session) }

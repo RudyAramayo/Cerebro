@@ -859,8 +859,9 @@ struct ROBWorkspaceCanSelection {
         }
         let origin = SIMD3(shoulder.columns.3.x,shoulder.columns.3.y,shoulder.columns.3.z)
         let candidates = canCandidates.confirmed(nowMilliseconds:nowMilliseconds).filter { object in
-            object.registrationID == map.registrationID && map.observations.contains {
-                $0.sequence == object.sequence && $0.capturedAtMilliseconds == object.capturedAt
+            map.observations.contains {
+                $0.sequence == object.sequence && $0.capturedAtMilliseconds == object.capturedAt &&
+                    $0.registrationID == object.registrationID
             }
         }.sorted {
             let a=simd_distance($0.point,origin),b=simd_distance($1.point,origin)

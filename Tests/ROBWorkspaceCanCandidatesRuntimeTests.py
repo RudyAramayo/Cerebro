@@ -32,7 +32,7 @@ final class ROBGhostRobotModel {
         return ["left_two_Link":left,"right_two_Link":right]
     }
 }
-struct ROBWorkspaceDepthObservation { let sequence:UInt64; let capturedAtMilliseconds:Double }
+struct ROBWorkspaceDepthObservation { let sequence:UInt64; let capturedAtMilliseconds:Double; var registrationID:String?=nil }
 struct ROBWorkspaceCollisionSnapshot {
     var sceneID:UUID; var modelID="model",geometryID="geometry",mappingID="mapping"
     var sessionGeneration:UInt64=1; var cameraGeneration:UUID; var bodyMotionIdentity="body"
@@ -123,6 +123,54 @@ FIXTURE = r'''
                 observations:second.map{.init(sequence:$0.sequence,capturedAtMilliseconds:$0.capturedAt)})
             ROBCanGrabPreview.calls=[];ROBCanGrabPreview.hook=nil
         }
+
+        // A measured map's aggregate hash differs from each exact source registration.
+        // Bind all three fields to ONE observation, never unrelated map entries.
+        var measuredFirst=object(0.45),measuredSecond=object(0.45,seq:2)
+        measuredFirst.registrationID="individual-registration-A";measuredSecond.registrationID="individual-registration-A"
+        var measuredCandidates=ROBWorkspaceCanCandidateSet()
+        measuredCandidates.observe([measuredFirst],context:context,nowMilliseconds:now)
+        measuredCandidates.observe([measuredSecond],context:context,nowMilliseconds:now)
+        search.canCandidates=measuredCandidates
+        var measuredMap=ROBWorkspaceCollisionSnapshot(sceneID:scene,cameraGeneration:camera,
+            registrationID:"fixed-head-map-aggregate-SHA",observations:[
+                .init(sequence:2,capturedAtMilliseconds:measuredSecond.capturedAt,registrationID:"individual-registration-A"),
+                .init(sequence:9,capturedAtMilliseconds:now-100,registrationID:"individual-registration-B")])
+        search.collisionSnapshot=measuredMap;ROBCanGrabPreview.calls=[]
+        var measuredResult=await search.nearestReachableCan(model:model,baseline:[:],map:measuredMap,nowMilliseconds:now)
+        precondition(measuredResult.object?.registrationID=="individual-registration-A" && ROBCanGrabPreview.calls.count==1,
+                     "Aggregate map registration incorrectly discarded its exactly matched individual observation")
+        measuredMap.observations=[
+            .init(sequence:2,capturedAtMilliseconds:measuredSecond.capturedAt,registrationID:"individual-registration-B"),
+            .init(sequence:9,capturedAtMilliseconds:now-100,registrationID:"individual-registration-A")]
+        search.collisionSnapshot=measuredMap;ROBCanGrabPreview.calls=[]
+        measuredResult=await search.nearestReachableCan(model:model,baseline:[:],map:measuredMap,nowMilliseconds:now)
+        precondition(measuredResult.object==nil && ROBCanGrabPreview.calls.isEmpty,
+                     "Registration from a different source observation admitted the can")
+        measuredMap.registrationID="individual-registration-A"
+        search.collisionSnapshot=measuredMap
+        measuredResult=await search.nearestReachableCan(model:model,baseline:[:],map:measuredMap,nowMilliseconds:now)
+        precondition(measuredResult.object==nil,"An equal aggregate ID substituted for the wrong exact source registration")
+        for mismatch in ["registration","sequence","timestamp"] {
+            let sequence:UInt64=mismatch=="sequence" ? 3:2
+            let captured=measuredSecond.capturedAt+(mismatch=="timestamp" ? 1:0)
+            measuredMap.observations=[.init(sequence:sequence,capturedAtMilliseconds:captured,
+                registrationID:mismatch=="registration" ? nil:"individual-registration-A")]
+            search.collisionSnapshot=measuredMap
+            measuredResult=await search.nearestReachableCan(model:model,baseline:[:],map:measuredMap,nowMilliseconds:now)
+            precondition(measuredResult.object==nil,"Measured registration mixed across an unmatched source field")
+        }
+        // The unregistered lane retains its exact nil/nil source contract.
+        enroll([object(0.45)])
+        var unregisteredResult=await search.nearestReachableCan(model:model,baseline:[:],map:search.collisionSnapshot!,nowMilliseconds:now)
+        precondition(unregisteredResult.object?.registrationID==nil && unregisteredResult.object != nil)
+        var wrongSourceMap=search.collisionSnapshot!
+        wrongSourceMap.observations=wrongSourceMap.observations.map{.init(sequence:$0.sequence,
+            capturedAtMilliseconds:$0.capturedAtMilliseconds,registrationID:"individual-registration-A")}
+        search.collisionSnapshot=wrongSourceMap
+        unregisteredResult=await search.nearestReachableCan(model:model,baseline:[:],map:wrongSourceMap,nowMilliseconds:now)
+        precondition(unregisteredResult.object==nil,"Unregistered can inherited a measured source registration")
+
         // A lower-confidence nearby reachable can beats the distant high-confidence can.
         enroll([object(1.2,confidence:0.99),object(0.45,confidence:0.4)])
         var result=await search.nearestReachableCan(model:model,baseline:[:],map:search.collisionSnapshot!,nowMilliseconds:now)
@@ -164,7 +212,7 @@ FIXTURE = r'''
         enroll([object(0.45)]);ROBCanGrabPreview.hook={ROBFixedHeadBodyMotionIdentity.currentIdentity="moved-during-solver"}
         result=await search.nearestReachableCan(model:model,baseline:[:],map:search.collisionSnapshot!,nowMilliseconds:now)
         precondition(result.object==nil && ROBCanGrabPreview.calls.count==1)
-        print("PASS actual multi-can tracker/selector: independent two-exposure confirmation, duplicate/reordered/occluded timestamps, shape gates, nine scene contexts, nearest physical-arm ranking, unreachable/unavailable skipping, exact source map evidence, and asynchronous context invalidation; no motion admission")
+        print("PASS actual multi-can tracker/selector: independent two-exposure confirmation, duplicate/reordered/occluded timestamps, shape gates, nine scene contexts, nearest physical-arm ranking, unreachable/unavailable skipping, exact per-observation measured/aggregate registration and nil/nil source map evidence, and asynchronous context invalidation; no motion admission")
     }
 }
 '''
