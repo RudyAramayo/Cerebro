@@ -21,6 +21,7 @@ enum ROBNeckRGBPoseDisplay {
         /// Saved raw-plane evidence affects the belly drawing only.
         let bellyFloorDisplayReferenceID: String?
         let usesPhotoHardwareOpticalOrigin: Bool
+        let operatorPanCalibrationDescription: String?
         /// An opt-in estimated origin, not registration. Keep the pinned RGB
         /// rotation while drawing/projecting from the measured hardware glass.
         var provisionalCameraToModel: simd_double4x4 {
@@ -88,6 +89,32 @@ enum ROBNeckRGBPoseDisplay {
         let bellyCameraDownwardPitchDegrees:Double?
         let bellyFloorDisplayReference:BellyFloorDisplayReference?
         let usePhotoHardwareOpticalOrigin:Bool?
+        let operatorPanCalibration:OperatorPanCalibration?
+    }
+    /// A measured operator angle and a provisional forward reference refine
+    /// the estimated pan mapping. They never authorize a servo command.
+    private struct OperatorPanCalibration:Decodable {
+        let kind:String
+        let forwardTarget:Int,anchorTarget:Int
+        let anchorAngleDegrees:Double
+        let evidencePath:String,evidenceSHA256:String
+        var scale:Double {anchorAngleDegrees/Double(anchorTarget-forwardTarget)/0.03}
+        var valid:Bool {
+            kind=="operator_confirmed_linear_pan" &&
+                [forwardTarget,anchorTarget].allSatisfy{(3000...10000).contains($0)} &&
+                forwardTarget != anchorTarget && anchorAngleDegrees.isFinite &&
+                (5...180).contains(abs(anchorAngleDegrees)) && scale.isFinite && (0.4...2.6).contains(scale)
+        }
+        var shortDescription:String {
+            String(format:"pan %d = %+.1f° · forward %d provisional",anchorTarget,anchorAngleDegrees,forwardTarget)
+        }
+    }
+    private struct OperatorPanEvidence:Decodable {
+        let schemaVersion:Int,kind:String,modelID:String,referenceID:String,geometryID:String
+        let forwardTarget:Int,anchorTarget:Int
+        let anchorAngleDegrees:Double,recordedAtMilliseconds:Double
+        let forwardReferenceProvisional:Bool,registrationVerified:Bool,armMotionAuthority:Bool
+        let observationSource:String
     }
     private struct BellyFloorDisplayReference:Decodable {
         let evidencePath:String,evidenceSHA256:String
@@ -120,6 +147,7 @@ enum ROBNeckRGBPoseDisplay {
         let bellyFloorDisplayReferenceID:String?
         let usePhotoHardwareOpticalOrigin:Bool
         let estimatedCameraProjectionIdentity:String?
+        let operatorPanCalibration:OperatorPanCalibration?
     }
     private static let lock=NSLock()
     private static var cachedKey=""
@@ -137,6 +165,20 @@ enum ROBNeckRGBPoseDisplay {
         let data=try Data(contentsOf:url);guard sha(data)==expected else {throw Failure.invalid};return data
     }
     private enum Failure:Error {case invalid}
+    private static func operatorPanEvidence(_ configuration:OperatorPanCalibration,model:ROBGhostRobotModel)throws->Data {
+        guard configuration.valid else {throw Failure.invalid}
+        let bytes=try read(configuration.evidencePath,sha:configuration.evidenceSHA256)
+        guard bytes.count<100_000 else {throw Failure.invalid}
+        let e=try JSONDecoder().decode(OperatorPanEvidence.self,from:bytes)
+        guard e.schemaVersion==1,e.kind=="operator_confirmed_linear_pan_evidence",
+              e.modelID==model.modelID,e.referenceID==model.referenceID,e.geometryID==model.geometryID,
+              e.forwardTarget==configuration.forwardTarget,e.anchorTarget==configuration.anchorTarget,
+              e.anchorAngleDegrees.isFinite,e.anchorAngleDegrees==configuration.anchorAngleDegrees,
+              e.recordedAtMilliseconds.isFinite,e.recordedAtMilliseconds>0,e.forwardReferenceProvisional,
+              e.observationSource=="operator_observed_physical_pan_angle",
+              !e.registrationVerified,!e.armMotionAuthority else {throw Failure.invalid}
+        return bytes
+    }
     private static func bellyFloorEvidence(_ reference:BellyFloorDisplayReference)throws->(Data,SIMD3<Double>) {
         let bytes=try read(reference.evidencePath,sha:reference.evidenceSHA256)
         let e=try JSONDecoder().decode(BellyFloorDisplayEvidence.self,from:bytes)
@@ -183,7 +225,16 @@ enum ROBNeckRGBPoseDisplay {
         lock.lock();defer{lock.unlock()}
         guard let bytes=try? Data(contentsOf:activationURL),bytes.count<100_000 else {cachedKey="";cachedProfile=nil;return nil}
         let key=sha(bytes)+model.modelID+model.referenceID+model.geometryID
-        if key==cachedKey {return cachedProfile}
+        if key==cachedKey,cachedProfile != nil {
+            // Unlike appearance settings, an operator anchor is physical
+            // projection provenance. Do not retain it after its pinned file
+            // disappears or changes while the activation file stays fixed.
+            if let pan=cachedProfile?.operatorPanCalibration,
+               (try? read(pan.evidencePath,sha:pan.evidenceSHA256)) == nil {
+                cachedKey="";cachedProfile=nil;return nil
+            }
+            return cachedProfile
+        }
         cachedKey=key;cachedProfile=nil
         do {
             let a=try JSONDecoder().decode(Activation.self,from:bytes)
@@ -192,6 +243,12 @@ enum ROBNeckRGBPoseDisplay {
             guard a.headMount?.valid ?? true else {throw Failure.invalid}
             guard a.hardwarePose?.valid ?? true else {throw Failure.invalid}
             guard a.usePhotoHardwareOpticalOrigin != true || a.hardwarePose != nil else {throw Failure.invalid}
+            let panEvidence:Data?
+            if let pan=a.operatorPanCalibration {
+                guard a.usePhotoHardwareOpticalOrigin==true,let hardware=a.hardwarePose,
+                      pan.forwardTarget==(hardware.panForwardTarget ?? 6000) else {throw Failure.invalid}
+                panEvidence=try operatorPanEvidence(pan,model:model)
+            } else {panEvidence=nil}
             let lift=a.headDepthDisplayLiftMeters ?? 0
             guard lift.isFinite,abs(lift)<=0.3048 else {throw Failure.invalid}
             let modelLift=a.robotModelDisplayLiftMeters ?? 0
@@ -241,7 +298,7 @@ enum ROBNeckRGBPoseDisplay {
                 // Include only inputs to physical old-R/photo-origin-T and
                 // their model/photo provenance, not cosmetic or display data.
                 let keys=["panScale","lowerScale","upperScale","lowerOffsetRadians","cameraDeltaRx","cameraDeltaRy","cameraDeltaRz"]
-                let physical:[String:Any]=["kind":"photo_hardware_optical_origin_v1","modelID":model.modelID,
+                var physical:[String:Any]=["kind":"photo_hardware_optical_origin_v1","modelID":model.modelID,
                     "referenceID":model.referenceID,"geometryID":model.geometryID,
                     "opticalRotationParameters":Dictionary(uniqueKeysWithValues:keys.map{($0,p[$0]!)}),
                     "lowerUprightTarget":h.lowerUprightTarget,"upperReferenceTarget":h.upperReferenceTarget,
@@ -249,13 +306,19 @@ enum ROBNeckRGBPoseDisplay {
                     "upperCenterToSphereMeters":h.upperCenterToSphereMeters,"sphereToRGBGlassMeters":h.sphereToRGBGlassMeters,
                     "upperCenterToRGBGlassMeters":h.upperCenterToRGBGlassMeters,"sphereForwardLeanDegrees":h.sphereForwardLeanDegrees,
                     "sourcePhotoSHA256":h.sourcePhotoSHA256]
+                if let pan=a.operatorPanCalibration {
+                    physical["operatorPanCalibration"]=["kind":pan.kind,"forwardTarget":pan.forwardTarget,
+                        "anchorTarget":pan.anchorTarget,"anchorAngleDegrees":pan.anchorAngleDegrees,
+                        "evidenceSHA256":pan.evidenceSHA256]
+                }
                 estimatedIdentity=sha(try JSONSerialization.data(withJSONObject:physical,options:[.sortedKeys]))
             }else{estimatedIdentity=nil}
-            cachedProfile=Profile(id:sha(bytes+fitData+referenceData+(bellyEvidence?.0 ?? Data())),parameters:p,upTorso:simd_normalize(up),headMount:a.headMount,headDepthDisplayLiftMeters:lift,
+            cachedProfile=Profile(id:sha(bytes+fitData+referenceData+(bellyEvidence?.0 ?? Data())+(panEvidence ?? Data())),parameters:p,upTorso:simd_normalize(up),headMount:a.headMount,headDepthDisplayLiftMeters:lift,
                 robotModelDisplayLiftMeters:modelLift,
                 hardwarePose:a.hardwarePose,bellyCameraDownwardPitchDegrees:a.bellyCameraDownwardPitchDegrees,
                 bellyFloorNormalOptical:bellyEvidence?.1,bellyFloorDisplayReferenceID:a.bellyFloorDisplayReference?.evidenceSHA256,
-                usePhotoHardwareOpticalOrigin:a.usePhotoHardwareOpticalOrigin ?? false,estimatedCameraProjectionIdentity:estimatedIdentity)
+                usePhotoHardwareOpticalOrigin:a.usePhotoHardwareOpticalOrigin ?? false,estimatedCameraProjectionIdentity:estimatedIdentity,
+                operatorPanCalibration:a.operatorPanCalibration)
         } catch {cachedProfile=nil}
         return cachedProfile
     }
@@ -271,6 +334,7 @@ enum ROBNeckRGBPoseDisplay {
     /// Profile identity is available without a current head-command estimate,
     /// so changing an explicit belly mount also invalidates its cloud cache.
     static func configurationIdentity(model:ROBGhostRobotModel)->String? {profile(model:model)?.id}
+    static func operatorPanCalibrationDescription(model:ROBGhostRobotModel)->String? {profile(model:model)?.operatorPanCalibration?.shortDescription}
     static func estimatedCameraProjectionIdentity(model:ROBGhostRobotModel)->String? {profile(model:model)?.estimatedCameraProjectionIdentity}
     static func robotModelDisplayLiftMeters(model:ROBGhostRobotModel)->Double {profile(model:model)?.robotModelDisplayLiftMeters ?? 0}
     /// Child-group presentation only. Conjugate display-up through the common
@@ -395,19 +459,33 @@ enum ROBNeckRGBPoseDisplay {
                 upperToGlassMeters:mount.upperCenterToRGBGlassMeters,glassToOpticalDistanceMeters:simd_distance(SIMD3(glass.columns.3.x,glass.columns.3.y,glass.columns.3.z),SIMD3(value.camera.columns.3.x,value.camera.columns.3.y,value.camera.columns.3.z)),
                 azimuthAssumption:mount.sphereAzimuthAssumption)
         } else {description=nil}
-        let hardware:[String:simd_double4x4]?
+        var hardware:[String:simd_double4x4]?
         if let configuration=profile.hardwarePose {
             guard let value=try? hardwareFrames(model:model,parameters:profile.parameters,configuration:configuration,
                 panTarget:panTarget,lowerTarget:lowerTarget,upperTarget:upperTarget) else{return nil}
             hardware=value
         } else{hardware=nil}
-        return Pose(profileID:profile.id,cameraToModel:torso*value.camera,modelToDisplay:gauge,
-            headFrames:value.frames.mapValues{torso*$0},headMount:description,headDepthDisplayLiftMeters:profile.headDepthDisplayLiftMeters,
+        var camera=torso*value.camera,headFrames=value.frames.mapValues{torso*$0}
+        if let pan=profile.operatorPanCalibration,panTarget != pan.forwardTarget {
+            // Apply one proper rigid correction to the entire current head
+            // assembly and its optical rays about the physical pan pivot.
+            // The original QR chain still defines historical floor evidence;
+            // at the forward anchor no extra matrix products change the pose.
+            let angle=Double(panTarget-pan.forwardTarget)*Double.pi/6000*(pan.scale-profile.parameters["panScale"]!)
+            let pivot=SIMD3<Double>(-0.0207044288303,0,0.355408962871)
+            let correction=torso*translated(pivot)*rotated(SIMD3(0,0,angle))*translated(-pivot)*simd_inverse(torso)
+            camera=correction*camera
+            headFrames=headFrames.mapValues{correction*$0}
+            hardware=hardware?.mapValues{correction*$0}
+        }
+        return Pose(profileID:profile.id,cameraToModel:camera,modelToDisplay:gauge,
+            headFrames:headFrames,headMount:description,headDepthDisplayLiftMeters:profile.headDepthDisplayLiftMeters,
             robotModelDisplayLiftMeters:profile.robotModelDisplayLiftMeters,
             hardwareFrames:hardware,hardwareSphereRingTiltDegrees:profile.hardwarePose.map{$0.sphereRingTiltAtReferenceDegrees ?? 0},
             bellyPreviewDownwardPitchDegrees:profile.bellyCameraDownwardPitchDegrees,
             bellyFloorDisplayReferenceID:profile.bellyFloorDisplayReferenceID,
-            usesPhotoHardwareOpticalOrigin:profile.usePhotoHardwareOpticalOrigin)
+            usesPhotoHardwareOpticalOrigin:profile.usePhotoHardwareOpticalOrigin,
+            operatorPanCalibrationDescription:profile.operatorPanCalibration?.shortDescription)
     }
     static func cameraToModel(model:ROBGhostRobotModel,panTarget:Int,lowerTarget:Int,upperTarget:Int)->simd_double4x4? {
         pose(model:model,panTarget:panTarget,lowerTarget:lowerTarget,upperTarget:upperTarget)?.cameraToModel

@@ -228,6 +228,9 @@ import simd
                     ? "\nNeck / face camera: photo mount + RGB orientation estimate"
                     : "\nNeck / face housing: operator photo pose\nHousing placement is separate from the provisional optical fit"
             }
+            if let pan=fitted.operatorPanCalibrationDescription {
+                headInfo.stringValue += "\n" + pan
+            }
             if fitted.bellyFloorDisplayReferenceID != nil {
                 headInfo.stringValue += "\nBelly floor: aligned to captured floor reference"
             } else if let belly=fitted.bellyPreviewDownwardPitchDegrees {

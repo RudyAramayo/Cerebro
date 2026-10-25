@@ -19,11 +19,187 @@ import simd
             SIMD3(pose.modelToDisplay.columns.2.x,pose.modelToDisplay.columns.2.y,pose.modelToDisplay.columns.2.z))
         precondition(abs(simd_determinant(R)-1)<1e-10)
     }
+    static func actualOperatorPanFixture(model:ROBGhostRobotModel,activationURL:URL)throws {
+        let bytes=try Data(contentsOf:activationURL)
+        var baseline=try JSONSerialization.jsonObject(with:bytes)as![String:Any]
+        let anchor=baseline.removeValue(forKey:"operatorPanCalibration")as![String:Any]
+        let forward=anchor["forwardTarget"]as!Int,raw=anchor["anchorTarget"]as!Int
+        let angle=(anchor["anchorAngleDegrees"]as!NSNumber).doubleValue
+        precondition(forward==6015 && raw==7841 && angle==90)
+        let temporary=FileManager.default.temporaryDirectory.appendingPathComponent("actual-pan-comparison-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at:temporary,withIntermediateDirectories:true)
+        let baselineURL=temporary.appendingPathComponent("without-operator-pan.json")
+        try write(baseline,to:baselineURL)
+        let previous=getenv("ROB_NECK_RGB_DISPLAY_PROFILE").map{String(cString:$0)}
+        defer {
+            if let previous {setenv("ROB_NECK_RGB_DISPLAY_PROFILE",previous,1)}else{unsetenv("ROB_NECK_RGB_DISPLAY_PROFILE")}
+            try? FileManager.default.removeItem(at:temporary)
+        }
+        func pose(_ raw:Int)->ROBNeckRGBPoseDisplay.Pose {
+            guard let pose=ROBNeckRGBPoseDisplay.pose(model:model,panTarget:raw,lowerTarget:6011,upperTarget:6160) else {fatalError("Actual operator pan profile rejected")}
+            return pose
+        }
+        let torso=model.frames(model.reference)["torso_link"]!
+        func yaw(_ T:simd_double4x4)->Double {let local=simd_inverse(torso)*T;return atan2(local.columns.0.y,local.columns.0.x)*180 / .pi}
+        let fitURL=URL(fileURLWithPath:baseline["fitArtifactPath"]as!String),floorURL=URL(fileURLWithPath:baseline["floorReferencePath"]as!String)
+        let fitBytes=try Data(contentsOf:fitURL),floorBytes=try Data(contentsOf:floorURL)
+        setenv("ROB_NECK_RGB_DISPLAY_PROFILE",baselineURL.path,1)
+        let oldForward=pose(forward),oldAnchor=pose(raw),oldBelly=ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model)
+        let oldPID=ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)!,oldConfig=ROBNeckRGBPoseDisplay.configurationIdentity(model:model)!
+        let before=yaw(oldAnchor.hardwareFrames!["neck_pan_link"]!)
+        precondition(abs(before-108.07902913179431)<1e-9 && oldAnchor.operatorPanCalibrationDescription==nil)
+        setenv("ROB_NECK_RGB_DISPLAY_PROFILE",activationURL.path,1)
+        let newForward=pose(forward),newAnchor=pose(raw),after=yaw(pose(raw).hardwareFrames!["neck_pan_link"]!)
+        precondition(abs(after-90)<1e-9 && newAnchor.operatorPanCalibrationDescription != nil)
+        precondition(newForward.cameraToModel==oldForward.cameraToModel && newForward.provisionalCameraToModel==oldForward.provisionalCameraToModel &&
+            newForward.headFrames==oldForward.headFrames && newForward.hardwareFrames==oldForward.hardwareFrames &&
+            newForward.depthCloudCameraToModel==oldForward.depthCloudCameraToModel,"Actual exact forward view changed")
+        precondition(newAnchor.modelToDisplay==oldAnchor.modelToDisplay && newAnchor.bellyFloorDisplayReferenceID==oldAnchor.bellyFloorDisplayReferenceID &&
+            ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model)==oldBelly,"Actual historical gauge/belly reference changed")
+        precondition(newAnchor.headDepthDisplayLiftMeters==oldAnchor.headDepthDisplayLiftMeters &&
+            newAnchor.robotModelDisplayLiftMeters==oldAnchor.robotModelDisplayLiftMeters,"Actual preview lifts changed")
+        precondition(ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model) != oldPID &&
+            ROBNeckRGBPoseDisplay.configurationIdentity(model:model) != oldConfig)
+        check(newAnchor,torso:torso)
+        let afterActivation=try Data(contentsOf:activationURL),afterFit=try Data(contentsOf:fitURL),afterFloor=try Data(contentsOf:floorURL)
+        precondition(afterActivation==bytes && afterFit==fitBytes && afterFloor==floorBytes,"Actual source evidence was modified")
+        print("PASS actual staged operator pan:6015 exact forward;7841 \(before)→\(after)deg; floor/belly/lifts unchanged; projection/config IDs changed; source files unchanged; no depth authority")
+    }
+    static func operatorPanFixture(model:ROBGhostRobotModel,base:[String:Any],temporary:URL,restore:URL)throws {
+        let activation=temporary.appendingPathComponent("operator-pan-activation.json")
+        let fitURL=temporary.appendingPathComponent("operator-pan-fit.json")
+        let evidenceURL=temporary.appendingPathComponent("operator-pan-evidence.json")
+        var fit=try JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:base["fitArtifactPath"]as!String)))as![String:Any]
+        var parameters=fit["parameters"]as![String:Double]
+        parameters["panScale"]=1.9729651174113603;fit["parameters"]=parameters
+        try write(fit,to:fitURL)
+        var a=base
+        a["fitArtifactPath"]=fitURL.path;a["fitArtifactSHA256"]=hash(try Data(contentsOf:fitURL))
+        a["headDepthDisplayLiftMeters"]=0.0508;a["robotModelDisplayLiftMeters"]=0.03175
+        a["usePhotoHardwareOpticalOrigin"]=true
+        a.removeValue(forKey:"operatorPanCalibration")
+        func activate()throws {try write(a,to:activation)}
+        try activate();setenv("ROB_NECK_RGB_DISPLAY_PROFILE",activation.path,1)
+        defer {setenv("ROB_NECK_RGB_DISPLAY_PROFILE",restore.path,1)}
+        let torso=model.frames(model.reference)["torso_link"]!
+        func pose(_ pan:Int)->ROBNeckRGBPoseDisplay.Pose {
+            ROBNeckRGBPoseDisplay.pose(model:model,panTarget:pan,lowerTarget:6011,upperTarget:6160)!
+        }
+        func same(_ a:simd_double4x4,_ b:simd_double4x4)->Bool {(0..<4).allSatisfy{close(a[$0],b[$0])}}
+        func yaw(_ T:simd_double4x4)->Double {let local=simd_inverse(torso)*T;return atan2(local.columns.0.y,local.columns.0.x)*180 / .pi}
+        let forward=pose(6015),left=pose(7841),beforePID=ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)!
+        let beforeConfig=ROBNeckRGBPoseDisplay.configurationIdentity(model:model)!
+        let bellyBefore=ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model)!
+        precondition(forward.operatorPanCalibrationDescription==nil && ROBNeckRGBPoseDisplay.operatorPanCalibrationDescription(model:model)==nil)
+        precondition(abs(yaw(left.hardwareFrames!["neck_pan_link"]!)-108.07902913179431)<1e-9)
+        let fitBytes=try Data(contentsOf:fitURL),floorURL=URL(fileURLWithPath:a["floorReferencePath"]as!String)
+        let floorBytes=try Data(contentsOf:floorURL)
+        let evidence:[String:Any]=["schemaVersion":1,"kind":"operator_confirmed_linear_pan_evidence",
+            "modelID":model.modelID,"referenceID":model.referenceID,"geometryID":model.geometryID,
+            "forwardTarget":6015,"anchorTarget":7841,"anchorAngleDegrees":90.0,
+            "forwardReferenceProvisional":true,"observationSource":"operator_observed_physical_pan_angle",
+            "recordedAtMilliseconds":1234.0,"registrationVerified":false,"armMotionAuthority":false]
+        func install(_ proof:[String:Any])throws {
+            try write(proof,to:evidenceURL)
+            a["operatorPanCalibration"]=["kind":"operator_confirmed_linear_pan","forwardTarget":6015,
+                "anchorTarget":7841,"anchorAngleDegrees":90.0,"evidencePath":evidenceURL.path,
+                "evidenceSHA256":hash(try Data(contentsOf:evidenceURL))]
+            try activate()
+        }
+        try install(evidence)
+        let correctedForward=pose(6015),corrected=pose(7841)
+        let correctedPID=ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)!
+        precondition(correctedPID != beforePID && ROBNeckRGBPoseDisplay.configurationIdentity(model:model) != beforeConfig)
+        precondition(corrected.operatorPanCalibrationDescription != nil && ROBNeckRGBPoseDisplay.operatorPanCalibrationDescription(model:model) != nil)
+        precondition(correctedForward.cameraToModel==forward.cameraToModel && correctedForward.provisionalCameraToModel==forward.provisionalCameraToModel &&
+            correctedForward.headFrames==forward.headFrames && correctedForward.hardwareFrames==forward.hardwareFrames &&
+            correctedForward.depthCloudCameraToModel==forward.depthCloudCameraToModel,"Operator anchor moved the exact forward view")
+        precondition(abs(yaw(corrected.hardwareFrames!["neck_pan_link"]!)-90)<1e-10)
+        let delta=corrected.hardwareFrames!["neck_pan_link"]!*simd_inverse(left.hardwareFrames!["neck_pan_link"]!)
+        precondition(same(corrected.cameraToModel,delta*left.cameraToModel) && same(corrected.provisionalCameraToModel,delta*left.provisionalCameraToModel))
+        for (name,T) in left.headFrames {precondition(same(corrected.headFrames[name]!,delta*T),"Camera and head received different pan corrections")}
+        for (name,T) in left.hardwareFrames! {precondition(same(corrected.hardwareFrames![name]!,delta*T),"Camera and hardware received different pan corrections")}
+        let pivot=torso*SIMD4<Double>(-0.0207044288303,0,0.355408962871,1)
+        precondition(close(delta*pivot,pivot),"Pan correction rotated about a camera or torso origin instead of the pan pivot")
+        let relative=simd_inverse(torso)*(corrected.cameraToModel*simd_inverse(correctedForward.cameraToModel))*torso
+        precondition(abs(atan2(relative.columns.0.y,relative.columns.0.x)*180 / .pi-90)<1e-9)
+        precondition(corrected.modelToDisplay==left.modelToDisplay && corrected.bellyFloorDisplayReferenceID==left.bellyFloorDisplayReferenceID &&
+            ROBNeckRGBPoseDisplay.bellyPreviewFrames(model:model)==bellyBefore,"Current pan anchors changed historical floor or belly alignment")
+        let afterFit=try Data(contentsOf:fitURL),afterFloor=try Data(contentsOf:floorURL)
+        precondition(afterFit==fitBytes && afterFloor==floorBytes,"Operator anchors rewrote historical fit/floor evidence")
+        precondition(corrected.headDepthDisplayLiftMeters==0.0508 && corrected.robotModelDisplayLiftMeters==0.03175 && !corrected.hasDepthProjectionAuthority)
+        var cloud=corrected.modelToDisplay*corrected.provisionalCameraToModel;cloud.columns.3.z+=0.0508
+        precondition(same(corrected.depthCloudCameraToModel,cloud),"Pan calibration consumed or rotated the independent preview lift")
+        check(corrected,torso:torso)
+        // Raw command-domain endpoints are not expanded or converted into new
+        // hardware limits by an optional model calibration.
+        for raw in [3000,4000,8000,10000] {precondition(!pose(raw).hasDepthProjectionAuthority)}
+        precondition(ROBNeckRGBPoseDisplay.pose(model:model,panTarget:2999,lowerTarget:6011,upperTarget:6160)==nil &&
+            ROBNeckRGBPoseDisplay.pose(model:model,panTarget:10001,lowerTarget:6011,upperTarget:6160)==nil)
+        let validEvidence=try Data(contentsOf:evidenceURL),validActivation=try Data(contentsOf:activation)
+        // Evidence is rehashed even when the activation/profile cache key is
+        // unchanged. Restoring the exact proof must make it usable again.
+        for remove in [false,true] {
+            if remove {try FileManager.default.removeItem(at:evidenceURL)}
+            else {try Data("Changed synthetic operator evidence".utf8).write(to:evidenceURL)}
+            let currentActivation=try Data(contentsOf:activation)
+            precondition(currentActivation==validActivation)
+            precondition(ROBNeckRGBPoseDisplay.pose(model:model,panTarget:7841,lowerTarget:6011,upperTarget:6160)==nil &&
+                ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==nil,"Cached pan calibration accepted changed/missing proof")
+            try validEvidence.write(to:evidenceURL)
+            precondition(ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==correctedPID)
+        }
+        for field in ["schemaVersion","kind","modelID","referenceID","geometryID","forwardTarget","anchorTarget","anchorAngleDegrees",
+                      "forwardReferenceProvisional","observationSource","recordedAtMilliseconds","registrationVerified","armMotionAuthority"] {
+            var bad=evidence
+            switch field {
+            case "schemaVersion":bad[field]=2
+            case "forwardTarget":bad[field]=6016
+            case "anchorTarget":bad[field]=7842
+            case "anchorAngleDegrees":bad[field]=89.0
+            case "forwardReferenceProvisional":bad[field]=false
+            case "recordedAtMilliseconds":bad[field]=0.0
+            case "registrationVerified","armMotionAuthority":bad[field]=true
+            default:bad[field]="wrong"
+            }
+            try install(bad)
+            precondition(ROBNeckRGBPoseDisplay.pose(model:model,panTarget:7841,lowerTarget:6011,upperTarget:6160)==nil,"Invalid operator proof accepted: \(field)")
+        }
+        try install(evidence)
+        for (forwardRaw,anchor,angle) in [(6015,6015,90.0),(6015,6016,90.0),(6015,7841,-90.0),
+            (6015,7841,5.0),(6015,7015,180.0),(6015,9567,181.0),(6015,10001,90.0),(6000,7841,90.0)] {
+            var bad=evidence;bad["forwardTarget"]=forwardRaw;bad["anchorTarget"]=anchor;bad["anchorAngleDegrees"]=angle
+            try write(bad,to:evidenceURL)
+            a["operatorPanCalibration"]=["kind":"operator_confirmed_linear_pan","forwardTarget":forwardRaw,"anchorTarget":anchor,
+                "anchorAngleDegrees":angle,"evidencePath":evidenceURL.path,"evidenceSHA256":hash(try Data(contentsOf:evidenceURL))]
+            try activate()
+            precondition(ROBNeckRGBPoseDisplay.pose(model:model,panTarget:7841,lowerTarget:6011,upperTarget:6160)==nil,"Invalid pan anchors/gain accepted")
+        }
+        try install(evidence)
+        var badRecord=a["operatorPanCalibration"]as![String:Any];badRecord["evidenceSHA256"]=String(repeating:"f",count:64)
+        a["operatorPanCalibration"]=badRecord;try activate()
+        precondition(ROBNeckRGBPoseDisplay.pose(model:model,panTarget:7841,lowerTarget:6011,upperTarget:6160)==nil,"Pan proof SHA mismatch accepted")
+        try install(evidence)
+        a["usePhotoHardwareOpticalOrigin"]=false;try activate()
+        precondition(ROBNeckRGBPoseDisplay.pose(model:model,panTarget:7841,lowerTarget:6011,upperTarget:6160)==nil,"Operator pan ignored absent photo-origin opt-in")
+        a["usePhotoHardwareOpticalOrigin"]=true;a.removeValue(forKey:"hardwarePose");try activate()
+        precondition(ROBNeckRGBPoseDisplay.pose(model:model,panTarget:7841,lowerTarget:6011,upperTarget:6160)==nil,"Operator pan accepted missing hardware zero")
+        a["hardwarePose"]=base["hardwarePose"];a.removeValue(forKey:"operatorPanCalibration");try activate()
+        let restored=pose(7841)
+        precondition(restored.cameraToModel==left.cameraToModel && restored.hardwareFrames==left.hardwareFrames &&
+            restored.modelToDisplay==left.modelToDisplay && ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==beforePID &&
+            ROBNeckRGBPoseDisplay.configurationIdentity(model:model)==beforeConfig,"Nil operator calibration changed legacy behavior/identity")
+        precondition(evidence["registrationVerified"]as?Bool==false && evidence["armMotionAuthority"]as?Bool==false)
+        print("PASS operator pan:6015 exact forward;7841 hardware108.079029→90deg; common rigid camera/head/hardware pivot; unchanged historical fit/floor/belly/lifts; projection identities and hashed operator evidence fail closed; no authority")
+    }
     static func main() throws {
         let args=CommandLine.arguments
         let directory=URL(fileURLWithPath:args[1])
         let model=try ROBGhostRobotModel(directory:directory,physicalSide:"right")
         let torso=model.frames(model.reference)["torso_link"]!
+        if let index=args.firstIndex(of:"--actual-operator-pan-profile") {
+            try actualOperatorPanFixture(model:model,activationURL:URL(fileURLWithPath:args[index+1]));return
+        }
         if let index=args.firstIndex(of:"--actual-belly-reference") {
             let source=ROBNeckRGBPoseDisplay.activationURL,evidenceURL=URL(fileURLWithPath:args[index+1])
             let referenceBytes=try Data(contentsOf:evidenceURL)
@@ -340,6 +516,7 @@ import simd
             floorPose.depthCloudCameraToModel==beforeFloor.depthCloudCameraToModel && !floorPose.hasDepthProjectionAuthority &&
             ROBNeckRGBPoseDisplay.estimatedCameraProjectionIdentity(model:model)==physicalBeforeFloor,
             "Belly display evidence changed head/raw rotation, physical projection identity or depth authority")
+        try operatorPanFixture(model:model,base:a,temporary:temp,restore:activation)
         // A bare normal, edited source, rejected report or insufficient held-out
         // evidence cannot become a cosmetic pose merely by changing its hash.
         for field in ["kind","normalOptical","validationRMSEMeters","validationP95AbsMeters","validationMaxAbsMeters",

@@ -228,3 +228,19 @@ than established post-repair mechanical zeroes. Fixed room markers alone do
 not establish torso-forward yaw. A separate torso-relative observation must
 anchor that gauge. Record approximate operator observations as provisional,
 preserve their uncertainty, and retain the original captured commands.
+
+The optional activation `operatorPanCalibration` records a forward raw target
+and a second operator-observed pan angle, with a SHA-pinned evidence file.
+For example, a provisional forward reference at 6015 and an observed 90° left
+at 7841 define 0.0492881° per raw unit. The loader applies one rigid correction
+about the pan pivot to the current head assembly and provisional camera frame.
+The forward pose stays exactly unchanged. Historical QR fit parameters, the
+floor-up gauge, belly alignment and display lifts retain their original values.
+
+The evidence must match the active model/reference/geometry and the activation
+anchors, identify its operator-observed source, and explicitly grant no
+registration or motion authority. Invalid or altered evidence rejects the
+profile. Both display and estimated physical projection identities bind this
+correction, so prior accumulated surfaces and estimated contexts cannot survive
+a change. Raw servo targets, tested mechanical limits and driver safety
+conversions are independent of this provisional model correction.
