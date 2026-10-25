@@ -9,7 +9,7 @@ from DepthCameraIPCFixtureTests import load_service, FakeRGBFrame, FakeDepthFram
 
 ROOT=Path(__file__).resolve().parents[1]
 source=(ROOT/'Cerebro/CameraManager.swift').read_text()
-structure=braced_declaration(source,'struct CameraIntrinsics:')
+structure=braced_declaration(source,'struct CameraRuntimeCalibration:')+'\n'+braced_declaration(source,'struct CameraIntrinsics:')
 depth_geometry=braced_declaration(source,'struct CameraDepthRGBGeometryCorrespondence:')
 header=braced_declaration(source,'private struct DepthCameraPacketHeader:')
 camera_source=(ROOT/'Cerebro/CameraViewController.swift').read_text()
@@ -91,6 +91,7 @@ with_depth.update(rectified_left_geometry=left_geometry,rectified_right_geometry
 fixture=r'''
 import Foundation
 import AVFoundation
+import CryptoKit
 struct CameraInertialObservation:Decodable,Sendable {var isValid:Bool {true}}
 struct ROBChessPieceDetection:Decodable {}
 /* INTRINSICS */

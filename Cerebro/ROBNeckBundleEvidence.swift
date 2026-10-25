@@ -30,6 +30,11 @@ struct ROBNeckBundleObservation: Codable {
     let metadataSHA256: String
     let frameSequence: UInt64
     let capturedAtMilliseconds: Double
+    var stereoMode: String? = nil
+    var stereoModeSource: String? = nil
+    var stereoExtendedDisparity: Bool? = nil
+    var stereoSubpixel: Bool? = nil
+    var runtimeCalibrationIdentity: String? = nil
 }
 
 struct ROBNeckBundleRGBInput: Codable {
@@ -116,8 +121,12 @@ struct ROBNeckBundleRGBEvidence {
                   try verifySource(observation) else {
                 try reject("QR observation changed scope, image provenance, intrinsics, pixel geometry or training split.")
             }
-            let intrinsicsData=try JSONSerialization.data(withJSONObject:[Double(observation.width),Double(observation.height)]+observation.intrinsics)
-            guard digest(intrinsicsData)==observation.scope.intrinsicsIdentity else {
+            let intrinsicsIdentity = try ROBFixedHeadRegistrationScope.cameraIntrinsicsIdentity(
+                width: observation.width, height: observation.height, intrinsics: observation.intrinsics,
+                stereoMode: observation.stereoMode, stereoModeSource: observation.stereoModeSource,
+                extendedDisparity: observation.stereoExtendedDisparity, subpixel: observation.stereoSubpixel,
+                runtimeCalibrationIdentity: observation.runtimeCalibrationIdentity)
+            guard intrinsicsIdentity == observation.scope.intrinsicsIdentity else {
                 try reject("QR intrinsics do not match the exact captured camera scope.")
             }
             poses[pose]=observation.training

@@ -652,11 +652,13 @@ final class ROBArmRoutineCoordinator {
             print("Right estimated runtime: passive active-mode preview, one explicit physical-right approval, one 4s immutable two-joint outward retreat on gateway left, other arm unchanged, no jaw/return/replay; actual pixel/depth acquisition is separately covered, never fabricated here.")
             return
         }
-        if ["right-scope","right-three-scope"].contains(CommandLine.arguments.last ?? "") {
+        if ["right-scope","right-three-scope","right-four-scope"].contains(CommandLine.arguments.last ?? "") {
             var requestArms:[String]=[]
+            var requestSummaries:[String]=[]
             broker.send = { message,_,_ in
                 if message.kind == .actionRequest {
                     requestArms.append(message.arguments["arm"] as! String)
+                    requestSummaries.append(message.arguments["summary"] as! String)
                     DispatchQueue.main.async {
                         _ = broker.receive(.actionStatus(callID:message.callID!,state:.accepted,
                             detail:"Isolated scope decision",result:[:],senderID:"fixture-controller",recipientID:message.senderID),
@@ -671,10 +673,27 @@ final class ROBArmRoutineCoordinator {
             ROBArmRoutineCoordinator.shared.prepareView={true}; ROBArmRoutineCoordinator.shared.viewIsStationary={true}
             ROBWorkspaceSearch.shared.clearCollisionScene()
             let three = CommandLine.arguments.last == "right-three-scope"
-            let result=await run(three ? "right_recycle_three_cans" : "right_recycle_can")
-            if three {
-                precondition(result["batch_requested"] as? Int == 3 && result["batch_completed"] as? Int == 0)
-                precondition((result["batch_results"] as? [[String:Any]])?.count == 1,"An unconfirmed first grasp must stop the three-can task")
+            let four = CommandLine.arguments.last == "right-four-scope"
+            if four {
+                let originalSide = trial.physicalSide
+                for target in ["", "0", "9", "-1", "4.5", "all", "999999999999999999999999999999"] {
+                    let rejected = await run("right_recycle_cans", target:target)
+                    precondition(rejected["status"] as? String == "rejected", rejected.description)
+                    precondition(requestArms == ["left"] && g.commands.isEmpty,
+                                 "Invalid batch count requested approval or dispatched a command")
+                    precondition(trial.physicalSide == originalSide,
+                                 "Invalid batch count changed the selected physical arm")
+                }
+            }
+            let count = four ? 4 : three ? 3 : 1
+            let result=await run(four ? "right_recycle_cans" : three ? "right_recycle_three_cans" : "right_recycle_can",
+                                 target:four ? " 4\n" : "")
+            if count > 1 {
+                precondition(result["batch_requested"] as? Int == count && result["batch_completed"] as? Int == 0)
+                precondition((result["batch_results"] as? [[String:Any]])?.count == 1,
+                             "An unconfirmed first grasp must stop the complete batch")
+                precondition(requestSummaries.last?.contains("One approval covers all \(count) complete transfers.") == true,
+                             "The approved scope omitted the frozen batch count")
             }
             precondition(requestArms == ["left","both"],"A left-only rehearsal grant was incorrectly reused for the right task")
             precondition(trial.physicalSide=="right" && trial.executionGatewayArm=="left")
@@ -686,7 +705,7 @@ final class ROBArmRoutineCoordinator {
             precondition(result["arm_motion_sent"] as? Bool==false && ["not_reachable","not_localized","not_found","needs_help"].contains(result["status"] as? String ?? ""),result.description)
             precondition(ROBAmberArmMotionArbiter.shared.owners.isEmpty && !broker.isPending)
             broker.cancel(reason:"Isolated right-scope fixture finished")
-            print("Right task scope: left rehearsal does not authorize right travel; one fresh both-arm stationary-hold/right-travel approval; active1 -> measuredhold2 on both without parking, jaw motion or path bypass; unregistered map still blocks.")
+            print("Right task scope (\(count) cans): one complete-task approval includes the frozen count; invalid count cannot request authority or change arms; an unconfirmed first item stops the batch; active arms hold without parking or jaw motion and an unregistered map still blocks travel.")
             return
         }
         if CommandLine.arguments.last == "estimated-calibration" {

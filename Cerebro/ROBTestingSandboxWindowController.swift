@@ -19,13 +19,13 @@ import AppKit
     }
     private static let trials: [Trial] = [
         Trial(id: "right-recycling", title: "Recycle can · right arm", detail: "Use ROB's physical right arm (Amber L10). Find an empty upright can, grasp its middle, verify a small lift with fixed-head visual evidence, then carry and gravity-drop above the bucket. Right-arm calibration is separate from left-arm reach tuning. One task approval covers both arms holding at their measured positions and only the right arm travelling.", parameters: .current,
-              actions: [Action(title: "Recycle all three cans", command: "right_recycle_three_cans"), Action(title: "Recycle both cans", command: "right_recycle_two_cans"), Action(title: "Recycle one can", command: "right_recycle_can"), Action(title: "Search only", command: "right_search_workspace"), Action(title: "Scan workspace geometry", command: "right_scan_clearance"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision")]),
+              actions: [Action(title: "Recycle selected cans", command: "right_recycle_cans"), Action(title: "Search only", command: "right_search_workspace"), Action(title: "Scan workspace geometry", command: "right_scan_clearance"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision")]),
         Trial(id: "fixed-head-registration", title: "Camera-to-arm registration", detail: "Measure a local camera-to-robot transform from current RGB-D robot surfaces. Hold the exact head pose; fit and held-out validation use separate surface patches and later frames. A validated fit records its uncertainty and bounded volume. This test never moves an arm and does not manufacture a motion approval.", parameters: .none,
               actions: [Action(title: "Open fixed-head calibration…", command: "registration:open")]),
         Trial(id: "right-estimated-calibration", title: "Right-arm calibration step", detail: "Review one empty-right-arm two-joint retreat away from the table, then hold. The four-second step is capped at 3 cm of full-model travel. It is an estimated commissioning test, with existing modeled self-proxy overlaps required to improve. It does not close the jaws, recycle a can or claim a general arm calibration. Inspect the physical local clearance and ghost before one spoken or controller approval.", parameters: .none,
               actions: [Action(title: "Capture / preview right calibration step", command: "right_estimated_preview"), Action(title: "Inspect estimated ghost…", command: "ghost:collision"), Action(title: "Run reviewed right calibration step", command: "right_estimated_trial")]),
         Trial(id: "recycling", title: "Recycle can", detail: "Find an upright empty can and an open orange bucket using the neck camera. Grasp the can at its middle, lift, carry and release above the opening. Search and preview do not move the arms. A run uses one complete-task authorization or an active supervised session.", parameters: .recycling,
-              actions: [Action(title: "Run recycle test", command: "left_recycle_can"), Action(title: "Search only", command: "left_search_workspace"), Action(title: "Scan workspace geometry", command: "left_scan_clearance"), Action(title: "Preview grasp…", command: "ghost:can"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision")]),
+              actions: [Action(title: "Recycle selected cans", command: "left_recycle_cans"), Action(title: "Search only", command: "left_search_workspace"), Action(title: "Scan workspace geometry", command: "left_scan_clearance"), Action(title: "Preview grasp…", command: "ghost:can"), Action(title: "Inspect depth map / planned route…", command: "ghost:collision")]),
         Trial(id: "depth-alignment", title: "Depth alignment", detail: "Adjust the face camera's modeled downward mounting angle and move head-camera depth points horizontally toward ROB. The camera model, live depth view, new workspace scans and object measurements share the pitch correction. Previous scans and previews are cleared when the values change.", parameters: .depthAlignment,
               actions: [Action(title: "Show corrected live depth…", command: "ghost:collision"), Action(title: "Capture corrected workspace", command: "left_scan_clearance")]),
         Trial(id: "neck-qr-calibration", title: "Neck / QR calibration", detail: "Select a fixed 120 mm table, floor or wall target. Upper-neck checks start from the current view with lower target 6011 and hold pan fixed. Each selected upper target is checked against the QR, including reverse visits. Protractor mode holds each position until you advance. Posture sweeps repeat pan/upper checks at upright, back and forward lower-neck targets. Keep ROB's base and the target fixed. Results remain unverified until independent measurements validate them.", parameters: .none,
@@ -48,6 +48,11 @@ import AppKit
               actions: [Action(title: "Test spoken arm warning", command: "speech-test")])
     ]
 
+    private static let recyclingCountKey = "ROBTestingSandboxRecyclingCanCount"
+    private static var recyclingCount: Int {
+        let count = UserDefaults.standard.integer(forKey: recyclingCountKey)
+        return (1...ROBRecyclingBatchRequest.maximumCount).contains(count) ? count : 1
+    }
     private let table = NSTableView()
     private let detailStack = NSStackView()
     private let status = NSTextField(wrappingLabelWithString: "")
@@ -208,6 +213,10 @@ import AppKit
             collisionInfo.widthAnchor.constraint(equalTo: detailStack.widthAnchor).isActive = true
             refreshCollisionInfo()
         }
+        if ["recycling", "right-recycling"].contains(trial.id) {
+            addField("recyclingCount", "Number of cans", Double(Self.recyclingCount),
+                note: "1–\(ROBRecyclingBatchRequest.maximumCount) · each can is checked again")
+        }
         if trial.parameters == .depthAlignment {
             let current = ROBWorkspaceDepthAlignment.snapshot()
             addField("depthTowardRobotInches", "Depth points toward ROB (in)", (current?.towardRobotMeters ?? 0) / 0.0254,
@@ -311,6 +320,14 @@ import AppKit
                 refresh(); return true
             }
             let current = try value("currentLimit", within: 0...Double.greatestFiniteMagnitude)
+            let recyclingCount: Int?
+            if ["recycling", "right-recycling"].contains(selectedTrial.id) {
+                let count = try value("recyclingCount", within: 1...Double(ROBRecyclingBatchRequest.maximumCount))
+                guard count.rounded() == count else {
+                    throw ROBGhostMotionError.blocked("Enter a whole number of cans.")
+                }
+                recyclingCount = Int(count)
+            } else { recyclingCount = nil }
             if selectedTrial.parameters == .recycling {
                 let parameters = ROBRecyclingTestParameters(motionPace: try value("motionPace", within: 1...1.25),
                     jawSettleSeconds: try value("jawSettleSeconds", within: 1...2),
@@ -337,6 +354,7 @@ import AppKit
                 // Preserve model identity, source and every unknown optional field.
                 if let calibrationData { try calibrationData.write(to: ROBLeftCanReachCalibration.file, options: .atomic) }
             }
+            if let recyclingCount { UserDefaults.standard.set(recyclingCount, forKey: Self.recyclingCountKey) }
             UserDefaults.standard.set(current, forKey: ROBLeftArmTrial.currentLimitKey)
             parameterMessage = "Parameters saved for the next test."
             refresh(); return true
@@ -411,7 +429,8 @@ import AppKit
     private func run(_ command: String) {
         parameterMessage = ""
         observingLeftOperation = ROBLeftArmTrial.commands.contains(command)
-        ROBArmRoutineCoordinator.shared.performCommand(command, target: "") { [weak self] _ in self?.refresh() }
+        let target = ROBRecyclingBatchRequest.configuredCommands.contains(command) ? String(Self.recyclingCount) : ""
+        ROBArmRoutineCoordinator.shared.performCommand(command, target: target) { [weak self] _ in self?.refresh() }
         refresh()
     }
     @objc private func continueObjectCycle() {

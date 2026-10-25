@@ -4,6 +4,75 @@ The sandbox separates a measured camera view from a general neck calibration.
 One validated view can support a local experiment without claiming that every
 neck angle or arm encoder offset is commissioned.
 
+## Optional runtime stereo calibration
+
+The camera worker can load a device-specific stereo correction into **RAM** at
+startup. It does not flash EEPROM, rescale depth or change RGB intrinsics,
+distortion, focus, the right-camera-to-RGB anchor, IMU data or specification
+translations. The approved changes are the raw left-to-right rotation and
+translation plus the two stored rectification rotations. The loader checks the
+original B→C→A camera graph, unchanged unrelated fields, proper bounded rotations
+and translations, and consistency between the raw pair and rectification.
+
+Keep profiles, requested calibration JSON and commissioning evidence outside the
+repository. The worker reads this activation pointer once; restart the camera
+worker after changing it:
+
+`~/Library/Application Support/Cerebro/DepthCamera/RuntimeStereoCalibration/{role}-active.json`
+
+The pointer has `schemaVersion: 1`, `kind: "runtime_stereo_calibration_activation"`,
+`cameraRole`, an absolute `profilePath`, and that immutable file's `profileSHA256`.
+The referenced profile has these required fields:
+
+| Field | Required value |
+| --- | --- |
+| `schemaVersion`, `kind` | `1`, `runtime_stereo_calibration_profile` |
+| `cameraRole`, `actualDeviceMXID` | Exact camera role and device |
+| `platform`, `sdkVersion` | `RVC2`, `3.8.0` |
+| `factoryEEPROMSHA256` | SHA256 of the original EEPROM JSON export bytes |
+| `requestedCalibrationPath`, `requestedCalibrationSHA256` | Absolute immutable JSON path and byte SHA256 |
+| `requestedCalibrationSemanticSHA256` | SHA256 after normalizing `cameraData` to a socket-keyed object |
+| `candidateSHA256` | SHA256 of the approved candidate evidence |
+| `validationEvidencePath`, `validationEvidenceSHA256` | Absolute commissioning-summary path and byte SHA256 |
+
+Calibration exports and semantic canonicalization use sorted keys, two-space
+indentation and a final newline; semantic canonicalization first normalizes
+only the camera-table ordering. File hashes always pin the actual saved bytes.
+The summary records measured results and their
+limits; pinning it does not create a global metric pass or arm authorization.
+
+A missing or rejected profile sends no calibration override. Diagnostics call
+the observed data **FACTORY** only when it equals EEPROM; an unrelated prior RAM
+calibration remains identified as **OBSERVED_EXISTING_RUNTIME**. Both paths
+retain actual effective-runtime provenance. Once an override is attempted, an
+apply/readback mismatch aborts capture and restores the prior effective RAM
+calibration rather than silently continuing. Restoration and unchanged EEPROM
+are checked **before** pipeline teardown, because SDK 3.8 closes the device when
+the pipeline stops.
+
+Auto-calibration is explicitly OFF for factory and profile workers. An applied
+profile also explicitly disables all three specification-translation policies.
+The packet's `runtime_calibration` binds device, role, SDK, factory EEPROM hash,
+effective-runtime semantic hash, actual HOST stereo-policy hash and optional
+candidate/profile hashes. `runtime_calibration_identity` hashes the prefix
+`runtime-camera-calibration-v1` followed by those eight fields in that order,
+joined by LF with no final LF; absent candidate/profile values use `-`. HOST
+configuration is not a firmware-strategy observation. Identity changes start a
+new camera generation and invalidate dependent scenes and registrations.
+
+The October 24 single-RGB, RGB-aligned 640×400 standard-stereo TABLE check still
+measured a **+10.7–12.7 mm center optical-Z residual** against the 120 mm RGB
+target pose. No constant correction was applied. Preserve this local residual
+in the commissioning uncertainty; do not generalize it to another range or
+view. Correcting stereo geometry does not establish camera-to-body or
+camera-to-arm registration. A fresh independently validated body reference and
+ordinary path admission remain necessary, and this camera test claims no grasp
+or bucket-delivery success.
+
+CPU-only profile, identity and restoration fixtures run with
+`python3 -B Scripts/test-runtime-stereo-calibration.py` in the calibration Python
+environment. They do not open a camera or actuate ROB.
+
 ## Capture and registration
 
 Open **Testing Sandbox → Camera-to-arm registration → Open fixed-head
@@ -49,12 +118,19 @@ It never reflects a left trajectory or inherits left reach residuals. The
 remaining encoder mapping is explicitly a prior; visual commissioning must
 establish actual accuracy before claiming a general arm calibration.
 
-**Recycle both cans** requests one complete operation: both arms may enter
-stationary holds at their current measured positions, and only the selected
-right arm travels. The existing spoken prompt remains **“Can I move my arms?”**.
+Set **Number of cans** to a whole number from **1 through 8**, then run the
+selected recycling test. One approval covers the stated complete batch: both
+arms may enter stationary holds at their current measured positions, and only
+the selected right arm travels. The spoken prompt remains **“Can I move my arms?”**.
 Each can receives fresh observation, depth, scene admission and a reviewed path.
 An existing left-only session cannot authorize the right task. A failure or
-uncertain first grasp stops the batch before a second reach.
+uncertain grasp stops the batch in a hold before the next reach. Existing time,
+feedback, scene and Stop limits still apply. A completed transfer path records a
+commanded gravity release; it does not by itself verify landing inside the bin.
+
+The count-based API commands are `left_recycle_cans` and `right_recycle_cans`,
+with the decimal count supplied in `target`. Existing one-can, two-can and
+right-three-can command names retain their original counts.
 
 The can's visible wall is distinguished from its estimated cylinder axis. Side
 grasp geometry uses measured top, middle and bottom bands plus a radius offset

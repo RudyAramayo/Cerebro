@@ -62,6 +62,7 @@ static NSString *fixtureBodyIdentity;
 @property(strong) FixtureGhostGestureEditor *ghostGestureEditor;
 @property BOOL treadCommandsAreActive;
 __CONTROLLER_PROPERTIES__
+__SOURCE_CONTEXT_PROPERTIES__
 @end
 @implementation Harness
 __CONTROLLER_METHODS__
@@ -76,6 +77,7 @@ static void drain(Harness *h) {
 static void submit(Harness *h, NSData *samples, ROBDepthCloudFrame *frame, ROBSurfaceDepthView view, BOOL projectionReady) {
     h.lastHeadSurfaceSubmission=0;h.lastBellySurfaceSubmission=0;
     frame.capturedUptime=NSProcessInfo.processInfo.systemUptime;
+    [h updateDepthCloudStream:frame];
     [h offerAccumulatedSurfaceSamples:samples frame:frame view:view robotTransform:h.robotNode.worldTransform
         projectionReady:projectionReady projectionIdentity:h.ghostGestureEditor.depthProjectionIdentity];
 }
@@ -86,6 +88,7 @@ static void offer(Harness *h, NSData *samples, ROBDepthCloudFrame *frame, ROBSur
 static SCNNode *rebuildHead(Harness *h, NSData *samples, ROBDepthCloudFrame *frame, ROBSurfaceDepthView view) {
     frame.sequence++;offer(h,samples,frame,view);
     frame.sequence++;offer(h,samples,frame,view);
+    frame.sequence++;offer(h,samples,frame,view);
     SCNNode *map=h.headSurfaceNode.childNodes.firstObject;
     assert(map.childNodes.count>=4 && h.headUsesSurfaces);
     return map;
@@ -93,6 +96,17 @@ static SCNNode *rebuildHead(Harness *h, NSData *samples, ROBDepthCloudFrame *fra
 static void assertEmptyHistory(Harness *h) {
     assert(!h.headSurfaceNode.childNodes.count && !h.bellySurfaceNode.childNodes.count);
     assert(!h.headSurfaceAccumulator && !h.bellySurfaceAccumulator && !h.headUsesSurfaces && !h.bellyUsesSurfaces);
+}
+static void assertEmptyHeadHistory(Harness *h) {
+    assert(!h.headSurfaceNode.childNodes.count && !h.headSurfaceAccumulator && !h.headUsesSurfaces);
+}
+static ROBDepthCloudFrame *copyFrame(ROBDepthCloudFrame *frame) {
+    ROBDepthCloudFrame *copy=[ROBDepthCloudFrame new];
+    copy.isBelly=frame.isBelly;copy.hasCalibratedIntrinsics=frame.hasCalibratedIntrinsics;
+    copy.width=frame.width;copy.height=frame.height;copy.captureStreamID=frame.captureStreamID;
+    copy.sequence=frame.sequence;copy.capturedUptime=frame.capturedUptime;
+    copy.millimetersLittleEndian=frame.millimetersLittleEndian;copy.rgbPixelBuffer=frame.rgbPixelBuffer;
+    return copy;
 }
 int main(int argc,const char *argv[]) { @autoreleasepool {
     [NSApplication sharedApplication];
@@ -136,12 +150,15 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
     assert(triangles>0 && triangles<100);
     double captured=h.lastHeadSurfaceCapture;offer(h,samples,frame,view);
     assert(h.headSurfaceNode.childNodes.firstObject==map && h.lastHeadSurfaceCapture==captured);
-    /* Two camera histories are independent; a stream change clears both. */
+    /* A capture/calibration stream change invalidates only its camera. */
     frame.isBelly=YES;frame.captureStreamID=@"fixture-belly-1";frame.sequence=1;offer(h,samples,frame,view);
     assert(h.headSurfaceNode.childNodes.firstObject==map && h.bellySurfaceAccumulator && h.headSurfaceAccumulator!=h.bellySurfaceAccumulator);
     frame.sequence=2;offer(h,samples,frame,view);assert(h.bellySurfaceNode.childNodes.firstObject.childNodes.count>=4);
+    SCNNode *bellyMap=h.bellySurfaceNode.childNodes.firstObject;
+    ROBSurfaceAccumulator *bellyAccumulator=h.bellySurfaceAccumulator;
     frame.isBelly=NO;frame.captureStreamID=@"fixture-head-reconnected";frame.sequence=1;offer(h,samples,frame,view);
-    assertEmptyHistory(h);assert([h.headSurfaceSummary containsString:@"after Reset"]);
+    assertEmptyHeadHistory(h);assert([h.headSurfaceSummary containsString:@"after Reset"]);
+    assert(h.bellySurfaceNode.childNodes.firstObject==bellyMap && h.bellySurfaceAccumulator==bellyAccumulator);
     frame.sequence=2;offer(h,samples,frame,view);assert([h.headSurfaceSummary containsString:@"1 frames"]);
     frame.sequence=3;offer(h,samples,frame,view);map=h.headSurfaceNode.childNodes.firstObject;
     ROBSurfaceAccumulator *before=h.headSurfaceAccumulator;
@@ -154,7 +171,8 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
     /* Losing projection readiness cannot retain another stream/profile/body context. */
     NSUInteger generation=h.surfaceGeneration;
     frame.captureStreamID=@"fixture-head-floor-occluded-reconnect";submit(h,samples,frame,view,NO);
-    assertEmptyHistory(h);assert(h.surfaceGeneration>generation);
+    assertEmptyHeadHistory(h);assert(h.surfaceGeneration>generation);
+    assert(h.bellySurfaceNode.childNodes.firstObject==bellyMap && h.bellySurfaceAccumulator==bellyAccumulator);
     map=rebuildHead(h,samples,frame,view);generation=h.surfaceGeneration;
     h.ghostGestureEditor.depthProjectionIdentity=@"projection-after-profile-reload";
     submit(h,samples,frame,view,NO);assertEmptyHistory(h);assert(h.surfaceGeneration>generation);
@@ -183,6 +201,47 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
     dispatch_resume(h.cloudQueue);drain(h);
     assert(h.headSurfaceNode.childNodes.firstObject==map && h.lastHeadSurfaceCapture==captured);
     ROBLeftArmTrial.shared.isRunning=NO;
+    /* A same-K source change cannot publish an old result, clear a newer
+       pending flag, or cancel the other camera's existing history. */
+    ROBDepthCloudFrame *bellyFrame=copyFrame(frame);bellyFrame.isBelly=YES;
+    bellyFrame.captureStreamID=@"fixture-belly-preserved-during-head-runtime-change";bellyFrame.sequence=1;
+    offer(h,samples,bellyFrame,view);bellyFrame.sequence++;offer(h,samples,bellyFrame,view);
+    bellyFrame.sequence++;offer(h,samples,bellyFrame,view);
+    bellyMap=h.bellySurfaceNode.childNodes.firstObject;bellyAccumulator=h.bellySurfaceAccumulator;
+    assert(bellyMap.childNodes.count>=4 && h.headSurfaceNode.childNodes.firstObject==map);
+    dispatch_semaphore_t gate=dispatch_semaphore_create(0);
+    __block BOOL oldCompletionDrained=NO;
+    dispatch_suspend(h.cloudQueue);frame.sequence++;submit(h,samples,frame,view,YES);
+    assert(h.headSurfaceUpdatePending);
+    dispatch_async(h.cloudQueue, ^{
+        dispatch_async(dispatch_get_main_queue(), ^{oldCompletionDrained=YES;});
+        dispatch_semaphore_wait(gate,DISPATCH_TIME_FOREVER);
+    });
+    ROBDepthCloudFrame *newFrame=copyFrame(frame);
+    newFrame.captureStreamID=@"fixture-head-new-runtime-same-K";newFrame.sequence=1;
+    [h updateDepthCloudStream:newFrame];
+    assertEmptyHeadHistory(h);assert(!h.headSurfaceUpdatePending);
+    assert(h.bellySurfaceAccumulator==bellyAccumulator && h.bellySurfaceNode.childNodes.firstObject==bellyMap);
+    newFrame.sequence++;submit(h,samples,newFrame,view,YES);assert(h.headSurfaceUpdatePending);
+    dispatch_resume(h.cloudQueue);
+    double oldDeadline=NSProcessInfo.processInfo.systemUptime+5;
+    while (!oldCompletionDrained && NSProcessInfo.processInfo.systemUptime<oldDeadline)
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.002]];
+    assert(oldCompletionDrained && h.headSurfaceUpdatePending && h.surfaceUpdatePending);
+    assert(!h.headSurfaceNode.childNodes.count && h.bellySurfaceNode.childNodes.firstObject==bellyMap);
+    dispatch_semaphore_signal(gate);drain(h);
+    assert([h.headSurfaceSummary containsString:@"1 frames"] && !h.headSurfaceNode.childNodes.firstObject.childNodes.count);
+    newFrame.sequence++;offer(h,samples,newFrame,view);frame=newFrame;
+    map=h.headSurfaceNode.childNodes.firstObject;assert(map.childNodes.count>=4);
+    /* A belly restart likewise leaves a pending head observation intact. */
+    dispatch_suspend(h.cloudQueue);frame.sequence++;submit(h,samples,frame,view,YES);
+    assert(h.headSurfaceUpdatePending);
+    ROBDepthCloudFrame *newBelly=copyFrame(bellyFrame);newBelly.captureStreamID=@"fixture-belly-new-runtime-same-K";
+    [h updateDepthCloudStream:newBelly];
+    assert(h.headSurfaceUpdatePending && h.headSurfaceNode.childNodes.firstObject==map);
+    assert(!h.bellySurfaceNode.childNodes.count && !h.bellySurfaceAccumulator);
+    dispatch_resume(h.cloudQueue);drain(h);
+    assert(h.headSurfaceNode.childNodes.firstObject.childNodes.count>=4);
     /* A reset while a worker is pending prevents its old result publishing. */
     h.lastHeadSurfaceSubmission=0;frame.sequence++;frame.capturedUptime=NSProcessInfo.processInfo.systemUptime;
     [h offerAccumulatedSurfaceSamples:samples frame:frame view:view robotTransform:SCNMatrix4Identity projectionReady:YES
@@ -203,6 +262,7 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
         if (belly) {
             frame.captureStreamID=@"fixture-belly-empty-transition";frame.sequence=1;
             offer(h,samples,frame,view);frame.sequence++;offer(h,samples,frame,view);
+            frame.sequence++;offer(h,samples,frame,view);
         }
         SCNNode *surfaceRoot=belly ? h.bellySurfaceNode : h.headSurfaceNode;
         SCNNode *populated=surfaceRoot.childNodes.firstObject;

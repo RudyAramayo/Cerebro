@@ -265,6 +265,14 @@ import simd
             record.merge(stepContext) { _, new in new }
             record["intrinsicsSource"] = k.calibrationSource ?? "unspecified"
             if let value = k.cameraServiceSourceSHA256 { record["cameraServiceSourceSHA256"] = value }
+            if let value = k.runtimeCalibration {
+                record["runtimeCalibration"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(value))
+                record["runtimeCalibrationIdentity"] = value.identity
+            }
+            if let value = k.stereoMode { record["stereoMode"] = value }
+            if let value = k.stereoModeSource { record["stereoModeSource"] = value }
+            if let value = k.stereoExtendedDisparity { record["stereoExtendedDisparity"] = value }
+            if let value = k.stereoSubpixel { record["stereoSubpixel"] = value }
             if let value = k.rgbOutputUndistorted { record["rgbOutputUndistorted"] = value }
             if let value = k.calibratedLensPosition { record["calibratedLensPosition"] = value }
             if let value = k.frameLensPosition { record["frameLensPosition"] = value }

@@ -158,10 +158,14 @@ def run_fixtures():
             super().__init__(result=result)
             self.started, self.closed = False, False
             self.usb_speed = usb_speed
+            self.runtime_reads = 0
         def setMaxReconnectionAttempts(self, *args): pass
         def getUsbSpeed(self): return self.usb_speed
         def getPlatform(self): return "rvc2"
         def readCalibration2(self): return self
+        def getMxId(self): return "CPU-IR-FIXTURE"
+        def getCalibration(self): self.runtime_reads += 1; return self
+        def eepromToJson(self): return {"cameraData": [], "fixture": "synthetic IR setup"}
         def getCameraIntrinsics(self, *args): return [[500, 0, 320], [0, 500, 200], [0, 0, 1]]
         def close(self): self.closed = True
         def setIrFloodLightIntensity(self, value):
@@ -172,6 +176,7 @@ def run_fixtures():
             return super().setIrLaserDotProjectorIntensity(value)
 
     class Pipeline:
+        AutoCalibrationMode = SimpleNamespace(OFF="off")
         stereo_nodes = []
         def __init__(self, device, fail=False): self.device, self.fail = device, fail
         def __enter__(self): return self
@@ -184,6 +189,14 @@ def run_fixtures():
             if self.fail: raise RuntimeError("pipeline start failed")
             self.device.started = True
         def isRunning(self): return False
+        def setAutoCalibrationMode(self, mode):
+            assert not self.device.started and mode == self.AutoCalibrationMode.OFF
+            self.auto_mode = mode
+        def getAutoCalibrationMode(self): return self.auto_mode
+        def serializeToJson(self, _):
+            return {"nodes": [[1, {"properties": {"useHomographyRectification": False,
+                "disparityToDepthUseSpecTranslation": None, "rectificationUseSpecTranslation": None,
+                "depthAlignmentUseSpecTranslation": None}}]]}
 
     for supported, size, mono, usb, expected_fps,mode,role in [
             (True, (640, 400), (640, 400), "high", 10.,"standard","face"),
@@ -195,8 +208,8 @@ def run_fixtures():
             (True, (1280, 800), (1280, 800), "high", 2.5,"standard","belly")]:
         Camera.requests = []; Pipeline.stereo_nodes = []
         device = Device(result=supported, usb_speed=usb)
-        fake = SimpleNamespace(Device=lambda *args: device, DeviceInfo=lambda value: value,
-            Pipeline=lambda device: Pipeline(device), UsbSpeed=SimpleNamespace(HIGH="high"),
+        fake = SimpleNamespace(__version__="3.8.0", Device=lambda *args: device, DeviceInfo=lambda value: value,
+            Pipeline=Pipeline, UsbSpeed=SimpleNamespace(HIGH="high"),
             Platform=SimpleNamespace(RVC2="rvc2", RVC3="rvc3", RVC4="rvc4"),
             node=SimpleNamespace(Camera=Camera, StereoDepth=Stereo, Sync=Sync),
             ImgFrame=SimpleNamespace(Type=SimpleNamespace(RGB888i="rgb", GRAY8="gray")),
@@ -216,7 +229,12 @@ def run_fixtures():
         assert evidence["requestedPipeline"]["stereoMode"] == mode
         assert evidence["requestedPipeline"]["resolvedStrategyObserved"] is False
         assert evidence["requestedPipeline"]["rectificationPolicy"] == "explicit_mesh"
-        assert evidence["metricAccuracyVerified"] is False and evidence["eepromExport"]["status"] == "unavailable"
+        assert evidence["metricAccuracyVerified"] is False and evidence["eepromExport"]["status"] == "observed"
+        assert evidence["runtimeProfileApplied"] is False and device.runtime_reads >= 2
+        assert evidence["runtimeCalibration"]["actualDeviceMXID"] == "CPU-IR-FIXTURE"
+        assert evidence["runtimeCalibration"]["candidateSHA256"] is None
+        assert evidence["runtimeCalibration"]["profileSHA256"] is None
+        assert evidence["requestedPipeline"]["autoCalibrationMode"] == "off"
         assert len(Camera.requests) == 3
         assert [entry[1] for entry in Camera.requests] == [size, mono, mono]
         assert all(entry[2]["fps"] == expected_fps for entry in Camera.requests)

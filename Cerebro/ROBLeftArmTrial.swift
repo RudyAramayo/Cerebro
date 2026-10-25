@@ -38,7 +38,7 @@ struct ROBReviewedArmDispatchStart {
     static let commands = ["left_wave", "left_prepare", "left_grip", "left_release", "left_relax", "left_object_cycle",
         "left_pick_place", "left_recycle_can", "left_search_workspace", "left_check_hanging", "left_scan_clearance",
         "left_estimated_preview", "left_estimated_calibration",
-        "right_estimated_preview", "right_estimated_trial", "right_recycle_can", "right_recycle_two_cans", "right_recycle_three_cans", "left_recycle_two_cans", "right_search_workspace", "right_scan_clearance"]
+        "right_estimated_preview", "right_estimated_trial", "right_recycle_can", "right_recycle_two_cans", "right_recycle_three_cans", "left_recycle_two_cans", "right_search_workspace", "right_scan_clearance"] + ROBRecyclingBatchRequest.configuredCommands
     private static let neckOnlyCommands = ["left_search_workspace", "left_check_hanging", "left_scan_clearance", "left_estimated_preview"]
     @nonobjc private var workspaceSearchTargets = ROBWorkspaceTarget.allCases
     static let currentLimitKey = "ROBLeftArmCurrentJumpLimitRaw"
@@ -464,10 +464,13 @@ struct ROBReviewedArmDispatchStart {
               !ROBControllerArmApproval.shared.isPending || requestedCommand == "left_relax" else {
             completion(["status":"busy","detail":"Finish the current operation or use Stop + hold."]);return
         }
+        let canCount: Int
+        do { canCount = try ROBRecyclingBatchRequest.requestedCount(command: requestedCommand, target: target) ?? 1 }
+        catch { completion(["status":"rejected", "detail":error.localizedDescription]); return }
         selectPhysicalSide(requestedCommand.hasPrefix("right_") ? "right" : "left")
-        requestedCanCount = requestedCommand.hasSuffix("_recycle_three_cans") ? 3 : requestedCommand.hasSuffix("_recycle_two_cans") ? 2 : 1
+        requestedCanCount = canCount
         let canonical = requestedCommand.hasPrefix("right_") ? "left_" + requestedCommand.dropFirst(6) : requestedCommand
-        let command = ["left_recycle_two_cans","left_recycle_three_cans"].contains(canonical) ? "left_recycle_can" : canonical == "left_estimated_trial" ? "left_estimated_calibration" : canonical
+        let command = ["left_recycle_two_cans","left_recycle_three_cans","left_recycle_cans"].contains(canonical) ? "left_recycle_can" : canonical == "left_estimated_trial" ? "left_estimated_calibration" : canonical
         workspaceSearchTargets = command == "left_search_workspace"
             && target.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "can"
             ? [.can] : ROBWorkspaceTarget.allCases

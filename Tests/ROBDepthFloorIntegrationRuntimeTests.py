@@ -5,6 +5,7 @@ Only app services and geometry publication are inert substitutes. The candidate
 gate and complete processing method are extracted verbatim from the controller.
 """
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 
@@ -13,6 +14,13 @@ source = (ROOT / "Cerebro/ROBSCNViewController.m").read_text()
 helpers = source[source.index("static NSUInteger const ROBMaximumDisplayedCloudPoints"):source.index("static NSString *ROBDiagnosticInhibitReason")]
 status_method = source[source.index("- (void)refreshFloorStatus\n"):source.index("- (void)armTrialViewPrepared:")]
 method = source[source.index("- (void)refreshFloorCloudVisibilityAtUptime:"):source.rindex("\n@end")]
+source_methods = source[source.index("- (void)resetAccumulatedSurfaceForBelly:"):source.index("- (void)refreshAccumulatedSurfaceStatus\n")]
+source_names = ["headCloudStreamID", "bellyCloudStreamID", "headCloudSourceEpoch", "headSurfaceGeneration",
+                "headSurfaceUpdatePending", "lastHeadSurfaceResetUptime", "surfaceGeneration", "surfaceUpdatePending",
+                "lastHeadSurfaceSubmission", "lastHeadSurfaceCapture", "lastSurfaceResetUptime", "headSurfaceAccumulator",
+                "bellySurfaceAccumulator", "headSurfaceSummary", "bellySurfaceSummary", "lastHeadCloudSubmission", "lastBellyCloudSubmission"]
+source_properties = "\n".join(dict.fromkeys(re.search(r"^@property[^\n]*\b" + name + r"\b[^\n]*;", source, re.M).group()
+                                         for name in source_names))
 HARNESS = r'''
 #import <Foundation/Foundation.h>
 #import <SceneKit/SceneKit.h>
@@ -33,8 +41,11 @@ HARNESS = r'''
 @property double cameraFX, cameraFY, cameraCX, cameraCY, capturedUptime;
 @property(strong) NSData *millimetersLittleEndian;
 @property CVPixelBufferRef rgbPixelBuffer;
+@property(copy) NSString *captureStreamID;
 @end
-@implementation ROBDepthCloudFrame @end
+@implementation ROBDepthCloudFrame
+- (instancetype)init {self=[super init];if(self) _captureStreamID=@"fixture-stream";return self;}
+@end
 __HELPERS__
 @interface ROBSerialBox : NSObject
 @property BOOL isNeckCommandStateKnown;
@@ -79,6 +90,7 @@ __HELPERS__
 @implementation ROBFixedHeadBodyMotionIdentity
 + (NSString *)currentIdentity { return @"fixture-body-motion"; }
 @end
+@class ROBSurfaceAccumulator;
 @interface Harness : NSObject
 @property(strong) FixtureNode *robotNode;
 @property(strong) SCNNode *liveRGBCloudNode, *liveBellyRGBCloudNode;
@@ -104,19 +116,29 @@ __HELPERS__
 @property ROBSurfaceDepthView capturedSurfaceView;
 @property(copy) NSString *capturedSurfaceProjectionIdentity;
 @property BOOL capturedSurfaceProjectionReady;
+__SOURCE_PROPERTIES__
 - (void)processDepthFrame:(ROBDepthCloudFrame *)frame robotTransform:(SCNMatrix4)robot cameraTransform:(ROBDepthCloudTransform)camera neckTargets:(NSArray<NSNumber *> *)targets;
 - (void)processDepthFrame:(ROBDepthCloudFrame *)frame robotTransform:(SCNMatrix4)robot cameraTransform:(ROBDepthCloudTransform)camera neckTargets:(NSArray<NSNumber *> *)targets projectionIdentity:(NSString *)projectionIdentity explicitCameraPose:(BOOL)explicitCameraPose;
+- (void)processDepthFrame:(ROBDepthCloudFrame *)frame robotTransform:(SCNMatrix4)robot cameraTransform:(ROBDepthCloudTransform)camera neckTargets:(NSArray<NSNumber *> *)targets projectionIdentity:(NSString *)projectionIdentity explicitCameraPose:(BOOL)explicitCameraPose sourceStreamID:(NSString *)sourceStreamID sourceEpoch:(NSUInteger)sourceEpoch;
 - (void)refreshFloorCloudVisibilityAtUptime:(NSTimeInterval)now;
 - (void)retainHeadCloudForDisplayAtUptime:(NSTimeInterval)now;
 - (void)refreshFloorStatus;
 @end
 @implementation Harness
+- (void)processDepthFrame:(ROBDepthCloudFrame *)frame robotTransform:(SCNMatrix4)robot cameraTransform:(ROBDepthCloudTransform)camera neckTargets:(NSArray<NSNumber *> *)targets projectionIdentity:(NSString *)projectionIdentity explicitCameraPose:(BOOL)explicitCameraPose {
+    [self updateDepthCloudStream:frame];
+    if(frame.isBelly) self.bellyCloudUpdatePending=YES;else self.cloudUpdatePending=YES;
+    [self processDepthFrame:frame robotTransform:robot cameraTransform:camera neckTargets:targets projectionIdentity:projectionIdentity
+        explicitCameraPose:explicitCameraPose sourceStreamID:frame.captureStreamID ?: @"unavailable"
+        sourceEpoch:frame.isBelly ? self.bellyCloudSourceEpoch : self.headCloudSourceEpoch];
+}
 - (void)processDepthFrame:(ROBDepthCloudFrame *)frame robotTransform:(SCNMatrix4)robot cameraTransform:(ROBDepthCloudTransform)camera neckTargets:(NSArray<NSNumber *> *)targets {
     [self processDepthFrame:frame robotTransform:robot cameraTransform:camera neckTargets:targets
         projectionIdentity:self.ghostGestureEditor.depthProjectionIdentity explicitCameraPose:NO];
 }
 - (void)refreshAccumulatedSurfaceStatus {}
 - (void)resetAccumulatedSurfaces:(id)sender {}
+__SOURCE_METHODS__
 - (void)offerAccumulatedSurfaceSamples:(NSData *)samples frame:(ROBDepthCloudFrame *)frame
                                  view:(ROBSurfaceDepthView)view robotTransform:(SCNMatrix4)robot projectionReady:(BOOL)projectionReady
                    projectionIdentity:(NSString *)projectionIdentity {
@@ -584,6 +606,48 @@ int main(void) { @autoreleasepool {
     h.robotNode.worldTransform=world; h.headUsesSurfaces=YES;
     NSArray *previousPoints=h.capturedPoints; publish(h,f,camera,targets);
     assert(h.capturedPoints==previousPoints && h.capturedSurfaceSamples.length/sizeof(ROBSurfaceSample)>500);
+    /* Exact production completion guards reject old valid AND invalid work
+       before either can clear a newer pending flag or resurrect raw geometry. */
+    for (int role=0;role<2;role++) {
+        BOOL belly=role==1;
+        Harness *epochs=newHarness(world);
+        ROBDepthCloudFrame *old=frameAtHeight(1,0,NO);old.isBelly=belly;
+        ROBDepthCloudFrame *other=frameAtHeight(1,0,NO);other.isBelly=!belly;
+        publishExplicit(epochs,old,camera,targets);publishExplicit(epochs,other,camera,targets);
+        id otherGeometry=(belly ? epochs.liveRGBCloudNode : epochs.liveBellyRGBCloudNode).geometry;
+        assert(otherGeometry);
+        NSUInteger oldEpoch=belly ? epochs.bellyCloudSourceEpoch : epochs.headCloudSourceEpoch;
+        NSString *oldStream=old.captureStreamID;
+        old.capturedUptime=NSProcessInfo.processInfo.systemUptime;
+        if(belly) epochs.bellyCloudUpdatePending=YES;else epochs.cloudUpdatePending=YES;
+        [epochs processDepthFrame:old robotTransform:world cameraTransform:camera neckTargets:targets
+            projectionIdentity:epochs.ghostGestureEditor.depthProjectionIdentity explicitCameraPose:YES sourceStreamID:oldStream sourceEpoch:oldEpoch];
+        ROBDepthCloudFrame *invalidOld=[ROBDepthCloudFrame new];invalidOld.isBelly=belly;
+        invalidOld.width=invalidOld.height=100;invalidOld.millimetersLittleEndian=[NSData data];
+        [epochs processDepthFrame:invalidOld robotTransform:world cameraTransform:camera neckTargets:targets
+            projectionIdentity:epochs.ghostGestureEditor.depthProjectionIdentity explicitCameraPose:YES sourceStreamID:oldStream sourceEpoch:oldEpoch];
+        ROBDepthCloudFrame *fresh=frameAtHeight(1,0,NO);fresh.isBelly=belly;fresh.captureStreamID=@"runtime-profile-changed-with-identical-K";
+        [epochs updateDepthCloudStream:fresh];
+        SCNNode *changedNode=belly ? epochs.liveBellyRGBCloudNode : epochs.liveRGBCloudNode;
+        assert(changedNode.hidden && !changedNode.geometry);
+        assert((belly ? epochs.liveRGBCloudNode : epochs.liveBellyRGBCloudNode).geometry==otherGeometry);
+        epochs.cloudUpdatePending=YES;epochs.bellyCloudUpdatePending=YES;
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.025]];
+        assert(epochs.cloudUpdatePending && epochs.bellyCloudUpdatePending && !changedNode.geometry);
+        assert((belly ? epochs.liveRGBCloudNode : epochs.liveBellyRGBCloudNode).geometry==otherGeometry);
+        if(belly) epochs.cloudUpdatePending=NO;else epochs.bellyCloudUpdatePending=NO;
+        fresh.capturedUptime=NSProcessInfo.processInfo.systemUptime;
+        NSUInteger freshEpoch=belly ? epochs.bellyCloudSourceEpoch : epochs.headCloudSourceEpoch;
+        [epochs processDepthFrame:fresh robotTransform:world cameraTransform:camera neckTargets:targets
+            projectionIdentity:epochs.ghostGestureEditor.depthProjectionIdentity explicitCameraPose:YES
+            sourceStreamID:fresh.captureStreamID sourceEpoch:freshEpoch];drain(epochs);
+        assert(changedNode.geometry && !changedNode.hidden);
+        NSArray *freshContext=belly ? epochs.bellyFloorCloudContext : epochs.headFloorCloudContext;
+        assert([freshContext[5] isEqual:fresh.captureStreamID]);
+        [epochs updateDepthCloudStream:fresh];
+        assert((belly ? epochs.bellyCloudSourceEpoch : epochs.headCloudSourceEpoch)==freshEpoch && changedNode.geometry);
+        CVPixelBufferRelease(old.rgbPixelBuffer);CVPixelBufferRelease(other.rgbPixelBuffer);CVPixelBufferRelease(fresh.rgbPixelBuffer);
+    }
     CVPixelBufferRelease(rejectedHead.rgbPixelBuffer); CVPixelBufferRelease(nearBudget.rgbPixelBuffer); CVPixelBufferRelease(noise.rgbPixelBuffer); CVPixelBufferRelease(empty.rgbPixelBuffer);
     CVPixelBufferRelease(f.rgbPixelBuffer); puts("Production depth-floor integration passed:8/25/29degree floor bootstrap, rigid0.3m object height, tabletop rejection,9.5mm acceptance, HEAD captured-world retention with age labels and fresh replacement during arm operations, unchanged BELLY250ms noise hold/700ms freshness, explicit HEAD/BELLY raw and surface rays agree without double floor correction even without an accepted floor, projection-change invalidation, no resurrection after base clears, independent cameras, RGB pairing,20k cap and surface-only geometry delivery");
 } return 0; }
@@ -593,7 +657,8 @@ int main(void) { @autoreleasepool {
 def main():
     with tempfile.TemporaryDirectory(prefix="cerebro-depth-floor-integration-") as folder:
         harness = Path(folder) / "integration.m"
-        harness.write_text(HARNESS.replace("__HELPERS__", helpers).replace("__STATUS_METHOD__", status_method).replace("__METHOD__", method))
+        harness.write_text(HARNESS.replace("__HELPERS__", helpers).replace("__SOURCE_PROPERTIES__", source_properties)
+                           .replace("__SOURCE_METHODS__", source_methods).replace("__STATUS_METHOD__", status_method).replace("__METHOD__", method))
         binary = Path(folder) / "integration"
         subprocess.run(["xcrun", "clang", "-fobjc-arc", "-fblocks", "-framework", "Foundation", "-framework", "SceneKit", "-framework", "CoreVideo", "-I", str(ROOT / "Cerebro"), str(harness), "-o", str(binary)], check=True, timeout=120)
         subprocess.run([str(binary)], check=True, timeout=30)

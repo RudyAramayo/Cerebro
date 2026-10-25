@@ -54,6 +54,25 @@ struct ROBFixedHeadRegistrationScope: Codable, Equatable {
     let upperTarget: Int
     let intrinsicsIdentity: String
 
+    /// Shared by capture and immutable RGB evidence validation. Legacy input
+    /// without mode/runtime provenance retains its original identity bytes.
+    static func cameraIntrinsicsIdentity(width: Int, height: Int, intrinsics: [Double],
+        stereoMode: String? = nil, stereoModeSource: String? = nil,
+        extendedDisparity: Bool? = nil, subpixel: Bool? = nil,
+        runtimeCalibrationIdentity: String? = nil) throws -> String {
+        var values: [Any] = [Double(width), Double(height)] + intrinsics
+        if let stereoMode {
+            values.append(["stereoMode": stereoMode, "source": stereoModeSource ?? "unreported",
+                "extendedDisparity": extendedDisparity as Any? ?? NSNull(),
+                "subpixel": subpixel as Any? ?? NSNull()] as [String: Any])
+        }
+        if let runtimeCalibrationIdentity {
+            values.append(["runtimeCalibrationIdentity": runtimeCalibrationIdentity])
+        }
+        let data = try JSONSerialization.data(withJSONObject: values, options: [.sortedKeys])
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
     func validate() throws {
         let strings = [modelID,geometryID,mappingID,displayCorrectionIdentity,intrinsicsIdentity]
         guard strings.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 512 }), gatewaySessionGeneration > 0,

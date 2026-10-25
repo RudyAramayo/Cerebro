@@ -19,10 +19,11 @@ def main():
     source = source.replace(storage, 'URL(fileURLWithPath: ProcessInfo.processInfo.environment["ROB_BELLY_FIXTURE_ROOT"]!, isDirectory: true)')
     manager_source = (ROOT / "Cerebro/CameraManager.swift").read_text()
     contracts = "\n".join(braced_declaration(manager_source, signature) for signature in (
-        "struct CameraDepthRGBGeometryCorrespondence:", "struct CameraIntrinsics:",
+        "struct CameraRuntimeCalibration:", "struct CameraDepthRGBGeometryCorrespondence:", "struct CameraIntrinsics:",
         "struct CameraStereoSourceExtrinsics:", "struct CameraStereoPairExtrinsics:",
         "struct CameraStereoGeometry:", "struct CameraStereoFrame:"))
     stubs = r'''
+import CryptoKit
 import AppKit
 import CoreImage
 import CoreVideo

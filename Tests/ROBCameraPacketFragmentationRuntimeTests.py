@@ -38,6 +38,7 @@ for signature in ("case .ready:", "case .failed(let error):", "case .cancelled:"
 
 harness = r'''
 import Foundation
+import CryptoKit
 enum DecoderMetrics { static var count = 0 }
 struct JSONDecoder {
     func decode<T:Decodable>(_ type:T.Type, from data:Data)throws->T {
@@ -50,6 +51,7 @@ struct ROBChessPieceDetection:Decodable {}
 /* GEOMETRY */
 /* HEADER */
 /* ERROR */
+enum Role:String {case face,belly}
 struct Connection {
     var stateUpdateHandler:((Int)->Void)?
     func cancel() {}
@@ -72,6 +74,7 @@ private final class Stream {
     private var pendingPacket:PendingPacket?
     private var connection:Connection?=Connection()
     private var reportedStreaming=false
+    let role = Role.face
     var delivered:[Delivered]=[]
     var cached:Bool {pendingPacket != nil}
     var cachedLength:Int? {pendingPacket?.packetLength}
@@ -204,7 +207,7 @@ func packet(_ sequence:UInt64, rich:Bool=false, invalidLength:Bool=false)->(Data
 harness = harness.replace("/* HEADER */", braced_declaration(source,"private struct DepthCameraPacketHeader:"))
 harness = harness.replace("/* ERROR */", braced_declaration(source,"private enum DepthCameraIPCError:"))
 harness = harness.replace("/* GEOMETRY */", "\n".join(braced_declaration(source, signature) for signature in (
-    "struct CameraDepthRGBGeometryCorrespondence:", "struct CameraIntrinsics:",
+    "struct CameraRuntimeCalibration:", "struct CameraDepthRGBGeometryCorrespondence:", "struct CameraIntrinsics:",
     "struct CameraStereoSourceExtrinsics:", "struct CameraStereoPairExtrinsics:",
     "struct CameraStereoGeometry:", "struct CameraStereoFrame:")))
 with tempfile.TemporaryDirectory(prefix="cerebro-camera-packets-", dir="/private/tmp") as directory:

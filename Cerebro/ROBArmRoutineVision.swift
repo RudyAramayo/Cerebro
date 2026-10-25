@@ -16,9 +16,10 @@ struct ROBVisionCaptureIdentity {
 
     mutating func observe(streamID: String?, source: String, width: Int?, height: Int?,
         intrinsics: [Double]?, sequence: UInt64, timestampNanoseconds: UInt64,
-        capturedAtMilliseconds: Double?) -> Update {
+        capturedAtMilliseconds: Double?, runtimeCalibrationIdentity: String? = nil) -> Update {
         let nextSignature = "\(streamID ?? "unknown")|\(source)|\(width ?? 0)x\(height ?? 0)|"
             + (intrinsics?.map { String($0.bitPattern) }.joined(separator:",") ?? "no-intrinsics")
+            + "|runtime:" + (runtimeCalibrationIdentity ?? "legacy")
         // The initial UUID already identifies this first stream. Enrolling
         // its first metadata must not cancel an inspection waiting for startup.
         let changedIdentity = signature != nil && signature != nextSignature
@@ -88,6 +89,8 @@ final class ROBArmRoutineVision {
     private var teaching = false
     private var epoch = UUID()
     private var captureIdentity = ROBVisionCaptureIdentity()
+    private var runtimeContextEnrolled = false
+    private var expectedRuntimeCalibrationIdentity: String?
     private var busy: Set<String> = []
     private var lastOffer: [String: TimeInterval] = [:]
     private var inputNotes: [String: String] = [:]
@@ -110,6 +113,19 @@ final class ROBArmRoutineVision {
         epoch = UUID(); frames = [:]; busy = []; lastOffer = [:]
         lastInspection = [:]; inputNotes = [:]
         lastIncomingCapture = nil; lastIncomingSequence = 0; processingMilliseconds = 0
+    }
+
+    /// Runs at camera ingress, before a queued delegate can publish old pixels.
+    /// Pending inference loses its epoch and old-runtime callbacks are rejected.
+    func updateRuntimeCalibrationContext(_ identity: String?) {
+        lock.lock(); defer { lock.unlock() }
+        if runtimeContextEnrolled && expectedRuntimeCalibrationIdentity != identity {
+            captureIdentity = ROBVisionCaptureIdentity()
+            epoch = UUID(); frames = [:]; busy = []; lastOffer = [:]
+            lastInspection = [:]; inputNotes = [:]
+            lastIncomingCapture = nil; lastIncomingSequence = 0; processingMilliseconds = 0
+        }
+        runtimeContextEnrolled = true; expectedRuntimeCalibrationIdentity = identity
     }
 
     struct Frame {
@@ -140,10 +156,15 @@ final class ROBArmRoutineVision {
         guard role == .face else { return }
         let key = role.rawValue, now = ProcessInfo.processInfo.systemUptime
         lock.lock()
+        let runtimeIdentity = frame.intrinsics?.runtimeCalibration?.identity
+        guard !runtimeContextEnrolled || runtimeIdentity == expectedRuntimeCalibrationIdentity else {
+            lock.unlock(); return
+        }
         let identityUpdate = captureIdentity.observe(streamID:frame.captureStreamID,source:frame.source.rawValue,
             width:frame.alignedDepth?.width,height:frame.alignedDepth?.height,
             intrinsics:frame.intrinsics.map { [$0.fx,$0.fy,$0.cx,$0.cy] },sequence:frame.sequence,
-            timestampNanoseconds:frame.timestampNanoseconds,capturedAtMilliseconds:frame.capturedAtMilliseconds)
+            timestampNanoseconds:frame.timestampNanoseconds,capturedAtMilliseconds:frame.capturedAtMilliseconds,
+            runtimeCalibrationIdentity:runtimeIdentity)
         if identityUpdate == .reordered { lock.unlock(); return }
         if identityUpdate == .changed {
             // Capture identity changes also cancel any pending analysis answer.

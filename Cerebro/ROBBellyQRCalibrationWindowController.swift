@@ -381,6 +381,14 @@ private final class ROBBellyQRFrameMailbox: @unchecked Sendable {
                 if let value = k.rgbOutputUndistorted { record["rgbOutputUndistorted"] = value }
                 else { missing.insert("RGB undistortion metadata") }
                 if let value = k.cameraServiceSourceSHA256 { record["cameraServiceSourceSHA256"] = value }
+                if let value = k.runtimeCalibration {
+                    record["runtimeCalibration"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(value))
+                    record["runtimeCalibrationIdentity"] = value.identity
+                }
+                if let value = k.stereoMode { record["stereoMode"] = value }
+                if let value = k.stereoModeSource { record["stereoModeSource"] = value }
+                if let value = k.stereoExtendedDisparity { record["stereoExtendedDisparity"] = value }
+                if let value = k.stereoSubpixel { record["stereoSubpixel"] = value }
                 if let value = k.calibrationSource { record["intrinsicsSource"] = value }
                 if let value = k.depthAlignmentMethod { record["depthAlignmentMethod"] = value }
                 else { missing.insert("depth alignment metadata") }

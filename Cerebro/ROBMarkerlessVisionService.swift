@@ -10,6 +10,7 @@ final class ROBMarkerlessVisionService {
     private var enabled = false
     private var busy = false
     private var lastOffer: [String: TimeInterval] = [:]
+    private var latestCaptureStreams: [String: String] = [:]
     private var process: Process?
     private var input: FileHandle?
     private var output: FileHandle?
@@ -74,7 +75,7 @@ final class ROBMarkerlessVisionService {
     }
 
     func stop() {
-        lock.lock(); enabled = false; busy = false; lastOffer = [:]; lock.unlock()
+        lock.lock(); enabled = false; busy = false; lastOffer = [:]; latestCaptureStreams = [:]; lock.unlock()
         queue.sync {
             generation = UUID(); buffer.removeAll(); requestToken = UUID()
             output?.readabilityHandler = nil; errors?.readabilityHandler = nil
@@ -89,6 +90,26 @@ final class ROBMarkerlessVisionService {
     func offer(_ frame: CameraFrameSet, role: CameraRole, streamID: String) {
         let uptime = ProcessInfo.processInfo.systemUptime
         lock.lock()
+        let previousStream = latestCaptureStreams[role.rawValue]
+        latestCaptureStreams[role.rawValue] = streamID
+        if let previousStream, previousStream != streamID {
+            // Invalidate only an observation from this replaced camera. The
+            // torso consumer preserves a fresh accepted alternate camera.
+            DispatchQueue.main.async { [weak self] in
+                self?.onObservation?(["schemaVersion": 1, "source": "camera_context_invalidated",
+                    "camera": role.rawValue, "streamID": previousStream, "status": "unavailable",
+                    "detail": "Camera calibration or capture stream changed; previous coordinates expired."])
+            }
+            queue.async { [weak self] in
+                guard let self else { return }
+                if let data = try? Data(contentsOf: self.observationURL),
+                   let prior = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   prior["camera"] as? String == role.rawValue,
+                   prior["streamID"] as? String == previousStream {
+                    try? FileManager.default.removeItem(at: self.observationURL)
+                }
+            }
+        }
         guard enabled, !busy, uptime - (lastOffer[role.rawValue] ?? 0) >= 0.25,
               frame.source == .depthAIService, let depth = frame.alignedDepth,
               let capturedAt = frame.capturedAtMilliseconds, capturedAt.isFinite,
@@ -111,11 +132,15 @@ final class ROBMarkerlessVisionService {
                         sampled.append(UInt8(value & 255)); sampled.append(UInt8(value >> 8))
                     }
                 }
-                let packet: [String: Any] = ["camera": role.rawValue, "streamID": streamID,
+                var packet: [String: Any] = ["camera": role.rawValue, "streamID": streamID,
                     "sequence": frame.sequence, "timestampNanoseconds": frame.timestampNanoseconds,
                     "capturedAtMilliseconds": capturedAt, "width": width, "height": height,
                     "intrinsics": [intrinsics.fx, intrinsics.fy, intrinsics.cx, intrinsics.cy].map { $0 / Double(step) },
                     "depth": sampled.base64EncodedString()]
+                if let runtime = intrinsics.runtimeCalibration {
+                    packet["runtimeCalibrationIdentity"] = runtime.identity
+                    packet["runtimeCalibration"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(runtime))
+                }
                 var data = try JSONSerialization.data(withJSONObject: packet); data.append(10)
                 guard let input = self.input else { throw CocoaError(.fileWriteUnknown) }
                 try Self.writeBounded(data, to: input)
@@ -146,15 +171,26 @@ final class ROBMarkerlessVisionService {
               let captured = object["capturedAtMilliseconds"] as? Double, captured.isFinite else {
             fail(); return
         }
+        guard captureStreamIsCurrent(object) else {
+            requestToken = UUID()
+            lock.lock(); busy = false; lock.unlock()
+            return
+        }
         // Atomic replacement prevents the planner from seeing a partial frame.
         try? line.write(to: observationURL, options: .atomic)
         let token = generation
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.queue.sync(execute: { token == self.generation }) else { return }
+            guard let self, self.queue.sync(execute: { token == self.generation }), self.captureStreamIsCurrent(object) else { return }
             self.onObservation?(object)
         }
         requestToken = UUID()
         lock.lock(); busy = false; lock.unlock()
+    }
+
+    private func captureStreamIsCurrent(_ object: [String: Any]) -> Bool {
+        guard let camera = object["camera"] as? String, let stream = object["streamID"] as? String else { return false }
+        lock.lock(); defer { lock.unlock() }
+        return latestCaptureStreams[camera] == stream
     }
 
     private func fail() {

@@ -5,6 +5,7 @@ Robot services are inert substitutes; this fixture has no camera/actuator IO.
 Exercises explicit camera-pose admission independently of a floor-fit result.
 """
 from pathlib import Path
+import re
 import struct
 import subprocess
 import sys
@@ -12,11 +13,17 @@ import tempfile
 
 root = Path(__file__).resolve().parents[1]
 source = (root / "Cerebro/ROBSCNViewController.m").read_text()
-properties_start = source.index("@property (strong) NSButton *surfaceMode;")
+properties_start = source.index("@property (readwrite, assign) BOOL cloudUpdatePending;")
 properties = source[properties_start:source.index("\n@end", properties_start)]
+context_names = ["headFloorCloudContext", "bellyFloorCloudContext", "lastHeadCloudSubmission", "lastBellyCloudSubmission",
+                 "headFloorAlignmentEstablished", "bellyFloorAlignmentEstablished", "headFloorHoldingAcceptedFrame",
+                 "bellyFloorHoldingAcceptedFrame", "headCloudHasCalibratedIntrinsics", "lastHeadCloudUptime",
+                 "lastBellyCloudUptime", "bellyCloudDisplayUntil", "headFloorSummary", "bellyFloorSummary"]
+context_properties = "\n".join(dict.fromkeys(re.search(r"^@property[^\n]*\b" + name + r"\b[^\n]*;", source, re.M).group()
+                                          for name in context_names))
 methods = source[source.index("- (void)surfaceModeChanged:"):source.index("- (void)refreshFloorStatus\n")]
 fixture = (root / "Tests/ROBAccumulatedSurfaceRenderFixture.m").read_text()
-fixture = fixture.replace("__CONTROLLER_PROPERTIES__", properties).replace("__CONTROLLER_METHODS__", methods)
+fixture = fixture.replace("__CONTROLLER_PROPERTIES__", properties).replace("__SOURCE_CONTEXT_PROPERTIES__", context_properties).replace("__CONTROLLER_METHODS__", methods)
 render_path = Path(sys.argv[1] if len(sys.argv) > 1 else "/private/tmp/rob-accumulated-surface-render.png").resolve()
 render_path.parent.mkdir(parents=True, exist_ok=True)
 with tempfile.TemporaryDirectory(prefix="rob-surface-render-", dir="/private/tmp") as temporary:

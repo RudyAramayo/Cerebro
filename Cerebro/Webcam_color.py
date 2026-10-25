@@ -8,6 +8,7 @@ SDK failures are reported and retried instead of terminating the service.
 """
 
 import argparse
+from contextlib import contextmanager
 from collections import deque
 from datetime import datetime, timedelta, timezone
 import fcntl
@@ -55,6 +56,312 @@ QUEUE_WAIT = timedelta(milliseconds=500)
 SYNC_THRESHOLD = timedelta(milliseconds=20)
 CLIENT_SEND_TIMEOUT_SECONDS = 5.0
 IMU_DISABLED_AFTER_START_FAILURE = set()
+RUNTIME_STEREO_PROFILE_CACHE = {}
+
+
+def calibration_json_bytes(value):
+    return (json.dumps(value, sort_keys=True, indent=2, allow_nan=False) + "\n").encode("utf-8")
+
+
+def calibration_semantic_value(value):
+    """Camera table order is not significant in SDK CalibrationHandler JSON."""
+    result = json.loads(json.dumps(value, allow_nan=False))
+    rows = result.get("cameraData")
+    if (not isinstance(rows, list) or any(not isinstance(row, list) or len(row) != 2 or type(row[0]) is not int for row in rows)
+            or len({row[0] for row in rows}) != len(rows)):
+        raise ValueError("invalid calibration camera socket table")
+    result["cameraData"] = {str(row[0]): row[1] for row in rows}
+    return result
+
+
+def calibration_semantic_sha256(value):
+    return hashlib.sha256(calibration_json_bytes(calibration_semantic_value(value))).hexdigest()
+
+
+def calibration_changed_leaves(before, after, path=""):
+    if isinstance(before, dict) and isinstance(after, dict):
+        return [p for key in sorted(set(before) | set(after))
+                for p in calibration_changed_leaves(before.get(key), after.get(key), path + "/" + key)]
+    if isinstance(before, list) and isinstance(after, list) and len(before) == len(after):
+        return [p for index, (a, b) in enumerate(zip(before, after))
+                for p in calibration_changed_leaves(a, b, path + "/" + str(index))]
+    return [] if before == after else [path]
+
+
+def checked_sha256(value):
+    if not isinstance(value, str) or len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
+        raise ValueError("expected lowercase SHA256")
+    return value
+
+
+def read_pinned_runtime_json(path, expected_hash, maximum_bytes=1024 * 1024):
+    checked_sha256(expected_hash)
+    if not isinstance(path, str) or not os.path.isabs(path):
+        raise ValueError("runtime calibration evidence path must be absolute")
+    with open(path, "rb") as source:
+        encoded = source.read(maximum_bytes + 1)
+    if len(encoded) > maximum_bytes or hashlib.sha256(encoded).hexdigest() != expected_hash:
+        raise ValueError("runtime calibration evidence size/hash mismatch")
+    value = json.loads(encoded)
+    if not isinstance(value, dict):
+        raise ValueError("runtime calibration evidence must be a JSON object")
+    return value
+
+
+def load_runtime_stereo_profile(role, activation_path=None):
+    """Freeze activation bytes once per worker; changing a pointer needs restart."""
+    path = activation_path or os.path.join(ir_status_directory(), "RuntimeStereoCalibration", role + "-active.json")
+    cache_key = (role, path)
+    if cache_key in RUNTIME_STEREO_PROFILE_CACHE:
+        return RUNTIME_STEREO_PROFILE_CACHE[cache_key]
+    result = {"status": "missing", "detail": "no runtime stereo profile override", "profile": None}
+    try:
+        with open(path, "rb") as source:
+            encoded = source.read(8193)
+        if len(encoded) > 8192:
+            raise ValueError("runtime activation exceeds size bound")
+        activation = json.loads(encoded)
+        if (not isinstance(activation, dict) or type(activation.get("schemaVersion")) is not int or activation.get("schemaVersion") != 1 or activation.get("kind") != "runtime_stereo_calibration_activation"
+                or activation.get("cameraRole") != role or role not in ("face", "belly")):
+            raise ValueError("runtime activation schema/role mismatch")
+        profile_hash = checked_sha256(activation.get("profileSHA256"))
+        profile = read_pinned_runtime_json(activation.get("profilePath"), profile_hash, 65536)
+        if (type(profile.get("schemaVersion")) is not int or profile.get("schemaVersion") != 1 or profile.get("kind") != "runtime_stereo_calibration_profile"
+                or profile.get("cameraRole") != role or profile.get("platform") != "RVC2"
+                or profile.get("sdkVersion") != "3.8.0"):
+            raise ValueError("runtime stereo profile schema/platform/SDK mismatch")
+        mxid = profile.get("actualDeviceMXID")
+        if not isinstance(mxid, str) or not mxid or mxid.strip() != mxid or any(c in mxid for c in "\r\n"):
+            raise ValueError("runtime stereo profile device identity missing")
+        for key in ("factoryEEPROMSHA256", "requestedCalibrationSHA256", "requestedCalibrationSemanticSHA256", "candidateSHA256", "validationEvidenceSHA256"):
+            checked_sha256(profile.get(key))
+        requested = read_pinned_runtime_json(profile.get("requestedCalibrationPath"), profile["requestedCalibrationSHA256"])
+        if calibration_semantic_sha256(requested) != profile["requestedCalibrationSemanticSHA256"]:
+            raise ValueError("requested runtime calibration semantic hash mismatch")
+        # Pin commissioning evidence bytes without promoting its local metrics to
+        # global camera registration or arm authority.
+        read_pinned_runtime_json(profile.get("validationEvidencePath"), profile["validationEvidenceSHA256"])
+        result = {"status": "candidate", "detail": "pinned runtime stereo profile loaded", "profile": profile,
+                  "profileSHA256": profile_hash, "requestedCalibration": requested}
+    except FileNotFoundError:
+        if os.path.lexists(path):
+            result = {"status": "invalid", "detail": "runtime profile evidence missing; no profile override", "profile": None}
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        result = {"status": "invalid", "detail": "runtime profile rejected; no profile override: " + str(error)[:400], "profile": None}
+    RUNTIME_STEREO_PROFILE_CACHE[cache_key] = result
+    return result
+
+
+def checked_rotation(value):
+    if not isinstance(value, list) or len(value) != 3 or any(not isinstance(row, list) or len(row) != 3 for row in value):
+        raise ValueError("runtime rotation must be 3x3")
+    if any(type(x) not in (int, float) or not math.isfinite(x) for row in value for x in row):
+        raise ValueError("runtime rotation must be finite")
+    for a in range(3):
+        for b in range(3):
+            if abs(sum(value[k][a] * value[k][b] for k in range(3)) - (1 if a == b else 0)) > 1e-4:
+                raise ValueError("runtime rotation is not orthonormal")
+    a, b, c = value
+    determinant = a[0]*(b[1]*c[2]-b[2]*c[1]) - a[1]*(b[0]*c[2]-b[2]*c[0]) + a[2]*(b[0]*c[1]-b[1]*c[0])
+    if abs(determinant - 1) > 1e-4:
+        raise ValueError("runtime rotation must be proper")
+    return value
+
+
+def checked_rotation_delta(before, after):
+    checked_rotation(before); checked_rotation(after)
+    cosine = (sum(before[r][c] * after[r][c] for r in range(3) for c in range(3)) - 1) / 2
+    if math.acos(max(-1.0, min(1.0, cosine))) > math.radians(5):
+        raise ValueError("runtime rotation correction exceeds commissioning bound")
+
+
+def validate_runtime_calibration_changes(factory, requested):
+    before, after = calibration_semantic_value(factory), calibration_semantic_value(requested)
+    for value in (before, after):
+        cameras = value["cameraData"]
+        if (set(cameras) != {"0", "1", "2"} or cameras["1"]["extrinsics"]["toCameraSocket"] != 2
+                or cameras["2"]["extrinsics"]["toCameraSocket"] != 0
+                or cameras["0"]["extrinsics"]["toCameraSocket"] != -1
+                or value["stereoRectificationData"]["leftCameraSocket"] != 1
+                or value["stereoRectificationData"]["rightCameraSocket"] != 2):
+            raise ValueError("runtime calibration requires the original B→C→A graph")
+    changes = calibration_changed_leaves(before, after)
+    prefixes = ("/cameraData/1/extrinsics/rotationMatrix/", "/cameraData/1/extrinsics/translation/",
+                "/stereoRectificationData/rectifiedRotationLeft/", "/stereoRectificationData/rectifiedRotationRight/")
+    if (not changes or len(changes) > 30 or any(not any(p.startswith(prefix) for prefix in prefixes) for p in changes)
+            or any(not any(p.startswith(prefix) for p in changes) for prefix in prefixes)):
+        raise ValueError("runtime calibration changes fields outside approved B→C R/T and R1/R2")
+    old, new = before["cameraData"]["1"]["extrinsics"], after["cameraData"]["1"]["extrinsics"]
+    checked_rotation_delta(old["rotationMatrix"], new["rotationMatrix"])
+    for key in ("rectifiedRotationLeft", "rectifiedRotationRight"):
+        checked_rotation_delta(before["stereoRectificationData"][key], after["stereoRectificationData"][key])
+    if new["lengthUnit"] != 1 or old["lengthUnit"] != 1:
+        raise ValueError("runtime calibration translation must remain centimeters")
+    old_t, new_t = ([v["translation"][axis] for axis in ("x", "y", "z")] for v in (old, new))
+    if any(type(x) not in (int, float) or not math.isfinite(x) for x in old_t + new_t):
+        raise ValueError("runtime translation must be finite")
+    if not 3 < math.sqrt(sum(x*x for x in new_t)) < 20 or math.sqrt(sum((a-b)**2 for a,b in zip(old_t,new_t))) > .5:
+        raise ValueError("runtime translation correction exceeds commissioning bound")
+    # The stored rotations must rectify this same raw pair, rather than an
+    # unrelated proper rotation that happened to pass the numeric bounds.
+    r1 = after["stereoRectificationData"]["rectifiedRotationLeft"]
+    r2 = after["stereoRectificationData"]["rectifiedRotationRight"]
+    rectified_r = [[sum(r2[r][k] * new["rotationMatrix"][k][j] * r1[c][j]
+                       for k in range(3) for j in range(3)) for c in range(3)] for r in range(3)]
+    rectified_t = [sum(r2[r][k] * new_t[k] for k in range(3)) for r in range(3)]
+    if (any(abs(rectified_r[r][c] - (1 if r == c else 0)) > .001 for r in range(3) for c in range(3))
+            or rectified_t[0] >= -3 or any(abs(x) > .01 for x in rectified_t[1:])):
+        raise ValueError("runtime R1/R2 do not rectify the approved raw stereo pair")
+    return changes
+
+
+def clone_runtime_calibration(factory, requested, dai):
+    changes = validate_runtime_calibration_changes(factory, requested)
+    values = calibration_semantic_value(requested)
+    edge = values["cameraData"]["1"]["extrinsics"]
+    clone = dai.CalibrationHandler.fromJson(factory, validateExtrinsics=True)
+    clone.setCameraExtrinsics(dai.CameraBoardSocket.CAM_B, dai.CameraBoardSocket.CAM_C,
+        edge["rotationMatrix"], [edge["translation"][key] for key in ("x", "y", "z")],
+        [edge["specTranslation"][key] for key in ("x", "y", "z")])
+    clone.setStereoLeft(dai.CameraBoardSocket.CAM_B, values["stereoRectificationData"]["rectifiedRotationLeft"])
+    clone.setStereoRight(dai.CameraBoardSocket.CAM_C, values["stereoRectificationData"]["rectifiedRotationRight"])
+    if calibration_semantic_value(clone.eepromToJson()) != values:
+        raise ValueError("SDK runtime clone differs from pinned requested calibration")
+    dai.CalibrationHandler.fromJson(clone.eepromToJson(), validateExtrinsics=True)
+    return clone, changes
+
+
+@contextmanager
+def runtime_stereo_calibration_session(device, pipeline, dai, role, factory, loaded):
+    """RAM-only override and verified restoration BEFORE Pipeline closes Device."""
+    factory_json = factory.eepromToJson()
+    factory_hash = hashlib.sha256(calibration_json_bytes(factory_json)).hexdigest()
+    prior = device.getCalibration()
+    prior_json = prior.eepromToJson()
+    state = {"factoryEEPROMSHA256": factory_hash, "factorySemanticSHA256": calibration_semantic_sha256(factory_json), "priorEffectiveCalibration": prior_json,
+             "attempted": False, "applied": False, "profile": None, "status": loaded["status"], "detail": loaded["detail"]}
+    state["calibrationSource"] = ("FACTORY" if calibration_semantic_value(prior_json) == calibration_semantic_value(factory_json)
+                                  else "OBSERVED_EXISTING_RUNTIME")
+    clone = None
+    try:
+        if loaded["profile"] is not None:
+            try:
+                profile = loaded["profile"]
+                if (profile["actualDeviceMXID"] != device.getMxId() or profile["cameraRole"] != role
+                        or str(device.getPlatform()) != "Platform.RVC2" or str(dai.__version__) != profile["sdkVersion"]
+                        or factory_hash != profile["factoryEEPROMSHA256"]):
+                    raise ValueError("runtime profile does not match actual device/role/SDK/factory EEPROM")
+                if calibration_semantic_value(prior_json) != calibration_semantic_value(factory_json):
+                    raise ValueError("prior effective RAM calibration differs from profile factory scope")
+                clone, changes = clone_runtime_calibration(factory_json, loaded["requestedCalibration"], dai)
+                state.update(profile=profile, profileSHA256=loaded["profileSHA256"], intendedDiffPaths=changes)
+            except (ValueError, TypeError, KeyError, RuntimeError) as error:
+                state.update(status="invalid", detail="runtime profile rejected before apply; existing runtime preserved: " + str(error)[:400], profile=None)
+        emit("CEREBRO_DEPTHCAM_RUNTIME_PROFILE " + json.dumps({"role": role, "status": state["status"],
+            "calibrationSource": state["calibrationSource"], "detail": state["detail"]}, separators=(",", ":")))
+        if clone is not None:
+            state["attempted"] = True  # A partially failing apply must also restore.
+            pipeline.setCalibrationData(clone)
+        yield state
+    finally:
+        if state["attempted"]:
+            errors = []
+            try:
+                device.setCalibration(prior)
+            except BaseException as error:
+                errors.append("setCalibration: " + str(error)[:300])
+            try:
+                restored = device.getCalibration().eepromToJson()
+                state["restoredEffectiveRuntimeCalibrationSHA256"] = calibration_semantic_sha256(restored)
+                if calibration_semantic_value(restored) != calibration_semantic_value(prior_json):
+                    errors.append("restored effective RAM calibration differs from prior effective RAM")
+            except BaseException as error:
+                errors.append("restored getCalibration: " + str(error)[:300])
+            try:
+                after = device.readCalibration2().eepromToJson()
+                state["restoredFactoryEEPROMSHA256"] = hashlib.sha256(calibration_json_bytes(after)).hexdigest()
+                if state["restoredFactoryEEPROMSHA256"] != factory_hash:
+                    errors.append("EEPROM changed unexpectedly")
+            except BaseException as error:
+                errors.append("restored readCalibration2: " + str(error)[:300])
+            emit("CEREBRO_DEPTHCAM_RUNTIME_RESTORE " + json.dumps({"role": role, "verified": not errors,
+                "restoredEffectiveRuntimeCalibrationSHA256": state.get("restoredEffectiveRuntimeCalibrationSHA256"),
+                "factoryEEPROMSHA256": state.get("restoredFactoryEEPROMSHA256"), "errors": errors}, separators=(",", ":")))
+            if errors:
+                raise RuntimeError("runtime calibration restoration failed: " + "; ".join(errors))
+
+
+def runtime_stereo_policy(pipeline, stereo, dai, profile_applied):
+    auto_mode = pipeline.getAutoCalibrationMode()
+    if auto_mode != dai.Pipeline.AutoCalibrationMode.OFF:
+        raise RuntimeError("camera runtime auto-calibration was not confirmed OFF")
+    graph = pipeline.serializeToJson(False)
+    if isinstance(graph, str):
+        graph = json.loads(graph)
+    matches = []
+    def visit(value):
+        if isinstance(value, dict):
+            if "useHomographyRectification" in value and "disparityToDepthUseSpecTranslation" in value:
+                matches.append(value)
+            for child in value.values(): visit(child)
+        elif isinstance(value, list):
+            for child in value: visit(child)
+    visit(graph)
+    if len(matches) != 1:
+        raise RuntimeError("actual HOST StereoDepth configuration is unavailable/ambiguous")
+    properties = matches[0]
+    if profile_applied and any(properties.get(key) is not False for key in
+            ("disparityToDepthUseSpecTranslation", "rectificationUseSpecTranslation", "depthAlignmentUseSpecTranslation")):
+        raise RuntimeError("runtime profile HOST calibrated-translation policies were not confirmed")
+    return {"schemaVersion": 1, "source": "actual_host_configuration_not_firmware_resolved_strategy",
+            "autoCalibrationMode": str(auto_mode), "stereoMode": observed_stereo_configuration(stereo),
+            "stereoDepthProperties": properties}
+
+
+def runtime_calibration_identity(value):
+    keys = ("actualDeviceMXID", "cameraRole", "sdkVersion", "factoryEEPROMSHA256",
+            "effectiveRuntimeCalibrationSHA256", "stereoPolicySHA256", "candidateSHA256", "profileSHA256")
+    if not isinstance(value, dict) or set(value) != {"schemaVersion", *keys} or type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1:
+        raise ValueError("runtime calibration provenance schema mismatch")
+    for key in keys[:3]:
+        item = value[key]
+        if not isinstance(item, str) or not item or item.strip() != item or any(c in item for c in "\r\n"):
+            raise ValueError("runtime calibration provenance identity missing")
+    if value["cameraRole"] not in ("face", "belly"):
+        raise ValueError("runtime calibration role invalid")
+    for key in keys[3:]:
+        if value[key] is None and key in ("candidateSHA256", "profileSHA256"):
+            continue
+        checked_sha256(value[key])
+    if (value["candidateSHA256"] is None) != (value["profileSHA256"] is None):
+        raise ValueError("runtime candidate/profile provenance must be present together")
+    encoded = "\n".join(["runtime-camera-calibration-v1"] + [value[key] if value[key] is not None else "-" for key in keys])
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def finalize_runtime_calibration(state, device, pipeline, stereo, dai, role):
+    effective = device.getCalibration().eepromToJson()
+    if state["attempted"]:
+        if calibration_semantic_sha256(effective) != state["profile"]["requestedCalibrationSemanticSHA256"]:
+            raise RuntimeError("effective RAM readback differs from requested runtime calibration")
+        state["applied"] = True
+        state["calibrationSource"] = "RUNTIME_PROFILE"
+    else:
+        state["calibrationSource"] = ("FACTORY" if calibration_semantic_sha256(effective) == state["factorySemanticSHA256"] else "OBSERVED_EXISTING_RUNTIME")
+    policy = runtime_stereo_policy(pipeline, stereo, dai, state["applied"])
+    value = {"schemaVersion": 1, "actualDeviceMXID": device.getMxId(), "cameraRole": role,
+        "sdkVersion": str(dai.__version__), "factoryEEPROMSHA256": state["factoryEEPROMSHA256"],
+        "effectiveRuntimeCalibrationSHA256": calibration_semantic_sha256(effective),
+        "stereoPolicySHA256": hashlib.sha256(calibration_json_bytes(policy)).hexdigest(),
+        "candidateSHA256": state["profile"]["candidateSHA256"] if state["applied"] else None,
+        "profileSHA256": state["profileSHA256"] if state["applied"] else None}
+    runtime_calibration_identity(value)
+    state.update(effectiveRuntimeCalibration=effective, stereoPolicy=policy, provenance=value)
+    emit("CEREBRO_DEPTHCAM_RUNTIME_CALIBRATION " + json.dumps({"provenance": value,
+        "identity": runtime_calibration_identity(value), "profileApplied": state["applied"],
+        "calibrationSource": state["calibrationSource"],
+        "metricAccuracyVerified": False, "registrationVerified": False}, separators=(",", ":")))
+    return value
 
 
 def emit(line):
@@ -124,7 +431,7 @@ def write_ir_status(status):
 
 
 def write_calibration_evidence(device, calibration, dai, role, frame_size, mono_size,
-                               requested_mxid=None, requested_stereo_mode="standard"):
+                               requested_mxid=None, requested_stereo_mode="standard", runtime_state=None):
     """Read existing calibration once; never configure or write the device.
 
     SDK metadata is evidence of what was returned, not physical metric accuracy
@@ -217,6 +524,24 @@ def write_calibration_evidence(device, calibration, dai, role, frame_size, mono_
                 "rectificationUseSpecTranslation": "UNSET", "resolvedStrategyObserved": False},
             "intrinsicsScope": "EEPROM/default and explicit requested-size queries only; actual processed frame K remains in per-frame packet metadata",
             "calibrationWrittenToDevice": False, "metricAccuracyVerified": False, "registrationVerified": False}
+        if runtime_state is not None:
+            provenance = runtime_state["provenance"]
+            document.update(factoryEEPROMSHA256=provenance["factoryEEPROMSHA256"],
+                effectiveRuntimeCalibrationExport={"status": "observed", "method": "getCalibration",
+                    "value": runtime_state["effectiveRuntimeCalibration"],
+                    "semanticSHA256": provenance["effectiveRuntimeCalibrationSHA256"]},
+                priorEffectiveRuntimeCalibrationExport={"status": "observed", "method": "getCalibration",
+                    "value": runtime_state["priorEffectiveCalibration"]},
+                runtimeCalibration=provenance, runtimeCalibrationIdentity=runtime_calibration_identity(provenance),
+                runtimeStereoPolicy=runtime_state["stereoPolicy"], runtimeProfileApplied=runtime_state["applied"],
+                runtimeProfileStatus="applied" if runtime_state["applied"] else runtime_state["status"],
+                runtimeCalibrationSource=runtime_state["calibrationSource"],
+                calibrationWrittenToDevice=runtime_state["applied"],
+                calibrationWriteScope="nonpersistent_RAM" if runtime_state["applied"] else "none", EEPROMWritten=False)
+            properties = runtime_state["stereoPolicy"]["stereoDepthProperties"]
+            for key in ("disparityToDepthUseSpecTranslation", "depthAlignmentUseSpecTranslation", "rectificationUseSpecTranslation"):
+                document["requestedPipeline"][key] = properties.get(key)
+            document["requestedPipeline"]["autoCalibrationMode"] = runtime_state["stereoPolicy"]["autoCalibrationMode"]
         encoded = (json.dumps(document, sort_keys=True, indent=2, allow_nan=False)+"\n").encode("utf-8")
         directory = ir_status_directory()
         evidence_directory = os.path.join(directory, "CalibrationEvidence")
@@ -440,7 +765,7 @@ def remove_stale_socket(path):
 def acquire_service_lock(socket_path):
     lock_path = socket_path + ".lock"
     flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
-    
+
     # Try up to 5 times with a 0.5s delay to handle startup races with old shutting-down instances
     for attempt in range(6):
         descriptor = os.open(lock_path, flags, 0o600)
@@ -1281,7 +1606,7 @@ def frame_payload(
     sidewalk_deviation=None, sidewalk_confidence=None, chess_pieces=None,
     captured_at_milliseconds=None, rgb_calibrated_lens_position=None,
     depth_alignment_method=None, imu_telemetry=None, stereo_configuration=None,
-    stereo_length_unit_meter=None
+    stereo_length_unit_meter=None, runtime_calibration=None
 ):
     rgb_width = int(rgb_frame.getWidth())
     rgb_height = int(rgb_frame.getHeight())
@@ -1371,6 +1696,9 @@ def frame_payload(
     header.update(validated_stereo_configuration(stereo_configuration))
     header.update(rgb_frame_readback(rgb_frame))
     header.update(rectified_stereo_frame_evidence(left_frame, right_frame, stereo_length_unit_meter))
+    if runtime_calibration is not None:
+        header["runtime_calibration_identity"] = runtime_calibration_identity(runtime_calibration)
+        header["runtime_calibration"] = runtime_calibration
     header_bytes = json.dumps(
         header, ensure_ascii=False, separators=(",", ":")
     ).encode("utf-8")
@@ -1382,13 +1710,13 @@ def send_frame(
     sidewalk_deviation=None, sidewalk_confidence=None, chess_pieces=None,
     captured_at_milliseconds=None, rgb_calibrated_lens_position=None,
     depth_alignment_method=None, imu_telemetry=None, stereo_configuration=None,
-    stereo_length_unit_meter=None
+    stereo_length_unit_meter=None, runtime_calibration=None
 ):
     header, rgb_bytes, depth_bytes, left_bytes, right_bytes = frame_payload(
         rgb_frame, depth_frame, left_frame, right_frame, rgb_intrinsics,
         sidewalk_deviation, sidewalk_confidence, chess_pieces, captured_at_milliseconds,
         rgb_calibrated_lens_position, depth_alignment_method, imu_telemetry, stereo_configuration,
-        stereo_length_unit_meter
+        stereo_length_unit_meter, runtime_calibration
     )
     client.sendall(PROTOCOL_MAGIC + struct.pack(">I", len(header)) + header)
     client.sendall(rgb_bytes)
@@ -1475,9 +1803,12 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
     mono_size = stereo_capture_size(frame_size)
     dai = load_depthai()
     device = None
+    runtime_loaded = load_runtime_stereo_profile(role)
+    runtime_context_lost = threading.Event()
 
     def reconnection_callback(status):
-        emit_error("device reconnect status " + str(status))
+        runtime_context_lost.set()
+        emit_error("device reconnect invalidated runtime calibration context: " + str(status))
 
     try:
         if mxid:
@@ -1492,244 +1823,258 @@ def stream_camera(client, stop_event, mxid=None, role="face", model_name="chess"
         emit("CEREBRO_DEPTHCAM_CAPTURE rgb={}x{} mono={}x{} usb={} fps={:.3f}".format(
             width, height, mono_size[0], mono_size[1], usb_speed, frame_rate))
         calibration = device.readCalibration2()
-        write_calibration_evidence(device, calibration, dai, role, frame_size, mono_size,
-            requested_mxid=mxid, requested_stereo_mode=stereo_mode)
-
         with dai.Pipeline(device) as pipeline:
-            rgb_socket = color_camera_socket(device, dai)
-            rgb_camera = pipeline.create(dai.node.Camera).build(rgb_socket)
-            calibrated_lens_position = configure_rgb_calibrated_focus(
-                rgb_camera, calibration, rgb_socket
-            )
-            emit("CEREBRO_DEPTHCAM_RGB_FOCUS source={} lens_position={}".format(
-                "eeprom" if calibrated_lens_position is not None else "unavailable",
-                calibrated_lens_position,
-            ))
-            rgb_output = rgb_camera.requestOutput(
-                frame_size,
-                type=dai.ImgFrame.Type.RGB888i,
-                resizeMode=dai.ImgResizeMode.CROP,
-                fps=frame_rate,
-                enableUndistortion=RGB_OUTPUT_UNDISTORTED,
-            )
+            # Freeze runtime data for factory and profile paths alike.
+            pipeline.setAutoCalibrationMode(dai.Pipeline.AutoCalibrationMode.OFF)
+            with runtime_stereo_calibration_session(device, pipeline, dai, role, calibration, runtime_loaded) as runtime_state:
+                rgb_socket = color_camera_socket(device, dai)
+                rgb_camera = pipeline.create(dai.node.Camera).build(rgb_socket)
+                calibrated_lens_position = configure_rgb_calibrated_focus(
+                    rgb_camera, calibration, rgb_socket
+                )
+                emit("CEREBRO_DEPTHCAM_RGB_FOCUS source={} lens_position={}".format(
+                    "eeprom" if calibrated_lens_position is not None else "unavailable",
+                    calibrated_lens_position,
+                ))
+                rgb_output = rgb_camera.requestOutput(
+                    frame_size,
+                    type=dai.ImgFrame.Type.RGB888i,
+                    resizeMode=dai.ImgResizeMode.CROP,
+                    fps=frame_rate,
+                    enableUndistortion=RGB_OUTPUT_UNDISTORTED,
+                )
 
-            # OAK-D Pro is an RVC2 device. DepthAI's automatic v3 Depth node
-            # does not always infer its OV9282 stereo pair, so wire the two
-            # physical mono sensors explicitly and align their result to RGB.
-            left_camera = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_B)
-            right_camera = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_C)
-            left_output = left_camera.requestOutput(
-                mono_size, type=dai.ImgFrame.Type.GRAY8, fps=frame_rate,
-                enableUndistortion=False,
-            )
-            right_output = right_camera.requestOutput(
-                mono_size, type=dai.ImgFrame.Type.GRAY8, fps=frame_rate,
-                enableUndistortion=False,
-            )
-            stereo = pipeline.create(dai.node.StereoDepth)
-            stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.ROBOTICS)
-            # Explicit SDK mesh rectification includes lens distortion. Never
-            # silently retain AUTO/homography if this required v3.8 API fails.
-            stereo.useHomographyRectification(False)
-            emit("CEREBRO_DEPTHCAM_RECTIFICATION requested=explicit_mesh resolved_strategy_observed=false")
-            stereo.setLeftRightCheck(True)
-            configure_stereo_mode(stereo,stereo_mode)
-            configure_latest_input(stereo.left)
-            configure_latest_input(stereo.right)
-            left_output.link(stereo.left)
-            right_output.link(stereo.right)
+                # OAK-D Pro is an RVC2 device. DepthAI's automatic v3 Depth node
+                # does not always infer its OV9282 stereo pair, so wire the two
+                # physical mono sensors explicitly and align their result to RGB.
+                left_camera = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_B)
+                right_camera = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_C)
+                left_output = left_camera.requestOutput(
+                    mono_size, type=dai.ImgFrame.Type.GRAY8, fps=frame_rate,
+                    enableUndistortion=False,
+                )
+                right_output = right_camera.requestOutput(
+                    mono_size, type=dai.ImgFrame.Type.GRAY8, fps=frame_rate,
+                    enableUndistortion=False,
+                )
+                stereo = pipeline.create(dai.node.StereoDepth)
+                stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.ROBOTICS)
+                # Explicit SDK mesh rectification includes lens distortion. Never
+                # silently retain AUTO/homography if this required v3.8 API fails.
+                stereo.useHomographyRectification(False)
+                emit("CEREBRO_DEPTHCAM_RECTIFICATION requested=explicit_mesh resolved_strategy_observed=false")
+                stereo.setLeftRightCheck(True)
+                configure_stereo_mode(stereo,stereo_mode)
+                if runtime_state["attempted"]:
+                    stereo.setDisparityToDepthUseSpecTranslation(False)
+                    stereo.setRectificationUseSpecTranslation(False)
+                    stereo.setDepthAlignmentUseSpecTranslation(False)
+                configure_latest_input(stereo.left)
+                configure_latest_input(stereo.right)
+                left_output.link(stereo.left)
+                right_output.link(stereo.right)
 
-            aligned_depth_output, alignment_method = configure_rgb_depth_alignment(
-                pipeline, dai, device.getPlatform(), stereo, rgb_output, frame_size
-            )
-            emit("CEREBRO_DEPTHCAM_ALIGNMENT method={} platform={}".format(
-                alignment_method, device.getPlatform()
-            ))
-            imu_retry_key = (role, mxid or "automatic")
-            imu_queue, imu_window = configure_optional_imu(pipeline, dai, device, calibration, rgb_socket,
-                disabled=imu_retry_key in IMU_DISABLED_AFTER_START_FAILURE)
+                aligned_depth_output, alignment_method = configure_rgb_depth_alignment(
+                    pipeline, dai, device.getPlatform(), stereo, rgb_output, frame_size
+                )
+                emit("CEREBRO_DEPTHCAM_ALIGNMENT method={} platform={}".format(
+                    alignment_method, device.getPlatform()
+                ))
+                imu_retry_key = (role, mxid or "automatic")
+                imu_queue, imu_window = configure_optional_imu(pipeline, dai, device, calibration, rgb_socket,
+                    disabled=imu_retry_key in IMU_DISABLED_AFTER_START_FAILURE)
 
-            nn_model = None
-            nn_queue = None
-            face_model_labels = []
-            script_dir = os.path.dirname(os.path.abspath(__file__))
+                nn_model = None
+                nn_queue = None
+                face_model_labels = []
+                script_dir = os.path.dirname(os.path.abspath(__file__))
 
-            if role == "belly":
-                # The bundled road model has no sidewalk class. Navigation stays
-                # fail-closed until a purpose-built sidewalk contract is added.
-                pass
-            elif role == "face":
-                # Dynamic Custom Spatial model (e.g. yolov8_chess_6shave.blob, yolov8_monopoly_6shave.blob)
-                blob_name = f"yolov8_{model_name.lower()}_6shave.blob"
-                blob_path = os.path.join(script_dir, "Models", blob_name)
-                if not os.path.exists(blob_path):
-                    blob_path = os.path.join(script_dir, "..", "Models", blob_name)
+                if role == "belly":
+                    # The bundled road model has no sidewalk class. Navigation stays
+                    # fail-closed until a purpose-built sidewalk contract is added.
+                    pass
+                elif role == "face":
+                    # Dynamic Custom Spatial model (e.g. yolov8_chess_6shave.blob, yolov8_monopoly_6shave.blob)
+                    blob_name = f"yolov8_{model_name.lower()}_6shave.blob"
+                    blob_path = os.path.join(script_dir, "Models", blob_name)
+                    if not os.path.exists(blob_path):
+                        blob_path = os.path.join(script_dir, "..", "Models", blob_name)
 
-                if not os.path.exists(blob_path):
-                    emit_error("Face model blob not found; disabling NN: " + blob_path)
-                    manifest = None
-                else:
-                    manifest = load_face_model_manifest(blob_path)
+                    if not os.path.exists(blob_path):
+                        emit_error("Face model blob not found; disabling NN: " + blob_path)
+                        manifest = None
+                    else:
+                        manifest = load_face_model_manifest(blob_path)
 
-                if manifest is not None:
-                    try:
-                        nn_model = pipeline.create(dai.node.YoloSpatialDetectionNetwork)
-                        nn_model.setBlobPath(blob_path)
-                        nn_model.setConfidenceThreshold(manifest["confidence_threshold"])
-                        nn_model.setNumClasses(manifest["num_classes"])
-                        nn_model.setCoordinateSize(manifest["coordinate_size"])
-                        nn_model.setIouThreshold(manifest["iou_threshold"])
-                        nn_input_stream = rgb_camera.requestOutput(
-                            (manifest["input_width"], manifest["input_height"]),
-                            type=dai.ImgFrame.Type.RGB888i,
-                            resizeMode=dai.ImgResizeMode.CROP,
-                            fps=5.0,
-                            enableUndistortion=RGB_OUTPUT_UNDISTORTED,
-                        )
-                        nn_input_stream.link(nn_model.input)
-                        stereo.depth.link(nn_model.inputDepth)
-                        face_model_labels = manifest["labels"]
-                    except Exception as error:
-                        emit_error("Failed to initialize manifested face spatial neural network: " + str(error))
-                        nn_model = None
-                        face_model_labels = []
+                    if manifest is not None:
+                        try:
+                            nn_model = pipeline.create(dai.node.YoloSpatialDetectionNetwork)
+                            nn_model.setBlobPath(blob_path)
+                            nn_model.setConfidenceThreshold(manifest["confidence_threshold"])
+                            nn_model.setNumClasses(manifest["num_classes"])
+                            nn_model.setCoordinateSize(manifest["coordinate_size"])
+                            nn_model.setIouThreshold(manifest["iou_threshold"])
+                            nn_input_stream = rgb_camera.requestOutput(
+                                (manifest["input_width"], manifest["input_height"]),
+                                type=dai.ImgFrame.Type.RGB888i,
+                                resizeMode=dai.ImgResizeMode.CROP,
+                                fps=5.0,
+                                enableUndistortion=RGB_OUTPUT_UNDISTORTED,
+                            )
+                            nn_input_stream.link(nn_model.input)
+                            stereo.depth.link(nn_model.inputDepth)
+                            face_model_labels = manifest["labels"]
+                        except Exception as error:
+                            emit_error("Failed to initialize manifested face spatial neural network: " + str(error))
+                            nn_model = None
+                            face_model_labels = []
 
-            sync = pipeline.create(dai.node.Sync)
-            sync.setSyncThreshold(SYNC_THRESHOLD)
-            sync.setSyncAttempts(3)
-            # Leave a short timestamp-matching window while bounding history.
-            for name in ("rgb", "depth", "left", "right"):
-                configure_latest_input(sync.inputs[name], size=4)
-            rgb_output.link(sync.inputs["rgb"])
-            aligned_depth_output.link(sync.inputs["depth"])
-            stereo.rectifiedLeft.link(sync.inputs["left"])
-            stereo.rectifiedRight.link(sync.inputs["right"])
-            queue = sync.out.createOutputQueue(maxSize=1, blocking=False)
-            
-            if nn_model is not None:
-                configure_latest_input(nn_model.input, size=1)
-                configure_latest_input(nn_model.inputDepth, size=1)
-                nn_queue = nn_model.out.createOutputQueue(maxSize=1, blocking=False)
+                sync = pipeline.create(dai.node.Sync)
+                sync.setSyncThreshold(SYNC_THRESHOLD)
+                sync.setSyncAttempts(3)
+                # Leave a short timestamp-matching window while bounding history.
+                for name in ("rgb", "depth", "left", "right"):
+                    configure_latest_input(sync.inputs[name], size=4)
+                rgb_output.link(sync.inputs["rgb"])
+                aligned_depth_output.link(sync.inputs["depth"])
+                stereo.rectifiedLeft.link(sync.inputs["left"])
+                stereo.rectifiedRight.link(sync.inputs["right"])
+                queue = sync.out.createOutputQueue(maxSize=1, blocking=False)
 
-            try:
-                pipeline.start()
-            except Exception:
-                # The helper's existing retry opens a fresh pipeline. Sacrifice
-                # optional IMU telemetry after a startup failure so it cannot
-                # prevent subsequent RGB-D recovery in this process.
-                if imu_window is not None:
-                    IMU_DISABLED_AFTER_START_FAILURE.add(imu_retry_key)
-                    emit_error("Pipeline startup failed with optional IMU; retrying RGB-D without IMU telemetry")
-                raise
-            stereo_configuration=observed_stereo_configuration(stereo)
-            stereo_length_unit_meter = getattr(getattr(dai, "LengthUnit", None), "METER", None)
-            if stereo_mode=="near_field" and stereo_configuration["stereo_mode"]!="near_field":
-                raise RuntimeError("near_field stereo configuration was not confirmed by SDK readback")
-            emit("CEREBRO_DEPTHCAM_STEREO "+json.dumps(stereo_configuration,separators=(",",":")))
-            configure_ir_projectors(device, role, ir_dot_intensity)
-            intrinsic_matrix = calibration.getCameraIntrinsics(
-                rgb_socket, frame_size[0], frame_size[1]
-            )
-            rgb_intrinsics = [
-                float(value) for row in intrinsic_matrix for value in row
-            ]
-            if len(rgb_intrinsics) != 9:
-                raise RuntimeError("DepthAI returned invalid RGB camera intrinsics")
-            emit("CEREBRO_DEPTHCAM_STREAMING")
+                if nn_model is not None:
+                    configure_latest_input(nn_model.input, size=1)
+                    configure_latest_input(nn_model.inputDepth, size=1)
+                    nn_queue = nn_model.out.createOutputQueue(maxSize=1, blocking=False)
 
-            latest_sidewalk_deviation = None
-            latest_sidewalk_confidence = None
-            latest_chess_pieces = []
-            latest_chess_pieces_updated_at = None
-            last_timing_at = 0.0
+                try:
+                    pipeline.start()
+                except Exception:
+                    # The helper's existing retry opens a fresh pipeline. Sacrifice
+                    # optional IMU telemetry after a startup failure so it cannot
+                    # prevent subsequent RGB-D recovery in this process.
+                    if imu_window is not None:
+                        IMU_DISABLED_AFTER_START_FAILURE.add(imu_retry_key)
+                        emit_error("Pipeline startup failed with optional IMU; retrying RGB-D without IMU telemetry")
+                    raise
+                stereo_configuration=observed_stereo_configuration(stereo)
+                stereo_length_unit_meter = getattr(getattr(dai, "LengthUnit", None), "METER", None)
+                if stereo_mode=="near_field" and stereo_configuration["stereo_mode"]!="near_field":
+                    raise RuntimeError("near_field stereo configuration was not confirmed by SDK readback")
+                emit("CEREBRO_DEPTHCAM_STEREO "+json.dumps(stereo_configuration,separators=(",",":")))
+                if runtime_context_lost.is_set():
+                    raise RuntimeError("camera reconnected before runtime calibration provenance was frozen")
+                runtime_provenance = finalize_runtime_calibration(runtime_state, device, pipeline, stereo, dai, role)
+                write_calibration_evidence(device, calibration, dai, role, frame_size, mono_size,
+                    requested_mxid=mxid, requested_stereo_mode=stereo_mode, runtime_state=runtime_state)
+                configure_ir_projectors(device, role, ir_dot_intensity)
+                intrinsic_matrix = calibration.getCameraIntrinsics(
+                    rgb_socket, frame_size[0], frame_size[1]
+                )
+                rgb_intrinsics = [
+                    float(value) for row in intrinsic_matrix for value in row
+                ]
+                if len(rgb_intrinsics) != 9:
+                    raise RuntimeError("DepthAI returned invalid RGB camera intrinsics")
+                emit("CEREBRO_DEPTHCAM_STREAMING")
 
-            while not stop_event.is_set() and pipeline.isRunning():
-                group = queue.get(QUEUE_WAIT)
-                if group is None:
-                    continue
-                if not isinstance(group, dai.MessageGroup):
-                    raise RuntimeError("DepthAI sync returned an invalid message")
+                latest_sidewalk_deviation = None
+                latest_sidewalk_confidence = None
+                latest_chess_pieces = []
+                latest_chess_pieces_updated_at = None
+                last_timing_at = 0.0
 
-                rgb_frame = group["rgb"]
-                depth_frame = group["depth"]
-                left_frame = group["left"]
-                right_frame = group["right"]
-                if not isinstance(rgb_frame, dai.ImgFrame) or not isinstance(
-                    depth_frame, dai.ImgFrame
-                ):
-                    raise RuntimeError("DepthAI sync group is missing RGB or depth")
+                while not stop_event.is_set() and pipeline.isRunning():
+                    if runtime_context_lost.is_set():
+                        raise RuntimeError("camera reconnect invalidated frozen runtime calibration provenance")
+                    group = queue.get(QUEUE_WAIT)
+                    if group is None:
+                        continue
+                    if not isinstance(group, dai.MessageGroup):
+                        raise RuntimeError("DepthAI sync returned an invalid message")
 
-                # Process latest on-device neural network sidewalk segmentation/YOLO if available
-                if nn_queue is not None:
-                    try:
-                        nn_msg = nn_queue.tryGet()
-                        if nn_msg is not None:
-                            if role == "belly":
-                                # road-segmentation-adas-0001 has road, curb, and
-                                # mark classes, but no sidewalk class. Fail closed
-                                # until a real sidewalk model and confidence
-                                # contract are available.
-                                latest_sidewalk_deviation = None
-                                latest_sidewalk_confidence = None
-                            elif role == "face":
-                                detections = getattr(nn_msg, "detections", None)
-                                if detections is None:
-                                    raise RuntimeError("SpatialImgDetections is missing detections")
-                                latest_chess_pieces = []
-                                for det in detections:
-                                    label_index = int(det.label)
-                                    if label_index < 0 or label_index >= len(face_model_labels):
-                                        raise RuntimeError("Detection label is outside manifested labels")
-                                    latest_chess_pieces.append({
-                                        "type": face_model_labels[label_index],
-                                        "x": float(det.spatialCoordinates.x / 1000.0),
-                                        "y": float(det.spatialCoordinates.y / 1000.0),
-                                        "z": float(det.spatialCoordinates.z / 1000.0)
-                                    })
-                                latest_chess_pieces_updated_at = time.monotonic()
-                    except Exception as error:
-                        emit_error("Failed to post-process on-device NeuralNetwork output: " + str(error))
+                    rgb_frame = group["rgb"]
+                    depth_frame = group["depth"]
+                    left_frame = group["left"]
+                    right_frame = group["right"]
+                    if not isinstance(rgb_frame, dai.ImgFrame) or not isinstance(
+                        depth_frame, dai.ImgFrame
+                    ):
+                        raise RuntimeError("DepthAI sync group is missing RGB or depth")
+
+                    # Process latest on-device neural network sidewalk segmentation/YOLO if available
+                    if nn_queue is not None:
+                        try:
+                            nn_msg = nn_queue.tryGet()
+                            if nn_msg is not None:
+                                if role == "belly":
+                                    # road-segmentation-adas-0001 has road, curb, and
+                                    # mark classes, but no sidewalk class. Fail closed
+                                    # until a real sidewalk model and confidence
+                                    # contract are available.
+                                    latest_sidewalk_deviation = None
+                                    latest_sidewalk_confidence = None
+                                elif role == "face":
+                                    detections = getattr(nn_msg, "detections", None)
+                                    if detections is None:
+                                        raise RuntimeError("SpatialImgDetections is missing detections")
+                                    latest_chess_pieces = []
+                                    for det in detections:
+                                        label_index = int(det.label)
+                                        if label_index < 0 or label_index >= len(face_model_labels):
+                                            raise RuntimeError("Detection label is outside manifested labels")
+                                        latest_chess_pieces.append({
+                                            "type": face_model_labels[label_index],
+                                            "x": float(det.spatialCoordinates.x / 1000.0),
+                                            "y": float(det.spatialCoordinates.y / 1000.0),
+                                            "z": float(det.spatialCoordinates.z / 1000.0)
+                                        })
+                                    latest_chess_pieces_updated_at = time.monotonic()
+                        except Exception as error:
+                            emit_error("Failed to post-process on-device NeuralNetwork output: " + str(error))
+                            latest_chess_pieces = []
+                            latest_chess_pieces_updated_at = None
+                    elif role == "face":
+                        # Board corners do not identify chess pieces. Without a
+                        # compatible detection model, publish no piece detections.
                         latest_chess_pieces = []
                         latest_chess_pieces_updated_at = None
-                elif role == "face":
-                    # Board corners do not identify chess pieces. Without a
-                    # compatible detection model, publish no piece detections.
-                    latest_chess_pieces = []
-                    latest_chess_pieces_updated_at = None
 
-                if (
-                    role == "face"
-                    and latest_chess_pieces_updated_at is not None
-                    and time.monotonic() - latest_chess_pieces_updated_at
-                    > FACE_DETECTION_TTL_SECONDS
-                ):
-                    latest_chess_pieces = []
-                    latest_chess_pieces_updated_at = None
+                    if (
+                        role == "face"
+                        and latest_chess_pieces_updated_at is not None
+                        and time.monotonic() - latest_chess_pieces_updated_at
+                        > FACE_DETECTION_TTL_SECONDS
+                    ):
+                        latest_chess_pieces = []
+                        latest_chess_pieces_updated_at = None
 
-                send_started = time.monotonic()
-                clock_now = dai.Clock.now()
-                timing = frame_timing(rgb_frame, depth_frame, clock_now)
-                send_frame(
-                    client, rgb_frame, depth_frame, left_frame, right_frame,
-                    rgb_intrinsics, latest_sidewalk_deviation, latest_sidewalk_confidence,
-                    latest_chess_pieces,
-                    captured_at_milliseconds=capture_time_milliseconds(
-                        [rgb_frame, depth_frame], clock_now, time.time()),
-                    rgb_calibrated_lens_position=calibrated_lens_position,
-                    depth_alignment_method=alignment_method,
-                    imu_telemetry=read_optional_imu(imu_queue, imu_window, rgb_frame),
-                    stereo_configuration=stereo_configuration,
-                    stereo_length_unit_meter=stereo_length_unit_meter,
-                )
-                send_finished = time.monotonic()
-                if send_finished - last_timing_at >= 5:
-                    last_timing_at = send_finished
-                    timing.update(role=role, width=width, height=height, usb_speed=str(usb_speed), fps=frame_rate,
-                                  send_ms=round((send_finished - send_started) * 1000, 1))
-                    emit("CEREBRO_DEPTHCAM_TIMING " + json.dumps(timing, separators=(",", ":")))
+                    send_started = time.monotonic()
+                    clock_now = dai.Clock.now()
+                    timing = frame_timing(rgb_frame, depth_frame, clock_now)
+                    if runtime_context_lost.is_set():
+                        raise RuntimeError("camera reconnect invalidated frame runtime calibration provenance")
+                    send_frame(
+                        client, rgb_frame, depth_frame, left_frame, right_frame,
+                        rgb_intrinsics, latest_sidewalk_deviation, latest_sidewalk_confidence,
+                        latest_chess_pieces,
+                        captured_at_milliseconds=capture_time_milliseconds(
+                            [rgb_frame, depth_frame], clock_now, time.time()),
+                        rgb_calibrated_lens_position=calibrated_lens_position,
+                        depth_alignment_method=alignment_method,
+                        imu_telemetry=read_optional_imu(imu_queue, imu_window, rgb_frame),
+                        stereo_configuration=stereo_configuration,
+                        stereo_length_unit_meter=stereo_length_unit_meter,
+                        runtime_calibration=runtime_provenance,
+                    )
+                    send_finished = time.monotonic()
+                    if send_finished - last_timing_at >= 5:
+                        last_timing_at = send_finished
+                        timing.update(role=role, width=width, height=height, usb_speed=str(usb_speed), fps=frame_rate,
+                                      send_ms=round((send_finished - send_started) * 1000, 1))
+                        emit("CEREBRO_DEPTHCAM_TIMING " + json.dumps(timing, separators=(",", ":")))
 
-            if not stop_event.is_set():
-                raise RuntimeError("DepthAI pipeline stopped unexpectedly")
+                if not stop_event.is_set():
+                    raise RuntimeError("DepthAI pipeline stopped unexpectedly")
     finally:
         if device is not None:
             try:

@@ -15,7 +15,15 @@ enum CameraSource { case depthAIService }
 enum CameraState { case streamingRGBD }
 enum Role: String { case face }
 struct Depth { let width = 640; let height = 400 }
+struct Runtime {let identity:String}
+struct Intrinsics {let runtimeCalibration:Runtime?}
+enum ROBArmRoutineVision {
+    static let shared=Observer()
+    final class Observer {func updateRuntimeCalibrationContext(_ identity:String?) {}}
+}
+/* RUNTIME_IDENTITY */
 struct CameraFrameSet {
+    var intrinsics:Intrinsics?=nil
     let sequence: UInt64
     let rgbSampleBuffer = 0
     let alignedDepth: Depth? = Depth()
@@ -31,19 +39,20 @@ final class Ingress {
     var wantsRunning = true, usesLegacyLuxonisUVCMode = false
     var expectedDepthRunGeneration: UInt64? = 1
     var activeSource: CameraSource? = .depthAIService
+    var runtimeCalibrationStreamIdentity=CameraRuntimeCalibrationStreamIdentity()
     var generation: UInt64 = 1
     var delivered: [UInt64] = []
     func currentDeliveryGeneration() -> UInt64 { generation }
     func deliveryGenerationIsCurrent(_ value: UInt64) -> Bool { value == generation }
-    func advanceDeliveryGeneration() { generation += 1 }
+    func advanceDeliveryGeneration() { generation += 1;runtimeCalibrationStreamIdentity=CameraRuntimeCalibrationStreamIdentity() }
     func stopFallbackCaptureAndDrainCallbacks() {}
     func installDepthPreviewLayer(generation: UInt64) {}
     func report(_ state: CameraState, detail: String) {}
     func enqueueLatestPreview(_ buffer: Int, generation: UInt64) {}
     func deliverLatest(_ frame: CameraFrameSet, generation: UInt64) { delivered.append(frame.sequence) }
     // METHODS
-    func offer(_ sequence: UInt64, run: UInt64 = 1) {
-        receivedDepthFrameSet(CameraFrameSet(sequence: sequence), sourceGeneration: run)
+    func offer(_ sequence: UInt64, run: UInt64 = 1, runtime:String?=nil) {
+        receivedDepthFrameSet(CameraFrameSet(intrinsics:Intrinsics(runtimeCalibration:runtime.map{Runtime(identity:$0)}),sequence: sequence), sourceGeneration: run)
     }
 }
 @main struct Test {
@@ -62,10 +71,20 @@ final class Ingress {
         precondition(stream.delivered == [1000, 1001], "Invalidated camera run delivered old pixels")
         stream.wantsRunning = false; stream.offer(1004); stream.sessionQueue.sync {}
         precondition(stream.delivered.count == 2 && !stream.depthIngressScheduled)
+        stream.wantsRunning=true
+        let prior=stream.generation
+        stream.offer(1005,runtime:"calibration-a");stream.sessionQueue.sync{}
+        precondition(stream.generation==prior+1)
+        stream.offer(1006,runtime:"calibration-a");stream.sessionQueue.sync{}
+        precondition(stream.generation==prior+1)
+        stream.offer(1007,runtime:"policy-b");stream.sessionQueue.sync{}
+        precondition(stream.generation==prior+2)
+        stream.offer(1008);stream.sessionQueue.sync{}
+        precondition(stream.generation==prior+3)
         print("Camera ingress: 1000 queued frames coalesced; generation, stopped-camera and re-entry gates passed")
     }
 }
-'''.replace("    // METHODS", methods)
+'''.replace("    // METHODS", methods).replace('/* RUNTIME_IDENTITY */',braced_declaration(source,'struct CameraRuntimeCalibrationStreamIdentity'))
 with tempfile.TemporaryDirectory(prefix="cerebro-camera-ingress-") as folder:
     path = Path(folder)
     (path / "Test.swift").write_text(harness)

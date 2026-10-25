@@ -162,14 +162,10 @@ struct ROBFixedHeadCaptureFrameGate {
               k.isValid(forWidth: depth.width, height: depth.height) else {
             throw ROBGhostMotionError.blocked("Aligned depth and valid intrinsics are required.")
         }
-        var identity: [Any] = [Double(depth.width), Double(depth.height), k.fx, k.fy, k.cx, k.cy]
-        if let mode = k.stereoMode {
-            identity.append(["stereoMode": mode, "source": k.stereoModeSource ?? "unreported",
-                "extendedDisparity": k.stereoExtendedDisparity as Any? ?? NSNull(),
-                "subpixel": k.stereoSubpixel as Any? ?? NSNull()] as [String: Any])
-        }
-        let data = try JSONSerialization.data(withJSONObject: identity, options: [.sortedKeys])
-        return ROBGhostRobotModel.hash(data)
+        return try ROBFixedHeadRegistrationScope.cameraIntrinsicsIdentity(width: depth.width, height: depth.height,
+            intrinsics: [k.fx,k.fy,k.cx,k.cy], stereoMode: k.stereoMode, stereoModeSource: k.stereoModeSource,
+            extendedDisparity: k.stereoExtendedDisparity, subpixel: k.stereoSubpixel,
+            runtimeCalibrationIdentity: k.runtimeCalibration?.identity)
     }
     @nonobjc func scope(model: ROBGhostRobotModel, frame: ROBArmRoutineVision.Frame) throws -> ROBFixedHeadRegistrationScope {
         let neck = readNeck?() ?? [:]
@@ -319,6 +315,10 @@ struct ROBFixedHeadCaptureFrameGate {
                 "intrinsicsSource":k.calibrationSource ?? "unspecified",
                 "depthAlignmentMethod":k.depthAlignmentMethod ?? "unspecified"]
             if let value = k.cameraServiceSourceSHA256 { record["cameraServiceSourceSHA256"] = value }
+            if let value = k.runtimeCalibration {
+                record["runtimeCalibration"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(value))
+                record["runtimeCalibrationIdentity"] = value.identity
+            }
             if let value = k.rgbOutputUndistorted { record["rgbOutputUndistorted"] = value }
             if let imu = k.inertial {
                 record["imu"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(imu))

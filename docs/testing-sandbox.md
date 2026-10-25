@@ -11,7 +11,7 @@ The sandbox catalog contains these independent test items:
 | Test | Actions |
 | --- | --- |
 | Recycle can | Run the physical test, search with the neck camera, scan workspace geometry, preview the grasp |
-| Recycle can · right arm | Recycle one, two or three empty cans with physical right/L10, separate reach tuning and visual grasp checks |
+| Recycle can · right arm | Recycle a configured batch of 1–8 empty cans with physical right/L10, separate reach tuning and visual grasp checks |
 | Camera-to-arm registration | Capture, fit and independently validate one fixed head/body view |
 | Neck / QR calibration | Record fixed targets at held neck poses and inspect calibration evidence |
 | Belly camera calibration | Capture five native RGB-D frames of B01/B02 and report target geometry, pixel alignment and raw depth |
@@ -96,6 +96,20 @@ Starting a session only requests the bounded authorization. It does **not** auto
 One active session covers its included routines and waypoints; there are no extra approvals for each arm segment. Neck-only search, workspace depth scanning and hanging inspection need no arm authorization. Returning an empty arm to hanging also needs no new approval, while still requiring current collision clearance. Stop, expiry, sleep/restart, ownership loss or failed motion ends the session. A perception-only rejection that sent no arm motion can remain inside the existing bounded session; that grant never substitutes for scene registration. A typed sandbox command never supplies spoken approval.
 
 ## Recycling parameters
+
+Both recycling tests expose **Number of cans**, a saved whole-number preference
+from **1 through 8** (default 1). Save the value before starting the batch. The
+count is copied into the pending operation scope; one spoken or controller
+approval covers that batch. Each can requires fresh perception, a newly checked
+path and visual grasp evidence. A failed or uncertain grasp stops in a hold;
+there is no blind next-can retry or automatic timeout extension. A commanded
+gravity release is recorded separately from verified landing inside the bin.
+
+The sandbox uses `left_recycle_cans` or `right_recycle_cans` with the count in
+`target`. Legacy one-can, two-can and right-three-can commands retain their
+counts. This parameter does not alter registration, collision or approval
+requirements. Camera RAM-profile setup and its remaining local depth residual
+are described in [fixed-head commissioning](fixed-head-pickup-commissioning.md#optional-runtime-stereo-calibration).
 
 Test timing parameters are saved in `~/Library/Application Support/Cerebro/TestingSandbox/recycling.json` and snapshotted for the next run. Editing is disabled during an active or pending operation, including startup jaw setup.
 

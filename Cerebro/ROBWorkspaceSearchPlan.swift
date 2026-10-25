@@ -494,6 +494,31 @@ struct ROBWorkspaceLocationConfirmation {
 /// immutable proposal; editing the file never changes an active operation.
 /// Pace removes optional timing padding only. The existing trajectory minimum,
 /// telemetry, lease and joint limits continue to apply to every dispatched step.
+/// The sandbox supplies a finite task count before the one operation approval.
+/// Legacy command names keep their original counts; perception and completion
+/// checks are still repeated for every item by the executor.
+enum ROBRecyclingBatchRequest {
+    static let maximumCount = 8
+    static let configuredCommands = ["left_recycle_cans", "right_recycle_cans"]
+
+    static func requestedCount(command: String, target: String) throws -> Int? {
+        if configuredCommands.contains(command) {
+            let text = target.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty, text.utf8.allSatisfy({ (48...57).contains($0) }),
+                  let count = Int(text), (1...maximumCount).contains(count) else {
+                throw ROBGhostMotionError.blocked("Choose a whole number of cans from 1 to \(maximumCount) before requesting recycling.")
+            }
+            return count
+        }
+        switch command {
+        case "left_recycle_can", "right_recycle_can": return 1
+        case "left_recycle_two_cans", "right_recycle_two_cans": return 2
+        case "right_recycle_three_cans": return 3
+        default: return nil
+        }
+    }
+}
+
 struct ROBRecyclingTestParameters: Codable, Equatable {
     var motionPace: Double = 1.25
     var jawSettleSeconds: Double = 1.5

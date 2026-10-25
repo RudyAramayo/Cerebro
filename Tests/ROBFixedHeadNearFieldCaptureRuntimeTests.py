@@ -178,8 +178,10 @@ final class Identity {
 '''
 harness=harness.replace('/* MANAGER_METHODS */',manager_methods)
 harness=harness.replace('/* GEOMETRY */',braced_declaration(manager,'struct CameraDepthRGBGeometryCorrespondence:'))
-harness=harness.replace('/* INTRINSICS */',braced_declaration(manager,'struct CameraIntrinsics:'))
+harness=harness.replace('/* INTRINSICS */',braced_declaration(manager,'struct CameraRuntimeCalibration:')+'\n'+braced_declaration(manager,'struct CameraIntrinsics:'))
 harness=harness.replace('/* GATE */',braced_declaration(controller,'struct ROBFixedHeadCaptureFrameGate'))
+scope_helper=braced_declaration((ROOT/'Cerebro/ROBFixedHeadRegistration.swift').read_text(),'    static func cameraIntrinsicsIdentity(')
+harness='import Foundation\nimport CryptoKit\nenum ROBFixedHeadRegistrationScope {\n'+scope_helper+'\n}\n'+harness
 harness=harness.replace('/* IDENTITY */',braced_declaration(controller,'    @nonobjc static func intrinsicsIdentity('))
 harness=harness.replace('/* DEMAND */',braced_declaration(view,'    @objc private func fixedHeadCalibrationDemandDidChange(').replace('cameraManager?.','cameraManager.'))
 harness=harness.replace('/* REVIEW */','\n'.join(braced_declaration(controller,s) for s in (
